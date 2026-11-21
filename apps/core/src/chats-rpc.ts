@@ -11,6 +11,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatMakeSchema,
   chatMentionsSchema,
+  chatListOptionsSchema,
   chatRatingReasonMax,
   chatTitleSchema,
   unmetNeeds,
@@ -23,6 +24,7 @@ import type {
   ChatConnectionRequest,
   ChatFile,
   ChatFileInput,
+  ChatListOptions,
   ChatQuestion,
   ChatRating,
   ChatSearchHit,
@@ -270,6 +272,7 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   lastAt: chat.lastAt.toISOString(),
   running: false,
   make: makeOf(chat),
+  archived: false,
 });
 
 /**
@@ -353,11 +356,24 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async list(): Promise<ChatSummary[]> {
-    return await withPerson(
-      this.#check,
-      async ({ userId }) => await this.#chatsOf(userId).chats(userId)
-    );
+  async list(options?: ChatListOptions): Promise<ChatSummary[]> {
+    return await withPerson(this.#check, async (person) => {
+      const parsed = chatListOptionsSchema.safeParse(options ?? {});
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      const { archived = false, project } = parsed.data;
+      // Only while they are in the project: once out, its chats are no
+      // longer listed by it, though each stays theirs in their own list.
+      if (project !== undefined) {
+        await requireProjectRole(this.#env, person, project, "user");
+      }
+      return await this.#chatsOf(person.userId).chats(
+        person.userId,
+        archived,
+        project
+      );
+    });
   }
 
   async search(query: string): Promise<ChatSearchHit[]> {
@@ -483,6 +499,41 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         person.userId,
         parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async archive(chatId: string): Promise<void> {
+    await this.#archive(chatId, true);
+  }
+
+  async unarchive(chatId: string): Promise<void> {
+    await this.#archive(chatId, false);
+  }
+
+  async setProject(chatId: string, project: string | null): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      const id = chatIdOf(chatId);
+      if (project !== null) {
+        await requireProjectRole(this.#env, person, project, "user");
+      }
+      await this.#chatsOf(person.userId).setChatProject(
+        id,
+        person.userId,
+        project,
+        actorOf(person)
+      );
+    });
+  }
+
+  /** Archives the person's own chat, or brings it back (`archived` false). */
+  async #archive(chatId: string, archived: boolean): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await this.#chatsOf(person.userId).archiveChat(
+        chatIdOf(chatId),
+        person.userId,
+        archived,
         actorOf(person)
       );
     });

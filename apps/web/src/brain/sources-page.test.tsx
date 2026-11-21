@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Connection } from "@grasp-os/shared/brain";
+import type { Connection, Source } from "@grasp-os/shared/brain";
 import type {
   BrainMemoryShown,
   BrainStoreCursor,
@@ -36,17 +36,19 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { formatDateTime } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
+import { ms } from "../grasp/tokens/tokens.values.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
 // reaches it over RPC, faked: the sources core lists, a page at a time,
-// one opened at its newest version and then an older one; search shows
-// recall's pack as core gives it, in its order, with what it didn't find
-// and that it was cut short, and opens a result's source at its version;
-// each connection says how it feeds the Brain; a refusal is said; a file
-// uploads for the readers chosen, and an upload's panel offers what core
-// says the person may do to it.
+// one opened at its newest version and then an older one, among the
+// Brain's own sources, newest first, each of which opens its own page;
+// search shows recall's pack as core gives it, in its order, with what it
+// didn't find and that it was cut short, and opens a result's source at
+// its version; each connection says how it feeds the Brain; a refusal is
+// said; a file uploads for the readers chosen, and an upload's panel
+// offers what core says the person may do to it.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -63,6 +65,9 @@ const unnamed: BrainSourceRef = { producer: "upload", id: "u-4" };
 /** The teams the person is in. */
 const teams = [{ id: "t-1", name: "Finance" }];
 
+/** When each listed source was added. */
+const addedAt = "2026-11-10T09:00:00.000Z";
+
 const listed = (
   source: BrainSourceRef,
   firstLine: string,
@@ -71,7 +76,7 @@ const listed = (
 ): BrainSourceListed => ({
   source,
   version: versions,
-  addedAt: "2026-11-10T09:00:00.000Z",
+  addedAt,
   firstLine,
   personal,
   versions,
@@ -207,6 +212,8 @@ interface Faked {
    * none (null) for any other; a string is a refusal.
    */
   learned?: Record<string, BrainLearned | null | string>;
+  /** The Brain's own sources, as `brain.read` gives them. */
+  sources?: Source[];
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -217,6 +224,10 @@ const MemoriesStandIn = () => {
   const { searchStr } = useLocation();
   return <p>Memories page {searchStr}</p>;
 };
+
+/** A refusal core meant, with its code, as core sends one (no code: core out of reach). */
+const refusedBy = (message: string): Error =>
+  Object.assign(new Error(message), { code: "auth.forbidden" });
 
 /** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
@@ -237,6 +248,7 @@ const shown = async (
     firstVersionRefused,
     kept = false,
     learned = {},
+    sources = [],
   }: Faked = {}
 ) => {
   const calls: string[] = [];
@@ -251,7 +263,7 @@ const shown = async (
         `list${after === undefined ? "" : ` after ${after.source.id}`}`
       );
       if (refusal !== undefined) {
-        throw new Error(refusal);
+        throw refusedBy(refusal);
       }
       if (empty) {
         return { sources: [], next: null };
@@ -305,7 +317,7 @@ const shown = async (
         next === undefined || next === null ? "" : `#${String(next.memory)}`;
       const answer = learned[`${source.id}@${version}${after}`] ?? null;
       if (typeof answer === "string") {
-        throw new TypeError(answer);
+        throw refusedBy(answer);
       }
       return answer;
     },
@@ -390,7 +402,7 @@ const shown = async (
     uploadOf: async (uploadId: string) => {
       await Promise.resolve();
       if (uploadRefusal !== undefined) {
-        throw new Error(uploadRefusal);
+        throw refusedBy(uploadRefusal);
       }
       return uploadId === handbook.id
         ? {
@@ -456,7 +468,12 @@ const shown = async (
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <SourcesPage admin={admin} connections={connections} teams={teams} />
+      <SourcesPage
+        admin={admin}
+        connections={connections}
+        sources={sources}
+        teams={teams}
+      />
     ),
   });
   const memoriesPage = createRoute({
@@ -464,8 +481,13 @@ const shown = async (
     path: "/brain/memories",
     component: MemoriesStandIn,
   });
+  const note = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/brain/$noteId",
+    component: () => <p>A note</p>,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([page, memoriesPage]),
+    routeTree: rootRoute.addChildren([page, memoriesPage, note]),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -481,7 +503,7 @@ const shown = async (
     await router.load();
   });
   await settle();
-  return { calls, uploadIds, versionIds };
+  return { calls, uploadIds, versionIds, router };
 };
 
 /** Chooses `file` in `picker`. */
@@ -505,11 +527,137 @@ const submitted = async (form: HTMLFormElement): Promise<void> => {
   await settle();
 };
 
+/** The upload's dialog, while it is open. */
+const uploadDialog = (): Element | null =>
+  document.querySelector('[role="dialog"]');
+
+/** The text of the upload's dialog, or nothing while it is closed. */
+const uploadText = (): string => uploadDialog()?.textContent ?? "";
+
+/** Presses the upload's dialog's Upload. */
+const uploadPressed = async (): Promise<void> => {
+  const upload = [...(uploadDialog()?.querySelectorAll("button") ?? [])].find(
+    (each) => each.textContent.trim().startsWith("Upload")
+  );
+  if (upload === undefined) {
+    throw new TypeError("No Upload in the upload's dialog");
+  }
+  await act(async () => {
+    upload.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Opens the upload's dialog by the page head's Upload, unless it is open. */
+const openUpload = async (): Promise<void> => {
+  if (uploadDialog() !== null) {
+    return;
+  }
+  const trigger = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      'button[aria-haspopup="dialog"]'
+    ),
+  ].find((each) => each.textContent.trim() === "Upload");
+  if (trigger === undefined) {
+    throw new TypeError("No Upload in the page's head");
+  }
+  await act(async () => {
+    trigger.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Closes the upload's dialog by its Cancel. */
+const cancelUpload = async (): Promise<void> => {
+  const cancel = [...(uploadDialog()?.querySelectorAll("button") ?? [])].find(
+    (each) => each.textContent.trim().startsWith("Cancel")
+  );
+  if (cancel === undefined) {
+    throw new TypeError("No Cancel in the upload's dialog");
+  }
+  await act(async () => {
+    cancel.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** The upload's file picker as it stands, in its dialog: it starts afresh each time the dialog opens. */
+const uploadPicker = (): HTMLInputElement => {
+  const picker = [...(uploadDialog()?.querySelectorAll("input") ?? [])].find(
+    (input) => input.type === "file"
+  );
+  if (!picker) {
+    throw new TypeError("No upload picker");
+  }
+  return picker;
+};
+
+/** The upload's form. */
+const uploadForm = (): HTMLFormElement => {
+  const form = uploadPicker().closest("form");
+  if (!form) {
+    throw new TypeError("No upload form");
+  }
+  return form;
+};
+
+/** The upload's choice of who may read it, a library Select's trigger. */
+const readersChoice = (): HTMLElement => {
+  const control = uploadForm().querySelector<HTMLElement>('[role="combobox"]');
+  if (control === null) {
+    throw new TypeError("No choice of readers");
+  }
+  return control;
+};
+
+/** What the choice of readers shows as chosen, without what is hidden from a screen reader. */
+const readersChosen = (): string => {
+  const copy = readersChoice().cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** Opens the choice of readers and gives its options. */
+const readerOptions = async (): Promise<HTMLElement[]> => {
+  const control = readersChoice();
+  await act(async () => {
+    control.click();
+    await Promise.resolve();
+  });
+  await settle();
+  const list = document.querySelector(
+    `[id="${control.getAttribute("aria-controls") ?? ""}"]`
+  );
+  return [
+    ...(list ?? document).querySelectorAll<HTMLElement>('[role="option"]'),
+  ];
+};
+
+/** The page's text as a person sees it: nothing hidden, such as a closed panel. */
+const visibleText = (): string => {
+  const copy = document.body.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[hidden]")) {
+    hidden.remove();
+  }
+  return copy.textContent;
+};
+
 /** The opened upload's new version picker and its form. */
 const versionFormOf = () => {
   const picker = [...document.querySelectorAll("input")].find(
     (input) =>
-      input.type === "file" && input.closest("[data-slot=card]") !== null
+      input.type === "file" && input.closest("[data-slot=panel]") !== null
   );
   const form = picker?.closest("form");
   if (!(picker && form)) {
@@ -543,6 +691,26 @@ const press = async (label: string): Promise<void> => {
   await settle();
 };
 
+/**
+ * Presses the open alert dialog's answer that says `label`. Its words come
+ * first: the library's action button also holds its working and failed words.
+ */
+const answer = async (label: string): Promise<void> => {
+  const found = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((each) => each.textContent.trim().startsWith(label));
+  if (found === undefined) {
+    throw new TypeError(`No answer ${label}`);
+  }
+  await act(async () => {
+    found.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
 /** Searches for `question`. */
 const search = async (question: string): Promise<void> => {
   const box = document.querySelector("input");
@@ -567,15 +735,46 @@ const search = async (question: string): Promise<void> => {
 
 /** The text of the opened source's panel. */
 const panel = (): string =>
-  document.querySelector("[data-slot=card]")?.textContent ?? "";
+  document.querySelector("[data-slot=panel]")?.textContent ?? "";
 
-/** The text of the section whose heading is `heading`. */
+/** Opens the search result whose source is titled `title`, by its open-version action. */
+const openResult = async (title: string): Promise<void> => {
+  const button = [...document.querySelectorAll("[data-slot=item]")]
+    .find((each) => each.textContent.startsWith(title))
+    ?.querySelector("button");
+  if (!button) {
+    throw new TypeError(`No result ${title}`);
+  }
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Follows the link whose text starts with `label`. */
+const follow = async (label: string): Promise<void> => {
+  const link = [...document.querySelectorAll("a")].find((each) =>
+    each.textContent.startsWith(label)
+  );
+  if (!link) {
+    throw new TypeError(`No link ${label}`);
+  }
+  await act(async () => {
+    link.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** The text of the section whose heading is `heading`, as it is or counted, as a library list's is ("Results · 2"). */
 const section = (heading: string): string =>
-  [...document.querySelectorAll("section[aria-labelledby]")].find(
-    (each) =>
-      document.querySelector(`[id="${each.getAttribute("aria-labelledby")}"]`)
-        ?.textContent === heading
-  )?.textContent ?? "";
+  [...document.querySelectorAll("section[aria-labelledby]")].find((each) => {
+    const said = document.querySelector(
+      `[id="${each.getAttribute("aria-labelledby")}"]`
+    )?.textContent;
+    return said === heading || said?.startsWith(`${heading} · `) === true;
+  })?.textContent ?? "";
 
 /** A memory as core shows one, about entity `about`. */
 const memoryShown = (
@@ -705,6 +904,7 @@ describe(SourcesPage, () => {
     root = undefined;
     document.body.replaceChildren();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("lists the sources core gives a page at a time, says when one read through a connection was last read, and opens one at its newest version, then an older one", async () => {
@@ -723,20 +923,25 @@ describe(SourcesPage, () => {
         "No first line",
         "2 versions",
         "Only you",
-        "Those marked Only you are yours alone",
       ].map((text) => listedText.includes(text)),
       moreGone: listedText.includes("Show more"),
-      // Once, for the one source core gave a read time, in the page's
-      // own date format.
-      lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
-        .length,
+      // Once, for the one source core gave a read time, as the day only.
+      lastRead: [
+        listedText.split(`Last read ${formatDate(lastReadAt)}`).length,
+        listedText.includes(formatDateTime(lastReadAt)),
+      ],
+      // Each row says the day it was added, without the time.
+      added: [formatDate(addedAt), formatDateTime(addedAt)].map((text) =>
+        listedText.includes(text)
+      ),
       newest: newest.includes("Invoices are paid on Fridays."),
       oldest: oldest.includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
-      listed: [true, true, true, true, true, true],
+      listed: [true, true, true, true, true],
       moreGone: false,
-      lastRead: 2,
+      lastRead: [2, false],
+      added: [true, false],
       newest: true,
       oldest: true,
       calls: [
@@ -749,11 +954,32 @@ describe(SourcesPage, () => {
     });
   });
 
+  it("closes the source opened, and leaves the list as it was", async () => {
+    await shown([]);
+    await press("Handbook");
+    const opened = panel();
+    const close = document.querySelector<HTMLButtonElement>(
+      '[data-slot=panel] button[aria-label="Close"]'
+    );
+    await act(async () => {
+      close?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      opened: opened.includes("Invoices are paid on Fridays."),
+      closed: panel(),
+      listed: section("Sources you may read").includes("Handbook"),
+    }).toStrictEqual({ opened: true, closed: "", listed: true });
+  });
+
   it("shows recall's pack as core gives it, and opens a result's source at its version", async () => {
     const { calls } = await shown([]);
     await search("  invoices refunds  ");
     const resultText = section("Results");
-    await press("Invoices are paid monthly.");
+    const pageText = document.body.textContent;
+    await openResult("Handbook");
 
     expect({
       order:
@@ -762,10 +988,10 @@ describe(SourcesPage, () => {
       found: ["Exact match", "By meaning", "The best part of its passage"].map(
         (text) => resultText.includes(text)
       ),
-      notFound: resultText.includes(
+      notFound: pageText.includes(
         "Nothing you may read holds refunds and INV-7."
       ),
-      truncated: resultText.includes("More was found than fits"),
+      truncated: pageText.includes("More was found than fits"),
       opened: panel().includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
@@ -782,9 +1008,9 @@ describe(SourcesPage, () => {
     const { calls } = await shown([]);
     await search(remembered);
     const resultText = section("Results");
-    const before = document.body.textContent;
+    const before = visibleText();
     await press("The passage around it");
-    const opened = document.body.textContent;
+    const opened = visibleText();
     await press("Open version 2");
 
     expect({
@@ -827,11 +1053,11 @@ describe(SourcesPage, () => {
   it("opens a result at the version it cites, even after another version was picked in its panel", async () => {
     await shown([]);
     await search("invoices");
-    await press("Invoices are paid monthly.");
+    await openResult("Handbook");
     const cited = panel();
     await press("Version 2");
     const picked = panel();
-    await press("Invoices are paid monthly.");
+    await openResult("Handbook");
 
     expect({
       cited: cited.includes("Invoices are paid monthly."),
@@ -860,9 +1086,9 @@ describe(SourcesPage, () => {
   it("says once that a search found nothing, and what wasn't found only beside what was", async () => {
     await shown([]);
     await search(unmatched);
-    const nothing = section("Results");
+    const nothing = document.body.textContent;
     await search("invoices refunds");
-    const some = section("Results");
+    const some = document.body.textContent;
 
     expect({
       nothing: [
@@ -873,28 +1099,12 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ nothing: [true, false], some: true });
   });
 
-  it("says what Only you means only when there are sources to mark", async () => {
+  it("says when there is nothing in the Brain the person may read", async () => {
     await shown([], { empty: true });
-    const empty = section("Sources you may read");
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
-    await shown([]);
-    const listedText = section("Sources you may read");
 
-    expect({
-      empty: {
-        onlyYou: empty.includes("Those marked Only you"),
-        documents: empty.includes(
-          "Documents and workflow runs show here once they reach the Brain."
-        ),
-      },
-      listed: listedText.includes("Those marked Only you"),
-    }).toStrictEqual({
-      empty: { onlyYou: false, documents: true },
-      listed: true,
-    });
+    expect(document.body.textContent).toContain(
+      "Nothing in the Brain you may read yet"
+    );
   });
 
   it("asks one search at a time: a question sent while one is searched is not asked", async () => {
@@ -911,7 +1121,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ calls: ["list", "search invoices"], shown: true });
   });
 
-  it("says what the Brain keeps of a person's own connections, marks each it keeps reads from and each that can't tell what changed in it, and says when there are none", async () => {
+  it("says what the Brain keeps of a person's own connections, marks each it keeps reads from and each that can't tell what changed in it, and leaves the section out when there are none", async () => {
     await shown([
       {
         name: "Gmail",
@@ -950,7 +1160,7 @@ describe(SourcesPage, () => {
         "Microsoft 365Searched live, nothing kept." +
         "HubSpotSearched live, nothing kept." +
         "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp.",
-      none: "How your connections feed the BrainYou have no connections yet.",
+      none: "",
     });
   });
 
@@ -958,7 +1168,8 @@ describe(SourcesPage, () => {
     await shown([], { kept: true });
     const kept = section("What agents read through shared connections");
     await search("rotterdam");
-    await press("Deal Rotterdam warehouse");
+    // A passage from a source the list hasn't shown is named by what added it.
+    await openResult("Read from a shared connection");
     const opened = panel();
     act(() => {
       root?.unmount();
@@ -982,6 +1193,63 @@ describe(SourcesPage, () => {
     });
   });
 
+  it("lists the Brain's own sources among the kept ones, newest first, the older ones once core's pages reach them, and opens one on its own page", async () => {
+    const { router } = await shown([], {
+      sources: [
+        {
+          id: "src-finance",
+          kind: "interview",
+          title: "Finance lead interview",
+          date: "2026-11-12",
+          who: "Finance lead",
+          how: "Live, 45 minutes",
+        },
+        {
+          id: "src-directory",
+          kind: "import",
+          title: "Directory",
+          date: "2026-11-01",
+        },
+        {
+          id: "src-gone",
+          kind: "chat",
+          title: "Forgotten chat",
+          date: "2026-11-11",
+          removedAt: "2026-11-13",
+        },
+      ],
+    });
+    const firstPage = section("Sources you may read");
+    await press("Show more");
+    const listedText = section("Sources you may read");
+    const order = [
+      "Finance lead interview",
+      "Handbook",
+      "Board minutes",
+      "No first line",
+      "Directory",
+    ].map((title) => listedText.indexOf(title));
+    await follow("Finance lead interview");
+
+    expect({
+      waited: firstPage.includes("Directory"),
+      found: order.every((at) => at >= 0),
+      order: order.toSorted((a, b) => a - b),
+      gone: listedText.includes("Forgotten chat"),
+      origin: listedText.includes(
+        "Interview · Finance lead · Live, 45 minutes"
+      ),
+      at: router.state.location.pathname,
+    }).toStrictEqual({
+      waited: false,
+      found: true,
+      order,
+      gone: false,
+      origin: true,
+      at: "/brain/src-finance",
+    });
+  });
+
   it("says why core refused, and shows nothing as listed", async () => {
     await shown([], { refusal: "You aren't a member of this organization." });
     const text = document.body.textContent;
@@ -996,29 +1264,24 @@ describe(SourcesPage, () => {
     // React says what it can't render right (two children of one key) here.
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const { calls } = await shown([]);
-    const [, picker] = document.querySelectorAll("input");
-    const readers = document.querySelector("select");
-    const form = picker?.closest("form");
-    if (!(picker && readers && form)) {
-      throw new TypeError("No upload form");
-    }
-    const options = [...readers.options].map(({ textContent }) => textContent);
+    await openUpload();
+    await pick(
+      uploadPicker(),
+      new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })
+    );
+    const offered = await readerOptions();
+    const options = offered.map(({ textContent }) => textContent.trim());
+    const team = offered.find(
+      ({ textContent }) => textContent.trim() === "Team Finance"
+    );
     await act(async () => {
-      Object.defineProperty(picker, "files", {
-        configurable: true,
-        value: [new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })],
-      });
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-      readers.value = "t-1";
-      readers.dispatchEvent(new Event("change", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await act(async () => {
-      form.requestSubmit();
+      team?.click();
       await Promise.resolve();
     });
     await settle();
+    await uploadPressed();
     await settle();
+    const dialogClosed = uploadDialog() === null;
     await press("Handbook");
     await settle();
     const opened = panel();
@@ -1029,6 +1292,7 @@ describe(SourcesPage, () => {
     expect({
       options,
       errors: errors.mock.calls.map(([message]) => String(message)),
+      dialogClosed,
       opened: [
         "Team Finance can read this upload.",
         "Upload new version",
@@ -1039,6 +1303,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({
       options: ["Only me", "Team Finance", "Everyone"],
       errors: [],
+      dialogClosed: true,
       opened: [true, true, true],
       closed: "",
       calls: [
@@ -1056,40 +1321,28 @@ describe(SourcesPage, () => {
   it("chooses Only me until the person picks other readers, and says why an upload or an upload's details were refused", async () => {
     const refused = "Files are being read for many people at the moment.";
     await shown([], { uploadRefusal: refused });
-    const [, picker] = document.querySelectorAll("input");
-    const readers = document.querySelector("select");
-    const form = picker?.closest("form");
-    if (!(picker && readers && form)) {
-      throw new TypeError("No upload form");
-    }
-    const chosen = readers.selectedOptions[0]?.textContent;
-    await act(async () => {
-      Object.defineProperty(picker, "files", {
-        configurable: true,
-        value: [new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })],
-      });
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await act(async () => {
-      form.requestSubmit();
-      await Promise.resolve();
-    });
-    await settle();
-    const uploadText = section("Upload a file");
+    await openUpload();
+    const picker = uploadPicker();
+    const chosen = readersChosen();
+    await pick(picker, new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" }));
+    await uploadPressed();
+    const refusedText = uploadText();
+    await cancelUpload();
     await press("Handbook");
     await settle();
 
     expect({
       chosen,
-      accepts: picker.accept,
-      // The types and the limit, as core's own lists hold them.
-      says: uploadText.includes(".xlsx, and .vtt files of up to 10 MB."),
-      uploadSaysWhy: uploadText.includes(refused),
+      accepts: picker.accept.split(",").map((type) => type.trim()),
+      // The limit, as core's own holds it.
+      says: refusedText.includes(
+        "PDF, Word, Excel or transcripts, up to 10 MB."
+      ),
+      uploadSaysWhy: refusedText.includes(refused),
       panelSaysWhy: panel().includes(refused),
     }).toStrictEqual({
       chosen: "Only me",
-      accepts: ".pdf,.docx,.xlsx,.vtt",
+      accepts: [".pdf", ".docx", ".xlsx", ".vtt"],
       says: true,
       uploadSaysWhy: true,
       panelSaysWhy: true,
@@ -1097,6 +1350,8 @@ describe(SourcesPage, () => {
   });
 
   it("says it uploads while it does, says a file's text is too long in the person's words, and retries with the same upload's id", async () => {
+    // A refused Upload shows so for a moment, and takes no press meanwhile.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const held = Promise.withResolvers<boolean>();
     const { uploadIds } = await shown([], {
       uploading: held.promise,
@@ -1105,40 +1360,34 @@ describe(SourcesPage, () => {
         message: "Core's own words",
       },
     });
-    const [, picker] = document.querySelectorAll("input");
-    const form = picker?.closest("form");
-    if (!(picker && form)) {
-      throw new TypeError("No upload form");
-    }
+    // The dialog closes once a file is uploaded, and its picker starts
+    // afresh when it opens again: each choice finds it anew.
     const choose = async (name: string) => {
-      await act(async () => {
-        Object.defineProperty(picker, "files", {
-          configurable: true,
-          value: [new File(["WEBVTT"], name, { type: "text/vtt" })],
-        });
-        picker.dispatchEvent(new Event("change", { bubbles: true }));
-        await Promise.resolve();
-      });
+      await openUpload();
+      await pick(
+        uploadPicker(),
+        new File(["WEBVTT"], name, { type: "text/vtt" })
+      );
     };
     const submit = async () => {
-      await act(async () => {
-        form.requestSubmit();
-        await Promise.resolve();
-      });
-      await settle();
+      await uploadPressed();
     };
     await choose("long.vtt");
     await submit();
-    const whileHeld = section("Upload a file");
+    const whileHeld =
+      uploadDialog()?.querySelector('[aria-busy="true"]') !== null;
     held.resolve(true);
     await settle();
-    const refusedText = section("Upload a file");
+    const refusedText = uploadText();
+    act(() => {
+      vi.advanceTimersByTime(ms.durationHold);
+    });
     await submit();
     await choose("other.vtt");
     await submit();
 
     expect({
-      whileHeld: whileHeld.includes("Uploading…"),
+      whileHeld,
       refused: [
         refusedText.includes(
           "This file's text is too long for the Brain to keep."
@@ -1160,32 +1409,32 @@ describe(SourcesPage, () => {
   it("keeps the file picker out of reach while a file uploads, so the next file chosen isn't lost", async () => {
     const held = Promise.withResolvers<boolean>();
     await shown([], { uploading: held.promise });
-    const [, picker] = document.querySelectorAll("input");
-    const form = picker?.closest("form");
-    if (!(picker && form)) {
-      throw new TypeError("No upload form");
-    }
-    await act(async () => {
-      Object.defineProperty(picker, "files", {
-        configurable: true,
-        value: [new File(["WEBVTT"], "first.vtt", { type: "text/vtt" })],
-      });
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-      await Promise.resolve();
-    });
-    const before = picker.disabled;
-    await act(async () => {
-      form.requestSubmit();
-      await Promise.resolve();
-    });
-    await settle();
-    const whileUploading = picker.disabled;
+    await openUpload();
+    await pick(
+      uploadPicker(),
+      new File(["WEBVTT"], "first.vtt", { type: "text/vtt" })
+    );
+    const before = uploadPicker().disabled;
+    await uploadPressed();
+    const whileUploading = uploadPicker().disabled;
+    // Cancel can't take the form, and the file it holds, away meanwhile.
+    await cancelUpload();
+    const stillOpen =
+      uploadDialog()?.querySelector('[aria-busy="true"]') !== null &&
+      uploadDialog() !== null;
     held.resolve(true);
     await settle();
+    await openUpload();
 
-    expect({ before, whileUploading, after: picker.disabled }).toStrictEqual({
+    expect({
+      before,
+      whileUploading,
+      stillOpen,
+      after: uploadPicker().disabled,
+    }).toStrictEqual({
       before: false,
       whileUploading: true,
+      stillOpen: true,
       after: false,
     });
   });
@@ -1202,7 +1451,7 @@ describe(SourcesPage, () => {
     await settle();
     const versionPicker = [...document.querySelectorAll("input")].find(
       (input) =>
-        input.type === "file" && input.closest("[data-slot=card]") !== null
+        input.type === "file" && input.closest("[data-slot=panel]") !== null
     );
     const versionForm = versionPicker?.closest("form");
     if (!(versionPicker && versionForm)) {
@@ -1259,15 +1508,7 @@ describe(SourcesPage, () => {
     const told = document.body.textContent.includes(
       "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
     );
-    // The dialog's own button, after the panel's of the same word.
-    const confirm = [...document.querySelectorAll("button")].findLast(
-      (button) => button.textContent.trim() === "Delete"
-    );
-    await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await answer("Delete");
 
     expect({
       told,
@@ -1306,15 +1547,7 @@ describe(SourcesPage, () => {
     await press("Erase for good");
     const told =
       document.querySelector('[role="alertdialog"]')?.textContent ?? "";
-    // The dialog's own button, after the row's of the same words.
-    const confirm = [...document.querySelectorAll("button")].findLast(
-      (button) => button.textContent.trim() === "Erase for good"
-    );
-    await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await answer("Erase for good");
     await settle();
 
     expect({
@@ -1353,15 +1586,12 @@ describe(SourcesPage, () => {
 
   it("refuses a file past the limit, new or as a new version, before reading or sending it", async () => {
     const { calls, uploadIds, versionIds } = await shown([]);
-    const [, picker] = document.querySelectorAll("input");
-    const form = picker?.closest("form");
-    if (!(picker && form)) {
-      throw new TypeError("No upload form");
-    }
     const tooLarge = uploadMaxBytes + 1;
-    await pick(picker, fileSized("large.vtt", tooLarge));
-    await submitted(form);
-    const uploadText = section("Upload a file");
+    await openUpload();
+    await pick(uploadPicker(), fileSized("large.vtt", tooLarge));
+    await uploadPressed();
+    const refusedText = uploadText();
+    await cancelUpload();
     await press("Handbook");
     await settle();
     const version = versionFormOf();
@@ -1371,7 +1601,7 @@ describe(SourcesPage, () => {
     expect({
       sent: [uploadIds.length, versionIds.length],
       calls: calls.filter((call) => call.startsWith("upload")),
-      said: [uploadText, panel()].map((text) =>
+      said: [refusedText, panel()].map((text) =>
         text.includes("This file is over the upload limit of 10 MB.")
       ),
     }).toStrictEqual({ sent: [0, 0], calls: [], said: [true, true] });
@@ -1419,15 +1649,8 @@ describe(SourcesPage, () => {
     const afterPanel = calls.slice(before);
     // The first row's: Payroll.vtt.
     await press("Erase for good");
-    const confirm = [...document.querySelectorAll("button")].findLast(
-      (button) => button.textContent.trim() === "Erase for good"
-    );
     const beforeErase = calls.length;
-    await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await answer("Erase for good");
     await settle();
 
     expect({
@@ -1452,14 +1675,13 @@ describe(SourcesPage, () => {
 
   it("reads an admin's shared uploads again after an upload", async () => {
     const { calls } = await shown([], { admin: true });
-    const [, picker] = document.querySelectorAll("input");
-    const form = picker?.closest("form");
-    if (!(picker && form)) {
-      throw new TypeError("No upload form");
-    }
     const before = calls.length;
-    await pick(picker, new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" }));
-    await submitted(form);
+    await openUpload();
+    await pick(
+      uploadPicker(),
+      new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })
+    );
+    await uploadPressed();
     await settle();
 
     expect(
@@ -1560,13 +1782,20 @@ describe(SourcesPage, () => {
     await press("Version 1");
     const none = learnedSection();
     await press("Board minutes");
-    const refused = learnedSection();
+    const refused = learnedSection() ?? "";
 
-    expect({ nothing, none, refused }).toStrictEqual({
+    expect({
+      nothing,
+      none,
+      refused: {
+        why: refused.includes("The Brain is busy."),
+        again: refused.includes("Try again"),
+      },
+    }).toStrictEqual({
       nothing:
         "What the Brain learned from this versionThe Brain hasn't learned anything from this version.",
       none: undefined,
-      refused: "What the Brain learned from this versionThe Brain is busy.",
+      refused: { why: true, again: true },
     });
   });
 
@@ -1593,7 +1822,7 @@ describe(SourcesPage, () => {
         ].find(
           (each) =>
             each.textContent === "Show more" &&
-            each.closest("[data-slot=card]") !== null
+            each.closest("[data-slot=panel]") !== null
         );
         await act(async () => {
           more?.click();
@@ -1646,7 +1875,7 @@ describe(SourcesPage, () => {
     ].find(
       (each) =>
         each.textContent === "Show more" &&
-        each.closest("[data-slot=card]") !== null
+        each.closest("[data-slot=panel]") !== null
     );
     await act(async () => {
       more?.click();

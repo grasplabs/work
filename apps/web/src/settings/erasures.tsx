@@ -7,39 +7,47 @@ import type {
   RemovedPeoplePage,
   RemovedPerson,
 } from "@grasp-os/shared/members";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
+import { useEffect, useId, useState } from "react";
+
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
-  DialogClose,
-  DialogContent,
+  DialogAction,
+  DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
+  DialogContent,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Progress, ProgressLabel } from "@grasp-os/ui/components/progress";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import { useEffect, useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
-import { formatDate } from "../format.ts";
-import { initials } from "../frame/person-menu.tsx";
+} from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { More, Trash } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Progress } from "../grasp/progress/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { SettingsSection } from "./settings-parts.tsx";
 
 // Erasing someone an admin removed (GRA-903, GRA-1195): their email,
 // sign-ins and personal content go; their name and ID stay on the
@@ -85,35 +93,86 @@ const stateLabels: Record<string, MessageDescriptor> = {
   skipped: msg`Skipped, may still hold data`,
 };
 
+/** How each state stands: erased is done, skipped wants a look. */
+const stateTones: Record<string, "success" | "attention" | "neutral"> = {
+  pending: "neutral",
+  complete: "success",
+  skipped: "attention",
+};
+
 /** How many of `areas` are done, one way or another. */
 const doneOf = (areas: readonly ErasureArea[]): number =>
   areas.filter(({ state }) => state !== "pending").length;
 
+const styles = stylex.create({
+  // A row's last cell: where it stands, then its menu, on one line.
+  ends: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: grasp.space2,
+  },
+  stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  areas: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  area: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+  },
+  columns: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(12rem, 1fr))",
+    gap: grasp.space4,
+  },
+  column: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  bullets: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    paddingInlineStart: grasp.space5,
+  },
+});
+
+/** An area's name, in the page's language; as core names it when it is new to the page. */
+const useAreaName = () => {
+  const { i18n } = useLingui();
+  return (area: string): string => {
+    const label = areaLabels[area];
+    return label === undefined ? area : i18n._(label);
+  };
+};
+
 /** Each area of an erasure, and how far it got. */
 const ErasureAreas = ({ areas }: { areas: readonly ErasureArea[] }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
+  const areaName = useAreaName();
   const done = doneOf(areas);
+  const total = areas.length;
   return (
-    <div className="flex flex-col gap-3">
-      <Progress max={areas.length} value={done}>
-        <ProgressLabel>
-          <Trans>Areas finished</Trans>
-        </ProgressLabel>
-        <span className="text-muted-foreground ml-auto text-sm tabular-nums">
-          <Trans>
-            {done} of {areas.length}
-          </Trans>
-        </span>
-      </Progress>
-      <ul className="flex flex-col gap-1">
+    <div {...stylex.props(styles.stack)}>
+      <Progress
+        label={t`Areas finished`}
+        max={total}
+        showLabel
+        value={done}
+        valueText={() => t`${done} of ${total}`}
+      />
+      <ul {...stylex.props(styles.areas)}>
         {areas.map(({ area, state }) => {
-          const label = areaLabels[area];
           const stateLabel = stateLabels[state];
           return (
-            <li className="flex items-center justify-between gap-2" key={area}>
-              <span>{label === undefined ? area : i18n._(label)}</span>
-              <Badge variant={state === "pending" ? "outline" : "secondary"}>
-                {state === "pending" ? <Spinner /> : null}
+            <li key={area} {...stylex.props(styles.area)}>
+              <Text element="span">{areaName(area)}</Text>
+              <Badge tone={stateTones[state] ?? "neutral"}>
                 {stateLabel === undefined ? state : i18n._(stateLabel)}
               </Badge>
             </li>
@@ -129,53 +188,44 @@ const ErasureAreas = ({ areas }: { areas: readonly ErasureArea[] }) => {
  * the dialog promises nothing it won't do; and what it keeps.
  */
 const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
-  const { i18n } = useLingui();
+  const { t } = useLingui();
+  const areaName = useAreaName();
+  const kept = [
+    t`Their name, on what they did, so it stays traceable`,
+    t`Runs they started, and their place in the roster`,
+    t`The audit trail`,
+    t`Documents they or others shared with a team or the company stay, and their text can still name them.`,
+    t`An admin can still delete a specific document.`,
+    t`Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset.`,
+  ];
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="flex flex-col gap-1">
-        <h3 className="font-medium">
-          <Trans>Erased</Trans>
-        </h3>
-        <ul className="text-muted-foreground flex list-disc flex-col gap-0.5 pl-5">
-          {areas.map((area) => {
-            const label = areaLabels[area];
-            return (
-              <li key={area}>{label === undefined ? area : i18n._(label)}</li>
-            );
-          })}
+    <div {...stylex.props(styles.columns)}>
+      <div {...stylex.props(styles.column)}>
+        <Heading level={3} size="ui">
+          {t`Erased`}
+        </Heading>
+        <ul {...stylex.props(styles.bullets)}>
+          {areas.map((area) => (
+            <li key={area}>
+              <Text element="span" size="sm" tone="muted">
+                {areaName(area)}
+              </Text>
+            </li>
+          ))}
         </ul>
       </div>
-      <div className="flex flex-col gap-1">
-        <h3 className="font-medium">
-          <Trans>Kept</Trans>
-        </h3>
-        <ul className="text-muted-foreground flex list-disc flex-col gap-0.5 pl-5">
-          <li>
-            <Trans>Their name, on what they did, so it stays traceable</Trans>
-          </li>
-          <li>
-            <Trans>Runs they started, and their place in the roster</Trans>
-          </li>
-          <li>
-            <Trans>The audit trail</Trans>
-          </li>
-          <li>
-            <Trans>
-              Documents they or others shared with a team or the company stay,
-              and their text can still name them.
-            </Trans>
-          </li>
-          <li>
-            <Trans>An admin can still delete a specific document.</Trans>
-          </li>
-          <li>
-            <Trans>
-              Cards about them without the address they signed in with can
-              remain. Those built from documents go when an admin deletes those
-              documents, and those an App wrote go when that App’s data is
-              reset.
-            </Trans>
-          </li>
+      <div {...stylex.props(styles.column)}>
+        <Heading level={3} size="ui">
+          {t`Kept`}
+        </Heading>
+        <ul {...stylex.props(styles.bullets)}>
+          {kept.map((line) => (
+            <li key={line}>
+              <Text element="span" size="sm" tone="muted">
+                {line}
+              </Text>
+            </li>
+          ))}
         </ul>
       </div>
     </div>
@@ -183,8 +233,14 @@ const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
 };
 
 /** A spinner while a preview loads, or why it didn't. */
-const Loading = ({ failure }: { failure: string | undefined }) =>
-  failure === undefined ? <Spinner /> : <ErrorText>{failure}</ErrorText>;
+const Loading = ({ lost }: { lost: string | undefined }) => {
+  const { t } = useLingui();
+  return lost === undefined ? (
+    <Spinner aria-label={t`Loading…`} />
+  ) : (
+    <Alert tone="danger">{lost}</Alert>
+  );
+};
 
 /**
  * Erasing `person`: who they are now, and their name typed to confirm;
@@ -206,7 +262,6 @@ const EraseDialog = ({
   const [erasure, setErasure] = useState<Erasure | null>(person.erasure);
   const [typed, setTyped] = useState("");
   const [lost, setLost] = useState<string>();
-  const nameId = useId();
   const { userId } = person;
 
   // Who they are as core has them now, not as the list showed them.
@@ -289,6 +344,7 @@ const EraseDialog = ({
     }
     setFailure(refused);
   };
+  const formId = useId();
   const name = shownAs(preview ?? person, t`Guest`);
   // A guest, who has no name, is confirmed by their address.
   const confirmed =
@@ -304,95 +360,84 @@ const EraseDialog = ({
       }}
       open
     >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Erase {name}?</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            {erasure === null ? (
-              <Trans>
-                Their personal data goes for good. Their name stays on the
-                company’s records, so what they did stays traceable.
-              </Trans>
-            ) : (
-              <Trans>
-                Each area is erased on its own. One that fails is tried again
-                until it is done, even after you close this.
-              </Trans>
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        {erasure === null ? (
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void erase();
-            }}
-          >
-            {preview === undefined ? (
-              <Loading failure={lost} />
-            ) : (
-              <>
-                <p>
-                  <span className="font-medium">{name}</span>
-                  {preview.email === null || preview.name === "" ? null : (
-                    <span className="text-muted-foreground">
-                      {" "}
-                      ({preview.email})
-                    </span>
-                  )}
-                </p>
-                <WhatErasingDoes areas={preview.areas} />
-                <Field data-invalid={failure === undefined ? undefined : true}>
-                  <FieldLabel htmlFor={nameId}>
-                    <Trans>Type {name} to confirm</Trans>
-                  </FieldLabel>
-                  <Input
-                    aria-invalid={failure === undefined ? undefined : true}
-                    autoComplete="off"
-                    id={nameId}
-                    onChange={(event) => {
-                      setTyped(event.target.value);
-                    }}
-                    value={typed}
-                  />
-                  <FieldDescription>
-                    <Trans>Exactly as it’s written here.</Trans>
-                  </FieldDescription>
-                  {failure === undefined ? null : (
-                    <FieldError>{failure}</FieldError>
-                  )}
-                </Field>
-              </>
-            )}
-            <DialogFooter>
-              <DialogClose render={<Button type="button" variant="outline" />}>
-                <Trans>Cancel</Trans>
-              </DialogClose>
-              <Button
-                disabled={busy || !confirmed}
-                type="submit"
-                variant="destructive"
-              >
-                <Trans>Erase</Trans>
-              </Button>
-            </DialogFooter>
-          </form>
-        ) : (
-          <>
-            <ErasureAreas areas={erasure.areas} />
-            <output aria-live="polite" className="text-muted-foreground">
-              {erasure.completedAt === null ? (
-                <Trans>Erasing…</Trans>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Erase ${name}?`}</DialogTitle>
+        <DialogDescription>
+          {erasure === null
+            ? t`Their personal data goes for good. Their name stays on the company’s records, so what they did stays traceable.`
+            : t`Each area is erased on its own. One that fails is tried again until it is done, even after you close this.`}
+        </DialogDescription>
+        <DialogBody>
+          {erasure === null ? (
+            <div {...stylex.props(styles.stack)}>
+              {preview === undefined ? (
+                <Loading lost={lost} />
               ) : (
-                <Trans>{name} is erased.</Trans>
+                <>
+                  <Text tone="ink" weight="medium">
+                    {preview.email === null || preview.name === ""
+                      ? name
+                      : `${preview.name} (${preview.email})`}
+                  </Text>
+                  <WhatErasingDoes areas={preview.areas} />
+                  <Form
+                    aria-label={t`Erase ${name}?`}
+                    id={formId}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void erase();
+                    }}
+                  >
+                    <Field invalid={failure !== undefined}>
+                      <FieldLabel>{t`Type ${name} to confirm`}</FieldLabel>
+                      <Input
+                        autoComplete="off"
+                        onValueChange={setTyped}
+                        value={typed}
+                      />
+                      <FieldDescription>
+                        {t`Exactly as it’s written here.`}
+                      </FieldDescription>
+                      {failure === undefined ? null : (
+                        <FieldError match>{failure}</FieldError>
+                      )}
+                    </Field>
+                  </Form>
+                </>
               )}
-            </output>
-            <ErrorText>{lost ?? failure}</ErrorText>
-            <DialogFooter showCloseButton />
-          </>
+            </div>
+          ) : (
+            <div {...stylex.props(styles.stack)}>
+              <ErasureAreas areas={erasure.areas} />
+              <output aria-live="polite">
+                <Text element="span" tone="muted">
+                  {erasure.completedAt === null
+                    ? t`Erasing…`
+                    : t`${name} is erased.`}
+                </Text>
+              </output>
+              {(lost ?? failure) === undefined ? null : (
+                <Alert tone="attention">{lost ?? failure}</Alert>
+              )}
+            </div>
+          )}
+        </DialogBody>
+        {erasure === null ? (
+          <DialogFooter>
+            <DialogAction>{t`Cancel`}</DialogAction>
+            <Button
+              disabled={busy || !confirmed}
+              form={formId}
+              type="submit"
+              variant="danger"
+            >
+              {t`Erase`}
+            </Button>
+          </DialogFooter>
+        ) : (
+          <DialogFooter>
+            <DialogAction>{t`Close`}</DialogAction>
+          </DialogFooter>
         )}
       </DialogContent>
     </Dialog>
@@ -410,12 +455,12 @@ const ReleaseAddressDialog = ({
   person: RemovedPerson;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const router = useRouter();
   const { t } = useLingui();
+  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [email, setEmail] = useState("");
   const [answer, setAnswer] = useState<"released" | "not-theirs">();
-  const emailId = useId();
+  const formId = useId();
   const name = shownAs(person, t`Guest`);
   const release = async (): Promise<void> => {
     const result = await run(
@@ -428,181 +473,149 @@ const ReleaseAddressDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open>
-      <DialogContent>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void release();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Let {name}’s old address in again?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                For an address your company gave to someone else. Anyone signing
-                in with it then gets in, {name} too if your sign-in provider
-                still has it for them.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <Field data-invalid={failure === undefined ? undefined : true}>
-            <FieldLabel htmlFor={emailId}>
-              <Trans>The address</Trans>
-            </FieldLabel>
-            <Input
-              aria-invalid={failure === undefined ? undefined : true}
-              autoComplete="off"
-              id={emailId}
-              onChange={(event) => {
-                setEmail(event.target.value);
-                setAnswer(undefined);
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Let ${name}’s old address in again?`}</DialogTitle>
+        <DialogDescription>
+          {t`For an address your company gave to someone else. Anyone signing in with it then gets in, ${name} too if your sign-in provider still has it for them.`}
+        </DialogDescription>
+        <DialogBody>
+          <div {...stylex.props(styles.stack)}>
+            <Form
+              aria-label={t`Let ${name}’s old address in again?`}
+              id={formId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void release();
               }}
-              type="email"
-              value={email}
-            />
-            <FieldDescription>
-              <Trans>Grasp keeps no copy of it, so type it in full.</Trans>
-            </FieldDescription>
-            {failure === undefined ? null : <FieldError>{failure}</FieldError>}
-          </Field>
-          {answer === undefined ? null : (
-            <output aria-live="polite" className="text-muted-foreground">
-              {answer === "released" ? (
-                <Trans>The address can sign in again.</Trans>
-              ) : (
-                <Trans>That address wasn’t kept out.</Trans>
-              )}
-            </output>
-          )}
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              {answer === "released" ? (
-                <Trans>Close</Trans>
-              ) : (
-                <Trans>Cancel</Trans>
-              )}
-            </DialogClose>
-            <Button
-              disabled={busy || email.trim() === "" || answer === "released"}
-              type="submit"
             >
-              <Trans>Let it in</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+              <Field invalid={failure !== undefined}>
+                <FieldLabel>{t`The address`}</FieldLabel>
+                <Input
+                  autoComplete="off"
+                  onValueChange={(value) => {
+                    setEmail(value);
+                    setAnswer(undefined);
+                  }}
+                  required
+                  type="email"
+                  value={email}
+                />
+                <FieldDescription>
+                  {t`Grasp keeps no copy of it, so type it in full.`}
+                </FieldDescription>
+                <FieldError match="valueMissing">
+                  {t`Enter the address to let in again.`}
+                </FieldError>
+                {failure === undefined ? null : (
+                  <FieldError match>{failure}</FieldError>
+                )}
+              </Field>
+            </Form>
+            {answer === undefined ? null : (
+              <output aria-live="polite">
+                <Text element="span" tone="muted">
+                  {answer === "released"
+                    ? t`The address can sign in again.`
+                    : t`That address wasn’t kept out.`}
+                </Text>
+              </output>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>
+            {answer === "released" ? t`Close` : t`Cancel`}
+          </DialogAction>
+          <Button
+            disabled={busy || answer === "released"}
+            form={formId}
+            type="submit"
+            variant="ink"
+          >
+            {t`Let it in`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 };
 
-/** Where `person` stands: removed, being erased, or erased. */
+/** Where `person` stands once an erasure started: being erased, or erased. Removed alone, the group's name says it. */
 const Standing = ({ person }: { person: RemovedPerson }) => {
+  const { t } = useLingui();
   const { erasure } = person;
   if (erasure === null) {
-    return (
-      <Badge variant="outline">
-        <Trans>Removed</Trans>
-      </Badge>
-    );
+    return null;
   }
   if (erasure.completedAt === null) {
     const done = doneOf(erasure.areas);
     const total = erasure.areas.length;
-    return (
-      <Badge variant="outline">
-        <Spinner />
-        <Trans>
-          Erasing, {done} of {total}
-        </Trans>
-      </Badge>
-    );
+    return <Badge tone="info">{t`Erasing, ${done} of ${total}`}</Badge>;
   }
-  return (
-    <Badge variant="secondary">
-      <Trans>Erased</Trans>
-    </Badge>
-  );
+  return <Badge tone="success">{t`Erased`}</Badge>;
 };
 
-/** One person an admin removed, and what may be done about them now. */
-const RemovedRow = ({ person }: { person: RemovedPerson }) => {
+/**
+ * What can be done about someone an admin removed, in the people table's
+ * last column: where an erasure stands once one started, and a menu to
+ * erase them, follow the erasure, or release their address once erased.
+ */
+export const RemovedActions = ({ person }: { person: RemovedPerson }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState<"erase" | "release">();
-  const { erasure } = person;
+  const { erasure, email } = person;
   const name = shownAs(person, t`Guest`);
-  const date = formatDate(person.removedAt);
   const who =
-    person.email === null || person.name === ""
-      ? name
-      : `${person.name} (${person.email})`;
+    email === null || person.name === "" ? name : `${person.name} (${email})`;
+  const close = (next: boolean): void => {
+    if (!next) {
+      setOpen(undefined);
+    }
+  };
+  const erasing = erasure !== null && erasure.completedAt === null;
+  const releasable = erasure?.completedAt !== null && person.addressKeptOut;
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <Avatar className="size-8">
-        <AvatarFallback>{initials(name)}</AvatarFallback>
-      </Avatar>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{name}</span>
-        <span className="text-muted-foreground truncate">
-          {person.email === null ? (
-            <Trans>Removed on {date} · email erased</Trans>
-          ) : (
-            <Trans>
-              {person.email} · removed on {date}
-            </Trans>
-          )}
-        </span>
-      </div>
+    <span {...stylex.props(styles.ends)}>
       <Standing person={person} />
-      {erasure === null || erasure.completedAt === null ? (
-        <Button
-          aria-label={
-            erasure === null ? t`Erase ${who}` : t`Follow the erasure of ${who}`
-          }
-          onClick={() => {
-            setOpen("erase");
-          }}
-          size="sm"
-          variant={erasure === null ? "outline" : "ghost"}
-        >
-          {erasure === null ? <Trans>Erase…</Trans> : <Trans>Follow</Trans>}
-        </Button>
-      ) : null}
-      {erasure?.completedAt !== null && person.addressKeptOut ? (
-        <Button
-          aria-label={t`Let the old address of ${who} in again`}
-          onClick={() => {
-            setOpen("release");
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          <Trans>Release address…</Trans>
-        </Button>
-      ) : null}
+      {erasure !== null && !erasing && !releasable ? null : (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={t`Actions for ${who}`}
+            icon={More}
+            size="sm"
+            variant="ghost"
+          />
+          <DropdownMenuContent align="end">
+            {erasure === null || erasing ? (
+              <DropdownMenuItem
+                icon={erasure === null ? Trash : undefined}
+                onSelect={() => {
+                  setOpen("erase");
+                }}
+                {...(erasure === null ? { variant: "danger" as const } : {})}
+              >
+                {erasure === null ? t`Erase…` : t`Follow`}
+              </DropdownMenuItem>
+            ) : null}
+            {releasable ? (
+              <DropdownMenuItem
+                onSelect={() => {
+                  setOpen("release");
+                }}
+              >
+                {t`Release address…`}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       {open === "erase" ? (
-        <EraseDialog
-          onOpenChange={(next) => {
-            if (!next) {
-              setOpen(undefined);
-            }
-          }}
-          person={person}
-        />
+        <EraseDialog onOpenChange={close} person={person} />
       ) : null}
       {open === "release" ? (
-        <ReleaseAddressDialog
-          onOpenChange={(next) => {
-            if (!next) {
-              setOpen(undefined);
-            }
-          }}
-          person={person}
-        />
+        <ReleaseAddressDialog onOpenChange={close} person={person} />
       ) : null}
-    </div>
+    </span>
   );
 };
 
@@ -617,11 +630,11 @@ const cursorAfter = (
 };
 
 /**
- * The people admins removed: whom an admin may erase, and whom they did.
- * The latest page first; older ones on request.
+ * The people admins removed, for the foot of the members list: whom an
+ * admin may erase, and whom they did. The latest page first; older ones on
+ * request (`showMore`).
  */
-export const RemovedPeople = ({ page }: { page: RemovedPeoplePage }) => {
-  const { t } = useLingui();
+export const useRemovedPeople = (page: RemovedPeoplePage) => {
   const { busy, failure, run } = useCoreAction();
   // Older pages count only on top of the first page they were read after:
   // fresh loader data (after an erasure, say) starts the list over from its
@@ -646,34 +659,5 @@ export const RemovedPeople = ({ page }: { page: RemovedPeoplePage }) => {
       });
     }
   };
-  return (
-    <SettingsSection
-      description={t`People you removed can’t sign in. Erasing someone also takes their personal data, for good, keeping their name on what they did.`}
-      title={t`Removed people`}
-    >
-      {people.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-6 text-center">
-          <Trans>Nobody was removed.</Trans>
-        </p>
-      ) : null}
-      {people.map((person) => (
-        <RemovedRow key={person.userId} person={person} />
-      ))}
-      {more ? (
-        <div className="flex flex-col items-center gap-2 border-t px-5 py-3">
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void showMore();
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            <Trans>Show older</Trans>
-          </Button>
-          <ErrorText>{failure}</ErrorText>
-        </div>
-      ) : null}
-    </SettingsSection>
-  );
+  return { people, more, showMore, busy, failure };
 };

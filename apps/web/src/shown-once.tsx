@@ -1,57 +1,24 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { useLingui } from "@lingui/react/macro";
+import type { ReactNode } from "react";
+
+import { CopyField } from "./grasp/copy-field/index.ts";
 import {
   Dialog,
+  DialogAction,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Input } from "@grasp-os/ui/components/input";
-import { Trans, useLingui } from "@lingui/react/macro";
-import type { ReactNode } from "react";
-
-import { useCopy } from "./copy.ts";
+} from "./grasp/dialog/index.ts";
+import { Text } from "./grasp/text/index.ts";
 
 // A secret core answers once and never again (an App webhook's, a webhook
-// trigger's): shown in a dialog with the way to copy it, until it is
-// closed on purpose (Done, the close button or Escape; a stray click
-// outside doesn't). Whoever holds it keeps it above anything read again,
-// so a list read after the change never takes it away before it was
-// copied.
-
-/** Copies `text`, and says so for a moment, to screen readers too. */
-export const CopyButton = ({
-  text,
-  label,
-}: {
-  text: string;
-  /** What is copied, for screen readers: "Copy the URL". */
-  label: string;
-}) => {
-  const { t } = useLingui();
-  const { copied, copy } = useCopy();
-  // The button keeps naming what it copies; that it did is announced
-  // apart, as a changed name on a focused button often isn't.
-  return (
-    <>
-      <Button
-        aria-label={label}
-        onClick={() => {
-          void copy(text);
-        }}
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        {copied ? <Trans>Copied</Trans> : <Trans>Copy</Trans>}
-      </Button>
-      <output aria-live="polite" className="sr-only">
-        {copied ? t`Copied` : ""}
-      </output>
-    </>
-  );
-};
+// trigger's): shown in a dialog with the way to copy it (Grasp UI's Copy
+// field), until it is closed on purpose (Done or the close button; a stray
+// click outside or Escape doesn't). Whoever holds it keeps it above
+// anything read again, so a list read after the change never takes it
+// away before it was copied.
 
 /** Shows `secret` once, with the way to copy it; closed, it is gone. */
 export const ShownOnceDialog = ({
@@ -69,7 +36,9 @@ export const ShownOnceDialog = ({
   const { t } = useLingui();
   return (
     <Dialog
-      disablePointerDismissal
+      // Closed on purpose only: Done or the close button. A stray click
+      // outside, or Escape, keeps the secret in view.
+      dismissible={false}
       onOpenChange={(open) => {
         if (!open) {
           onClose();
@@ -77,28 +46,22 @@ export const ShownOnceDialog = ({
       }}
       open={secret !== undefined}
     >
-      <DialogContent closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <Input aria-label={t`Secret`} readOnly value={secret ?? ""} />
-        <p className="text-sm font-medium">
-          <Trans>
-            Copy it now: you won&apos;t see it again. Lost, it can only be
-            replaced.
-          </Trans>
-        </p>
-        <DialogFooter>
+      <DialogContent>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>{description}</DialogDescription>
+        <DialogBody>
           {/* Mounted with each secret, so Copied never carries over. */}
-          <CopyButton
+          <CopyField
+            aria-label={t`Copy the secret`}
             key={secret}
-            label={t`Copy the secret`}
-            text={secret ?? ""}
+            value={secret ?? ""}
           />
-          <Button onClick={onClose}>
-            <Trans>Done</Trans>
-          </Button>
+          <Text weight="medium">
+            {t`Copy it now: you won't see it again. Lost, it can only be replaced.`}
+          </Text>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction variant="ink">{t`Done`}</DialogAction>
         </DialogFooter>
       </DialogContent>
     </Dialog>

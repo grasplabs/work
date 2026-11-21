@@ -3,13 +3,15 @@ import {
   directorySuiteOf,
 } from "@grasp-os/shared/directory";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
+import { Button } from "../grasp/button/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 
 // Connecting the directory again after the onboarding (GRA-2171), under
@@ -20,6 +22,15 @@ import { useCore } from "../use-core.ts";
 // connection in place; another replaces it once it has shown it reads.
 // The next daily read goes through it, a quarter of an hour away at most
 // while reads fail, a day while they don't.
+
+const styles = stylex.create({
+  reconnect: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+  },
+});
 
 /** Where the sign-in of `provider`'s directory comes back to: this page, naming it. */
 const membersPage = (provider: DirectoryProvider): string =>
@@ -67,31 +78,32 @@ export const DirectoryReconnect = ({
     }
   };
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div {...stylex.props(styles.reconnect)}>
       {connectedAgain ? (
-        <p>
+        <Text size="sm">
           <Trans>
             {name} is connected again. Grasp reads it at its next daily read.
           </Trans>
-        </p>
+        </Text>
       ) : null}
       <Button
-        disabled={state === "starting"}
         onClick={() => {
           void connect();
         }}
         size="sm"
-        variant="outline"
+        disabled={state === "starting"}
+        variant="quiet"
       >
-        {state === "starting" ? <Spinner data-icon="inline-start" /> : null}
         <Trans>Connect {name} again</Trans>
       </Button>
       {state === "failed" ? (
-        <p role="alert">
-          <Trans>
-            {name} couldn’t be reached just now. Try again in a moment.
-          </Trans>
-        </p>
+        <div role="alert">
+          <Text size="sm">
+            <Trans>
+              {name} couldn’t be reached just now. Try again in a moment.
+            </Trans>
+          </Text>
+        </div>
       ) : null}
     </div>
   );

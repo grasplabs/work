@@ -7,25 +7,35 @@ import type {
   TeamPin,
   UnplacedMember,
 } from "@grasp-os/shared/members";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
-import { initials } from "../frame/person-menu.tsx";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
-import { SettingsSection } from "./settings-parts.tsx";
 import { addTeamMember, removeTeamMember } from "./team-changes.ts";
 import { useTeamChange } from "./use-team-change.ts";
 
@@ -37,6 +47,44 @@ import { useTeamChange } from "./use-team-change.ts";
 // through the same team routes as anywhere else, which pin the pair;
 // letting the directory decide again releases a pin. Each section shows
 // only while it lists someone.
+
+const styles = stylex.create({
+  actions: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: grasp.space1,
+  },
+  add: { display: "flex", alignItems: "center", gap: grasp.space2 },
+});
+
+/** A section of people to place: a compact card, a row each. */
+const PlacementSection = ({
+  title,
+  description,
+  aside,
+  label,
+  children,
+}: {
+  title: string;
+  description: string;
+  aside?: ReactNode;
+  label: string;
+  children: ReactNode;
+}) => (
+  <SectionCard
+    aside={aside}
+    density="compact"
+    description={description}
+    flush
+    title={title}
+    variant="grouped"
+  >
+    <ItemGroup aria-label={label} separated>
+      {children}
+    </ItemGroup>
+  </SectionCard>
+);
 
 /** What the directory says of someone's department, in one sentence. */
 const DirectorySays = ({
@@ -79,17 +127,21 @@ const PersonRow = ({
   children: ReactNode;
   actions: ReactNode;
 }) => (
-  <div className="flex flex-wrap items-center gap-3 border-t px-5 py-3">
-    <Avatar className="size-8">
-      <AvatarFallback>{initials(person.name)}</AvatarFallback>
-    </Avatar>
-    <div className="flex min-w-0 flex-1 flex-col">
-      <span className="truncate">{person.name}</span>
-      <span className="text-muted-foreground truncate">{person.email}</span>
-      <span className="text-muted-foreground">{children}</span>
-    </div>
-    <div className="flex flex-col items-end gap-1">{actions}</div>
-  </div>
+  <Item size="xs">
+    <ItemMedia>
+      <Avatar decorative name={person.name} size="sm">
+        <AvatarFallback />
+      </Avatar>
+    </ItemMedia>
+    <ItemContent>
+      <ItemTitle>{person.name}</ItemTitle>
+      <ItemDescription>{person.email}</ItemDescription>
+      <ItemDescription>{children}</ItemDescription>
+    </ItemContent>
+    <ItemActions>
+      <div {...stylex.props(styles.actions)}>{actions}</div>
+    </ItemActions>
+  </Item>
 );
 
 /**
@@ -119,7 +171,7 @@ const AddToTeam = ({
   }
   return (
     <form
-      className="flex items-center gap-2"
+      {...stylex.props(styles.add)}
       onSubmit={(event) => {
         event.preventDefault();
         if (picked !== null) {
@@ -139,19 +191,18 @@ const AddToTeam = ({
         }}
         value={picked}
       >
-        <SelectTrigger aria-label={t`Team for ${who}`} className="w-44">
+        <SelectTrigger aria-label={t`Team for ${who}`} size="sm">
           <SelectValue placeholder={t`Choose a team`} />
         </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
+        <SelectContent />
       </Select>
-      <Button disabled={busy || picked === null} size="sm" type="submit">
-        <Trans>Add</Trans>
+      <Button
+        disabled={picked === null || busy}
+        size="sm"
+        type="submit"
+        variant="quiet"
+      >
+        {t`Add`}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </form>
@@ -174,13 +225,14 @@ const Unplaced = ({
     return null;
   }
   return (
-    <SettingsSection
-      action={
-        <Badge variant="attention">
-          <Plural one="# to place" other="# to place" value={count} />
+    <PlacementSection
+      aside={
+        <Badge size="sm" tone="attention">
+          {plural(count, { one: "# to place", other: "# to place" })}
         </Badge>
       }
-      description={t`They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is.`}
+      description={t`Nothing shared with a team reaches them yet. Add each to one, and the directory keeps your choice.`}
+      label={t`Not in a team`}
       title={t`Not in a team`}
     >
       {people.map((person) => (
@@ -197,7 +249,7 @@ const Unplaced = ({
           />
         </PersonRow>
       ))}
-    </SettingsSection>
+    </PlacementSection>
   );
 };
 
@@ -228,9 +280,9 @@ const TakeOff = ({
           );
         }}
         size="sm"
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Take off {name}</Trans>
+        {t`Take off ${name}`}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </>
@@ -253,13 +305,14 @@ const Movers = ({
     return null;
   }
   return (
-    <SettingsSection
-      action={
-        <Badge variant="attention">
-          <Plural one="# to check" other="# to check" value={count} />
+    <PlacementSection
+      aside={
+        <Badge size="sm" tone="attention">
+          {plural(count, { one: "# to check", other: "# to check" })}
         </Badge>
       }
-      description={t`The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team.`}
+      description={t`Their department in the directory no longer fills this team. They stay until you move them.`}
+      label={t`Team doesn’t match the directory`}
       title={t`Team doesn’t match the directory`}
     >
       {movers.map((mover) => {
@@ -287,7 +340,7 @@ const Movers = ({
           </PersonRow>
         );
       })}
-    </SettingsSection>
+    </PlacementSection>
   );
 };
 
@@ -313,8 +366,8 @@ const PinRow = ({
   const release = (
     <>
       <Button
-        aria-label={t`Let the directory decide whether ${who} is in ${team}`}
         disabled={busy}
+        aria-label={t`Let the directory decide whether ${who} is in ${team}`}
         onClick={() => {
           void run(
             async () => {
@@ -327,9 +380,9 @@ const PinRow = ({
           );
         }}
         size="sm"
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Let the directory decide</Trans>
+        {t`Let the directory decide`}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </>
@@ -371,8 +424,9 @@ const Pins = ({
     return null;
   }
   return (
-    <SettingsSection
-      description={t`An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is.`}
+    <PlacementSection
+      description={t`An admin set these by hand, and the directory leaves them as they are.`}
+      label={t`Placed by hand`}
       title={t`Placed by hand`}
     >
       {pins.map((pin) => (
@@ -382,7 +436,7 @@ const Pins = ({
           pin={pin}
         />
       ))}
-    </SettingsSection>
+    </PlacementSection>
   );
 };
 

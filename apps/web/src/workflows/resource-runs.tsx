@@ -1,47 +1,170 @@
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 
 import { formatDateTime } from "../format.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import { Link as TextLink } from "../grasp/link/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Names } from "./activity-bar.tsx";
-import { RunSheet } from "./run-detail.tsx";
-import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { RunBeside, RunStatusBadge, useStartedBy } from "./run-detail.tsx";
 import { WaitingForAiProvider } from "./runs.tsx";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
 // as core lists them for the reader: every run for its builders, their own
-// for its users (`workflowResources.runs`). Each opens beside the page
+// for its users (`workflowResources.runs`). Each opens beside the list
 // (run-detail.tsx) with what it returned or why it failed, read on the
 // run itself under its own rule for who sees it; its steps stay for the
 // workflow's builders, who read its definitions (Traces).
 
-/** The button on a run's row that opens it beside the page. */
-export const OpenRun = ({
-  started,
-  onOpen,
+const styles = stylex.create({
+  // Its status over what it waits for, at the row's end.
+  status: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: grasp.space1,
+  },
+});
+
+/**
+ * When a run started, as a link to it opened beside the list: a run open
+ * there has an address of its own (`?run=`), kept with the project it came
+ * from.
+ */
+const RunLink = ({
+  workflow,
+  run,
 }: {
-  started: string;
-  onOpen: () => void;
-}) => {
+  workflow: string;
+  run: WorkflowResourceRun;
+}) => (
+  <TextLink
+    render={
+      <Link
+        params={{ workflow }}
+        replace
+        search={(held) => ({
+          project: held.project,
+          view: "runs",
+          run: run.id,
+        })}
+        to="/workflows/$workflow"
+      />
+    }
+    variant="standalone"
+  >
+    {formatDateTime(run.createdAt)}
+  </TextLink>
+);
+
+/** No runs yet, where a list of them would stand. */
+const NoRuns = () => {
   const { t } = useLingui();
   return (
-    <Button
-      aria-label={t`Open the run started ${started}`}
-      onClick={onOpen}
-      size="sm"
-      variant="ghost"
-    >
-      {t({ message: "Open", context: "open one run of a workflow" })}
-    </Button>
+    <Empty size="md">
+      <EmptyHeader>
+        <EmptyDescription>{t`No runs yet.`}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+};
+
+/** How many runs a page of a workflow's runs holds. */
+const runsPageSize = 20;
+
+/** Its status as a Badge, and what it waits for while its AI provider fails. */
+const RunStatus = ({ run }: { run: WorkflowResourceRun }) => (
+  <span {...stylex.props(styles.status)}>
+    <RunStatusBadge status={run.status} />
+    {run.aiProvider === undefined ? null : (
+      <Text element="span" size="xs" tone="muted">
+        <WaitingForAiProvider wait={run.aiProvider} />
+      </Text>
+    )}
+  </span>
+);
+
+/** A workflow's runs' columns, under their headers' words. */
+const runColumns = (words: {
+  workflow: string;
+  startedBy: (principal: WorkflowResourceRun["principal"]) => string;
+  started: string;
+  version: string;
+  by: string;
+  ended: string;
+  status: string;
+}): DataTableColumn<WorkflowResourceRun>[] => [
+  {
+    key: "started",
+    header: words.started,
+    value: (run) => run.createdAt,
+    cell: (run) => <RunLink run={run} workflow={words.workflow} />,
+  },
+  { key: "version", header: words.version, value: (run) => run.version },
+  {
+    key: "by",
+    header: words.by,
+    value: (run) => words.startedBy(run.principal),
+  },
+  {
+    key: "ended",
+    header: words.ended,
+    value: (run) => run.endedAt ?? "",
+    cell: (run) => (run.endedAt === null ? "" : formatDateTime(run.endedAt)),
+  },
+  {
+    key: "status",
+    header: words.status,
+    value: (run) => run.status,
+    cell: (run) => <RunStatus run={run} />,
+    align: "end",
+  },
+];
+
+/**
+ * A workflow's runs, newest first, on the library's Data table as the
+ * tables pattern has it: when it started names the row; its version, who
+ * started it and when it ended; its status at the row's end. When it
+ * started is the link that opens it beside the list.
+ */
+export const WorkflowRunsTable = ({
+  workflow,
+  runs,
+  names,
+}: {
+  workflow: string;
+  runs: WorkflowResourceRun[];
+  names: Names;
+}) => {
+  const { t } = useLingui();
+  const startedBy = useStartedBy(names);
+  if (runs.length === 0) {
+    return <NoRuns />;
+  }
+  const columns = runColumns({
+    workflow,
+    startedBy,
+    started: t`Started`,
+    version: t`Version`,
+    by: t`Started by`,
+    ended: t`Ended`,
+    status: t`Status`,
+  });
+  return (
+    <DataTable
+      columns={columns}
+      density="compact"
+      label={t`Runs`}
+      pageSize={runsPageSize}
+      rowKey={(run) => run.id}
+      rows={runs}
+      unit={{ one: t`run`, other: t`runs` }}
+    />
   );
 };
 
@@ -50,99 +173,32 @@ export const ResourceRuns = ({
   runs,
   names,
   admin,
+  openRun,
+  onCloseRun,
 }: {
   workflow: string;
+  /** The run the address asks to open, by its ID. */
+  openRun?: string | undefined;
+  /** Clears the run from the address once it is closed. */
+  onCloseRun?: () => void;
   runs: WorkflowResourceRun[];
   names: Names;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
 }) => {
-  const { t } = useLingui();
-  const captionId = useId();
-  const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
-  if (runs.length === 0) {
-    return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>No runs yet.</Trans>
-      </p>
-    );
-  }
+  // The run the address names: one of the table's, or Run's "Open the run".
+  const opened = runs.find((run) => run.id === openRun) ?? null;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Started`}</TableHead>
-              <TableHead variant="card">{t`Status`}</TableHead>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Started by`}</TableHead>
-              <TableHead variant="card">{t`Ended`}</TableHead>
-              <TableHead variant="card">
-                <span className="sr-only">
-                  {t({
-                    message: "Open",
-                    context: "column: a button that opens a run",
-                  })}
-                </span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {runs.map((run) => {
-              const started = formatDateTime(run.createdAt);
-              return (
-                <TableRow key={run.id}>
-                  <TableCell variant="roomy">{started}</TableCell>
-                  <TableCell variant="roomy">
-                    <span className="inline-flex items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-                      />
-                      {t(runStatusLabels[run.status])}
-                    </span>
-                    {run.aiProvider === undefined ? null : (
-                      <span className="text-muted-foreground block text-xs">
-                        <WaitingForAiProvider wait={run.aiProvider} />
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell variant="roomy">{run.version}</TableCell>
-                  <TableCell variant="roomy">
-                    {run.principal === names.me
-                      ? t`You`
-                      : (names.people.get(run.principal) ?? t`Someone else`)}
-                  </TableCell>
-                  <TableCell variant="roomy">
-                    {run.endedAt === null ? "" : formatDateTime(run.endedAt)}
-                  </TableCell>
-                  <TableCell variant="roomy">
-                    <OpenRun
-                      onOpen={() => {
-                        setOpened(run);
-                      }}
-                      started={started}
-                    />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>The latest runs, newest first.</Trans>
-      </p>
-      <RunSheet
-        admin={admin}
-        names={names}
-        onClose={() => {
-          setOpened(null);
-        }}
-        opened={opened}
-        workflow={workflow}
-      />
-    </div>
+    <RunBeside
+      admin={admin}
+      names={names}
+      onClose={() => {
+        onCloseRun?.();
+      }}
+      opened={opened}
+      workflow={workflow}
+    >
+      <WorkflowRunsTable names={names} runs={runs} workflow={workflow} />
+    </RunBeside>
   );
 };

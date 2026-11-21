@@ -30,6 +30,58 @@ export const formatSince = (
   ).format(at);
 };
 
+const minuteMs = 60_000;
+const hourMs = 60 * minuteMs;
+const dayMs = 24 * hourMs;
+
+/**
+ * How long ago `value` was, in its largest whole unit (minutes, hours or
+ * days), as the page's language writes it: `short` for a quiet mark at a
+ * row's end ("5d"), `long` for a screen reader ("5 days").
+ */
+export const formatAge = (
+  value: string | number | Date,
+  now: Date = new Date()
+): { short: string; long: string } => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  let amount = Math.floor(ago / minuteMs);
+  let unit = "minute";
+  if (ago >= dayMs) {
+    amount = Math.floor(ago / dayMs);
+    unit = "day";
+  } else if (ago >= hourMs) {
+    amount = Math.floor(ago / hourMs);
+    unit = "hour";
+  }
+  const say = (unitDisplay: "narrow" | "long") =>
+    new Intl.NumberFormat(i18n.locale, {
+      style: "unit",
+      unit,
+      unitDisplay,
+    }).format(amount);
+  return { short: say("narrow"), long: say("long") };
+};
+
+/**
+ * A time zone's name as the page's language says it ("Central European
+ * Time"), from its IANA name; the IANA name where the browser has none.
+ */
+export const formatZone = (timeZone: string): string => {
+  try {
+    return (
+      new Intl.DateTimeFormat(i18n.locale, {
+        timeZone,
+        timeZoneName: "longGeneric",
+      })
+        .formatToParts(new Date())
+        .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+    );
+  } catch {
+    // A zone this browser doesn't know.
+    return timeZone;
+  }
+};
+
 /** A date as the page's language writes it, such as "3 Oct 2026". */
 export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
@@ -89,27 +141,11 @@ export const formatDayMonth = (value: string | number | Date): string =>
     month: "short",
   }).format(new Date(value));
 
-/**
- * A calendar day kept as an ISO date ("2026-10-03"), as its day and month
- * only, "3 Oct": for days of this month or the last, as a chart's ticks.
- * Read at noon UTC, so it is the same day wherever the reader is.
- */
-export const formatIsoDayMonth = (iso: string): string =>
-  iso === "" ? iso : formatDayMonth(`${iso.slice(0, 10)}T12:00:00Z`);
-
-/** An amount in whole euros, as the page's language writes it, such as "€1,240". */
 /** An amount in US dollars, to the cent: what the model gateway counts spend in. */
 export const formatDollars = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, {
     style: "currency",
     currency: "USD",
-  }).format(value);
-
-export const formatEuro = (value: number): string =>
-  new Intl.NumberFormat(i18n.locale, {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
   }).format(value);
 
 /** The ISO week number (1 to 53) of a day kept as an ISO date: week 1 holds the year's first Thursday. */
@@ -146,39 +182,6 @@ export const formatTime = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { timeStyle: "short" }).format(
     new Date(value)
   );
-
-const msPerDay = 24 * 60 * 60 * 1000;
-const daysPerMonth = 30;
-const monthsPerYear = 12;
-
-/** When the day `date` falls on began, where the reader is. */
-const startOfDay = (date: Date): number =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-
-/**
- * How long ago a day was, by calendar days where the reader is, as the
- * page's language says it: "today", "yesterday", "4 days ago", then
- * "2 months ago" and "last year". Words to put in a sentence, such as
- * "Updated {when}", never a sentence of its own.
- */
-export const formatDaysAgo = (
-  value: string | number | Date,
-  now: Date = new Date(),
-  locale: string = i18n.locale
-): string => {
-  const days = Math.max(
-    0,
-    Math.round((startOfDay(now) - startOfDay(new Date(value))) / msPerDay)
-  );
-  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  if (days < daysPerMonth) {
-    return relative.format(-days, "day");
-  }
-  const months = Math.round(days / daysPerMonth);
-  return months < monthsPerYear
-    ? relative.format(-months, "month")
-    : relative.format(-Math.round(months / monthsPerYear), "year");
-};
 
 /** A value as text: text as it is, anything else as JSON. */
 export const valueText = (value: unknown): string =>

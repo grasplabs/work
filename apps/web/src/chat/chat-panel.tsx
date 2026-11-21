@@ -1,174 +1,109 @@
-import { Button } from "@grasp-os/ui/components/button";
+import type { ChatSummary } from "@grasp-os/shared/chat";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
-  DockablePanel,
-  DockablePanelHandle,
-  DockablePanelHeader,
-  useDockablePanel,
-} from "@grasp-os/ui/components/dockable-panel";
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { Panel } from "@grasp-os/ui/components/panel";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
-import {
-  Maximize2Icon,
-  Minimize2Icon,
-  SquarePenIcon,
-  XIcon,
-} from "lucide-react";
-import { Suspense, lazy, useEffect, useEffectEvent, useRef } from "react";
+  Link,
+  useMatch,
+  useRouteContext,
+  useRouter,
+} from "@tanstack/react-router";
+import { useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
-import { shortcutLabel } from "../shortcuts.ts";
+import {
+  AppShellPanelBody,
+  AppShellPanelHead,
+  AppShellPanelTitle,
+} from "../grasp/app-shell/index.ts";
+import type {
+  AppShellPanelPlacement,
+  AppShellPanelPosition,
+} from "../grasp/app-shell/index.ts";
+import type { DropdownMenuAction } from "../grasp/dropdown-menu/index.ts";
+import { Edit } from "../grasp/icons/index.ts";
 import { setActiveChat, startAfresh } from "./active-chat.ts";
-import { AgentName, agentModelOf } from "./agent-choice.tsx";
-import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
-import { BuildsFailure, workOf } from "./builds.tsx";
+import { boxOf, ChatConversation, ChatFooter } from "./chat-body.tsx";
 import {
   chatWidth,
   closeChat,
-  exitFullscreen,
+  expandChat,
+  heightenChat,
   moveChat,
   openChat,
   resizeChat,
   useChatLayout,
 } from "./chat-layout.ts";
-import { ChatTitleMenu } from "./chat-more.tsx";
-import { allows } from "./chat-presence.ts";
-import { HeaderIcon } from "./chat-switcher.tsx";
-import { ConnectionRequests } from "./connection-requests.tsx";
-import { chatKey, useGlobalChat } from "./global-chat.tsx";
-import type { ModelsUnavailable } from "./global-chat.tsx";
-import { HeldWrites } from "./held-writes.tsx";
-import { pendingCard } from "./make-card.tsx";
-import { PackageRequests } from "./package-requests.tsx";
-import { RecentsButton } from "./recents.tsx";
-import { ChatSources } from "./sources.tsx";
-import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
+import { chatLink } from "./chat-link.ts";
+import { ChatPanelTitle, useChatMenu } from "./chat-more.tsx";
+import { allows, useOpenChat } from "./chat-presence.ts";
+import { useGlobalChat } from "./global-chat.tsx";
+import { reading } from "./reading.stylex.ts";
 
-// Grasp's chat open (global-chat.tsx): one panel, docked beside the page or
-// floating over it as a window the person moves by its header. A header with
-// the person's recent chats and the ways to start afresh, move the chat or
-// close it; the thread; and the box to ask in, which takes the cursor as the
-// chat opens. Escape closes it to its idle bar, which takes the cursor back
-// (chat-bar.tsx).
+// Grasp's chat open (global-chat.tsx), in App shell's panels: docked beside
+// the page or floating over it as a window, full screen over the page, and
+// back. The shell moves it, sizes it and docks it (drag it to the end edge,
+// or pull the docked head out to float it); work keeps where it is
+// (chat-layout.ts). Its head: the chat's name, renamed where it stands, the
+// shell's switch, full screen and the chat's own page, then a new chat, its
+// menu and Close. Then the thread, and the box to ask in, which takes the
+// cursor as the chat opens. Escape closes it to its idle bar, which takes
+// the cursor back (chat-bar.tsx).
 
-// The conversation, with its Markdown and code highlighting, loads once a
-// chat is open: most pages show the chat idle.
-const ChatThread = lazy(async () => {
-  const { ChatThread: thread } = await import("./thread.tsx");
-  return { default: thread };
+const panelStyles = stylex.create({
+  // The chat in App shell's panels: its head, its thread, its box.
+  content: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
+  },
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  // The conversation at the body's whole height, so the Thread keeps its
+  // own scroll.
+  whole: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
+  },
+  // Full screen, the conversation and the box in the middle, at one reading
+  // width: the library's Thread runs the whole width there for now.
+  column: {
+    width: "100%",
+    maxWidth: reading.width,
+    marginInline: "auto",
+  },
 });
 
-/**
- * The open chat's title at the head of the chat, renamed where it stands,
- * with its menu; a chat not made yet is a new chat.
- */
+/** The open chat's name; a chat not made yet is a new chat. */
 const ChatTitle = () => {
-  const { summary, sourceNames, retitle } = useGlobalChat();
-  if (summary === undefined) {
-    return (
-      <span className="text-muted-foreground truncate px-2 text-sm font-medium">
-        <Trans>New chat</Trans>
-      </span>
-    );
-  }
-  return (
-    // Its own: renamed, copied, a dialog open, for this chat alone.
-    <ChatTitleMenu
-      chat={summary}
-      key={summary.id}
-      onRenamed={retitle}
-      sourceNames={sourceNames}
-    />
+  const { t } = useLingui();
+  const { summary, retitle } = useGlobalChat();
+  return summary === undefined ? (
+    <AppShellPanelTitle>{t`New chat`}</AppShellPanelTitle>
+  ) : (
+    // Its own for each chat: one being renamed is never another.
+    <ChatPanelTitle chat={summary} key={summary.id} onRenamed={retitle} />
   );
 };
 
-/** A move of the chat from where it is, as its header offers it. */
-interface Move {
-  to: DockablePlacement;
-  label: string;
-  icon: ReactNode;
-}
-
-/**
- * The chat's grip, at the head of the chat: floating, it moves the chat,
- * or docks it, dragged to its dock or double-clicked; docked, dragged out
- * of its dock or double-clicked, it undocks it.
- */
-const ChatGrip = () => {
+/** "New chat" as an item of the head's menu, once a chat is open. */
+const useFreshItem = (): DropdownMenuAction[] => {
   const { t } = useLingui();
-  const { placement } = useDockablePanel();
-  return (
-    <DockablePanelHandle
-      label={
-        placement === "floating"
-          ? t`Drag to move, or double-click to dock`
-          : t`Drag or double-click to undock`
-      }
-    />
-  );
-};
-
-/**
- * The header's buttons that move the chat from where it is: full screen
- * and back, or dock it; only to where this page allows it
- * (chat-presence.ts).
- */
-const MoveButtons = () => {
-  const { t } = useLingui();
-  const { placement } = useDockablePanel();
-  const { presence } = useGlobalChat();
-  const moves: Record<DockablePlacement, Move[]> = {
-    // Undocking is the grip's: dragged out, or double-clicked (ChatGrip).
-    docked: [
-      { to: "fullscreen", label: t`Full screen`, icon: <Maximize2Icon /> },
-    ],
-    fullscreen: [
-      { to: "docked", label: t`Exit full screen`, icon: <Minimize2Icon /> },
-    ],
-    // Docking is the grip's: pushed into the dock, or double-clicked.
-    floating: [],
-  };
-  return moves[placement]
-    .filter(({ to }) => allows(presence, to))
-    .map(({ to, label, icon }) => (
-      <HeaderIcon
-        key={to}
-        label={label}
-        onClick={() => {
-          openChat(to);
-        }}
-      >
-        {icon}
-      </HeaderIcon>
-    ));
-};
-
-/**
- * The header's buttons on its right: start afresh, move the chat, close it.
- * They follow where the panel shows, so they don't change while it fades out
- * of one place for the other.
- */
-const HeaderActions = () => {
-  const { t } = useLingui();
-  const { chatId, slot, keptOpen } = useGlobalChat();
-  return (
-    <div className="ml-auto flex items-center gap-0.5">
-      {chatId === undefined ? null : (
-        <HeaderIcon
-          label={t`New chat`}
-          onClick={() => {
+  const { chatId, slot } = useGlobalChat();
+  return chatId === undefined
+    ? []
+    : [
+        {
+          label: t`New chat`,
+          icon: Edit,
+          onSelect: () => {
             // A subject's slot would find the chat that last worked on it
             // again: it starts afresh instead.
             if (slot === "chat") {
@@ -176,158 +111,78 @@ const HeaderActions = () => {
             } else {
               startAfresh(slot);
             }
-          }}
-        >
-          <SquarePenIcon />
-        </HeaderIcon>
-      )}
-      <MoveButtons />
-      {/* About the page's subject it stays open (chat-subject.ts). */}
-      {keptOpen ? null : (
-        <HeaderIcon
-          label={t`Close`}
-          onClick={closeChat}
-          shortcut={shortcutLabel(chatKey)}
-        >
-          <XIcon />
-        </HeaderIcon>
-      )}
-    </div>
+          },
+        },
+      ];
+};
+
+/** What every head of the chat's panel takes, whatever is open in it. */
+interface HeadProps {
+  expanded: boolean;
+  menu: readonly DropdownMenuAction[];
+}
+
+/**
+ * The library's window head: the chat's name (renamed where it stands),
+ * full screen, the "…" with the head's own items and ours, and close. About
+ * the page's subject the chat stays open, so it has no close
+ * (chat-subject.ts).
+ */
+const Head = ({ expanded, menu }: HeadProps) => {
+  const { chatId, keptOpen } = useGlobalChat();
+  return (
+    <AppShellPanelHead
+      expanded={expanded}
+      menu={menu}
+      onExpandedChange={expandChat}
+      {...(keptOpen ? {} : { onClose: closeChat })}
+      // A chat not made yet has no page until its first question. The
+      // router's link, so opening it doesn't load the app anew.
+      {...(chatId === undefined
+        ? {}
+        : {
+            pageHref: `/chats/${chatId}`,
+            pageRender: <Link {...chatLink(chatId)} />,
+          })}
+      title={<ChatTitle />}
+    />
   );
 };
 
-/** What the chat says before anything is asked in it. */
-const Welcome = ({ text }: { text: string }) => (
-  <div className="animate-in fade-in-0 flex flex-1 flex-col motion-reduce:animate-none">
-    <Empty className="flex-1">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <GraspMark />
-        </EmptyMedia>
-        <EmptyTitle>{text}</EmptyTitle>
-      </EmptyHeader>
-    </Empty>
-  </div>
-);
-
-/** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
-const Thread = ({ focusBox }: { focusBox: () => void }) => {
-  const { t } = useLingui();
-  const {
-    chatId,
-    finding,
-    view,
-    failure,
-    empty,
-    words,
-    ask,
-    composer,
-    offered,
-  } = useGlobalChat();
-  const { placement } = useDockablePanel();
-  // A subject's chat, while core finds it, or why it gave none.
-  if (finding.searching || finding.failure !== undefined) {
-    return finding.failure === undefined ? (
-      <div className="flex flex-1 justify-center py-8">
-        <Spinner aria-label={t`Loading…`} />
-      </div>
-    ) : (
-      <div className="flex flex-1 flex-col items-center gap-3 py-8">
-        <NotLoaded page={finding.failure} />
-        <Button
-          onClick={() => {
-            finding.retry();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Try again</Trans>
-        </Button>
-      </div>
-    );
-  }
-  if (chatId === undefined || empty) {
-    return <Welcome text={words.empty} />;
-  }
-  const lastQuestion = view.messages.findLast(({ role }) => role === "user");
+/** The head of an open chat: its own menu after "New chat", and the delete's dialog. */
+const OpenChatHead = ({
+  chat,
+  expanded,
+  fresh,
+}: {
+  chat: ChatSummary;
+  expanded: boolean;
+  fresh: readonly DropdownMenuAction[];
+}) => {
+  const { sourceNames } = useGlobalChat();
+  const { actions, dialog } = useChatMenu({ chat, sourceNames });
   return (
-    <Suspense
-      fallback={
-        <div className="flex flex-1 justify-center py-8">
-          <Spinner aria-label={t`Loading…`} />
-        </div>
-      }
-    >
-      <ChatThread
-        agents={offered?.agents}
-        chatId={chatId}
-        compact={placement !== "fullscreen"}
-        loaded={view.loaded || failure !== undefined}
-        messages={view.messages}
-        onRetry={() => {
-          if (lastQuestion !== undefined) {
-            void ask(lastQuestion.text);
-          }
-        }}
-        output={view.output}
-        partial={view.partial}
-        checking={view.checking}
-        running={view.running}
-        tools={view.tools}
-        build={{
-          model: composer.model,
-          effort: composer.effort,
-          onChangePlan: focusBox,
-        }}
-      >
-        {failure === undefined && view.stopped === null ? null : (
-          <div className="flex flex-col gap-2">
-            <ErrorText>{failure}</ErrorText>
-            <ErrorText>{view.stopped ?? undefined}</ErrorText>
-            {/* A question stopped before the agent answered (a deploy, say)
-              is asked again from here: it may be the chat's first. */}
-            {view.stopped !== null &&
-            !view.running &&
-            lastQuestion !== undefined ? (
-              <Button
-                className="self-start"
-                onClick={() => {
-                  void ask(lastQuestion.text);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                <Trans>Try again</Trans>
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <HeldWrites
-          chatId={chatId}
-          // Confirmed, the agent reads how it ended and goes on, in a turn
-          // the person's own message starts, as for approved packages
-          // below: the decision itself reaches it as a note (GRA-2224).
-          onConfirmed={() => {
-            if (!view.running) {
-              void ask(t`Confirmed. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-        <ConnectionRequests chatId={chatId} version={view.held} />
-        <PackageRequests
-          chatId={chatId}
-          // Approved, the work the agent stopped for goes on, in a turn
-          // the person's own message starts: the thread says why it did.
-          onApproved={() => {
-            if (!view.running) {
-              void ask(t`The packages are approved. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-      </ChatThread>
-    </Suspense>
+    <>
+      <Head expanded={expanded} menu={[...fresh, ...actions]} />
+      {dialog}
+    </>
+  );
+};
+
+/** The panel's head, for a chat not made yet or the open one. */
+const PanelHead = ({ expanded }: { expanded: boolean }) => {
+  const { summary } = useGlobalChat();
+  const fresh = useFreshItem();
+  return summary === undefined ? (
+    <Head expanded={expanded} menu={fresh} />
+  ) : (
+    // Its own for each chat: a delete opened for one is never another's.
+    <OpenChatHead
+      chat={summary}
+      expanded={expanded}
+      fresh={fresh}
+      key={summary.id}
+    />
   );
 };
 
@@ -355,130 +210,29 @@ const BrainGaps = () => {
   );
 };
 
-/** Why nothing can be asked yet, under the box, with the way out. */
-const ModelsUnavailableNotice = ({
-  why,
-  onRetry,
-}: {
-  why: ModelsUnavailable;
-  onRetry: (() => void) | undefined;
-}) => {
-  // No provider is the box's own to say: it is covered (composer.tsx).
-  if (why.why === "provider") {
-    return null;
-  }
-  return (
-    <p className="text-muted-foreground flex items-center gap-2 px-1 text-xs">
-      {why.text}
-      {onRetry === undefined ? null : (
-        <Button onClick={onRetry} size="xs" variant="link">
-          <Trans>Try again</Trans>
-        </Button>
-      )}
-    </p>
-  );
-};
-
-/** The box to ask in, or the agent's questions in its place. */
-const Footer = () => {
-  const { t } = useLingui();
-  const {
-    builds,
-    subject,
-    chatId,
-    composer,
-    words,
-    view,
-    asking,
-    ask,
-    modelsUnavailable,
-    retry,
-    sourceNames,
-    summary,
-    offered,
-  } = useGlobalChat();
-  const work = workOf(builds);
-  // Which of the company's agents answers here, where there are several.
-  const agents = offered?.agents ?? [];
-  // Under a card that waits for the person, the box is where to change it.
-  const waiting = pendingCard(view.messages, view.running)?.kind;
-  const changeWords = {
-    planned: t`Change something about the plan`,
-    agentDraft: t`Change something about the agent`,
-    agentChange: t`Change something about the change`,
-  };
-  const placeholder =
-    waiting === undefined ? words.placeholder : changeWords[waiting];
-  // When the running turn began: its question's time.
-  const turnSince = view.running
-    ? view.messages.findLast(({ role }) => role === "user")?.at
-    : undefined;
-  // The page's subject, by name once it is known.
-  const worked =
-    subject.about === undefined || subject.name === undefined
-      ? undefined
-      : { ...subject.about, name: subject.name };
-  return (
-    <div className="flex flex-none flex-col gap-1 px-4 pt-2 pb-4">
-      <BuildsFailure read={builds} />
-      <ChatSources names={sourceNames} provenance={view.provenance} />
-      <AskOrCompose
-        {...composer}
-        actions={<RecentsButton />}
-        agent={
-          summary === undefined ? undefined : (
-            <AgentName agentId={summary.agentId} agents={agents} />
-          )
-        }
-        agentModel={agentModelOf(agents, summary?.agentId)}
-        subject={
-          subjectBarOf(worked, work) === undefined ? undefined : (
-            <SubjectBarContent
-              chatId={chatId}
-              work={work}
-              since={turnSince}
-              subject={worked}
-            />
-          )
-        }
-        asking={asking}
-        label={words.title}
-        onAnswer={(text) => {
-          void ask(text);
-        }}
-        // The box's editor takes its placeholder as it starts: another
-        // starts it afresh, with the text it holds.
-        key={placeholder}
-        placeholder={placeholder}
-        running={view.running}
-      />
-      {modelsUnavailable === undefined ? null : (
-        <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
-      )}
-    </div>
-  );
-};
-
 /**
  * The open chat's body: its thread, the brain's questions on its pages,
  * and the box, which takes the cursor as the chat opens or moves.
  */
-const Body = ({ open }: { open: boolean }) => {
+const Body = ({ open, expanded }: { open: boolean; expanded: boolean }) => {
   const body = useRef<HTMLDivElement>(null);
-  const { placement } = useDockablePanel();
-  const { summary, words, keptOpen } = useGlobalChat();
-  // Escape closes it, or, where it stays open, takes it out of full screen.
+  const chat = useGlobalChat();
+  const { summary, words, keptOpen } = chat;
+  // Escape closes it, where it doesn't stay open (about the page's subject).
   const onEscape = useEffectEvent(() => {
-    if (keptOpen) {
-      exitFullscreen();
-    } else {
+    if (!keptOpen) {
       closeChat();
     }
   });
-  // Each time it opens: the panel's stays mounted while it is closed.
+  // Each time it opens, or is drawn anew (App shell may mount its panels
+  // again as a layer elsewhere closes): never away from a dialog or menu
+  // that has the cursor now, such as the chats window just opened.
   useEffect(() => {
-    if (open) {
-      body.current?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
+    const elsewhere = document.activeElement?.closest(
+      '[role="dialog"], [role="alertdialog"], [role="menu"]'
+    );
+    if (open && (elsewhere === null || elsewhere === undefined)) {
+      boxOf(body.current)?.focus();
     }
   }, [open]);
   useEffect(() => {
@@ -490,7 +244,12 @@ const Body = ({ open }: { open: boolean }) => {
     }
     const onKey = (event: KeyboardEvent) => {
       // What has its own use for Escape (a menu, the questions) keeps it.
-      if (event.key === "Escape" && !event.defaultPrevented) {
+      // Grasp's questions are the Composer's takeover, whose Escape (back
+      // to the text) React hears only after this listener: left to it.
+      const inQuestions =
+        event.target instanceof Element &&
+        event.target.closest('[data-slot="composer-takeover-room"]') !== null;
+      if (event.key === "Escape" && !event.defaultPrevented && !inQuestions) {
         event.preventDefault();
         onEscape();
       }
@@ -501,94 +260,118 @@ const Body = ({ open }: { open: boolean }) => {
     };
   }, []);
   return (
-    <div className="flex min-h-0 flex-1 flex-col" ref={body}>
-      {/* Full screen, the conversation reads as a column in the middle,
-        named by its chat. */}
+    <div ref={body} {...stylex.props(panelStyles.body)}>
+      {/* The conversation, named by its chat. */}
       <section
         aria-label={summary?.title ?? words.title}
-        className="mx-auto flex min-h-0 w-full flex-1 flex-col data-[placement=fullscreen]:max-w-3xl"
-        data-placement={placement}
+        {...stylex.props(panelStyles.body)}
       >
-        <Thread
-          focusBox={() => {
-            body.current
-              ?.querySelector<HTMLElement>('[role="textbox"]')
-              ?.focus();
-          }}
-        />
+        <AppShellPanelBody fill>
+          {/* Full screen, the conversation in the middle at its reading width. */}
+          <div
+            {...stylex.props(panelStyles.whole, expanded && panelStyles.column)}
+          >
+            <ChatConversation
+              chat={chat}
+              compact
+              focusBox={() => {
+                boxOf(body.current)?.focus();
+              }}
+            />
+          </div>
+        </AppShellPanelBody>
         <BrainGaps />
-        <Footer />
+        {/* Full screen, the box stands under the thread's reading column. */}
+        <div {...stylex.props(expanded && panelStyles.column)}>
+          <ChatFooter chat={chat} />
+        </div>
       </section>
     </div>
   );
 };
 
-/**
- * Grasp's chat, open: one panel, docked beside the page or floating over it,
- * where the person last had it. It stays mounted while closed, so the
- * conversation and the box never render anew as it opens, closes or moves.
- * The shell's right Panel is the room it docks into; each shows as the
- * stage says (chat-stage.ts), and says when it has finished moving.
- */
+/** The open chat as App shell's panels hold it: its head, its thread and its box. */
 export const ChatPanel = () => {
-  const { t } = useLingui();
-  const { stage, delays, settled, presence } = useGlobalChat();
-  const { offset, width } = useChatLayout();
+  const { stage } = useGlobalChat();
+  const { expanded } = useChatLayout();
   return (
-    <Panel
-      delayed={delays.room}
-      onOpenChangeComplete={() => {
-        settled("room");
-      }}
-      open={stage.room}
-      side="right"
-      // Resizable docked; full screen, its edge is under the chat.
-      {...(stage.placement === "docked"
-        ? {
-            maxSize: chatWidth.max,
-            minSize: chatWidth.min,
-            onSizeChange: resizeChat,
-            resizeLabel: t`Resize the chat`,
-            size: width,
-          }
-        : { size: width })}
-    >
-      <DockablePanel
-        defaultOffset={offset ?? undefined}
-        delayed={delays.card}
-
-        label={t`Chat`}
-        onOffsetChange={moveChat}
-        // Out of its dock, it floats, where this page allows that.
-        onDetach={
-          allows(presence, "floating")
-            ? () => {
-                openChat("floating");
-              }
-            : undefined
-        }
-        // Dragged to its dock, it docks, where this page allows that.
-        onDock={
-          allows(presence, "docked")
-            ? () => {
-                openChat("docked");
-              }
-            : undefined
-        }
-        onOpenChangeComplete={() => {
-          settled("card");
-        }}
-        open={stage.card}
-        placement={stage.placement}
-      >
-        <DockablePanelHeader>
-          {/* Only where the chat can leave its dock, or go back to it. */}
-          {allows(presence, "floating") ? <ChatGrip /> : null}
-          <ChatTitle />
-          <HeaderActions />
-        </DockablePanelHeader>
-        <Body open={stage.card} />
-      </DockablePanel>
-    </Panel>
+    <div {...stylex.props(panelStyles.content)}>
+      <PanelHead expanded={expanded} />
+      <Body expanded={expanded} open={stage.card} />
+    </div>
   );
+};
+
+/** What App shell needs of Grasp's chat for its panels. */
+export interface ChatPanels {
+  /** The chat, wherever it may show on this page, open or not; null where it may not. */
+  panels: ReactNode;
+  /** Whether it is open beside or over the page. */
+  open: boolean;
+  /**
+   * Opens and closes it from App shell's own button, at the bar's end at
+   * every width; none where it stays open (about the page's subject), where
+   * a button that can't close it would do nothing.
+   */
+  onOpenChange: ((open: boolean) => void) | undefined;
+  /** How wide the chat is, in pixels. */
+  width: number;
+  onWidthChange: (width: number) => void;
+  minWidth: number;
+  maxWidth: number;
+  /** Docked beside the page, or floating over it. */
+  placement: AppShellPanelPlacement;
+  /** Moves it between the two; undefined where this page allows only one. */
+  onPlacementChange: ((placement: AppShellPanelPlacement) => void) | undefined;
+  /** Where the floating chat was moved; undefined until it was. */
+  position: AppShellPanelPosition | undefined;
+  onPositionChange: (position: AppShellPanelPosition) => void;
+  /** How tall the floating chat was made; undefined until it was. */
+  height: number | undefined;
+  onHeightChange: (height: number) => void;
+  /** Whether it covers the page, full screen. */
+  covered: boolean;
+  /** Closes the chat to its idle bar; undefined where it stays open (about the page's subject). */
+  onClose: (() => void) | undefined;
+}
+
+/** Grasp's chat for App shell's panels: where it is, how large, and how to move, size and close it. */
+export const useChatPanels = (): ChatPanels => {
+  const { stage, keptOpen, presence, roomBeside, available } = useGlobalChat();
+  const layout = useChatLayout();
+  const openHere = useOpenChat();
+  // Where the page allows both, and there is room beside it (not a phone).
+  const movable =
+    roomBeside && allows(presence, "docked") && allows(presence, "floating");
+  return {
+    // Given wherever it may show, so the shell's own button stands there
+    // open or closed, a way back to a closed chat at every width.
+    panels: available ? <ChatPanel /> : null,
+    open: stage.card,
+    onOpenChange: keptOpen
+      ? undefined
+      : (open) => {
+          if (open) {
+            openHere();
+          } else {
+            closeChat();
+          }
+        },
+    width: layout.width,
+    onWidthChange: resizeChat,
+    minWidth: chatWidth.min,
+    maxWidth: chatWidth.max,
+    placement: stage.placement,
+    onPlacementChange: movable
+      ? (placement) => {
+          openChat(placement);
+        }
+      : undefined,
+    position: layout.position ?? undefined,
+    onPositionChange: moveChat,
+    height: layout.height ?? undefined,
+    onHeightChange: heightenChat,
+    covered: stage.card && layout.expanded,
+    onClose: keptOpen ? undefined : closeChat,
+  };
 };

@@ -53,7 +53,7 @@ export const saidBy = (timing: Timing, seconds: number): number => {
 };
 
 /** One word of a text, and where it starts and ends in it, without the space after it. */
-export interface WordAt {
+interface WordAt {
   word: string;
   start: number;
   end: number;

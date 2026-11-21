@@ -452,28 +452,22 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
     });
   });
 
-  it.each([
-    ["renders nothing", "an empty render"],
-    ["logs an error without throwing", "a console.error"],
-  ])(
-    "keeps saying a problem is being fixed when an update that %s is applied",
-    async () => {
-      const held: { updates?: PreviewUpdates } = {};
-      const run = following([answered(refreshAt(2))], () => {
-        // The frame reports what the update ran into before it answers
-        // that it shows it.
-        held.updates?.problem();
-        return "applied";
-      });
-      held.updates = run.updates;
-      run.updates.follow(run.toFrame);
-      run.updates.revise(2);
-      await vi.waitFor(() => {
-        expect(run.seen.moved).toStrictEqual([2]);
-      });
-      expect(run.seen.health).toStrictEqual(["fixing"]);
-    }
-  );
+  it("keeps saying a problem is being fixed when an update that ran into one is applied", async () => {
+    const held: { updates?: PreviewUpdates } = {};
+    const run = following([answered(refreshAt(2))], () => {
+      // The frame reports what the update ran into before it answers
+      // that it shows it.
+      held.updates?.problem();
+      return "applied";
+    });
+    held.updates = run.updates;
+    run.updates.follow(run.toFrame);
+    run.updates.revise(2);
+    await vi.waitFor(() => {
+      expect(run.seen.moved).toStrictEqual([2]);
+    });
+    expect(run.seen.health).toStrictEqual(["fixing"]);
+  });
 
   it("says a problem the page reported is being fixed, once", () => {
     const { updates, seen } = following([]);

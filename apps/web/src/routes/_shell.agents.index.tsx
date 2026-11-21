@@ -6,9 +6,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AgentsOverview } from "../agents/agents-overview.tsx";
 import type { ManagedAgents } from "../agents/agents-overview.tsx";
 import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
+import { AgentTabsWaiting, agentsTabOf } from "../agents/tabs.tsx";
+import type { AgentsTab } from "../agents/tabs.tsx";
 import type { Session } from "../core.ts";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonAgents } from "../grasp/blocks/page-skeleton-agents/page-skeleton-agents.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Plus } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // The Agents page (agents/agents-overview.tsx): the agents the person may
@@ -16,7 +21,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // the company's own admins every agent of the company
 // with what core keeps of it. Only admins read the rest, as core checks
 // on every call; the first agent's reach is Settings › Stephen's, so only
-// the others' is read here.
+// the others' is read here. The tab an admin is on is in the address
+// (`?tab=`), so a link or a reload leads back to it.
 
 /** What an admin reads of every agent: its reach, its classes and its wake-ups. */
 export const readManaged = async (session: Session): Promise<ManagedAgents> => {
@@ -101,6 +107,8 @@ const readOwnAdmin = async (
 const AgentsPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Agents` }]} page={page} />;
@@ -113,17 +121,61 @@ const AgentsPage = () => {
         makesOwn={!identity.staff && page.data.ownOn}
         managed={page.data.managed}
         offered={page.data.offered}
+        onTab={(chosen) => {
+          // In place of the address it leaves: Back goes to the page before Agents.
+          void navigate({ search: { tab: chosen }, replace: true });
+        }}
         ownAdmin={page.data.ownAdmin}
         own={page.data.own}
+        tab={tab}
         usable={page.data.usable}
       />
     </>
   );
 };
 
+/**
+ * The Agents page before its agents arrive: its crumbs, then the library's
+ * agents skeleton, its grid of portrait cards on the page's own paper, with
+ * New agent in its place for whoever may make one: anyone but Grasp's
+ * staff, as people may make their own until an admin turns that off
+ * (`ownAgentsDefault`), which the page knows only once it has loaded. The
+ * tabs stand in their place for the company's admins, who have them on the
+ * loaded page.
+ */
+const AgentsLoading = () => {
+  const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
+  const { tab } = Route.useSearch();
+  // As the loader reads it: whoever gets the tabs on the loaded page.
+  const admin = isAdmin(identity.role);
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Agents` }]} />
+      <PageSkeletonAgents
+        actions={
+          identity.staff ? undefined : (
+            <Button icon={Plus} variant="ink">
+              {t`New agent`}
+            </Button>
+          )
+        }
+        cards={4}
+        toolbar={admin ? <AgentTabsWaiting tab={tab} /> : undefined}
+      />
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/agents/")({
-  pendingComponent: PageLoading,
+  pendingComponent: AgentsLoading,
   component: AgentsPage,
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { tab?: AgentsTab | undefined } => {
+    const tab = agentsTabOf(search.tab);
+    return tab === undefined ? {} : { tab };
+  },
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
       const admin = isAdmin(identity.role);

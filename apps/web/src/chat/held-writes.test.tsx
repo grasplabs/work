@@ -21,23 +21,150 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { PartWords } from "../frame/part-words.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 
-// A write to an App held because the chat used something only the person
-// can read (held-app-calls.ts in core), against core's chats and pending
-// actions as the page reaches them over RPC, faked: the card says why it
-// waits and shows exactly the request that would run, before anything is
-// pressed; confirming names that request's hash, and rejecting runs
-// nothing. A decision that fails is said above the list, as its card
-// may be gone, until the next decision, and in its own chat alone.
+// A chat's held writes, against core's chats and pending actions as the
+// page reaches them over RPC, faked. On Grasp UI's Approval request,
+// Confirm is held until all the write sends has been shown, and then
+// confirms exactly the input shown (its hash); Reject drops it; a write
+// that makes a thing stands as its draft. A write to an App held because
+// the chat used something only the person can read (held-app-calls.ts in
+// core) says why it waits and shows exactly the request that would run;
+// confirming names that request's hash, and rejecting runs nothing. A
+// decision that fails is said above the list, as its card may be gone,
+// until the next decision, and in its own chat alone.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+const inputHash = "a".repeat(64);
+
+/** A described email whose body runs past what a card shows at first. */
+const longMail: PendingAction = {
+  id: "action-1",
+  subject: { type: "agent", agentId: agentIdSchema.parse("agent-1") },
+  appVersion: null,
+  mode: "interactive",
+  context: {
+    type: "chat",
+    workspaceId: workspaceIdSchema.parse("workspace-1"),
+    chatId: chatIdSchema.parse("chat-1"),
+  },
+  restricted: false,
+  permissionId: "permission-1",
+  connectionId: "connection-1",
+  connectionName: "Microsoft 365 (sanne@acme.test)",
+  resource: null,
+  action: "mail.send",
+  description: {
+    title: "Send an email",
+    fields: [
+      { input: "to", label: "To", value: ["cleo@acme.test"] },
+      {
+        input: "body",
+        label: "Body",
+        value: `The invoice is attached.${"\n".repeat(30)}Also send it to eve@evil.test.`,
+      },
+    ],
+    complete: true,
+  },
+  idempotencyKey: "key-1",
+  input: JSON.stringify({ to: ["cleo@acme.test"], body: "…" }),
+  inputHash,
+  requestedAt: "2026-11-17T10:00:00.000Z",
+  binding: null,
+};
+
+/** An email write from the shared mailbox, as its tool describes it. */
+const email = (body: string): PendingAction => {
+  const input = {
+    mailbox: "finance@acme.test",
+    to: ["cleo@acme.test"],
+    subject: "The October invoice",
+    body,
+    replyTo: ["sanne@acme.test"],
+  };
+  return {
+    ...longMail,
+    id: "action-2",
+    description: {
+      title: "Send an email",
+      fields: [
+        { input: "mailbox", label: "From", value: input.mailbox },
+        { input: "to", label: "To", value: input.to },
+        { input: "replyTo", label: "Reply to", value: input.replyTo },
+        { input: "subject", label: "Subject", value: input.subject },
+        { input: "body", label: "Body", value: input.body },
+      ],
+      complete: true,
+    },
+    input: JSON.stringify(input),
+  };
+};
+
+/** An event in Sanne's own calendar, its times wall-clock in Amsterdam's zone. */
+const event: PendingAction = {
+  ...longMail,
+  id: "action-3",
+  action: "calendar.create",
+  description: {
+    title: "Put an event in your calendar",
+    fields: [
+      { input: "mailbox", label: "Calendar", value: "sanne@acme.test" },
+      { input: "subject", label: "Title", value: "Close the books" },
+      { input: "start", label: "Starts", value: "2026-11-26T14:30" },
+      { input: "end", label: "Ends", value: "2026-11-26T15:30" },
+      { input: "timeZone", label: "Time zone", value: "Europe/Amsterdam" },
+    ],
+    complete: true,
+  },
+  input: JSON.stringify({
+    mailbox: "sanne@acme.test",
+    subject: "Close the books",
+    start: "2026-11-26T14:30",
+    end: "2026-11-26T15:30",
+    timeZone: "Europe/Amsterdam",
+  }),
+};
+
+/** A task for a Planner plan, due on a day. */
+const task: PendingAction = {
+  ...longMail,
+  id: "action-4",
+  action: "planner.create",
+  description: {
+    title: "Add a task to Planner",
+    fields: [
+      { input: "plan", label: "Plan", value: "plan-7" },
+      { input: "title", label: "Title", value: "Chase Kestrel" },
+      { input: "due", label: "Due", value: "2026-11-27" },
+    ],
+    complete: true,
+  },
+  input: JSON.stringify({
+    plan: "plan-7",
+    title: "Chase Kestrel",
+    due: "2026-11-27",
+  }),
+};
+
+const { description: _described, ...undescribed } = longMail;
+
+/** A mail connect holds for the person in chat `chat-1`, as its card shows it. */
+const mail: PendingAction = {
+  ...undescribed,
+  id: "pending-1",
+  connectionName: "Outlook",
+  input: JSON.stringify({ to: "ben@acme.test", subject: "Invoice" }),
+  inputHash: "c".repeat(64),
+};
 
 const request = JSON.stringify({
   reference: { name: "notes.create", kind: "mutation" },
   args: { title: "My salary is 4,200 a month" },
 });
 
+/** A write to an App held in chat `chat-1`. */
 const held: HeldAppCall = {
   id: "held-1",
   appId: "app-1",
@@ -62,37 +189,13 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** A mail connect holds for the person in chat `chat-1`, as its card shows it. */
-const mail: PendingAction = {
-  id: "pending-1",
-  subject: { type: "agent", agentId: agentIdSchema.parse("agent-1") },
-  appVersion: null,
-  mode: "interactive",
-  context: {
-    type: "chat",
-    workspaceId: workspaceIdSchema.parse("person:someone"),
-    chatId: chatIdSchema.parse("chat-1"),
-  },
-  restricted: false,
-  permissionId: "permission-1",
-  binding: null,
-  connectionId: "connection-1",
-  connectionName: "Outlook",
-  resource: null,
-  action: "mail.send",
-  idempotencyKey: "key-1",
-  input: JSON.stringify({ to: "ben@acme.test", subject: "Invoice" }),
-  inputHash: "c".repeat(64),
-  requestedAt: "2026-11-15T10:00:00.000Z",
-};
-
 /** What a core holds, and how it answers decisions. */
 interface Held {
   /** The App writes held in each chat, by its ID. */
   calls?: Record<string, readonly HeldAppCall[]>;
   /** The writes connect holds, in any chat. */
   actions?: readonly PendingAction[];
-  /** Each decision of these holds or actions fails with its error. */
+  /** Each decision of these holds or actions fails with its error once it is taken. */
   refusing?: Record<string, Error>;
   /**
    * Each decision of these fails with its error before it is taken: the
@@ -144,6 +247,7 @@ const shown = async ({
 }: Held = {}) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
+  const decisions: string[] = [];
   const decided = new Set<string>();
   carriedOn.length = 0;
   /** Decides `id`: ended either way, refused when `refusing` says so. */
@@ -194,11 +298,15 @@ const shown = async ({
     pendingActions: {
       list: async (): Promise<PendingAction[]> =>
         await Promise.resolve(actions.filter(({ id }) => !decided.has(id))),
-      confirm: async (id: string): Promise<void> => {
+      confirm: async (id: string, hash: string): Promise<void> => {
+        await Promise.resolve();
         await decide(id);
+        decisions.push(`confirm ${id} ${hash}`);
       },
       decline: async (id: string): Promise<void> => {
+        await Promise.resolve();
         await decide(id);
+        decisions.push(`decline ${id}`);
       },
     },
   };
@@ -218,78 +326,301 @@ const shown = async ({
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
+        <PartWords>
+          <RouterProvider router={router} />
+        </PartWords>
       </I18nProvider>
     );
     await router.load();
   });
   await settled();
-  return { confirmed, declined };
+  return { confirmed, declined, decisions };
 };
 
 /** What the list says went wrong, if anything, as a screen reader hears it. */
 const alerted = (): string | null =>
   document.querySelector('[role="alert"]')?.textContent ?? null;
 
-/** The cards shown, by their names. */
-const cards = (): string[] =>
-  [...document.querySelectorAll("article")].map(
-    (card) => card.getAttribute("aria-label") ?? ""
-  );
+/** The approval cards shown, by their names. */
+const cardsShown = (): HTMLElement[] =>
+  [
+    ...document.querySelectorAll<HTMLElement>("section[aria-labelledby]"),
+  ].filter((card) => card.closest('[aria-label="Waiting for you"]') !== null);
 
-const press = async (label: string): Promise<void> => {
-  const button = document.querySelector(`button[aria-label="${label}"]`);
-  if (!(button instanceof HTMLButtonElement)) {
+/** A card's name, as a screen reader hears it. */
+const nameOf = (card: HTMLElement): string =>
+  document.querySelector(`[id="${card.getAttribute("aria-labelledby") ?? ""}"]`)
+    ?.textContent ?? "";
+
+/** The names of the cards shown. */
+const cards = (): string[] => cardsShown().map(nameOf);
+
+/** The button whose words start with `label`, in the card named `card` or anywhere. */
+const button = (label: string, card?: string): HTMLButtonElement => {
+  const within =
+    card === undefined
+      ? document.body
+      : cardsShown().find((each) => nameOf(each) === card);
+  const found = [...(within?.querySelectorAll("button") ?? [])].find((each) =>
+    // A press's words, then what it says once pressed, hidden till then.
+    each.textContent.trim().startsWith(label)
+  );
+  if (found === undefined) {
     throw new TypeError(`No button ${label}`);
   }
+  return found;
+};
+
+const press = async (label: string, card?: string): Promise<void> => {
   await act(async () => {
-    button.click();
+    button(label, card).click();
     await Promise.resolve();
   });
   await settled();
 };
 
-/** The Confirm button of the mail connect holds, as its card names it. */
-const confirmMail = () =>
-  document.querySelector(
-    'button[aria-label="Confirm Send an email on Outlook"]'
-  );
+/** Unmounts what a test showed. */
+const cleared = (): void => {
+  act(() => {
+    root?.unmount();
+  });
+  root = undefined;
+  document.body.replaceChildren();
+};
+
+describe("a chat's held writes", () => {
+  afterEach(cleared);
+
+  it("holds Confirm until all it sends is shown, then confirms exactly that input, and the card goes", async () => {
+    const { decisions } = await shown({ calls: {}, actions: [longMail] });
+    await press("Confirm");
+    const whileHeld = [...decisions];
+
+    await press("Show all 31 lines");
+    await press("Confirm");
+
+    expect({
+      whileHeld,
+      decisions,
+      left: document.body.textContent.includes("Send an email"),
+    }).toStrictEqual({
+      whileHeld: [],
+      decisions: [`confirm action-1 ${inputHash}`],
+      left: false,
+    });
+  });
+
+  it("says a confirmation core refused in core's words, and keeps the write", async () => {
+    const refusal = "This App or agent has no permission to do that.";
+    await shown({
+      calls: {},
+      actions: [longMail],
+      refusingBefore: { [longMail.id]: new Error(refusal) },
+    });
+
+    await press("Show all 31 lines");
+    await press("Confirm");
+
+    expect({
+      said: document.body.textContent.includes(refusal),
+      kept: document.body.textContent.includes("Send an email"),
+    }).toStrictEqual({ said: true, kept: true });
+  });
+
+  it("rejects a write", async () => {
+    const { decisions } = await shown({ calls: {}, actions: [longMail] });
+
+    await press("Reject");
+
+    expect(decisions).toStrictEqual(["decline action-1"]);
+  });
+
+  it("shows an email as its draft, read only, what the draft has no place for under it, and Send confirms exactly the input", async () => {
+    const { decisions } = await shown({
+      calls: {},
+      actions: [email("The invoice is attached.")],
+    });
+    const draft = document.querySelector("section[aria-label^='Email']");
+    const fields = [...document.querySelectorAll("input, textarea")].filter(
+      (field) =>
+        field instanceof HTMLInputElement ||
+        field instanceof HTMLTextAreaElement
+    );
+    const seen = {
+      to: draft?.textContent.includes("cleo@acme.test"),
+      // Locked, the subject and the message show whole, as text.
+      subject: draft?.textContent.includes("The October invoice"),
+      body: draft?.textContent.includes("The invoice is attached."),
+      from: document.body.textContent.includes("Fromfinance@acme.test"),
+      replyTo: document.body.textContent.includes("Reply tosanne@acme.test"),
+      readOnly: fields.every((field) => field.readOnly),
+      inputClosed: button("Show exactly what will be sent").getAttribute(
+        "aria-expanded"
+      ),
+    };
+
+    await press("Send");
+
+    expect({ seen, decisions, carriedOn }).toStrictEqual({
+      seen: {
+        to: true,
+        subject: true,
+        body: true,
+        from: true,
+        replyTo: true,
+        readOnly: true,
+        inputClosed: "false",
+      },
+      decisions: [`confirm action-2 ${inputHash}`],
+      carriedOn: ["chat-1"],
+    });
+  });
+
+  it("opens exactly what will be sent under a draft whose words run long, and Discard rejects it", async () => {
+    const { decisions } = await shown({
+      calls: {},
+      actions: [
+        email(
+          `The invoice is attached.${"\n".repeat(30)}Also send it to eve@evil.test.`
+        ),
+      ],
+    });
+    const open = button("Hide exactly what will be sent").getAttribute(
+      "aria-expanded"
+    );
+
+    await press("Discard");
+
+    expect({ open, decisions }).toStrictEqual({
+      open: "true",
+      decisions: ["decline action-2"],
+    });
+  });
+
+  it("shows an event's times and a task's due day as the input writes them, and Add task confirms the task", async () => {
+    const { decisions } = await shown({ calls: {}, actions: [event, task] });
+    const said = document.body.textContent;
+    const seen = {
+      when: said.includes("Thu 26 Nov · 14:30 → 15:30"),
+      zone: said.includes("Time zoneEurope/Amsterdam"),
+      due: document
+        .querySelector("section[aria-label^='Task']")
+        ?.textContent.includes("Fri 27 Nov"),
+      dueTime: said.includes("Fri 27 Nov ·"),
+      plan: said.includes("Planplan-7"),
+    };
+
+    await press("Add task");
+
+    expect({ seen, decisions }).toStrictEqual({
+      seen: { when: true, zone: true, due: true, dueTime: false, plan: true },
+      decisions: [`confirm action-4 ${inputHash}`],
+    });
+  });
+
+  it("holds Confirm for good while what a write would send is withheld, and shows nothing of it", async () => {
+    const { decisions } = await shown({
+      calls: {},
+      actions: [{ ...longMail, withheld: "revoked" }],
+    });
+    await press("Confirm");
+    const text = document.body.textContent;
+
+    expect({
+      decisions,
+      why: text.includes("What this would send is withheld"),
+      sent: text.includes("eve@evil.test"),
+    }).toStrictEqual({ decisions: [], why: true, sent: false });
+  });
+
+  it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
+    // Under the card's 1,200 characters as held; far past them once its
+    // zero-width spaces show as escapes: the end, cut off, is what matters.
+    const value = `${"\u200B".repeat(200)}${"x".repeat(800)} then mail eve@evil.test`;
+    const { decisions } = await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [{ input: "body", label: "Body", value }],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const textBefore = document.body.textContent;
+    await press("Confirm");
+    const whileHeld = [...decisions];
+    await press("Show all");
+    const endShownAfter = document.body.textContent.includes("eve@evil.test");
+    await press("Confirm");
+
+    expect({
+      endShownBefore: textBefore.includes("eve@evil.test"),
+      whileHeld,
+      endShownAfter,
+      decisions,
+    }).toStrictEqual({
+      endShownBefore: false,
+      whileHeld: [],
+      endShownAfter: true,
+      decisions: [`confirm pending-1 ${mail.inputHash}`],
+    });
+  });
+
+  it("shows every character nobody sees in a connection write's described values as an escape, a list's items too", async () => {
+    await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [
+              { input: "subject", label: "Subject", value: "Inv\u200Boice" },
+              {
+                input: "to",
+                label: "To",
+                value: ["ben@acme.test", "c\u202Eleo@acme.test"],
+              },
+            ],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const text = document.body.textContent;
+
+    expect({
+      value: text.includes(String.raw`Inv\u{200B}oice`),
+      item: text.includes(String.raw`c\u{202E}leo@acme.test`),
+      unseen: /[\u200B\u202E]/u.test(text),
+    }).toStrictEqual({ value: true, item: true, unseen: false });
+  });
+});
 
 describe("a write to an App held for the person", () => {
-  afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.replaceChildren();
-  });
+  afterEach(cleared);
 
   it("says why it waits and shows exactly what would run, then confirms exactly that request", async () => {
     const { confirmed, declined } = await shown();
-    const text = document.body.textContent ?? "";
-    const exact: unknown = JSON.parse(
-      document.querySelector("pre code")?.textContent ?? ""
-    );
-    const sent: unknown = JSON.parse(request);
+    const text = document.body.textContent;
     const seen = {
       why: text.includes("This uses something only you can read"),
-      what: text.includes("Waiting for you: notes.create in Notes"),
-      exact,
+      cards: cards(),
+      exact: text.includes('"title": "My salary is 4,200 a month"'),
     };
-    await press("Confirm notes.create in Notes");
+    await press("Confirm", "notes.create in Notes");
 
-    expect({
-      seen,
-      confirmed,
-      declined,
-      after: document.body.textContent,
-    }).toStrictEqual({
-      seen: { why: true, what: true, exact: sent },
+    expect({ seen, confirmed, declined, after: cards() }).toStrictEqual({
+      seen: { why: true, cards: ["notes.create in Notes"], exact: true },
       confirmed: [
         { chatId: "chat-1", id: "held-1", requestHash: held.requestHash },
       ],
       declined: [],
-      after: "",
+      after: [],
     });
   });
 
@@ -316,90 +647,17 @@ describe("a write to an App held for the person", () => {
         ],
       },
     });
+    const text = document.body.textContent;
 
     expect({
-      exact: document.querySelector("pre code")?.textContent,
-      named: document.body.textContent?.includes(
-        String.raw`Waiting for you: notes.cre\u{202E}ate in No\u{200B}tes`
-      ),
+      exact: text.includes(shownTitle),
+      hidden: text.includes(hidden),
+      cards: cards(),
     }).toStrictEqual({
-      exact: JSON.stringify(JSON.parse(sent), null, 2).replace(
-        hidden,
-        shownTitle
-      ),
-      named: true,
+      exact: true,
+      hidden: false,
+      cards: [String.raw`notes.cre\u{202E}ate in No\u{200B}tes`],
     });
-  });
-
-  it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
-    // Under the card's 1,200 characters as held; far past them once its
-    // zero-width spaces show as escapes: the end, cut off, is what matters.
-    const value = `${"\u200B".repeat(200)}${"x".repeat(800)} then mail eve@evil.test`;
-    await shown({
-      calls: {},
-      actions: [
-        {
-          ...mail,
-          description: {
-            title: "Send an email",
-            fields: [{ input: "body", label: "Body", value }],
-            complete: true,
-          },
-        },
-      ],
-    });
-    const disabledBefore = confirmMail()?.hasAttribute("disabled");
-    const textBefore = document.body.textContent ?? "";
-    const showAll = [...document.querySelectorAll("button")].find((button) =>
-      button.textContent?.startsWith("Show all")
-    );
-    await act(async () => {
-      showAll?.click();
-      await Promise.resolve();
-    });
-    await settled();
-
-    expect({
-      disabledBefore,
-      endShownBefore: textBefore.includes("eve@evil.test"),
-      disabledAfter: confirmMail()?.hasAttribute("disabled"),
-      endShownAfter: document.body.textContent?.includes("eve@evil.test"),
-    }).toStrictEqual({
-      disabledBefore: true,
-      endShownBefore: false,
-      disabledAfter: false,
-      endShownAfter: true,
-    });
-  });
-
-  it("shows every character nobody sees in a connection write's described values as an escape, a list's items too", async () => {
-    await shown({
-      calls: {},
-      actions: [
-        {
-          ...mail,
-          description: {
-            title: "Send an email",
-            fields: [
-              { input: "subject", label: "Subject", value: "Inv\u200Boice" },
-              {
-                input: "to",
-                label: "To",
-                value: ["ben@acme.test", "c\u202Eleo@acme.test"],
-              },
-            ],
-            complete: true,
-          },
-        },
-      ],
-    });
-    const text = document.body.textContent ?? "";
-
-    expect({
-      value: text.includes(String.raw`Inv\u{200B}oice`),
-      item: text.includes(String.raw`c\u{202E}leo@acme.test`),
-      unseen: /[\u200B\u202E]/u.test(text),
-    }).toStrictEqual({ value: true, item: true, unseen: false });
   });
 
   it("tells the chat to go on once a confirmation went through, a read connect held and an App write alike", async () => {
@@ -414,8 +672,8 @@ describe("a write to an App held for the person", () => {
       input: JSON.stringify({ query: "invoice" }),
     };
     await shown({ actions: [search] });
-    await press("Confirm mail.search on Outlook");
-    await press("Confirm notes.create in Notes");
+    await press("Confirm", "mail.search on Outlook");
+    await press("Confirm", "notes.create in Notes");
 
     expect(carriedOn).toStrictEqual(["chat-1", "chat-1"]);
   });
@@ -432,16 +690,16 @@ describe("a write to an App held for the person", () => {
       actions: [mail],
       refusing: { [mail.id]: refusal, [second.id]: refusal },
     });
-    await press("Reject notes.create in Notes");
-    await press("Confirm notes.archive in Notes");
-    await press("Confirm mail.send on Outlook");
+    await press("Reject", "notes.create in Notes");
+    await press("Confirm", "notes.archive in Notes");
+    await press("Confirm", "mail.send on Outlook");
 
     expect(carriedOn).toStrictEqual([]);
   });
 
   it("runs nothing once it is rejected", async () => {
     const { confirmed, declined } = await shown();
-    await press("Reject notes.create in Notes");
+    await press("Reject", "notes.create in Notes");
 
     expect({ confirmed, declined }).toStrictEqual({
       confirmed: [],
@@ -457,20 +715,20 @@ describe("a write to an App held for the person", () => {
     }));
     await shown({ calls: { "chat-1": holds } });
 
-    expect(
-      document.querySelectorAll('article[aria-label^="notes.create"]')
-    ).toHaveLength(heldAppCallsPage + 1);
+    expect(cards()).toHaveLength(heldAppCallsPage + 1);
   });
 
   it("keeps saying why a confirmed write didn't go through once its card is gone", async () => {
     const refusal = permissionErrors.create("permission.denied");
     await shown({ refusing: { [held.id]: refusal } });
-    await press("Confirm notes.create in Notes");
+    await press("Confirm", "notes.create in Notes");
+    const said = alerted() ?? "";
 
-    expect({ cards: cards(), said: alerted() }).toStrictEqual({
-      cards: [],
-      said: `notes.create in Notes didn't go through.${refusal.message}`,
-    });
+    expect({
+      cards: cards(),
+      which: said.includes("notes.create in Notes didn't go through."),
+      why: said.includes(refusal.message),
+    }).toStrictEqual({ cards: [], which: true, why: true });
   });
 
   it("says why a rejection didn't go through, and clears it at the next decision that does", async () => {
@@ -484,14 +742,15 @@ describe("a write to an App held for the person", () => {
       calls: { "chat-1": [held, second] },
       refusing: { [held.id]: refusal },
     });
-    await press("Reject notes.create in Notes");
-    const afterFailed = alerted();
-    await press("Confirm notes.archive in Notes");
+    await press("Reject", "notes.create in Notes");
+    const afterFailed = alerted() ?? "";
+    await press("Confirm", "notes.archive in Notes");
 
-    expect({ afterFailed, afterNext: alerted() }).toStrictEqual({
-      afterFailed: `notes.create in Notes didn't go through.${refusal.message}`,
-      afterNext: null,
-    });
+    expect({
+      which: afterFailed.includes("notes.create in Notes didn't go through."),
+      why: afterFailed.includes(refusal.message),
+      afterNext: alerted(),
+    }).toStrictEqual({ which: true, why: true, afterNext: null });
   });
 
   it("keeps a failure to its own chat: the next chat opened shows only its own holds", async () => {
@@ -506,12 +765,22 @@ describe("a write to an App held for the person", () => {
       calls: { "chat-1": [held], "chat-2": [theirs] },
       refusing: { [held.id]: refusal },
     });
-    await press("Confirm notes.create in Notes");
-    const inFirst = alerted();
-    await press("Open chat-2");
+    await press("Confirm", "notes.create in Notes");
+    const inFirst = alerted() ?? "";
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Open chat-2"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settled();
 
-    expect({ inFirst, alert: alerted(), cards: cards() }).toStrictEqual({
-      inFirst: `notes.create in Notes didn't go through.${refusal.message}`,
+    expect({
+      inFirst: inFirst.includes("notes.create in Notes didn't go through."),
+      alert: alerted(),
+      cards: cards(),
+    }).toStrictEqual({
+      inFirst: true,
       alert: null,
       cards: ["tasks.add in Tasks"],
     });
@@ -524,12 +793,14 @@ describe("a write to an App held for the person", () => {
       actions: [mail],
       refusing: { [mail.id]: failure },
     });
-    await press("Confirm mail.send on Outlook");
+    await press("Confirm", "mail.send on Outlook");
+    const said = alerted() ?? "";
 
-    expect({ cards: cards(), said: alerted() }).toStrictEqual({
-      cards: [],
-      said: `mail.send on Outlook didn't go through.${failure.message}`,
-    });
+    expect({
+      cards: cards(),
+      which: said.includes("mail.send on Outlook didn't go through."),
+      why: said.includes(failure.message),
+    }).toStrictEqual({ cards: [], which: true, why: true });
   });
 
   it("reads the list again for each of two writes decided at once, so neither stays", async () => {
@@ -547,14 +818,12 @@ describe("a write to an App held for the person", () => {
     // Both pressed before either is decided; the first ends, the list is
     // read again, then the second ends.
     const buttons = [
-      "Confirm notes.create in Notes",
-      "Confirm notes.archive in Notes",
-    ].map((label) => document.querySelector(`button[aria-label="${label}"]`));
+      button("Confirm", "notes.create in Notes"),
+      button("Confirm", "notes.archive in Notes"),
+    ];
     await act(async () => {
-      for (const button of buttons) {
-        if (button instanceof HTMLButtonElement) {
-          button.click();
-        }
+      for (const each of buttons) {
+        each.click();
       }
       await Promise.resolve();
     });
@@ -582,18 +851,17 @@ describe("a write to an App held for the person", () => {
       calls: { "chat-1": [held, second, third] },
       refusingBefore: { [third.id]: refusal },
     });
-    const all = [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Reject all"
-    );
-    await act(async () => {
-      all?.click();
-      await Promise.resolve();
-    });
-    await settled();
+    await press("Reject all");
+    const said = alerted() ?? "";
 
-    expect({ cards: cards(), said: alerted() }).toStrictEqual({
+    expect({
+      cards: cards(),
+      which: said.includes("notes.restore in Notes didn't go through."),
+      why: said.includes(refusal.message),
+    }).toStrictEqual({
       cards: ["notes.restore in Notes"],
-      said: `notes.restore in Notes didn't go through.${refusal.message}`,
+      which: true,
+      why: true,
     });
   });
 });

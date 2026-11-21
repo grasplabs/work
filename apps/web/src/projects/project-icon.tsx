@@ -1,47 +1,33 @@
 import type { ProjectIcon as ProjectIconName } from "@grasp-os/shared/projects";
-import {
-  BriefcaseIcon,
-  ChartLineIcon,
-  CoinsIcon,
-  FolderIcon,
-  LightbulbIcon,
-  RocketIcon,
-  SparklesIcon,
-  TargetIcon,
-  UsersIcon,
-  WrenchIcon,
-} from "lucide-react";
-import type { ComponentType, SVGProps } from "react";
 
-// A project's icon, one of the few core keeps (`projectIcons`), drawn on a
-// grey tile as a business process's is (workflows/business-process.tsx).
+import {
+  Chart,
+  Checklist,
+  Company,
+  Folder,
+  Money,
+  People,
+  Rocket,
+  Sparkles,
+  Thought,
+  Tool,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+
+// A project's icon, one of the few core keeps (`projectIcons`), drawn from
+// Grasp UI's icons. The library has no target, briefcase or light bulb of
+// its own: a checklist, a building and a thought stand in for them.
 
 /** Each icon a project may have, as drawn. */
-export const projectIconShapes: Record<
-  ProjectIconName,
-  ComponentType<SVGProps<SVGSVGElement>>
-> = {
-  folder: FolderIcon,
-  briefcase: BriefcaseIcon,
-  target: TargetIcon,
-  users: UsersIcon,
-  coins: CoinsIcon,
-  rocket: RocketIcon,
-  chart: ChartLineIcon,
-  lightbulb: LightbulbIcon,
-  wrench: WrenchIcon,
-  sparkles: SparklesIcon,
-};
-
-/** A project's icon on its tile. */
-export const ProjectIcon = ({ icon }: { icon: ProjectIconName }) => {
-  const Shape = projectIconShapes[icon];
-  return (
-    <span
-      aria-hidden="true"
-      className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
-    >
-      <Shape className="size-4" />
-    </span>
-  );
+export const projectIconShapes: Record<ProjectIconName, IconData> = {
+  folder: Folder,
+  briefcase: Company,
+  target: Checklist,
+  users: People,
+  coins: Money,
+  rocket: Rocket,
+  chart: Chart,
+  lightbulb: Thought,
+  wrench: Tool,
+  sparkles: Sparkles,
 };

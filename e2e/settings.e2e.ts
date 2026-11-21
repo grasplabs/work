@@ -5,19 +5,19 @@ import { test } from "./csp.ts";
 import { apiOf, peopleIn, signInAs } from "./people.ts";
 
 // Settings, as in the prototype: the workspace's sections for admins, the
-// account's for everyone, listed beside the section where the page has the
-// room and as one control above it where it hasn't. Billing's details and
+// account's for everyone, listed in the sidebar while the person is in
+// Settings, and on a phone in the menu's sheet. Billing's details and
 // emails are kept by core and changed here by the admin; what core has
 // nothing for yet (a plan, a card, invoices) shows the prototype's empty
 // state, and can't be changed. The devices a person is signed in on can be
-// signed out one by one. Members, Models, AI spend and the audit trail have tests
-// of their own (web, models, activity).
+// signed out one by one. Members and the audit trail have tests of their
+// own (web, activity).
 
 /** A section of the page, by its heading. */
 const sectionOf = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
-test("an admin opens Settings on the workspace, and each section from the list beside it", async ({
+test("an admin opens Settings on the workspace, and each section from the sidebar", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("settings");
@@ -38,13 +38,7 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
   await expect(page.getByText("Stripe is not linked yet")).toBeVisible();
-  await expect(
-    sectionOf(page, "Plan").getByRole("button", { name: "Change plan" })
-  ).toBeDisabled();
-  await expect(sectionOf(page, "Payment method")).toContainText(
-    "No card on file"
-  );
-  await expect(sectionOf(page, "Invoices")).toContainText("No invoices yet.");
+  await expect(sectionOf(page, "Plan")).toContainText("Current plan");
   // The billing details are the admin's to keep, as each field is left.
   const details = sectionOf(page, "Billing details");
   await details.getByLabel("VAT number").fill("nl123456789b01");
@@ -77,7 +71,7 @@ test("an admin opens Settings on the workspace, and each section from the list b
 
   await nav.getByRole("link", { name: "Security" }).click();
   await expect(page).toHaveURL(/\/settings\/security$/u);
-  await expect(sectionOf(page, "Sign-in")).toContainText(admin.email);
+  await expect(sectionOf(page, "Devices")).toContainText("This device");
 });
 
 test("someone who isn't an admin opens Settings on their profile, with only their account's sections", async ({
@@ -90,23 +84,27 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   // Their own instruction file too, which every member writes.
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Profile", "Instructions", "Security"]);
+  ).toHaveText(["Profile", "Appearance", "Instructions", "Security"]);
 });
 
-test("on a phone the sections are one control above the section", async ({
+test("on a phone the sections are in the menu's sheet, and choosing one closes it", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("settings");
   const page = await pageOf(admin);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/profile");
-  await expect(page.getByRole("navigation", { name: "Settings" })).toBeHidden();
-  const sections = page.getByRole("combobox", { name: "Settings" });
-  await expect(sections).toContainText("Profile");
-  await sections.click();
-  await page.getByRole("option", { name: "Members and roles" }).click();
+  await page.getByRole("button", { name: "Menu" }).click();
+  const sheet = page.getByRole("dialog", { name: "Menu" });
+  const sections = sheet.getByRole("navigation", { name: "Settings" });
+  await expect(sections.getByRole("link", { name: "Profile" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await sections.getByRole("link", { name: "Members and roles" }).click();
+  await expect(sheet).toBeHidden();
   await expect(page).toHaveURL(/\/settings\/members$/u);
-  await expect(sectionOf(page, "Roles")).toBeVisible();
+  await expect(sectionOf(page, "Members")).toBeVisible();
 });
 
 test("someone signs out a device of theirs from Security, and its session ends", async ({
@@ -119,13 +117,19 @@ test("someone signs out a device of theirs from Security, and its session ends",
   await page.goto("/settings/security");
   const devices = sectionOf(page, "Devices");
   const signOuts = devices.getByRole("button", { name: /^Sign out/u });
-  await expect(devices).toContainText("Signed in on 2 devices.");
+  const rows = devices.getByRole("listitem");
+  await expect(rows).toHaveCount(2);
   await expect(devices.getByText("This device", { exact: true })).toBeVisible();
   // This one signs out from the person menu, not here.
   await expect(signOuts).toHaveCount(1);
 
+  // It asks first.
   await signOuts.click();
-  await expect(devices).toContainText("Signed in on 1 device.");
+  await page
+    .getByRole("alertdialog", { name: "Sign out this device?" })
+    .getByRole("button", { name: "Sign out" })
+    .click();
+  await expect(rows).toHaveCount(1);
   await expect(signOuts).toHaveCount(0);
   await expect(devices.getByText("This device", { exact: true })).toBeVisible();
   const { core, api } = apiOf({ cookie: elsewhere });

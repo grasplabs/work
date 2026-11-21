@@ -124,7 +124,32 @@ export const appReady = "Your contact list is ready to try in the preview.";
 export const approvalDrawn =
   "Drew it: the approver you name decides on each invoice.";
 
+/** What the agent writes, slowly, in `writesOn`: long enough to stop it mid-way. */
+export const writingOn =
+  "One, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve, thirteen, fourteen, fifteen, sixteen, seventeen, eighteen, nineteen, twenty.";
+
+/** How much of `writingOn` arrives before the answer holds. */
+export const writtenBeforeHold = 40;
+
 export const modelScripts = {
+  /**
+   * An answer caught mid-way: the agent writes the start of `writingOn`,
+   * then holds until the request is given up (Stop, a reload, the page
+   * left), as a long answer still being written.
+   */
+  writesOn: {
+    opener: "Count slowly to twenty for me.",
+    replies: [
+      {
+        ...says(writingOn),
+        pause: {
+          at: writtenBeforeHold,
+          // Never: the person stops it, or leaves.
+          until: Promise.withResolvers<never>().promise,
+        },
+      },
+    ],
+  },
   /** A chat turn, end to end: the person asks, the agent answers. */
   answers: {
     opener: "What should the weekly sales report cover?",

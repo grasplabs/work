@@ -45,6 +45,10 @@ catalog:
   typedoc: 0.28.20
   typedoc-plugin-markdown: 4.14.1
   mdast-util-from-markdown: 2.1.0
+  mdast-util-gfm: 3.1.0
+  micromark-extension-gfm: 3.0.0
+  prismjs: 1.30.0
+  "@types/prismjs": 1.26.6
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs).
   parse5: 8.1.0
@@ -80,6 +84,7 @@ catalog:
   "@cloudflare/vitest-plugin": 1.8.2
   "@cloudflare/workers-types": 5.20261113.1
   capnweb: 0.12.0
+  country-flag-icons: 1.6.20
   # A mutation's seeded randomness, in its isolate (the SDK's runner):
   # ChaCha20's keystream from the seed its receipt keeps.
   "@noble/ciphers": 2.4.0
@@ -204,10 +209,24 @@ catalog:
   "@tiptap/pm": 3.33.0
   "@tiptap/react": 3.33.0
   "@tiptap/suggestion": 3.33.0
+  # The library's DocumentEditor (apps/web/src/grasp/document-editor): Brain
+  # and Knowledge pages written in place, kept as Markdown, with GFM tables,
+  # collapsible sections and text styles.
+  "@tiptap/extension-details": 3.33.0
+  "@tiptap/extension-table": 3.33.0
+  "@tiptap/extension-text-style": 3.33.0
+  "@tiptap/markdown": 3.33.0
+  "@tiptap/starter-kit": 3.33.0
   # The kit's SortableList: drag, with a keyboard and a screen reader too.
   "@dnd-kit/core": 6.3.1
   "@dnd-kit/sortable": 10.0.0
   "@dnd-kit/utilities": 3.2.2
+  "@hugeicons/core-free-icons": 4.4.0
+  "@hugeicons/react": 1.1.10
+  "@stylexjs/stylex": 0.19.2
+  "@stylexjs/unplugin": 0.19.2
+  "@ui-sdk/core": 0.1.0-beta.1
+  "@ui-sdk/react": 0.1.0-beta.1
   "@tailwindcss/vite": 4.3.3
   # The state, subscriptions and lifecycle under the SDK's forms (useForm,
   # @grasp-os/sdk/react) and their fields (@grasp-os/ui/form).
@@ -267,12 +286,6 @@ catalog:
   react-resizable-panels: 4.14.2
   # The kit's charts.
   recharts: 3.10.1
-  # The agent's answers: code blocks highlighted by class, so the theme's
-  # tokens colour them with no inline style (the no-inline-styles lint rule).
-  rehype-highlight: 7.0.2
-  # An App's Code tab: its files and a draft's changes, virtualised and
-  # highlighted by the library's own highlighter (Highlights).
-  "@pierre/diffs": 1.6.2
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0

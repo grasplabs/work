@@ -136,7 +136,7 @@ test("someone it is shared with uses the live App and moves between its pages; i
     preview.frameLocator("iframe").getByRole("heading", { name: "The board" })
   ).toBeVisible({ timeout: 20_000 });
   await expect(
-    workspace.getByRole("button", { name: "Share changes" })
+    workspace.getByRole("region", { name: "Changes only you see" })
   ).toHaveCount(0);
   const chat = workspace.getByRole("region", { name: "Chat" });
   await expect(

@@ -3,35 +3,33 @@ import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import { Await, Link } from "@tanstack/react-router";
+
+import { formatNumber } from "../format.ts";
+import { Workflow } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import {
   Popover,
   PopoverContent,
+  PopoverTitle,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, Link } from "@tanstack/react-router";
-import { ChevronRightIcon, WorkflowIcon } from "lucide-react";
-import type { ReactNode } from "react";
-
-import { ErrorText } from "../error-text.tsx";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { notLoadedText } from "../load-from-core.tsx";
+} from "../grasp/popover/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import type { Integration } from "./integrations.ts";
 import { workflowsOf } from "./integrations.ts";
 
 // Which workflows use an app, as the prototype shows them: "Used by N
-// workflows" on its row in Integrations, opening the list of them
-// (`components/integration-row.tsx`), and its page's Workflows tab
-// (`routes/integrations/$integrationId.tsx`). Each opens the workflow's
-// page. They come from a read of their own, which the rest of either page
-// never waits on.
+// workflows" on its row (`components/integration-row.tsx`), opening the
+// list of them, each opening the workflow's page. They come from a read
+// of their own, which the rest of the page never waits on.
 
 /** Which workflows use each connection, as the page reads it. */
 export type ConnectionUses = Promise<Loaded<ConnectionWorkflows[]>>;
@@ -43,23 +41,19 @@ const usingOf = (
 ): ConnectionWorkflow[] =>
   workflowsOf(integration, loaded.state === "ready" ? loaded.data : []);
 
-/** A workflow's name, opening its page; `className` for where it sits. */
-const WorkflowLink = ({
-  workflow,
-  className,
-  children,
-}: {
-  workflow: ConnectionWorkflow;
-  className: string;
-  children: ReactNode;
-}) => (
-  <Link
-    className={className}
-    params={{ workflow: workflow.id }}
-    to="/workflows/$workflow"
+/** A workflow as a row that opens its page. */
+const WorkflowItem = ({ workflow }: { workflow: ConnectionWorkflow }) => (
+  <Item
+    render={
+      <Link params={{ workflow: workflow.id }} to="/workflows/$workflow" />
+    }
+    size="xs"
   >
-    {children}
-  </Link>
+    <ItemMedia icon={Workflow} iconLook="inline" />
+    <ItemContent>
+      <ItemTitle>{workflowLabel(workflow)}</ItemTitle>
+    </ItemContent>
+  </Item>
 );
 
 /** "Used by 2 workflows", as the row's count and its list say it. */
@@ -82,47 +76,24 @@ const UsedByCount = ({
     return null;
   }
   return (
-    <>
-      <span aria-hidden="true">·</span>
-      <Popover>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PopoverTrigger
-                render={
-                  <button
-                    aria-label={label}
-                    className="hover:text-foreground focus-visible:ring-ring/50 inline-flex flex-none items-center gap-1 rounded-sm tabular-nums outline-none focus-visible:ring-3"
-                    type="button"
-                  />
-                }
-              />
-            }
-          >
-            <WorkflowIcon aria-hidden="true" className="size-3.5" />
-            {workflows.length}
-          </TooltipTrigger>
-          <TooltipContent>{label}</TooltipContent>
-        </Tooltip>
-        <PopoverContent align="start" variant="flush">
-          <div className="flex flex-col gap-1 p-2">
-            <p className="text-muted-foreground px-2 py-1">{label}</p>
-            <ul className="flex flex-col">
-              {workflows.map((workflow) => (
-                <li key={workflow.id}>
-                  <WorkflowLink
-                    className="hover:bg-accent focus-visible:bg-accent flex flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none"
-                    workflow={workflow}
-                  >
-                    <span className="truncate">{workflowLabel(workflow)}</span>
-                  </WorkflowLink>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </PopoverContent>
-      </Popover>
-    </>
+    <Popover>
+      <PopoverTrigger
+        aria-label={label}
+        icon={Workflow}
+        size="xs"
+        variant="ghost"
+      >
+        {formatNumber(workflows.length)}
+      </PopoverTrigger>
+      <PopoverContent>
+        <PopoverTitle>{label}</PopoverTitle>
+        <ItemGroup aria-label={label}>
+          {workflows.map((workflow) => (
+            <WorkflowItem key={workflow.id} workflow={workflow} />
+          ))}
+        </ItemGroup>
+      </PopoverContent>
+    </Popover>
   );
 };
 
@@ -136,90 +107,5 @@ export const UsedBy = ({
 }) => (
   <Await fallback={null} promise={uses}>
     {(loaded) => <UsedByCount workflows={usingOf(integration, loaded)} />}
-  </Await>
-);
-
-/** How many workflows use the app, beside its Workflows tab's name, once read. */
-export const WorkflowsCount = ({
-  integration,
-  uses,
-}: {
-  integration: Integration;
-  uses: ConnectionUses;
-}) => (
-  <Await fallback={null} promise={uses}>
-    {(loaded) =>
-      loaded.state === "ready" ? (
-        <span className="text-muted-foreground tabular-nums">
-          {usingOf(integration, loaded).length}
-        </span>
-      ) : null
-    }
-  </Await>
-);
-
-/**
- * The workflows that use the app, on its page's Workflows tab: each opens
- * its workflow; or that none does yet, or why that can't be read.
- */
-const WorkflowList = ({
-  uses,
-  workflows,
-  app,
-}: {
-  uses: Loaded<unknown>;
-  workflows: readonly ConnectionWorkflow[];
-  app: string;
-}) => {
-  const { i18n } = useLingui();
-  if (uses.state !== "ready") {
-    return <ErrorText>{notLoadedText(uses, i18n)}</ErrorText>;
-  }
-  if (workflows.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>No workflow uses {app} yet.</Trans>
-      </p>
-    );
-  }
-  return (
-    <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-      {workflows.map((workflow) => (
-        <li
-          className="hover:bg-accent relative flex items-center gap-4 border-b px-4 py-3 last:border-b-0"
-          key={workflow.id}
-        >
-          <WorkflowLink
-            className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-            workflow={workflow}
-          >
-            {workflowLabel(workflow)}
-          </WorkflowLink>
-          <ChevronRightIcon
-            aria-hidden="true"
-            className="text-muted-foreground size-4 flex-none"
-          />
-        </li>
-      ))}
-    </ul>
-  );
-};
-
-/** `WorkflowList` once the workflows are read. */
-export const WorkflowsUsing = ({
-  integration,
-  uses,
-}: {
-  integration: Integration;
-  uses: ConnectionUses;
-}) => (
-  <Await fallback={<LoadingLines />} promise={uses}>
-    {(loaded) => (
-      <WorkflowList
-        app={integration.name}
-        uses={loaded}
-        workflows={usingOf(integration, loaded)}
-      />
-    )}
   </Await>
 );

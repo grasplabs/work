@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import {
   appIdSchema,
@@ -9,6 +8,9 @@ import {
   workflowIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
+// @vitest-environment happy-dom
+import type { LinkToSend, OnboardingView } from "@grasp-os/shared/onboarding";
+import { noContext } from "@grasp-os/shared/onboarding-context";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
@@ -24,11 +26,10 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vite-plus/test";
 
-import { inInbox } from "../dashboard/in-inbox.tsx";
-import type { Waiting } from "../dashboard/waiting.ts";
-import { inboxItems, listed, unread } from "./items.ts";
+import { groupOf, inboxItems, listed, unread } from "./items.ts";
 import type { Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
+import type { Waiting } from "./waiting.ts";
 
 // The inbox's items (items.ts), as the prototype derives them
 // (`lib/inbox.test.ts`): each made from what core says waits now, in the
@@ -273,6 +274,27 @@ const waiting = (ranOut = true) =>
   }) satisfies Waiting;
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
+
+/** Someone's interview link, out, and new since the admin last took links when `fresh`. */
+const link = (person: string, fresh: boolean): LinkToSend => ({
+  person,
+  name: person,
+  team: "Finance",
+  email: "",
+  path: `/talk#${person}`,
+  fresh,
+  mailFailed: false,
+});
+
+/** An open question the Brain has for the Head of finance, asked on `askedAt`, if at all. */
+const gap = (id: string, askedAt?: string) => ({
+  id,
+  question: `Question ${id}?`,
+  owner: "Head of finance",
+  sourceId: "src-1",
+  about: [],
+  ...(askedAt === undefined ? {} : { askedAt }),
+});
 const member = { role: "user", staff: false, name: "Max Member" } as const;
 
 describe(inboxItems, () => {
@@ -295,6 +317,137 @@ describe(inboxItems, () => {
         "workflowChanged:changed-1",
       ].toSorted()
     );
+  });
+
+  it("lists for an admin every question the Brain still has, by group, the one asked of them once, and none for anyone else", () => {
+    const read = {
+      ...waiting(),
+      gaps: {
+        state: "ready" as const,
+        data: [
+          gap("gap-invoices", "2026-10-13"),
+          gap("gap-open"),
+          gap("gap-elsewhere", "2026-10-12"),
+        ],
+      },
+    } satisfies Waiting;
+    const questions = (viewer: typeof admin | typeof member) =>
+      inboxItems(read, viewer, readAt)
+        .filter(
+          ({ kind }) => kind === "openQuestion" || kind === "brainQuestion"
+        )
+        .map(({ id, kind }) => ({ id, group: groupOf[kind] }))
+        .toSorted((a, b) => a.id.localeCompare(b.id));
+
+    expect({
+      admin: questions(admin),
+      member: questions(member),
+    }).toStrictEqual({
+      admin: [
+        { id: "asked:asked-1", group: "asked" },
+        { id: "gap:gap-elsewhere", group: "brain" },
+        { id: "gap:gap-open", group: "brain" },
+      ],
+      member: [{ id: "asked:asked-1", group: "asked" }],
+    });
+  });
+
+  it("pins the interviews first while they run, counted only while something waits on the admin, and drops them once the gate opens", () => {
+    const plan = { start: "2026-10-06", days: 14 };
+    const view: OnboardingView = {
+      roster: null,
+      plan,
+      progress: null,
+      agreed: true,
+      paused: false,
+      sponsor: null,
+      context: noContext,
+      waiting: 0,
+      mailSends: true,
+      mailDomain: null,
+      kickoff: null,
+      teamsInBrain: null,
+    };
+    const interviewsOf = (
+      links: LinkToSend[],
+      stage: "interviews" | "open"
+    ) => {
+      const [first] = inboxItems(
+        {
+          ...waiting(),
+          interviews: { state: "ready", data: { view, links, stage } },
+        },
+        admin,
+        readAt
+      );
+      return first?.id === "interviews"
+        ? { calm: first.calm, summary: first.summary }
+        : first?.id;
+    };
+
+    expect({
+      quiet: interviewsOf([link("ann", false)], "interviews"),
+      fresh: interviewsOf([link("ann", true), link("bo", true)], "interviews"),
+      open: interviewsOf([link("ann", true)], "open"),
+    }).toStrictEqual({
+      quiet: { calm: true, summary: "Day 9 of 14" },
+      fresh: { calm: false, summary: "2 new links to send" },
+      // Once Grasp opens the gate nothing of them is left: the first item is another's.
+      open: inboxItems(waiting(), admin, readAt)[0]?.id,
+    });
+  });
+
+  it("lists everyone's open changes of unknown outcome for the organization's own admin, by whose they are, but not their own twice nor counted", () => {
+    const listing = (id: string, cursor: string, onBehalfOf: string) => ({
+      effectKeyHash: `hash-${id}`,
+      id,
+      onBehalfOf,
+      subject: { type: "app" as const, appId: app },
+      connectionId: connectionIdSchema.parse("connection-1"),
+      connectionName: "Slack (ops)",
+      action: "post_message",
+      title: "Post a message",
+      resource: null,
+      sentAt: "2026-10-13T08:00:00.000Z",
+      cursor,
+    });
+    const read = {
+      ...waiting(),
+      everyonesOutcomes: {
+        state: "ready" as const,
+        data: {
+          listed: [
+            listing("theirs", "2.def", "user-bo"),
+            // The admin's own, which the inbox lists for them to answer already.
+            listing("own", "1.abc", "user-ada"),
+          ],
+          people: new Map([["user-bo", "Bo Berg"]]),
+        },
+      },
+    } satisfies Waiting;
+    const followed = (viewer: typeof admin | typeof member) =>
+      inboxItems(read, viewer, readAt)
+        .filter(({ kind }) => kind === "everyonesOutcome")
+        .map(({ id, face, summary, calm, kind }) => ({
+          id,
+          face,
+          summary,
+          calm,
+          group: groupOf[kind],
+        }));
+
+    expect({ admin: followed(admin), member: followed(member) }).toStrictEqual({
+      admin: [
+        {
+          id: "everyonesOutcome:theirs",
+          face: "Bo Berg",
+          summary: "Bo Berg · Slack (ops)",
+          calm: true,
+          group: "outcomes",
+        },
+      ],
+      member: [],
+    });
   });
 
   it("tells of packages revoked as malware as urgent, with the package, its advisory and where it is fixed", () => {
@@ -404,17 +557,26 @@ describe(inboxItems, () => {
 
     const titles = inboxItems(read, admin, readAt)
       .filter(({ kind }) => kind === "permissionRequest")
-      .map(({ context }) => context);
+      .map(({ title }) => title);
 
-    expect(titles.toSorted()).toStrictEqual(
-      [
-        "Schedule trigger (On the schedule 0 9 * * 1-5, in Europe/Berlin): start on Workflow workflow-1",
-        "Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1",
-        "Email trigger (When an email arrives at its own address): start on Workflow workflow-1",
-        "Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1",
-        "Trigger unknown-1: start on Workflow workflow-1",
-      ].toSorted()
+    // A schedule says what it is, never its cron.
+    const scheduled = titles.filter(
+      (title): boolean => title === "Grant Schedule for workflow-1?"
     );
+    expect({
+      scheduled: scheduled.length,
+      cron: scheduled.some((title) => title.includes("* *")),
+      others: titles.filter((title) => !scheduled.includes(title)).toSorted(),
+    }).toStrictEqual({
+      scheduled: 1,
+      cron: false,
+      others: [
+        "Grant Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1?",
+        "Grant Email trigger (When an email arrives at its own address): start on Workflow workflow-1?",
+        "Grant Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1?",
+        "Grant Trigger unknown-1: start on Workflow workflow-1?",
+      ].toSorted(),
+    });
   });
 
   it("puts what blocks something first, then the newest", () => {
@@ -455,31 +617,6 @@ describe(inboxItems, () => {
   });
 });
 
-describe(inInbox, () => {
-  it("leads the dashboard to every item it has no card or row of its own for", () => {
-    // The pile settles changes, lost answers and requests; rows
-    // under it lead to connections.
-    const onDashboard = new Set(["held", "outcome", "request", "reconnect"]);
-    const all = inboxItems(waiting(), admin, readAt);
-    const elsewhere = all.filter(({ source }) => !onDashboard.has(source.type));
-    expect(
-      inInbox(waiting(), admin, readAt)
-        .map(({ id }) => id)
-        .toSorted()
-    ).toStrictEqual(elsewhere.map(({ id }) => id).toSorted());
-    expect(elsewhere.map(({ id }) => id).toSorted()).toStrictEqual([
-      "asked:asked-1",
-      "bindingApproval:workflow-quotes:2",
-      "decision:decision-1",
-      "heldStart:held-start-1",
-      "packageNotice:revoked-1",
-      "stopped:stopped-1",
-      "stoppedEvents:deaf-1",
-      "workflowChanged:changed-1",
-    ]);
-  });
-});
-
 describe(listed, () => {
   const items = inboxItems(waiting(), admin, readAt);
 
@@ -492,18 +629,12 @@ describe(listed, () => {
   });
 
   it("shows one group of kinds when asked", () => {
+    // Workflows' and Apps' asks are one group: everything here but the question.
     expect(
-      listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual([
-      "decision",
-      "bindingApproval",
-      "stoppedEvents",
-      "heldStart",
-      "stoppedSchedule",
-      "workflowChanged",
-    ]);
+      listed(items, "approvals", "urgent").map(({ kind }) => kind)
+    ).not.toContain("openQuestion");
     expect(
-      listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
+      listed(items, "asked", "urgent").map(({ kind, title, about }) => ({
         kind,
         title,
         about,
@@ -535,7 +666,7 @@ describe(listed, () => {
         section: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
+    expect(listed(items, "approvals", "urgent")).toHaveLength(items.length - 1);
   });
 });
 

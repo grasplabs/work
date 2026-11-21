@@ -28,15 +28,19 @@ test("loads the frontend from core, reaches core over RPC, and asks whoever isn'
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
-test("shows only its own words for a refused sign-in, never the link's", async ({
+test("shows only its own words for a refused sign-in, never the link's, and comes back to the page without them", async ({
   page,
 }) => {
-  const planted = "Your account is locked. Call +1 555 0100";
-  await page.goto(`/?error=${encodeURIComponent(planted)}`);
+  const planted = encodeURIComponent(
+    "Your account is locked. Call +1 555 0100"
+  );
+  // OAuth's pair, as a refused sign-in comes back with.
+  await page.goto(`/?error=${planted}&error_description=${planted}`);
   await expect(page.getByRole("alert")).toHaveText(
     "Sign-in didn't work. Try again, or ask an admin."
   );
-  await expect(page.getByText(planted)).toHaveCount(0);
+  await expect(page.getByText(decodeURIComponent(planted))).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
 test("an interview link nobody made asks to sign in first, then can't be opened with the request ID core refused it under, says nothing was saved, and lets them sign out to sign in again", async ({
@@ -175,10 +179,10 @@ test("names each member's actions for them, and asks before making someone an ad
   await role.click();
   await page.getByRole("option", { name: "Admin" }).click();
   await expect(
-    page.getByRole("dialog", { name: "Make Person an admin?" })
+    page.getByRole("alertdialog", { name: "Make Person an admin?" })
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await expect(role).toContainText("User");
 });
 
@@ -228,9 +232,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   await page.goto("/settings/members");
   const who = `Person (${leaving.email})`;
   const actions = page.getByRole("button", { name: `Actions for ${who}` });
-  const notice = page
-    .getByRole("region", { name: "Members" })
-    .getByRole("status");
+  // What a change did, said over the people's table.
+  const notice = page.getByRole("status").filter({ hasText: /^Person is/u });
 
   await actions.click();
   await page.getByRole("menuitem", { name: "Sign out everywhere" }).click();
@@ -240,7 +243,7 @@ test("an admin signs someone out everywhere, then removes them, and is told what
 
   await actions.click();
   await page.getByRole("menuitem", { name: "Remove" }).click();
-  const confirm = page.getByRole("dialog", { name: "Remove Person?" });
+  const confirm = page.getByRole("alertdialog", { name: "Remove Person?" });
   await confirm.getByRole("button", { name: "Remove" }).click();
   await expect(notice).toHaveText(
     "Person is removed. 0 personal connections were disconnected."
@@ -301,38 +304,43 @@ test("invites someone with a role, says what each role may do, and withdraws the
   const { admin } = peopleIn("memberInvites");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  const roles = page.getByRole("region", { name: "Roles" });
+  // What each role may do opens from Roles in the members' head.
+  await page.getByRole("button", { name: "Roles" }).click();
   await expect(
-    roles.getByRole("row", { name: /^Invite people, change roles/u })
+    page.getByText(/^Manages people, teams and permissions/u)
   ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Invite", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Invite someone" });
-  await dialog
-    .getByRole("textbox", { name: "Email" })
-    .fill("someone@elsewhere.test");
-  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Invite people" });
+  // Grasp UI's tag input: a combobox, which suggests as it is typed in.
+  const addresses = dialog.getByRole("combobox", { name: "Email addresses" });
+  // An address outside the organization's domains: core refuses it, and it stays marked.
+  await addresses.fill("someone@elsewhere.test");
+  await addresses.press("Enter");
+  await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(
     dialog.getByText(
       "Use an email address in one of the domains your organization signs in with."
     )
   ).toBeVisible();
+  await addresses.press("Backspace");
 
   const email = `invited-${crypto.randomUUID().slice(0, 8)}@acme.test`;
-  await dialog.getByRole("textbox", { name: "Email" }).fill(email);
+  await addresses.fill(email);
+  await addresses.press("Enter");
   await dialog.getByRole("combobox", { name: "Role" }).click();
-  await page.getByRole("option", { name: "Builder" }).click();
-  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  await page.getByRole("option", { name: /^Builder/u }).click();
+  await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(dialog).toBeHidden();
 
-  const members = page.getByRole("region", { name: "Members" });
-  await expect(members.getByText(email)).toBeVisible();
-  await expect(
-    members.getByText(/^Invited as Builder by .+ · hasn’t signed in yet$/u)
-  ).toBeVisible();
-  await members
-    .getByRole("button", { name: `Withdraw the invitation of ${email}` })
-    .click();
+  // The invited stand in the people's table, a state of their row.
+  const members = page.getByRole("table", { name: "Members" });
+  const row = members.getByRole("row").filter({ hasText: email });
+  await expect(row).toContainText("Invited");
+  await expect(row).toContainText("Builder");
+  await members.getByRole("button", { name: `Actions for ${email}` }).click();
+  await page.getByRole("menuitem", { name: "Withdraw invitation" }).click();
   await expect(members.getByText(email)).toHaveCount(0);
 });
 
@@ -342,8 +350,7 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
 }) => {
   const { admin, member } = peopleIn("teams");
   await signInTo(context, admin);
-  await page.goto("/settings/members");
-  await page.getByRole("tab", { name: "Teams" }).click();
+  await page.goto("/settings/teams");
   const teams = page.getByRole("region", { name: "Teams" });
   const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
 
@@ -354,32 +361,28 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await expect(create).toBeHidden();
   await expect(teams.getByText(name, { exact: true })).toBeVisible();
 
-  await teams.getByRole("button", { name: `Members of ${name}` }).click();
-  const team = page.getByRole("dialog", { name: `Members of ${name}` });
-  await team.getByRole("combobox", { name: "Add a member" }).click();
-  await page
-    .getByRole("option", { name: `Person (${member.email})`, exact: true })
-    .click();
-  await team.getByRole("button", { name: "Add", exact: true }).click();
-  const inTeam = team.getByRole("list", { name: `Members of ${name}` });
-  await expect(inTeam.getByText(member.email)).toBeVisible();
-  await team.getByRole("button", { name: `Take Person off ${name}` }).click();
-  await expect(team.getByText("Nobody is in this team yet.")).toBeVisible();
-  await page.keyboard.press("Escape");
+  // The team's name opens its dialog: tick someone in, save.
+  await teams.getByRole("button", { name, exact: true }).click();
+  const team = page.getByRole("dialog", { name });
+  await team.getByRole("searchbox", { name: "Find people" }).fill(member.email);
+  await team.getByRole("checkbox", { name: "Person" }).check();
+  await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
+  await expect(teams.getByText("1 person")).toBeVisible();
 
+  // Untick them and rename it, in one save.
   const renamed = `${name} and legal`;
-  await teams.getByRole("button", { name: `Actions for ${name}` }).click();
-  await page.getByRole("menuitem", { name: "Rename" }).click();
-  const rename = page.getByRole("dialog", { name: `Rename ${name}` });
-  await rename.getByRole("textbox", { name: "Name" }).fill(renamed);
-  await rename.getByRole("button", { name: "Rename" }).click();
+  await teams.getByRole("button", { name, exact: true }).click();
+  await team.getByRole("checkbox", { name: "Person" }).uncheck();
+  await team.getByRole("textbox", { name: "Name" }).fill(renamed);
+  await team.getByRole("button", { name: "Save changes" }).click();
+  await expect(team).toBeHidden();
   await expect(teams.getByText(renamed, { exact: true })).toBeVisible();
 
   await teams.getByRole("button", { name: `Actions for ${renamed}` }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await page
-    .getByRole("dialog", { name: `Delete ${renamed}?` })
+    .getByRole("alertdialog", { name: `Delete ${renamed}?` })
     .getByRole("button", { name: "Delete" })
     .click();
   await expect(teams.getByText(renamed, { exact: true })).toHaveCount(0);
@@ -431,7 +434,9 @@ test("shows the members page only to someone signed in, and never signs them out
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
   await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+    page.getByText(
+      "Grasp could not reach its servers. Nothing you saved is lost."
+    )
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
@@ -440,12 +445,13 @@ test("shows the members page only to someone signed in, and never signs them out
 
   // Trying again shows it's trying, then says so again while core fails.
   const unreachable = page.getByRole("alert");
-  await page.getByRole("button", { name: "Try again" }).click();
-  await expect(
-    page.getByRole("button", { name: "Trying again…" })
-  ).toBeDisabled();
+  const retry = page.getByRole("button", { name: "Try again" });
+  await retry.click();
+  // Busy while it tries, keeping its words (Grasp UI's working button says
+  // "Trying again…" to a screen reader): a second press waits for the first.
+  await expect(retry).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment.",
+    "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }
   );
   expect(new URL(page.url()).pathname).toBe("/settings/members");

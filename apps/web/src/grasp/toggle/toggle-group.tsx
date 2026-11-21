@@ -1,0 +1,110 @@
+// ToggleGroup: toggles on one soft track, from shadcn's (registry/bases/base/ui/toggle-group.tsx,
+// on Base UI), converted from Tailwind to StyleX and rebuilt on UI SDK's ToggleGroup: one tab stop,
+// the arrow keys between toggles. Made as Palermo's: the track soft, the pressed toggle raised.
+//
+//   <ToggleGroup aria-label="View" defaultValue={["list"]}>
+//     <Toggle value="list">List</Toggle>
+//     <Toggle value="board">Board</Toggle>
+//   </ToggleGroup>
+//
+// Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
+"use client";
+
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
+import * as stylex from "@stylexjs/stylex";
+import { ToggleGroup as ToggleGroupPrimitive } from "@ui-sdk/react/toggle";
+import type { ComponentProps, ReactNode } from "react";
+
+import { grasp, media } from "../tokens/tokens.stylex";
+import type { ToggleLayoutStyle } from "./toggle";
+import { ToggleGroupContext } from "./toggle-context";
+import type { ToggleSize } from "./toggle-context";
+
+type ToggleGroupPrimitiveProps = ComponentProps<
+  typeof ToggleGroupPrimitive<string>
+>;
+
+/** Every prop a ToggleGroup takes. */
+interface ToggleGroupOwnProps {
+  /** The toggles. */
+  children: ReactNode;
+  /** What the toggles set, as a screen reader and an agent say it ("Text style"). */
+  "aria-label"?: string;
+  /** The pressed toggles' values now, for a group your code holds. */
+  value?: string[];
+  /** The pressed toggles' values at first, when the group holds its own. */
+  defaultValue?: string[];
+  /** Runs when a press changes which toggles are pressed, with their values. */
+  onValueChange?: ToggleGroupPrimitiveProps["onValueChange"];
+  /**
+   * Several may be pressed at once. Otherwise pressing one lifts the others.
+   * @default false
+   */
+  multiple?: boolean;
+  /**
+   * Button's ladder: `xs` 28 alone or in a toolbar; `sm` 32, `md` 36 and `lg` 44, the track level with
+   * a field of that size in the same row (a Select beside it). Every toggle in it takes this size.
+   * @default "xs"
+   */
+  size?: ToggleSize;
+  /**
+   * Every toggle out of use, still reachable by the keyboard. Say why near it.
+   * @default false
+   */
+  disabled?: boolean;
+  /** @deprecated Use `layout`. */
+  style?: ToggleLayoutStyle;
+  /** Layout only: margins and alignment. The look belongs to the group. */
+  layout?: ToggleLayoutStyle;
+}
+
+/** Every prop a ToggleGroup takes: the ones above, and the rest of UI SDK's ToggleGroup. */
+export type ToggleGroupProps = ToggleGroupOwnProps &
+  Omit<
+    ToggleGroupPrimitiveProps,
+    keyof ToggleGroupOwnProps | "className" | "render"
+  >;
+
+const styles = stylex.create({
+  group: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.toggleGap,
+    boxSizing: "border-box",
+    maxWidth: "100%",
+    // The same room on every side, so the pressed toggle stands evenly inside the track.
+    padding: grasp.toggleTrackInset,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    // Forced colours drop the fill: a line keeps the track.
+    outline: { default: "none", [media.forced]: "1px solid CanvasText" },
+    outlineOffset: "-1px",
+  },
+  vertical: {
+    flexDirection: "column",
+    alignItems: "stretch",
+  },
+});
+
+export const ToggleGroup = ({
+  children,
+  size = "xs",
+  style: styleProp,
+  layout,
+  ...rest
+}: ToggleGroupProps) => (
+  // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
+  <ToggleGroupContext.Provider value={{ grouped: true, size }}>
+    <ToggleGroupPrimitive
+      {...rest}
+      {...stylex.props(
+        styles.group,
+        rest.orientation === "vertical" && styles.vertical,
+        layout ?? styleProp
+      )}
+    >
+      {children}
+    </ToggleGroupPrimitive>
+  </ToggleGroupContext.Provider>
+);

@@ -1,15 +1,20 @@
 import "./styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
-import { Button } from "@grasp-os/ui/components/button";
 import { i18n } from "@lingui/core";
 import { I18nProvider, useLingui } from "@lingui/react";
+import * as stylex from "@stylexjs/stylex";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { CoreConnection } from "./core-connection.ts";
+import { CoreConnection, shellStatus } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
 import { NotFound } from "./frame/page-states.tsx";
+import { PartWords } from "./frame/part-words.tsx";
+import { wasSignedIn } from "./frame/signed-in-here.ts";
+import { Button } from "./grasp/button/index.ts";
+import { Text } from "./grasp/text/index.ts";
+import { grasp } from "./grasp/tokens/tokens.stylex.ts";
 import { startI18n } from "./i18n.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
@@ -34,7 +39,15 @@ const router = createRouter({
   context: { core },
   // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="app-shell-content"]'],
+  scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
+  // A press answers in the frame it lands in: a page that reads shows its
+  // skeleton at once (its `pendingComponent`), not after the router's
+  // default second with the last page still up, and the skeleton goes as
+  // soon as the page is read, kept no longer than that. A page visited
+  // before shows what it read then, at once, while the router reads it
+  // again behind it (its `staleTime` of 0, reloaded in the background).
+  defaultPendingMs: 0,
+  defaultPendingMinMs: 0,
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });
@@ -57,7 +70,12 @@ declare module "@tanstack/react-router" {
  */
 const Routes = () => {
   const { i18n: current } = useLingui();
-  return <RouterProvider key={current.locale} router={router} />;
+  return (
+    // The parts' own words in the page's language (frame/part-words.tsx).
+    <PartWords>
+      <RouterProvider key={current.locale} router={router} />
+    </PartWords>
+  );
 };
 
 const root = document.querySelector("#root");
@@ -70,16 +88,28 @@ if (!root) {
  * as Grasp loaded), there is one thing left to say, and only English to
  * say it in.
  */
+const noWords = stylex.create({
+  page: {
+    display: "flex",
+    minHeight: "100svh",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space4,
+    padding: grasp.space6,
+    textAlign: "center",
+  },
+});
+
 const NoWords = () => (
-  <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
-    <p className="text-muted-foreground text-sm">
+  <main {...stylex.props(noWords.page)}>
+    <Text size="sm" tone="muted">
       Grasp could not load. Check your connection and try again.
-    </p>
+    </Text>
     <Button
       onClick={() => {
         window.location.reload();
       }}
-      variant="outline"
     >
       Try again
     </Button>
@@ -93,6 +123,12 @@ const NoWords = () => (
  * and the build split into hundreds of tiny files.
  */
 const start = async (): Promise<void> => {
+  // Who is signed in, asked of core while the language loads rather than
+  // after it, where someone was signed in here last (the shell asks
+  // anyway, and shares this ask: core-connection.ts).
+  if (wasSignedIn()) {
+    void shellStatus(core);
+  }
   let worded = true;
   try {
     await startI18n();

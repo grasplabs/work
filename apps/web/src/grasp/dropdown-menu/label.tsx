@@ -1,0 +1,22 @@
+// DropdownMenuLabel: the name of a group in a dropdown menu, UI SDK's MenuGroupLabel: small and
+// quiet, at the top of its DropdownMenuGroup or DropdownMenuRadioGroup, which it names.
+"use client";
+
+import * as stylex from "@stylexjs/stylex";
+import { MenuGroupLabel as LabelPrimitive } from "@ui-sdk/react/menu";
+
+import { useMenuLook } from "./look";
+
+/** Every prop a DropdownMenuLabel takes. */
+export interface DropdownMenuLabelProps {
+  /** The group's name, in sentence case ("Sort by"). */
+  children: string;
+}
+
+/** A group's name, above its items. */
+export const DropdownMenuLabel = ({ children }: DropdownMenuLabelProps) => {
+  const styles = useMenuLook();
+  return (
+    <LabelPrimitive {...stylex.props(styles.label)}>{children}</LabelPrimitive>
+  );
+};

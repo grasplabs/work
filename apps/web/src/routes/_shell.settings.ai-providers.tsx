@@ -3,45 +3,62 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
-import {
-  SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+import { SpendCard } from "../settings/ai-spend.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
-// Settings › AI providers, for admins: the organization's own AI provider
-// keys and the models its calls use (settings/ai-providers.tsx). Grasp
-// staff read it; only the organization's own admins change it, as core
-// checks on every call.
+// Settings › AI and spend, for admins: the organization's own AI provider
+// keys, the models its calls use (settings/ai-providers.tsx), and what they
+// cost this month (settings/ai-spend.tsx). Grasp staff read it; only the
+// organization's own admins change it, as core checks on every call.
 
 const AiProvidersPage = () => {
   const { t } = useLingui();
-  const page = Route.useLoaderData();
+  const { page, spend, settings } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={t`AI providers`}>
+      <SectionCard variant="grouped" density="compact" title={t`AI and spend`}>
         <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      </SectionCard>
     );
   }
+  const { providers, source } = page.data;
+  // Nothing connected and not on Grasp's AI: nothing has been spent, and
+  // the page is only the way to connect a provider.
+  const unanswered = providers.length === 0 && source !== "grasp";
   return (
-    <AiProvidersSettings
-      editable={isMemberAdmin(identity)}
-      listing={page.data}
-    />
+    <>
+      <AiProvidersSettings
+        editable={isMemberAdmin(identity)}
+        listing={page.data}
+      />
+      {unanswered ? null : <SpendCard settings={settings} spend={spend} />}
+    </>
   );
 };
 
+/** The providers, the models (default, fallbacks, add), then the month's spend. */
+const AiProvidersPending = () => (
+  <PageSkeletonSettings
+    header={false}
+    sections={[1, 3, { variant: "chart" }]}
+  />
+);
+
 export const Route = createFileRoute("/_shell/settings/ai-providers")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: AiProvidersPending,
   errorComponent: SettingsError,
   component: AiProvidersPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.aiProviders.list()
-    ),
+  loader: async ({ context: { core } }) => {
+    const [page, spend, settings] = await Promise.all([
+      loadFromCore(core, async (session) => await session.aiProviders.list()),
+      loadFromCore(core, async (session) => await session.models.spend()),
+      loadFromCore(core, async (session) => await session.models.settings()),
+    ]);
+    return { page, spend, settings };
+  },
 });

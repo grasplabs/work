@@ -14,8 +14,8 @@ import { origin } from "./stack.ts";
 // builder makes it from Make something, saying what they want done, and
 // Grasp's chat draws it once they say Build it (the stack's scripted
 // model saves an invoice approval, a person's decision, as its draft,
-// e2e/model-scripts.ts); the builder shares it with Share with your team
-// in its bar; an admin names who answers its decision in its Settings'
+// e2e/model-scripts.ts); the builder publishes it with Publish in its
+// bar; an admin names who answers its decision in its Settings'
 // Files and apps; the builder starts a run with Run, naming the
 // approver, whose nav counts the workflow that needs them, and who decides
 // from their inbox, on the decision's own page: its link, which anyone
@@ -115,15 +115,15 @@ const drawnAndPublished = async (
     pageRead
   );
 
-  // Share with your team, in its bar, makes the draft its first version.
+  // Publish, in its bar, makes the draft its first version.
   await page
-    .getByRole("button", { name: "Share with your team" })
+    .getByRole("button", { name: "Publish", exact: true })
     .click(pageRead);
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "Share", exact: true })
+    .getByRole("button", { name: "Publish", exact: true })
     .click(pageRead);
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(page.getByText(`${planned} is live`)).toBeVisible(pageRead);
   return { workflow, name: newName };
 };
 
@@ -241,17 +241,21 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   const sourceName = `Invoices ${randomBytes(4).toString("hex")}`;
   await asAdmin.goto("/settings/webhooks");
   await asAdmin
-    .getByLabel("New source, named after its sender")
-    .fill(sourceName, pageRead);
-  await asAdmin.getByRole("button", { name: "Add the source" }).click();
-  const shown = asAdmin.getByRole("dialog");
-  const secret = await shown
-    .getByRole("textbox", { name: "Secret" })
-    .inputValue();
-  await shown.getByRole("button", { name: "Done" }).click();
-  const url = await asAdmin
-    .getByRole("textbox", { name: `URL of ${sourceName}` })
-    .inputValue(pageRead);
+    .getByRole("button", { name: "Add a source" })
+    .first()
+    .click(pageRead);
+  const adding = asAdmin.getByRole("dialog");
+  await adding.getByLabel("Name").fill(sourceName);
+  await adding.getByRole("button", { name: "Next" }).click();
+  // Each value stands in a Copy field, beside the button that copies it.
+  const copied = (button: string) =>
+    adding
+      .locator('[data-slot="copy-field"]')
+      .filter({ has: asAdmin.getByRole("button", { name: button }) })
+      .locator('[data-slot="copy-field-value"]');
+  const secret = (await copied("Copy the secret").textContent()) ?? "";
+  const url = (await copied("Copy the URL").textContent()) ?? "";
+  await adding.getByRole("button", { name: "Done" }).click();
 
   // The builder starts the workflow on its invoices, in its Settings'
   // Triggers.

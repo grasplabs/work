@@ -3,53 +3,59 @@ import type {
   ChannelAccount,
   ChannelLinkPreview,
   ChannelLinkRefusal,
-  ChannelReach,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { MessageSquareIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { Confirmed } from "../confirmed.tsx";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Chat } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemDescription,
+  ItemActions,
+  ItemMedia,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "./settings-parts.tsx";
-import { WhereStephen } from "./where-stephen.tsx";
+import { RowNote } from "./section.tsx";
 
-// Settings › Security › Chat apps: the person's accounts on chat platforms
-// that are linked to them, so Grasp knows it is them writing there, and a
-// link a chat sent them, waiting for them to confirm it. Confirming is a
-// press here, never opening the link (chat apps open links to preview
-// them), and the card says whose account it is, by the platform's own
-// name for it, so a link someone forwarded doesn't pass for theirs. And
+// Settings › Security: the person's accounts on chat platforms that are
+// linked to them, so Grasp knows it is them writing there, as quiet rows in
+// the Chat apps card (none when none are); and a link a chat sent them,
+// waiting for them to confirm it, as an outlined row above that card.
+// Confirming is a press here, never opening the link (chat apps open links
+// to preview them), and the card says whose account it is, by the
+// platform's own name for it, so a link someone forwarded doesn't pass for theirs. And
 // deleting what Grasp keeps of their conversations with Stephen there,
 // which no page of Grasp shows as a chat (GRA-1919): this is where the
 // person erases them.
 
-/**
- * What the section shows: where to reach Stephen, the linked accounts,
- * and the link waiting, if any.
- */
+/** The linked accounts, and the link waiting in this tab, if any. */
 export interface ChatAccounts {
-  reach: ChannelReach[];
   accounts: ChannelAccount[];
   pending?: { secret: string; preview: ChannelLinkPreview };
 }
@@ -81,15 +87,16 @@ const useRefusalText = (reason: ChannelLinkRefusal): string => {
 
 /** A link that links nothing, and a way to put it away. */
 const RefusedLink = ({ reason }: { reason: ChannelLinkRefusal }) => {
+  const { t } = useLingui();
   const router = useRouter();
   const text = useRefusalText(reason);
   return (
-    <Alert>
-      <AlertTitle>
-        <Trans>This link can’t be used</Trans>
-      </AlertTitle>
-      <AlertDescription>{text}</AlertDescription>
-      <AlertAction>
+    <Item variant="outline">
+      <ItemContent>
+        <ItemTitle>{t`This link can’t be used`}</ItemTitle>
+        <ItemDescription>{text}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
         <Button
           onClick={() => {
             forgetChatLink();
@@ -98,10 +105,10 @@ const RefusedLink = ({ reason }: { reason: ChannelLinkRefusal }) => {
           size="sm"
           variant="ghost"
         >
-          <Trans>Dismiss</Trans>
+          {t`Dismiss`}
         </Button>
-      </AlertAction>
-    </Alert>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -117,18 +124,21 @@ const OpenLink = ({
   platformUserId: string;
   name: string | null;
 }) => {
+  const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const app = chatPlatformName(platform);
   const account = name ?? platformUserId;
   const link = async (): Promise<void> => {
+    const outcome = { linked: false };
     await run(async ({ channelAccounts }) => {
       await changeThenRefresh(
         async () => {
-          const outcome = await channelAccounts.link(secret);
+          const answer = await channelAccounts.link(secret);
           // A refusal keeps the link: the refreshed preview says why.
-          if (outcome.state === "linked") {
+          if (answer.state === "linked") {
             forgetChatLink();
+            outcome.linked = true;
           }
         },
         async () => {
@@ -136,23 +146,24 @@ const OpenLink = ({
         }
       );
     });
+    // The card goes and the account stands among the linked ones: say so.
+    if (outcome.linked) {
+      toast.success(t`Linked`);
+    }
   };
   return (
-    <Alert>
-      <AlertTitle>
-        <Trans>
-          Link your {app} account {account}?
-        </Trans>
-      </AlertTitle>
-      <AlertDescription>
-        <Trans>
-          Grasp sent this link to that account in {app}. Link it only if it is
-          yours: Grasp then answers it as you, with what you can see.
-        </Trans>
-        <ErrorText>{failure}</ErrorText>
-      </AlertDescription>
-      <AlertAction>
-        <div className="flex gap-2">
+    <Item variant="outline">
+      <ItemMedia icon={Chat} />
+      <ItemContent>
+        <ItemTitle>{t`Link your ${app} account ${account}?`}</ItemTitle>
+        <ItemDescription>
+          <RowNote failure={failure}>
+            {t`Grasp sent this link to that account in ${app}. Link it only if it is yours: Grasp then answers it as you, with what you can see.`}
+          </RowNote>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <>
           <Button
             disabled={busy}
             onClick={() => {
@@ -162,7 +173,7 @@ const OpenLink = ({
             size="sm"
             variant="ghost"
           >
-            <Trans>Not mine</Trans>
+            {t`Not mine`}
           </Button>
           <Button
             disabled={busy}
@@ -170,23 +181,34 @@ const OpenLink = ({
               void link();
             }}
             size="sm"
+            variant="ink"
           >
-            <Trans>Link</Trans>
+            {t`Link`}
           </Button>
-        </div>
-      </AlertAction>
-    </Alert>
+        </>
+      </ItemActions>
+    </Item>
   );
 };
 
-/** One linked account, and unlinking it. */
+/** Whether a Brand icon has this mark. */
+const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
+
+/** A chat app's mark, where the Brand icons have it; core's platform ids are mostly the brands'. */
+const brandOf = (platform: string): Brand | undefined => {
+  const id =
+    platform === "gchat" || platform === "google-chat" ? "google" : platform;
+  return isBrand(id) ? id : undefined;
+};
+
+/** One linked account, its chat app's mark, and unlinking it. */
 const AccountRow = ({ account }: { account: ChannelAccount }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const app = chatPlatformName(account.platform);
-  const time = formatDateTime(account.linkedAt);
   const shown = account.name ?? account.platformUserId;
+  const brand = brandOf(account.platform);
   const unlink = async (): Promise<void> => {
     await run(async ({ channelAccounts }) => {
       await changeThenRefresh(
@@ -198,32 +220,34 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
     });
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <MessageSquareIcon
-        aria-hidden="true"
-        className="text-muted-foreground size-4 flex-none"
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">
-          {app} · {shown}
-        </span>
-        <span className="text-muted-foreground">
-          <Trans>Linked {time}</Trans>
-        </span>
-        <ErrorText>{failure}</ErrorText>
-      </div>
-      <Button
-        aria-label={t`Unlink ${app} account ${shown}`}
-        disabled={busy}
-        onClick={() => {
-          void unlink();
-        }}
-        size="sm"
-        variant="ghost"
-      >
-        <Trans>Unlink</Trans>
-      </Button>
-    </div>
+    <Item size="xs">
+      {brand === undefined ? (
+        <ItemMedia icon={Chat} iconLook="inline" />
+      ) : (
+        <ItemMedia>
+          <BrandIcon brand={brand} decorative size="md" tile={false} />
+        </ItemMedia>
+      )}
+      <ItemContent>
+        <ItemTitle>{shown}</ItemTitle>
+        <ItemDescription>
+          <RowNote failure={failure}>{app}</RowNote>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          aria-label={t`Unlink ${app} account ${shown}`}
+          disabled={busy}
+          onClick={() => {
+            void unlink();
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t`Unlink`}
+        </Button>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -253,7 +277,7 @@ const forgotten = async (
 /**
  * Deleting what Grasp keeps of every conversation the person had with
  * Stephen in a chat app (`channelAccounts.forgetConversations`), and how
- * many it deleted.
+ * many it deleted, said under the row once it went.
  */
 const ForgetConversations = () => {
   const { t } = useLingui();
@@ -263,55 +287,79 @@ const ForgetConversations = () => {
     answering: t`Stephen is still answering one of your conversations. Try again in a moment.`,
     under_way: t`Your conversations are being deleted. If any remain, try again in a moment.`,
   };
+  const went =
+    typeof deleted === "number"
+      ? t`${plural(deleted, { 0: "No conversations to delete.", one: "# conversation deleted.", other: "# conversations deleted." })}`
+      : undefined;
   return (
-    <SettingsRow
-      description={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
+    <SettingRow
+      error={typeof deleted === "string" ? refusals[deleted] : failure}
+      help={went}
+      info={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
+      infoLabel={t`More about your conversations in chat apps`}
       label={t`Your conversations in chat apps`}
     >
-      <div className="flex flex-col items-end gap-1">
-        <Confirmed
-          busy={busy}
-          button={t`Delete`}
-          confirm={t`Delete for good`}
-          description={t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
-          label={t`Delete your conversations in chat apps`}
-          onConfirm={() => {
-            setDeleted(undefined);
-            void (async () => {
-              setDeleted(await run(forgotten));
-            })();
-          }}
-          title={t`Delete your conversations in chat apps?`}
-        />
-        <p aria-live="polite" className="text-muted-foreground">
-          {typeof deleted === "number" ? (
-            <Plural
-              _0="No conversations to delete."
-              one="# conversation deleted."
-              other="# conversations deleted."
-              value={deleted}
-            />
-          ) : null}
-        </p>
-        <ErrorText>
-          {typeof deleted === "string" ? refusals[deleted] : failure}
-        </ErrorText>
-      </div>
-    </SettingsRow>
+      <AlertDialog>
+        <AlertDialogTrigger disabled={busy} size="sm" variant="quiet">
+          {t`Delete`}
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogTitle>{t`Delete your conversations in chat apps?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={async () => {
+                setDeleted(undefined);
+                setDeleted(await run(forgotten));
+              }}
+              variant="danger"
+              workingLabel={t`Deleting`}
+            >
+              {t`Delete for good`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SettingRow>
   );
 };
 
-/** The link waiting for the person, as core read it. */
-const PendingLink = ({
-  pending,
-}: {
-  pending: NonNullable<ChatAccounts["pending"]>;
-}) => {
-  const { preview, secret } = pending;
-  if (preview.state === "refused") {
-    return <RefusedLink reason={preview.reason} />;
+/** The chat accounts linked to the person, one quiet row each; nothing when none are. */
+const LinkedChatAccounts = ({ accounts }: { accounts: ChannelAccount[] }) => {
+  const { t } = useLingui();
+  if (accounts.length === 0) {
+    return null;
   }
   return (
+    <SettingsRows label={t`Linked chat accounts`}>
+      <ItemGroup aria-label={t`Linked chat accounts`} separated>
+        {accounts.map((account) => (
+          <AccountRow account={account} key={account.id} />
+        ))}
+      </ItemGroup>
+    </SettingsRows>
+  );
+};
+
+/**
+ * A link a chat app sent, waiting in this tab for the person to confirm or
+ * turn down; or why the accounts could not be read to show it.
+ */
+const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
+  if (chat.state !== "ready") {
+    return <NotLoadedState heading="h3" page={chat} />;
+  }
+  const { pending } = chat.data;
+  if (pending === undefined) {
+    return null;
+  }
+  const { preview, secret } = pending;
+  return preview.state === "refused" ? (
+    <RefusedLink reason={preview.reason} />
+  ) : (
     <OpenLink
       name={preview.offer.name}
       platform={preview.offer.platform}
@@ -321,42 +369,37 @@ const PendingLink = ({
   );
 };
 
-/** Settings › Security › Chat apps. */
-export const ChatAccountsSection = ({
+/**
+ * Chat apps: the link a chat app sent, while one waits in this tab, as an
+ * outlined row above the card; in the card, edge to edge as the library's
+ * flush card has its rows, deleting the person's conversations with Stephen
+ * there, then the accounts linked to them. The accounts come second, as a
+ * labelled group, so the library draws the line between the two.
+ */
+export const ChatAppsSection = ({
   chat,
+  waiting,
 }: {
   chat: Loaded<ChatAccounts>;
+  waiting: boolean;
 }) => {
   const { t } = useLingui();
-  const description = t`Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use.`;
-  if (chat.state !== "ready") {
-    return (
-      <SettingsSection description={description} title={t`Chat apps`}>
-        <NotLoadedState heading="h3" page={chat} />
-      </SettingsSection>
-    );
-  }
-  const { reach, accounts, pending } = chat.data;
   return (
-    <SettingsSection description={description} title={t`Chat apps`}>
-      <WhereStephen reach={reach} />
-      {pending === undefined ? null : (
-        <SettingsBody>
-          <PendingLink pending={pending} />
-        </SettingsBody>
-      )}
-      {accounts.length === 0 ? (
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>No chat app accounts are linked.</Trans>
-          </p>
-        </SettingsBody>
-      ) : (
-        accounts.map((account) => (
-          <AccountRow account={account} key={account.id} />
-        ))
-      )}
-      <ForgetConversations />
-    </SettingsSection>
+    <>
+      {waiting ? <PendingChatLink chat={chat} /> : null}
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        title={t`Chat apps`}
+      >
+        <SettingsRows>
+          <ForgetConversations />
+        </SettingsRows>
+        {chat.state === "ready" ? (
+          <LinkedChatAccounts accounts={chat.data.accounts} />
+        ) : null}
+      </SectionCard>
+    </>
   );
 };

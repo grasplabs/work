@@ -101,8 +101,8 @@ test("two people see each other's notes live, in their theme, and a failing page
     openPage(second, app),
   ]);
 
-  // The page marks what the App draws as the App's, around the frame.
-  await expect(first.getByText("App page", { exact: true })).toBeVisible();
+  // The page marks what the App draws as the App's: its name heads the
+  // chrome around the frame.
   await expect(first.getByRole("heading", { name: "Notes" })).toBeVisible();
 
   // The page follows its page's theme.
@@ -331,7 +331,7 @@ test("a tab holds one connection to core for its shell and every App frame it op
   };
 
   // The shell, then one App's frame after another, and back to the first.
-  await page.goto("/dashboard");
+  await page.goto("/inbox");
   await expect(page.getByRole("navigation").first()).toBeVisible();
   await moveTo(`/apps/${app}`);
   await shows("Notes");

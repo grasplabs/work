@@ -1,444 +1,280 @@
-import type { BusinessProcess } from "@grasp-os/shared/business-processes";
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
-import { failedRunDays } from "@grasp-os/shared/workflows";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Stat } from "@grasp-os/ui/components/stat";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { plural } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { ChevronRightIcon, WorkflowIcon } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useRouter } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 
-import { formatDateTime, formatNumber } from "../format.ts";
-import { PersonAvatar } from "../people/person-picker.tsx";
-import { ProcessHint } from "./business-process.tsx";
-import { handledOf, listsOf } from "./lists.ts";
-import { RunResult } from "./runs.tsx";
+import { formatList, formatNumber } from "../format.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { BrandIconGroup } from "../grasp/brand-icon/group.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  DataTable,
+  DataTablePerson,
+  grouping,
+  view,
+} from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
+import { IconTile } from "../grasp/icon-tile/index.ts";
+import { Workflow } from "../grasp/icons/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { useNarrow } from "../use-narrow.ts";
+import { processIcons } from "./business-process.tsx";
+import type { OverviewRow, Phase, Tool, ToolsByWorkflow } from "./overview.ts";
 
-// The workflows table, one line a workflow, as the prototype draws it
-// (`components/workflows-overview.tsx`, `workflows-table.tsx`): on the
-// Workflows page, every workflow the person has a role in, in two lists.
-// A line begins with a workflow's icon, naming the process it serves when
-// pointed at.
+// The Workflows page's table, on the library's Data table: one row a
+// workflow, gathered by the phase it stands in (overview.ts), what needs
+// the reader first. A row begins with the icon of the process it serves
+// (or a workflow's own), then its name; then whose it is, the tools it
+// reaches and the runs it completed this week. Each row opens its
+// workflow. On a phone a row is its workflow and its owner's face.
 
-/** When a workflow last ran, or that it never did. */
-const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
-  workflow.lastRun === null ? (
-    <span className="text-muted-foreground">
-      <Trans>Never</Trans>
+const phaseNames: Readonly<Record<Phase, MessageDescriptor>> = {
+  needsYou: msg({ message: "Needs you", context: "workflow phase" }),
+  running: msg({ message: "Running", context: "workflow phase" }),
+  building: msg({ message: "Building", context: "workflow phase" }),
+};
+
+const styles = stylex.create({
+  // The icon and the name in a box one line of the table's text tall, as
+  // the library's person in a cell: the tile, taller than the line, reaches
+  // into the cell's padding and the row keeps its height.
+  lead: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+    height: grasp.tableTextLine,
+    verticalAlign: "top",
+  },
+  // The name on the one line the box holds, as the library's person's.
+  name: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  // A face alone, held to the line as the lead is.
+  face: {
+    display: "inline-flex",
+    alignItems: "center",
+    height: grasp.tableTextLine,
+    verticalAlign: "top",
+  },
+});
+
+/** A workflow's icon and name, and that it is paused when it is. */
+const WorkflowCell = ({ row }: { row: OverviewRow }) => {
+  const { t } = useLingui();
+  return (
+    <span {...stylex.props(styles.lead)}>
+      <IconTile
+        icon={row.process === null ? Workflow : processIcons[row.process]}
+        size="sm"
+        variant="tint"
+      />
+      <span {...stylex.props(styles.name)}>{row.name}</span>
+      {row.paused ? (
+        <Badge size="sm">
+          {t({ message: "Paused", context: "a workflow someone paused" })}
+        </Badge>
+      ) : null}
+    </span>
+  );
+};
+
+/** A workflow's owner: their face and name; on a phone their face alone, named for a screen reader. */
+const OwnerCell = ({
+  name,
+  narrow,
+}: {
+  name: string | null;
+  narrow: boolean;
+}) => {
+  if (name === null) {
+    return null;
+  }
+  return narrow ? (
+    <span {...stylex.props(styles.face)}>
+      <Avatar name={name} size="xs">
+        <AvatarFallback />
+      </Avatar>
     </span>
   ) : (
-    <span className="tabular-nums">
-      {formatDateTime(workflow.lastRun.createdAt)}
-    </span>
-  );
-
-/** A count of a workflow's runs, linking to them on its page's Runs tab. */
-const RunCount = ({
-  workflow,
-  children,
-  label,
-}: {
-  workflow: WorkflowSummary;
-  children: ReactNode;
-  /** What the link opens, read out: the count and the workflow, in words. */
-  label: string;
-}) => (
-  <Link
-    aria-label={label}
-    className="relative z-10 underline-offset-4 hover:underline"
-    params={{ workflow: workflow.workflowId }}
-    search={{ view: "runs" }}
-    to="/workflows/$workflow"
-  >
-    {children}
-  </Link>
-);
-
-/**
- * Where a workflow stands: its last run's result, and the runs waiting
- * for a decision or failed lately, each a link to them on the Runs tab.
- */
-const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
-  const { t } = useLingui();
-  const { waiting, failed } = workflow;
-  const name = workflowLabel(workflow);
-  const days = failedRunDays;
-  return (
-    <div className="flex flex-col items-start gap-0.5">
-      {workflow.lastRun === null ? (
-        <span className="text-muted-foreground">–</span>
-      ) : (
-        <RunResult
-          aiProvider={workflow.lastRun.aiProvider}
-          status={workflow.lastRun.status}
-        />
-      )}
-      {waiting === 0 ? null : (
-        <RunCount
-          label={t`${plural(waiting, { one: "# waiting run", other: "# waiting runs" })} of ${name}`}
-          workflow={workflow}
-        >
-          <Plural one="# waiting" other="# waiting" value={waiting} />
-        </RunCount>
-      )}
-      {failed === 0 ? null : (
-        <RunCount
-          label={t`${plural(failed, { one: "# failed run", other: "# failed runs" })} of ${name}`}
-          workflow={workflow}
-        >
-          <Plural
-            one={`# failed in the last ${days} days`}
-            other={`# failed in the last ${days} days`}
-            value={failed}
-          />
-        </RunCount>
-      )}
-    </div>
+    <DataTablePerson name={name} size="xs" />
   );
 };
 
-/** The business process each workflow serves, by its ID: null for none. */
-export type WorkflowProcesses = ReadonlyMap<string, BusinessProcess | null>;
-
-/** The process `row` serves. */
-export const processOf = (
-  processes: WorkflowProcesses | undefined,
-  row: WorkflowSummary
-): BusinessProcess | null => processes?.get(row.workflowId) ?? null;
-
-/**
- * Where a line begins: a workflow's icon, naming the process it serves
- * when pointed at, with the prototype's attention mark on its corner while
- * a run waits for a decision. The mark only repeats what Status says in
- * words.
- */
-const Lead = ({
-  workflow,
-  process,
-}: {
-  workflow: WorkflowSummary;
-  process: BusinessProcess | null;
-}) => (
-  <Tooltip>
-    <TooltipTrigger render={<span className="relative flex-none rounded-lg" />}>
-      <span
-        aria-hidden="true"
-        className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
-      >
-        <WorkflowIcon className="size-4" />
-      </span>
-      {workflow.waiting === 0 ? null : (
-        <span
-          aria-hidden="true"
-          className="bg-card absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full"
-        >
-          <span className="bg-status-attention size-2 rounded-full" />
-        </span>
-      )}
-    </TooltipTrigger>
-    <TooltipContent className="max-w-64">
-      {process === null ? (
-        <Trans>Workflow</Trans>
-      ) : (
-        <ProcessHint process={process} />
-      )}
-    </TooltipContent>
-  </Tooltip>
-);
-
-/** A workflow's name, opening it: the whole row is its link. */
-const WorkflowLink = ({ workflow }: { workflow: WorkflowSummary }) => (
-  <Link
-    className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-    params={{ workflow: workflow.workflowId }}
-    to="/workflows/$workflow"
-  >
-    {workflowLabel(workflow)}
-  </Link>
-);
-
-/** The version new runs run, or that none is published yet. */
-const Version = ({ version }: { version: number | null }) =>
-  version === null ? <Trans>Draft</Trans> : <Trans>Version {version}</Trans>;
-
-/** A workflow's owner: who created it, named when pointed at. */
-const Owner = ({ workflow }: { workflow: WorkflowSummary }) => {
-  const name = workflow.owner.name ?? workflow.owner.userId;
-  return (
-    <span className="inline-flex" title={name}>
-      <PersonAvatar name={name} />
-      <span className="sr-only">{name}</span>
-    </span>
-  );
-};
-
-/**
- * A workflow's row: its name and its version under it, its owner, when it
- * last ran and where it stands. The whole row opens it.
- */
-const WorkflowRow = ({
-  workflow,
-  process,
-}: {
-  workflow: WorkflowSummary;
-  process: BusinessProcess | null;
-}) => {
-  const { version } = workflow;
-  return (
-    <TableRow className="relative">
-      <TableCell variant="roomy">
-        <div className="flex min-w-0 items-center gap-3">
-          <Lead process={process} workflow={workflow} />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex min-w-0 items-center gap-2">
-              <WorkflowLink workflow={workflow} />
-            </span>
-            <span className="text-muted-foreground">
-              <Version version={version} />
-            </span>
-            {/* Narrow, the status's cell is hidden too, as the prototype
-                keeps the name its room: where it stands goes under it. */}
-            <div className="@sm:hidden">
-              <Status workflow={workflow} />
-            </div>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="hidden @xl:table-cell" variant="roomy">
-        <span className="tabular-nums">{formatNumber(workflow.handled)}</span>
-      </TableCell>
-      <TableCell className="hidden @2xl:table-cell" variant="roomy">
-        <LastRun workflow={workflow} />
-      </TableCell>
-      <TableCell className="hidden @md:table-cell" variant="roomy">
-        <Owner workflow={workflow} />
-      </TableCell>
-      <TableCell className="hidden @sm:table-cell" variant="roomy">
-        <Status workflow={workflow} />
-      </TableCell>
-      <TableCell>
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="text-muted-foreground mx-auto size-4"
-        />
-      </TableCell>
-    </TableRow>
-  );
-};
-
-/**
- * Every workflow the person can open, in the prototype's table
- * (grasplabs/prototype `components/workflows-table.tsx`): its columns
- * follow the table's own width, so as it narrows, the last run folds away.
- */
-export const WorkflowsTable = ({
-  rows,
-  empty,
-  processes,
-}: {
-  rows: WorkflowSummary[];
-  /** The process each row serves; none known without it. */
-  processes?: WorkflowProcesses;
-  /** What an empty table says; the Workflows page's empty state without it. */
-  empty?: ReactElement;
-}) => {
-  if (rows.length === 0 && empty !== undefined) {
-    return empty;
-  }
-  if (rows.length === 0) {
-    return (
-      <div className="bg-card rounded-xl border">
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <WorkflowIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              <Trans>No workflows yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              <Trans>
-                Workflows are made in chat: describe what should run on its own,
-                and Grasp builds it.
-              </Trans>
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Link
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-              search={{}}
-              to="/"
-            >
-              <Trans>Open Chat</Trans>
-            </Link>
-          </EmptyContent>
-        </Empty>
-      </div>
-    );
-  }
-  return (
-    <div className="bg-card @container overflow-hidden rounded-xl border">
-      <Table className="table-fixed">
-        <TableHeader>
-          <TableRow>
-            <TableHead variant="card">
-              <Trans>Workflow</Trans>
-            </TableHead>
-            <TableHead className="hidden w-32 @xl:table-cell" variant="card">
-              <Trans>Runs a week</Trans>
-            </TableHead>
-            <TableHead className="hidden w-44 @2xl:table-cell" variant="card">
-              <Trans>Last run</Trans>
-            </TableHead>
-            <TableHead className="hidden w-20 @md:table-cell" variant="card">
-              <Trans context="column: who owns a workflow">Owner</Trans>
-            </TableHead>
-            <TableHead className="hidden w-52 @sm:table-cell" variant="card">
-              <Trans context="column: where a workflow stands">Status</Trans>
-            </TableHead>
-            <TableHead className="w-9" variant="card">
-              <span className="sr-only">
-                <Trans context="column: a link that opens the workflow">
-                  Open
-                </Trans>
-              </span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <WorkflowRow
-              key={row.workflowId}
-              process={processOf(processes, row)}
-              workflow={row}
-            />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-};
-
-/** One of the overview's lists: its name over its table, left out while empty. */
-const List = ({
-  title,
-  rows,
-  processes,
-}: {
-  title: ReactNode;
-  rows: WorkflowSummary[];
-  processes: WorkflowProcesses | undefined;
-}) =>
-  rows.length === 0 ? null : (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-muted-foreground">{title}</h2>
-      <WorkflowsTable processes={processes} rows={rows} />
-    </section>
-  );
-
-/** A large number over the words that say what it is; a dash for one nobody counts yet. */
-const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
-  <div className="flex min-w-0 flex-col-reverse gap-0.5">
-    <dt className="text-muted-foreground">{label}</dt>
-    <Stat render={<dd />}>{value ?? "–"}</Stat>
-  </div>
-);
-
-/**
- * The prototype's three numbers over the lists, for all the workflows
- * together: the runs they completed this week (core's `handled`); the
- * return a month that was measured, and what designs and tests expect on
- * top, are dashes: core measures no return yet, and keeps no designs.
- */
-const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
-  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
-    <Big
-      label={<Trans>runs a week by these workflows</Trans>}
-      value={formatNumber(handledOf(rows))}
+/** The tools a workflow reaches, as the library's marks: three, then how many more. */
+const ToolsCell = ({ tools }: { tools: readonly Tool[] }) =>
+  tools.length === 0 ? null : (
+    <BrandIconGroup
+      brands={tools.map(({ name, brand }) => brand ?? { name })}
+      max={3}
     />
-    <Big label={<Trans>return a month, measured</Trans>} value={null} />
-    <Big
-      label={<Trans>expected on top, from designs and tests</Trans>}
-      value={null}
-    />
-  </dl>
-);
+  );
+
+const noTools: readonly Tool[] = [];
 
 /**
- * `rows` in the overview's two lists, without the numbers over them: at
- * work, those that have run, the ones waiting on a person first; on the
- * way, those that haven't run yet. Needs you shows its workflows so, as
- * the prototype's does.
+ * Follows a row's link within Grasp. The Data table draws a row's link as
+ * a plain anchor (`rowHref`), which the browser would follow by loading
+ * the whole page again: a plain press goes through the router instead. A
+ * press that opens a new tab or window is left to the browser.
  */
-export const WorkflowLists = ({
-  rows,
-  processes,
+const useRowLinks = () => {
+  const router = useRouter();
+  const table = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = table.current;
+    const onClick = (event: MouseEvent): void => {
+      const link =
+        event.target instanceof Element
+          ? event.target.closest("a[data-row-target]")
+          : null;
+      const href = link?.getAttribute("href");
+      const plain =
+        event.button === 0 &&
+        !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+      if (href === null || href === undefined || !plain) {
+        return;
+      }
+      event.preventDefault();
+      router.history.push(href);
+    };
+    host?.addEventListener("click", onClick);
+    return () => {
+      host?.removeEventListener("click", onClick);
+    };
+  }, [router]);
+  return table;
+};
+
+/** The columns' words, in the page's language. */
+interface ColumnWords {
+  workflow: string;
+  phase: string;
+  owner: string;
+  tools: string;
+  runs: string;
+  phaseName: (phase: Phase) => string;
+}
+
+/** The table's columns: the workflow, its phase (out of view), whose it is, its tools and its runs. */
+const columnsOf = ({
+  words,
+  narrow,
+  tools,
 }: {
-  rows: WorkflowSummary[];
-  processes?: WorkflowProcesses;
-}) => {
-  const { atWork, onTheWay } = listsOf(rows);
-  return (
-    <>
-      <List
-        processes={processes}
-        rows={atWork}
-        title={<Trans>At work</Trans>}
-      />
-      <List
-        processes={processes}
-        rows={onTheWay}
-        title={<Trans>On the way</Trans>}
-      />
-    </>
-  );
+  words: ColumnWords;
+  /** Below the phone's width the owner is their face alone. */
+  narrow: boolean;
+  tools: ToolsByWorkflow | undefined;
+}): DataTableColumn<OverviewRow>[] => {
+  const toolsOf = (row: OverviewRow): readonly Tool[] =>
+    tools?.get(row.id) ?? noTools;
+  return [
+    {
+      key: "workflow",
+      header: words.workflow,
+      value: (row) => row.name,
+      cell: (row) => <WorkflowCell row={row} />,
+    },
+    // The phase gathers the rows: its column stays out of view, its words
+    // in each group's heading.
+    {
+      key: "phase",
+      header: words.phase,
+      value: (row) => words.phaseName(row.phase),
+      hidden: true,
+    },
+    {
+      key: "owner",
+      header: words.owner,
+      value: (row) => row.owner ?? "",
+      cell: (row) => <OwnerCell name={row.owner} narrow={narrow} />,
+    },
+    {
+      key: "tools",
+      header: words.tools,
+      value: (row) => formatList(toolsOf(row).map(({ name }) => name)),
+      cell: (row) => <ToolsCell tools={toolsOf(row)} />,
+      hideBelow: "phone",
+    },
+    {
+      key: "runs",
+      header: words.runs,
+      value: (row) => row.runs ?? "",
+      cell: (row) => (row.runs === null ? null : formatNumber(row.runs)),
+      align: "end",
+      hideBelow: "phone",
+    },
+  ];
 };
 
 /**
- * The Workflows page's list, as the prototype tells it
- * (`components/workflows-overview.tsx`): made for many workflows, its
- * numbers on top, then two lists. At work, those that have run, the ones
- * waiting on a person first; on the way, those that haven't run yet.
+ * Every workflow the person can open, gathered by phase. `tools` come
+ * after the rows (their own read): until then, and where a workflow
+ * reaches none, its cell is empty.
  */
-export const WorkflowsOverview = ({
+export const WorkflowsByPhase = ({
   rows,
-  processes,
+  tools,
 }: {
-  rows: WorkflowSummary[];
-  processes?: WorkflowProcesses;
+  /** In the order of their phases (overview.ts). */
+  rows: readonly OverviewRow[];
+  tools: ToolsByWorkflow | undefined;
 }) => {
-  if (rows.length === 0) {
-    return <WorkflowsTable rows={rows} />;
-  }
+  const { t, i18n } = useLingui();
+  const router = useRouter();
+  const narrow = useNarrow();
+  const table = useRowLinks();
+  const needsYou = i18n._(phaseNames.needsYou);
   return (
-    // The container for the numbers' columns: a container query never
-    // applies to the element that is the container.
-    <div className="@container flex flex-col gap-8">
-      <Numbers rows={rows} />
-      <WorkflowLists processes={processes} rows={rows} />
+    <div ref={table}>
+      <DataTable
+        columns={columnsOf({
+          words: {
+            workflow: t`Workflow`,
+            phase: t({
+              message: "Phase",
+              context: "column: a workflow's phase",
+            }),
+            owner: t({
+              message: "Owner",
+              context: "column: who owns a workflow",
+            }),
+            tools: t`Tools`,
+            runs: t`Runs a week`,
+            phaseName: (phase) => i18n._(phaseNames[phase]),
+          },
+          narrow,
+          tools,
+        })}
+        empty={{
+          title: t`No workflows yet`,
+          description: t`Workflows are made in chat: describe what should run on its own, and Grasp builds it.`,
+          icon: Workflow,
+          action: (
+            <Button render={<Link search={{}} to="/" />}>{t`Open Chat`}</Button>
+          ),
+        }}
+        groupBy="phase"
+        groupTone={(phase) => (phase === needsYou ? "attention" : undefined)}
+        label={t`Workflows`}
+        pieces={[grouping, view]}
+        rowHref={(row) =>
+          router.buildLocation({
+            to: "/workflows/$workflow",
+            params: { workflow: row.id },
+          }).href
+        }
+        rowKey={(row) => row.id}
+        rows={rows}
+        unit={{ one: t`workflow`, other: t`workflows` }}
+      />
     </div>
   );
 };

@@ -151,7 +151,10 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
       .locator("main")
       .evaluate((element) => getComputedStyle(element).fontFamily)
   ).toMatch(/^"Geist Variable"/u);
-  await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
+  // The page's head: the Grasp mark beside its name.
+  await expect(
+    printed.locator("header").filter({ hasText: "Grasp" }).locator("svg")
+  ).toHaveCount(1);
   // Once the dialog closes, the page to print goes.
   await closePrint(page, "Vision page");
   await expect(page.locator('iframe[title="Vision page"]')).toHaveCount(0);
@@ -162,7 +165,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   await page.goto("/");
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send" }).click();
-  // It opens full screen in Grasp's chat, named once core has said its
+  // It opens on its own page, named once core has said its
   // title, which the export is named after.
   const messages = page
     .getByRole("region", { name: question })

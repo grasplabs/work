@@ -50,7 +50,7 @@ export const LOBES: RegionId[] = [
 /** A team's work sits with the team, in a folder of the region named after it: the folder's path starts with this. */
 export const TEAM_FOLDER = "@team";
 
-export interface Region {
+interface Region {
   id: RegionId;
   /** Its name: the company's own for a group of teams, the board in front, what came in at the stem. */
   name: string;
@@ -114,10 +114,12 @@ const stemName = msg({
   context: "the brainstem: every conversation, document and connection",
 });
 
+/** The id of the region the teams in no group share, and the groups beyond the lobes. */
+export const OTHER_TEAMS = "group-other";
+
 /**
- * The company's groups of teams, one for each lobe. The groups it keeps (confirmed, or proposed by
- * Grasp), then one of its own for every team in none, named after it, as Grasp would propose it.
- * More groups than lobes: the last lobe holds the rest together.
+ * The company's groups of teams, one for each lobe, in its order. The teams in none share the
+ * last lobe as "Other teams", and so do the groups the four lobes have no room for.
  */
 export const groupsOf = (ws: Workspace): TeamGroup[] => {
   const known = new Set(ws.teams.map((team) => team.id));
@@ -128,30 +130,28 @@ export const groupsOf = (ws: Workspace): TeamGroup[] => {
     }))
     .filter((group) => group.teamIds.length > 0);
   const placed = new Set(kept.flatMap((group) => group.teamIds));
-  const all = [
-    ...kept,
-    ...ws.teams
-      .filter((team) => !placed.has(team.id))
-      .map((team): TeamGroup => ({
-        id: `group-${team.id}`,
-        name: team.name,
-        teamIds: [team.id],
-        confirmed: false,
-      })),
+  const waiting = ws.teams
+    .filter((team) => !placed.has(team.id))
+    .map((team) => team.id);
+  const room =
+    waiting.length === 0 && kept.length <= LOBES.length
+      ? LOBES.length
+      : LOBES.length - 1;
+  const rest = [
+    ...kept.slice(room).flatMap((group) => group.teamIds),
+    ...waiting,
   ];
-  if (all.length <= LOBES.length) {
-    return all;
-  }
-  const rest = all.slice(LOBES.length - 1);
-  return [
-    ...all.slice(0, LOBES.length - 1),
-    {
-      id: "group-more",
-      name: t`More teams`,
-      teamIds: rest.flatMap((group) => group.teamIds),
-      confirmed: rest.every((group) => group.confirmed),
-    },
-  ];
+  return rest.length === 0
+    ? kept.slice(0, room)
+    : [
+        ...kept.slice(0, room),
+        {
+          id: OTHER_TEAMS,
+          name: t`Other teams`,
+          teamIds: rest,
+          confirmed: true,
+        },
+      ];
 };
 
 /** The team a piece of work belongs to: its workflow's main team, else the first team that told of it. */
@@ -487,223 +487,4 @@ export const signalPaths = (ws: Workspace, atlas: Atlas): RegionId[][] => {
     }
   }
   return paths;
-};
-
-/** One line of a story, and the notes it lights up. */
-export interface StoryLine {
-  text: string;
-  notes: string[];
-}
-
-type Line = (text: string, notes: string[]) => void;
-type Ids = (match: (note: Note) => boolean) => string[];
-
-const visionStory = (ws: Workspace, ids: Ids, line: Line): void => {
-  const goals = ids((note) => note.kind === "goal");
-  const count = goals.length;
-  line(
-    plural(count, {
-      one: "The board set # goal for the sprint.",
-      other: "The board set # goals for the sprint.",
-    }),
-    goals
-  );
-  const changed = ids(
-    (note) => note.kind === "goal" && note.tags.includes("changed")
-  );
-  const moved = changed.length;
-  if (moved > 0) {
-    line(
-      plural(moved, {
-        one: "# of them changed after it was set, at a later talk with the board.",
-        other:
-          "# of them changed after they were set, at later talks with the board.",
-      }),
-      changed
-    );
-  }
-  line(
-    given(ws.vision.confirmedAt)
-      ? t`The board confirmed the vision.`
-      : t`The board has not confirmed the vision yet.`,
-    ["vision"]
-  );
-};
-
-/** A group of teams: who is in it, the work they do, and what is not known yet. */
-const groupStory = (
-  ws: Workspace,
-  region: AtlasRegion,
-  ids: Ids,
-  line: Line
-): void => {
-  const teams = ids((note) => note.kind === "team");
-  if (teams.length === 0) {
-    return;
-  }
-  const names = formatList(
-    region.notes
-      .filter((note) => note.kind === "team")
-      .map((note) => note.title)
-  );
-  const work = ids((note) => note.kind === "candidate");
-  const count = work.length;
-  line(
-    count === 0
-      ? t`${names} work here. No work of theirs came up yet.`
-      : plural(count, {
-          one: `${names} work here, on # piece of work that came up in what people said.`,
-          other: `${names} work here, on # pieces of work that came up in what people said.`,
-        }),
-    [...teams, ...work]
-  );
-  const drawn = ids(
-    (note) => note.kind === "candidate" && note.tags.includes("drawn")
-  );
-  const done = drawn.length;
-  if (done > 0) {
-    line(
-      plural(done, {
-        one: "# of them is drawn.",
-        other: "# of them are drawn.",
-      }),
-      drawn
-    );
-  }
-  const waiting = region.waiting.filter((id) => teams.includes(id));
-  const left = waiting.length;
-  if (left > 0) {
-    line(
-      plural(left, {
-        one: "# team here is not interviewed yet.",
-        other: "# teams here are not interviewed yet.",
-      }),
-      waiting
-    );
-  }
-  // Told from both sides, by the rule the brain's nerves follow (brain-links.ts), so the story never says it while its nerve is still only proposed.
-  const both = brainLinks(ws).find(
-    (link) => link.kind === "handover" && link.bothSides
-  )?.teams;
-  if (both?.some((id) => teams.includes(id)) === true) {
-    const [one = "", other = ""] = both.map(
-      (id) => ws.teams.find((team) => team.id === id)?.name ?? id
-    );
-    line(
-      t`${one} and ${other} both name the same handover, each from their own side.`,
-      both.filter((id) => teams.includes(id))
-    );
-  }
-};
-
-const sourcesStory = (
-  ws: Workspace,
-  region: AtlasRegion,
-  ids: Ids,
-  line: Line
-): void => {
-  const conversations = ids(
-    (note) => note.kind === "source" && note.path[1] === "Conversations"
-  );
-  const count = conversations.length;
-  line(
-    plural(count, {
-      one: "# conversation came in: with the board, the teams and their people.",
-      other:
-        "# conversations came in: with the board, the teams and their people.",
-    }),
-    conversations
-  );
-  const statements = ws.statements.length;
-  line(
-    plural(statements, {
-      one: "They brought # statement, each one tagged and kept with its source.",
-      other:
-        "They brought # statements, each one tagged and kept with its source.",
-    }),
-    conversations
-  );
-  const inRegion = (id: string) => region.notes.some((note) => note.id === id);
-  const sinks = ws.statements.filter(
-    (statement) => statement.kind === "timeSink"
-  );
-  const sunk = sinks.length;
-  if (sunk > 0) {
-    line(
-      plural(sunk, {
-        one: "# of them is a time waster, as the team said it.",
-        other: "# of them are time wasters, as the teams said them.",
-      }),
-      [...new Set(sinks.map((statement) => statement.sourceId))].filter(
-        inRegion
-      )
-    );
-  }
-  const documents = ids(
-    (note) => note.kind === "source" && note.path[1] === "Documents"
-  );
-  const shared = documents.length;
-  if (shared > 0) {
-    line(
-      plural(shared, {
-        one: "# document was shared or found, and read.",
-        other: "# documents were shared or found, and read.",
-      }),
-      documents
-    );
-  }
-  const of = (connection: "directory" | "signIn" | "pulse") =>
-    ws.sources
-      .filter((source) => source.connection === connection)
-      .map((source) => source.id)
-      .filter(inRegion);
-  const directory = of("directory");
-  if (directory.length > 0) {
-    line(t`The directory brought in the teams and their roles.`, directory);
-  }
-  const signIn = of("signIn");
-  if (signIn.length > 0) {
-    line(t`Sign-in shows the applications people log in to.`, signIn);
-  }
-  const pulse = of("pulse");
-  if (pulse.length > 0) {
-    line(t`Pulse shows what runs on the laptops, AI tools included.`, pulse);
-  }
-};
-
-/**
- * What a region tells when you go in: three to five lines, each lighting up the notes it is about,
- * in a fixed order, ending with what is still open.
- */
-export const storyOf = (
-  regionId: RegionId,
-  atlas: Atlas,
-  ws: Workspace
-): StoryLine[] => {
-  const region = atlas.regions.find((each) => each.id === regionId);
-  if (!region) {
-    return [];
-  }
-  const ids: Ids = (match) => region.notes.filter(match).map((note) => note.id);
-  const lines: StoryLine[] = [];
-  const line: Line = (text, notes) => {
-    lines.push({ text, notes });
-  };
-  if (regionId === "frontal") {
-    visionStory(ws, ids, line);
-  } else if (regionId === "stem") {
-    sourcesStory(ws, region, ids, line);
-  } else {
-    groupStory(ws, region, ids, line);
-  }
-  for (const item of region.open) {
-    const { question, who } = item;
-    line(
-      given(who)
-        ? t`Still open: ${question} ${who} can answer it.`
-        : t`Still open: ${question}`,
-      [item.noteId, ...item.subjects]
-    );
-  }
-  return lines;
 };

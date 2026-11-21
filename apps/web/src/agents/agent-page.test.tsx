@@ -27,17 +27,24 @@ import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
+  Outlet,
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, useState } from "react";
+import type { AnyRouter } from "@tanstack/react-router";
+import { act } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
-import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
+import type { FirstAgentAccess } from "./agent-page.tsx";
+import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
+import { agentTabOf } from "./tabs.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import { agentInstructionsFor } from "./unsaved-instructions.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
@@ -118,7 +125,7 @@ const fakeConnections = () => {
   // Each agent's instruction file, by its ID, as core's
   // `session.instructions` keeps it.
   const files = new Map<string, InstructionFileText>();
-  // Saves to refuse, as a Brain out of reach would, before any is kept.
+  // Saves and reads to refuse, as a Brain out of reach would.
   const outOfReach = { saves: 0, reads: 0 };
   const instructions: InstructionsApi = {
     read: async (file) => {
@@ -390,14 +397,21 @@ interface Shown {
   agents: Agent[];
   instructions: Record<string, InstructionFileText | null | undefined>;
   unsaved: Record<string, UnsavedInstructions | undefined>;
+  apps: Record<string, AgentApp[]>;
   settings: Record<string, AgentSettings>;
   wakes: Record<string, AgentWake[]>;
   documents: Record<string, AgentDocument[]>;
-  apps: Record<string, AgentApp[]>;
 }
 
-/** What is shown: one agent's page, by its name, or the new agent's. */
-type Open = { agent: string; tab?: AgentTab } | "new" | "new-own-off";
+/**
+ * What is shown: one agent's page, by its name, or the new agent's, with
+ * the company's agents of people's own on, or off, or set up by hand.
+ */
+type Open =
+  | { agent: string; tab?: AgentTab }
+  | "new"
+  | "new-own-off"
+  | "new-guided";
 
 /** The page for `open` on the agents its route read, its tab kept as its route would. */
 const Page = ({
@@ -409,11 +423,30 @@ const Page = ({
   editable: boolean;
   open: Open;
 }) => {
-  const [tab, setTab] = useState<AgentTab>(
-    typeof open === "string" ? "overview" : (open.tab ?? "overview")
-  );
+  const tab: AgentTab =
+    typeof open === "string" ? "overview" : (open.tab ?? "overview");
+  if (open === "new-guided") {
+    return (
+      <ManualAgent
+        apps={[]}
+        company={editable}
+        models={models}
+        own
+        personId={anna.userId}
+        taken={data.agents.map(({ name }) => name)}
+        teams={teams}
+      />
+    );
+  }
   if (typeof open === "string") {
-    return <NewAgent company={editable} models={models} own={open === "new"} />;
+    return (
+      <NewAgent
+        company={editable}
+        own={open === "new"}
+        personId={anna.userId}
+        taken={data.agents.map(({ name }) => name)}
+      />
+    );
   }
   const agent = data.agents.find(({ name }) => name === open.agent);
   if (agent === undefined) {
@@ -438,7 +471,6 @@ const Page = ({
       first={agent.id === data.agents.at(0)?.id}
       firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
       models={models}
-      onTab={setTab}
       people={people}
       settings={data.settings[agent.id]}
       tab={tab}
@@ -450,9 +482,10 @@ const Page = ({
   );
 };
 
-/**
- * `open` on what `fake` holds, for the company's admin when `editable`.
- */
+/** The router of the page shown, to open another of its parts. */
+let shownRouter: AnyRouter | undefined;
+
+/** `open` on what `fake` holds, for the company's admin when `editable`. */
 const shown = async (
   { connections, instructions }: Fake,
   open: Open,
@@ -501,6 +534,12 @@ const shown = async (
           ] as const
       )
     );
+    const given = await Promise.all(
+      agents.map(async ({ id }): Promise<[string, AgentApp[]]> => [
+        id,
+        await connections.agentApps(id),
+      ])
+    );
     return {
       agents,
       instructions: Object.fromEntries(
@@ -509,30 +548,56 @@ const shown = async (
       unsaved: Object.fromEntries(
         told.map(([id, { unsaved }]) => [id, unsaved])
       ),
+      apps: Object.fromEntries(given),
       settings: Object.fromEntries(read),
       wakes: Object.fromEntries(woken),
       documents: Object.fromEntries(kept),
-      apps: Object.fromEntries(
-        await Promise.all(
-          agents.map(async ({ id }): Promise<[string, AgentApp[]]> => [
-            id,
-            await connections.agentApps(id),
-          ])
-        )
-      ),
     };
   };
   const rootRoute = createRootRoute({
-    loader: load,
-    component: () => (
-      <Page data={rootRoute.useLoaderData()} editable={editable} open={open} />
-    ),
-    // Where the new agent's page leads: an address this router has no page for.
+    component: Outlet,
+    // Where the new agent's page leads, when this router has no page for it.
     notFoundComponent: () => <p>Elsewhere</p>,
   });
+  // The new agent's page, at the start.
+  const start = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    loader: load,
+    component: () => (
+      <Page data={start.useLoaderData()} editable={editable} open={open} />
+    ),
+  });
+  // An agent's own address, its tab in the search, as its tab links lead.
+  const agentRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/agents/$agent",
+    loader: load,
+    validateSearch: (search: Record<string, unknown>) => ({
+      tab: agentTabOf(search.tab),
+    }),
+    component: (): ReactNode => {
+      const data: Shown = agentRoute.useLoaderData();
+      const { agent } = agentRoute.useParams();
+      const { tab } = agentRoute.useSearch();
+      const name = data.agents.find(({ id }) => id === agent)?.name ?? "";
+      return (
+        <Page data={data} editable={editable} open={{ agent: name, tab }} />
+      );
+    },
+  });
+  const agents = await connections.agents();
+  const agentId =
+    typeof open === "string"
+      ? undefined
+      : agents.find(({ name }) => name === open.agent)?.id;
+  const address =
+    typeof open === "string" || agentId === undefined
+      ? "/"
+      : `/agents/${agentId}${open.tab === undefined ? "" : `?tab=${open.tab}`}`;
   const router = createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory(),
+    routeTree: rootRoute.addChildren([start, agentRoute]),
+    history: createMemoryHistory({ initialEntries: [address] }),
     context: { core },
   });
   const host = document.createElement("div");
@@ -546,6 +611,7 @@ const shown = async (
     );
     await router.load();
   });
+  shownRouter = router;
   return router;
 };
 
@@ -570,7 +636,7 @@ const press = async (element: HTMLElement) => {
 
 /** Whether `element` is on the open tab, or outside the tabs. */
 const inView = (element: Element): boolean =>
-  element.closest("[role='tabpanel'][hidden]") === null;
+  element.closest("[hidden]") === null;
 
 /** The button in view named `name`, or one whose words start with it. */
 const button = (name: string): HTMLButtonElement => {
@@ -586,23 +652,56 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** Opens the tab named `name`. */
-const openTab = async (name: string) => {
-  const tab = [...document.querySelectorAll("[role='tab']")].find((each) =>
-    each.textContent?.trim().startsWith(name)
+/** The button in view whose words are `name`, exactly. */
+const exactButton = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (each) => inView(each) && each.textContent?.trim() === name
   );
-  if (!(tab instanceof HTMLElement)) {
-    throw new TypeError(`No tab ${name}`);
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new TypeError(`No button ${name}`);
   }
-  await press(tab);
+  return found;
 };
 
-/** The field labelled `label`, on whichever tab it is. */
-const field = (label: string): HTMLInputElement | HTMLTextAreaElement => {
-  const named = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+/** The button in the open dialog whose words are `name`. */
+const dialogButton = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("[role='dialog'] button")].find(
+    (each) => each.textContent?.trim() === name
   );
-  const found = document.querySelector(`#${CSS.escape(named?.htmlFor ?? "")}`);
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new TypeError(`No button ${name} in a dialog`);
+  }
+  return found;
+};
+
+/** Opens the agent's part `tab`, as its row in the sidebar leads there. */
+const openTab = async (tab: AgentTab) => {
+  await act(async () => {
+    await shownRouter?.navigate({
+      to: ".",
+      search: tab === "overview" ? {} : { tab },
+    });
+  });
+  await settled();
+};
+
+/** The field labelled `label`, on whichever tab or dialog it is. */
+const field = (label: string): HTMLInputElement | HTMLTextAreaElement => {
+  const named = [...document.querySelectorAll("label")].find((each) =>
+    each.textContent?.trim().startsWith(label)
+  );
+  const byLabel = (): Element | null | undefined => {
+    if (named === undefined) {
+      // A field alone in its card is named by the card, not a label.
+      return document.querySelector(
+        `input[aria-label="${label}"], textarea[aria-label="${label}"]`
+      );
+    }
+    return named.htmlFor === ""
+      ? named.parentElement?.querySelector("input, textarea")
+      : document.querySelector(`#${CSS.escape(named.htmlFor)}`);
+  };
+  const found = byLabel();
   if (
     !(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)
   ) {
@@ -629,33 +728,114 @@ const set = async (
   await settled();
 };
 
-/** The choice labelled `label`, or none. */
-const choice = (label: string): HTMLSelectElement | null => {
-  const found = document.querySelector(`select[aria-label="${label}"]`);
-  return found instanceof HTMLSelectElement ? found : null;
+/** Whether the row a radio stands in, and no other radio's, says `words`. */
+const saysOnItsRow = (radio: HTMLElement, words: string): boolean => {
+  let row: HTMLElement | null = radio;
+  while (row !== null && row.querySelectorAll("[role='radio']").length <= 1) {
+    if (row.textContent?.includes(words)) {
+      return true;
+    }
+    row = row.parentElement;
+  }
+  return false;
 };
 
-/** The switch labelled `name`. */
-const toggle = (name: string): HTMLElement => {
-  const found = document.querySelector(`[role="switch"][aria-label="${name}"]`);
+/** The answer in the question Grasp asks now: the radio whose row says `words`. */
+const answer = (words: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>(
+      "[data-slot='question-tool'] [role='radio']"
+    ),
+  ].find((each) => saysOnItsRow(each, words));
+  if (found === undefined) {
+    throw new TypeError(`No answer ${words}`);
+  }
+  return found;
+};
+
+/** The box Grasp's question takes words in: its own text box, or its Other row's. */
+const answerBox = (): HTMLInputElement | HTMLTextAreaElement => {
+  const found = document.querySelector(
+    "[data-slot='question-tool'] input:not([type='radio']), [data-slot='question-tool'] textarea"
+  );
+  if (
+    !(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)
+  ) {
+    throw new TypeError("No answer box");
+  }
+  return found;
+};
+
+/** The choice labelled `label` (a library Select's trigger), or none. */
+const choice = (label: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(
+    `[role="combobox"][aria-label="${label}"]`
+  );
+
+/** What a choice shows as chosen, without what is hidden from a screen reader. */
+const chosenIn = (label: string): string | undefined => {
+  const found = choice(label);
+  if (found === null) {
+    return undefined;
+  }
+  const copy = found.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return undefined;
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** Opens the choice labelled `label` and picks the option that says `name`. */
+const choose = async (label: string, name: string) => {
+  const control = choice(label);
+  if (control === null) {
+    throw new TypeError(`No choice ${label}`);
+  }
+  await press(control);
+  const list = document.querySelector(
+    `[id="${control.getAttribute("aria-controls") ?? ""}"]`
+  );
+  const option = [
+    ...(list ?? document).querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((each) => each.textContent.trim() === name);
+  if (option === undefined) {
+    throw new TypeError(`No option ${name}`);
+  }
+  await press(option);
+};
+
+/** The switch on the row that says `words`. */
+const rowSwitch = (words: string): HTMLElement => {
+  const found = [...document.querySelectorAll("li")]
+    .find((row) => row.textContent?.includes(words))
+    ?.querySelector("[role='switch']");
   if (!(found instanceof HTMLElement)) {
-    throw new TypeError(`No switch ${name}`);
+    throw new TypeError(`No switch on ${words}`);
   }
   return found;
 };
 
 /** The switch in the page's heading, which turns the agent off and on. */
 const onSwitch = (): HTMLElement => {
-  const found = document.querySelector("label [role='switch']");
+  const found = document.querySelector("header [role='switch']");
   if (!(found instanceof HTMLElement)) {
     throw new TypeError("No on switch");
   }
   return found;
 };
 
+/** The words of the agent's documents' list. */
+const documentsListed = (): string =>
+  document.querySelector("ul[aria-label='Documents']")?.textContent ?? "";
+
 /** Picks `files` in the documents' file picker, as a person does. */
 const pick = async (...files: File[]) => {
-  const input = document.querySelector("[data-testid='agent-document-input']");
+  const input = document.querySelector(
+    "[data-slot='file-upload'] input[type='file']"
+  );
   if (!(input instanceof HTMLInputElement)) {
     throw new TypeError("No file picker");
   }
@@ -692,6 +872,80 @@ const withClaire = async () => {
   return fake;
 };
 
+/**
+ * Answers the new agent's questions in a chat as a person does: a job in
+ * their own words, `name`, the shape and colours offered, then whom it is
+ * for where they are asked (`whose`: the offered answer, or Just for me),
+ * the schedule offered where it is asked, and `instructions`; then
+ * Review and Make agent.
+ */
+const makeInChat = async ({
+  name,
+  instructions,
+  whose,
+}: {
+  name: string;
+  instructions: string;
+  /** `offered` as offered, `mine` Just for me, `unasked` for one who isn't asked. */
+  whose: "offered" | "mine" | "unasked";
+}) => {
+  await press(answer("Something else"));
+  await set(answerBox(), "Chases unpaid invoices.", "input");
+  await press(button("Next"));
+  await set(answerBox(), name, "input");
+  await press(button("Next"));
+  await press(button("Next"));
+  await press(button("Next"));
+  if (whose === "mine") {
+    await press(answer("Just for me"));
+    await press(button("Next"));
+  }
+  if (whose === "offered") {
+    // Everyone in the company, and only when asked: as offered.
+    await press(button("Next"));
+    await press(button("Next"));
+  }
+  await set(answerBox(), instructions, "input");
+  await press(button("Review"));
+  await press(button("Make agent"));
+};
+
+/** The radio whose row says `words`, in whatever is asked now. */
+const radio = (words: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>("[role='radio']"),
+  ].find((each) => saysOnItsRow(each, words));
+  if (found === undefined) {
+    throw new TypeError(`No radio ${words}`);
+  }
+  return found;
+};
+
+/**
+ * Goes through the guided setup as a person does, naming it `name` and
+ * saying what it is for, every other answer as offered, up to Make agent;
+ * says each question asked, in order, after the ones `before`.
+ */
+const setUpByHand = async (
+  name: string,
+  before: readonly string[] = []
+): Promise<string[]> => {
+  const question = document.querySelector("h1")?.textContent ?? "";
+  const questions = [...before, question];
+  // A dozen at most: more is a setup that never ends.
+  if (question.startsWith("Ready to make") || questions.length > 12) {
+    return questions;
+  }
+  if (question === "What should we call your agent?") {
+    await set(field("Name"), name, "input");
+  }
+  if (question === `What should ${name} do?`) {
+    await set(field("What it is for"), "Chases unpaid invoices.", "input");
+  }
+  await press(button("Next"));
+  return await setUpByHand(name, questions);
+};
+
 describe("an agent's page", () => {
   afterEach(() => {
     act(() => {
@@ -706,24 +960,378 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Stephen", tab: "access" });
     expect(choice("Who may use Stephen")).toBeNull();
     expect(document.body.textContent).toContain("Where people reach him");
-    expect(document.querySelector("a[href='/settings/stephen']")).toBeNull();
+    expect(document.body.textContent).toContain("Grasp's chat");
   });
 
-  it("makes an agent from what an admin types, and leads to its access", async () => {
+  it("makes an agent from the answers to Grasp's questions, in the look chosen, and leads to its access", async () => {
     const fake = fakeConnections();
     const { asked } = fake;
     const router = await shown(fake, "new");
-    await set(field("Name"), " Claire ", "input");
-    await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), claireTold, "input");
+    await press(answer("Something else"));
+    await set(answerBox(), "Chases unpaid invoices.", "input");
+    await press(button("Next"));
+    await set(answerBox(), " Claire ", "input");
+    await press(button("Next"));
+    await press(answer("Triangle"));
+    await press(button("Next"));
+    await press(answer("Ember"));
+    await press(button("Next"));
+    await press(answer("Nobody yet"));
+    await press(button("Next"));
+    // Only when asked: as offered.
+    await press(button("Next"));
+    await set(answerBox(), "Answer only about invoices.", "input");
+    await press(button("Review"));
     await press(button("Make agent"));
     expect(asked).toStrictEqual([
-      ["make", claire],
+      ["make", { ...claire, face: "figure-prism-ember" }],
       // What it is told: its instruction file's first version.
       ["told", "agent-1", claireTold],
       ["work out", "agent-1"],
     ]);
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
+  });
+
+  it("makes a starting point's agent for everyone, working on its own for the one who made it", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    const router = await shown(fake, "new");
+    await press(answer("Chase unpaid invoices"));
+    await press(button("Next"));
+    // Its suggested name, shape and colours, as offered.
+    await press(button("Next"));
+    await press(button("Next"));
+    await press(button("Next"));
+    await press(answer("Everyone in the company"));
+    await press(button("Next"));
+    await press(answer("Every weekday at 9:00"));
+    await press(button("Next"));
+    await press(button("Review"));
+    await press(button("Make agent"));
+    const [made] = asked;
+    expect(made?.[1]).toMatchObject({ name: "Invoice chaser" });
+    expect({
+      rest: asked.slice(1),
+    }).toStrictEqual({
+      rest: [
+        // Its starting point's instructions, as its file's first version.
+        ["told", "agent-1", expect.any(String)],
+        ["work out", "agent-1"],
+        ["reach", "agent-1", true, { who: "everyone" }],
+        [
+          "wake",
+          "agent-1",
+          {
+            cron: "0 9 * * 1-5",
+            personId: anna.userId,
+            opening: "Chases unpaid invoices and drafts the reminders.",
+          },
+        ],
+      ],
+    });
+    // Its page opens where it was made, not on its access: that is chosen already.
+    expect({
+      page: router.state.location.pathname,
+      access: router.state.location.href.includes("tab=access"),
+    }).toStrictEqual({ page: "/agents/agent-1", access: false });
+  });
+
+  it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "access" });
+    const before = [
+      chosenIn("Who may use Claire"),
+      chosenIn("Read their own, for Claire"),
+    ];
+    await choose("Who may use Claire", "Everyone");
+    await choose("Read their own, for Claire", "As the company has it");
+    expect(before).toStrictEqual(["Nobody yet", "Nobody yet"]);
+    expect(asked).toStrictEqual([
+      ["reach", "agent-1", true, { who: "everyone" }],
+      ["class", "agent-1", "read-own", { who: "asClass" }],
+    ]);
+    // Read again from core: the page shows what it keeps.
+    expect(chosenIn("Who may use Claire")).toBe("Everyone");
+    expect(chosenIn("Read their own, for Claire")).toBe(
+      "As the company has it"
+    );
+  });
+
+  it("saves a new name with the rest of the agent as it was", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
+    await press(button("Edit"));
+    await set(field("Name"), "Clara", "input");
+    await press(dialogButton("Save"));
+    expect(asked).toStrictEqual([
+      ["change", "agent-1", { ...claire, name: "Clara" }],
+    ]);
+  });
+
+  it("pauses an agent from its heading, and says it is paused", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
+    await press(onSwitch());
+    expect(asked).toStrictEqual([["paused", "agent-1", true]]);
+    expect(onSwitch().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("offers someone who isn't the company's admin nothing to change", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" }, false);
+    expect({
+      edit: button("Edit").disabled,
+      on:
+        Object.hasOwn(onSwitch().dataset, "disabled") ||
+        onSwitch().getAttribute("aria-disabled") === "true" ||
+        onSwitch().hasAttribute("disabled"),
+    }).toStrictEqual({ edit: true, on: true });
+    await openTab("schedule");
+    expect(document.body.textContent).toContain(
+      "Claire only works when asked."
+    );
+    expect(document.body.textContent).not.toContain("Add a time");
+    expect(asked).toStrictEqual([]);
+  });
+
+  it("takes no name another agent has, and says why where it was typed", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new");
+    await press(answer("Something else"));
+    await set(answerBox(), "Answers questions about leave.", "input");
+    await press(button("Next"));
+    await set(answerBox(), "stephen", "input");
+    await press(button("Next"));
+    expect({
+      said: document.body.textContent?.includes("Another agent has this name"),
+      kept: answerBox().value,
+      asked,
+    }).toStrictEqual({ said: true, kept: "stephen", asked: [] });
+  });
+
+  it("keeps what is typed and not yet saved while the agent is paused, and while another tab is looked at", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    await set(field("Instructions"), "A draft, not saved.", "input");
+    // Paused: core is asked and the page read again.
+    await press(onSwitch());
+    const afterPause = field("Instructions").value;
+    await openTab("access");
+    await openTab("instructions");
+    expect(asked.at(-1)).toStrictEqual(["paused", "agent-1", true]);
+    expect([afterPause, field("Instructions").value]).toStrictEqual([
+      "A draft, not saved.",
+      "A draft, not saved.",
+    ]);
+    // And it is the draft that is saved, as its instruction file.
+    await press(exactButton("Save"));
+    expect(asked.slice(-2)).toStrictEqual([
+      ["told", "agent-1", "A draft, not saved."],
+      ["work out", "agent-1"],
+    ]);
+  });
+
+  it("adds a time an agent works on its own, as a schedule core keeps, and pauses and removes it", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, { agent: "Stephen", tab: "schedule" });
+    await press(button("Add a time"));
+    await set(field("Time"), "07:30", "input");
+    await set(
+      field("What to ask it each time"),
+      " Look for invoices that are overdue. ",
+      "input"
+    );
+    await press(exactButton("Add"));
+    expect(asked).toStrictEqual([
+      [
+        "wake",
+        "organization",
+        {
+          cron: "30 7 * * 1-5",
+          personId: "user-anna",
+          opening: "Look for invoices that are overdue.",
+        },
+      ],
+    ]);
+    // Shown in words, for whom and with what it is asked.
+    expect(document.body.textContent).toContain("Every weekday at 07:30");
+    expect(document.body.textContent).toContain(
+      "For Anna de Vries: Look for invoices that are overdue."
+    );
+
+    await press(rowSwitch("Every weekday at 07:30"));
+    await press(button("Remove Every weekday at 07:30, for Anna de Vries"));
+    expect(asked.slice(1)).toStrictEqual([
+      ["wake paused", "wake-1", true],
+      ["wake deleted", "wake-1"],
+    ]);
+    expect(document.body.textContent).not.toContain("Every weekday at 07:30");
+  });
+
+  it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, { agent: "Stephen", tab: "schedule" });
+    await press(button("Add a time"));
+    await set(field("What to ask it each time"), "refuse this", "input");
+    // Another change on the page saves and the page is read again.
+    await press(onSwitch());
+    expect(field("What to ask it each time").value).toBe("refuse this");
+    // Core refuses it: still there to be corrected, and said why.
+    await press(exactButton("Add"));
+    expect(asked.at(-1)?.[0]).toBe("wake");
+    expect(field("What to ask it each time").value).toBe("refuse this");
+    expect(document.body.textContent).toContain("That isn't a wake-up.");
+  });
+
+  it("shows the time zone a wake-up was made in, by its name", async () => {
+    const fake = fakeConnections();
+    await shown(fake, { agent: "Stephen", tab: "schedule" });
+    await press(button("Add a time"));
+    await set(field("What to ask it each time"), "Check the inbox.", "input");
+    await press(exactButton("Add"));
+    const row = [...document.querySelectorAll("li")].find((each) =>
+      each.textContent?.includes("Every weekday at 09:00")
+    );
+    // Europe/Amsterdam, as the page's language names it.
+    expect(row?.textContent).toContain("Central European Time");
+  });
+
+  it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    // The name's dialog is opened after the instructions were saved.
+    await set(field("Instructions"), "Only invoices over 30 days.", "input");
+    await press(exactButton("Save"));
+    await press(button("Edit"));
+    await set(field("Name"), "Clara", "input");
+    await press(dialogButton("Save"));
+    expect(asked).toStrictEqual([
+      ["told", "agent-1", "Only invoices over 30 days."],
+      ["work out", "agent-1"],
+      ["change", "agent-1", { ...claire, name: "Clara" }],
+    ]);
+  });
+
+  it("gives an agent the files an admin picks, each with its name and content, lists them, and removes one", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    await pick(
+      new File(["# Close\n\nTwo signatures."], "Close checklist.md"),
+      new File(["Net 30."], "Terms.txt")
+    );
+    const listed = document.body.textContent;
+    await press(button("Remove Close checklist.md"));
+    // It asks first: a removed document can't be put back without its file.
+    await press(button("Remove"));
+    expect({
+      asked,
+      listed: [
+        listed.includes("Close checklist.md"),
+        listed.includes("Terms.txt"),
+      ],
+      // The agent's documents, as their list has them once core kept them.
+      after: [
+        documentsListed().includes("Close checklist.md"),
+        documentsListed().includes("Terms.txt"),
+      ],
+      // Who may learn what a document says, said where one is added.
+      warned: listed.includes("Anyone who may ask it can learn what they say."),
+    }).toStrictEqual({
+      asked: [
+        [
+          "document",
+          "agent-1",
+          "Close checklist.md",
+          "# Close\n\nTwo signatures.",
+        ],
+        ["document", "agent-1", "Terms.txt", "Net 30."],
+        ["document removed", "agent-1", "document-1"],
+      ],
+      listed: [true, true],
+      after: [false, true],
+      warned: true,
+    });
+  });
+
+  it("says why a file wasn't taken, and keeps the others", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    await pick(
+      new File(["a"], "a.md"),
+      new File(["not a PDF"], "policy.pdf"),
+      new File(["c"], "c.md")
+    );
+    // Each file is sent on its own: one core refuses stops none of the rest.
+    expect({
+      asked: asked.map((each) => each[2]),
+      said: document.body.textContent.includes(
+        "Only PDF, Word and text files can be attached."
+      ),
+      kept: ["a.md", "c.md"].map((file) => documentsListed().includes(file)),
+    }).toStrictEqual({
+      asked: ["a.md", "policy.pdf", "c.md"],
+      said: true,
+      kept: [true, true],
+    });
+  });
+
+  it("never sends core a file larger than it takes, or of a type it doesn't, and says why", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const large = new File(["a"], "large.md");
+    Object.defineProperty(large, "size", { value: chatFileMaxBytes + 1 });
+    await pick(large);
+    const tooLarge = document.body.textContent.includes(
+      "large.md is larger than 10 MB."
+    );
+    await pick(new File(["MZ"], "tool.exe"));
+    expect({
+      asked,
+      tooLarge,
+      unsupported: document.body.textContent.includes(
+        "tool.exe isn't a kind of file an agent reads."
+      ),
+    }).toStrictEqual({ asked: [], tooLarge: true, unsupported: true });
+  });
+
+  it("shows someone who isn't the company's admin an agent's documents, with no way to add or remove one", async () => {
+    const fake = await withClaire();
+    const { connections, asked } = fake;
+    await connections.addAgentDocument("agent-1", {
+      name: "Terms.txt",
+      bytes: new TextEncoder().encode("Net 30."),
+    });
+    asked.length = 0;
+    await shown(fake, { agent: "Claire", tab: "instructions" }, false);
+    expect({
+      listed: document.body.textContent.includes("Terms.txt"),
+      add: document.body.textContent.includes("Add document"),
+      picker: document.querySelector(
+        "[data-slot='file-upload'] input[type='file']"
+      ),
+      remove: [...document.querySelectorAll("button")].some(
+        (each) => each.getAttribute("aria-label") === "Remove Terms.txt"
+      ),
+      asked,
+    }).toStrictEqual({
+      listed: true,
+      add: false,
+      picker: null,
+      remove: false,
+      asked: [],
+    });
   });
 
   it("refuses instructions their save would refuse, counted as it counts them, before anything is made", async () => {
@@ -732,33 +1340,30 @@ describe("an agent's page", () => {
     const router = await shown(fake, "new");
     // Under the limit as typed, over it once each & is escaped.
     const typed = `${"&".repeat(10)}${"x".repeat(7980)}`;
-    await set(field("Name"), "Claire", "input");
-    await set(field("Instructions"), typed, "input");
-    await press(button("Make agent"));
+    await makeInChat({ name: "Claire", instructions: typed, whose: "offered" });
     expect({
       length: typed.length,
       asked,
-      at: router.state.location.href,
+      at: router.state.location.pathname,
       said: document.body.textContent.includes(
         "This instruction file is over its size limit."
       ),
-      kept: field("Instructions").value === typed,
-    }).toStrictEqual({
-      length: 7990,
-      asked: [],
-      at: "/",
-      said: true,
-      kept: true,
-    });
+    }).toStrictEqual({ length: 7990, asked: [], at: "/", said: true });
   });
 
   it("keeps instructions it couldn't save while their file can't be read either, shows them once it can, and drops them once saved", async () => {
     const fake = fakeConnections();
     fake.outOfReach.saves = 1;
     await shown(fake, "new");
-    await set(field("Name"), "Claire", "input");
-    await set(field("Instructions"), claireTold, "input");
-    await press(button("Make agent"));
+    // The Brain still out of reach as its page opens: no file read, for
+    // either agent.
+    fake.outOfReach.reads = 2;
+    await makeInChat({
+      name: "Claire",
+      instructions: claireTold,
+      whose: "offered",
+    });
+    const unreadable = document.body.textContent.includes("Not shown");
     /** The agent's page, opened again, as the address it was sent to. */
     const reopened = async (): Promise<void> => {
       act(() => {
@@ -767,16 +1372,12 @@ describe("an agent's page", () => {
       document.body.replaceChildren();
       await shown(fake, { agent: "Claire", tab: "instructions" });
     };
-    // The Brain still out of reach: no file read, for either agent.
-    fake.outOfReach.reads = 2;
-    await reopened();
-    const unreadable = document.body.textContent.includes("Not shown");
     await reopened();
     const readable = {
       text: field("Instructions").value,
       said: saysOutOfReach(),
     };
-    await press(button("Save"));
+    await press(exactButton("Save"));
     await reopened();
     expect({
       unreadable,
@@ -800,23 +1401,18 @@ describe("an agent's page", () => {
     const { asked } = fake;
     fake.outOfReach.saves = 1;
     const router = await shown(fake, "new");
-    await set(field("Name"), "Claire", "input");
-    await set(field("Instructions"), claireTold, "input");
-    await press(button("Make agent"));
-    const at = router.state.location.href;
-    act(() => {
-      root?.unmount();
+    await makeInChat({
+      name: "Claire",
+      instructions: claireTold,
+      whose: "offered",
     });
-    document.body.replaceChildren();
     // Its page, as the address it was sent to opens it.
-    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const at = router.state.location.href;
     const shownThen = {
       text: field("Instructions").value,
-      said: document.body.textContent.includes(
-        "The Brain can't be reached. Try again."
-      ),
+      said: saysOutOfReach(),
     };
-    await press(button("Save"));
+    await press(exactButton("Save"));
     expect({
       at,
       shownThen,
@@ -825,15 +1421,15 @@ describe("an agent's page", () => {
         scope: "agent",
         agentId: "agent-1",
       }),
-      saidAfter: document.body.textContent.includes(
-        "The Brain can't be reached. Try again."
-      ),
+      saidAfter: saysOutOfReach(),
     }).toStrictEqual({
       at: "/agents/agent-1?tab=instructions",
       shownThen: { text: claireTold, said: true },
       asked: [
-        ["make", { ...claire, job: "" }],
+        ["make", expect.objectContaining({ name: "Claire" })],
         ["told", "agent-1", claireTold],
+        // For everyone, as offered.
+        ["reach", "agent-1", true, { who: "everyone" }],
         ["told", "agent-1", claireTold],
         ["work out", "agent-1"],
       ],
@@ -842,53 +1438,123 @@ describe("an agent's page", () => {
     });
   });
 
-  it("makes an agent of the person's own for someone who isn't an admin, with no choice of whose, and opens its page", async () => {
+  it("makes an agent of the person's own for someone who isn't an admin, never asking whom it is for, and opens its page", async () => {
     const fake = fakeConnections();
     const { asked } = fake;
     const router = await shown(fake, "new", false);
-    const whose = document.querySelectorAll("input[name='whose']").length;
-    await set(field("Name"), "Claire", "input");
-    await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), claireTold, "input");
-    await press(button("Make agent"));
-    expect({ whose, asked, at: router.state.location.href }).toStrictEqual({
-      whose: 0,
+    await makeInChat({
+      name: "Claire",
+      instructions: claireTold,
+      whose: "unasked",
+    });
+    expect({
+      asked,
+      page: router.state.location.pathname,
+      tab: router.state.location.href.includes("tab=instructions"),
+    }).toStrictEqual({
       asked: [
-        ["make own", claire],
+        ["make own", expect.objectContaining({ name: "Claire" })],
         ["told", "agent-1", claireTold],
         ["work out", "agent-1"],
       ],
-      at: "/agents/agent-1",
+      page: "/agents/agent-1",
+      tab: false,
     });
   });
 
   it("offers an admin no agent of their own while the company has them off", async () => {
     const fake = fakeConnections();
-    await shown(fake, "new");
-    // Shown with the company's setting off, as its route reads it.
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
     await shown(fake, "new-own-off");
-    expect(document.querySelectorAll("input[name='whose']")).toHaveLength(0);
+    await press(answer("Something else"));
+    await set(answerBox(), "Chases unpaid invoices.", "input");
+    await press(button("Next"));
+    await set(answerBox(), "Claire", "input");
+    await press(button("Next"));
+    await press(button("Next"));
+    await press(button("Next"));
+    // Whom it is for: the company's people, never just the admin.
+    expect(answer("Everyone in the company")).toBeInstanceOf(HTMLElement);
+    expect(() => answer("Just for me")).toThrow("No answer Just for me");
+  });
+
+  it("asks an admin first who can use a new agent set up by hand, everyone as offered, and makes it for everyone", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    const offered = radio("Everyone").getAttribute("aria-checked");
+    const questions = await setUpByHand("Claire");
+    await press(button("Make agent"));
+    expect({ offered, questions }).toStrictEqual({
+      offered: "true",
+      questions: [
+        "Who can use it?",
+        "What should we call your agent?",
+        "What should Claire do?",
+        "How should Claire work?",
+        "Which apps can Claire use?",
+        "What can Claire do?",
+        "How hard should Claire think?",
+        "When should Claire work?",
+        "Ready to make Claire?",
+      ],
+    });
+    expect(asked[0]).toStrictEqual([
+      "make",
+      expect.objectContaining({ name: "Claire" }),
+    ]);
+    expect(asked).toContainEqual([
+      "reach",
+      "agent-1",
+      true,
+      { who: "everyone" },
+    ]);
+  });
+
+  it("asks no more of an agent just for its maker, set up by hand, than it keeps, and makes it theirs", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    await press(radio("Just me"));
+    const questions = await setUpByHand("Claire");
+    await press(button("Make agent"));
+    expect({ questions, made: asked[0] }).toStrictEqual({
+      // Never what it may do or when it works: one of their own has neither.
+      questions: [
+        "Who can use it?",
+        "What should we call your agent?",
+        "What should Claire do?",
+        "How should Claire work?",
+        "Which apps can Claire use?",
+        "How hard should Claire think?",
+        "Ready to make Claire?",
+      ],
+      made: ["make own", expect.objectContaining({ name: "Claire" })],
+    });
+    expect(
+      asked.some(([what]) => what === "reach" || what === "wake")
+    ).toBeFalsy();
+  });
+
+  it("never asks someone who isn't an admin who can use an agent they set up by hand", async () => {
+    const fake = fakeConnections();
+    await shown(fake, "new-guided", false);
+    expect(document.querySelector("h1")?.textContent).toBe(
+      "What should we call your agent?"
+    );
   });
 
   it("lets an admin make an agent just for themselves instead of one for the company", async () => {
     const fake = fakeConnections();
     const { asked } = fake;
     await shown(fake, "new");
-    const mine = document.querySelector("input[name='whose'][value='own']");
-    if (!(mine instanceof HTMLElement)) {
-      throw new TypeError("Expected the choice of whose it is");
-    }
-    await press(mine);
-    await set(field("Name"), "Claire", "input");
-    await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), claireTold, "input");
-    await press(button("Make agent"));
+    // Just for me: never asked when it works on its own.
+    await makeInChat({
+      name: "Claire",
+      instructions: claireTold,
+      whose: "mine",
+    });
     expect(asked).toStrictEqual([
-      ["make own", claire],
+      ["make own", expect.objectContaining({ name: "Claire" })],
       ["told", "agent-1", claireTold],
       ["work out", "agent-1"],
     ]);
@@ -900,21 +1566,26 @@ describe("an agent's page", () => {
     await connections.makeOwnAgent(claire);
     asked.length = 0;
     await shown(fake, { agent: "Claire" });
-    const tabs = [...document.querySelectorAll("[role='tab']")].map((each) =>
-      each.textContent?.trim()
-    );
     const text = document.body.textContent;
+    await press(button("Edit"));
     await set(field("Name"), "Clara", "input");
-    await press(button("Save"));
+    await press(dialogButton("Save"));
+    await openTab("access");
+    const access = choice("Who may use Clara");
+    await openTab("schedule");
     expect({
-      tabs,
       alone: text.includes("Yours alone: nobody else sees or asks it"),
       who: text.includes("Only you"),
+      access,
+      schedule: [...document.querySelectorAll("button")].some(
+        (each) => inView(each) && each.textContent?.trim() === "Add a time"
+      ),
       asked,
     }).toStrictEqual({
-      tabs: ["Overview", "Instructions"],
       alone: true,
       who: true,
+      access: null,
+      schedule: false,
       asked: [["change", "agent-1", { ...claire, name: "Clara" }]],
     });
   });
@@ -939,19 +1610,10 @@ describe("an agent's page", () => {
     });
   });
 
-  it("works out a new agent's apps from its instructions as it is made", async () => {
-    const fake = fakeConnections();
-    const { asked } = fake;
-    await shown(fake, "new");
-    await set(field("Name"), "Claire", "input");
-    await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), "Check Gmail for late payers.", "input");
-    await press(button("Make agent"));
-    expect(asked.map(([what]) => what)).toStrictEqual([
-      "make",
-      "told",
-      "work out",
-    ]);
+  it("offers no company agent to the company", async () => {
+    const fake = await withClaire();
+    await shown(fake, { agent: "Claire" });
+    expect(document.body.textContent).not.toContain("Offer to the company");
   });
 
   it("works its apps out from its instructions on a press and as they are saved, says what it turned on, and turns on what it suggests only on a press", async () => {
@@ -967,7 +1629,7 @@ describe("an agent's page", () => {
       "Answer about HubSpot deals too.",
       "input"
     );
-    await press(button("Save"));
+    await press(exactButton("Save"));
     expect({
       said: [
         said.includes("Added from its instructions: Google Workspace."),
@@ -985,325 +1647,6 @@ describe("an agent's page", () => {
         ["told", "agent-1", "Answer about HubSpot deals too."],
         ["work out", "agent-1"],
       ],
-    });
-  });
-
-  it("offers no company agent to the company", async () => {
-    const fake = await withClaire();
-    await shown(fake, { agent: "Claire" });
-    expect(document.body.textContent).not.toContain("Offer to the company");
-  });
-
-  it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire", tab: "access" });
-    const who = choice("Who may use Claire");
-    const readOwn = choice("Read their own, for Claire");
-    if (who === null || readOwn === null) {
-      throw new TypeError("Expected Claire's choices");
-    }
-    const before = [who.value, readOwn.value];
-    await set(who, "everyone", "change");
-    await set(readOwn, "same", "change");
-    expect(before).toStrictEqual(["nobody", "nobody"]);
-    expect(asked).toStrictEqual([
-      ["reach", "agent-1", true, { who: "everyone" }],
-      ["class", "agent-1", "read-own", { who: "asClass" }],
-    ]);
-    // Read again from core: the page shows what it keeps.
-    expect(choice("Who may use Claire")?.value).toBe("everyone");
-    expect(choice("Read their own, for Claire")?.value).toBe("same");
-  });
-
-  it("saves a new name with the rest of the agent as it was", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire" });
-    await set(field("Name"), "Clara", "input");
-    await press(button("Save"));
-    expect(asked).toStrictEqual([
-      ["change", "agent-1", { ...claire, name: "Clara" }],
-    ]);
-  });
-
-  it("pauses an agent from its heading, and says it is paused", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire" });
-    await press(onSwitch());
-    expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(document.querySelector("h1")?.parentElement?.textContent).toContain(
-      "Paused"
-    );
-    expect(document.body.textContent).toContain("Claire is paused");
-  });
-
-  it("offers someone who isn't the company's admin nothing to change", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire" }, false);
-    expect({
-      name: field("Name").disabled,
-      save: button("Save").disabled,
-      on:
-        Object.hasOwn(onSwitch().dataset, "disabled") ||
-        onSwitch().getAttribute("aria-disabled") === "true",
-    }).toStrictEqual({ name: true, save: true, on: true });
-    await openTab("Schedule");
-    expect(document.body.textContent).toContain(
-      "Claire never works on its own."
-    );
-    expect(document.body.textContent).not.toContain("Add a time");
-    expect(asked).toStrictEqual([]);
-  });
-
-  it("says why an agent wasn't made on the page it was typed on, and keeps what was typed", async () => {
-    const fake = fakeConnections();
-    const router = await shown(fake, "new");
-    await set(field("Name"), "Stephen", "input");
-    await press(button("Make agent"));
-    expect(document.body.textContent).toContain(
-      "Another agent already has that name."
-    );
-    expect(field("Name").value).toBe("Stephen");
-    expect(router.state.location.href).toBe("/");
-  });
-
-  it("keeps what is typed and not yet saved while the agent is paused, and while another tab is looked at", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire", tab: "instructions" });
-    await set(field("Instructions"), "A draft, not saved.", "input");
-    // Paused: core is asked and the page read again.
-    await press(onSwitch());
-    const afterPause = field("Instructions").value;
-    await openTab("Access");
-    await openTab("Instructions");
-    expect(asked.at(-1)).toStrictEqual(["paused", "agent-1", true]);
-    expect([afterPause, field("Instructions").value]).toStrictEqual([
-      "A draft, not saved.",
-      "A draft, not saved.",
-    ]);
-    // And it is the draft that is saved.
-    await press(button("Save"));
-    expect(asked.slice(-2)).toStrictEqual([
-      ["told", "agent-1", "A draft, not saved."],
-      ["work out", "agent-1"],
-    ]);
-  });
-
-  it("adds a time an agent works on its own, as a schedule core keeps, and pauses and removes it", async () => {
-    const fake = fakeConnections();
-    const { asked } = fake;
-    await shown(fake, { agent: "Stephen", tab: "schedule" });
-    await set(field("At, in the company's time zone"), "07:30", "input");
-    await set(
-      field("What to ask it each time"),
-      " Look for invoices that are overdue. ",
-      "input"
-    );
-    await press(button("Add a time"));
-    expect(asked).toStrictEqual([
-      [
-        "wake",
-        "organization",
-        {
-          cron: "30 7 * * 1-5",
-          personId: "user-anna",
-          opening: "Look for invoices that are overdue.",
-        },
-      ],
-    ]);
-    // Shown in words, for whom and with what it is asked.
-    expect(document.body.textContent).toContain("Every weekday at 07:30");
-    expect(document.body.textContent).toContain(
-      "For Anna de Vries: Look for invoices that are overdue."
-    );
-
-    await press(toggle("Every weekday at 07:30, for Anna de Vries, is on"));
-    await press(button("Remove Every weekday at 07:30, for Anna de Vries"));
-    expect(asked.slice(1)).toStrictEqual([
-      ["wake paused", "wake-1", true],
-      ["wake deleted", "wake-1"],
-    ]);
-    expect(document.body.textContent).not.toContain("Every weekday at 07:30");
-  });
-
-  it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
-    const fake = fakeConnections();
-    const { asked } = fake;
-    await shown(fake, { agent: "Stephen", tab: "schedule" });
-    await set(field("What to ask it each time"), "refuse this", "input");
-    // Another change on the page saves and the page is read again.
-    await press(onSwitch());
-    expect(field("What to ask it each time").value).toBe("refuse this");
-    // Core refuses it: still there to be corrected, and said why.
-    await press(button("Add a time"));
-    expect(asked.at(-1)?.[0]).toBe("wake");
-    expect(field("What to ask it each time").value).toBe("refuse this");
-    expect(document.body.textContent).toContain("That isn't a wake-up.");
-  });
-
-  it("shows the time zone a wake-up was made in", async () => {
-    const fake = fakeConnections();
-    await shown(fake, { agent: "Stephen", tab: "schedule" });
-    await set(field("What to ask it each time"), "Check the inbox.", "input");
-    await press(button("Add a time"));
-    expect(document.body.textContent).toContain(
-      "Every weekday at 09:00 · Europe/Amsterdam"
-    );
-  });
-
-  it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire" });
-    const pen = document.querySelector("input[aria-label='Pen']");
-    const model = document.querySelector("select");
-    if (!(pen instanceof HTMLElement) || model === null) {
-      throw new TypeError("Expected the picture and the model to choose");
-    }
-    await press(pen);
-    await press(button("Save"));
-    // The model's card was shown before the picture was saved.
-    await set(model, "anthropic/claude-sonnet-4-5", "change");
-    const [, saveModel] = [...document.querySelectorAll("button")].filter(
-      (each) => each.textContent?.trim() === "Save"
-    );
-    if (saveModel === undefined) {
-      throw new TypeError("Expected the model's Save");
-    }
-    await press(saveModel);
-    // And the name's card before the model was.
-    await set(field("Name"), "Clara", "input");
-    await press(button("Save"));
-    expect(asked).toStrictEqual([
-      ["change", "agent-1", { ...claire, face: "pen" }],
-      [
-        "change",
-        "agent-1",
-        { ...claire, face: "pen", model: "anthropic/claude-sonnet-4-5" },
-      ],
-      [
-        "change",
-        "agent-1",
-        {
-          ...claire,
-          name: "Clara",
-          face: "pen",
-          model: "anthropic/claude-sonnet-4-5",
-        },
-      ],
-    ]);
-  });
-
-  it("gives an agent the files an admin picks, each with its name and content, lists them, and removes one", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire", tab: "instructions" });
-    await pick(
-      new File(["# Close\n\nTwo signatures."], "Close checklist.md"),
-      new File(["Net 30."], "Terms.txt")
-    );
-    const listed = document.body.textContent;
-    await press(button("Remove Close checklist.md"));
-    expect({
-      asked,
-      listed: [
-        listed.includes("Close checklist.md"),
-        listed.includes("Terms.txt"),
-      ],
-      after: [
-        document.body.textContent.includes("Close checklist.md"),
-        document.body.textContent.includes("Terms.txt"),
-      ],
-      // Who may learn what a document says, said where one is added.
-      warned: listed.includes(
-        "Anyone who may ask Claire can learn what these say."
-      ),
-    }).toStrictEqual({
-      asked: [
-        [
-          "document",
-          "agent-1",
-          "Close checklist.md",
-          "# Close\n\nTwo signatures.",
-        ],
-        ["document", "agent-1", "Terms.txt", "Net 30."],
-        ["document removed", "agent-1", "document-1"],
-      ],
-      listed: [true, true],
-      after: [false, true],
-      warned: true,
-    });
-  });
-
-  it("says why a file wasn't taken, keeps those taken before it, and stops there", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire", tab: "instructions" });
-    await pick(
-      new File(["a"], "a.md"),
-      new File(["not a PDF"], "policy.pdf"),
-      new File(["c"], "c.md")
-    );
-    expect({
-      asked: asked.map((each) => each[2]),
-      said: document.body.textContent.includes(
-        "Only PDF, Word and text files can be attached."
-      ),
-      kept: document.body.textContent.includes("a.md"),
-    }).toStrictEqual({
-      asked: ["a.md", "policy.pdf"],
-      said: true,
-      kept: true,
-    });
-  });
-
-  it("never sends core a file larger than it takes, or of a type it doesn't, and says why", async () => {
-    const fake = await withClaire();
-    const { asked } = fake;
-    await shown(fake, { agent: "Claire", tab: "instructions" });
-    const large = new File(["a"], "large.md");
-    Object.defineProperty(large, "size", { value: chatFileMaxBytes + 1 });
-    await pick(large);
-    const tooLarge = document.body.textContent.includes(
-      "A document is at most 10 MB"
-    );
-    await pick(new File(["MZ"], "tool.exe"));
-    expect({
-      asked,
-      tooLarge,
-      unsupported: document.body.textContent.includes(
-        "A document is a PDF, Word (.docx)"
-      ),
-    }).toStrictEqual({ asked: [], tooLarge: true, unsupported: true });
-  });
-
-  it("shows someone who isn't the company's admin an agent's documents, with no way to add or remove one", async () => {
-    const fake = await withClaire();
-    const { connections, asked } = fake;
-    await connections.addAgentDocument("agent-1", {
-      name: "Terms.txt",
-      bytes: new TextEncoder().encode("Net 30."),
-    });
-    asked.length = 0;
-    await shown(fake, { agent: "Claire", tab: "instructions" }, false);
-    expect({
-      listed: document.body.textContent.includes("Terms.txt"),
-      add: document.body.textContent.includes("Add document"),
-      picker: document.querySelector("[data-testid='agent-document-input']"),
-      remove: [...document.querySelectorAll("button")].some(
-        (each) => each.getAttribute("aria-label") === "Remove Terms.txt"
-      ),
-      asked,
-    }).toStrictEqual({
-      listed: true,
-      add: false,
-      picker: null,
-      remove: false,
-      asked: [],
     });
   });
 

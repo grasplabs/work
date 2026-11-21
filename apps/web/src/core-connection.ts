@@ -15,6 +15,8 @@ import {
   withTimeout,
 } from "./core.ts";
 import type { Session } from "./core.ts";
+import { forgetSignedIn } from "./frame/signed-in-here.ts";
+import { forgetChatLink } from "./settings/chat-link.ts";
 
 /** Why the person's session ended under the page. */
 export type SessionEnded = "signed-out" | "principal-changed";
@@ -91,17 +93,24 @@ const onPageBack = (back: () => void): void => {
 };
 
 /**
+ * Whether core answers, as the connection last found: trying to reach it,
+ * reached, or not reached on the last try (it tries again by itself). For
+ * a page that failed, to say truthfully whether Grasp can be reached.
+ */
+export type CoreReach = "checking" | "reachable" | "unreachable";
+
+/**
  * How a caller waits for the connection. A person waiting (the shell's
  * calls, which give up in a few seconds) cuts a reconnect pause short; an
  * App frame is patient: it waits for the next attempt the backoff makes,
  * so however often a page asks during an outage, it never adds one.
  */
-export interface Waiting {
+interface Waiting {
   patient?: boolean;
 }
 
 /** What a tab's connection is made with. */
-export interface CoreConnectionOptions {
+interface CoreConnectionOptions {
   /**
    * Called once the person's session ended under the page, after every
    * App frame on the connection was told (main.tsx loads the page again).
@@ -169,6 +178,9 @@ export class CoreConnection {
   readonly #frames = new Set<(why: SessionEnded) => void>();
   /** Told each time core refuses a call for the person's role. */
   readonly #roleRefusals = new Set<() => void>();
+  #reach: CoreReach = "checking";
+  /** Told each time `reach` changes. */
+  readonly #reachWatchers = new Set<() => void>();
   /** Told each time a connection answers. */
   readonly #answered = new Set<() => void>();
 
@@ -180,6 +192,29 @@ export class CoreConnection {
     this.#onSessionEnded = onSessionEnded;
     this.#connectCore = connect;
     this.#watchPage = watchPage;
+  }
+
+  /** Whether core answers, as the connection last found ({@link CoreReach}). */
+  get reach(): CoreReach {
+    return this.#reach;
+  }
+
+  /** Tells `changed` each time `reach` changes. Returns what stops it listening. */
+  watchReach(changed: () => void): () => void {
+    this.#reachWatchers.add(changed);
+    return () => {
+      this.#reachWatchers.delete(changed);
+    };
+  }
+
+  #setReach(next: CoreReach): void {
+    if (next === this.#reach) {
+      return;
+    }
+    this.#reach = next;
+    for (const changed of this.#reachWatchers) {
+      changed();
+    }
   }
 
   /**
@@ -298,8 +333,10 @@ export class CoreConnection {
       }
     }
     // The open chats were this person's: whoever signs in next starts
-    // without them, however the session ended.
+    // without them, however the session ended; and the reload paints no
+    // frame before core says who is in (frame/signed-in-here.ts).
     forgetActiveChats();
+    forgetSignedIn();
     this.#onSessionEnded();
     if (failures.length > 0) {
       throw new AggregateError(failures, "Stopping a frame failed.");
@@ -411,6 +448,7 @@ export class CoreConnection {
         // Closed while waiting: a new connection would never be closed.
         throw closedError();
       }
+      this.#setReach("checking");
       const api = this.#connectCore();
       let connected: Connected;
       try {
@@ -418,6 +456,7 @@ export class CoreConnection {
         connected = await answered(api);
       } catch {
         disposeQuietly(api);
+        this.#setReach("unreachable");
         continue;
       }
       if (this.#closed) {
@@ -437,6 +476,7 @@ export class CoreConnection {
       }
       this.#person ??= person;
       this.#live = api;
+      this.#setReach("reachable");
       // Registered after the answer, it still hears of a break before it.
       api.onRpcBroken(() => {
         this.#lost(api);
@@ -457,6 +497,7 @@ export class CoreConnection {
       return;
     }
     this.#live = undefined;
+    this.#setReach("unreachable");
     this.#connected = this.#connect(0);
     void settled(this.#connected);
   }
@@ -487,7 +528,7 @@ export class CoreConnection {
 }
 
 /** Whether core answers, how people sign in here, and who is signed in. */
-export interface CoreStatus {
+interface CoreStatus {
   connected: boolean;
   signInOptions: SignInOption[];
   identity?: Identity;
@@ -616,6 +657,23 @@ const remember = (core: CoreConnection, status: CoreStatus): void => {
   }
 };
 
+/** The ask under way while nothing is known yet, per connection. */
+const firstAsks = new WeakMap<CoreConnection, Promise<CoreStatus>>();
+
+/** Asks core while nothing is known, keeping an answer with someone in it. */
+const askFirst = async (core: CoreConnection): Promise<CoreStatus> => {
+  try {
+    const status = await loadCoreStatus(core);
+    if (status.connected && status.identity !== undefined) {
+      remember(core, status);
+    }
+    return status;
+  } finally {
+    // Asked again next time unless remembered: nobody in, or core away.
+    firstAsks.delete(core);
+  }
+};
+
 /**
  * The shell's `loadCoreStatus`, asked on every way to a page: core is
  * asked the first time, and every time until it answered with someone
@@ -637,11 +695,14 @@ export const shellStatus = async (
 ): Promise<CoreStatus> => {
   const known = knownStatuses.get(core);
   if (known === undefined) {
-    const status = await loadCoreStatus(core);
-    if (status.connected && status.identity !== undefined) {
-      remember(core, status);
+    // One ask at a time: the tab starts it as it loads (main.tsx), and the
+    // shell, asking meanwhile, waits for the same answer.
+    let asking = firstAsks.get(core);
+    if (asking === undefined) {
+      asking = askFirst(core);
+      firstAsks.set(core, asking);
     }
-    return status;
+    return await asking;
   }
   if (Date.now() - known.at >= frameReadMs) {
     askNowBehind(core);
@@ -675,6 +736,20 @@ export const signOut = async (core: CoreConnection): Promise<void> => {
   // Core didn't sign the person out (it failed, or a proxy answered).
   if (!response.ok) {
     throw new Error(`Signing out failed (${response.status}).`);
+  }
+  // What this browser kept for the person alone goes with them, so the
+  // next person here isn't offered it: a chat link they opened, and the
+  // setup's place and unsent message (routes/setup.tsx). Not on every
+  // session end: a chat link is kept across the sign-in it may need.
+  forgetChatLink();
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("grasp.setup.")) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // A private window may refuse storage: nothing was kept.
   }
   core.end("signed-out");
 };

@@ -68,7 +68,6 @@ const placed = async (model = "openai/gpt-5") => {
         <AskOrCompose
           asking={asked}
           busy={false}
-          compact
           model={model}
           models={model === "" ? [] : [model]}
           onAnswer={(text, given) => {
@@ -88,6 +87,23 @@ const placed = async (model = "openai/gpt-5") => {
       ),
     }),
     history: createMemoryHistory(),
+    // The box lists what can be mentioned: nothing, here.
+    context: {
+      core: {
+        withSession: async <T,>(
+          read: (session: {
+            apps: { list: () => Promise<[]> };
+            workflowResources: { list: () => Promise<[]> };
+            chats: { people: () => Promise<[]> };
+          }) => Promise<T>
+        ): Promise<T> =>
+          await read({
+            apps: { list: async () => await Promise.resolve([]) },
+            workflowResources: { list: async () => await Promise.resolve([]) },
+            chats: { people: async () => await Promise.resolve([]) },
+          }),
+      },
+    },
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -123,11 +139,25 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** The option row labelled `label`, with its control. */
+/** The control (a radio or a checkbox) of the option row `row`. */
+const controlOf = (row: Element): Element | null =>
+  row.querySelector('[role="radio"], [role="checkbox"]');
+
+/** What an option row says, less the number its control shows. */
+const wordsOf = (row: Element): string => {
+  const copy = row.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  controlOf(copy)?.remove();
+  return copy.textContent?.trim() ?? "";
+};
+
+/** The option row labelled `label`, with its control: what a person presses. */
 const option = (label: string): HTMLElement => {
-  const found = [
-    ...document.querySelectorAll<HTMLElement>('[data-slot="ask-card-option"]'),
-  ].find((each) => each.textContent.startsWith(label));
+  const found = [...document.querySelectorAll<HTMLElement>("label")].find(
+    (each) => controlOf(each) !== null && wordsOf(each).startsWith(label)
+  );
   if (found === undefined) {
     throw new Error(`No option ${label}`);
   }
@@ -147,7 +177,7 @@ const pick = (label: string): void => {
 
 /** Whether the option labelled `label` is picked. */
 const picked = (label: string): boolean =>
-  option(label).querySelector("[data-checked]") !== null;
+  controlOf(option(label))?.getAttribute("aria-checked") === "true";
 
 /** Presses `key` where focus is, as the person does, with no click first. */
 const press = (key: string): void => {
@@ -158,16 +188,28 @@ const press = (key: string): void => {
 };
 
 /** The option whose control has focus, by its label. */
-const focusedOption = (): string | undefined =>
-  document.activeElement
-    ?.closest<HTMLElement>('[data-slot="ask-card-option"]')
-    ?.querySelector(":scope > span:not([data-slot]) > span")?.firstChild
-    ?.textContent ?? undefined;
+const focusedOption = (): string | undefined => {
+  const row = document.activeElement?.closest("label");
+  if (row === null || row === undefined || controlOf(row) === null) {
+    return undefined;
+  }
+  // Its label alone, without the description or the Recommended mark: the
+  // first words after its control.
+  const words = [...row.children].find((child) => controlOf(child) === null);
+  let first = words?.firstElementChild;
+  while (
+    first?.firstElementChild !== null &&
+    first?.firstElementChild !== undefined
+  ) {
+    first = first.firstElementChild;
+  }
+  return first?.textContent ?? undefined;
+};
 
 /** Types `text` into the field for the person's own words. */
 const typeOwn = (text: string): void => {
   const field = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Your answer"]'
+    'input[aria-label^="In my own words"]'
   );
   if (field === null) {
     throw new Error("No field for their own words");
@@ -253,7 +295,8 @@ describe("questions in place of the box", () => {
       first,
       toWhom,
       answered: answered.map(({ text }) => text),
-      typing: document.querySelector('[role="textbox"]') !== null,
+      typing:
+        document.querySelector('[data-slot="composer"] textarea') !== null,
     }).toStrictEqual({
       // The key moves focus to what it picks.
       focusMoved: "Weekly",
@@ -307,7 +350,8 @@ describe("questions in place of the box", () => {
     click(button("Next"));
     const own = button("Open the chat").type;
     click(button("Type instead"));
-    const boxShown = document.querySelector('[role="textbox"]') !== null;
+    const boxShown =
+      document.querySelector('[data-slot="composer"] textarea') !== null;
     click(button("Back to the 2 questions"));
     const onSecond = says("To whom?");
     click(button("Back"));
@@ -325,14 +369,17 @@ describe("questions in place of the box", () => {
     pick("Weekly");
     click(button("Next"));
     pick("Me");
-    const sendDisabled = button("Send").disabled;
     click(button("Send"));
+    // Grasp UI's Question tool can't hold its Send off from outside (asked
+    // of the library): pressed, it sends nothing and says why.
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect({
-      sendDisabled,
       sent,
       connect: says("Connect an AI provider"),
-    }).toStrictEqual({ sendDisabled: true, sent: [], connect: true });
+    }).toStrictEqual({ sent: [], connect: true });
   });
 });
 

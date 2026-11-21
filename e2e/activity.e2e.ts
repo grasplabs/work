@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { saidOf, toItem } from "./inbox.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
-import { toCard } from "./pile.ts";
 
-// The Activity page: an admin approves one App's permission request and
-// rejects another, finds the approval in the audit log with its details,
+// An admin grants one App's permission request in the Inbox and declines
+// another, finds the approval in the audit log with its details,
 // and exports what the log's filters match. Search, export and the grant
 // themselves are core's tests.
 
@@ -16,6 +16,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
 }) => {
   const { admin, builder } = peopleIn("activity");
   const appName = `Board pack ${crypto.randomUUID()}`;
+  // Another App asks to read the Brain: each row names one request.
+  const brainApp = `Board notes ${crypto.randomUUID()}`;
   const { core, api } = apiOf(builder);
   let approved: string;
   try {
@@ -29,8 +31,12 @@ test("an admin approves a permission request, finds it in the audit log, and exp
       actions: ["statistics"],
       binding: "BOARD_PACK",
     }));
+    const { id: brainAppId } = await api.apps.create({
+      name: brainApp,
+      description: "Reads the Brain for the board meeting",
+    });
     await api.permissions.request({
-      subject: { type: "app", appId },
+      subject: { type: "app", appId: brainAppId },
       object: { type: "platform" },
       actions: ["brain"],
       binding: "BRAIN",
@@ -39,35 +45,31 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     core[Symbol.dispose]();
   }
   const page = await pageOf(admin);
-  // An admin's permission requests wait on the dashboard.
-  await page.goto("/dashboard");
-  // Other tests' requests wait in the pile too: it is gone through to this
-  // App's cards.
-  const reading = await toCard(
+  // An admin's permission requests wait in the Inbox, among other tests'.
+  await page.goto("/inbox");
+  const reading = await toItem(
     page,
-    new RegExp(`^${appName}: statistics on Platform statistics\\.`, "u")
+    new RegExp(`^${appName}$`, "u"),
+    new RegExp(`^Grant ${appName}: statistics on Platform statistics\\.`, "u")
   );
-  await expect(reading).toContainText("as BOARD_PACK");
+  await reading.getByRole("button", { name: "Details" }).click();
   await expect(reading).toContainText("Version to review: None live");
-  await reading.getByRole("button", { name: /^Approve /u }).click();
+  await reading.getByRole("button", { name: "Grant it" }).click();
   await expect(
-    page.getByRole("status").filter({
-      hasText: `Approved: ${appName}: statistics on Platform statistics.`,
+    saidOf(page).filter({
+      hasText: `Approved: Grant ${appName}: statistics on Platform statistics.`,
     })
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
-  const recalling = await toCard(
+  const recalling = await toItem(
     page,
-    new RegExp(`^${appName}: brain on Company Brain, read only\\.`, "u")
+    new RegExp(`^${brainApp}$`, "u"),
+    new RegExp(`^Grant ${brainApp}: brain on Company Brain, read only\\.`, "u")
   );
-  await recalling.getByRole("button", { name: /^Reject /u }).click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Reject", exact: true })
-    .click();
+  await recalling.getByRole("button", { name: "Decline" }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: `Rejected: ${appName}` })
+    saidOf(page).filter({ hasText: `Declined: Grant ${brainApp}` })
   ).toHaveCount(1);
   await expect(recalling).toHaveCount(0);
 
@@ -167,29 +169,27 @@ test("an admin approves an App's request only for the version the list shows", a
     });
 
     const page = await pageOf(admin);
-    await page.goto("/dashboard");
-    const card = await toCard(
+    await page.goto("/inbox");
+    const card = await toItem(
       page,
-      new RegExp(`^${appName}: brain on Company Brain, read only\\.`, "u")
+      new RegExp(`^${appName}$`, "u"),
+      new RegExp(`^Grant ${appName}: brain on Company Brain, read only\\.`, "u")
     );
+    await card.getByRole("button", { name: "Details" }).click();
     // Versions as people know them: YY.MM.N, the first this month.
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
 
-    // Another version is published while the admin looks at version 1.
+    // Another version is published while the admin looks at version 1: the
+    // grant is refused, and the card shows the version there is now.
     await release(builds.api, appId, { "README.md": "Two" });
-    await card.getByRole("button", { name: /^Approve /u }).click();
-    await expect(card.getByRole("alert")).toHaveText(
-      "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
-    );
+    await card.getByRole("button", { name: "Grant it" }).click();
+    await expect(saidOf(page).filter({ hasText: "Approved:" })).toHaveCount(0);
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
-    await expect(
-      page.getByRole("status").filter({ hasText: "Approved:" })
-    ).toHaveCount(0);
 
-    await card.getByRole("button", { name: /^Approve /u }).click();
+    await card.getByRole("button", { name: "Grant it" }).click();
     await expect(
-      page.getByRole("status").filter({
-        hasText: `Approved: ${appName}: brain on Company Brain, read only.`,
+      saidOf(page).filter({
+        hasText: `Approved: Grant ${appName}: brain on Company Brain, read only.`,
       })
     ).toHaveCount(1);
     await expect(card).toHaveCount(0);

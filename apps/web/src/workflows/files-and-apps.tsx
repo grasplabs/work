@@ -5,7 +5,41 @@ import type {
   WorkflowFile,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import type { ReactNode } from "react";
+
+import { integrationsOf, stateOf } from "../connections/integrations.ts";
+import type { Integration } from "../connections/integrations.ts";
+import { ProviderMark } from "../connections/provider-mark.tsx";
+import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatBytes, formatDateTime } from "../format.ts";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
+import { Cable } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
   TableBody,
@@ -13,20 +47,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ReactNode } from "react";
-
-import { Confirmed } from "../confirmed.tsx";
-import { AppLogo } from "../connections/app-logo.tsx";
-import { integrationsOf, stateOf } from "../connections/integrations.ts";
-import type { Integration } from "../connections/integrations.ts";
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatBytes, formatDateTime } from "../format.ts";
-import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -54,82 +77,121 @@ import type { WorkflowApps } from "./workflow-apps.ts";
 // connect (a cold catalog can take seconds), which no other tab needs, so
 // the page never waits for them.
 
+const styles = stylex.create({
+  tab: { display: "flex", flexDirection: "column", gap: grasp.space6 },
+  versions: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  version: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  approved: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+  },
+  approvedWords: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    minWidth: 0,
+  },
+  loading: { padding: grasp.space4 },
+});
+
+/** One part of the tab, on a card of its own under its title. */
 const Section = ({
-  id,
   title,
+  flush = false,
+  info,
   children,
 }: {
-  id: string;
-  title: ReactNode;
+  title: string;
+  flush?: boolean;
+  /** More about it behind the info mark beside its title. */
+  info?: string;
   children: ReactNode;
 }) => (
-  <section aria-labelledby={id} className="flex flex-col gap-3">
-    <h2 className="font-medium" id={id}>
-      {title}
-    </h2>
+  <SectionCard
+    density="compact"
+    flush={flush}
+    title={title}
+    {...(info === undefined ? {} : { info })}
+  >
     {children}
-  </section>
+  </SectionCard>
 );
 
-const Quiet = ({ children }: { children: ReactNode }) => (
-  <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-    {children}
-  </p>
-);
-
-/** How a connected app stands, in words. */
+/** How a connected app stands, in words: a badge only when it needs someone. */
 const ConnectedState = ({ integration }: { integration: Integration }) => {
+  const { t } = useLingui();
   const state = stateOf(integration);
   if (state === "needs_reauth") {
     return (
-      <Badge variant="destructive">
-        <Trans>Needs someone to sign in again</Trans>
+      <Badge size="sm" tone="attention">
+        {t`Needs someone to sign in again`}
       </Badge>
     );
   }
   return (
-    <Badge variant="secondary">
-      <Trans context="state of one app">Connected</Trans>
+    <Badge size="sm" tone="success">
+      {t({ message: "Connected", context: "state of one app" })}
     </Badge>
   );
 };
 
 const Apps = ({ apps }: { apps: WorkflowApps }) => {
+  const { t } = useLingui();
   if (apps.connected.length === 0 && apps.unconnected.length === 0) {
     return (
-      <Quiet>
-        <Trans>It works in no app.</Trans>
-      </Quiet>
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`It works in no app.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
-    <ul className="bg-card flex flex-col divide-y rounded-xl border">
+    <ItemGroup separated>
       {apps.connected.map((integration) => (
-        <li className="flex items-center gap-3 px-4 py-3" key={integration.key}>
-          <AppLogo logo={integration.logo} name={integration.name} size="sm" />
-          <Link
-            className="min-w-0 flex-1 truncate font-medium hover:underline focus-visible:underline"
-            params={{ integration: integration.key }}
-            to="/integrations/$integration"
-          >
-            {integration.name}
-          </Link>
-          <ConnectedState integration={integration} />
-        </li>
+        <Item
+          key={integration.key}
+          render={
+            <Link
+              params={{ integration: integration.key }}
+              to="/integrations/$integration"
+            />
+          }
+          size="xs"
+        >
+          <ItemMedia>
+            <ProviderMark
+              id={integration.id}
+              logo={integration.logo}
+              name={integration.name}
+            />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>{integration.name}</ItemTitle>
+          </ItemContent>
+          <ItemActions>
+            <ConnectedState integration={integration} />
+          </ItemActions>
+        </Item>
       ))}
       {apps.unconnected.map(({ alias, contractId }) => (
-        <li className="flex items-center gap-3 px-4 py-3" key={alias}>
-          <AppLogo logo={null} name={alias} size="sm" />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <code className="truncate font-medium">{alias}</code>
-            <span className="text-muted-foreground truncate">{contractId}</span>
-          </span>
-          <Badge variant="outline">
-            <Trans>Not connected</Trans>
-          </Badge>
-        </li>
+        <Item key={alias} size="xs">
+          <ItemMedia icon={Cable} iconLook="inline" />
+          <ItemContent>
+            <ItemTitle>
+              <code>{alias}</code>
+            </ItemTitle>
+            <ItemDescription>{contractId}</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Badge size="sm" tone="attention">{t`Not connected`}</Badge>
+          </ItemActions>
+        </Item>
       ))}
-    </ul>
+    </ItemGroup>
   );
 };
 
@@ -137,36 +199,34 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
   const { t } = useLingui();
   if (files.length === 0) {
     return (
-      <Quiet>
-        <Trans>Its runs have written no file you may see.</Trans>
-      </Quiet>
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Its runs have written no file you may see.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
-    <div className="bg-card overflow-hidden rounded-xl border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead variant="card">{t`Name`}</TableHead>
-            <TableHead variant="card">{t`Type`}</TableHead>
-            <TableHead variant="card">{t`Size`}</TableHead>
-            <TableHead variant="card">{t`Written`}</TableHead>
+    <Table aria-label={t`Files its runs wrote`}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t`Name`}</TableHead>
+          <TableHead>{t`Type`}</TableHead>
+          <TableHead>{t`Size`}</TableHead>
+          <TableHead>{t`Written`}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {files.map((file) => (
+          <TableRow key={file.id}>
+            <TableCell>{file.name}</TableCell>
+            <TableCell>{file.type}</TableCell>
+            <TableCell>{formatBytes(file.size)}</TableCell>
+            <TableCell>{formatDateTime(file.writtenAt)}</TableCell>
           </TableRow>
-        </TableHeader>
-        <TableBody>
-          {files.map((file) => (
-            <TableRow key={file.id}>
-              <TableCell variant="roomy">{file.name}</TableCell>
-              <TableCell variant="roomy">{file.type}</TableCell>
-              <TableCell variant="roomy">{formatBytes(file.size)}</TableCell>
-              <TableCell variant="roomy">
-                {formatDateTime(file.writtenAt)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+        ))}
+      </TableBody>
+    </Table>
   );
 };
 
@@ -205,15 +265,9 @@ const Waiting = ({
       }
     };
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-muted-foreground">
-        <Trans>
-          It can&apos;t start until you approve what each binding reaches, for
-          the version it runs.
-        </Trans>
-      </p>
+    <div {...stylex.props(styles.versions)}>
       {pending.map(({ version, bindings }) => (
-        <div className="flex flex-col gap-2" key={version}>
+        <div key={version} {...stylex.props(styles.version)}>
           <PendingBindingList
             bindings={bindings}
             busy={busy}
@@ -258,9 +312,11 @@ const Approved = ({
   const { busy, failure, run } = useCoreAction();
   if (declared.length === 0) {
     return (
-      <Quiet>
-        <Trans>Version {version} declares no binding to approve.</Trans>
-      </Quiet>
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Version ${version} declares no binding to approve.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const revoke = async (alias: string, approval: string): Promise<void> => {
@@ -269,20 +325,19 @@ const Approved = ({
       await session.workflowResources.revokeBinding(workflow, approval);
       return true;
     });
-    if (revoked === true) {
-      onSaid(t`Revoked: ${alias}.`);
-      onChanged();
+    if (revoked !== true) {
+      // The dialog stays open; why is said under the bindings.
+      throw new Error("It wasn't revoked.");
     }
+    onSaid(t`Revoked: ${alias}.`);
+    onChanged();
   };
   return (
-    <div className="flex flex-col gap-2">
-      <h3 className="font-medium">
-        <Trans>Version {version}, which runs now</Trans>
-      </h3>
-      <ul
-        aria-label={t`Bindings of version ${version}`}
-        className="flex flex-col gap-2"
-      >
+    <div {...stylex.props(styles.version)}>
+      <Text element="p" size="sm" weight="medium">
+        {t`Version ${version}, which runs now`}
+      </Text>
+      <ItemGroup aria-label={t`Bindings of version ${version}`}>
         {declared.map(({ alias, kind, contractId, fingerprint }) => {
           // Served as a start serves it: approved for this version's own
           // declaration of the alias (its contract's fingerprint, as the
@@ -303,8 +358,8 @@ const Approved = ({
                 kind={kind}
               >
                 <span>
-                  <Badge variant="outline">
-                    <Trans>Waiting for an admin&apos;s approval</Trans>
+                  <Badge size="sm" tone="attention">
+                    {t`Waiting for an admin's approval`}
                   </Badge>
                 </span>
               </BindingFrame>
@@ -320,38 +375,53 @@ const Approved = ({
               key={alias}
               kind={kind}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex min-w-0 flex-col gap-1">
+              <div {...stylex.props(styles.approved)}>
+                <span {...stylex.props(styles.approvedWords)}>
                   <span>
                     {targetWords(approval.target, approval.label, {
                       people: names.people,
                       teams,
                     })}
                   </span>
-                  <span className="text-muted-foreground">
-                    <Trans>
-                      Approved by {approver} on {at}
-                    </Trans>
-                  </span>
+                  <Text element="span" size="sm" tone="muted">
+                    {t`Approved by ${approver} on ${at}`}
+                  </Text>
                 </span>
                 {revokes ? (
-                  <Confirmed
-                    busy={busy}
-                    button={t`Revoke`}
-                    confirm={t`Revoke`}
-                    description={t`Its next start is refused until an admin approves ${alias} again, and runs already started fail at their next call through it.`}
-                    label={t`Revoke ${alias}`}
-                    onConfirm={() => {
-                      void revoke(alias, approval.id);
-                    }}
-                    title={t`Revoke ${alias}?`}
-                  />
+                  <AlertDialog>
+                    <AlertDialogTrigger
+                      aria-label={t`Revoke ${alias}`}
+                      disabled={busy}
+                      size="sm"
+                      variant="quiet"
+                    >
+                      {t`Revoke`}
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogTitle>{t`Revoke ${alias}?`}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t`Its next start is refused until an admin approves ${alias} again, and runs already started fail at their next call through it.`}
+                      </AlertDialogDescription>
+                      <AlertDialogFooter>
+                        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                        <AlertDialogAction
+                          action={async () => {
+                            await revoke(alias, approval.id);
+                          }}
+                          failedLabel={t`Not revoked`}
+                          variant="danger"
+                        >
+                          {t`Revoke`}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 ) : null}
               </div>
             </BindingFrame>
           );
         })}
-      </ul>
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
     </div>
   );
@@ -371,7 +441,11 @@ const Part = <T,>({
   children: (data: T) => ReactNode;
 }): ReactNode => {
   if (loaded === undefined) {
-    return <LoadingLines />;
+    return (
+      <div {...stylex.props(styles.loading)}>
+        <LoadingLines />
+      </div>
+    );
   }
   return loaded.state === "ready" ? (
     children(loaded.data)
@@ -609,12 +683,12 @@ export const FilesAndApps = ({
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div {...stylex.props(styles.tab)}>
       {pending === undefined ||
       (pending.state === "ready" && pending.data.length === 0) ? null : (
         <Section
-          id="workflow-waiting"
-          title={<Trans>Waiting for your approval</Trans>}
+          info={t`It can't start until you approve what each binding reaches, for the version it runs.`}
+          title={t`Waiting for your approval`}
         >
           <Part again={again} loaded={pending}>
             {(data) => (
@@ -636,7 +710,7 @@ export const FilesAndApps = ({
       {said === undefined ? null : <output>{said}</output>}
       {runningBindings?.state === "ready" &&
       runningBindings.data === null ? null : (
-        <Section id="workflow-bindings" title={<Trans>Its bindings</Trans>}>
+        <Section title={t`Its bindings`}>
           <Part
             again={versionsRead ? again : undefined}
             loaded={runningBindings}
@@ -661,13 +735,13 @@ export const FilesAndApps = ({
           </Part>
         </Section>
       )}
-      <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
+      <Section flush title={t`Apps it works in`}>
         {/* Without the versions, the page's own read failed: its loaders. */}
         <Part again={versionsRead ? again : undefined} loaded={appsOf}>
           {(data) => <Apps apps={data} />}
         </Part>
       </Section>
-      <Section id="workflow-files" title={<Trans>Files its runs wrote</Trans>}>
+      <Section flush title={t`Files its runs wrote`}>
         <Part again={again} loaded={files}>
           {(data) => <Files files={data} />}
         </Part>

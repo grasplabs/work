@@ -1,14 +1,28 @@
 import type { SignInOption } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { signIn } from "./core.ts";
 import { ErrorText } from "./error-text.tsx";
+import { Button } from "./grasp/button/index.ts";
+import { grasp } from "./grasp/tokens/tokens.stylex.ts";
 import { signInErrorMessage } from "./sign-in-errors.ts";
 
+const styles = stylex.create({
+  options: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: grasp.space2,
+    width: "100%",
+  },
+  wide: { width: "100%" },
+});
+
 /**
- * A button for each way to sign in here, and why the last sign-in was
- * refused, if it was. The IdP sends the person back to `returnTo`.
+ * A button for each way to sign in here, the first the page's one action,
+ * and why the last sign-in was refused, if it was. The IdP sends the
+ * person back to `returnTo`.
  */
 export const SignInOptions = ({
   options,
@@ -18,23 +32,26 @@ export const SignInOptions = ({
   options: SignInOption[];
   error: string | undefined;
   returnTo?: string;
-}) => (
-  <div className="flex w-full flex-col items-center gap-2">
-    <ErrorText>
-      {error === undefined ? undefined : signInErrorMessage(error)}
-    </ErrorText>
-    {options.map(({ providerId, label }, index) => (
-      <Button
-        className="w-full"
-        key={providerId}
-        onClick={() => {
-          void signIn(providerId, returnTo);
-        }}
-        size="xl"
-        variant={index === 0 ? "highlight" : "outline"}
-      >
-        <Trans>Sign in with {label}</Trans>
-      </Button>
-    ))}
-  </div>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.options)}>
+      <ErrorText>
+        {error === undefined ? undefined : signInErrorMessage(error)}
+      </ErrorText>
+      {options.map(({ providerId, label }, index) => (
+        <Button
+          key={providerId}
+          layout={styles.wide}
+          onClick={() => {
+            void signIn(providerId, returnTo);
+          }}
+          size="lg"
+          variant={index === 0 ? "ink" : "quiet"}
+        >
+          {t`Sign in with ${label}`}
+        </Button>
+      ))}
+    </div>
+  );
+};

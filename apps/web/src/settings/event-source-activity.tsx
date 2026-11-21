@@ -6,33 +6,70 @@ import type {
   EventSourceTestResult,
   EventSourceTrigger,
 } from "@grasp-os/shared/event-sources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
-// What a source received, under its row in Settings › Webhooks (core's
-// workflows/source-deliveries.ts): when its last event came and how many
-// it accepted and refused in the last 24 hours, always; and, once opened,
-// why it refused them, its recent deliveries, each payload read on its own
-// (core audits that read, so nothing reads one unasked), and a test event
-// that says which triggers it matches and starts nothing.
+// What a source received, in its inspector in Settings › Incoming events
+// (core's workflows/source-deliveries.ts): when its last event came and
+// how many it accepted and refused in the last 24 hours, always; and, once
+// opened, why it refused them, its recent deliveries, each payload read on
+// its own (core audits that read, so nothing reads one unasked), and a
+// test event that says which triggers it matches and starts nothing.
+
+const styles = stylex.create({
+  activity: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    padding: grasp.space3,
+  },
+  summary: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: grasp.space2,
+    rowGap: grasp.space1,
+  },
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  delivery: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+    paddingBlock: grasp.space1,
+  },
+  type: { fontFamily: grasp.fontMono },
+  test: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+});
 
 /** What an opened source shows: its refusals and its deliveries so far. */
 interface Received {
@@ -80,9 +117,13 @@ const Refusals = ({
     }
   });
   return (
-    <ul className="flex flex-col gap-1 text-sm">
+    <ul {...stylex.props(styles.lines)}>
       {refusals.map(({ reason }, index) => (
-        <li key={reason}>{lines[index]}</li>
+        <li key={reason}>
+          <Text element="span" size="sm">
+            {lines[index] ?? ""}
+          </Text>
+        </li>
       ))}
     </ul>
   );
@@ -101,34 +142,32 @@ const DeliveryRow = ({
   const { t } = useLingui();
   const { triggersStarted: started, type } = delivery;
   return (
-    <li className="flex flex-wrap items-center gap-2 py-2 text-sm">
-      <span className="text-muted-foreground">
+    <li {...stylex.props(styles.delivery)}>
+      <Text element="span" size="sm" tone="muted">
         {formatDateTime(delivery.receivedAt)}
-      </span>
-      <code className="font-mono">{type}</code>
+      </Text>
+      <code {...stylex.props(styles.type)}>{type}</code>
       {delivery.test ? (
-        <Badge variant="outline">
-          <Trans>Test</Trans>
-        </Badge>
+        <Badge size="sm">{t`Test`}</Badge>
       ) : (
-        <span className="text-muted-foreground">
+        <Text element="span" size="sm" tone="muted">
           {t`${plural(started, { one: "Started # workflow", other: "Started # workflows" })}`}
-        </span>
+        </Text>
       )}
       {delivery.payloadHeld ? (
         <Button
           aria-label={t`Show the payload of ${type}`}
           disabled={busy}
           onClick={onPayload}
-          size="sm"
+          size="xs"
           variant="ghost"
         >
-          <Trans>Show payload</Trans>
+          {t`Show payload`}
         </Button>
       ) : (
-        <span className="text-muted-foreground text-xs">
-          <Trans>Payload no longer kept</Trans>
-        </span>
+        <Text element="span" size="xs" tone="muted">
+          {t`Payload no longer kept`}
+        </Text>
       )}
     </li>
   );
@@ -145,22 +184,34 @@ const MatchedTrigger = ({ trigger }: { trigger: EventSourceTrigger }) => {
   switch (trigger.start) {
     case "active": {
       return (
-        <span>{t`An event from the sender would start ${name} now, if its data is an input the workflow takes.`}</span>
+        <Text
+          element="span"
+          size="sm"
+        >{t`An event from the sender would start ${name} now, if its data is an input the workflow takes.`}</Text>
       );
     }
     case "requested": {
       return (
-        <span className="text-status-attention">{t`An event from the sender would not start ${name}: its trigger still waits for an admin's approval.`}</span>
+        <Text
+          element="span"
+          size="sm"
+        >{t`An event from the sender would not start ${name}: its trigger still waits for an admin's approval.`}</Text>
       );
     }
     case "revoked": {
       return (
-        <span className="text-status-attention">{t`An event from the sender would not start ${name}: its trigger's approval was taken back.`}</span>
+        <Text
+          element="span"
+          size="sm"
+        >{t`An event from the sender would not start ${name}: its trigger's approval was taken back.`}</Text>
       );
     }
     case null: {
       return (
-        <span className="text-status-attention">{t`An event from the sender would not start ${name}: its trigger has no approval.`}</span>
+        <Text
+          element="span"
+          size="sm"
+        >{t`An event from the sender would not start ${name}: its trigger has no approval.`}</Text>
       );
     }
     default: {
@@ -177,7 +228,6 @@ const TestEvent = ({
   source: EventSource;
   onSent: () => Promise<void>;
 }) => {
-  const ids = useId();
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [type, setType] = useState("");
@@ -210,46 +260,38 @@ const TestEvent = ({
   const count = matched.length;
   return (
     <form
-      className="flex flex-col gap-2"
       onSubmit={(submitted) => {
         submitted.preventDefault();
         void send();
       }}
+      {...stylex.props(styles.test)}
     >
-      <Label htmlFor={`${ids}-type`}>
-        <Trans>Event type of a test event</Trans>
-      </Label>
-      <Input
-        id={`${ids}-type`}
-        onChange={(changed) => {
-          setType(changed.target.value);
-        }}
-        placeholder="payment.paid"
-        required
-        value={type}
-      />
-      <Label htmlFor={`${ids}-data`}>
-        <Trans>Its data, as JSON</Trans>
-      </Label>
-      <Textarea
-        id={`${ids}-data`}
-        onChange={(changed) => {
-          setData(changed.target.value);
-        }}
-        value={data}
-      />
+      <Field>
+        <FieldLabel>{t`Event type of a test event`}</FieldLabel>
+        <Input
+          onValueChange={setType}
+          placeholder="payment.paid"
+          required
+          value={type}
+        />
+        <FieldError match="valueMissing">{t`Enter an event type.`}</FieldError>
+      </Field>
+      <Field>
+        <FieldLabel>{t`Its data, as JSON`}</FieldLabel>
+        <Textarea onValueChange={setData} value={data} />
+      </Field>
       <div>
-        <Button disabled={busy} size="sm" type="submit" variant="outline">
-          <Trans>Send a test event</Trans>
+        <Button disabled={busy} size="sm" type="submit" variant="quiet">
+          {t`Send a test event`}
         </Button>
       </div>
       {result === undefined ? null : (
-        <output className="flex flex-col gap-1 text-sm">
-          <span>
+        <output {...stylex.props(styles.lines)}>
+          <Text element="span" size="sm">
             {count === 0
               ? t`No trigger matches this type. A test event starts no workflow.`
               : t`${plural(count, { one: "# trigger matches this type. A test event starts no workflow.", other: "# triggers match this type. A test event starts no workflow." })}`}
-          </span>
+          </Text>
           {matched.map((trigger) => (
             <MatchedTrigger key={trigger.id} trigger={trigger} />
           ))}
@@ -277,49 +319,69 @@ const ReceivedList = ({
   onMore: (from: string) => void;
   onPayload: (delivery: EventSourceDelivery) => void;
   onSent: () => Promise<void>;
-}) => (
-  <div className="flex flex-col gap-3">
-    {received === undefined ? null : (
-      <>
-        <Refusals refusals={received.refusals} />
-        {received.deliveries.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            <Trans>No event accepted in the last seven days.</Trans>
-          </p>
-        ) : (
-          <ul className="flex flex-col divide-y">
-            {received.deliveries.map((delivery) => (
-              <DeliveryRow
-                busy={busy}
-                delivery={delivery}
-                key={delivery.id}
-                onPayload={() => {
-                  onPayload(delivery);
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {received === undefined ? null : (
+        <>
+          <Refusals refusals={received.refusals} />
+          {received.deliveries.length === 0 ? (
+            <Text size="sm" tone="muted">
+              {t`No event accepted in the last seven days.`}
+            </Text>
+          ) : (
+            <ul {...stylex.props(styles.lines)}>
+              {received.deliveries.map((delivery) => (
+                <DeliveryRow
+                  busy={busy}
+                  delivery={delivery}
+                  key={delivery.id}
+                  onPayload={() => {
+                    onPayload(delivery);
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+          {received.next === null ? null : (
+            <div>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  onMore(received.next ?? "");
                 }}
-              />
-            ))}
-          </ul>
-        )}
-        {received.next === null ? null : (
-          <div>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                onMore(received.next ?? "");
-              }}
-              size="sm"
-              variant="outline"
-            >
-              <Trans>Show older events</Trans>
-            </Button>
-          </div>
-        )}
-      </>
-    )}
-    <ErrorText>{failure}</ErrorText>
-    <TestEvent onSent={onSent} source={source} />
-  </div>
-);
+                size="xs"
+                variant="ghost"
+              >
+                {t`Show older events`}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+      <ErrorText>{failure}</ErrorText>
+      <TestEvent onSent={onSent} source={source} />
+    </>
+  );
+};
+
+/**
+ * How many deliveries `source` refused in the last 24 hours, for its row
+ * in the list: something to look at; nothing while it refused none.
+ */
+export const RefusedBadge = ({ source }: { source: EventSource }) => {
+  const { t } = useLingui();
+  const refused = source.activity?.refusedLastDay ?? 0;
+  if (refused === 0) {
+    return null;
+  }
+  return (
+    <Badge size="sm" tone="attention">
+      {t`${plural(refused, { one: "# refused in the last 24 hours", other: "# refused in the last 24 hours" })}`}
+    </Badge>
+  );
+};
 
 /**
  * What `source` received lately, for its admin: a line always, and its
@@ -388,25 +450,23 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
     activity.lastEventAt === null
       ? undefined
       : formatDateTime(activity.lastEventAt);
-  const { acceptedLastDay: accepted, refusedLastDay: refused } = activity;
+  const { acceptedLastDay: accepted } = activity;
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span>
+    <div {...stylex.props(styles.activity)}>
+      <div {...stylex.props(styles.summary)}>
+        <Text element="span" size="sm">
           {last === undefined ? (
             <Trans>No event in the last seven days.</Trans>
           ) : (
             <Trans>Last event {last}.</Trans>
           )}
-        </span>
-        <span className="text-muted-foreground">
+        </Text>
+        <Text element="span" size="sm" tone="muted">
           {t`${plural(accepted, { one: "# event accepted in the last 24 hours.", other: "# events accepted in the last 24 hours." })}`}
-        </span>
-        {refused === 0 ? null : (
-          <Badge variant="attention">
-            {t`${plural(refused, { one: "# refused in the last 24 hours", other: "# refused in the last 24 hours" })}`}
-          </Badge>
-        )}
+        </Text>
+        <RefusedBadge source={source} />
+      </div>
+      <div>
         <Button
           aria-expanded={open}
           aria-label={
@@ -418,10 +478,10 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
               void read();
             }
           }}
-          size="sm"
+          size="xs"
           variant="ghost"
         >
-          {open ? <Trans>Hide events</Trans> : <Trans>Show events</Trans>}
+          {open ? t`Hide events` : t`Show events`}
         </Button>
       </div>
       {open ? (
@@ -450,27 +510,20 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
         }}
         open={payload !== undefined}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Payload</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                Kept for 24 hours after the event came. Opening it is recorded
-                in the audit trail.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          {payload === null ? (
-            <p className="text-muted-foreground text-sm">
-              <Trans>This payload is no longer kept.</Trans>
-            </p>
-          ) : (
-            <pre className="max-h-96 overflow-auto font-mono text-sm">
-              {payload}
-            </pre>
-          )}
+        <DialogContent closeLabel={t`Close`}>
+          <DialogTitle>{t`Payload`}</DialogTitle>
+          <DialogDescription>
+            {t`Kept for 24 hours after the event came. Opening it is recorded in the audit trail.`}
+          </DialogDescription>
+          <DialogBody>
+            {payload === null || payload === undefined ? (
+              <Text size="sm" tone="muted">
+                {t`This payload is no longer kept.`}
+              </Text>
+            ) : (
+              <CodeBlock code={payload} language="json" />
+            )}
+          </DialogBody>
         </DialogContent>
       </Dialog>
     </div>

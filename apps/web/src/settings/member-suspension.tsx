@@ -1,15 +1,30 @@
 import type { DirectoryAccount, Member } from "@grasp-os/shared/members";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactElement } from "react";
 
 import { formatDate } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // A member the directory's daily read suspended (GRA-2056; core's
 // directory-suspensions.ts): what their row in Settings › Members says.
 // Only the directory lifts a suspension (GRA-2141): someone it turned off
 // or deleted signs in through it too, so Grasp offers nothing to click,
 // and says where the way out is instead.
+
+const styles = stylex.create({
+  // The badge and each sentence on a line of their own: every row the
+  // same shape, however long the reason.
+  suspension: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space1,
+    paddingBlockStart: grasp.space1,
+  },
+});
 
 /**
  * Why `member` is suspended, as the directory has their account now. One
@@ -89,20 +104,18 @@ export const MemberSuspension = ({ member }: { member: Member }) => {
     return null;
   }
   return (
-    // The badge and each sentence on a line of their own: every row the
-    // same shape, however long the reason.
-    <div className="flex flex-col items-start gap-1">
-      <Badge variant="attention">
+    <span {...stylex.props(styles.suspension)}>
+      <Badge size="sm" tone="attention">
         <Trans>Suspended</Trans>
       </Badge>
-      <span className="text-muted-foreground">
+      <Text element="span" size="sm" tone="muted">
         <SuspensionReason reason={suspension.reason} since={suspension.since} />
-      </span>
+      </Text>
       {suspension.reason === "enabled" ? null : (
-        <span className="text-muted-foreground">
+        <Text element="span" size="sm" tone="muted">
           <WayOut reason={suspension.reason} />
-        </span>
+        </Text>
       )}
-    </div>
+    </span>
   );
 };

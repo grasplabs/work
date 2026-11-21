@@ -69,10 +69,10 @@ export interface LaneDay {
 }
 
 /** A lane's key: its workflow's ID. */
-export const laneKeyOf = (lane: TodayLane): string => lane.id;
+const laneKeyOf = (lane: TodayLane): string => lane.id;
 
 /** What a run came to, as its dot says it. */
-export const stateOf = (run: TodayRun): LaneState => {
+const stateOf = (run: TodayRun): LaneState => {
   if (run.waits !== null) {
     return "waits";
   }
@@ -192,10 +192,6 @@ export const handovers = (day: LaneDay): { from: LaneRun; to: LaneRun }[] => {
     return from === undefined ? [] : [{ from, to: run }];
   });
 };
-
-/** What waits on the reader now: the day's attention marks. */
-export const waiting = (day: LaneDay): LaneRun[] =>
-  allRuns(day).filter((run) => run.state === "waits");
 
 const hourMs = 3_600_000;
 

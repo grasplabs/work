@@ -100,12 +100,12 @@ test("a builder makes an App from what they want done, shares it with their team
     uncaught.push(error.message);
   });
 
-  // Make something: Chat's page, what they want done, and Grasp's plan
+  // Build new app: Chat's page, what they want done, and Grasp's plan
   // for it in the chat. Nothing is made until Build it; then Grasp builds
   // it in the chat, ticking off what it does, and offers to open the App,
   // where the same chat docks beside it.
   await page.goto("/apps");
-  await page.getByRole("link", { name: "Make something" }).click();
+  await page.getByRole("link", { name: "Build new app" }).click();
   await expect(page).toHaveURL(/\/\?make=app$/u);
   await expect(
     page.getByRole("heading", { name: "What do you want to get done?" })
@@ -151,20 +151,20 @@ test("a builder makes an App from what they want done, shares it with their team
     frame.getByRole("list", { name: "Contacts" }).getByRole("listitem")
   ).toHaveText(["Ada Lovelace"], built);
 
-  // The chat never shares it: the builder does, with whom they pick, which
-  // checks the draft, makes it the App's first version and shares it, in
-  // one step. Everyone the stack signs in is called Person, and a builder
+  // The chat never shares or publishes it: the builder does, each on its own:
+  // Share gives it to whom they pick, Publish checks the draft and makes it
+  // the first version. Everyone the stack signs in is called Person, and a builder
   // sees names, not emails: they are told apart by the ID each goes by.
-  await page.getByRole("button", { name: "Share with your team" }).click(built);
-  const sharing = page.getByRole("dialog");
-  await sharing
-    .getByRole("checkbox", {
-      name: `Person (ID …${user.userId.slice(-namesakeIdEnd)})`,
-    })
-    .check();
+  const userIdEnd = `ID …${user.userId.slice(-namesakeIdEnd)}`;
+  await page.getByRole("button", { name: "Share", exact: true }).click(built);
+  const sharing = page.getByRole("dialog", { name: `Share ${appPlanned}` });
+  await sharing.getByLabel("Add people, teams or projects").click();
+  await page
+    .getByRole("option", { name: "Person" })
+    .filter({ hasText: userIdEnd })
+    .click(built);
   blip.sharing = true;
-  await sharing.getByRole("button", { name: "Share", exact: true }).click();
-  await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  await sharing.getByRole("button", { name: "Add", exact: true }).click();
   // Its read again after sharing lost its connection: Grasp can't be
   // reached, until a connection answers again, when the page reads the
   // App by itself, with no Try again.
@@ -188,6 +188,22 @@ test("a builder makes an App from what they want done, shares it with their team
   ).toBeAttached(built);
   await expect(unreachable).toHaveCount(0);
   expect(uncaught).toStrictEqual([]);
+  // The share held: Share lists them, its one Person.
+  await page.getByRole("button", { name: "Share", exact: true }).click(built);
+  await expect(
+    sharing
+      .getByRole("list", { name: "Shared with" })
+      .getByRole("listitem")
+      .filter({ hasText: "Person" })
+  ).toHaveCount(1, built);
+  await sharing.getByRole("button", { name: "Done", exact: true }).click();
+  // Publish checks the draft and makes it the first version.
+  await page.getByRole("button", { name: "Publish", exact: true }).click(built);
+  await page
+    .getByRole("dialog", { name: `Publish ${appPlanned}` })
+    .getByRole("button", { name: "Publish", exact: true })
+    .click(built);
+  await expect(page.getByText(`${appPlanned} is live`)).toBeVisible(built);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);

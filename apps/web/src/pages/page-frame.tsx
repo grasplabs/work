@@ -1,28 +1,31 @@
 import { linkErrors } from "@grasp-os/shared/app-links";
 import { decisionErrors } from "@grasp-os/shared/decisions";
-import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { i18n as pageI18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useBlocker } from "@tanstack/react-router";
-import { InfoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Info, Spinner as Working } from "../grasp/icons/index.ts";
+import { arrive } from "../grasp/motion/arrive.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { LinkConfirmDialog } from "../link-confirmation.tsx";
 import type { PendingLink } from "../link-confirmation.tsx";
 import { useCore } from "../use-core.ts";
@@ -44,6 +47,51 @@ type FrameQuestion =
   | { readonly kind: "decision"; readonly review: PendingConfirmation }
   | { readonly kind: "link"; readonly link: PendingLink };
 
+/** Printed, the page is the page alone: the bar over it stays off the paper. */
+const PRINT = "@media print";
+
+const styles = stylex.create({
+  status: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // The bar over a frame: a hairline under it, never on paper.
+  bar: {
+    display: { default: "flex", [PRINT]: "none" },
+    alignItems: "center",
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+  // What a bare frame is doing, over its corner: nothing to press, so
+  // clicks go through it to the page.
+  notice: {
+    display: { default: "block", [PRINT]: "none" },
+    position: "absolute",
+    top: grasp.space3,
+    insetInlineEnd: grasp.space3,
+    maxWidth: "24rem",
+    pointerEvents: "none",
+  },
+  chrome: { gap: grasp.space2, padding: grasp.space3 },
+  barEnd: { display: "flex", flexGrow: 1, justifyContent: "flex-end" },
+  page: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  failure: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 0,
+    overflowY: "auto",
+    padding: grasp.space6,
+  },
+  frame: { flexGrow: 1, width: "100%", borderWidth: 0 },
+  hidden: { display: "none" },
+});
+
 const linkAskingPaused = msg`Another link is waiting for an answer, or one was just turned down. Try again in a moment.`;
 
 /**
@@ -62,34 +110,35 @@ const pausedFor = (question: FrameQuestion): Error => {
 
 /**
  * What a frame says of a page that runs: that its preview is fixing a
- * problem, or that a new version waits for its unsaved edits.
+ * problem, or that a new version waits for its unsaved edits; nothing
+ * while it does neither.
  */
-const StatusWords = ({ state }: { state: PageState }) => {
+const useStatusWords = (state: PageState): string | undefined => {
+  const { t } = useLingui();
   if (state.status === "fixing") {
     // Calm, and never what went wrong: the agent hears that.
-    return <Trans>Fixing a problem…</Trans>;
+    return t`Fixing a problem…`;
   }
   if (state.status === "updated") {
     // Only a page holding unsaved edits shows this: one with nothing
     // to lose switches at once.
-    return (
-      <Trans>
-        A new version is ready: it opens once your changes are saved.
-      </Trans>
-    );
+    return t`A new version is ready: it opens once your changes are saved.`;
   }
-  return null;
+  return undefined;
 };
 
-/** What the page's own bar says of a page that runs (`StatusWords`). */
+/** What the page's own bar says of a page that runs (`useStatusWords`). */
 const RunningStatus = ({ state }: { state: PageState }) => {
-  if (state.status !== "fixing" && state.status !== "updated") {
+  const words = useStatusWords(state);
+  if (words === undefined) {
     return null;
   }
   return (
-    <output className="text-muted-foreground flex items-center gap-2 text-xs">
+    <output {...stylex.props(styles.status)}>
       {state.status === "fixing" ? <Spinner /> : null}
-      <StatusWords state={state} />
+      <Text element="span" size="xs" tone="muted">
+        {words}
+      </Text>
     </output>
   );
 };
@@ -283,7 +332,7 @@ const Frame = ({
   );
   return (
     <iframe
-      className={hidden ? "hidden" : "w-full flex-1 border-0"}
+      {...stylex.props(hidden ? styles.hidden : styles.frame)}
       ref={setFrame}
       referrerPolicy="no-referrer"
       sandbox="allow-scripts"
@@ -307,39 +356,37 @@ const UpdateConfirmDialog = ({
   open: boolean;
   onSaveFirst: () => void;
   onSwitch: () => void;
-}) => (
-  <AlertDialog
-    onOpenChange={(next) => {
-      if (!next) {
-        onSaveFirst();
-      }
-    }}
-    open={open}
-  >
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          <Trans>A new version of this App is ready</Trans>
-        </AlertDialogTitle>
+}) => {
+  const { t } = useLingui();
+  return (
+    <AlertDialog
+      onOpenChange={(next) => {
+        if (!next) {
+          onSaveFirst();
+        }
+      }}
+      open={open}
+    >
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`A new version of this App is ready`}</AlertDialogTitle>
         <AlertDialogDescription>
-          <Trans>
-            It has changes that aren&apos;t saved, or a change it hasn&apos;t
-            heard back about. Save them first and it switches once they are, or
-            switch now and lose what isn&apos;t saved.
-          </Trans>
+          {t`It has changes that aren't saved, or a change it hasn't heard back about. Save them first and it switches once they are, or switch now and lose what isn't saved.`}
         </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Save first</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onSwitch}>
-          <Trans>Switch now</Trans>
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-);
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Save first`}</AlertDialogAction>
+          {/* Switching loses what isn't saved: the danger answer. */}
+          <AlertDialogAction
+            action={onSwitch}
+            failedLabel={t`Not done`}
+            variant="danger"
+          >
+            {t`Switch now`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
 
 /**
  * Where a page stands on a new version of its App: none offered, the
@@ -354,11 +401,7 @@ type Update = "none" | "asking" | "saving";
  * only what the page is doing shows, while it does, over the frame's
  * corner (`FrameNotice`).
  */
-export type FrameBar = { kind: "chrome"; label: string } | { kind: "bare" };
-
-/** Whether `RunningStatus` has anything to say of `state`. */
-const saysSomething = (state: PageState): boolean =>
-  state.status === "fixing" || state.status === "updated";
+type FrameBar = { kind: "chrome"; label?: string } | { kind: "bare" };
 
 /** Fix with Grasp for the frame `ended` at `path`, when it is offered. */
 const fixOf = (
@@ -384,15 +427,16 @@ const FrameTop = ({
   appName: string;
   state: PageState;
 }) => {
-  const Title = embedded ? "h2" : "h1";
   if (bar.kind === "bare") {
     return null;
   }
   return (
-    <header className="flex items-center gap-2 border-b p-3 print:hidden">
-      <Badge variant="secondary">{bar.label}</Badge>
-      <Title className="text-sm font-medium">{appName}</Title>
-      <span className="flex flex-1 justify-end">
+    <header {...stylex.props(styles.bar, styles.chrome)}>
+      {bar.label === undefined ? null : <Badge>{bar.label}</Badge>}
+      <Heading level={embedded ? 2 : 1} size="ui-sm">
+        {appName}
+      </Heading>
+      <span {...stylex.props(styles.barEnd)}>
         <RunningStatus state={state} />
       </span>
     </header>
@@ -406,17 +450,17 @@ const FrameTop = ({
  * use it. It has nothing to press, so clicks go through it to the page.
  */
 const FrameNotice = ({ state }: { state: PageState }) => {
-  if (!saysSomething(state)) {
+  const words = useStatusWords(state);
+  if (words === undefined) {
     return null;
   }
   return (
-    <div className="animate-in fade-in-0 pointer-events-none absolute top-3 right-3 max-w-sm motion-reduce:animate-none print:hidden">
-      <Alert live="polite">
-        {state.status === "fixing" ? <Spinner /> : <InfoIcon />}
-        <AlertTitle>
-          <StatusWords state={state} />
-        </AlertTitle>
-      </Alert>
+    <div {...stylex.props(styles.notice, arrive.in)}>
+      <Alert
+        icon={state.status === "fixing" ? Working : Info}
+        live="polite"
+        title={words}
+      />
     </div>
   );
 };
@@ -606,10 +650,10 @@ const FramedPage = ({
       ? state
       : undefined;
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.page)}>
       <FrameTop appName={appName} bar={bar} embedded={embedded} state={state} />
       {ended === undefined ? null : (
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
+        <div {...stylex.props(styles.failure)}>
           <FrameFailure
             onFix={fixOf(onFix, ended, path)}
             onRetry={reload}
@@ -704,6 +748,8 @@ interface PageFrameProps {
   onReload?: () => void;
   /** Called once the pages failed or their person signed out. */
   onEnded?: PageEnded;
+  /** Called each time the pages started and run. */
+  onRunning?: () => void;
 }
 
 /** How a frame ended: it failed, and why, or its person signed out. */
@@ -727,11 +773,12 @@ export const PageFrame = ({
   bare = false,
   onReload,
   onEnded,
+  onRunning,
 }: PageFrameProps) => {
   const { t } = useLingui();
   return (
     <FramedPage
-      bar={bare ? { kind: "bare" } : { kind: "chrome", label: t`App page` }}
+      bar={bare ? { kind: "bare" } : { kind: "chrome" }}
       embedded={embedded}
       source={{ app }}
       title={t`App`}
@@ -740,6 +787,7 @@ export const PageFrame = ({
       {...(ownPath === undefined ? {} : { ownPath })}
       {...(onReload === undefined ? {} : { onReload })}
       {...(onEnded === undefined ? {} : { onEnded })}
+      {...(onRunning === undefined ? {} : { onRunning })}
     />
   );
 };

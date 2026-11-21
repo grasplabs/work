@@ -21,6 +21,11 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { organizations, teams } from "./db/core/schema.ts";
+import {
+  logoPathOf,
+  removeOrganizationLogo,
+  setOrganizationLogo,
+} from "./organization-logo.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -31,17 +36,22 @@ import type { SessionCheck } from "./session-check.ts";
 // the deployment decides. Grasp staff are admins, but what the client is
 // called and when its day starts are the client's to say.
 
-/** The organization's name and time zone, as stored. */
+/** The organization's name, time zone and logo, as stored. */
 const storedOrganization = async (
   db: D1Database
-): Promise<{ name: string; timeZone: string }> => {
+): Promise<{ name: string; timeZone: string; logo: string | null }> => {
   const [row] = await drizzle(db)
-    .select({ name: organizations.name, timeZone: organizations.timeZone })
+    .select({
+      name: organizations.name,
+      timeZone: organizations.timeZone,
+      logo: organizations.logo,
+    })
     .from(organizations)
     .where(eq(organizations.id, organizationId));
   return {
     name: row?.name ?? "",
     timeZone: row?.timeZone ?? defaultTimeZone,
+    logo: row?.logo ?? null,
   };
 };
 
@@ -53,12 +63,13 @@ export const organizationTimeZone = async (db: D1Database): Promise<string> => {
 
 /** The organization as stored, with what the deployment says about it. */
 export const readOrganization = async (env: Env): Promise<Organization> => {
-  const { name, timeZone } = await storedOrganization(env.DB);
+  const { name, timeZone, logo } = await storedOrganization(env.DB);
   return {
     name,
     timeZone,
     dataRegion: "eu",
     signInDomains: signInConfig(env)?.domains ?? [],
+    logo: logoPathOf(logo),
   };
 };
 
@@ -268,6 +279,20 @@ export class OrganizationRpc extends CoreRpcTarget implements OrganizationApi {
       this.#check,
       async (person) => await updateOrganization(this.#env, person, changes)
     );
+  }
+
+  async setLogo(image: Uint8Array): Promise<Organization> {
+    return await withPerson(this.#check, async (person) => {
+      await setOrganizationLogo(this.#env, person, image);
+      return await readOrganization(this.#env);
+    });
+  }
+
+  async removeLogo(): Promise<Organization> {
+    return await withPerson(this.#check, async (person) => {
+      await removeOrganizationLogo(this.#env, person);
+      return await readOrganization(this.#env);
+    });
   }
 
   async teams(): Promise<{ id: string; name: string }[]> {

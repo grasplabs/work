@@ -118,7 +118,7 @@ const SubscriptionTarget = boundedRpcTarget({
 });
 
 /** A stream the frame follows: `release()` lets go of it. */
-export class StreamSubscription extends SubscriptionTarget {
+class StreamSubscription extends SubscriptionTarget {
   readonly #stop: AbortController;
 
   constructor(stop: AbortController) {

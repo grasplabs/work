@@ -1,14 +1,19 @@
 import type { Agent, AgentChangeDrafted } from "@grasp-os/shared/agents";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
+import { formatList } from "../format.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
 import {
   AppNames,
   AudienceWords,
   DraftActions,
-  Line,
+  lines,
+  ScheduleWords,
 } from "./agent-draft-card.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { MakeCard } from "./make-card.tsx";
@@ -36,6 +41,29 @@ const useAgentNow = (change: AgentChangeDrafted): Agent | undefined => {
     : undefined;
 };
 
+const styles = stylex.create({
+  beforeAfter: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+  },
+  before: {
+    color: grasp.muted,
+    textDecorationLine: "line-through",
+    textDecorationThickness: "1px",
+  },
+  // All of it, as it will be kept: long ones scroll.
+  long: {
+    display: "block",
+    maxHeight: "16rem",
+    overflowY: "auto",
+    whiteSpace: "pre-wrap",
+  },
+  longBefore: {
+    maxHeight: "8rem",
+  },
+});
+
 /** What a part is now, and what it becomes. */
 const BeforeAfter = ({
   now,
@@ -44,22 +72,18 @@ const BeforeAfter = ({
   now: string | undefined;
   becomes: ReactNode;
 }) => (
-  <span className="flex flex-col gap-1">
+  <span {...stylex.props(styles.beforeAfter)}>
     {now === undefined ? null : (
-      <span className="text-muted-foreground line-through decoration-1">
-        <span className="block max-h-32 overflow-y-auto whitespace-pre-wrap">
-          {now}
-        </span>
+      <span {...stylex.props(styles.before, styles.long, styles.longBefore)}>
+        {now}
       </span>
     )}
-    <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
-      {becomes}
-    </span>
+    <span {...stylex.props(styles.long)}>{becomes}</span>
   </span>
 );
 
 /** The drafted change as a card, with `actions` while it waits. */
-export const AgentChangeCard = ({
+const AgentChangeCard = ({
   change,
   actions,
 }: {
@@ -90,49 +114,53 @@ export const AgentChangeCard = ({
       label={t`A change to ${name}`}
       title={t`Change ${name}`}
     >
-      <dl className="flex flex-col gap-3">
-        {job === undefined ? null : (
-          <Line label={t`What it is for`}>
-            <BeforeAfter becomes={job} now={now?.job} />
-          </Line>
-        )}
-        {addInstructions === undefined ? null : (
-          <Line label={t`Added to its instructions`}>
-            <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
-              {addInstructions}
-            </span>
-          </Line>
-        )}
-        {addApps.length === 0 ? null : (
-          <Line label={t`Apps it gets`}>
-            <AppNames apps={addApps} />
-          </Line>
-        )}
-        {removeApps.length === 0 ? null : (
-          <Line label={t`Apps taken off`}>
-            <AppNames apps={removeApps} />
-          </Line>
-        )}
-        {audience === undefined ? null : (
-          <Line label={t`Who may ask it`}>
-            <AudienceWords audience={audience} />
-          </Line>
-        )}
-        {turnOn.length === 0 ? null : (
-          <Line label={t`What it may also do`}>
-            {turnOn.map((each) => i18n._(classNames[each])).join(", ")}
-          </Line>
-        )}
-        {schedule === undefined ? null : (
-          <Line label={t`Also works on its own`}>
-            <span className="font-mono text-xs">{schedule.cron}</span>
-            {" · "}
-            {schedule.timeZone ?? t`the company's time zone`}
-            {" · "}
-            {schedule.opening}
-          </Line>
-        )}
-      </dl>
+      <KeyValueList
+        items={lines([
+          job === undefined
+            ? undefined
+            : {
+                key: t`What it is for`,
+                value: <BeforeAfter becomes={job} now={now?.job} />,
+              },
+          addInstructions === undefined
+            ? undefined
+            : {
+                key: t`Added to its instructions`,
+                value: (
+                  <span {...stylex.props(styles.long)}>{addInstructions}</span>
+                ),
+              },
+          addApps.length === 0
+            ? undefined
+            : { key: t`Apps it gets`, value: <AppNames apps={addApps} /> },
+          removeApps.length === 0
+            ? undefined
+            : {
+                key: t`Apps taken off`,
+                value: <AppNames apps={removeApps} />,
+              },
+          audience === undefined
+            ? undefined
+            : {
+                key: t`Who may ask it`,
+                value: <AudienceWords audience={audience} />,
+              },
+          turnOn.length === 0
+            ? undefined
+            : {
+                key: t`What it may also do`,
+                value: formatList(
+                  turnOn.map((each) => i18n._(classNames[each]))
+                ),
+              },
+          schedule === undefined
+            ? undefined
+            : {
+                key: t`Also works on its own`,
+                value: <ScheduleWords schedule={schedule} />,
+              },
+        ])}
+      />
     </MakeCard>
   );
 };

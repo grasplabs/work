@@ -20,16 +20,15 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { HeldCard } from "../dashboard/pile-cards.tsx";
-import type { Waiting } from "../dashboard/waiting.ts";
 import { ItemDetail } from "./item-detail.tsx";
 import { inboxItems } from "./items.ts";
+import type { Waiting } from "./waiting.ts";
 
 // A run's held write and its call of unknown outcome in the inbox, as core
 // lists them (GRA-1999): while the run may still read what it read, their
-// input is there to read and approve; once core withholds it, the inbox
-// shows why, nothing of it, and only what sends nothing: Reject, or "It
-// happened".
+// input is there to read and confirm; once core withholds it, the inbox
+// shows why, nothing of it, and only what sends nothing: Decline, with
+// Confirm held, or "It happened".
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -86,7 +85,19 @@ const lostSend: UnknownOutcome = {
   cursor: "1.a",
 };
 
-/** What `node`, rendered in a router, shows: its text and its buttons, by label, each whether it is off. */
+/** A button's words as a screen reader hears them: what is hidden from it left out. */
+const wordsOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof HTMLElement)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
+/** What `node`, rendered in a router, shows: its text and its buttons, by label, each whether it is off or held. */
 const rendered = async (node: () => React.ReactNode) => {
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
@@ -113,12 +124,18 @@ const rendered = async (node: () => React.ReactNode) => {
   const buttons = [...host.querySelectorAll("button")];
   return {
     text: host.textContent ?? "",
-    // Each act by its label, whether it is off: a bar may show them twice.
+    // Each act by its label, whether it is off: held, Confirm stays reached by Tab.
     actions: Object.fromEntries(
       buttons
-        .map((button) => [button.textContent ?? "", button.disabled] as const)
+        .map(
+          (button) =>
+            [
+              wordsOf(button),
+              button.disabled || button.dataset.held !== undefined,
+            ] as const
+        )
         .filter(([label]) =>
-          ["Approve", "Reject", "It happened", "It didn't happen"].includes(
+          ["Confirm", "Decline", "It happened", "It didn't happen"].includes(
             label
           )
         )
@@ -155,9 +172,7 @@ const opened = async ({
   if (item === undefined) {
     throw new Error("No item");
   }
-  return await rendered(() => (
-    <ItemDetail item={item} onBack={() => {}} onSaid={() => {}} />
-  ));
+  return await rendered(() => <ItemDetail item={item} onSaid={() => {}} />);
 };
 
 describe("a run's held or lost write in the inbox", () => {
@@ -169,7 +184,7 @@ describe("a run's held or lost write in the inbox", () => {
     document.body.replaceChildren();
   });
 
-  it("shows what a held write would send and takes Approve, and once withheld shows why, nothing of it, and Reject alone", async () => {
+  it("shows what a held write would send and takes Confirm, and once withheld shows why, nothing of it, and Confirm held", async () => {
     const open = await opened({ held: [heldSend] });
     act(() => {
       root?.unmount();
@@ -198,42 +213,13 @@ describe("a run's held or lost write in the inbox", () => {
     }).toStrictEqual({
       open: {
         shows: true,
-        actions: { Approve: false, Reject: false },
+        actions: { Confirm: false, Decline: false },
       },
       withheld: {
         shows: false,
         says: true,
-        actions: { Reject: false },
+        actions: { Confirm: true, Decline: false },
       },
-    });
-  });
-
-  it("shows a withheld held write on the dashboard's pile with Approve off, said why", async () => {
-    const { text, actions } = await rendered(() => (
-      <HeldCard
-        action={{ ...heldSend, input: "", inputHash: "", withheld: "revoked" }}
-        pile={{
-          answering: () => true,
-          settled: () => {},
-          deciding: false,
-          answered: () => {},
-        }}
-      />
-    ));
-    const approve = [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Approve"
-    );
-    const whyId = approve?.getAttribute("aria-describedby") ?? "";
-    const why = document.querySelector(`[id="${whyId}"]`);
-
-    expect({
-      shows: text.includes("Invoice 42"),
-      actions,
-      why: why?.textContent?.includes("may no longer read what it read"),
-    }).toStrictEqual({
-      shows: false,
-      actions: { Approve: true, Reject: false },
-      why: true,
     });
   });
 

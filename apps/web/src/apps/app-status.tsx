@@ -1,18 +1,17 @@
 import type { App } from "@grasp-os/shared/apps";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
@@ -21,8 +20,21 @@ import { useCoreAction } from "../use-core-action.ts";
 // for its builders, and its triggers don't fire, until it is shared. Core decides who may move
 // it (app-status.ts); a refusal shows under the buttons.
 
+/** Where an App is: core keeps only `archived` and its live version. */
+type AppStatus = "draft" | "live" | "archived";
+
+/** The status of `app`, from whether it is archived and has a live version. */
+export const statusOf = (
+  app: Pick<App, "archived" | "currentVersion">
+): AppStatus => {
+  if (app.archived) {
+    return "archived";
+  }
+  return app.currentVersion === null ? "draft" : "live";
+};
+
 /** What a builder can move an App along, as core's `apps` names it. */
-type Transition = "archive" | "restore";
+export type Transition = "archive" | "restore";
 
 /**
  * Asks before archiving: it takes the App offline and stops its runs,
@@ -41,23 +53,21 @@ export const ArchiveDialog = ({
 }) => (
   <AlertDialog onOpenChange={onOpenChange} open={open}>
     <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          <Trans>Archive {name}?</Trans>
-        </AlertDialogTitle>
-        <AlertDialogDescription>
-          <Trans>
-            An archived App is kept as it is and goes offline: nobody opens its
-            pages, its triggers stop and its unfinished runs are cancelled. A
-            builder can restore it later.
-          </Trans>
-        </AlertDialogDescription>
-      </AlertDialogHeader>
+      <AlertDialogTitle>
+        <Trans>Archive {name}?</Trans>
+      </AlertDialogTitle>
+      <AlertDialogDescription>
+        <Trans>
+          An archived App is kept as it is and goes offline: nobody opens its
+          pages, its triggers stop and its unfinished runs are cancelled. A
+          builder can restore it later.
+        </Trans>
+      </AlertDialogDescription>
       <AlertDialogFooter>
-        <AlertDialogCancel>
+        <AlertDialogAction>
           <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onArchive} variant="destructive">
+        </AlertDialogAction>
+        <AlertDialogAction onClick={onArchive} variant="danger">
           <Trans>Archive</Trans>
         </AlertDialogAction>
       </AlertDialogFooter>
@@ -95,16 +105,16 @@ export const StatusNote = ({
   const { t } = useLingui();
   if (app.archived) {
     return (
-      <p className="text-muted-foreground">
+      <Text size="sm" tone="muted">
         {t`Archived: nobody opens its pages and nothing runs, until a builder restores it.`}
-      </p>
+      </Text>
     );
   }
   if (app.currentVersion === null) {
     return (
-      <p className="text-muted-foreground">
+      <Text size="sm" tone="muted">
         {t`Only its builders open it, and its triggers don't fire, until it is shared with the team.`}
-      </p>
+      </Text>
     );
   }
   return null;

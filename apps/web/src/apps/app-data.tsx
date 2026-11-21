@@ -7,71 +7,81 @@ import type {
   RecordChange,
 } from "@grasp-os/shared/app-data";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { i18n } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
+import type { ReactNode } from "react";
+
+import { downloadCsv } from "../csv.ts";
+import { readPeople } from "../directory.ts";
+import {
+  formatDateTime,
+  formatList,
+  formatNumber,
+  valueText,
+} from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "../grasp/dropdown-menu/index.ts";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { FileUpload } from "../grasp/file-upload/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import {
+  Database,
+  Download,
+  Icon,
+  More,
+  Search,
+  Upload,
+} from "../grasp/icons/index.ts";
 import {
   InputGroup,
-  InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
-  RecordGrid,
-  RecordGridHeader,
-  RecordGridValue,
-} from "@grasp-os/ui/components/record-grid";
-import type { RecordGridColumn } from "@grasp-os/ui/components/record-grid";
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
 import {
   Select,
   SelectContent,
-  SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "../grasp/select/index.ts";
 import {
   Sheet,
+  SheetBody,
   SheetContent,
   SheetDescription,
-  SheetHeader,
   SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { i18n } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import {
-  ArrowUpDownIcon,
-  DownloadIcon,
-  SearchIcon,
-  UploadIcon,
-} from "lucide-react";
-import { useState } from "react";
-import type { ReactNode } from "react";
-
-import { downloadCsv } from "../csv.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime, valueText } from "../format.ts";
+} from "../grasp/sheet/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An App's data, for its builders and the admins (core's app-data.ts):
@@ -79,6 +89,90 @@ import { useCoreAction } from "../use-core-action.ts";
 // its change history, export a table as CSV and import CSV rows into one.
 // Reading only, but for an import, which core checks row by row and lands
 // whole or not at all.
+
+// Grasp UI has no token for a toolbar field's measure: the find-by-ID
+// field is as wide as the old grid's bar had it.
+const BAR_FIELD = "14rem";
+
+/**
+ * A record by what people call it: its `title` or `name` field where it
+ * has one as text, else the end of its ID, as the table shows it.
+ */
+const recordName = (record: {
+  id: string;
+  fields: Record<string, unknown>;
+}): string => {
+  for (const field of ["title", "name"]) {
+    const value = record.fields[field];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return `…${record.id.slice(-6)}`;
+};
+
+const styles = stylex.create({
+  // The records: their bar, what a read ran into, then the table, which
+  // scrolls on its own while the bar stays.
+  records: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  bar: {
+    display: "flex",
+    flexShrink: 0,
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space3,
+    borderBottomStyle: "solid",
+    borderBottomWidth: grasp.hairline,
+    borderBottomColor: grasp.line,
+  },
+  spacer: { flexGrow: 1 },
+  barField: { width: BAR_FIELD, maxWidth: "100%" },
+  notes: {
+    display: "grid",
+    flexShrink: 0,
+    gap: grasp.space2,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space3,
+  },
+  grid: { flexGrow: 1, minHeight: 0, overflow: "auto" },
+  // A record's sheet and a history entry: their parts, one under the other.
+  stack: { display: "grid", gap: grasp.space4 },
+  entry: { display: "grid", gap: grasp.space2 },
+  entryHead: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  list: {
+    display: "grid",
+    gap: grasp.space4,
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  start: { justifySelf: "start" },
+  // The import's columns, each beside the field it lands in.
+  mapping: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr)",
+    alignItems: "center",
+    gap: grasp.space3,
+  },
+  errors: {
+    maxHeight: "12rem",
+    overflowY: "auto",
+    margin: 0,
+    paddingInlineStart: grasp.space4,
+  },
+});
 
 /**
  * `call`'s answer, or undefined once core says the App's version moved
@@ -125,15 +219,22 @@ const leftOut = {
   unknown
 >;
 
-/** Who made a change, as people read it. */
-const actorText = (actor: AuditActor): string => {
+/** Who made a change, as people read it: a person by name, where it is known. */
+const actorText = (
+  actor: AuditActor,
+  people: ReadonlyMap<string, string>
+): string => {
   switch (actor.type) {
     case "person":
     case "staff": {
-      return actor.userId;
+      return (
+        people.get(actor.userId) ?? i18n._(msg`Someone in the organization`)
+      );
     }
     case "agent": {
-      const person = actor.onBehalfOf;
+      const person =
+        people.get(actor.onBehalfOf) ??
+        i18n._(msg`someone in the organization`);
       return i18n._(msg`Agent for ${person}`);
     }
     case "workflow": {
@@ -153,45 +254,57 @@ const actorText = (actor: AuditActor): string => {
   }
 };
 
-/** One change of a record's history. */
-const ChangeItem = ({ change }: { change: RecordChange }) => {
-  const who = actorText(change.actor);
+/** A value a change held, or a dash where it held none. */
+const heldText = (
+  values: Record<string, unknown> | null,
+  field: string
+): string =>
+  values !== null && Object.hasOwn(values, field)
+    ? valueText(values[field])
+    : "–";
+
+/** One change of a record's history: what, by whom and when, and each field before and after. */
+const ChangeItem = ({
+  change,
+  people,
+}: {
+  change: RecordChange;
+  people: ReadonlyMap<string, string>;
+}) => {
+  const { t } = useLingui();
+  const who = actorText(change.actor, people);
   const when = formatDateTime(change.at);
+  const fields = formatList(change.fields);
   return (
-    <li className="flex flex-col gap-1 border-b py-3 last:border-b-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{i18n._(ops[change.op])}</Badge>
-        <span className="text-muted-foreground">
+    <li {...stylex.props(styles.entry)}>
+      <div {...stylex.props(styles.entryHead)}>
+        <Badge size="sm">{i18n._(ops[change.op])}</Badge>
+        <Text element="span" size="sm" tone="muted">
           {i18n._(sources[change.source])}
-        </span>
+        </Text>
       </div>
-      <p>
-        <Trans>
-          {who}, {when}
-        </Trans>
-      </p>
+      <Text size="sm">{t`${who}, ${when}`}</Text>
       {change.valuesLeftOut === null ? (
-        <dl className="grid grid-cols-3 gap-x-2 gap-y-1">
-          {change.fields.map((field) => (
-            <div className="contents" key={field}>
-              <dt className="font-medium">{field}</dt>
-              <dd className="text-muted-foreground truncate">
-                {change.before !== null && Object.hasOwn(change.before, field)
-                  ? valueText(change.before[field])
-                  : "–"}
-              </dd>
-              <dd className="truncate">
-                {change.after !== null && Object.hasOwn(change.after, field)
-                  ? valueText(change.after[field])
-                  : "–"}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        // Each field it changed, before then after: a list, which a narrow
+        // sheet holds whole where a table's columns would be cut off.
+        <KeyValueList
+          items={change.fields.map((field) => {
+            const before = heldText(change.before, field);
+            const after = heldText(change.after, field);
+            return {
+              key: field,
+              value: t({
+                message: `${before} → ${after}`,
+                comment: "A field's value before a change, then after it.",
+              }),
+            };
+          })}
+          variant="inline"
+        />
       ) : (
-        <p className="text-muted-foreground">
-          {change.fields.join(", ")} {i18n._(leftOut[change.valuesLeftOut])}
-        </p>
+        <Text size="sm" tone="muted">
+          {fields} {i18n._(leftOut[change.valuesLeftOut])}
+        </Text>
       )}
     </li>
   );
@@ -200,38 +313,49 @@ const ChangeItem = ({ change }: { change: RecordChange }) => {
 /** A record's change history as read, and reading older changes. */
 const RecordHistory = ({
   changes,
+  people,
   failure,
   busy,
   onOlder,
 }: {
   changes: RecordChange[] | undefined;
+  /** People's names by ID, where they could be read. */
+  people: ReadonlyMap<string, string>;
   failure: string | undefined;
   busy: boolean;
   onOlder: (() => void) | undefined;
-}) => (
-  <>
-    <h3 className="font-medium">
-      <Trans>History</Trans>
-    </h3>
-    {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
-    {changes?.length === 0 ? (
-      <p className="text-muted-foreground">
-        <Trans>No changes are kept for this record.</Trans>
-      </p>
-    ) : (
-      <ul>
-        {changes?.map((change) => (
-          <ChangeItem change={change} key={change.id} />
-        ))}
-      </ul>
-    )}
-    {onOlder === undefined ? null : (
-      <Button disabled={busy} onClick={onOlder} size="sm" variant="outline">
-        <Trans>Older changes</Trans>
-      </Button>
-    )}
-  </>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <section {...stylex.props(styles.stack)}>
+      <Heading level={3} size="ui">
+        {t`History`}
+      </Heading>
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+      {changes?.length === 0 ? (
+        <Text size="sm" tone="muted">
+          {t`No changes are kept for this record.`}
+        </Text>
+      ) : (
+        <ul {...stylex.props(styles.list)}>
+          {changes?.map((change) => (
+            <ChangeItem change={change} key={change.id} people={people} />
+          ))}
+        </ul>
+      )}
+      {onOlder === undefined ? null : (
+        <Button
+          disabled={busy}
+          layout={styles.start}
+          onClick={onOlder}
+          size="sm"
+        >
+          {t`Older changes`}
+        </Button>
+      )}
+    </section>
+  );
+};
 
 /**
  * A record's fields and its change history, in a sheet: the history of
@@ -258,24 +382,33 @@ const RecordSheet = ({
   const { busy, failure, run } = useCoreAction();
   const [changes, setChanges] = useState<RecordChange[]>();
   const [next, setNext] = useState<number | null>(null);
+  const [people, setPeople] = useState<ReadonlyMap<string, string>>(new Map());
   const load = async (before: number | null) => {
     if (version === null) {
       return;
     }
-    const page = await run(
+    const read = await run(
       async (session) =>
-        await unlessStale(
-          async () =>
-            await session.apps.data.history(
-              app,
-              table,
-              version,
-              record.id,
-              before
-            ),
-          onStale
-        )
+        await Promise.all([
+          unlessStale(
+            async () =>
+              await session.apps.data.history(
+                app,
+                table,
+                version,
+                record.id,
+                before
+              ),
+            onStale
+          ),
+          // Names for whoever made a change, once: none where they can't be listed.
+          before === null ? readPeople(session) : undefined,
+        ])
     );
+    const [page, named] = read ?? [];
+    if (named !== undefined) {
+      setPeople(named);
+    }
     if (page !== undefined) {
       setChanges([
         ...(before === null ? [] : (changes ?? [])),
@@ -293,7 +426,7 @@ const RecordSheet = ({
   ) {
     void load(null);
   }
-  const { id } = record;
+  const shown = recordName(record);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -303,39 +436,34 @@ const RecordSheet = ({
       }}
       open
     >
-      <SheetContent closeLabel={t`Close`} side="right">
-        <SheetHeader>
-          <SheetTitle>
-            <Trans>Record {id}</Trans>
-          </SheetTitle>
-          <SheetDescription>
-            {formatDateTime(record.updatedAt)}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-4 text-sm">
-          <dl className="grid grid-cols-3 gap-x-2 gap-y-1">
-            {Object.entries(record.fields).map(([field, value]) => (
-              <div className="contents" key={field}>
-                <dt className="font-medium">{field}</dt>
-                <dd className="col-span-2 break-words">{valueText(value)}</dd>
-              </div>
-            ))}
-          </dl>
-          {version === null ? null : (
-            <RecordHistory
-              busy={busy}
-              changes={changes}
-              failure={failure}
-              onOlder={
-                next === null
-                  ? undefined
-                  : () => {
-                      void load(next);
-                    }
-              }
+      <SheetContent closeLabel={t`Close`}>
+        <SheetTitle>{shown}</SheetTitle>
+        <SheetDescription>{formatDateTime(record.updatedAt)}</SheetDescription>
+        <SheetBody>
+          <div {...stylex.props(styles.stack)}>
+            <KeyValueList
+              items={Object.entries(record.fields).map(([field, value]) => ({
+                key: field,
+                value: valueText(value),
+              }))}
             />
-          )}
-        </div>
+            {version === null ? null : (
+              <RecordHistory
+                busy={busy}
+                changes={changes}
+                people={people}
+                failure={failure}
+                onOlder={
+                  next === null
+                    ? undefined
+                    : () => {
+                        void load(next);
+                      }
+                }
+              />
+            )}
+          </div>
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );
@@ -343,6 +471,38 @@ const RecordSheet = ({
 
 /** The field to leave a column out of an import with. */
 const leaveOut = "-";
+
+/** What core refused of an import: each row's problem, and whether there were more. */
+const ImportErrors = ({
+  errors,
+  more,
+}: {
+  errors: Extract<AppDataImportResult, { ok: false }>["errors"];
+  more: boolean;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Alert
+      title={t`Nothing was added. Fix these rows and try again.`}
+      tone="danger"
+    >
+      <ul {...stylex.props(styles.errors)}>
+        {errors.map((error) => {
+          const { row, message } = error;
+          const where = error.field ?? error.column ?? "";
+          return (
+            <li key={`${row}:${where}:${error.message}`}>
+              {row === 0
+                ? t`File ${where}: ${message}`
+                : t`Row ${row} ${where}: ${message}`}
+            </li>
+          );
+        })}
+      </ul>
+      {more ? t`And more.` : null}
+    </Alert>
+  );
+};
 
 /** Importing a CSV file into `table`: pick it, map its columns, import. */
 const ImportDialog = ({
@@ -409,6 +569,8 @@ const ImportDialog = ({
     }
   };
   const { name } = table;
+  const rows = preview?.rows ?? 0;
+  const inserted = result?.ok === true ? result.inserted : 0;
   const fieldItems = [
     { value: leaveOut, label: t`Leave out` },
     ...table.fields.map((field) => ({ value: field.name, label: field.name })),
@@ -422,125 +584,85 @@ const ImportDialog = ({
       }}
       open
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Import into {name}</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              Every row is checked first. If one is wrong, nothing is added.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <Field>
-          <FieldLabel htmlFor="app-data-file">
-            <Trans>CSV file</Trans>
-          </FieldLabel>
-          <Input
-            accept=".csv,text/csv"
-            disabled={busy}
-            id="app-data-file"
-            onChange={(event) => {
-              void choose(event.target.files?.[0]);
-            }}
-            type="file"
-          />
-        </Field>
-        {preview === undefined ? null : (
-          <div className="flex flex-col gap-2">
-            <p className="text-muted-foreground">
-              <Plural
-                one="# row to import."
-                other="# rows to import."
-                value={preview.rows}
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Import into ${name}`}</DialogTitle>
+        <DialogDescription>
+          {t`Every row is checked first. If one is wrong, nothing is added.`}
+        </DialogDescription>
+        <DialogBody>
+          <div {...stylex.props(styles.stack)}>
+            <Field>
+              <FieldLabel>{t`CSV file`}</FieldLabel>
+              <FileUpload
+                accept={[".csv", "text/csv"]}
+                disabled={busy}
+                onValueChange={(files) => {
+                  void choose(files[0]);
+                }}
               />
-            </p>
-            {preview.columns.map((column) => (
-              <Field key={column} orientation="horizontal">
-                <FieldLabel className="w-1/3">
-                  <span className="truncate">{column}</span>
-                </FieldLabel>
-                <Select
-                  items={fieldItems}
-                  onValueChange={(value: unknown) => {
-                    if (typeof value === "string") {
-                      setMapping({
-                        ...mapping,
-                        [column]: value === leaveOut ? null : value,
-                      });
-                    }
-                  }}
-                  value={mapping[column] ?? leaveOut}
-                >
-                  <SelectTrigger
-                    aria-label={t`Field for ${column}`}
-                    className="flex-1"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fieldItems.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ))}
-          </div>
-        )}
-        {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
-        {result?.ok === true ? (
-          <p>
-            <Plural
-              one="# record added."
-              other="# records added."
-              value={result.inserted}
-            />
-          </p>
-        ) : null}
-        {result?.ok === false ? (
-          <div className="flex flex-col gap-1">
-            <ErrorText>
-              {t`Nothing was added. Fix these rows and try again.`}
-            </ErrorText>
-            <ul className="text-muted-foreground max-h-48 overflow-y-auto">
-              {result.errors.map((error) => {
-                const { row, message } = error;
-                const where = error.field ?? error.column ?? "";
-                return (
-                  <li key={`${row}:${where}:${error.message}`}>
-                    {row === 0 ? (
-                      <Trans>
-                        File {where}: {message}
-                      </Trans>
-                    ) : (
-                      <Trans>
-                        Row {row} {where}: {message}
-                      </Trans>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-            {result.more ? (
-              <p className="text-muted-foreground">
-                <Trans>And more.</Trans>
-              </p>
+            </Field>
+            {preview === undefined ? null : (
+              <>
+                <Text size="sm" tone="muted">
+                  {t`${plural(rows, {
+                    one: "# row to import.",
+                    other: "# rows to import.",
+                  })}`}
+                </Text>
+                <div {...stylex.props(styles.mapping)}>
+                  {preview.columns.map((column) => (
+                    <Field key={column} orientation="horizontal">
+                      <Text element="span" size="sm" wrap="truncate">
+                        {column}
+                      </Text>
+                      <Select
+                        items={fieldItems}
+                        onValueChange={(value) => {
+                          if (typeof value === "string") {
+                            setMapping({
+                              ...mapping,
+                              [column]: value === leaveOut ? null : value,
+                            });
+                          }
+                        }}
+                        value={mapping[column] ?? leaveOut}
+                      >
+                        <SelectTrigger aria-label={t`Field for ${column}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent />
+                      </Select>
+                    </Field>
+                  ))}
+                </div>
+              </>
+            )}
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
+            )}
+            {result?.ok === true ? (
+              <Alert tone="success">
+                {t`${plural(inserted, {
+                  one: "# record added.",
+                  other: "# records added.",
+                })}`}
+              </Alert>
+            ) : null}
+            {result?.ok === false ? (
+              <ImportErrors errors={result.errors} more={result.more} />
             ) : null}
           </div>
-        ) : null}
+        </DialogBody>
         <DialogFooter>
           <Button
             disabled={busy || preview === undefined || result?.ok === true}
+            icon={Upload}
             onClick={() => {
               void start();
             }}
+            variant="ink"
           >
-            <UploadIcon data-icon="inline-start" />
-            <Trans>Import</Trans>
+            {t`Import`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -548,124 +670,134 @@ const ImportDialog = ({
   );
 };
 
-/** A column of a table's records: the field whose values it shows, and its header. */
-export interface RecordColumn {
+const minuteMs = 60_000;
+const hourMs = 60 * minuteMs;
+const dayMs = 24 * hourMs;
+
+/** How long ago `value` was ("3 hours ago"), as the page's language says it. */
+const formatAgo = (value: string, now: Date = new Date()): string => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  const say = new Intl.RelativeTimeFormat(i18n.locale, { numeric: "auto" });
+  if (ago >= dayMs) {
+    return say.format(-Math.floor(ago / dayMs), "day");
+  }
+  if (ago >= hourMs) {
+    return say.format(-Math.floor(ago / hourMs), "hour");
+  }
+  return say.format(-Math.floor(ago / minuteMs), "minute");
+};
+
+/** A column of a table's records: the field whose values it shows, and its name in the head. */
+interface RecordColumn {
   field: string;
-  header: ReactNode;
-  width?: number;
+  header: string;
+  /** A number: aligned to the end, as a table's numbers are. */
+  number?: boolean;
 }
 
-/** A header that only names its column. */
-export const PlainHeader = ({ children }: { children: ReactNode }) => (
-  <RecordGridHeader>{children}</RecordGridHeader>
-);
+/** The words the record columns say, translated where they are made. */
+interface RecordColumnWords {
+  record: string;
+  changed: string;
+}
 
-/** The grid's columns: each record's ID, which opens it, its fields, and when it last changed. */
+/**
+ * The table's columns: each record by what people call it (`recordName`),
+ * which opens it (the table's `onRowOpen`), its fields, and when it last changed. The first column
+ * names the row, as a table's does, so the field that names it (`title`,
+ * else `name`) has no column of its own besides; numbers and the time
+ * stand at the row's end.
+ */
 const recordColumns = (
   columns: readonly RecordColumn[],
-  onOpen: (record: AppDataRecord) => void
-): RecordGridColumn<AppDataRecord>[] => [
-  {
-    id: "_id",
-    width: 96,
-    header: (
-      <PlainHeader>
-        <Trans>Record</Trans>
-      </PlainHeader>
-    ),
-    cell: (record) => (
-      <Button
-        onClick={() => {
-          onOpen(record);
-        }}
-        size="xs"
-        title={record.id}
-        variant="link"
-      >
-        {/* A UUIDv7 starts with its time, the same for records made
-            together: its end tells them apart. */}
-        <RecordGridValue tone="code">…{record.id.slice(-6)}</RecordGridValue>
-      </Button>
-    ),
-  },
-  ...columns.map(
-    ({ field, header, width }): RecordGridColumn<AppDataRecord> => ({
-      id: field,
-      header,
-      ...(width === undefined ? {} : { width }),
-      cell: (record) => {
-        const value = record.fields[field];
-        return value === undefined || value === null ? null : (
-          <RecordGridValue>{valueText(value)}</RecordGridValue>
-        );
-      },
-    })
-  ),
-  {
-    id: "_updatedAt",
-    width: 168,
-    header: (
-      <PlainHeader>
-        <Trans>Changed</Trans>
-      </PlainHeader>
-    ),
-    cell: (record) => (
-      <RecordGridValue tone="muted">
-        {formatDateTime(record.updatedAt)}
-      </RecordGridValue>
-    ),
-  },
-];
+  words: RecordColumnWords
+): DataTableColumn<AppDataRecord>[] => {
+  const naming =
+    columns.find(({ field }) => field === "title") ??
+    columns.find(({ field }) => field === "name");
+  return [
+    {
+      key: "_id",
+      header: words.record,
+      // The row's name: it wraps in whole words where the row is narrow,
+      // as a table's first column does, so it stands in no control's box.
+      value: (record) => recordName(record),
+      // Its whole ID on hover, for whoever looks a record up by it.
+      cell: (record) => <span title={record.id}>{recordName(record)}</span>,
+    },
+    ...columns
+      .filter((column) => column !== naming)
+      .map(({ field, header, number }): DataTableColumn<AppDataRecord> => ({
+        key: field,
+        header,
+        ...(number === true ? { align: "end" } : {}),
+        value: (record) => {
+          const value = record.fields[field];
+          return value === undefined || value === null ? "" : valueText(value);
+        },
+      })),
+    {
+      key: "_updatedAt",
+      header: words.changed,
+      align: "end",
+      value: (record) => record.updatedAt,
+      // How long ago, the full time on hover: the same date five times
+      // over says nothing a row needs.
+      cell: (record) => (
+        <span title={formatDateTime(record.updatedAt)}>
+          <Text element="span" size="sm" tone="muted">
+            {formatAgo(record.updatedAt)}
+          </Text>
+        </span>
+      ),
+    },
+  ];
+};
 
-/** What a read of records ran into: the App moved on, an ID found nothing, a failure. */
+/**
+ * What finding, exporting or importing ran into: the App moved on, an ID
+ * found nothing, a call that failed. A page of records that failed to
+ * load is the table's own to say (its `failed`), with Try again.
+ */
 const RecordNotes = ({
   stale,
   missing,
   failure,
-  onRetry,
 }: {
   stale: boolean;
   missing: boolean;
   failure: string | undefined;
-  /** Reads again what failed to load; none for a failure nothing reads again. */
-  onRetry?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  if (!stale && !missing && failure === undefined) {
+    return null;
+  }
   return (
-    <>
+    <div {...stylex.props(styles.notes)}>
       {stale ? (
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <ErrorText>
-            {t`This App changed. Reload to see its current version.`}
-          </ErrorText>
-          <Button
-            onClick={() => {
-              void router.invalidate();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Reload</Trans>
-          </Button>
-        </div>
-      ) : null}
-      {missing || failure !== undefined ? (
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          {missing ? (
-            <p className="text-muted-foreground text-sm">
-              <Trans>No record of this table has that ID.</Trans>
-            </p>
-          ) : null}
-          <ErrorText>{failure}</ErrorText>
-          {failure === undefined || onRetry === undefined ? null : (
-            <Button onClick={onRetry} size="sm" variant="outline">
-              <Trans>Try again</Trans>
+        <Alert
+          action={
+            <Button
+              onClick={() => {
+                void router.invalidate();
+              }}
+              size="xs"
+              variant="quiet"
+            >
+              {t`Reload`}
             </Button>
-          )}
-        </div>
+          }
+          tone="attention"
+        >
+          {t`This App changed. Reload to see its current version.`}
+        </Alert>
       ) : null}
-    </>
+      {missing ? (
+        <Alert>{t`No record of this table has that ID.`}</Alert>
+      ) : null}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+    </div>
   );
 };
 
@@ -675,7 +807,7 @@ const RecordNotes = ({
  * App's draft (`apps.preview.records`), which nothing records,
  * exports or imports.
  */
-export type RecordSource = { kind: "live"; version: number } | { kind: "test" };
+type RecordSource = { kind: "live"; version: number } | { kind: "test" };
 
 /** A table, and where its records are read. */
 interface ReadTable {
@@ -687,7 +819,7 @@ interface ReadTable {
  * The records of `read`'s table, a page at a time, read apart from what
  * else the page does: the first page at once, the next one on `handleEnd`
  * (none while a read is out, once the last came, or after one failed),
- * all again on `reload`; and how many there are, when that's known.
+ * all again on `reload`.
  */
 const useRecordPages = (
   app: string,
@@ -730,9 +862,12 @@ const useRecordPages = (
   return {
     records: records ?? [],
     failure,
-    // The table's count, or, once the last page came, the records read.
-    total:
-      live?.table.records ?? (cursor === null ? records?.length : undefined),
+    /** The first page is on its way. */
+    loading: records === undefined && busy,
+    /** A next page is on its way. */
+    loadingMore: records !== undefined && busy,
+    /** There is a next page to read. */
+    more: records !== undefined && cursor !== null,
     /** Reads again the page that failed: the first, or the one after the last read. */
     retry: () => {
       void load(records === undefined ? null : cursor);
@@ -771,22 +906,22 @@ const RecordActions = ({
     <>
       <search>
         <form
-          className="w-56"
           onSubmit={(event) => {
             event.preventDefault();
             if (wanted.trim() !== "" && !busy) {
               onFind(wanted);
             }
           }}
+          {...stylex.props(styles.barField)}
         >
           <InputGroup>
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
+            <InputGroupText>
+              <Icon icon={Search} />
+            </InputGroupText>
             <InputGroupInput
               aria-label={t`Find a record by its ID`}
-              onChange={(event) => {
-                setWanted(event.target.value);
+              onValueChange={(value: string) => {
+                setWanted(value);
               }}
               placeholder={t`Find a record by its ID`}
               type="search"
@@ -797,27 +932,20 @@ const RecordActions = ({
       </search>
       <DropdownMenu>
         <DropdownMenuTrigger
+          aria-label={t`Import or export`}
           disabled={busy}
-          render={
-            <Button
-              aria-label={t`Import or export`}
-              size="icon-sm"
-              title={t`Import or export`}
-              variant="ghost"
-            />
-          }
-        >
-          <ArrowUpDownIcon />
-        </DropdownMenuTrigger>
+          icon={More}
+          size="sm"
+          title={t`Import or export`}
+          variant="ghost"
+        />
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={onExport}>
-            <DownloadIcon />
-            <Trans>Export as CSV</Trans>
+          <DropdownMenuItem icon={Download} onSelect={onExport}>
+            {t`Export as CSV`}
           </DropdownMenuItem>
           {importable ? (
-            <DropdownMenuItem onClick={onImport}>
-              <UploadIcon />
-              <Trans>Import from CSV</Trans>
+            <DropdownMenuItem icon={Upload} onSelect={onImport}>
+              {t`Import from CSV`}
             </DropdownMenuItem>
           ) : null}
         </DropdownMenuContent>
@@ -827,13 +955,13 @@ const RecordActions = ({
 };
 
 /**
- * One table's records in a grid, a page at a time, read from `source`:
+ * One table's records in a table, a page at a time, read from `source`:
  * the live App's, with find, export and import, the App's version read;
  * or the draft preview's test data. Its columns are the page's
  * (`columns`, by field), and the start of the bar above it (`toolbar`)
- * the page's too, its end too (`end`). The next page loads as the grid
- * nears its last row, so a table of any size scrolls through. None for a
- * table the source doesn't have (`table` undefined), or with no source.
+ * the page's too, its end too (`end`). The next page loads as the last
+ * row comes into view, so a table of any size scrolls through. None for
+ * a table the source doesn't have (`table` undefined), or with no source.
  */
 export const TableRecords = ({
   app,
@@ -855,6 +983,7 @@ export const TableRecords = ({
   /** What the page shows in place of the records (the table's fields), if anything. */
   instead?: ReactNode;
 }) => {
+  const { t } = useLingui();
   const router = useRouter();
   // An export or a lookup that fails never stops the paging.
   const action = useCoreAction();
@@ -907,12 +1036,15 @@ export const TableRecords = ({
       setOpen(found);
     }
   };
-  const gridColumns = recordColumns(columns, setOpen);
+  const tableColumns = recordColumns(columns, {
+    record: t`Record`,
+    changed: t`Changed`,
+  });
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
+    <div {...stylex.props(styles.records)}>
+      <div {...stylex.props(styles.bar)}>
         {toolbar}
-        <div className="flex-1" />
+        <span {...stylex.props(styles.spacer)} />
         {end}
         {live === undefined || instead !== undefined ? null : (
           <RecordActions
@@ -932,27 +1064,41 @@ export const TableRecords = ({
       </div>
       {instead}
       {instead === undefined ? (
-        <RecordNotes
-          failure={pages.failure ?? action.failure}
-          {...(pages.failure === undefined ? {} : { onRetry: pages.retry })}
-          missing={missing}
-          stale={stale}
-        />
+        <RecordNotes failure={action.failure} missing={missing} stale={stale} />
       ) : null}
       {instead === undefined ? (
-        <RecordGrid
-          columns={gridColumns}
-          empty={
-            <p className="text-muted-foreground px-3 py-6 text-sm">
-              <Trans>No records</Trans>
-            </p>
-          }
-          label={label}
-          onEndReached={pages.handleEnd}
-          rowKey={(record) => record.id}
-          rows={pages.records}
-          total={pages.total}
-        />
+        <div {...stylex.props(styles.grid)}>
+          <DataTable
+            columns={tableColumns}
+            density="compact"
+            empty={
+              read?.source.kind === "test"
+                ? {
+                    title: t`No example records`,
+                    description: t`Reset the example data to fill it.`,
+                  }
+                : {
+                    title: t`No records yet`,
+                    description: t`They show here as people use the App.`,
+                  }
+            }
+            {...(pages.failure === undefined
+              ? {}
+              : {
+                  failed: { description: pages.failure, onRetry: pages.retry },
+                })}
+            hasMore={pages.more && pages.failure === undefined}
+            label={label}
+            loading={pages.loading}
+            loadingMore={pages.loadingMore}
+            onEndReached={pages.handleEnd}
+            onRowOpen={setOpen}
+            rowCurrent={(record) => record.id === open?.id}
+            rowKey={(record) => record.id}
+            rows={pages.records}
+            unit={{ one: t`record`, other: t`records` }}
+          />
+        </div>
       ) : null}
       {open === undefined || read === undefined ? null : (
         <RecordSheet
@@ -1008,9 +1154,8 @@ export const AppData = ({
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>
-            <Trans>No tables</Trans>
-          </EmptyTitle>
+          <EmptyMedia icon={Database} />
+          <EmptyTitle>{t`No tables`}</EmptyTitle>
           <EmptyDescription>
             {t`The App's live version keeps no data.`}
           </EmptyDescription>
@@ -1018,40 +1163,43 @@ export const AppData = ({
       </Empty>
     );
   }
-  const items = tables.map(({ name }) => ({ value: name, label: name }));
   return (
     <TableRecords
       app={app}
       // Its own state for each App and table: nothing read of one is
       // shown, or kept, for another.
       key={`${app}/${version}/${table.name}`}
-      columns={table.fields.map(({ name }) => ({
+      columns={table.fields.map(({ name, kind }) => ({
         field: name,
-        header: <PlainHeader>{name}</PlainHeader>,
+        header: name,
+        number: kind === "number",
       }))}
       label={table.name}
       table={table}
       toolbar={
-        <Select
-          items={items}
-          onValueChange={(value: unknown) => {
+        // The App's tables, each with how many records it holds.
+        <ToggleGroup
+          aria-label={t`Table`}
+          onValueChange={(chosen: unknown[]) => {
+            const [value] = chosen;
             if (typeof value === "string") {
               setPicked({ app, table: value });
             }
           }}
-          value={table.name}
+          size="xs"
+          value={[table.name]}
         >
-          <SelectTrigger aria-label={t`Table`} className="w-56" size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {items.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          {tables.map(({ name, records }) => (
+            <Toggle key={name} value={name}>
+              {name}
+              {records === null ? null : (
+                <Text element="span" size="xs" tone="muted">
+                  {formatNumber(records)}
+                </Text>
+              )}
+            </Toggle>
+          ))}
+        </ToggleGroup>
       }
       source={{ kind: "live", version }}
     />

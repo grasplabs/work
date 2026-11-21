@@ -15,9 +15,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import type { Waiting } from "../dashboard/waiting.ts";
 import { ItemDetail } from "./item-detail.tsx";
 import { inboxItems } from "./items.ts";
+import type { Waiting } from "./waiting.ts";
 
 // A workflow's bindings that wait on an admin, in the inbox, against core's
 // workflowResources as the page reaches them over RPC, faked: each binding
@@ -120,7 +120,6 @@ const shown = async () => {
     component: () => (
       <ItemDetail
         item={shownItem}
-        onBack={() => {}}
         onSaid={(line) => {
           said.push(line);
         }}
@@ -163,12 +162,17 @@ describe("a workflow's bindings in the inbox", () => {
 
   it("approves a binding with exactly the target chosen, for the version shown", async () => {
     const { approved, said, title } = await shown();
-    const select = document.querySelector("select");
+    // The target is chosen as a person does: the list opened, its option pressed.
     await act(async () => {
-      if (select !== null) {
-        select.value = "1";
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      document
+        .querySelector<HTMLElement>('[aria-label="What summary reaches"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+        .find((each) => each.textContent?.trim() === "anthropic/claude")
+        ?.click();
       await Promise.resolve();
     });
     await act(async () => {

@@ -20,6 +20,8 @@ import {
   isNull,
   lt,
   lte,
+  ne,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
@@ -474,7 +476,8 @@ const shownSchema = z.object({
 /**
  * Marks read the person's notifications `ids` whose latest failure is no
  * later than `upTo`, and drops those they read over {@link keptReadMs}
- * ago.
+ * ago, but for a question still open that they were asked: that row is
+ * how `brain.openGaps` knows it was asked of them.
  */
 export const markNotificationsRead = async (
   env: Env,
@@ -500,14 +503,33 @@ export const markNotificationsRead = async (
           lte(notifications.updatedAt, new Date(shown.data.upTo))
         )
       ),
-    db
-      .delete(notifications)
-      .where(
-        and(
-          eq(notifications.personId, person.userId),
-          lt(notifications.readAt, new Date(now.getTime() - keptReadMs))
+    db.delete(notifications).where(
+      and(
+        eq(notifications.personId, person.userId),
+        lt(notifications.readAt, new Date(now.getTime() - keptReadMs)),
+        or(
+          ne(notifications.type, "gap_asked"),
+          notExists(
+            db
+              .select({ id: brainRecords.id })
+              .from(brainRecords)
+              .leftJoin(
+                brainGapStates,
+                eq(brainGapStates.gapId, brainRecords.id)
+              )
+              .where(
+                and(
+                  eq(brainRecords.id, notifications.gapId),
+                  eq(brainRecords.type, "gap"),
+                  isNull(brainRecords.retiredAt),
+                  isNull(brainRecords.forgottenAt),
+                  isNull(brainGapStates.closedAt)
+                )
+              )
+          )
         )
-      ),
+      )
+    ),
   ]);
 };
 

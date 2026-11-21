@@ -1,16 +1,19 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 import { z } from "zod";
 
 import type { CoreConnection } from "./core-connection.ts";
 import { signOut } from "./core-connection.ts";
 import { ErrorText } from "./error-text.tsx";
+import { Button } from "./grasp/button/index.ts";
+import { Field, FieldLabel } from "./grasp/field/index.ts";
+import { Heading } from "./grasp/heading/index.ts";
+import { Input } from "./grasp/input/index.ts";
+import { Text } from "./grasp/text/index.ts";
+import { grasp } from "./grasp/tokens/tokens.stylex.ts";
 
 // A guest's way in (core's auth/guest-codes.ts): someone outside the
 // company, invited by address, asks for a code by email and signs in with
@@ -30,6 +33,25 @@ const codeRefusals: Readonly<Record<string, MessageDescriptor>> = {
 };
 
 const fallback = msg`That didn't work. Try again.`;
+
+const styles = stylex.create({
+  // The form's fields and buttons, one under the other, the column's width.
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    width: "100%",
+    textAlign: "start",
+  },
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space4,
+    width: "100%",
+  },
+  words: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+});
 
 /** Posts `body` to core's sign-in route `path`: null when it went, else why not. */
 const post = async (path: string, body: unknown): Promise<string | null> => {
@@ -57,8 +79,6 @@ const post = async (path: string, body: unknown): Promise<string | null> => {
  */
 export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
   const { i18n, t } = useLingui();
-  const emailId = useId();
-  const codeId = useId();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
@@ -98,23 +118,19 @@ export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
   };
   return (
     <form
-      className="flex w-full flex-col gap-3"
+      {...stylex.props(styles.form)}
       onSubmit={(event) => {
         event.preventDefault();
         void (sent ? signIn() : ask());
       }}
     >
-      <Field>
-        <FieldLabel htmlFor={emailId}>
+      <Field disabled={sent} name="email">
+        <FieldLabel>
           <Trans>Your email address</Trans>
         </FieldLabel>
         <Input
           autoComplete="email"
-          disabled={sent}
-          id={emailId}
-          onChange={(event) => {
-            setEmail(event.target.value);
-          }}
+          onValueChange={setEmail}
           required
           type="email"
           value={email}
@@ -122,23 +138,20 @@ export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
       </Field>
       {sent ? (
         <>
-          <p className="text-muted-foreground text-balance">
+          <Text tone="muted">
             <Trans>
               If you were invited, a code is on its way to you. It works for
               five minutes.
             </Trans>
-          </p>
-          <Field>
-            <FieldLabel htmlFor={codeId}>
+          </Text>
+          <Field name="code">
+            <FieldLabel>
               <Trans>Code</Trans>
             </FieldLabel>
             <Input
               autoComplete="one-time-code"
-              id={codeId}
               inputMode="numeric"
-              onChange={(event) => {
-                setCode(event.target.value);
-              }}
+              onValueChange={setCode}
               required
               value={code}
             />
@@ -146,7 +159,7 @@ export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
         </>
       ) : null}
       <ErrorText>{failure}</ErrorText>
-      <Button disabled={busy} size="xl" type="submit">
+      <Button disabled={busy} size="lg" type="submit" variant="ink">
         {sent ? t`Sign in` : t`Email me a code`}
       </Button>
       <Button
@@ -186,26 +199,26 @@ export const NothingShared = ({
     }
   };
   return (
-    <div className="flex w-full flex-col items-center gap-4">
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle>
+    <div {...stylex.props(styles.page)}>
+      <div {...stylex.props(styles.words)}>
+        <Heading level={1}>
           <Trans>Nothing is shared with you yet</Trans>
-        </PageHeaderTitle>
-        <p className="text-muted-foreground text-balance">
+        </Heading>
+        <Text tone="muted">
           <Trans>
             You’re signed in as a guest with {email}. What someone shares with
             you shows here.
           </Trans>
-        </p>
+        </Text>
       </div>
       <ErrorText>{failure}</ErrorText>
       <Button
         onClick={() => {
           void leave();
         }}
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Sign out</Trans>
+        {t`Sign out`}
       </Button>
     </div>
   );

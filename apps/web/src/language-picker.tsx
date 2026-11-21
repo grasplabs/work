@@ -1,140 +1,27 @@
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
 import { useLingui } from "@lingui/react/macro";
-import { LanguagesIcon } from "lucide-react";
 
-import { chooseLocale, isLocale, localeNames } from "./i18n.ts";
-import type { Locale } from "./i18n.ts";
+import { languageOptions } from "./frame/language-options.ts";
+import { LanguageSwitch } from "./grasp/language-switch/index.ts";
+import { chooseLocale, isLocale } from "./i18n.ts";
 
-const languages = Object.entries(localeNames).map(([value, label]) => ({
-  value,
-  label,
-}));
+// The language as Grasp UI's Language switch, compact, in a page's corner
+// where there is no person menu (signing in, a guest's chat). Its words are
+// the parts' catalogue's (frame/part-words.tsx).
 
-/**
- * The language the product speaks, as a submenu of the person menu. Each
- * language is named in its own words, so anyone can find theirs.
- */
-export const LanguageMenu = () => {
-  const { t, i18n } = useLingui();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <LanguagesIcon />
-        {t`Language`}
-        <span className="text-muted-foreground ml-auto">
-          {localeNames[locale]}
-        </span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup
-          value={locale}
-          onValueChange={(value: unknown) => {
-            if (isLocale(value)) {
-              void chooseLocale(value);
-            }
-          }}
-        >
-          {languages.map((language) => (
-            <DropdownMenuRadioItem
-              key={language.value}
-              lang={language.value}
-              value={language.value}
-            >
-              {language.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-};
-
-/**
- * The language as a small button in a page's corner, where there is no
- * person menu (signing in). Its code says enough, as language buttons do.
- */
+/** The page's language, chosen as it is picked. */
 export const LanguageButton = () => {
-  const { t, i18n } = useLingui();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  const name = localeNames[locale];
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t`Language: ${name}`}
-        render={<Button size="icon-sm" variant="ghost" />}
-      >
-        {locale.toUpperCase()}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top">
-        <DropdownMenuRadioGroup
-          value={locale}
-          onValueChange={(value: unknown) => {
-            if (isLocale(value)) {
-              void chooseLocale(value);
-            }
-          }}
-        >
-          {languages.map((language) => (
-            <DropdownMenuRadioItem
-              key={language.value}
-              lang={language.value}
-              value={language.value}
-            >
-              {language.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-
-/** The language as a field of its own, as Settings → Profile offers it. */
-export const LanguageSelect = ({ id }: { id: string }) => {
   const { i18n } = useLingui();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
   return (
-    <Select
-      items={languages}
-      onValueChange={(value: unknown) => {
-        if (isLocale(value)) {
-          void chooseLocale(value);
+    <LanguageSwitch
+      look="compact"
+      onValueChange={(code) => {
+        if (isLocale(code)) {
+          void chooseLocale(code);
         }
       }}
-      value={locale}
-    >
-      <SelectTrigger className="w-full" id={id}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {languages.map((language) => (
-          <SelectItem
-            key={language.value}
-            lang={language.value}
-            value={language.value}
-          >
-            {language.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      options={languageOptions}
+      size="sm"
+      value={i18n.locale}
+    />
   );
 };

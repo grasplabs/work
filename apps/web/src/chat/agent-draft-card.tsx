@@ -1,10 +1,15 @@
 import type { AgentDraftMade, AgentDrafted } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
+import { formatList } from "../format.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import type { KeyValueItem } from "../grasp/key-value/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { MakeActions, MakeCard } from "./make-card.tsx";
@@ -27,7 +32,7 @@ const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
   const names = new Map(
     read?.state === "ready" ? read.data.map(({ id, name }) => [id, name]) : []
   );
-  const named = teams.map((id) => names.get(id) ?? id).join(", ");
+  const named = formatList(teams.map((id) => names.get(id) ?? id));
   return <Trans>People in these teams: {named}</Trans>;
 };
 
@@ -58,14 +63,14 @@ export const AppNames = ({
         ])
       : []
   );
-  return apps
-    .map(({ source, provider, name }) => {
+  return formatList(
+    apps.map(({ source, provider, name }) => {
       const granted = named.get(`${source}:${provider}`);
       return granted === undefined || granted === name
         ? name
         : `${granted} (${name})`;
     })
-    .join(", ");
+  );
 };
 
 /** Who may ask it, as the card says it. */
@@ -83,22 +88,45 @@ export const AudienceWords = ({
   return <TeamsWords teams={audience.teams} />;
 };
 
-/** One line of the card: what it says, and of what. */
-export const Line = ({
-  label,
-  children,
+const styles = stylex.create({
+  // All of it, as it will be kept: long ones scroll.
+  long: {
+    display: "block",
+    maxHeight: "16rem",
+    overflowY: "auto",
+    whiteSpace: "pre-wrap",
+  },
+  cron: {
+    fontFamily: grasp.fontMono,
+    fontSize: grasp.textXs,
+  },
+});
+
+/** When an agent works on its own, as a card says it. */
+export const ScheduleWords = ({
+  schedule,
 }: {
-  label: string;
-  children: ReactNode;
-}) => (
-  <div className="flex flex-col gap-0.5">
-    <dt className="text-muted-foreground text-xs">{label}</dt>
-    <dd className="text-sm">{children}</dd>
-  </div>
-);
+  schedule: { cron: string; timeZone?: string; opening: string };
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <span {...stylex.props(styles.cron)}>{schedule.cron}</span>
+      {" · "}
+      {schedule.timeZone ?? t`the company's time zone`}
+      {" · "}
+      {schedule.opening}
+    </>
+  );
+};
+
+/** The card's lines that hold something, in order. */
+export const lines = (
+  all: readonly (KeyValueItem | undefined)[]
+): KeyValueItem[] => all.filter((line) => line !== undefined);
 
 /** The drafted agent as a card, with `actions` while it waits. */
-export const AgentDraftCard = ({
+const AgentDraftCard = ({
   draft,
   actions,
 }: {
@@ -127,58 +155,61 @@ export const AgentDraftCard = ({
       label={t`An agent to make: ${name}`}
       title={name}
     >
-      <dl className="flex flex-col gap-3">
-        {job === "" ? null : <Line label={t`What it is for`}>{job}</Line>}
-        <Line label={t`Whose it is`}>
-          {company ? (
-            <Trans>One of the company&apos;s agents</Trans>
-          ) : (
-            <Trans>Yours alone: only you ask it</Trans>
-          )}
-        </Line>
-        {company ? (
-          <Line label={t`Who may ask it`}>
-            <AudienceWords audience={draft.audience} />
-          </Line>
-        ) : null}
-        <Line label={t`Apps it uses`}>
-          {apps.length === 0 ? (
-            <Trans>Any app its kinds of work allow</Trans>
-          ) : (
-            <AppNames apps={apps} />
-          )}
-        </Line>
-        {company ? (
-          <Line label={t`What it may do`}>
-            {classes.length === 0 ? (
-              <Trans>Nothing yet: you turn it on on its page</Trans>
+      <KeyValueList
+        items={lines([
+          job === "" ? undefined : { key: t`What it is for`, value: job },
+          {
+            key: t`Whose it is`,
+            value: company ? (
+              <Trans>One of the company&apos;s agents</Trans>
             ) : (
-              classes.map((each) => i18n._(classNames[each])).join(", ")
-            )}
-          </Line>
-        ) : null}
-        {schedule === undefined ? null : (
-          <Line label={t`When it works on its own`}>
-            <span className="font-mono text-xs">{schedule.cron}</span>
-            {" · "}
-            {schedule.timeZone ?? t`the company's time zone`}
-            {" · "}
-            {schedule.opening}
-          </Line>
-        )}
-        <Line label={t`Its instructions`}>
-          {/* All of it, as it will be kept: long ones scroll. */}
-          <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
-            {instructions}
-          </span>
-        </Line>
-      </dl>
+              <Trans>Yours alone: only you ask it</Trans>
+            ),
+          },
+          company
+            ? {
+                key: t`Who may ask it`,
+                value: <AudienceWords audience={draft.audience} />,
+              }
+            : undefined,
+          {
+            key: t`Apps it uses`,
+            value:
+              apps.length === 0 ? (
+                <Trans>Any app its kinds of work allow</Trans>
+              ) : (
+                <AppNames apps={apps} />
+              ),
+          },
+          company
+            ? {
+                key: t`What it may do`,
+                value:
+                  classes.length === 0 ? (
+                    <Trans>Nothing yet: you turn it on on its page</Trans>
+                  ) : (
+                    formatList(classes.map((each) => i18n._(classNames[each])))
+                  ),
+              }
+            : undefined,
+          schedule === undefined
+            ? undefined
+            : {
+                key: t`When it works on its own`,
+                value: <ScheduleWords schedule={schedule} />,
+              },
+          {
+            key: t`Its instructions`,
+            value: <span {...stylex.props(styles.long)}>{instructions}</span>,
+          },
+        ])}
+      />
     </MakeCard>
   );
 };
 
 /** Which press a card waits on: Make it for a drafted agent, Change it for a change. */
-export type DraftPress = "make" | "change";
+type DraftPress = "make" | "change";
 
 /** Make it or Change it, which lands the person on the agent, and Change something. */
 export const DraftActions = ({

@@ -39,13 +39,6 @@ describe("a chat as the page shows it", () => {
     ]);
   });
 
-  it("follows core's count of held writes, which the page reads again on", () => {
-    const once = applyUpdate(emptyView, update({ held: 1 }));
-    const twice = applyUpdate(once, update({ held: 2 }));
-
-    expect([emptyView.held, once.held, twice.held]).toStrictEqual([0, 1, 2]);
-  });
-
   it("adds each message once, in order, and keeps provenance until it changes", () => {
     const first = applyUpdate(
       emptyView,

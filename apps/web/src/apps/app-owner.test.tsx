@@ -42,16 +42,35 @@ const shown = (answerers: readonly { id: string; name: string }[] | null) => {
   return onRetry;
 };
 
-/** Each button, the owner's by their name, and whether it can be pressed. */
-const buttons = () =>
-  [...document.querySelectorAll("button")].map((each) => {
-    const text = each.textContent?.trim() ?? "";
-    // The owner's button shows their initial before their name.
-    return {
-      text: text.endsWith(owner.name) ? owner.name : text,
-      disabled: each.disabled,
-    };
+/** The owner control: whom it shows, and whether it can be changed. */
+const picker = () => {
+  const box = document.querySelector<HTMLInputElement>("[role=combobox]");
+  return { owner: box?.value ?? null, disabled: box?.disabled ?? null };
+};
+
+/** What a button says, without the words it keeps hidden while working or failed. */
+const words = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
+/** Opens the list of people, and says each as it reads: their name, then what tells them apart. */
+const offered = async (): Promise<string[]> => {
+  const trigger = [...document.querySelectorAll("button")].find(
+    (each) => each.getAttribute("aria-label") === "Show the people"
+  );
+  await act(async () => {
+    trigger?.click();
+    await Promise.resolve();
   });
+  return [...document.querySelectorAll("[role=option]")].map(words);
+};
 
 describe("an App's owner in its settings", () => {
   afterEach(() => {
@@ -66,40 +85,38 @@ describe("an App's owner in its settings", () => {
     shown([{ id: "grace", name: "Grace" }]);
 
     expect({
-      buttons: buttons(),
+      picker: picker(),
       alert: document.querySelector("[role=alert]")?.textContent ?? null,
     }).toStrictEqual({
-      buttons: [{ text: "Ada", disabled: false }],
+      picker: { owner: "Ada", disabled: false },
       alert: null,
     });
   });
 
-  it("names its owner apart from someone of the same name who may answer for it", () => {
+  it("names its owner apart from someone of the same name who may answer for it", async () => {
     shown([{ id: "user-ada-222222", name: "Ada" }]);
 
-    expect(document.querySelector("button")?.getAttribute("aria-label")).toBe(
-      "Owner: Ada (ID …ada). Change owner"
-    );
+    await expect(offered()).resolves.toStrictEqual([
+      "AdaID …222222",
+      "AdaID …ada",
+    ]);
   });
 
   it("can't be changed while that couldn't be read, and says so, with a way to try again", () => {
     const onRetry = shown(null);
     const retry = [...document.querySelectorAll("button")].find(
-      (each) => each.textContent?.trim() === "Try again"
+      (each) => words(each) === "Try again"
     );
     act(() => {
       retry?.click();
     });
 
     expect({
-      buttons: buttons(),
+      picker: picker(),
       alert: document.querySelector("[role=alert]")?.textContent ?? null,
       retried: onRetry.mock.calls.length,
     }).toStrictEqual({
-      buttons: [
-        { text: "Ada", disabled: true },
-        { text: "Try again", disabled: false },
-      ],
+      picker: { owner: "Ada", disabled: true },
       alert: "Couldn't load who may answer for it.",
       retried: 1,
     });

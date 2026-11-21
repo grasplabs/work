@@ -1,13 +1,20 @@
-import { SiteHeader as SiteHeaderBar } from "@grasp-os/ui/components/site-header";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
+import { AppShellBar } from "../grasp/app-shell/index.ts";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
-  | { label: string }
+  | {
+      label: string;
+      /** The page's own name only: renamed in place (App shell's crumb). */
+      onRename?: (name: string) => void;
+      /** Whether its rename is open, when a menu's Rename opens it. */
+      renaming?: boolean;
+      onRenamingChange?: (renaming: boolean) => void;
+    }
   | {
       label: string;
       to:
@@ -67,38 +74,41 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
 };
 
 /**
- * The bar above every signed-in page (`SiteHeader` in the kit, the same
- * as the admin's): the sidebar's trigger, then where the page is, with
- * where its subject stands after it (`trailing`), and on the right any
- * page action. `phoneCrumbs` says which crumbs a phone keeps (the kit's
- * `phoneCrumbs`).
+ * The bar above every signed-in page, Grasp UI's page bar (AppShellBar):
+ * where the page is, with where its subject stands after it (`trailing`),
+ * and at its end any page action. App shell puts the menu's button before
+ * it on a phone, and the sidebar's way back when it is folded.
+ * `phoneCrumbs` says which crumbs a phone keeps.
  */
 export const SiteHeader = ({
   crumbs,
   actions,
   trailing,
   phoneCrumbs,
+  middle,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
   trailing?: ReactNode;
   phoneCrumbs?: "last-two" | "first";
+  /**
+   * In the bar's middle: the views of its subject (an App's App, Code,
+   * Data and Settings). The bar puts them on a row of their own under it
+   * where they don't fit beside the rest.
+   */
+  middle?: ReactNode;
 }) => {
   const { t } = useLingui();
   return (
-    <SiteHeaderBar
+    <AppShellBar
       actions={actions}
-      trailing={trailing}
-      phoneCrumbs={phoneCrumbs}
-      breadcrumbLabel={t`Breadcrumb`}
+      words={{ breadcrumb: t`Breadcrumb` }}
       crumbs={crumbs.map((crumb) =>
-        "to" in crumb
-          ? { label: crumb.label, link: crumbLink(crumb) }
-          : { label: crumb.label }
+        "to" in crumb ? { label: crumb.label, render: crumbLink(crumb) } : crumb
       )}
-      // The sidebar holds its own fold on a wider screen (frame/sidebar-brand.tsx).
-      trigger="mobile"
-      triggerLabel={t`Show or hide the sidebar`}
+      phoneCrumbs={phoneCrumbs}
+      end={trailing}
+      {...(middle === undefined ? {} : { middle })}
     />
   );
 };

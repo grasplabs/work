@@ -6,7 +6,6 @@ import type {
   BrainMemoryPlace,
   BrainMemoryShown,
 } from "@grasp-os/shared/brain-memories";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -22,6 +21,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { Toaster } from "../grasp/toast/index.ts";
 import { MemoriesPage } from "./memories-page.tsx";
 
 // What the Memories page does with what its actions answer, against core's
@@ -153,9 +153,8 @@ const shown = async (
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <Toaster>
-          <RouterProvider router={router} />
-        </Toaster>
+        <RouterProvider router={router} />
+        <Toaster />
       </I18nProvider>
     );
     await router.load();
@@ -169,12 +168,13 @@ const buttons = (label: string): HTMLButtonElement[] =>
     each.textContent.startsWith(label)
   );
 
-/** Presses `button`. */
+/** Presses `button`, which takes focus as a press gives it. */
 const press = async (button: HTMLButtonElement | undefined): Promise<void> => {
   if (!button) {
     throw new TypeError("No such button");
   }
   await act(async () => {
+    button.focus();
     button.click();
     await Promise.resolve();
   });
@@ -201,6 +201,82 @@ const save = async (text: string): Promise<void> => {
     await Promise.resolve();
   });
   await settle();
+};
+
+/** The open dialog's form: what it shows of a correction or a share. */
+const dialogForm = (): HTMLFormElement | null =>
+  document.querySelector('[role="dialog"] form');
+
+/** Opens the select in `within`. */
+const openSelect = async (
+  within: ParentNode | null | undefined
+): Promise<void> => {
+  const trigger = within?.querySelector<HTMLElement>('[role="combobox"]');
+  if (!trigger) {
+    throw new TypeError("No select");
+  }
+  await act(async () => {
+    trigger.click();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
+
+/** Presses the open select's option `value`. */
+const pressOption = async (value: string): Promise<void> => {
+  const option = document.querySelector<HTMLElement>(
+    `[role="option"][id$="-option-${value}"]`
+  );
+  if (!option) {
+    throw new TypeError(`No option ${value}`);
+  }
+  await act(async () => {
+    option.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Chooses `value` in the select in `within`. */
+const choose = async (
+  within: ParentNode | null | undefined,
+  value: string
+): Promise<void> => {
+  await openSelect(within);
+  await pressOption(value);
+};
+
+/**
+ * What the select in `within` offers, each option's value and words, as
+ * its list shows them once opened; then closed again on the value it holds.
+ */
+const optionsIn = async (
+  within: ParentNode | null | undefined
+): Promise<string[][]> => {
+  await openSelect(within);
+  const options = [
+    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+  ].map((each) => [
+    each.id.slice(each.id.lastIndexOf("-option-") + "-option-".length),
+    each.textContent,
+  ]);
+  const chosen = within?.querySelector<HTMLInputElement>(
+    '[data-slot="select-form-input"]'
+  )?.value;
+  if (chosen !== undefined && chosen !== "") {
+    await pressOption(chosen);
+  }
+  return options;
+};
+
+/** The values the select in `within` offers. */
+const valuesIn = async (
+  within: ParentNode | null | undefined
+): Promise<(string | undefined)[]> => {
+  const options = await optionsIn(within);
+  return options.map(([value]) => value);
 };
 
 const changedText =
@@ -471,9 +547,17 @@ describe("the Memories page's actions", () => {
     });
     await press(buttons("It's wrong")[0]);
     await save("Paused");
-    const closeOffered = [
-      ...document.querySelectorAll("[role=dialog] button"),
-    ].some((each) => each.textContent === "Close");
+    // The dialog's close button stays in its corner (the library's
+    // dialog always draws it), so it is pressed: it must not close it.
+    const close = [
+      ...document.querySelectorAll<HTMLButtonElement>("[role=dialog] button"),
+    ].find((each) => each.getAttribute("aria-label") === "Close");
+    await act(async () => {
+      close?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    const closedByClose = document.querySelector("textarea") === null;
     await act(async () => {
       document.activeElement?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
@@ -488,11 +572,13 @@ describe("the Memories page's actions", () => {
     });
     await settle();
     expect({
-      closeOffered,
+      closeFound: close !== undefined,
+      closedByClose,
       open,
       closedOnceSaved: document.querySelector("textarea") === null,
     }).toStrictEqual({
-      closeOffered: false,
+      closeFound: true,
+      closedByClose: false,
       open: true,
       closedOnceSaved: true,
     });
@@ -839,16 +925,7 @@ const versioned = (paged: Paged) => {
 
 /** Picks `kind` in the kind select. */
 const pickKind = async (kind: string): Promise<void> => {
-  const select = document.querySelector("select");
-  if (!select) {
-    throw new TypeError("No kind select");
-  }
-  await act(async () => {
-    select.value = kind;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    await Promise.resolve();
-  });
-  await settle();
+  await choose(document, kind);
 };
 
 /** The list button named exactly `name`. */
@@ -1008,18 +1085,11 @@ describe("the Memories page's paged lists, read again", () => {
   /** Picks `value` in the dialog's audience and shares. */
   const shareWith = async (value: string): Promise<void> => {
     // The audience's own select: the page's kind of entity is another.
-    const select = document
-      .querySelector("option[value=everyone]")
-      ?.closest("select");
-    const form = select?.closest("form");
-    if (!(select instanceof HTMLSelectElement) || !form) {
+    const form = dialogForm();
+    if (!form) {
       throw new TypeError("No share dialog");
     }
-    await act(async () => {
-      select.value = value;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-      await Promise.resolve();
-    });
+    await choose(form, value);
     await act(async () => {
       form.requestSubmit();
       await Promise.resolve();
@@ -1030,12 +1100,13 @@ describe("the Memories page's paged lists, read again", () => {
   it("shares a fact of the person's own exactly as the dialog shows it, with the audience they pick, and reads the page again", async () => {
     const sent: Readonly<Record<string, unknown>>[] = [];
     let reads = 0;
-    await initechOpen([ownFact("m-own")], {
+    const statement = "Initech renews\u200B in March";
+    await initechOpen([ownFact("m-own", { statement })], {
       memories: async () => {
         reads += 1;
         return await Promise.resolve({
           entity: initech,
-          memories: [ownFact("m-own")],
+          memories: [ownFact("m-own", { statement })],
           next: null,
         });
       },
@@ -1046,30 +1117,28 @@ describe("the Memories page's paged lists, read again", () => {
     });
     const before = reads;
     await press(buttons("Share…")[0]);
-    const dialog = document
-      .querySelector("option[value=everyone]")
-      ?.closest("form");
-    const options = [...(dialog?.querySelectorAll("option") ?? [])].map(
-      (each) => [each.value, each.textContent]
-    );
+    const dialog = dialogForm();
     const dialogText = dialog?.textContent ?? "";
+    const options = await optionsIn(dialog);
     await shareWith("everyone");
     const [share] = sent;
     expect({
       shows: [
         "About Initech",
         "Status: Renewing",
-        "Initech renews in March",
+        "Initech renews\\u{200B} in March",
       ].map((text) => dialogText.includes(text)),
+      raw: dialogText.includes(statement),
       options,
       // Its id is the opening's own: any text.
       share: { ...share, change: typeof share?.change },
       sharedOnce: sent.length,
-      closed: document.querySelector("option[value=everyone]") === null,
+      closed: dialogForm() === null,
       readAgain: reads > before,
       said: document.body.textContent.includes("Shared."),
     }).toStrictEqual({
       shows: [true, true, true],
+      raw: false,
       options: [
         ["t-sales", "Team Sales"],
         ["everyone", "Everyone"],
@@ -1081,7 +1150,7 @@ describe("the Memories page's paged lists, read again", () => {
           attribute: "status",
           type: "fact",
           value: "Renewing",
-          statement: "Initech renews in March",
+          statement,
           validFrom: null,
           validUntil: null,
         },
@@ -1120,7 +1189,7 @@ describe("the Memories page's paged lists, read again", () => {
       said: document.body.textContent.includes(
         "This memory has changed or is no longer yours to share. Look at it again first."
       ),
-      closed: document.querySelector("option[value=everyone]") === null,
+      closed: dialogForm() === null,
     }).toStrictEqual({ failed: true, newId: true, said: true, closed: true });
   });
 
@@ -1167,9 +1236,7 @@ describe("the Memories page's paged lists, read again", () => {
       },
     });
     await press(buttons("Share…")[0]);
-    const dialogText =
-      document.querySelector("option[value=everyone]")?.closest("form")
-        ?.textContent ?? "";
+    const dialogText = dialogForm()?.textContent ?? "";
     await shareWith("everyone");
     expect({
       showsUntil: dialogText.includes("True until"),
@@ -1273,27 +1340,6 @@ describe("the Memories page's paged lists, read again", () => {
     });
   });
 
-  it("shows every character nobody sees in what is shared as an escape, and sends the text as stored", async () => {
-    const sent: Readonly<Record<string, unknown>>[] = [];
-    const hidden = "Initech renews\u200B in March";
-    await initechOpen([ownFact("m-own", { statement: hidden })], {
-      publish: async (share: Readonly<Record<string, unknown>>) => {
-        sent.push(share);
-        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
-      },
-    });
-    await press(buttons("Share…")[0]);
-    const dialogText =
-      document.querySelector("option[value=everyone]")?.closest("form")
-        ?.textContent ?? "";
-    await shareWith("everyone");
-    expect({
-      escaped: dialogText.includes("Initech renews\\u{200B} in March"),
-      raw: dialogText.includes(hidden),
-      sent: JSON.stringify(sent[0]?.shown).includes(JSON.stringify(hidden)),
-    }).toStrictEqual({ escaped: true, raw: false, sent: true });
-  });
-
   it("offers only the teams core lets the person share with, never a team of two", async () => {
     await initechOpen(
       [ownFact("m-own")],
@@ -1310,26 +1356,19 @@ describe("the Memories page's paged lists, read again", () => {
       ]
     );
     await press(buttons("Share…")[0]);
-    const options = [
-      ...(document
-        .querySelector("option[value=everyone]")
-        ?.closest("select")
-        ?.querySelectorAll("option") ?? []),
-    ].map((each) => each.value);
+    const options = await valuesIn(dialogForm());
     expect(options).toStrictEqual(["t-sales", "everyone"]);
   });
 
   /** The audiences the open share dialog offers, by value, and whether Share can be pressed. */
-  const dialogState = () => {
+  const dialogState = async () => {
     const share = buttons("Share").find(
       (each) => each.textContent === "Share" && each.type === "submit"
     );
-    const select = share?.closest("form")?.querySelector("select");
+    const shareDisabled = share?.disabled;
     return {
-      options: [...(select?.querySelectorAll("option") ?? [])].map(
-        (each) => each.value
-      ),
-      shareDisabled: share?.disabled,
+      options: await valuesIn(share?.closest('[role="dialog"]')),
+      shareDisabled,
     };
   };
 
@@ -1349,7 +1388,7 @@ describe("the Memories page's paged lists, read again", () => {
     });
     await press(buttons("Share…")[0]);
     expect({
-      ...dialogState(),
+      ...(await dialogState()),
       said: document.body.textContent.includes("The connection dropped"),
       asked,
     }).toStrictEqual({
@@ -1367,7 +1406,7 @@ describe("the Memories page's paged lists, read again", () => {
     });
     await press(buttons("Share…")[0]);
     expect({
-      ...dialogState(),
+      ...(await dialogState()),
       hint: document.body.textContent.includes(
         "once it has three people or more"
       ),
@@ -1415,9 +1454,7 @@ describe("the Memories page's paged lists, read again", () => {
           await initechOpen([memoryShown]);
           // oxlint-disable-next-line no-await-in-loop -- one dialog at a time
           await press(buttons("Share…")[0]);
-          const dialog =
-            document.querySelector("option[value=everyone]")?.closest("form")
-              ?.textContent ?? "";
+          const dialog = dialogForm()?.textContent ?? "";
           const escaped = (text: string) =>
             text.replaceAll(hidden, "\\u{200B}");
           const copied = [

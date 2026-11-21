@@ -122,7 +122,7 @@ describe("what the Brain page says of the interviews", () => {
     ]);
   });
 
-  it("reads an opinion of the company's as said by five or more people across the company, never quoted, with no team (GRA-1987)", async () => {
+  it("reads an opinion of the company's as said by five or more people across the company, never quoted, with no team", async () => {
     const opinions: Source = {
       id: "onb-opinions",
       kind: "interview",
