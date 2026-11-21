@@ -470,6 +470,22 @@ const emailOf = async (
 };
 
 /**
+ * Whether an admin's open invitation makes `email` an admin as they join:
+ * they come in while the gate is closed as the admin they are about to
+ * be, so an admin can bring another in for the onboarding.
+ */
+const invitedAsAdmin = async (
+  env: Env,
+  email: string | undefined
+): Promise<boolean> => {
+  if (email === undefined) {
+    return false;
+  }
+  const invitation = await openInvitation(env, email.toLowerCase(), Date.now());
+  return invitation?.role === "admin";
+};
+
+/**
  * Whether the gate lets `userId` in: checked again as their session is
  * made, beside the check of their claims (`validateUserInfo`).
  */
@@ -477,7 +493,12 @@ const gateLetsIn = async (
   env: Env,
   config: SignInConfig,
   userId: string
-): Promise<boolean> => await mayComeIn(env, config, await emailOf(env, userId));
+): Promise<boolean> => {
+  const email = await emailOf(env, userId);
+  return (
+    (await mayComeIn(env, config, email)) || (await invitedAsAdmin(env, email))
+  );
+};
 
 /**
  * Whether `email`, verified by the company's sign-in, opens someone's
@@ -1181,12 +1202,14 @@ const createAuth = (
               )
             : "method_not_allowed";
         // While the company is onboarding, only its admins come in through
-        // its IdP, and those an interview link went to, for their interview
+        // its IdP (and whoever an admin invited as one), and those an
+        // interview link went to, for their interview
         // alone, before any user or membership is made (onboarding/gate.ts).
         if (
           refusal === undefined &&
           provider !== providerIds.staff &&
           !(await mayComeIn(env, config, user.email)) &&
+          !(await invitedAsAdmin(env, user.email)) &&
           !(await interviewInvites(env, user.email))
         ) {
           refusal = "not_open_yet";

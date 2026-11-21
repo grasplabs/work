@@ -24,13 +24,13 @@ import {
   signIn,
   signedIn,
   signedInApi,
+  signedInWithRole,
   staffPerson,
   whoami,
 } from "./sign-in.ts";
 
 // The gate of a deployment that is onboarding (src/onboarding/gate.ts):
-// while it is closed, only the admins named in `SIGN_IN` and Grasp's staff
-// come in. From the threat model (GRA-307, W10), the ways it can fail,
+// while it is closed, only the company's admins and Grasp's staff come in. From the threat model (GRA-307, W10), the ways it can fail,
 // tried here:
 //
 // - Someone in the company signing in before Grasp's go, or keeping a
@@ -101,6 +101,58 @@ describe("while the company is onboarding", () => {
       users: 0,
       admin: true,
       staff: true,
+    });
+  });
+
+  it("is every admin's to come in for, whoever made them one or invited them as one, and no other member's", async () => {
+    // Admins the deployment's config doesn't name: one a member already,
+    // one an admin's invitation makes one as they join.
+    const second = await signedInWithRole(idp, "admin");
+    const inviter = await signedInApi(idp, "admin");
+    const invited = entraPerson(acmeTenant);
+    await inviter.api.members.invite(String(invited.email), "admin");
+    const member = await signedInWithRole(idp, "user");
+    await adminCommands().close();
+
+    const again = await signIn(idp, "microsoft", second.person);
+    const joined = await signIn(idp, "microsoft", invited);
+    const waiting = await signIn(idp, "microsoft", member.person);
+    const joinedAs =
+      joined.session === undefined ? undefined : await whoami(joined.session);
+    expect({
+      kept: await signedInStill(second.session),
+      again: again.session !== undefined,
+      joinedAs: joinedAs?.role,
+      member: await signedInStill(member.session),
+      waiting: new URL(
+        waiting.location ?? "",
+        "https://x.test"
+      ).searchParams.get("error"),
+    }).toStrictEqual({
+      kept: true,
+      again: true,
+      joinedAs: "admin",
+      member: false,
+      waiting: "not_open_yet",
+    });
+  });
+
+  it("tells anyone signed in whether the onboarding is behind the company: not until Grasp's go where its people are interviewed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    await adminCommands().close();
+    const waiting = await admin.api.onboarding.behind();
+    await adminCommands().open();
+    // A member, who reads nothing else of the onboarding, reads this.
+    const member = await signedInApi(idp, "user");
+
+    expect({
+      waiting,
+      afterTheGo: await member.api.onboarding.behind(),
+      nothingElse: await outcome(member.api.onboarding.place()),
+    }).toStrictEqual({
+      waiting: false,
+      afterTheGo: true,
+      nothingElse: "role.forbidden",
     });
   });
 

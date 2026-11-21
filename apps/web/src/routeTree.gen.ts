@@ -17,6 +17,7 @@ import { Route as KitRouteImport } from './routes/kit'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as StaffRouteImport } from './routes/staff'
+import { Route as WaitingRouteImport } from './routes/waiting'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
@@ -108,6 +109,11 @@ const SignInRoute = SignInRouteImport.update({
 const StaffRoute = StaffRouteImport.update({
   id: '/staff',
   path: '/staff',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WaitingRoute = WaitingRouteImport.update({
+  id: '/waiting',
+  path: '/waiting',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ShellIndexRoute = ShellIndexRouteImport.update({
@@ -389,6 +395,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
+  '/waiting': typeof WaitingRoute
   '/$': typeof ShellSplatRoute
   '/brain': typeof ShellBrainRouteWithChildren
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
@@ -450,6 +457,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
+  '/waiting': typeof WaitingRoute
   '/$': typeof ShellSplatRoute
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/dashboard': typeof ShellDashboardRoute
@@ -512,6 +520,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
+  '/waiting': typeof WaitingRoute
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
@@ -577,6 +586,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/staff'
+    | '/waiting'
     | '/$'
     | '/brain'
     | '/connect-microsoft'
@@ -638,6 +648,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/staff'
+    | '/waiting'
     | '/$'
     | '/connect-microsoft'
     | '/dashboard'
@@ -699,6 +710,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/staff'
+    | '/waiting'
     | '/_shell/$'
     | '/_shell/brain'
     | '/_shell/connect-microsoft'
@@ -763,6 +775,7 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
+  WaitingRoute: typeof WaitingRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
   AppsAppDraftRoute: typeof AppsAppDraftRouteWithChildren
   AppsAppFullRoute: typeof AppsAppFullRouteWithChildren
@@ -826,6 +839,13 @@ declare module '@tanstack/react-router' {
       path: '/staff'
       fullPath: '/staff'
       preLoaderRoute: typeof StaffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/waiting': {
+      id: '/waiting'
+      path: '/waiting'
+      fullPath: '/waiting'
+      preLoaderRoute: typeof WaitingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_shell/': {
@@ -1365,6 +1385,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,
+  WaitingRoute: WaitingRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
   AppsAppDraftRoute: AppsAppDraftRouteWithChildren,
   AppsAppFullRoute: AppsAppFullRouteWithChildren,
