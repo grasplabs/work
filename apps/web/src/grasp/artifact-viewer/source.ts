@@ -26,7 +26,11 @@ export interface ArtifactSource {
 export interface OpenedArtifact extends DetectedFormat {
   name: string;
   blob: Blob;
-  /** An object URL of the blob, for an image and the download. Revoke it with `close()`. */
+  /**
+   * The blob's address, for an image and the download: a data: URL for an image (a page whose
+   * policy takes pictures only from itself and data: refuses a blob: one), else an object URL.
+   * Revoke it with `close()`.
+   */
   url: string;
   /** The text, for text formats. */
   text?: string;
@@ -51,6 +55,32 @@ const nextTask = async () => {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, 0);
   });
+};
+
+// An image's data: URL, read off the page's thread.
+const dataUrl = async (blob: Blob) =>
+  // oxlint-disable-next-line promise/avoid-new -- FileReader has no promise of its own
+  await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    });
+    reader.addEventListener("error", () => {
+      reject(reader.error ?? new Error("unreadable"));
+    });
+    reader.readAsDataURL(blob);
+  });
+
+// The file's address and how to let it go: an image's is a data: URL (revoking one does nothing),
+// any other file's an object URL.
+const addressOf = async (blob: Blob, image: boolean) => {
+  const url = image ? await dataUrl(blob) : URL.createObjectURL(blob);
+  return {
+    url,
+    close: () => {
+      URL.revokeObjectURL(url);
+    },
+  };
 };
 
 /** Opens the file. Rejects when it does not load; `signal` stops a load that is no longer wanted. */
@@ -103,15 +133,11 @@ export const openArtifact = async (
   }
   const text =
     source.text ?? (isText(detected.format) ? await blob.text() : undefined);
-  const url = URL.createObjectURL(blob);
   return {
     ...detected,
     name,
     blob,
-    url,
     text,
-    close: () => {
-      URL.revokeObjectURL(url);
-    },
+    ...(await addressOf(blob, detected.format === "image")),
   };
 };

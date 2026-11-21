@@ -3,7 +3,8 @@
 // has no viewer. It holds its room at once and loads its own code when the browser is idle or it
 // scrolls into view, whichever comes first, so a page with a viewer below the fold pays nothing
 // up front. Each format's renderer is a chunk of its own, and the heavy work (parsing, highlighting,
-// search) runs in a Web Worker.
+// search) runs in Web Workers once the page calls allowWorkers() (only where its policy allows
+// them), else on the page.
 //
 //   <ArtifactViewer src="/reports/q3.md" />
 //   <ArtifactViewer file={upload} />                          a File or Blob the page has

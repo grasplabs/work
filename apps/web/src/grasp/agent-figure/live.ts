@@ -179,13 +179,20 @@ const painter = (canvas: HTMLCanvasElement, columns: number, rows: number) => {
       if (ctx === null || smallCtx === null || image === undefined) {
         return;
       }
-      if (out.every((value, cell) => value === drawn[cell])) {
-        return;
-      }
-      drawn.set(out);
       const { data } = image;
-      for (const [cell, value] of out.entries()) {
-        data.set(colours.subarray(value * 4, value * 4 + 4), cell * 4);
+      let changed = false;
+      for (let cell = 0; cell < out.length; cell += 1) {
+        const value = out[cell] ?? 0;
+        if (value !== drawn[cell]) {
+          changed = true;
+          drawn[cell] = value;
+          for (let channel = 0; channel < 4; channel += 1) {
+            data[cell * 4 + channel] = colours[value * 4 + channel] ?? 0;
+          }
+        }
+      }
+      if (!changed) {
+        return;
       }
       smallCtx.putImageData(image, 0, 0);
       ctx.imageSmoothingEnabled = false;
@@ -389,6 +396,44 @@ export const mountAura = (
   let rows = 0;
   let seconds = options.seed * 13.7;
   let since = 1;
+  // What stands still on the aura, worked out once per size: each cell's light behind the figure,
+  // and the few points of light that come and go (all that a tick redraws).
+  let behind = new Float64Array(0);
+  let twinkling: number[] = [];
+  let levels = new Uint8Array(0);
+  const levelAt = (cell: number) => {
+    const column = cell % columns;
+    const row = Math.floor(cell / columns);
+    const chance = hash(column * 1.31, row * 2.17);
+    const twinkle =
+      chance > 0.985
+        ? 0.5 + 0.5 * Math.sin(seconds * (0.6 + chance * 1.4) + chance * 40)
+        : 0;
+    const light = bright * (0.62 * (behind[cell] ?? 0) + 0.9 * twinkle);
+    return Math.max(
+      0,
+      Math.min(3, Math.floor(light * 3 + thresholdAt(column, row) - 0.5))
+    );
+  };
+  const measureLight = () => {
+    behind = new Float64Array(columns * rows);
+    twinkling = [];
+    levels = new Uint8Array(columns * rows);
+    const aspect = columns / Math.max(1, rows);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const x = ((column + 0.5) / columns) * 2 - 1;
+        const y = ((row + 0.5) / rows) * 2 - 1;
+        // A soft light behind where the figure stands.
+        const dx = x * aspect * 0.62;
+        behind[row * columns + column] = Math.exp(-(dx * dx + y * y) / 0.55);
+        // A few points of light, each coming and going at its own pace.
+        if (hash(column * 1.31, row * 2.17) > 0.985) {
+          twinkling.push(row * columns + column);
+        }
+      }
+    }
+  };
   const size = () => {
     const box = canvas.getBoundingClientRect();
     const ratio = ratioOf();
@@ -399,51 +444,58 @@ export const mountAura = (
     canvas.width = small.width * ratio;
     canvas.height = small.height * ratio;
     image = smallCtx?.createImageData(small.width, small.height);
+    measureLight();
   };
-  const draw = () => {
+  /** Sets a cell's dot to its level's light. */
+  const dot = (data: Uint8ClampedArray, cell: number, level: number) => {
+    const at =
+      (Math.floor(cell / columns) * AURA_PITCH * columns * AURA_PITCH +
+        (cell % columns) * AURA_PITCH) *
+      4;
+    data.set(colours.subarray((level + 1) * 4, (level + 2) * 4), at);
+  };
+  const show = () => {
     if (ctx === null || smallCtx === null || image === undefined) {
       return;
-    }
-    const { data } = image;
-    const width = columns * AURA_PITCH;
-    const ground = colours.subarray(4, 8);
-    const aspect = columns / Math.max(1, rows);
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < columns; column += 1) {
-        const x = ((column + 0.5) / columns) * 2 - 1;
-        const y = ((row + 0.5) / rows) * 2 - 1;
-        // A soft light behind where the figure stands.
-        const dx = x * aspect * 0.62;
-        const behind = Math.exp(-(dx * dx + y * y) / 0.55);
-        // A few points of light, each coming and going at its own pace.
-        const chance = hash(column * 1.31, row * 2.17);
-        const twinkle =
-          chance > 0.985
-            ? 0.5 + 0.5 * Math.sin(seconds * (0.6 + chance * 1.4) + chance * 40)
-            : 0;
-        const light = bright * (0.62 * behind + 0.9 * twinkle);
-        const level = Math.max(
-          0,
-          Math.min(3, Math.floor(light * 3 + thresholdAt(column, row) - 0.5))
-        );
-        const lit = colours.subarray((level + 1) * 4, (level + 2) * 4);
-        for (let down = 0; down < AURA_PITCH; down += 1) {
-          for (let across = 0; across < AURA_PITCH; across += 1) {
-            const dot = down === 0 && across === 0;
-            const at =
-              ((row * AURA_PITCH + down) * width +
-                column * AURA_PITCH +
-                across) *
-              4;
-            data.set(dot ? lit : ground, at);
-          }
-        }
-      }
     }
     smallCtx.putImageData(image, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(small, 0, 0, canvas.width, canvas.height);
+  };
+  /** The whole aura: on a new size, colour or brightness. */
+  const draw = () => {
+    if (image === undefined) {
+      return;
+    }
+    const { data } = image;
+    const ground = colours.subarray(4, 8);
+    for (let at = 0; at < data.length; at += 4) {
+      data.set(ground, at);
+    }
+    for (let cell = 0; cell < levels.length; cell += 1) {
+      levels[cell] = levelAt(cell);
+      dot(data, cell, levels[cell] ?? 0);
+    }
+    show();
+  };
+  /** A tick: only the points of light, shown only if one of them changed. */
+  const drift = () => {
+    if (image === undefined) {
+      return;
+    }
+    let changed = false;
+    for (const cell of twinkling) {
+      const level = levelAt(cell);
+      if (level !== levels[cell]) {
+        changed = true;
+        levels[cell] = level;
+        dot(image.data, cell, level);
+      }
+    }
+    if (changed) {
+      show();
+    }
   };
   const instance: Instance = {
     shown: false,
@@ -456,7 +508,7 @@ export const mountAura = (
       since += dt;
       if (since >= 1 / 12) {
         since = 0;
-        draw();
+        drift();
       }
     },
   };
