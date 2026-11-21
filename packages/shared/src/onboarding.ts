@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { directorySuiteSchema } from "./directory.ts";
 import type { OnboardingDirectoryApi } from "./directory.ts";
 import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
@@ -141,6 +142,18 @@ export const rosterTeamSchema = z.strictObject({
 });
 export type RosterTeam = z.output<typeof rosterTeamSchema>;
 
+/**
+ * An entry's tie to its person in the organization's directory: the
+ * directory's suite, the provider's id of them, and core's keyed proof
+ * that its own read named them so (a SHA-256 HMAC, in hex).
+ */
+export const directoryTieSchema = z.strictObject({
+  suite: directorySuiteSchema,
+  id: z.string().min(1),
+  proof: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+export type DirectoryTie = z.infer<typeof directoryTieSchema>;
+
 /** Someone who works there. */
 export const rosterPersonSchema = z.strictObject({
   id: idSchema,
@@ -158,6 +171,18 @@ export const rosterPersonSchema = z.strictObject({
   title: z.string().trim().max(80).default(""),
   /** Away these weeks: they get no link, and nothing waits for them. */
   away: z.boolean().default(false),
+  /**
+   * Who they are in the organization's directory (GRA-2249), as core's
+   * own read of it named them (`DirectoryPeople.proofs`), only on a save:
+   * core keeps it only where the proof holds for this entry's email and
+   * name, and never shows it again.
+   */
+  directory: directoryTieSchema.optional(),
+  /**
+   * Gone from the organization: the directory no longer holds them, or
+   * their member was removed. Core's to say; a save's is ignored.
+   */
+  left: z.literal(true).optional(),
 });
 export type RosterPerson = z.output<typeof rosterPersonSchema>;
 

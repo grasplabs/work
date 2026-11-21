@@ -783,6 +783,11 @@ msgstr "{name} ({apart})"
 msgid "{name} (Grasp staff)"
 msgstr "{name} (équipe Grasp)"
 
+#: src/onboarding/setup-steps.tsx
+msgctxt "a person on the staff list who no longer works at the company"
+msgid "{name} (left)"
+msgstr "{name} (a quitté l’entreprise)"
+
 #: src/workflows/start-run.tsx
 msgid "{name} (optional)"
 msgstr "{name} (facultatif)"

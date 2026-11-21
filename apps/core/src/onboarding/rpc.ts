@@ -95,6 +95,7 @@ import {
   eraseOwedRosters,
 } from "./new-brain.ts";
 import { mondayOf } from "./rules.ts";
+import { tiesOf } from "./staff-ties.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
 
@@ -189,15 +190,36 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         roster
       );
       const by = actorOf(person);
+      const store = onboardingStore(this.#env);
+      // Who each entry is in the directory (GRA-2249): only as core's own
+      // read named them, and the store keeps no other (staff-ties.ts).
+      const kept = await store.staffTies();
+      const ties = await tiesOf(
+        this.#env,
+        parsed.people,
+        new Map(
+          kept.flatMap(({ id, tie }) =>
+            tie === null ? [] : [[id, tie] as const]
+          )
+        )
+      );
+      const tied = {
+        ...parsed,
+        people: parsed.people.map(
+          ({ directory: _sent, left: _left, ...each }) => {
+            const tie = ties.get(each.id);
+            return tie === undefined ? each : { ...each, directory: tie };
+          }
+        ),
+      };
       // The list names the members' teams (GRA-2055): each of its teams
       // keeps one id from the first save that names it (a members' team's,
       // one the store holds, or a new one core makes); a confirm makes and
       // names its members' teams under those ids, in order with every other
       // confirm and rename (`syncTeams`). A confirm changes no membership.
-      const store = onboardingStore(this.#env);
       const { roster: named, minted } = await intoMembersTeams(
         this.#env,
-        parsed,
+        tied,
         { held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });

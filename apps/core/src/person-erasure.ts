@@ -476,8 +476,9 @@ const runs: ErasureStep = {
  * as an admin, on their onboarding. And their address, everywhere the
  * onboarding keeps one (GRA-2111): erasure is final. Their entries on the
  * list are found by the account their interview belongs to (GRA-1790),
- * whatever the list says now, and by the address that was theirs, through
- * its keyed hash; each stays, the company's (Nick's D5), without the
+ * whatever the list says now, by the address that was theirs, through
+ * its keyed hash, and by who they are in the directory, through the
+ * keyed hash of each subject (GRA-2249); each stays, the company's (Nick's D5), without the
  * address, its link closed for good (`eraseEntries`). Those addresses of
  * theirs stay out of the list until an admin releases them, which waits
  * for this area (`releaseAddress`, GRA-2189). Once an admin released the
@@ -487,23 +488,55 @@ const interview: ErasureStep = {
   area: "interview",
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
-    const [erasure] = await db
-      .select({
-        emailHash: personErasures.emailHash,
-        keyVersion: personErasures.emailKeyVersion,
-      })
-      .from(personErasures)
-      .where(eq(personErasures.userId, userId));
+    // One snapshot: the identity area deletes their accounts in the batch
+    // that keeps each subject's hash, so between the two every subject is
+    // here, whichever area ran first.
+    const [[erasure], kept, held] = await db.batch([
+      db
+        .select({
+          emailHash: personErasures.emailHash,
+          keyVersion: personErasures.emailKeyVersion,
+        })
+        .from(personErasures)
+        .where(eq(personErasures.userId, userId)),
+      db
+        .select({ hash: erasedSubjects.subjectHash })
+        .from(erasedSubjects)
+        .where(
+          and(
+            eq(erasedSubjects.userId, userId),
+            eq(erasedSubjects.keyVersion, subjectKeyVersion)
+          )
+        ),
+      db
+        .select({
+          providerId: accounts.providerId,
+          accountId: accounts.accountId,
+          oid: accounts.oid,
+        })
+        .from(accounts)
+        .where(eq(accounts.userId, userId)),
+    ]);
     if (erasure === undefined) {
       return;
     }
+    // Who they are at their sign-ins, as erasure keeps it: their entries
+    // tied to them in the directory are found by it (GRA-2249).
+    const subjects = [
+      ...kept.map(({ hash }) => hash),
+      ...(await Promise.all(
+        held
+          .flatMap((account) => subjectsOf(account, directoryProviderId))
+          .map(async (subject) => await subjectHashOf(env, subject))
+      )),
+    ];
     const store = onboardingStore(env);
     // What the voice said for them as an admin, on their onboarding, goes
     // from its cache, whoever they were on the list (GRA-1897).
     await store.forgetSpokenForAdmin(userId);
     const hash =
       erasure.keyVersion === emailKeyVersion ? erasure.emailHash : null;
-    const found = await store.eraseEntries(userId, hash);
+    const found = await store.eraseEntries(userId, hash, subjects);
     // Whatever the Brain holds under their account, from any link, also
     // one it no longer holds (a new start gave it to someone else), goes
     // before this area is done: keyed by the account alone, so the link's

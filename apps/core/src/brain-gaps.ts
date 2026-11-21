@@ -7,10 +7,11 @@ import {
   brainRecordIdSchema,
   brainRecordSchema,
 } from "@grasp-os/shared/brain-records";
+import { directoryProviders } from "@grasp-os/shared/directory";
 import { issuesOf } from "@grasp-os/shared/errors";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -24,6 +25,7 @@ import type { GapRecord } from "./brain-records.ts";
 import {
   brainGapStates,
   brainRecords,
+  directoryPeople,
   notifications,
   users,
 } from "./db/core/schema.ts";
@@ -188,22 +190,29 @@ const roleKey = (role: string): string =>
 /**
  * The members who hold `owner`, the role a gap names: those on the
  * staff list (the onboarding's roster) with that title, found by the
- * email they sign in with, while they are members. At most
- * {@link maxAsked}, by name.
+ * email they sign in with, or, for an entry tied to them in the
+ * directory (GRA-2249), by the member the daily read ties to that
+ * person (directory-ties.ts), who may not have signed in yet; while
+ * they are members. At most {@link maxAsked}, by name.
  */
 const ownersOf = async (env: Env, owner: string): Promise<string[]> => {
-  const { roster } = await onboardingStore(env).view();
+  const listed = await onboardingStore(env).staffTies();
+  const holders = listed.filter(
+    ({ title }) => roleKey(title) === roleKey(owner)
+  );
   const emails = [
     ...new Set(
-      (roster?.people ?? [])
-        .filter(
-          ({ title, email }) =>
-            email !== "" && roleKey(title) === roleKey(owner)
-        )
-        .map(({ email }) => email.toLowerCase())
+      holders.flatMap(({ email }) =>
+        email === "" ? [] : [email.toLowerCase()]
+      )
     ),
   ];
-  if (emails.length === 0) {
+  const tied = holders.flatMap(({ tie }) =>
+    tie === null
+      ? []
+      : [[directoryProviders[tie.suite], tie.id.toLowerCase()] as const]
+  );
+  if (emails.length === 0 && tied.length === 0) {
     return [];
   }
   const rows = await drizzle(env.DB)
@@ -211,8 +220,15 @@ const ownersOf = async (env: Env, owner: string): Promise<string[]> => {
     .from(users)
     .where(
       and(
-        // Every email as one bound parameter: D1 binds at most 100.
-        sql`lower(${users.email}) IN (SELECT value FROM json_each(${JSON.stringify(emails)}))`,
+        // Every email, and every tie, as one bound parameter: D1 binds at most 100.
+        or(
+          sql`lower(${users.email}) IN (SELECT value FROM json_each(${JSON.stringify(emails)}))`,
+          sql`${users.id} IN (
+            SELECT ${directoryPeople.userId} FROM ${directoryPeople}, json_each(${JSON.stringify(tied)}) AS tie
+            WHERE ${directoryPeople.provider} = tie.value ->> 0
+              AND ${directoryPeople.accountId} = tie.value ->> 1
+          )`
+        ),
         activeMember(users.id)
       )
     )

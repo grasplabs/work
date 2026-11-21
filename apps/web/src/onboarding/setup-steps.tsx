@@ -649,11 +649,12 @@ const readDirectoryRoster = async (
   { roster: RosterInput; suite: DirectorySuite } | DirectoryProblem
 > => {
   try {
-    const { people, suite } = await core.withSession(
+    const read = await core.withSession(
       async (session) => await session.onboarding.readDirectory()
     );
+    const { people, suite } = read;
     return {
-      roster: withSaved(directoryListOf(people, noTeam).roster, saved),
+      roster: withSaved(directoryListOf(people, noTeam, read).roster, saved),
       suite,
     };
   } catch (error) {
@@ -1500,6 +1501,18 @@ const Pulse = (props: StepProps) => (
 
 const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const { t } = useLingui();
+  const labelOf = ({ name, left }: Roster["people"][number]): string => {
+    if (name === "") {
+      return t`Erased`;
+    }
+    return left === true
+      ? t({
+          message: `${name} (left)`,
+          context:
+            "a person on the staff list who no longer works at the company",
+        })
+      : name;
+  };
   const lines = useHeadlines(props).leads;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
@@ -1565,10 +1578,10 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       <Onward>
         <div className="setup-org-list flex w-full flex-col overflow-auto rounded-xl border text-left">
           {teams.map(({ team, people }) => {
-            // Someone erased stays in their team, without a name.
+            // Someone erased stays in their team, without a name; someone who left, with theirs.
             const options = people.map((person) => ({
               value: person.id,
-              label: person.name === "" ? t`Erased` : person.name,
+              label: labelOf(person),
             }));
             const { name } = team;
             const count = people.length;
