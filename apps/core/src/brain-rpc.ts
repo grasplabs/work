@@ -6,6 +6,7 @@ import type {
   Connection,
   Gap,
   Goal,
+  OpenGapsPage,
   Source,
   Stakeholder,
   Statement,
@@ -45,6 +46,7 @@ import {
   askAboutGap,
   closeGap,
   gapsWith,
+  openGaps,
   redactGapAnswer,
 } from "./brain-gaps.ts";
 import {
@@ -1401,6 +1403,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await answerGap(this.#env, person, gapId, answer)
+    );
+  }
+
+  async openGaps(after?: string): Promise<OpenGapsPage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await openGaps(this.#env, person, after)
     );
   }
 

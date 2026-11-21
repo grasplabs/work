@@ -1,3 +1,5 @@
+import { openGapsPageSize } from "@grasp-os/shared/brain";
+import { brainRecordsMaxPerCall } from "@grasp-os/shared/brain-records";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
@@ -572,6 +574,128 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         answer: "About 400.",
         answeredBy: name,
       },
+    });
+  });
+
+  it("list in the inbox, a page at a time, every open one for an admin, and for anyone else only those asked of them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "user");
+    const other = await signedInApi(idp, "user");
+    const tag = unique();
+    const source = `src-${tag}`;
+    const candidate = `cand-${tag}`;
+    const statement = `stmt-${tag}`;
+    const gap = (id: string): BrainRecordInput => ({
+      type: "gap",
+      id,
+      question: "How many invoices come in a month?",
+      owner: "Head of finance",
+      sourceId: source,
+      about: [candidate, statement],
+    });
+    const ids = {
+      asked: `gap-${tag}-asked`,
+      unasked: `gap-${tag}-unasked`,
+      answered: `gap-${tag}-answered`,
+      closed: `gap-${tag}-closed`,
+    };
+    // More open ones than a page holds, added in two calls.
+    const more = Array.from(
+      { length: openGapsPageSize },
+      (_, index) => `gap-${tag}-${index}`
+    );
+    const first: BrainRecordInput[] = [
+      {
+        type: "source",
+        id: source,
+        kind: "interview",
+        title: "Finance interview",
+        date: "2026-10-20",
+      },
+      { type: "candidate", id: candidate, name: "Invoice entry" },
+      {
+        type: "statement",
+        id: statement,
+        kind: "blocker",
+        text: "Invoices are typed in by hand.",
+        sourceId: source,
+      },
+      ...Object.values(ids).map(gap),
+    ];
+    const split = brainRecordsMaxPerCall - first.length;
+    await admin.api.brain.addRecords([
+      ...first,
+      ...more.slice(0, split).map(gap),
+    ]);
+    await admin.api.brain.addRecords(more.slice(split).map(gap));
+    await rosterWith(admin, "Head of finance", owner);
+    await admin.api.brain.askAboutGap(ids.asked);
+    await admin.api.brain.answerGap(ids.answered, "About 400.");
+    await admin.api.brain.closeGap(ids.closed);
+    // Taken out of the brain: no gap is about it any more.
+    await admin.api.brain.forget({ statements: [statement] });
+    const ours = new Set([...Object.values(ids), ...more]);
+    /** This test's gaps `person` lists, page by page, and how many pages. */
+    const listedBy = async (person: Signed) => {
+      const listed: { id: string; asked: boolean; about: string[] }[] = [];
+      let pages = 0;
+      let after: string | undefined;
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- each page starts after the last
+        const page = await person.api.brain.openGaps(after);
+        pages += 1;
+        expect(page.gaps.length).toBeLessThanOrEqual(openGapsPageSize);
+        listed.push(
+          ...page.gaps
+            .filter(({ id }) => ours.has(id))
+            .map(({ id, askedAt, about }) => ({
+              id,
+              asked: askedAt !== undefined,
+              about,
+            }))
+        );
+        after = page.gaps.at(-1)?.id;
+        if (!page.more || after === undefined) {
+          return { listed, pages };
+        }
+      }
+    };
+    const unaskedOne = (id: string) => ({
+      id,
+      asked: false,
+      about: [candidate],
+    });
+
+    const grasp = await staff();
+    const byAdmin = await listedBy(admin);
+    // A page goes on after the gap the last one ended on, whatever became
+    // of that gap since.
+    const fromUnasked = await admin.api.brain.openGaps(ids.unasked);
+    await admin.api.brain.closeGap(ids.unasked);
+
+    expect({
+      admin: byAdmin.listed,
+      paged: byAdmin.pages > 1,
+      owner: await listedBy(owner),
+      other: await listedBy(other),
+      afterClosed: await admin.api.brain.openGaps(ids.unasked),
+      badCursor: await outcome(admin.api.brain.openGaps("not a gap id")),
+      staff: await outcome(grasp.brain.openGaps()),
+    }).toStrictEqual({
+      admin: [
+        { id: ids.asked, asked: true, about: [candidate] },
+        unaskedOne(ids.unasked),
+        ...more.map(unaskedOne),
+      ],
+      paged: true,
+      owner: {
+        listed: [{ id: ids.asked, asked: true, about: [candidate] }],
+        pages: 1,
+      },
+      other: { listed: [], pages: 1 },
+      afterClosed: fromUnasked,
+      badCursor: "brain.gap_not_found",
+      staff: "role.forbidden",
     });
   });
 

@@ -113,6 +113,7 @@ export const rpcParamNames: ParamNames = {
     "forget": ["target"],
     "forgetPreview": ["target"],
     "goals": [],
+    "openGaps": ["after"],
     "read": [],
     "redactGapAnswer": ["gapId"],
     "saveTeamGroups": ["groups"],

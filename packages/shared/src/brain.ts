@@ -299,6 +299,17 @@ export interface Gap {
   answeredBy?: string;
 }
 
+/** Most gaps one page of `brain.openGaps` lists. */
+export const openGapsPageSize = 50;
+
+/** A page of the open gaps a person may answer from their inbox. */
+export interface OpenGapsPage {
+  /** At most {@link openGapsPageSize}, in the order the brain added them. */
+  gaps: Gap[];
+  /** Whether more follow: list again after the last one's id. */
+  more: boolean;
+}
+
 /** One step of a drawn workflow, as far as the brain reads it. */
 export interface Step {
   /** What is done, as an instruction. */
@@ -467,6 +478,13 @@ export interface BrainApi {
    * staff.
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /**
+   * The open gaps the person may answer from their inbox, a page at a
+   * time, after the gap `after` names: every one the brain still has for
+   * the company's own admins, asked of someone or not; for any other
+   * member only those asked of them. Not for Grasp's staff.
+   */
+  openGaps: (after?: string) => Promise<OpenGapsPage>;
   /**
    * What taking a source or statements out of the brain takes with it,
    * nothing taken yet: for the company's admins.
