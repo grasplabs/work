@@ -273,7 +273,7 @@ const RequestFlow = ({
       setSent(true);
       // The page reads its requests again, so the new one shows under
       // Requested, where "Forwarded to our team" says to find it.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   if (sent) {

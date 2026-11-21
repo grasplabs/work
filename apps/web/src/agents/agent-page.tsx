@@ -19,13 +19,15 @@ import { useId, useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
+import { formatDollars } from "../format.ts";
 import { Page } from "../frame/page.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
@@ -71,7 +73,6 @@ import {
 } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
-import { dollars } from "../settings/money.ts";
 import {
   AudienceControl,
   appAudienceOf,
@@ -96,6 +97,7 @@ import type { Part, Typed } from "./agent-form.tsx";
 import { AgentLook } from "./agent-look.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins, or a person's own agent's,
@@ -131,19 +133,6 @@ import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
-
-/** An agent's tabs, by the names its address carries. */
-export const agentTabs = [
-  "overview",
-  "instructions",
-  "access",
-  "schedule",
-] as const;
-export type AgentTab = (typeof agentTabs)[number];
-
-/** The tab an address names; Overview for any other. */
-export const agentTabOf = (value: unknown): AgentTab =>
-  agentTabs.find((tab) => tab === value) ?? "overview";
 
 const styles = stylex.create({
   actions: {
@@ -220,7 +209,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
   const { t } = useLingui();
   const monthName = useMonthName();
   const { requests, people } = usage;
-  const before = dollars(usage.spentBefore);
+  const before = formatDollars(usage.spentBefore);
   return (
     <FactRow
       info={[
@@ -233,7 +222,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
       ].join(" · ")}
       label={monthName(usage.month)}
     >
-      {dollars(usage.spent)}
+      {formatDollars(usage.spent)}
     </FactRow>
   );
 };
@@ -601,7 +590,7 @@ const DeleteAgent = ({
           {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={remove}
             failedLabel={t`Couldn't delete`}

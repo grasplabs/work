@@ -7,6 +7,9 @@
 import * as stylex from "@stylexjs/stylex";
 import { MenuItem as ItemPrimitive } from "@ui-sdk/react/menu";
 import type { MenuItemState } from "@ui-sdk/react/menu";
+import { mergeProps, renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
+import { useRef } from "react";
 
 import {
   DropdownMenu,
@@ -33,15 +36,63 @@ const styles = stylex.create({
   link: {
     textDecoration: "none",
   },
+  // A level drawn as a button (its `render`): none of a button's own look, so it reads as the rest.
+  press: {
+    appearance: "none",
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    fontFamily: "inherit",
+    textAlign: "start",
+  },
 });
 
 interface HiddenLevelsProps {
-  /** The folded levels, in the order of the path: each its name and where it goes. */
-  levels: { label: string; href?: string }[];
+  /** The folded levels, in the order of the path: each its name and where it goes, or what it is drawn as. */
+  levels: { label: string; href?: string; render?: RenderProp }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   label: string;
 }
+
+/** One folded level, as a link; or as what its `render` draws, a button that Enter presses as a click does. */
+const Level = ({ level }: { level: HiddenLevelsProps["levels"][number] }) => {
+  const element = useRef<HTMLElement>(null);
+  return (
+    <ItemPrimitive
+      label={level.label}
+      className={(state: MenuItemState) =>
+        stylex.props(
+          menuStyles.item,
+          styles.link,
+          level.render !== undefined && styles.press,
+          state.highlighted && menuStyles.highlighted
+        ).className
+      }
+      // The menu takes Enter and Space for its own select, so a level drawn as a button is pressed
+      // from there: its click runs the caller's own handler and closes the menu.
+      onSelect={(event: Event) => {
+        if (level.render !== undefined && event instanceof KeyboardEvent) {
+          event.preventDefault();
+          element.current?.click();
+        }
+      }}
+      render={(props: Record<string, unknown>) =>
+        renderElement(
+          "a",
+          mergeProps(props, {
+            ref: element,
+            href: level.href,
+            children: (
+              <span {...stylex.props(menuStyles.words)}>{level.label}</span>
+            ),
+          }),
+          level.render
+        )
+      }
+    />
+  );
+};
 
 /** The button and its menu of the folded levels. */
 export const HiddenLevels = ({
@@ -61,22 +112,7 @@ export const HiddenLevels = ({
     </span>
     <DropdownMenuContent align="start">
       {levels.map((level, index) => (
-        <ItemPrimitive
-          key={`${index}:${level.href ?? level.label}`}
-          label={level.label}
-          className={(state: MenuItemState) =>
-            stylex.props(
-              menuStyles.item,
-              styles.link,
-              state.highlighted && menuStyles.highlighted
-            ).className
-          }
-          render={(props: Record<string, unknown>) => (
-            <a {...props} href={level.href}>
-              <span {...stylex.props(menuStyles.words)}>{level.label}</span>
-            </a>
-          )}
-        />
+        <Level key={`${index}:${level.href ?? level.label}`} level={level} />
       ))}
     </DropdownMenuContent>
   </DropdownMenu>

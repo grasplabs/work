@@ -8,7 +8,7 @@ import type { ChatAsked } from "@grasp-os/shared/chat";
 // shows as written.
 
 /** One question, and what the person answered to it. */
-export interface Answered {
+interface Answered {
   question: string;
   answer: string;
 }

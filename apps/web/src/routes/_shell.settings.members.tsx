@@ -1,12 +1,13 @@
 import { failureText } from "@grasp-os/shared/errors";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
+  Guest,
   Invitation,
   Member,
   RemovedPeoplePage,
   RemovedPerson,
 } from "@grasp-os/shared/members";
-import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -16,12 +17,14 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
@@ -65,12 +68,13 @@ import {
   SelectContent,
 } from "../grasp/select/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { DirectoryReads } from "../settings/directory-reads.tsx";
 import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
-import { Guests } from "../settings/guests.tsx";
+import { GuestActions } from "../settings/guests.tsx";
 import {
   copyEmail,
   InvitationActions,
@@ -78,8 +82,7 @@ import {
 } from "../settings/invitations.tsx";
 import { MemberSuspension } from "../settings/member-suspension.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
-import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
-import { TeamsPanel } from "../settings/teams.tsx";
+import { SettingsError } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useNarrow } from "../use-narrow.ts";
@@ -90,9 +93,11 @@ import { useNarrow } from "../use-narrow.ts";
 // (settings/member-suspension.tsx), their role on one edge and a menu to
 // end their sessions or remove them for good; the invitations nobody has taken up yet; and at its foot
 // the people removed, quiet, and a way to erase them
-// (settings/erasures.tsx). Then where the directory's daily read stands,
-// once one was tried (settings/directory-reads.tsx), the teams, for the organization's own
-// admins (settings/teams.tsx), and, last, what each role may do. Core checks the role on every call; anyone else
+// (settings/erasures.tsx). Guests, people outside the company invited to
+// what is shared with them, are rows of the same table with a menu of
+// their own (settings/guests.tsx). Then where the directory's daily read
+// stands, once one was tried (settings/directory-reads.tsx). The teams
+// have their own page (settings/teams.tsx). Core checks the role on every call; anyone else
 // sees why they can't. The admin's own row has no actions: core refuses
 // removing yourself or ending your own sessions, and demoting yourself
 // (which core allows while another admin exists) is left out so nobody
@@ -103,20 +108,9 @@ const styles = stylex.create({
   // As wide as the header's own search, on a phone too: beside the Roles
   // mark and Invite it still fits the card's line (its actions never shrink).
   search: { width: grasp.frameSearch },
-  notice: { padding: grasp.space4 },
-  // Older removed people, asked for under the ones shown.
-  older: {
-    display: "grid",
-    justifyItems: "start",
-    gap: grasp.space2,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.tableCellInline,
-  },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // A suspended member: their face and name, and why under them.
   person: { display: "flex", flexDirection: "column", gap: grasp.space1 },
-  // Your own row has no menu: its room is kept, so every role stands on one edge.
-  menuRoom: { width: grasp.controlSm, flexShrink: 0 },
   // The roles compared: each name over what it may do.
   roles: {
     display: "grid",
@@ -132,23 +126,15 @@ const styles = stylex.create({
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
 
-/** What a change did, or why it failed. */
-interface Notice {
-  failure?: string;
-  done?: string;
-}
-
 /** A member's role and the menu of what else may be done to them. */
 const MemberActions = ({
   member,
   part,
-  onNotice,
   onRemoved,
 }: {
   member: Member;
   /** Which of the row's cells: the role chosen, or the menu of what else may be done. */
   part: "role" | "menu";
-  onNotice: (notice: Notice) => void;
   /** Once they are removed: their row, and what had the focus in it, is gone. */
   onRemoved: () => void;
 }) => {
@@ -166,20 +152,19 @@ const MemberActions = ({
     await router.invalidate({ sync: true });
   };
   const setRole = async (role: Role): Promise<void> => {
-    onNotice({});
     await run(
       async ({ members }) => {
         await changeThenRefresh(async () => {
           await members.setRole(member.userId, role);
         }, refresh);
       },
+      // A menu's change has no place of its own: said as a toast.
       (failure) => {
-        onNotice({ failure });
+        toast.error(failure);
       }
     );
   };
   const signOutEverywhere = async (): Promise<void> => {
-    onNotice({});
     try {
       await changeThenRefresh(async () => {
         await core.withSession(async ({ members }) => {
@@ -188,10 +173,10 @@ const MemberActions = ({
       }, refresh);
     } catch (error) {
       // Core's reason, with its reference to quote; the item says it failed.
-      onNotice({ failure: failureText(error) });
+      toast.error(failureText(error));
       throw error;
     }
-    onNotice({ done: t`${name} is signed out everywhere.` });
+    toast.success(t`${name} is signed out everywhere.`);
   };
   // With none to disconnect, the removal alone is said. Outside the `try`
   // below, as the React Compiler can't compile a conditional within one.
@@ -200,19 +185,16 @@ const MemberActions = ({
       ? t`${name} is removed.`
       : t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`;
   const remove = async (): Promise<void> => {
-    onNotice({});
     try {
       const { connectionsDisconnected: count } = await core.withSession(
         async ({ members }) => await members.remove(member.userId)
       );
-      onNotice({
-        done: removedSaid(count),
-      });
+      toast.success(removedSaid(count));
     } catch (error) {
       // Removed, with some connections still to disconnect: the row goes
-      // all the same, and the notice says why.
+      // all the same, and the toast says why.
       // Core's reason, with its reference to quote, either way.
-      onNotice({ failure: failureText(error) });
+      toast.error(failureText(error));
       if (memberErrors.codeOf(error) !== "member.connections_pending") {
         await refresh();
         throw error;
@@ -261,7 +243,7 @@ const MemberActions = ({
                 {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
               </AlertDialogDescription>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={async () => {
                     await setRole("admin");
@@ -333,7 +315,7 @@ const MemberActions = ({
                 {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
               </AlertDialogDescription>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={remove}
                   failedLabel={t`Not removed`}
@@ -374,6 +356,12 @@ const RolesButton = () => {
               </dd>
             </div>
           ))}
+          <div>
+            <dt {...stylex.props(styles.roleName)}>{t`Guest`}</dt>
+            <dd {...stylex.props(styles.roleText)}>
+              {t`People outside your organization, invited to what is shared with them. They reach nothing else.`}
+            </dd>
+          </div>
         </dl>
       </PopoverContent>
     </Popover>
@@ -394,16 +382,17 @@ const OwnRole = ({ role, label }: { role: Role; label: string }) => (
   </Select>
 );
 
-/** One row of the people's table: a member, an invitation or someone removed, with its date. */
+/** One row of the people's table: a member, a guest, an invitation or someone removed, with its date. */
 interface PersonRow {
   key: string;
-  kind: "member" | "invited" | "removed";
+  kind: "member" | "guest" | "invited" | "removed";
   name: string;
   email: string;
   /** When they joined, were invited or were removed. */
   at: string;
   invitedBy?: string;
   member?: Member;
+  guest?: Guest;
   invitation?: Invitation;
   removed?: RemovedPerson;
 }
@@ -413,6 +402,7 @@ interface PeopleWords {
   name: string;
   since: string;
   role: string;
+  guest: string;
   invited: string;
   yourRole: string;
   roleOf: (name: string) => string;
@@ -435,6 +425,7 @@ const usePeopleWords = (): PeopleWords => {
     name: t`Name`,
     since: t`Since`,
     role: t`Role`,
+    guest: t`Guest`,
     invited: t`Invited`,
     yourRole: t`Your role`,
     roleOf: (name) => t`Role of ${name}`,
@@ -449,13 +440,11 @@ const peopleColumns = ({
   words,
   me,
   narrow,
-  onNotice,
 }: {
   words: PeopleWords;
   me: string;
   /** Below the phone's width, Since steps aside so Name and Role fit. */
   narrow: boolean;
-  onNotice: (notice: Notice) => void;
 }): DataTableColumn<PersonRow>[] => {
   const columns: DataTableColumn<PersonRow>[] = [
     {
@@ -522,7 +511,8 @@ const peopleColumns = ({
             </Text>
           );
         }
-        // Joined is what Since means: a member's cell is the date alone.
+        // Joined is what Since means: a member's cell is the date alone, and a
+        // guest's the day they were invited, when they were let in.
         return date;
       },
     },
@@ -531,8 +521,27 @@ const peopleColumns = ({
       header: words.role,
       align: "end",
       control: true,
-      value: (row) => roleOf(row),
+      value: (row) => (row.kind === "guest" ? words.guest : roleOf(row)),
       cell: (row) => {
+        if (row.kind === "guest") {
+          // Nobody changes a guest's role: it reads as one's own does.
+          return (
+            <Select
+              disabled
+              items={[{ label: words.guest, value: "guest" }]}
+              value="guest"
+            >
+              <SelectTrigger
+                aria-label={words.roleOf(row.name)}
+                size="sm"
+                variant="text"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          );
+        }
         if (row.invitation !== undefined) {
           // What they join as, which nobody changes here: as one's own role reads.
           return (
@@ -550,7 +559,6 @@ const peopleColumns = ({
         ) : (
           <MemberActions
             member={row.member}
-            onNotice={onNotice}
             onRemoved={() => {
               // The table reads again, without their row.
             }}
@@ -572,13 +580,15 @@ const peopleColumns = ({
         if (row.removed !== undefined) {
           return <RemovedActions person={row.removed} />;
         }
+        if (row.guest !== undefined) {
+          return <GuestActions guest={row.guest} />;
+        }
         if (row.member === undefined || row.member.userId === me) {
           return null;
         }
         return (
           <MemberActions
             member={row.member}
-            onNotice={onNotice}
             onRemoved={() => {
               // The table reads again, without their row.
             }}
@@ -596,22 +606,23 @@ const peopleColumns = ({
  * (with headers): Name with the face and email, Since with the date each
  * joined, was invited (and by whom) or was removed, and Role with what can
  * be done; the count, the search and Invite on the head's one line; paged
- * twenty at a time, the search over everyone. Invited and removed people
- * are states of a row.
+ * twenty at a time, the search over everyone. Guests, invited and removed
+ * people are states of a row.
  */
 const PeopleTable = ({
   members,
+  guests,
   invitations,
   removed,
   me,
 }: {
   members: Member[];
+  guests: Guest[];
   invitations: Invitation[];
   removed: RemovedPeoplePage;
   me: string;
 }) => {
   const { t } = useLingui();
-  const [notice, setNotice] = useState<Notice>({});
   const [search, setSearch] = useState("");
   const gone = useRemovedPeople(removed);
   const narrow = useNarrow();
@@ -624,6 +635,15 @@ const PeopleTable = ({
       email: member.email,
       at: member.joinedAt,
       member,
+    })),
+    // A guest's name is their address: it stands alone, without a second line.
+    ...guests.map((guest) => ({
+      key: guest.userId,
+      kind: "guest" as const,
+      name: guest.email,
+      email: "",
+      at: guest.invitedAt,
+      guest,
     })),
     ...invitations.map((invitation) => ({
       key: invitation.id,
@@ -685,15 +705,6 @@ const PeopleTable = ({
       }
       title={t`Team members`}
     >
-      {notice.failure === undefined && notice.done === undefined ? null : (
-        <div {...stylex.props(styles.notice)}>
-          {notice.failure === undefined ? (
-            <Alert tone="success">{notice.done}</Alert>
-          ) : (
-            <Alert tone="danger">{notice.failure}</Alert>
-          )}
-        </div>
-      )}
       {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
       <DataTable
         key={narrow ? "narrow" : "wide"}
@@ -701,7 +712,6 @@ const PeopleTable = ({
           words,
           me,
           narrow,
-          onNotice: setNotice,
         })}
         label={t`Members`}
         onQueryChange={setSearch}
@@ -724,9 +734,8 @@ const PeopleTable = ({
 };
 
 /**
- * Settings › Members and roles on one page: the people, with what each
- * role may do over them, then (for the organization's own admins) their
- * teams.
+ * Settings › Members and roles on one page: the people and guests, with
+ * what each role may do over them.
  */
 const MembersPage = () => {
   const { t } = useLingui();
@@ -735,38 +744,23 @@ const MembersPage = () => {
   return (
     <div {...stylex.props(styles.page)}>
       {page.state === "ready" ? (
-        <>
-          <PeopleTable
-            invitations={page.data.invitations}
-            me={identity.userId}
-            members={page.data.members}
-            removed={page.data.removed}
-          />
-          <Guests guests={page.data.guests} />
-        </>
+        <PeopleTable
+          guests={page.data.guests}
+          invitations={page.data.invitations}
+          me={identity.userId}
+          members={page.data.members}
+          removed={page.data.removed}
+        />
       ) : (
         <SectionCard variant="grouped" density="compact" title={t`Members`}>
-          <SectionNotLoaded page={page} />
+          <NotLoadedState heading="h3" page={page} />
         </SectionCard>
       )}
       {/* Nothing before a read was tried, or for anyone core refuses it. */}
       <DirectoryReads />
-      {/* Core refuses the teams to anyone else. */}
-      {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}
-      {isMemberAdmin(identity) ? (
-        <TeamsPanel
-          key={
-            page.state === "ready"
-              ? page.data.members.map(({ userId }) => userId).join(" ")
-              : "unread"
-          }
-        />
-      ) : null}
     </div>
   );
 };
-
-const ignoreNotice = (): void => undefined;
 
 /**
  * The people's card while they are read: the card as the loaded one
@@ -805,7 +799,6 @@ const MembersPending = () => {
             words,
             me: "",
             narrow,
-            onNotice: ignoreNotice,
           }),
           label: t`Members`,
           pageSize,

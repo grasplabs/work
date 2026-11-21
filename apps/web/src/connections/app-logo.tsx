@@ -2,7 +2,6 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { Icon, Plus } from "../grasp/icons/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // An app's tile, as the prototype draws it (`components/app-logo.tsx`): its
@@ -88,21 +87,6 @@ const styles = stylex.create({
     height: "100%",
     objectFit: "contain",
   },
-  // The default tile, dashed and without its light ground: a place for something still to add.
-  add: {
-    display: "flex",
-    flexShrink: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    boxSizing: "border-box",
-    width: `calc(${grasp.space8} + ${grasp.space1})`,
-    height: `calc(${grasp.space8} + ${grasp.space1})`,
-    borderWidth: grasp.hairline,
-    borderStyle: "dashed",
-    borderColor: grasp.line,
-    borderRadius: grasp.cornerMark,
-    color: grasp.muted,
-  },
 });
 
 type TileSize = "bare" | "lg" | "default" | "sm" | "xs" | "inline";
@@ -167,13 +151,3 @@ export const AppLogo = ({
     </Tile>
   );
 };
-
-/**
- * The tile of something still to add, beside the logos of what is there:
- * the same tile, dashed and empty, with a plus.
- */
-export const AddLogo = () => (
-  <div aria-hidden="true" {...stylex.props(styles.add)}>
-    <Icon icon={Plus} />
-  </div>
-);

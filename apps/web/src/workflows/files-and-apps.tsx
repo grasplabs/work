@@ -21,6 +21,7 @@ import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -81,12 +82,6 @@ const styles = stylex.create({
   tab: { display: "flex", flexDirection: "column", gap: grasp.space6 },
   versions: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   version: { display: "flex", flexDirection: "column", gap: grasp.space2 },
-  // A part's own words and lists inside its card.
-  inset: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space4,
-  },
   approved: {
     display: "flex",
     flexWrap: "wrap",
@@ -409,7 +404,7 @@ const Approved = ({
                         {t`Its next start is refused until an admin approves ${alias} again, and runs already started fail at their next call through it.`}
                       </AlertDialogDescription>
                       <AlertDialogFooter>
-                        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                        <AlertDialogCancel />
                         <AlertDialogAction
                           action={async () => {
                             await revoke(alias, approval.id);

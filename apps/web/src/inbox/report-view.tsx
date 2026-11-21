@@ -1,10 +1,11 @@
 import type { BoardReport } from "@grasp-os/shared/dashboard";
 import type { Programme } from "@grasp-os/shared/onboarding";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { Ref } from "react";
 
-import { formatDate } from "../format.ts";
+import { formatDate, formatPercent } from "../format.ts";
 import {
   Chart,
   ChartAxis,
@@ -145,7 +146,10 @@ const Figures = ({ week }: { week: Week }) => {
           value: String(failed),
           ...(failed > 0 ? { tone: "danger" as const } : {}),
         },
-        { title: t`Without a person`, value: `${percentAlone}%` },
+        {
+          title: t`Without a person`,
+          value: formatPercent(percentAlone / 100),
+        },
       ]}
     />
   );
@@ -161,7 +165,7 @@ const PerDay = ({ week }: { week: Week }) => {
         config={{ runs: { label: t`Runs` } }}
         data={week.days}
         layout={styles.chart}
-        summary={t`${total} runs from ${from} to ${to}.`}
+        summary={t`${plural(total, { one: `# run from ${from} to ${to}.`, other: `# runs from ${from} to ${to}.` })}`}
         xKey="day"
       >
         <ChartGrid />
@@ -186,7 +190,7 @@ const Workflows = ({ week }: { week: Week }) => {
         fill="dither-dots"
         layout={styles.chart}
         nameKey="name"
-        summary={t`Where this week's ${total} runs went.`}
+        summary={t`${plural(total, { one: "Where this week's # run went.", other: "Where this week's # runs went." })}`}
       />
     </SectionCard>
   );
@@ -212,6 +216,7 @@ const Better = ({ week }: { week: Week }) => {
 const Report = ({ week }: { week: Week }) => {
   const { t } = useLingui();
   const { percentAlone, total } = week;
+  const percent = formatPercent(percentAlone / 100);
   return (
     <>
       <div {...stylex.props(styles.head)}>
@@ -221,7 +226,7 @@ const Report = ({ week }: { week: Week }) => {
         </div>
         <div {...stylex.props(styles.over)}>
           <Heading level={1} size="xl">
-            {t`${percentAlone}% of this week's ${total} runs needed nobody.`}
+            {t`${plural(total, { one: `${percent} of this week's # run needed nobody.`, other: `${percent} of this week's # runs needed nobody.` })}`}
           </Heading>
         </div>
       </div>

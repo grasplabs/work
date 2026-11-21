@@ -162,7 +162,7 @@ const wordPattern = /[\p{L}\p{N}’']+/gu;
 const wordsIn = (text: string): string[] => text.match(wordPattern) ?? [];
 
 /** The stems that what more than one team said have in common, in the order first said. */
-export const sharedStems = (words: readonly FigureWord[]): string[] => {
+const sharedStems = (words: readonly FigureWord[]): string[] => {
   const teamsOf = new Map<string, Set<string>>();
   const order: string[] = [];
   for (const word of words) {

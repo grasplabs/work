@@ -2,8 +2,10 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
-import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
+import { AgentPage } from "../agents/agent-page.tsx";
+import type { FirstAgentAccess } from "../agents/agent-page.tsx";
+import { agentTabOf } from "../agents/tabs.tsx";
+import type { AgentTab } from "../agents/tabs.tsx";
 import { agentInstructionsFor } from "../agents/unsaved-instructions.ts";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";

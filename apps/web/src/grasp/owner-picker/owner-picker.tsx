@@ -21,30 +21,25 @@ import {
   ComboboxContent,
   ComboboxEmpty,
   ComboboxInput,
-  ComboboxItem,
-  ComboboxItemIcon,
-  ComboboxItemIndicator,
-  ComboboxItemText,
   ComboboxList,
   ComboboxTrigger,
   ComboboxValueIcon,
 } from "@ui-sdk/react/combobox";
 import type {
   ComboboxInputState,
-  ComboboxItemState,
-  ComboboxItemTextState,
   ComboboxTriggerState,
   ComboboxQueryChangeReason,
   ComboboxValueChangeReason,
   ListData,
   ListItem,
 } from "@ui-sdk/react/combobox";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import { listStyles } from "../combobox/list.styles";
+import { PersonOption } from "../combobox/person-option";
 import { focus } from "../focus/focus";
-import { ChevronDown, Icon, People, Tick } from "../icons";
+import { ChevronDown, Icon, People } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import {
   inputStyles,
@@ -53,6 +48,7 @@ import {
   targetStyles,
 } from "../input/input";
 import type { InputLayoutStyle } from "../input/input";
+import { originFrom, pressedJustNow } from "../motion/origin";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -210,37 +206,10 @@ const styles = stylex.create({
   chevronOpen: { transform: "rotate(0.5turn)", transitionDuration: simply.ui },
   content: { minWidth: "var(--anchor-width)" },
   // A person in the list: avatar, name over their line, the tick at the end.
-  person: { display: "grid", minWidth: 0, flexGrow: 1 },
-  detail: {
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    // In forced colours it takes the highlighted row's own colour.
-    color: { default: grasp.muted, [media.forced]: "inherit" },
-    overflowWrap: "anywhere",
-  },
-  personItem: { paddingBlock: grasp.space1 },
-  icon: { display: "flex", flexShrink: 0 },
 });
 
 const className = (...parts: (stylex.StyleXStyles | false)[]) =>
   stylex.props(...parts).className;
-
-/** A person's name, with the letters the typed words matched a step heavier. */
-const Words = () => (
-  <ComboboxItemText {...stylex.props(listStyles.itemWords)}>
-    {(state: ComboboxItemTextState) =>
-      state.segments.map((segment, index) =>
-        segment.match ? (
-          <mark key={index} {...stylex.props(listStyles.mark)}>
-            {segment.text}
-          </mark>
-        ) : (
-          segment.text
-        )
-      )
-    }
-  </ComboboxItemText>
-);
 
 // Whether a person has a line about them to show and to search by.
 const hasDetail = (person: Owner): person is Owner & { detail: string } =>
@@ -270,6 +239,12 @@ export const OwnerPicker = ({
   "aria-label": ariaLabel,
   ...options
 }: OwnerPickerProps) => {
+  // Opened by a press on the chevron, the list grows from that button; by typing, from the field.
+  const chevron = useRef<HTMLButtonElement>(null);
+  const pressedAt = useRef(0);
+  const fromChevron = originFrom(() =>
+    pressedJustNow(pressedAt.current) ? chevron.current : null
+  );
   const {
     placeholder,
     empty,
@@ -374,6 +349,11 @@ export const OwnerPicker = ({
           )}
         />
         <ComboboxTrigger
+          ref={chevron}
+          onPointerDown={(event) => {
+            pressedAt.current =
+              Date.now() - (performance.now() - event.timeStamp);
+          }}
           aria-label={triggerLabel}
           className={(state: ComboboxTriggerState) =>
             className(
@@ -402,6 +382,7 @@ export const OwnerPicker = ({
         </ComboboxTrigger>
       </div>
       <ComboboxContent
+        ref={fromChevron}
         sideOffset={popup.gap}
         collisionPadding={popup.gutter}
         {...stylex.props(listStyles.popup, styles.content, scroll.bar)}
@@ -418,46 +399,15 @@ export const OwnerPicker = ({
                 return null;
               }
               return (
-                <ComboboxItem
+                <PersonOption
                   key={person.id}
                   value={person.id}
-                  label={person.name}
+                  name={person.name}
+                  src={person.src}
+                  line={person.detail}
+                  lineId={`${ids}-${person.id}`}
                   keywords={hasDetail(person) ? [person.detail] : undefined}
-                  // Its name is the person's; their line is read after it, not run into it.
-                  aria-label={person.name}
-                  aria-describedby={
-                    hasDetail(person) ? `${ids}-${person.id}` : undefined
-                  }
-                  className={(itemState: ComboboxItemState) =>
-                    className(
-                      listStyles.item,
-                      styles.personItem,
-                      itemState.highlighted && listStyles.itemHighlighted,
-                      itemState.disabled && listStyles.itemDisabled
-                    )
-                  }
-                >
-                  <ComboboxItemIcon {...stylex.props(styles.icon)}>
-                    <Avatar name={person.name} size="xs" decorative>
-                      <AvatarImage src={person.src} />
-                      <AvatarFallback />
-                    </Avatar>
-                  </ComboboxItemIcon>
-                  <span {...stylex.props(styles.person)}>
-                    <Words />
-                    {hasDetail(person) && (
-                      <span
-                        id={`${ids}-${person.id}`}
-                        {...stylex.props(styles.detail)}
-                      >
-                        {person.detail}
-                      </span>
-                    )}
-                  </span>
-                  <ComboboxItemIndicator {...stylex.props(listStyles.tick)}>
-                    <Icon icon={Tick} />
-                  </ComboboxItemIndicator>
-                </ComboboxItem>
+                />
               );
             })
           }

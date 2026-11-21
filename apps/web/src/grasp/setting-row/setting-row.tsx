@@ -13,7 +13,7 @@ import { Icon, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
-import { grasp } from "../tokens/tokens.stylex";
+import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { InfoMark, RowFrame, rowFrame } from "./frame";
 import { RowProblem } from "./line-context";
@@ -142,11 +142,10 @@ export interface SettingsRowsProps {
 /** A row narrower than this puts its control under its words (the row's own width). */
 const NARROW = "@container setting-row (width < 34rem)";
 
-// Saved: the tick stands a moment, then leaves.
+// Saved: the tick stands as long as any result holds, then leaves; with reduced motion it goes at once.
 const leave = stylex.keyframes({
-  "0%": { opacity: 1 },
-  "87%": { opacity: 1 },
-  "100%": { opacity: 0 },
+  from: { opacity: 1 },
+  to: { opacity: 0 },
 });
 
 const styles = stylex.create({
@@ -279,7 +278,8 @@ const styles = stylex.create({
   },
   markLeaves: {
     animationName: leave,
-    animationDuration: "2300ms",
+    animationDuration: { default: grasp.durationLeave, [media.reduced]: "0s" },
+    animationDelay: grasp.durationHold,
     animationTimingFunction: grasp.ease,
     animationFillMode: "forwards",
   },

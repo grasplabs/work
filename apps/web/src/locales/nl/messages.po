@@ -238,10 +238,6 @@ msgstr "{count, plural, =0 {Geen documenten} one {# document} other {# documente
 msgid "{count, plural, =0 {No sources} one {# source} other {# sources}}"
 msgstr "{count, plural, =0 {Geen bronnen} one {# bron} other {# bronnen}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
-msgstr "{count, plural, one {{names} werken hier, aan # stuk werk dat naar voren kwam in wat mensen vertelden.} other {{names} werken hier, aan # stukken werk die naar voren kwamen in wat mensen vertelden.}}"
-
 #: src/agents/own-agents-admin.tsx
 msgid "{count, plural, one {# agent} other {# agents}}"
 msgstr "{count, plural, one {# agent} other {# agents}}"
@@ -277,10 +273,6 @@ msgstr "{count, plural, one {# gekoppeld} other {# gekoppeld}}"
 #: src/chat/sources.tsx
 msgid "{count, plural, one {# connection} other {# connections}}"
 msgstr "{count, plural, one {# verbinding} other {# verbindingen}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
-msgstr "{count, plural, one {# gesprek kwam binnen: met het bestuur, de teams en hun mensen.} other {# gesprekken kwamen binnen: met het bestuur, de teams en hun mensen.}}"
 
 #: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: it was larger than 64 KiB.} other {# deliveries refused in the last seven days: they were larger than 64 KiB.}}"
@@ -327,10 +319,6 @@ msgid "{count, plural, one {# entry} other {# entries}}"
 msgstr "{count, plural, one {# regel} other {# regels}}"
 
 #: src/brain/brain.ts
-msgid "{count, plural, one {# gap still open. First: {question}} other {# gaps still open. First: {question}}}"
-msgstr "{count, plural, one {# leemte nog open. Eerste: {question}} other {# leemtes nog open. Eerste: {question}}}"
-
-#: src/brain/brain.ts
 msgid "{count, plural, one {# goal} other {# goals}}"
 msgstr "{count, plural, one {# doel} other {# doelen}}"
 
@@ -341,10 +329,6 @@ msgstr "{count, plural, one {# overdracht} other {# overdrachten}}"
 #: src/brain/activity-page.tsx
 msgid "{count, plural, one {# interview in week {week}} other {# interviews in week {week}}}"
 msgstr "{count, plural, one {# interview in week {week}} other {# interviews in week {week}}}"
-
-#: src/brain/brain.ts
-msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
-msgstr "{count, plural, one {# uitgenodigd team nog niet geïnterviewd: {teams}.} other {# uitgenodigde teams nog niet geïnterviewd: {teams}.}}"
 
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
@@ -486,6 +470,10 @@ msgstr "{count, plural, one {# workflow lezen} other {# workflows lezen}}"
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 msgstr "{count, plural, one {# ongewijzigde regel tonen} other {# ongewijzigde regels tonen}}"
 
+#: src/chat/held-writes.tsx
+msgid "{count, plural, one {Show all # line ({characters} characters)} other {Show all # lines ({characters} characters)}}"
+msgstr "{count, plural, one {De # regel tonen ({characters} tekens)} other {Alle # regels tonen ({characters} tekens)}}"
+
 #: src/frame/part-words.tsx
 msgid "{count, plural, one {Show the # {group} tool} other {Show the # {group} tools}}"
 msgstr "{count, plural, one {De # tool voor {group} tonen} other {De # tools voor {group} tonen}}"
@@ -501,10 +489,6 @@ msgstr "{count, plural, one {Start # workflow} other {Start # workflows}}"
 #: src/frame/part-words.tsx
 msgid "{count, plural, one {The # tool} other {All # tools}}"
 msgstr "{count, plural, one {De # tool} other {Alle # tools}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
-msgstr "{count, plural, one {Het bestuur stelde # doel voor de sprint.} other {Het bestuur stelde # doelen voor de sprint.}}"
 
 #: src/settings/invitations.tsx
 msgid "{count, plural, one {This is not an email address:} other {These are not email addresses:}} {listed}"
@@ -586,10 +570,6 @@ msgstr "{documentKinds}. Koppel waar ze staan, en ik lees alleen wat je met me d
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documenten}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{done, plural, one {# of them is drawn.} other {# of them are drawn.}}"
-msgstr "{done, plural, one {# daarvan is getekend.} other {# daarvan zijn getekend.}}"
 
 #: src/settings/stephen-settings.tsx
 msgid "{done} done · {failed} failed · 30 days"
@@ -836,10 +816,6 @@ msgstr "{leads, plural, one {Dank je. Ik begin met deze teamleider.} other {Dank
 msgid "{leadsHeard} of {leads}"
 msgstr "{leadsHeard} van {leads}"
 
-#: src/brain/brain-atlas.ts
-msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
-msgstr "{left, plural, one {# team hier is nog niet geïnterviewd.} other {# teams hier zijn nog niet geïnterviewd.}}"
-
 #: src/apps/app-code.tsx
 msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
 msgstr "{lines, plural, one {# regel, alleen lezen} other {# regels, alleen lezen}}"
@@ -899,10 +875,6 @@ msgstr "{more, plural, one {# ander bestand} other {# andere bestanden}}"
 #: src/drafts/share-with-team.tsx
 msgid "{more, plural, one {and # more} other {and # more}}"
 msgstr "{more, plural, one {en # meer} other {en # meer}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
-msgstr "{moved, plural, one {# daarvan veranderde later, in een volgend gesprek met het bestuur.} other {# daarvan veranderden later, in volgende gesprekken met het bestuur.}}"
 
 #: src/brain/brain-article/team-work.tsx
 msgctxt "the same pain: these teams told it too"
@@ -1139,10 +1111,6 @@ msgstr "{named}, {current}. Wissel naar {next}"
 msgid "{names} use it"
 msgstr "{names} gebruiken het"
 
-#: src/brain/brain-atlas.ts
-msgid "{names} work here. No work of theirs came up yet."
-msgstr "{names} werken hier. Er kwam nog geen werk van hen naar voren."
-
 #: src/apps/app-data-model.tsx
 msgid "{needs, plural, one {# needs you} other {# need you}}"
 msgstr "{needs, plural, one {# wacht op jou} other {# wachten op jou}}"
@@ -1162,14 +1130,6 @@ msgstr "{number}. {system}: {step}"
 #: src/brain/opportunity-drafts.ts
 msgid "{number}. {system}: {step} (copied from another system)"
 msgstr "{number}. {system}: {step} (overgenomen uit een ander systeem)"
-
-#: src/brain/brain-atlas.ts
-msgid "{one} and {other} both name the same handover, each from their own side."
-msgstr "{one} en {other} noemen allebei dezelfde overdracht, elk vanaf hun eigen kant."
-
-#: src/brain/brain.ts
-msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
-msgstr "{oneTeam} en {otherTeam} noemen allebei dezelfde overdracht, elk vanaf hun eigen kant."
 
 #: src/onboarding/document-drop.tsx
 msgid "{only} isn’t a file I can read."
@@ -1242,10 +1202,6 @@ msgstr "{people, plural, one {voor # persoon} other {voor # personen}}"
 #: src/onboarding/about-story.tsx
 msgid "{percent}% known now"
 msgstr "Nu {percent}% bekend"
-
-#: src/inbox/report-view.tsx
-msgid "{percentAlone}% of this week's {total} runs needed nobody."
-msgstr "{percentAlone}% van de {total} runs van deze week had niemand nodig."
 
 #: src/inbox/items.ts
 msgid "{person} · {connection}"
@@ -1380,10 +1336,6 @@ msgstr "{set, plural, one {Filters, # ingesteld} other {Filters, # ingesteld}}"
 msgid "{share} of questions answered · 30 days"
 msgstr "{share} van de vragen beantwoord · 30 dagen"
 
-#: src/brain/brain-atlas.ts
-msgid "{shared, plural, one {# document was shared or found, and read.} other {# documents were shared or found, and read.}}"
-msgstr "{shared, plural, one {# document werd gedeeld of gevonden, en gelezen.} other {# documenten werden gedeeld of gevonden, en gelezen.}}"
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}}"
@@ -1448,10 +1400,6 @@ msgstr "{statements, plural, one {# uitspraak: {breakdown}} other {# uitspraken:
 msgid "{statements, plural, one {# statement} other {# statements}}"
 msgstr "{statements, plural, one {# uitspraak} other {# uitspraken}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{statements, plural, one {They brought # statement, each one tagged and kept with its source.} other {They brought # statements, each one tagged and kept with its source.}}"
-msgstr "{statements, plural, one {Ze leverden # uitspraak op, gelabeld en bewaard bij de bron.} other {Ze leverden # uitspraken op, elk gelabeld en bewaard bij de bron.}}"
-
 #: src/brain/brain.ts
 msgid "{status, select, drawn {{workflow} (drawn)} designed {{workflow} (designed)} testing {{workflow} (testing)} other {{workflow} (running)}}"
 msgstr "{status, select, drawn {{workflow} (uitgetekend)} designed {{workflow} (ontworpen)} testing {{workflow} (in test)} other {{workflow} (live)}}"
@@ -1467,10 +1415,6 @@ msgstr "{step} van {count}"
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} op {object}"
-
-#: src/brain/brain-atlas.ts
-msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
-msgstr "{sunk, plural, one {# daarvan is een tijdvreter, zoals het team het zei.} other {# daarvan zijn tijdvreters, zoals de teams het zeiden.}}"
 
 #: src/brain/opportunities-page.tsx
 msgctxt "a system and a step taken in it"
@@ -1516,10 +1460,6 @@ msgstr "{team} · onze e-mail kwam niet aan"
 msgid "{team} (team)"
 msgstr "{team} (team)"
 
-#: src/brain/region-edit.tsx
-msgid "{team} has a region of its own"
-msgstr "{team} heeft een eigen regio"
-
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} has been quiet so far. A short message from {lead}, their lead, usually helps. I’ll remind everyone once myself."
 msgstr "{team} is tot nu toe stil. Een kort bericht van {lead}, hun teamleider, helpt meestal. Ik herinner iedereen zelf één keer."
@@ -1527,10 +1467,6 @@ msgstr "{team} is tot nu toe stil. Een kort bericht van {lead}, hun teamleider, 
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "{team} geïnterviewd"
-
-#: src/brain/region-edit.tsx
-msgid "{team} moved to {to}"
-msgstr "{team} verplaatst naar {to}"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{team} says the same"
@@ -1602,8 +1538,16 @@ msgid "{total, plural, one {{count} of # interview} other {{count} of # intervie
 msgstr "{total, plural, one {{count} van # interview} other {{count} van # interviews}}"
 
 #: src/inbox/report-view.tsx
-msgid "{total} runs from {from} to {to}."
-msgstr "{total} runs van {from} tot {to}."
+msgid "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+msgstr "{total, plural, one {{percent} van de # run van deze week had niemand nodig.} other {{percent} van de # runs van deze week had niemand nodig.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+msgstr "{total, plural, one {# run van {from} tot {to}.} other {# runs van {from} tot {to}.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
+msgstr "{total, plural, one {Waar de # run van deze week naartoe ging.} other {Waar de # runs van deze week naartoe gingen.}}"
 
 #: src/settings/ai-spend.tsx
 msgid "{total} so far this month."
@@ -2167,6 +2111,7 @@ msgstr "Acties voor {name}"
 
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
+#: src/settings/guests.tsx
 msgid "Actions for {who}"
 msgstr "Acties voor {who}"
 
@@ -2614,6 +2559,7 @@ msgid "Agent not found"
 msgstr "Agent niet gevonden"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
@@ -2668,7 +2614,7 @@ msgstr "AI-tool"
 msgid "All"
 msgstr "Alles"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alles"
@@ -3163,7 +3109,7 @@ msgstr "Applicaties"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Laat hem gelden als het domein van de afzender {domain} is."
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Approvals"
 msgstr "Goedkeuringen"
@@ -3404,10 +3350,6 @@ msgstr "Gearchiveerd: niemand opent de pagina’s en er draait niets, tot een bo
 msgid "Areas finished"
 msgstr "Onderdelen afgerond"
 
-#: src/brain/region-edit.tsx
-msgid "Arrange {name}"
-msgstr "{name} indelen"
-
 #: src/activity/audit-words.ts
 msgid "Arranged the company's groups of teams"
 msgstr "De teamgroepen van het bedrijf ingedeeld"
@@ -3644,7 +3586,7 @@ msgstr "Gevraagd op deze pagina"
 msgid "Asked of the {owner}"
 msgstr "Gevraagd aan {owner}"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Aan jou gevraagd"
@@ -3985,7 +3927,7 @@ msgstr "Gekoppeld aan"
 msgid "Brain"
 msgstr "Brein"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
@@ -4181,13 +4123,11 @@ msgstr "Kan nu niet worden getoond."
 msgid "Can't offer Run: {unread}"
 msgstr "Uitvoeren kan niet: {unread}"
 
-#: src/agents/agent-documents.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-own-link.tsx
-#: src/apps/app-remove.tsx
 #: src/apps/app-reset.tsx
 #: src/apps/app-status.tsx
 #: src/apps/app-webhooks.tsx
@@ -4196,54 +4136,28 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/apps/release-controls.tsx
-#: src/apps/reset-test-data.tsx
-#: src/apps/resource-bindings.tsx
-#: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
-#: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
-#: src/chat/delete-chat-dialog.tsx
-#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/decision-confirmation.tsx
-#: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
-#: src/drafts/sharing.tsx
 #: src/frame/part-words.tsx
-#: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
-#: src/interview/transcript.tsx
-#: src/link-confirmation.tsx
-#: src/onboarding/document-drop.tsx
-#: src/onboarding/forget-kickoff.tsx
-#: src/onboarding/forget-teams.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-people.tsx
-#: src/projects/project-view.tsx
-#: src/routes/_shell.settings.members.tsx
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
-#: src/settings/chat-accounts.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
 #: src/settings/org-card.tsx
-#: src/settings/staff-access.tsx
-#: src/settings/stephen-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/workflows/delete-workflow.tsx
-#: src/workflows/files-and-apps.tsx
-#: src/workflows/kept-state.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Cancel"
 msgstr "Annuleren"
@@ -4568,7 +4482,7 @@ msgstr "Wijzigingen gevraagd"
 msgid "Changes only you see"
 msgstr "Wijzigingen die alleen jij ziet"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
 msgstr "Wijzigingen die we niet konden bevestigen"
@@ -5359,7 +5273,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Verbindingen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindingen"
@@ -5462,11 +5376,11 @@ msgstr "Kopenhagen"
 #: src/frame/page-failed.tsx
 #: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
-#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/pages/frame-failure.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
@@ -5515,6 +5429,7 @@ msgid "Copy code"
 msgstr "Code kopiëren"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copy email"
 msgstr "E-mail kopiëren"
@@ -5570,7 +5485,9 @@ msgstr "URL van {name} kopiëren"
 #: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Copying didn't work"
 msgstr "Kopiëren is niet gelukt"
 
@@ -6953,6 +6870,10 @@ msgstr "Beëindigt de workflow"
 msgid "Enter a name for the organization."
 msgstr "Vul een naam voor de organisatie in."
 
+#: src/settings/event-sources.tsx
+msgid "Enter a name for the sender."
+msgstr "Geef de afzender een naam."
+
 #: src/settings/teams.tsx
 msgid "Enter a name for the team."
 msgstr "Vul een naam voor het team in."
@@ -6960,6 +6881,10 @@ msgstr "Vul een naam voor het team in."
 #: src/frame/part-words.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Vul een adres in dat met https:// begint."
+
+#: src/settings/event-source-activity.tsx
+msgid "Enter an event type."
+msgstr "Vul een type gebeurtenis in."
 
 #: src/settings/erasures.tsx
 msgid "Enter the address to let in again."
@@ -7634,6 +7559,10 @@ msgstr "Bestanden die de runs hebben geschreven"
 msgid "Files to send"
 msgstr "Te versturen bestanden"
 
+#: src/connections/connect-dialog.tsx
+msgid "Fill in {label}."
+msgstr "Vul {label} in."
+
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Vul dit in."
@@ -8099,7 +8028,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "Algemeen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "Algemeen"
@@ -8564,8 +8493,8 @@ msgid "Grid"
 msgstr "Raster van stippen"
 
 #: src/drafts/sharing.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
-#: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Gast"
 
@@ -8576,10 +8505,6 @@ msgstr "Gastaccounts kunnen niet inloggen."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Gastaccounts kunnen niet inloggen. Gebruik een eigen account van je organisatie."
-
-#: src/settings/guests.tsx
-msgid "Guests"
-msgstr "Gasten"
 
 #: src/activity/audit-words.ts
 msgid "Had the Brain forget a record"
@@ -8772,14 +8697,10 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "Geschiedenis"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
-
-#: src/interview/closed.tsx
-msgid "Hold for 4 seconds"
-msgstr "Houd 4 seconden vast"
 
 #: src/frame/part-words.tsx
 msgid "Hold to confirm: {words}"
@@ -9439,10 +9360,6 @@ msgstr "Uitgenodigd als gast?"
 msgid "Invited for step 2"
 msgstr "Uitgenodigd voor stap 2"
 
-#: src/settings/guests.tsx
-msgid "Invited on {date}"
-msgstr "Uitgenodigd op {date}"
-
 #: src/activity/audit-words.ts
 msgid "Invited someone"
 msgstr "Heeft iemand uitgenodigd"
@@ -9993,10 +9910,6 @@ msgstr "Verder bewerken"
 #: src/make/examples.ts
 msgid "Keep every client question in one place, and remind us when one waits too long for an answer."
 msgstr "Houd elke klantvraag op één plek bij, en herinner ons eraan als er een te lang op antwoord wacht."
-
-#: src/interview/closed.tsx
-msgid "Keep holding"
-msgstr "Blijf vasthouden"
 
 #: src/brain/forget.tsx
 #: src/frame/part-words.tsx
@@ -11239,10 +11152,6 @@ msgstr "{name} omlaag zetten"
 msgid "Move {name} up"
 msgstr "{name} omhoog zetten"
 
-#: src/brain/region-edit.tsx
-msgid "Move {team} to"
-msgstr "{team} verplaatsen naar"
-
 #: src/apps/field-editor.tsx
 msgid "Move {value} down"
 msgstr "{value} omlaag"
@@ -11266,10 +11175,6 @@ msgstr "Naar achteren"
 #: src/frame/part-words.tsx
 msgid "Move the panel"
 msgstr "Paneel verplaatsen"
-
-#: src/brain/region-edit.tsx
-msgid "Move to"
-msgstr "Verplaatsen naar"
 
 #: src/frame/part-words.tsx
 msgid "Move up"
@@ -11301,7 +11206,7 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Gedempt"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 msgid "My agents"
 msgstr "Mijn agents"
 
@@ -11522,10 +11427,6 @@ msgstr "Nieuwe optie"
 #: src/routes/_shell.projects.index.tsx
 msgid "New project"
 msgstr "Nieuw project"
-
-#: src/brain/region-edit.tsx
-msgid "New region"
-msgstr "Nieuwe regio"
 
 #: src/apps/app-data-model.tsx
 msgid "New table"
@@ -11842,10 +11743,6 @@ msgstr "Niemand heet zo"
 msgid "No one yet: open it to add people"
 msgstr "Nog niemand: open het om mensen toe te voegen"
 
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "Nog geen eigenaar"
-
 #: src/apps/app-page.tsx
 msgid "No page yet"
 msgstr "Nog geen pagina"
@@ -12019,10 +11916,6 @@ msgstr "Niemand daarbuiten kan hem iets vragen, in Grasp of in een chatapp."
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
 msgstr "Niemand ziet de records in {table}, ook Sam niet."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Niemand met die naam."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -12285,6 +12178,7 @@ msgid "Not read: no connection"
 msgstr "Niet gelezen: geen verbinding"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Not removed"
 msgstr "Niet verwijderd"
 
@@ -12301,6 +12195,7 @@ msgid "Not revoked"
 msgstr "Niet ingetrokken"
 
 #: src/brain/goals-editor.tsx
+#: src/interview/destination.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
@@ -13117,7 +13012,7 @@ msgstr "Chat openen"
 msgid "Open Data"
 msgstr "Gegevens openen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open external link?"
 msgstr "Externe link openen?"
 
@@ -13148,7 +13043,7 @@ msgstr "Openstaande facturen in de boekhouding, met hun vervaldatum."
 msgid "Open leads and deals in the CRM."
 msgstr "Open leads en deals in het CRM."
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open link"
 msgstr "Link openen"
 
@@ -13283,7 +13178,7 @@ msgstr "Optie {place}"
 msgid "Options"
 msgstr "Opties"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Opties"
@@ -13309,7 +13204,7 @@ msgstr "Bol"
 msgid "Order"
 msgstr "Volgorde"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -13443,14 +13338,6 @@ msgstr "Eigenaar"
 msgctxt "who owns what is shared"
 msgid "Owner"
 msgstr "Eigenaar"
-
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Eigenaar: {owner}. Eigenaar wijzigen"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Eigenaar: nog niemand. Eigenaar wijzigen"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -13740,7 +13627,7 @@ msgstr "Mensen erin: {count}"
 msgid "People in these teams: {named}"
 msgstr "Mensen in deze teams: {named}"
 
-#: src/settings/guests.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
 msgstr "Mensen buiten je organisatie, uitgenodigd voor wat met hen gedeeld wordt. Verder bereiken ze niets."
 
@@ -14151,10 +14038,6 @@ msgstr "Pulse"
 msgid "Pulse on company devices. Adds which applications, MCP servers and skills are actually used, AI tools and shadow IT included."
 msgstr "Pulse op apparaten van het bedrijf. Voegt toe welke applicaties, MCP-servers en skills echt gebruikt worden, AI-tools en shadow IT inbegrepen."
 
-#: src/brain/brain-atlas.ts
-msgid "Pulse shows what runs on the laptops, AI tools included."
-msgstr "Pulse laat zien wat er op de laptops draait, AI-tools inbegrepen."
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Purchase-to-Pay"
@@ -14441,10 +14324,6 @@ msgstr "Werkruimte wordt gelezen"
 msgid "Reading what changed at a connection failed"
 msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
 
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Lezen wie eigenaar kan zijn…"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Je personeelslijst lezen"
@@ -14721,10 +14600,6 @@ msgstr "Spaties aan het begin en eind weghalen"
 msgid "Remove table"
 msgstr "Tabel verwijderen"
 
-#: src/settings/guests.tsx
-msgid "Remove the guest {email}"
-msgstr "Gast {email} verwijderen"
-
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
 msgstr "De index {indexName} verwijderen"
@@ -14821,7 +14696,6 @@ msgstr "Verwijderd."
 msgid "Removing"
 msgstr "Bezig met verwijderen"
 
-#: src/brain/region-edit.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
@@ -14833,10 +14707,6 @@ msgstr "Hernoemen"
 msgctxt "a chat"
 msgid "Rename"
 msgstr "Naam wijzigen"
-
-#: src/brain/region-edit.tsx
-msgid "Rename {region}"
-msgstr "{region} hernoemen"
 
 #: src/chat/sidebar-chats.tsx
 msgid "Rename {title}"
@@ -14850,7 +14720,6 @@ msgstr "Chat hernoemen"
 msgid "Renamed the organization"
 msgstr "Heeft de organisatie hernoemd"
 
-#: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
 msgid "Renamed to {name}"
@@ -15763,10 +15632,6 @@ msgstr "Leden zoeken"
 msgid "Search models"
 msgstr "Modellen zoeken"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Personen zoeken"
-
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
@@ -16279,7 +16144,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Delen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Delen"
@@ -16310,10 +16175,6 @@ msgstr "Weer tonen"
 #: src/frame/part-words.tsx
 msgid "Show all"
 msgstr "Alles tonen"
-
-#: src/chat/held-writes.tsx
-msgid "Show all {count} lines ({characters} characters)"
-msgstr "Alle {count} regels tonen ({characters} tekens)"
 
 #: src/routes/_shell.settings.security.tsx
 msgid "Show all {devices}"
@@ -16493,7 +16354,6 @@ msgstr "Aanmelden"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integrations-banner.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Sign in again"
@@ -16575,10 +16435,6 @@ msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 msgstr "Inloggen is nog niet ingesteld voor deze werkruimte, dus niemand kan inloggen. Grasp stelt het in."
-
-#: src/brain/brain-atlas.ts
-msgid "Sign-in shows the applications people log in to."
-msgstr "Inloggen laat zien bij welke applicaties mensen inloggen."
 
 #: src/sign-in-errors.ts
 msgid "Sign-in timed out or was started elsewhere. Try again."
@@ -17112,6 +16968,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Step"
 msgstr "Stap"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Step {step}"
+msgstr "Stap {step}"
+
 #: src/frame/part-words.tsx
 msgid "Step {step} of {total}"
 msgstr "Stap {step} van {total}"
@@ -17159,14 +17019,6 @@ msgstr "Nog steeds niets? Zet je volume hoger, of kijk waar je geluid naartoe ga
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "Nog open"
-
-#: src/brain/brain-atlas.ts
-msgid "Still open: {question}"
-msgstr "Nog open: {question}"
-
-#: src/brain/brain-atlas.ts
-msgid "Still open: {question} {who} can answer it."
-msgstr "Nog open: {question} {who} kan het beantwoorden."
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Still trying · {tries} tries"
@@ -17567,6 +17419,7 @@ msgstr "Teamomvang onbekend."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
+#: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
 msgstr "Teams"
@@ -17965,14 +17818,6 @@ msgstr "Het beste deel van de passage"
 msgid "The board"
 msgstr "Het bestuur"
 
-#: src/brain/brain-atlas.ts
-msgid "The board confirmed the vision."
-msgstr "Het bestuur heeft de visie bevestigd."
-
-#: src/brain/brain-atlas.ts
-msgid "The board has not confirmed the vision yet."
-msgstr "Het bestuur heeft de visie nog niet bevestigd."
-
 #: src/connections/brain-audience.tsx
 msgid "The Brain"
 msgstr "Het Brain"
@@ -18041,7 +17886,12 @@ msgstr "De gepubliceerde wijzigingen konden niet als concept worden teruggezet. 
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "De chat voegt indexen toe terwijl hij de query’s van de App schrijft."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "De chat kon niet worden gearchiveerd. Probeer het opnieuw."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "De chat kon niet worden hernoemd. Probeer het opnieuw."
 
@@ -18134,10 +17984,6 @@ msgstr "De details van deze run zijn verwijderd toen de bewaartermijn afliep."
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "De directory en het inloggen via Microsoft of Google. Voegt teams en rollen toe, en de applicaties waarop mensen inloggen met hun rechten."
-
-#: src/brain/brain-atlas.ts
-msgid "The directory brought in the teams and their roles."
-msgstr "De directory bracht de teams en hun rollen binnen."
 
 #: src/settings/directory-reads.tsx
 msgid "The directory couldn’t be read, last tried {failedAt}."
@@ -18403,10 +18249,6 @@ msgstr "De snelste manier is je {signIn}-login koppelen. Ik zie alleen namen, te
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "De snelste manier is je Microsoft- of Google-login koppelen. Ik zie alleen namen, teams en rollen. Je e-mail, chats en agenda’s blijven dicht."
-
-#: src/brain/region-edit.tsx
-msgid "The regions could not be saved"
-msgstr "De regio's konden niet worden opgeslagen"
 
 #: src/apps/app-access-requests.tsx
 msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
@@ -19438,7 +19280,6 @@ msgid "Under Spam, bypass spam filters for an approved senders list, and add {do
 msgstr "Laat onder Spam de spamfilters omzeilen voor een lijst met goedgekeurde afzenders, en voeg {domain} eraan toe."
 
 #: src/agents/agent-wakes.tsx
-#: src/brain/region-edit.tsx
 #: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
 #: src/drafts/share-with-team.tsx
@@ -20166,7 +20007,7 @@ msgstr "Webhooktrigger"
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
@@ -20812,10 +20653,6 @@ msgstr "Waar de tijd naartoe gaat"
 #: src/brain/brain-article/team-work.tsx
 msgid "Where the work passes on"
 msgstr "Waar het werk wordt doorgegeven"
-
-#: src/inbox/report-view.tsx
-msgid "Where this week's {total} runs went."
-msgstr "Waar de {total} runs van deze week naartoe gingen."
 
 #: src/interview/destination.tsx
 msgid "Where your lines go"

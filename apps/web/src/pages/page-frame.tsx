@@ -401,7 +401,7 @@ type Update = "none" | "asking" | "saving";
  * only what the page is doing shows, while it does, over the frame's
  * corner (`FrameNotice`).
  */
-export type FrameBar = { kind: "chrome"; label?: string } | { kind: "bare" };
+type FrameBar = { kind: "chrome"; label?: string } | { kind: "bare" };
 
 /** Fix with Grasp for the frame `ended` at `path`, when it is offered. */
 const fixOf = (

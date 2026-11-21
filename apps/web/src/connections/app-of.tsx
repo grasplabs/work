@@ -36,7 +36,7 @@ import { appToolsOf } from "./tool-choices.ts";
  * The connection an app's parts speak of: the one the company relies on
  * when that lapsed, else the first that works, else the newest.
  */
-export const primaryOf = (
+const primaryOf = (
   integration: Integration,
   uses?: readonly ConnectionWorkflows[]
 ): ListedConnection | undefined => {
@@ -53,7 +53,7 @@ export const primaryOf = (
 };
 
 /** How a connection stands for the parts: it works, sign in again, or connect it anew. */
-export const appStateOf = (
+const appStateOf = (
   connection: ListedConnection,
   integration: Integration,
   identity: Pick<Identity, "role" | "staff">

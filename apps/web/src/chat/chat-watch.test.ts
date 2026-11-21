@@ -102,7 +102,7 @@ describe("loading a chat before its page shows", () => {
     });
   });
 
-  it("finds no chat that is someone else's, or none at all", async () => {
+  it("finds no chat that isn't the person's", async () => {
     const { core } = tabWithChat("chat-2");
 
     const theirs = await loadChat(core, "someone-elses");

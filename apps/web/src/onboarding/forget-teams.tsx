@@ -1,5 +1,10 @@
 import { onboardingErrors } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -7,15 +12,21 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { useLingui } from "@lingui/react/macro";
-import { useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/alert-dialog/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
+
+const styles = stylex.create({
+  forget: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+});
 
 // The admin erases the company's teams from the Brain (GRA-1748): every
 // version of what it was given of them, for everyone, as the kickoff's
@@ -61,15 +72,19 @@ export const ForgetTeams = ({
   // what core says now holds, and the erase is offered again.
   if (erased && teamsInBrain === null) {
     return (
-      <output aria-live="polite" className="text-muted-foreground text-sm">
-        {t`Erased. Your Brain keeps nothing of your teams until you confirm them again.`}
+      <output aria-live="polite">
+        <Text element="span" size="sm" tone="muted">
+          {t`Erased. Your Brain keeps nothing of your teams until you confirm them again.`}
+        </Text>
       </output>
     );
   }
   if (teamsInBrain === "erasing") {
     return (
-      <output aria-live="polite" className="text-muted-foreground text-sm">
-        {t`I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself.`}
+      <output aria-live="polite">
+        <Text element="span" size="sm" tone="muted">
+          {t`I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself.`}
+        </Text>
       </output>
     );
   }
@@ -77,7 +92,7 @@ export const ForgetTeams = ({
     return null;
   }
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div {...stylex.props(styles.forget)}>
       <Button
         disabled={busy}
         onClick={() => {
@@ -91,20 +106,17 @@ export const ForgetTeams = ({
       <ErrorText>{failure}</ErrorText>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t`Erase your teams from your Brain?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t`I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t`Erase your teams from your Brain?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone.`}
+          </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t`Cancel`}</AlertDialogCancel>
+            <AlertDialogCancel />
             <AlertDialogAction
-              onClick={() => {
-                setOpen(false);
+              action={() => {
                 void erase();
               }}
-              variant="destructive"
+              variant="danger"
             >
               {t`Erase them`}
             </AlertDialogAction>

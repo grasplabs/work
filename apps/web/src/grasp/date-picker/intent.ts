@@ -6,6 +6,9 @@ export const intent = {
   useWhen: [
     { when: "One date in a form, typed or chosen on a calendar." },
     { when: "A range, as one picker in range mode, never two pickers." },
+    {
+      when: "A range of what has happened, with presets and `max` of today so it cannot run into the future.",
+    },
   ],
   notWhen: [
     {
@@ -18,14 +21,13 @@ export const intent = {
       instead: ["calendar"],
       source: "docs/components/calendar.mdx",
     },
-    {
-      when: "A range with presets for the ranges people use most.",
-      instead: ["date-range-picker"],
-      source: "docs/components/date-range-picker.mdx",
-    },
   ],
   variants: [
     { name: 'mode="range"', when: "A start and an end, in one picker." },
+    {
+      name: "presets",
+      when: "A range people report on: Today, Last 7 days, or the product's own ranges by name.",
+    },
     { name: 'size="sm"', when: "In a dense table or toolbar.", proposed: true },
     {
       name: 'size="lg"',

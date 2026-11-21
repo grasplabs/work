@@ -11,13 +11,11 @@
     "i18n:extract": "lingui extract --clean"
   },
   "dependencies": {
-    "@base-ui/react": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/jetbrains-mono": "catalog:",
     "@fontsource-variable/newsreader": "catalog:",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
-    "@grasp-os/ui": "workspace:*",
     "@hugeicons/core-free-icons": "catalog:",
     "@hugeicons/react": "catalog:",
     "@lingui/core": "catalog:",
@@ -38,7 +36,6 @@
     "@ui-sdk/react": "catalog:",
     "capnweb": "catalog:",
     "country-flag-icons": "catalog:",
-    "lucide-react": "catalog:",
     "mdast-util-from-markdown": "catalog:",
     "mdast-util-gfm": "catalog:",
     "micromark-extension-gfm": "catalog:",
@@ -48,7 +45,6 @@
     "react-is": "catalog:",
     "react-markdown": "catalog:",
     "recharts": "catalog:",
-    "rehype-highlight": "catalog:",
     "remark-gfm": "catalog:",
     "zod": "catalog:"
   },
@@ -62,7 +58,6 @@
     "@messageformat/parser": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
     "@stylexjs/unplugin": "catalog:",
-    "@tailwindcss/vite": "catalog:",
     "@tanstack/router-plugin": "catalog:",
     "@types/prismjs": "catalog:",
     "@types/react": "catalog:",
@@ -71,7 +66,6 @@
     "babel-plugin-react-compiler": "catalog:",
     "happy-dom": "catalog:",
     "lightningcss": "catalog:",
-    "tailwindcss": "catalog:",
     "vite-plus": "catalog:"
   }
 }

@@ -79,7 +79,7 @@ const draftFailures: ReadonlySet<FailureReason> = new Set([
 ]);
 
 /** Whether the draft in a preview caused `reason`: Grasp can fix it. */
-export const fromTheDraft = (reason: FailureReason): boolean =>
+const fromTheDraft = (reason: FailureReason): boolean =>
   draftFailures.has(reason);
 
 /** Failures of a preview said as the preview's rather than a page's. */

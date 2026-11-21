@@ -3,6 +3,7 @@ import { useId } from "react";
 import type { ReactNode } from "react";
 
 import {
+  BackdropTile,
   backdropKinds as backdrops,
   ditherPatterns,
   ditherTones,
@@ -16,16 +17,15 @@ import type {
 } from "../grasp/backdrop/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { LookPictureStage, useLookPicture } from "./look-picture.tsx";
 
 // Choosing a look by sight (settings/backdrop-settings.tsx): every
 // backdrop as a small still picture in one row to scroll through, and for
 // a dither its patterns and colours as pictures of that dither too, so any
 // look is one or two clicks. Each row is a group of radios, one tab stop,
-// arrows to move. The pictures come from look-picture.tsx; only the big
-// preview above draws live. Grasp UI's Backdrop picker draws each tile
-// live and its patterns and colours as words, so work keeps this until it
-// draws pictures.
+// arrows to move. Each picture is Grasp UI's BackdropTile, a still loaded
+// once for every tile; only the big preview above draws live. Grasp UI's
+// Backdrop picker shows a dither's patterns and colours as words, so work
+// keeps its own rows of pictures.
 
 const styles = stylex.create({
   rows: {
@@ -81,15 +81,16 @@ const styles = stylex.create({
   // The picture: the page's own ground under it, as a dither and sand are
   // drawn on it.
   picture: {
+    position: "relative",
+    overflow: "hidden",
+    isolation: "isolate",
     display: "block",
     width: "100%",
     aspectRatio: "16 / 9",
-    objectFit: "cover",
     borderRadius: grasp.corner,
     cornerShape: grasp.cornerShape,
     backgroundColor: grasp.paper,
     boxShadow: grasp.edge,
-    imageRendering: "pixelated",
   },
   chosen: {
     boxShadow: `0 0 0 ${grasp.ringWidth} ${grasp.ink}`,
@@ -123,35 +124,24 @@ const Tile = ({
   chosen: boolean;
   small?: boolean;
   onChoose: () => void;
-}) => {
-  const picture = useLookPicture(look);
-  return (
-    <label {...stylex.props(styles.tile, small && styles.small, focus.within)}>
-      <input
-        checked={chosen}
-        name={group}
-        onChange={onChoose}
-        type="radio"
-        {...stylex.props(styles.native)}
-      />
-      {picture === undefined || picture === "" ? (
-        <span
-          aria-hidden="true"
-          {...stylex.props(styles.picture, chosen && styles.chosen)}
-        />
-      ) : (
-        <img
-          alt=""
-          src={picture}
-          {...stylex.props(styles.picture, chosen && styles.chosen)}
-        />
-      )}
-      <span {...stylex.props(styles.name, chosen && styles.nameOn)}>
-        {name}
-      </span>
-    </label>
-  );
-};
+}) => (
+  <label {...stylex.props(styles.tile, small && styles.small, focus.within)}>
+    <input
+      checked={chosen}
+      name={group}
+      onChange={onChoose}
+      type="radio"
+      {...stylex.props(styles.native)}
+    />
+    <span
+      aria-hidden="true"
+      {...stylex.props(styles.picture, chosen && styles.chosen)}
+    >
+      <BackdropTile look={look} />
+    </span>
+    <span {...stylex.props(styles.name, chosen && styles.nameOn)}>{name}</span>
+  </label>
+);
 
 /** A labelled row of tiles. */
 const Row = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -184,7 +174,6 @@ export const LookTiles = ({
   const id = useId();
   return (
     <div {...stylex.props(styles.rows)}>
-      <LookPictureStage />
       <Row label={words.backdropLabel}>
         {backdrops.map((backdrop) => (
           <Tile

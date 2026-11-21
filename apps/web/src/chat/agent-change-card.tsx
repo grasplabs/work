@@ -4,6 +4,7 @@ import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
+import { formatList } from "../format.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
@@ -82,7 +83,7 @@ const BeforeAfter = ({
 );
 
 /** The drafted change as a card, with `actions` while it waits. */
-export const AgentChangeCard = ({
+const AgentChangeCard = ({
   change,
   actions,
 }: {
@@ -148,9 +149,9 @@ export const AgentChangeCard = ({
             ? undefined
             : {
                 key: t`What it may also do`,
-                value: turnOn
-                  .map((each) => i18n._(classNames[each]))
-                  .join(", "),
+                value: formatList(
+                  turnOn.map((each) => i18n._(classNames[each]))
+                ),
               },
           schedule === undefined
             ? undefined

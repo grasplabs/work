@@ -14,6 +14,7 @@ import {
   Note,
   People,
   Person,
+  Workflow,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 
@@ -24,9 +25,10 @@ import type { IconData } from "../grasp/icons/index.ts";
 // listed: this only keeps out of sight what someone can't use.
 
 /** Where a section lives. */
-export type SettingsHref =
+type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
+  | "/settings/teams"
   | "/settings/ai-providers"
   | "/settings/audit"
   | "/settings/webhooks"
@@ -43,16 +45,16 @@ export type SettingsHref =
  * people, never Grasp staff (its members and the outside systems that
  * call in).
  */
-export type SettingsAudience = "everyone" | "own" | "admins" | "own-admins";
+type SettingsAudience = "everyone" | "own" | "admins" | "own-admins";
 
-export type SettingsGroupId = "workspace" | "account";
+type SettingsGroupId = "workspace" | "account";
 
-export interface SettingsGroup {
+interface SettingsGroup {
   id: SettingsGroupId;
   title: MessageDescriptor;
 }
 
-export interface SettingsSection {
+interface SettingsSection {
   /** Stable: a rename changes only the label. */
   id: string;
   label: MessageDescriptor;
@@ -67,7 +69,7 @@ export interface SettingsSection {
   wide?: true;
 }
 
-export const settingsGroups: readonly SettingsGroup[] = [
+const settingsGroups: readonly SettingsGroup[] = [
   // The person's own account first: the one group everyone has.
   {
     id: "account",
@@ -79,7 +81,7 @@ export const settingsGroups: readonly SettingsGroup[] = [
   },
 ];
 
-export const settingsSections: readonly SettingsSection[] = [
+const settingsSections: readonly SettingsSection[] = [
   {
     id: "profile",
     label: msg`Profile`,
@@ -130,6 +132,14 @@ export const settingsSections: readonly SettingsSection[] = [
     audience: "own-admins",
   },
   {
+    id: "teams",
+    label: msg`Teams`,
+    href: "/settings/teams",
+    group: "workspace",
+    icon: Workflow,
+    audience: "own-admins",
+  },
+  {
     id: "ai-providers",
     label: msg`AI and spend`,
     href: "/settings/ai-providers",
@@ -167,7 +177,7 @@ export const settingsSections: readonly SettingsSection[] = [
 ];
 
 /** Who is looking: their role, and whether they are Grasp staff. */
-export interface SettingsViewer {
+interface SettingsViewer {
   role: Role;
   staff: boolean;
 }

@@ -14,6 +14,7 @@ import type { Session } from "../core.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -72,7 +73,7 @@ interface Audiences {
 }
 
 /** What reading the audiences from core came to. */
-export type AudiencesRead =
+type AudiencesRead =
   | { state: "loading" }
   | { state: "refused"; message: string }
   | {
@@ -307,7 +308,7 @@ const WidenDialog = ({
           ) : null}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction onClick={onConfirm} variant="ink">
             {t`Keep it for them`}
           </AlertDialogAction>
@@ -335,7 +336,7 @@ const EraseAnswers = ({
     <>
       {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
       <AlertDialogFooter>
-        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+        <AlertDialogCancel />
         <AlertDialogAction
           action={async () => {
             let erased = false;

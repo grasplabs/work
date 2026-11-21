@@ -168,6 +168,25 @@ const refusal = async (promise: Promise<unknown>): Promise<unknown> => {
 const one = { userId: "one" };
 const two = { userId: "two" };
 
+/** A browser's storage holding `entries`; spread, what it holds now. */
+const kept = (entries: Record<string, string>): Record<string, string> => {
+  const store: Record<string, string> = { ...entries };
+  Object.defineProperties(store, {
+    getItem: { value: (key: string) => store[key] ?? null },
+    setItem: {
+      value: (key: string, value: string) => {
+        store[key] = value;
+      },
+    },
+    removeItem: {
+      value: (key: string) => {
+        Reflect.deleteProperty(store, key);
+      },
+    },
+  });
+  return store;
+};
+
 describe("the tab's one connection to core", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -322,11 +341,18 @@ describe("the tab's one connection to core", () => {
     });
   });
 
-  it("stops every frame when the person signs out", async () => {
+  it("stops every frame when the person signs out, and leaves the next person nothing of theirs this browser kept", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => await Promise.resolve(new Response("{}")))
     );
+    const local = kept({
+      "grasp.setup.u1": '{"message":"Team, please answer"}',
+      "grasp-theme": "dark",
+    });
+    const session = kept({ "grasp.chat-link": "secret" });
+    vi.stubGlobal("localStorage", local);
+    vi.stubGlobal("sessionStorage", session);
     const { core, ended } = tab([one]);
     await core.session();
     const frame = frameOn(core);
@@ -335,6 +361,11 @@ describe("the tab's one connection to core", () => {
 
     expect(frame.told).toStrictEqual(["signed-out"]);
     expect(ended).toStrictEqual(["page reloads"]);
+    expect({
+      setup: Object.hasOwn(local, "grasp.setup.u1"),
+      theme: local["grasp-theme"],
+      session: { ...session },
+    }).toStrictEqual({ setup: false, theme: "dark", session: {} });
     await expect(refusal(frame.link.session())).resolves.toBe(
       "auth.unauthenticated"
     );
@@ -508,8 +539,8 @@ describe("the tab's one connection to core", () => {
       await refusal(core.api(given)),
     ];
     await vi.advanceTimersByTimeAsync(1999);
-    expect({ refused: refused.length, attempts: opened.length }).toStrictEqual({
-      refused: 2,
+    expect({ refused, attempts: opened.length }).toStrictEqual({
+      refused: [given.reason, given.reason],
       attempts: 2,
     });
   });

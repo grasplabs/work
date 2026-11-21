@@ -39,10 +39,12 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AgentPage, agentTabOf } from "./agent-page.tsx";
-import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
+import { AgentPage } from "./agent-page.tsx";
+import type { FirstAgentAccess } from "./agent-page.tsx";
 import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
+import { agentTabOf } from "./tabs.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import { agentInstructionsFor } from "./unsaved-instructions.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
@@ -1021,7 +1023,7 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Stephen", tab: "access" });
     expect(choice("Who may use Stephen")).toBeNull();
     expect(document.body.textContent).toContain("Where people reach him");
-    expect(document.querySelector("a[href='/settings/stephen']")).toBeNull();
+    expect(document.body.textContent).toContain("Grasp's chat");
   });
 
   it("makes an agent from the answers to Grasp's questions, in the look chosen, and leads to its access", async () => {

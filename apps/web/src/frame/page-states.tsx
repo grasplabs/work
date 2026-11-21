@@ -264,7 +264,7 @@ export const ErrorState = ({
         }
         // The page's loaders read from core once more; still failing, the
         // button says so.
-        await router.invalidate();
+        await router.invalidate({ sync: true });
         if (router.state.matches.some(({ status }) => status === "error")) {
           throw new Error("The page did not load.");
         }

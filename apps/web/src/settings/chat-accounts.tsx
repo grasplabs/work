@@ -12,9 +12,11 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -40,7 +42,7 @@ import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import { RowNote, SectionNotLoaded } from "./section.tsx";
+import { RowNote } from "./section.tsx";
 
 // Settings › Security: the person's accounts on chat platforms that are
 // linked to them, so Grasp knows it is them writing there, as quiet rows in
@@ -308,7 +310,7 @@ const ForgetConversations = () => {
             {t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={async () => {
                 setDeleted(undefined);
@@ -349,7 +351,7 @@ const LinkedChatAccounts = ({ accounts }: { accounts: ChannelAccount[] }) => {
  */
 const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   if (chat.state !== "ready") {
-    return <SectionNotLoaded page={chat} />;
+    return <NotLoadedState heading="h3" page={chat} />;
   }
   const { pending } = chat.data;
   if (pending === undefined) {

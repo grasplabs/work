@@ -5,10 +5,8 @@ import type { ReactNode } from "react";
 
 import { isFileGone } from "../error-reports.ts";
 import { ErrorState } from "../frame/page-states.tsx";
-import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import type { Loaded } from "../load-from-core.tsx";
 import { useRouteErrorReason } from "../route-error.tsx";
 
 // Settings' own small parts, beside the library's: a Settings page is its
@@ -19,8 +17,9 @@ import { useRouteErrorReason } from "../route-error.tsx";
 // - SettingsStack: a section's fields and facts, one under the other.
 // - RowNote: a row's line, or why its action failed.
 // - TitleLine: an Item's title with a quieter detail beside it.
-// - LoadingLines, SectionNotLoaded and SettingsError: a section that is
-//   loading, didn't load, or failed as it rendered.
+// - LoadingLines and SettingsError: a section that is loading, or failed
+//   as it rendered. One that didn't load is NotLoadedState
+//   (frame/page-states.tsx), as everywhere.
 
 const styles = stylex.create({
   titleLine: {
@@ -100,19 +99,6 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
     </output>
   );
 };
-
-/**
- * Why a part of a page did not load, in the section it is part of: core's
- * reason, with the reference to quote, or that Grasp is out of reach.
- */
-export const SectionNotLoaded = ({
-  page,
-  onRetry,
-}: {
-  page: Exclude<Loaded<unknown>, { state: "ready" }>;
-  /** Reads it again; the page's own read when left out. */
-  onRetry?: () => void;
-}) => <PartNotLoaded onRetry={onRetry} page={page} />;
 
 /**
  * A section that failed as it rendered: the error in the Settings layout,

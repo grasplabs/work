@@ -150,10 +150,6 @@ export const useArrives = (key: string): boolean => {
   return asLeft === null;
 };
 
-/** The same, as the old kit's classes: until every step is on the library. */
-export const useEntrance = (key: string, classes: string): string =>
-  useArrives(key) ? classes : "";
-
 /**
  * Whether, on a phone, the step does not fit beside even the smallest
  * brain: its sentence then makes way once read and tells how much room that
@@ -184,7 +180,7 @@ const explainedWait = (line: string, on: boolean, heard: boolean): number => {
  * was time to read it: most of its reading time, never more than four
  * seconds.
  */
-export const useExplainedAfter = (line: string): void => {
+const useExplainedAfter = (line: string): void => {
   const { onExplained } = useContext(Explained);
   const voice = useVoice();
   const saying = voice.line?.text === line;
@@ -509,7 +505,7 @@ const connectionPages = {
   hr: "connections/hr",
 } as const;
 
-export type ConnectionPage = keyof typeof connectionPages;
+type ConnectionPage = keyof typeof connectionPages;
 
 /**
  * More about what a step connects, on Grasp's support site, in a new tab:

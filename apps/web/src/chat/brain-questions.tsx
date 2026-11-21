@@ -52,7 +52,7 @@ const styles = stylex.create({
   row: { display: "flex", flexWrap: "wrap", gap: grasp.space1 },
 });
 /** The questions nobody has answered or closed yet, in the order the brain keeps them. */
-export const openGaps = (gaps: Gap[]): Gap[] =>
+const openGaps = (gaps: Gap[]): Gap[] =>
   gaps.filter(({ closedAt }) => closedAt === undefined);
 
 /** A question, and what can be done about it. */

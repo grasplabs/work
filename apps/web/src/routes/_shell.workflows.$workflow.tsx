@@ -61,16 +61,14 @@ import type { Names } from "../workflows/activity-bar.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
 import { workflowVersions } from "../workflows/reads.ts";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
+import { workflowSettingsSectionOf } from "../workflows/settings-sections.ts";
+import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
 import { useWorkflowDraft } from "../workflows/use-workflow-draft.ts";
 import { WorkflowFlow } from "../workflows/workflow-flow.tsx";
-import {
-  workflowSettingsSectionOf,
-  WorkflowSettings,
-} from "../workflows/workflow-settings.tsx";
-import type { WorkflowSettingsSection } from "../workflows/workflow-settings.tsx";
+import { WorkflowSettings } from "../workflows/workflow-settings.tsx";
 import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 
 // One independent workflow (platform specification 13), in the same shell

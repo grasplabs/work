@@ -1,5 +1,6 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { AppPanel } from "../grasp/blocks/app-integration/app-integration.tsx";
@@ -25,27 +26,33 @@ interface ToolsRead {
   tools: Promise<Loaded<CatalogTool[]>>;
 }
 
-/** Each app's tools, read once a tab first opens it, kept for as long as the tab is. */
+/**
+ * Each app's tools, read once a tab first opens it and kept for as long as
+ * the tab is; a read that failed is forgotten, so the next open reads again.
+ */
 const toolsRead = new WeakMap<CoreConnection, Map<string, ToolsRead>>();
 
-/**
- * `integration`'s tools: read now, or the read from before, so the panel
- * waits for one read, not a new one with every render.
- */
+/** `integration`'s tools: the read from before, or a new one. */
 const toolsOf = (core: CoreConnection, integration: Integration): ToolsRead => {
   const known = toolsRead.get(core) ?? new Map<string, ToolsRead>();
   toolsRead.set(core, known);
-  const read = known.get(integration.key) ?? {
-    tools: loadFromCore(
-      core,
-      async (session) =>
-        await session.connections.catalogTools(
-          integration.source,
-          integration.id
-        )
-    ),
-  };
+  const before = known.get(integration.key);
+  if (before !== undefined) {
+    return before;
+  }
+  const tools = loadFromCore(
+    core,
+    async (session) =>
+      await session.connections.catalogTools(integration.source, integration.id)
+  );
+  const read = { tools };
   known.set(integration.key, read);
+  void (async () => {
+    const { state } = await tools;
+    if (state !== "ready" && known.get(integration.key) === read) {
+      known.delete(integration.key);
+    }
+  })();
   return read;
 };
 
@@ -66,9 +73,12 @@ export const IntegrationPanel = ({
 }) => {
   const core = useCore();
   const appOf = useAppOf(identity);
-  const tools = useSettled(
-    integration.listed ? toolsOf(core, integration).tools : undefined
+  // Once as the panel opens (it is keyed by the app), not with every render.
+  // oxlint-disable-next-line react/hook-use-state -- fixed at mount, never set
+  const [read] = useState(() =>
+    integration.listed ? toolsOf(core, integration) : undefined
   );
+  const tools = useSettled(read?.tools);
   const used = useSettled(uses);
   const app = appOf(integration, {
     size: "md",

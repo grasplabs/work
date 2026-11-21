@@ -12,7 +12,7 @@ import type {
  */
 
 /** A statement where it was said: the turn, and where in that turn's text. */
-export interface Highlight {
+interface Highlight {
   statement: Statement;
   /** The index of the turn in the transcript. */
   turn: number;
@@ -56,21 +56,6 @@ export const highlightsOf = (
       return [{ statement, turn, start, end: start + statement.text.length }];
     })
     .toSorted((a, b) => a.turn - b.turn || a.start - b.start);
-};
-
-/** The chapter each turn falls in: a chapter holds the turns from its minute until the next one starts. */
-export const chapterOfTurns = (transcript: Transcript): number[] => {
-  const starts = transcript.chapters.map((chapter) => position(chapter.at));
-  return transcript.turns.map((turn) => {
-    const at = position(turn.at);
-    let chapter = 0;
-    for (const [index, start] of starts.entries()) {
-      if (at >= start) {
-        chapter = index;
-      }
-    }
-    return chapter;
-  });
 };
 
 /** Where a statement was said, for a link to it: its source and, in a transcript, the minute and the turns around it. */

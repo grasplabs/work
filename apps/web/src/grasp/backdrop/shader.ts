@@ -354,7 +354,7 @@ export const sceneCommon = COMMON;
 export const scenePicture = (kind: BackdropScene): Picture | undefined =>
   KINDS[kind].picture;
 
-/** A compiled shader of `type` from `source`; none where it doesn't compile. */
+/** A shader of `type` from `source`, sent to be compiled; whether it did shows when its program links. */
 const compile = (
   gl: WebGLRenderingContext,
   type: number,
@@ -366,13 +366,11 @@ const compile = (
   }
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  return gl.getShaderParameter(shader, gl.COMPILE_STATUS) === true
-    ? shader
-    : null;
+  return shader;
 };
 
-/** The linked program of `kind`, with the one quad it draws on; none where WebGL won't. */
-const programOf = (
+/** The program of `kind`, sent to be linked, not yet asked whether it has: asking waits for it. */
+const linking = (
   gl: WebGLRenderingContext,
   kind: BackdropScene | BackdropDither
 ): WebGLProgram | null => {
@@ -385,7 +383,18 @@ const programOf = (
   gl.attachShader(program, vertex);
   gl.attachShader(program, fragment);
   gl.linkProgram(program);
-  if (gl.getProgramParameter(program, gl.LINK_STATUS) !== true) {
+  return program;
+};
+
+/** `program` once it has linked, with the one quad it draws on; none where it didn't. */
+const linked = (
+  gl: WebGLRenderingContext,
+  program: WebGLProgram | null
+): WebGLProgram | null => {
+  if (
+    program === null ||
+    gl.getProgramParameter(program, gl.LINK_STATUS) !== true
+  ) {
     return null;
   }
   gl.useProgram(program);
@@ -400,6 +409,12 @@ const programOf = (
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
   return program;
 };
+
+/** The linked program of `kind`, with the one quad it draws on; none where WebGL won't. */
+const programOf = (
+  gl: WebGLRenderingContext,
+  kind: BackdropScene | BackdropDither
+): WebGLProgram | null => linked(gl, linking(gl, kind));
 
 /**
  * How long a frame is. A scene is a ninth of the field's pixels and cheap, at twenty a second; a
@@ -719,4 +734,380 @@ export const startShader = (
       }
     },
   };
+};
+
+/** Calls `then` once `done` says so, asking again a task later each time, so the page runs on meanwhile. */
+const whenDone = (done: () => boolean, then: () => void): void => {
+  if (done()) {
+    then();
+    return;
+  }
+  setTimeout(() => {
+    whenDone(done, then);
+  }, 0);
+};
+
+/** Hands on a still picture: a PNG data address, or none where it couldn't be drawn. */
+type KeepPicture = (picture: string | null) => void;
+
+/** The scenes' pictures, each loaded and decoded once for every still drawn from it. */
+const scenePictures = new Map<string, HTMLImageElement | null>();
+const withScenePicture = (
+  address: string,
+  then: (image: HTMLImageElement | null) => void
+): void => {
+  const kept = scenePictures.get(address);
+  if (kept !== undefined) {
+    then(kept);
+    return;
+  }
+  const image = new Image();
+  image.src = address;
+  const load = async () => {
+    try {
+      await image.decode();
+      scenePictures.set(address, image);
+      then(image);
+    } catch {
+      then(null);
+    }
+  };
+  void load();
+};
+
+/**
+ * The one context the stills are drawn on while any is waiting, with each kind's program; let go once
+ * none is. They are drawn into `target`, a framebuffer of its own, so presenting the canvas never
+ * clears a picture before it is read back.
+ */
+interface StillCanvas {
+  gl: WebGL2RenderingContext;
+  scene: boolean;
+  programs: Map<BackdropScene | BackdropDither, WebGLProgram | null>;
+  texture: WebGLTexture | null;
+  target: WebGLRenderbuffer | null;
+}
+let stillCanvas: StillCanvas | undefined;
+const letStillCanvasGo = (): void => {
+  stillCanvas?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  stillCanvas = undefined;
+};
+const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
+  if (stillCanvas?.scene === scene && !stillCanvas.gl.isContextLost()) {
+    return stillCanvas;
+  }
+  letStillCanvasGo();
+  const gl = document
+    .createElement("canvas")
+    .getContext("webgl2", { alpha: !scene, antialias: false });
+  if (gl === null) {
+    return undefined;
+  }
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  for (const side of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) {
+    gl.texParameteri(gl.TEXTURE_2D, side, gl.CLAMP_TO_EDGE);
+  }
+  for (const filter of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) {
+    gl.texParameteri(gl.TEXTURE_2D, filter, gl.LINEAR);
+  }
+  const target = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, target);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, gl.createFramebuffer());
+  gl.framebufferRenderbuffer(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.RENDERBUFFER,
+    target
+  );
+  stillCanvas = { gl, scene, programs: new Map(), texture, target };
+  return stillCanvas;
+};
+
+/**
+ * Hands `then` the program of `kind` on `canvas` once it has linked: waited for a task at a time where
+ * the browser can say when it has (KHR_parallel_shader_compile), rather than by asking at once.
+ */
+const withProgram = (
+  canvas: StillCanvas,
+  kind: BackdropScene | BackdropDither,
+  then: (program: WebGLProgram | null) => void
+): void => {
+  const { gl, programs } = canvas;
+  const kept = programs.get(kind);
+  if (kept !== undefined) {
+    then(kept);
+    return;
+  }
+  const program = linking(gl, kind);
+  const parallel = gl.getExtension("KHR_parallel_shader_compile");
+  whenDone(
+    () =>
+      program === null ||
+      parallel === null ||
+      gl.isContextLost() ||
+      gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR) === true,
+    () => {
+      const ready = linked(gl, program);
+      programs.set(kind, ready);
+      then(ready);
+    }
+  );
+};
+
+/** What a still picture is of: its look, its colours as the tokens resolve where it stands, and its size in canvas pixels. */
+interface Still {
+  kind: BackdropScene | BackdropDither;
+  dither: { pattern: BackdropPattern; tone: BackdropTone };
+  address: string | undefined;
+  width: number;
+  height: number;
+  palette: readonly string[];
+  flat: string;
+}
+
+/** Sets what `program` draws `still` with, as the running drawing's settled picture has it (Backdrop's `still`). */
+const setUniforms = (
+  canvas: StillCanvas,
+  program: WebGLProgram,
+  still: Still,
+  image: HTMLImageElement | undefined
+): void => {
+  const { gl, scene } = canvas;
+  const { width, height, dither } = still;
+  const { picture } = KINDS[still.kind];
+  const uniform = (name: string) => gl.getUniformLocation(program, name);
+  gl.uniform3fv(
+    uniform("u_palette"),
+    still.palette.flatMap((colour) => {
+      const [r, g, b] = rgbaOf(colour);
+      return [r, g, b];
+    })
+  );
+  const [r, g, b, a] = rgbaOf(still.flat);
+  gl.uniform4f(uniform("u_flat"), r, g, b, a);
+  gl.uniform1f(uniform("u_hasClear"), 0);
+  gl.uniform2f(uniform("u_res"), width, height);
+  gl.uniform1f(uniform("u_cell"), scene ? sceneCell : 1);
+  gl.uniform1f(
+    uniform("u_pattern"),
+    scene ? 0 : ditherPatterns.indexOf(dither.pattern) + 1
+  );
+  gl.uniform1f(uniform("u_tone"), scene ? 0 : ditherTones.indexOf(dither.tone));
+  gl.uniform1f(uniform("u_progress"), 0);
+  gl.uniform1f(uniform("u_time"), startAt);
+  gl.uniform2f(uniform("u_lamp"), width / 2, height / 2);
+  if (picture === undefined || image === undefined) {
+    return;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, canvas.texture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.LUMINANCE,
+    gl.LUMINANCE,
+    gl.UNSIGNED_BYTE,
+    image
+  );
+  gl.uniform1i(uniform("u_image"), 0);
+  gl.uniform2f(uniform("u_imageRes"), image.naturalWidth, image.naturalHeight);
+  gl.uniform2f(uniform("u_focus"), picture.focus[0], picture.focus[1]);
+  gl.uniform4f(
+    uniform("u_grade"),
+    picture.gamma,
+    picture.gain,
+    picture.sway,
+    picture.drift
+  );
+  gl.uniform1f(uniform("u_invert"), picture.invert ? 1 : 0);
+  gl.uniform1f(uniform("u_arrive"), 1);
+};
+
+/** The picture on `gl`'s canvas, `width` by `height`, as a PNG data address. */
+const pictureOn = (
+  gl: WebGL2RenderingContext,
+  width: number,
+  height: number,
+  scene: boolean
+): string => {
+  const row = width * 4;
+  const read = new Uint8Array(row * height);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, read);
+  // Read from the foot up, as WebGL counts; a picture runs from the top. With alpha (a dither) the
+  // channels come back multiplied by it, as a canvas keeps them, and a picture wants them without.
+  const pixels = new ImageData(width, height);
+  for (let line = 0; line < height; line += 1) {
+    pixels.data.set(
+      read.subarray((height - 1 - line) * row, (height - line) * row),
+      line * row
+    );
+  }
+  if (!scene) {
+    for (let pixel = 0; pixel < pixels.data.length; pixel += 4) {
+      const alpha = pixels.data[pixel + 3] ?? 255;
+      if (alpha > 0 && alpha < 255) {
+        for (let channel = pixel; channel < pixel + 3; channel += 1) {
+          pixels.data[channel] = Math.round(
+            ((pixels.data[channel] ?? 0) * 255) / alpha
+          );
+        }
+      }
+    }
+  }
+  const flat = document.createElement("canvas");
+  flat.width = width;
+  flat.height = height;
+  flat.getContext("2d")?.putImageData(pixels, 0, 0);
+  return flat.toDataURL("image/png");
+};
+
+/**
+ * Draws `still` with the scene's picture `image` (none for a dither), and hands its picture to
+ * `keepPicture`, read back only once the GPU has signalled that it has finished: read back at once,
+ * the page would wait for the drawing itself, tens of ms where it is drawn in software.
+ */
+const drawWith = (
+  still: Still,
+  image: HTMLImageElement | undefined,
+  keepPicture: KeepPicture
+): void => {
+  const canvas = stillCanvasFor(isScene(still.kind));
+  if (canvas === undefined) {
+    keepPicture(null);
+    return;
+  }
+  withProgram(canvas, still.kind, (program) => {
+    const { gl } = canvas;
+    if (program === null || gl.isContextLost()) {
+      keepPicture(null);
+      return;
+    }
+    gl.useProgram(program);
+    const position = gl.getAttribLocation(program, "a_pos");
+    gl.enableVertexAttribArray(position);
+    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    gl.renderbufferStorage(
+      gl.RENDERBUFFER,
+      canvas.scene ? gl.RGB8 : gl.RGBA8,
+      still.width,
+      still.height
+    );
+    gl.viewport(0, 0, still.width, still.height);
+    setUniforms(canvas, program, still, image);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    whenDone(
+      () =>
+        fence === null ||
+        gl.isContextLost() ||
+        gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED,
+      () => {
+        gl.deleteSync(fence);
+        keepPicture(
+          gl.isContextLost()
+            ? null
+            : pictureOn(gl, still.width, still.height, canvas.scene)
+        );
+      }
+    );
+  });
+};
+
+/** Draws `still` and hands its picture to `keepPicture`; none where WebGL 2 won't draw it. */
+const drawStill = (still: Still, keepPicture: KeepPicture): void => {
+  if (still.address === undefined) {
+    drawWith(still, undefined, keepPicture);
+    return;
+  }
+  withScenePicture(still.address, (image) => {
+    if (image === null) {
+      keepPicture(null);
+      return;
+    }
+    drawWith(still, image, keepPicture);
+  });
+};
+
+/** Each still, by what it is of: its picture once drawn, and who waits on it until then. */
+const stills = new Map<
+  string,
+  { picture?: string | null; waiting: KeepPicture[] }
+>();
+/** The stills still to draw, drawn one after another on the one context. */
+const stillLine: { key: string; still: Still }[] = [];
+let drawingStill = false;
+const drawNextStill = (): void => {
+  const next = stillLine.shift();
+  drawingStill = next !== undefined;
+  if (next === undefined) {
+    letStillCanvasGo();
+    return;
+  }
+  const drawStillDone = (picture: string | null) => {
+    const entry = stills.get(next.key);
+    const waiting = entry?.waiting ?? [];
+    stills.set(next.key, { picture, waiting: [] });
+    for (const keep of waiting) {
+      keep(picture);
+    }
+    drawNextStill();
+  };
+  try {
+    drawStill(next.still, drawStillDone);
+  } catch {
+    drawStillDone(null);
+  }
+};
+
+/**
+ * Hands `keepPicture` the settled picture of the shader backdrop `kind` on a box `width` by `height`
+ * CSS pixels, in `palette` (the light's seven stops, night to paper) and `flat` (the flat tone's
+ * colour), as a PNG data address: drawn the first time it is asked for, the page never waiting on
+ * the GPU, and the same address for each box after; none where WebGL 2 won't draw it. Its context is
+ * let go once no still waits.
+ */
+export const stillPictureOf = (
+  kind: BackdropScene | BackdropDither,
+  dither: { pattern: BackdropPattern; tone: BackdropTone },
+  options: {
+    scenes: string;
+    small: boolean;
+    width: number;
+    height: number;
+    palette: readonly string[];
+    flat: string;
+  },
+  keepPicture: KeepPicture
+): void => {
+  const scene = isScene(kind);
+  const ratio = scene ? 1 / sceneCell : 1;
+  const still: Still = {
+    kind,
+    dither: scene ? { pattern: "bayer", tone: "light" } : dither,
+    address:
+      KINDS[kind].picture === undefined
+        ? undefined
+        : `${options.scenes}${kind}${options.small ? ".small" : ""}.jpg`,
+    width: Math.max(1, Math.round(options.width * ratio)),
+    height: Math.max(1, Math.round(options.height * ratio)),
+    palette: options.palette,
+    flat: options.flat,
+  };
+  const key = JSON.stringify(still);
+  const entry = stills.get(key);
+  if (entry?.picture !== undefined) {
+    keepPicture(entry.picture);
+    return;
+  }
+  if (entry !== undefined) {
+    entry.waiting.push(keepPicture);
+    return;
+  }
+  stills.set(key, { waiting: [keepPicture] });
+  stillLine.push({ key, still });
+  if (!drawingStill) {
+    drawNextStill();
+  }
 };

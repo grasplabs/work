@@ -243,9 +243,9 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
     const read = await loadIntegrations(core, identity, { held: true });
     return { ...read, tools };
   },
-  // A tab, or a notice dropped, keeps what was read; a change reads it
-  // again (use-change.ts invalidates it).
-  shouldReload: false,
+  // No `shouldReload`: a tab, or a notice dropped (the search), keeps what
+  // was read; opening this app or another reads it again, as does a change
+  // (use-change.ts invalidates it).
   pendingComponent: IntegrationSkeleton,
   component: IntegrationRoute,
 });

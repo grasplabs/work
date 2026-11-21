@@ -9,6 +9,8 @@ import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
+import { formatDollars } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   Chart,
   ChartArea,
@@ -23,8 +25,7 @@ import { Stat } from "../grasp/stats/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { dollars, monthEnd } from "./money.ts";
-import { SectionNotLoaded } from "./section.tsx";
+import { monthEnd } from "./money.ts";
 
 // Settings › AI and spend, its last card: what the models cost this month
 // on the organization's keys (core's `models.spend()` and the Apps' model
@@ -133,8 +134,8 @@ const runningTotal = (
 const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
   const { t } = useLingui();
   const end = monthEnd(spend.total, spend.month, new Date());
-  const ending = end === null ? null : dollars(end);
-  const total = dollars(spend.total);
+  const ending = end === null ? null : formatDollars(end);
+  const total = formatDollars(spend.total);
   return (
     <>
       {/* Bare: the figure at the card's start edge, as Grasp UI's spend card. */}
@@ -164,7 +165,7 @@ const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
           <ChartAxis side="x" />
           <ChartAxis format={axisDollars} side="y" width={axisWidth} />
           <ChartArea fill="plain" series="spend" />
-          <ChartTooltip format={dollars} />
+          <ChartTooltip format={formatDollars} />
         </Chart>
       )}
     </>
@@ -183,7 +184,7 @@ export const SpendCard = ({
   if (spend.state !== "ready") {
     return (
       <SectionCard variant="grouped" density="compact" title={t`Spend`}>
-        <SectionNotLoaded page={spend} />
+        <NotLoadedState heading="h3" page={spend} />
       </SectionCard>
     );
   }
@@ -208,7 +209,7 @@ export const SpendCard = ({
               aria-label={t`Where it went this month`}
               config={{ spend: { label: t`This month` } }}
               data={rows}
-              format={dollars}
+              format={formatDollars}
               nameKey="name"
               summary={t`${top} spent the most this month.`}
             />

@@ -11,8 +11,7 @@ import { useEffect, useId, useState } from "react";
 
 import { useDraft } from "../drafts/use-draft.ts";
 import { formatDateTime } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { PartNotLoaded } from "../frame/part-failed.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -314,6 +313,8 @@ export const AppWorkflows = ({
     0
   );
   const [read, setRead] = useState<Loaded<Read>>();
+  // Counts the tries, so Try again reads them again.
+  const [tried, setTried] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const load = async (): Promise<void> => {
@@ -339,7 +340,8 @@ export const AppWorkflows = ({
     return () => {
       left.abort();
     };
-  }, [app.id, builds, core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [app.id, builds, core, tried]);
   if (!builds) {
     return null;
   }
@@ -347,7 +349,15 @@ export const AppWorkflows = ({
     return <LoadingLines lines={2} />;
   }
   if (read.state !== "ready") {
-    return <PartNotLoaded page={read} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setTried(tried + 1);
+        }}
+        heading="h3"
+        page={read}
+      />
+    );
   }
   return (
     <BindingsView

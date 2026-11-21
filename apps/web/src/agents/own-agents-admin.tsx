@@ -6,6 +6,7 @@ import { useRouter } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { formatDollars } from "../format.ts";
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -15,7 +16,6 @@ import {
 } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import { orNull } from "../load-from-core.tsx";
-import { dollars } from "../settings/money.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // People's own agents, in Settings › Workspace for the company's admins
@@ -82,7 +82,7 @@ const UsageRows = ({
   return (
     <SettingsRows>
       {usage.map((each) => {
-        const spent = dollars(each.spent);
+        const spent = formatDollars(each.spent);
         const count = each.agents;
         return (
           <FactRow

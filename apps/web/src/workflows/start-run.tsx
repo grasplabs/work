@@ -476,7 +476,7 @@ export const StartIndependentRun = ({
             })
         );
         // Its runs, as core lists them now: the new one among them.
-        await router.invalidate();
+        await router.invalidate({ sync: true });
         return { kind: "listed", runId: started.id };
       }}
     />

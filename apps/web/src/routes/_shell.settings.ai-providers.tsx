@@ -2,19 +2,18 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
 import { SpendCard } from "../settings/ai-spend.tsx";
-import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
 // Settings › AI and spend, for admins: the organization's own AI provider
 // keys, the models its calls use (settings/ai-providers.tsx), and what they
 // cost this month (settings/ai-spend.tsx). Grasp staff read it; only the
-// organization's own admins change it, as core checks on every call. The
-// old Models and AI spend pages send here
-// (_shell.settings.models.tsx, _shell.settings.spend.tsx).
+// organization's own admins change it, as core checks on every call.
 
 const AiProvidersPage = () => {
   const { t } = useLingui();
@@ -23,7 +22,7 @@ const AiProvidersPage = () => {
   if (page.state !== "ready") {
     return (
       <SectionCard variant="grouped" density="compact" title={t`AI and spend`}>
-        <SectionNotLoaded page={page} />
+        <NotLoadedState heading="h3" page={page} />
       </SectionCard>
     );
   }

@@ -3,12 +3,10 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import {
-  AgentsOverview,
-  AgentTabsWaiting,
-  agentsTabOf,
-} from "../agents/agents-overview.tsx";
-import type { AgentsTab, ManagedAgents } from "../agents/agents-overview.tsx";
+import { AgentsOverview } from "../agents/agents-overview.tsx";
+import type { ManagedAgents } from "../agents/agents-overview.tsx";
+import { AgentTabsWaiting, agentsTabOf } from "../agents/tabs.tsx";
+import type { AgentsTab } from "../agents/tabs.tsx";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";

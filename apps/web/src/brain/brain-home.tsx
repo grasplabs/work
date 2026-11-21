@@ -9,13 +9,14 @@ import { escapeMarkdown } from "./brain-markdown.ts";
 import { brainSections, findFolder, shownCount } from "./brain-sections.ts";
 import { folderTree, groupLabel } from "./brain.ts";
 import type { Brain, Group } from "./brain.ts";
+import { graph } from "./graph.stylex.ts";
 
 // The brain's home and the pictures of its parts, as the prototype draws
 // them (`components/brain-home.tsx`).
 
 /* ── Pictures ────────────────────────────────────────────────────────────────────────────────── */
 
-// The brain's own hues, the theme's `--graph-*` tokens (the map's canvas reads the same ones): the
+// The brain's own hues (graph.stylex.ts): the
 // library has no names for them. A pale ground is the hue at 10%, its grid at 30%, a soft fill at
 // 20 to 40%.
 const hues = stylex.create({
@@ -25,77 +26,74 @@ const hues = stylex.create({
   companySoft: { fill: grasp.soft },
   companyInk: { color: grasp.ink },
   visionGround: {
-    backgroundColor:
-      "color-mix(in oklab, var(--graph-vision) 10%, transparent)",
+    backgroundColor: `color-mix(in oklab, ${graph.vision} 10%, transparent)`,
   },
   visionGrid: {
-    stroke: "color-mix(in oklab, var(--graph-vision) 30%, transparent)",
+    stroke: `color-mix(in oklab, ${graph.vision} 30%, transparent)`,
   },
-  visionLine: { stroke: "var(--graph-vision)" },
+  visionLine: { stroke: graph.vision },
   visionSoft: {
-    fill: "color-mix(in oklab, var(--graph-vision) 25%, transparent)",
+    fill: `color-mix(in oklab, ${graph.vision} 25%, transparent)`,
   },
-  visionInk: { color: "var(--graph-vision)" },
+  visionInk: { color: graph.vision },
   teamsGround: {
-    backgroundColor: "color-mix(in oklab, var(--graph-teams) 10%, transparent)",
+    backgroundColor: `color-mix(in oklab, ${graph.teams} 10%, transparent)`,
   },
   teamsGrid: {
-    stroke: "color-mix(in oklab, var(--graph-teams) 30%, transparent)",
+    stroke: `color-mix(in oklab, ${graph.teams} 30%, transparent)`,
   },
-  teamsLine: { stroke: "var(--graph-teams)" },
+  teamsLine: { stroke: graph.teams },
   teamsSoft: {
-    fill: "color-mix(in oklab, var(--graph-teams) 25%, transparent)",
+    fill: `color-mix(in oklab, ${graph.teams} 25%, transparent)`,
   },
-  teamsInk: { color: "var(--graph-teams)" },
+  teamsInk: { color: graph.teams },
   toolsGround: {
-    backgroundColor: "color-mix(in oklab, var(--graph-tools) 10%, transparent)",
+    backgroundColor: `color-mix(in oklab, ${graph.tools} 10%, transparent)`,
   },
   toolsGrid: {
-    stroke: "color-mix(in oklab, var(--graph-tools) 30%, transparent)",
+    stroke: `color-mix(in oklab, ${graph.tools} 30%, transparent)`,
   },
-  toolsLine: { stroke: "var(--graph-tools)" },
+  toolsLine: { stroke: graph.tools },
   toolsSoft: {
-    fill: "color-mix(in oklab, var(--graph-tools) 25%, transparent)",
+    fill: `color-mix(in oklab, ${graph.tools} 25%, transparent)`,
   },
-  toolsInk: { color: "var(--graph-tools)" },
+  toolsInk: { color: graph.tools },
   statementsGround: {
-    backgroundColor:
-      "color-mix(in oklab, var(--graph-statements) 10%, transparent)",
+    backgroundColor: `color-mix(in oklab, ${graph.statements} 10%, transparent)`,
   },
   statementsGrid: {
-    stroke: "color-mix(in oklab, var(--graph-statements) 30%, transparent)",
+    stroke: `color-mix(in oklab, ${graph.statements} 30%, transparent)`,
   },
-  statementsLine: { stroke: "var(--graph-statements)" },
+  statementsLine: { stroke: graph.statements },
   statementsSoft: {
-    fill: "color-mix(in oklab, var(--graph-statements) 25%, transparent)",
+    fill: `color-mix(in oklab, ${graph.statements} 25%, transparent)`,
   },
-  statementsInk: { color: "var(--graph-statements)" },
+  statementsInk: { color: graph.statements },
   candidatesGround: {
-    backgroundColor:
-      "color-mix(in oklab, var(--graph-candidates) 10%, transparent)",
+    backgroundColor: `color-mix(in oklab, ${graph.candidates} 10%, transparent)`,
   },
   candidatesGrid: {
-    stroke: "color-mix(in oklab, var(--graph-candidates) 30%, transparent)",
+    stroke: `color-mix(in oklab, ${graph.candidates} 30%, transparent)`,
   },
-  candidatesLine: { stroke: "var(--graph-candidates)" },
+  candidatesLine: { stroke: graph.candidates },
   candidatesSoft: {
-    fill: "color-mix(in oklab, var(--graph-candidates) 20%, transparent)",
+    fill: `color-mix(in oklab, ${graph.candidates} 20%, transparent)`,
   },
-  candidatesInk: { color: "var(--graph-candidates)" },
+  candidatesInk: { color: graph.candidates },
   gapsGround: {
-    backgroundColor: "color-mix(in oklab, var(--graph-gaps) 10%, transparent)",
+    backgroundColor: `color-mix(in oklab, ${graph.gaps} 10%, transparent)`,
   },
   gapsGrid: {
-    stroke: "color-mix(in oklab, var(--graph-gaps) 30%, transparent)",
+    stroke: `color-mix(in oklab, ${graph.gaps} 30%, transparent)`,
   },
-  gapsLine: { stroke: "var(--graph-gaps)" },
+  gapsLine: { stroke: graph.gaps },
   gapsSoft: {
-    fill: "color-mix(in oklab, var(--graph-gaps) 20%, transparent)",
+    fill: `color-mix(in oklab, ${graph.gaps} 20%, transparent)`,
   },
-  gapsInk: { color: "var(--graph-gaps)" },
+  gapsInk: { color: graph.gaps },
   sourcesLine: { stroke: grasp.muted },
   sourcesSoft: {
-    fill: "color-mix(in oklab, var(--graph-sources) 40%, transparent)",
+    fill: `color-mix(in oklab, ${graph.sources} 40%, transparent)`,
   },
   sourcesInk: { color: grasp.muted },
   card: { fill: grasp.raised },

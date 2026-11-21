@@ -17,7 +17,7 @@ import type { ExportFigure } from "./figure-tiles.tsx";
 // (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
 // as in the prototype (`lib/export-file.ts`, `lib/report.ts`): the Grasp
 // mark at its head, Geist for the text, the title (Grasp UI's Heading), the
-// Markdown's first two levels of heading (`page-export` in styles.css) and
+// Markdown's first two levels of heading (`[data-page="export"]` in styles.css) and
 // any key figures (Stat) in Newsreader, and the light theme, which is what
 // paper takes (the theme's dark is for the screen only). No PDF is drawn
 // in the app itself.
@@ -142,8 +142,8 @@ const PrintPage = ({
   markdown: string;
   figures: readonly ExportFigure[];
 }) => (
-  // `page-export` (styles.css): the A4 page and its headings, for print.
-  <main className={`page-export ${stylex.props(styles.page).className ?? ""}`}>
+  // [data-page="export"] (styles.css): the A4 page and its headings, for print.
+  <main data-page="export" {...stylex.props(styles.page)}>
     <header {...stylex.props(styles.head)}>
       <Icon icon={BrandGrasp} />
       Grasp
@@ -194,10 +194,7 @@ let printing: { remove: () => void } | undefined;
  * where a browser never says so, when this page has the focus again; the
  * focus goes back to where it was.
  */
-export const printAsPdf = async (
-  file: ExportFile,
-  locale: string
-): Promise<void> => {
+const printAsPdf = async (file: ExportFile, locale: string): Promise<void> => {
   printing?.remove();
   const returnFocus =
     document.activeElement instanceof HTMLElement

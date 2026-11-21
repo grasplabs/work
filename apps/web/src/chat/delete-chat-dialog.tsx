@@ -6,6 +6,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -51,7 +52,7 @@ export const DeleteChatDialog = ({
     if (active) {
       await navigate({ to: "/", search: {} });
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
@@ -62,7 +63,7 @@ export const DeleteChatDialog = ({
         </AlertDialogDescription>
         <ErrorText>{failure}</ErrorText>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={remove}
             failedLabel={t`Not deleted`}

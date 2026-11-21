@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -63,7 +64,7 @@ export const ResetTestData = ({
             {t`Every test record goes, for everyone who builds this App. The App's live data isn't touched.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={reset}
               failedLabel={t`Could not reset`}

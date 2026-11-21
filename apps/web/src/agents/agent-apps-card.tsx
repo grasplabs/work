@@ -342,7 +342,7 @@ const WorkedOut = ({
 };
 
 /** The Apps card: `agent`'s apps, and the ways to change them. */
-export const AgentApps = ({
+const AgentApps = ({
   agent,
   apps,
   offered,

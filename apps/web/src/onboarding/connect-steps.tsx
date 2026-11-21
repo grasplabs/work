@@ -5,20 +5,9 @@ import type {
   SetupChoices,
 } from "@grasp-os/shared/onboarding-choices";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { CheckIcon, ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -27,6 +16,19 @@ import { canConnect, ConnectDialog } from "../connections/connect-dialog.tsx";
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { ChevronDown, Icon, Plus, Tick } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGrid,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -43,6 +45,25 @@ import {
 import type { Answer, StepVoice } from "./setup-parts.tsx";
 import { documentSources, sourcesFor } from "./setup.ts";
 import type { Named, DocumentSource } from "./setup.ts";
+
+const styles = stylex.create({
+  // Alone on its row, the last tile takes the whole row, so the grid stays even.
+  wide: { gridColumn: "1 / -1" },
+  // On a phone, folded away with the rest of a long list until that is shown.
+  folded: { display: { default: null, [media.belowPhone]: "none" } },
+  // Only on a phone, close under the list it opens.
+  more: {
+    display: { default: null, [media.fromPhone]: "none" },
+    marginBlockStart: `calc(-1 * ${grasp.space3})`,
+  },
+  settled: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    color: grasp.muted,
+  },
+  tick: { display: "flex", color: grasp.success },
+});
 
 // The steps where the admin says what Grasp may connect (prototype
 // `Sources`, `RealPulse` and `Leads` in
@@ -61,7 +82,7 @@ interface Lines {
 }
 
 /** What these steps read and how they go on. */
-export interface ConnectStepProps {
+interface ConnectStepProps {
   lines: Lines;
   choices: SetupChoices;
   /** The suites the company signs in with: their places come first, and only those connect. */
@@ -84,7 +105,7 @@ const useSaveChoices = () => {
     if (kept === undefined) {
       return false;
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     return true;
   };
   return { save, busy, failure };
@@ -168,20 +189,16 @@ const OtherItem = ({
   };
   return (
     <Item
-      className={cn(wide && "sm:col-span-2", folded && "max-sm:hidden")}
+      layout={[wide && styles.wide, folded && styles.folded]}
       size="sm"
       variant="outline"
     >
-      <ItemMedia variant="icon">
-        <PlusIcon />
-      </ItemMedia>
+      <ItemMedia icon={Plus} />
       <ItemContent>
         {open ? (
           <Input
             aria-label={placeholder}
-            onChange={(event) => {
-              setName(event.target.value);
-            }}
+            onValueChange={setName}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 add();
@@ -210,7 +227,7 @@ const OtherItem = ({
             }
           }}
           size="sm"
-          variant="outline"
+          variant="quiet"
         >
           {open ? t`Ask for it` : t`Add`}
         </Button>
@@ -221,8 +238,10 @@ const OtherItem = ({
 
 /** A row's state, said with a check: noted, or connected. */
 const Settled = ({ children }: { children: ReactNode }) => (
-  <span className="text-muted-foreground flex items-center gap-1">
-    <CheckIcon className="text-status-agreed size-4" />
+  <span {...stylex.props(styles.settled)}>
+    <span {...stylex.props(styles.tick)}>
+      <Icon icon={Tick} />
+    </span>
     {children}
   </span>
 );
@@ -330,13 +349,14 @@ export const Sources = ({
   // On a phone only the first few show, and whatever is already in; the rest waits behind "Show more".
   const folded = (source: DocumentSource, index: number): boolean =>
     index >= phoneSources && !noted.includes(source.id);
-  const listRef = useRef<HTMLDivElement>(null);
-  // Shown, the keys go on from the first place that was folded away.
+  // A place folded away on a phone always waits to be connected: shown, the keys go on from the first one's button.
+  const firstFolded = useRef<HTMLButtonElement>(null);
+  const firstFoldedId = listed.find((source, index) =>
+    folded(source, index)
+  )?.id;
   useEffect(() => {
     if (all) {
-      listRef.current
-        ?.querySelector<HTMLElement>("[data-folded] button")
-        ?.focus();
+      firstFolded.current?.focus();
     }
   }, [all]);
   return (
@@ -348,14 +368,12 @@ export const Sources = ({
         voice={lines.voice}
       />
       <Onward>
-        <ItemGroup
-          className="grid w-full text-left sm:grid-cols-2"
-          ref={listRef}
-        >
+        <ItemGrid>
           {listed.map((source, index) => {
             const { name } = source;
             const away = folded(source, index);
             const offered = connectable(source);
+            let state: ReactNode = null;
             let action: ReactNode = (
               <Button
                 aria-label={t`Connect ${name}`}
@@ -363,38 +381,36 @@ export const Sources = ({
                 onClick={() => {
                   void connect(source);
                 }}
+                ref={source.id === firstFoldedId ? firstFolded : undefined}
                 size="sm"
-                variant="outline"
+                variant="quiet"
               >
                 {t`Connect`}
               </Button>
             );
             if (noted.includes(source.id) && isConnected(source)) {
-              action = <Settled>{t`Connected`}</Settled>;
+              state = <Settled>{t`Connected`}</Settled>;
+              action = null;
             } else if (noted.includes(source.id)) {
-              action = (
-                <>
-                  <Settled>{t`Noted`}</Settled>
-                  {offered === undefined ? null : (
-                    <Button
-                      aria-label={t`Sign in to connect ${name} now`}
-                      onClick={() => {
-                        setConnecting(offered);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      {t`Sign in`}
-                    </Button>
-                  )}
-                </>
-              );
+              state = <Settled>{t`Noted`}</Settled>;
+              action =
+                offered === undefined ? null : (
+                  <Button
+                    aria-label={t`Sign in to connect ${name} now`}
+                    onClick={() => {
+                      setConnecting(offered);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t`Sign in`}
+                  </Button>
+                );
             }
             return (
               <Item
-                className={cn(away && !all && "max-sm:hidden")}
-                data-folded={away || undefined}
                 key={source.id}
+                layout={away && !all ? styles.folded : undefined}
                 size="sm"
                 variant="outline"
               >
@@ -403,8 +419,11 @@ export const Sources = ({
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{name}</ItemTitle>
+                  {state === null ? null : (
+                    <ItemDescription>{state}</ItemDescription>
+                  )}
                 </ItemContent>
-                <ItemActions>{action}</ItemActions>
+                {action === null ? null : <ItemActions>{action}</ItemActions>}
               </Item>
             );
           })}
@@ -415,10 +434,8 @@ export const Sources = ({
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{name}</ItemTitle>
+                <ItemDescription>{t`Asked for`}</ItemDescription>
               </ItemContent>
-              <ItemActions>
-                <span className="text-muted-foreground">{t`Asked for`}</span>
-              </ItemActions>
             </Item>
           ))}
           <OtherItem
@@ -431,10 +448,11 @@ export const Sources = ({
             placeholder={t`Where, for example Dropbox`}
             wide={(listed.length + wanted.length) % 2 === 0}
           />
-        </ItemGroup>
+        </ItemGrid>
         {all ? null : (
           <Button
-            className="-mt-3 sm:hidden"
+            iconEnd={ChevronDown}
+            layout={styles.more}
             onClick={() => {
               setAll(true);
             }}
@@ -442,7 +460,6 @@ export const Sources = ({
             variant="ghost"
           >
             {t`Show more`}
-            <ChevronDownIcon data-icon="inline-end" />
           </Button>
         )}
         <ErrorText>{failure}</ErrorText>
@@ -597,7 +614,7 @@ export const HrPlatform = ({
       {hr === null || hr.kind === "none" ? (
         <>
           <Onward>
-            <ItemGroup className="grid w-full text-left sm:grid-cols-2">
+            <ItemGrid>
               {hrPlatforms.map((name) => (
                 <Item key={name} size="sm" variant="outline">
                   <ItemMedia>
@@ -614,7 +631,7 @@ export const HrPlatform = ({
                         void choose({ kind: "platform", name });
                       }}
                       size="sm"
-                      variant="outline"
+                      variant="quiet"
                     >
                       {t`Connect`}
                     </Button>
@@ -630,7 +647,7 @@ export const HrPlatform = ({
                 placeholder={t`Name of your HR platform`}
                 wide={hrPlatforms.length % 2 === 0}
               />
-            </ItemGroup>
+            </ItemGrid>
             <ErrorText>{failure}</ErrorText>
           </Onward>
           <Asides>

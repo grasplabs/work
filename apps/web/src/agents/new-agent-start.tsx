@@ -14,6 +14,7 @@ import { Heading } from "../grasp/heading/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PenFigure } from "./figure/pen-figure.tsx";
+import type { NewAgentWay } from "./new-agent-way.ts";
 
 // How a new agent is made (Ruben, 19 Nov 2026): it starts with one
 // question, set it up yourself or in a chat, two cards in the page's
@@ -21,14 +22,6 @@ import { PenFigure } from "./figure/pen-figure.tsx";
 // (new-agent.tsx); setting it up yourself is the agent's own words in one
 // form, Make agent, then its page. Which way is in the address (`?way=`),
 // so Back leads to the question again.
-
-/** The ways a new agent is made, by the names its address carries. */
-export const newAgentWays = ["manual", "chat"] as const;
-export type NewAgentWay = (typeof newAgentWays)[number];
-
-/** The way an address names; none for any other, which asks again. */
-export const newAgentWayOf = (value: unknown): NewAgentWay | undefined =>
-  newAgentWays.find((way) => way === value);
 
 const styles = stylex.create({
   // The question in the card's middle: the frame's page is a column at

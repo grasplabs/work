@@ -604,14 +604,12 @@ export interface PageOpening {
  * whole URL too, when core wants it confirmed), in the page's own
  * dialog; rejects while another question waits.
  */
-export type ConfirmLink = (link: {
+type ConfirmLink = (link: {
   readonly origin: string;
   readonly url?: string;
 }) => Promise<boolean>;
 
-export type ConfirmDecision = (
-  pending: PendingConfirmation
-) => Promise<boolean>;
+type ConfirmDecision = (pending: PendingConfirmation) => Promise<boolean>;
 
 /**
  * A running App's page: its own App's server, runs and error log. Its
@@ -789,7 +787,7 @@ const refusedInPreview = async (): Promise<never> => {
  * failed through the draft's own fault; and the frame's receiver of the
  * draft's updates, once it hands it over.
  */
-export interface PreviewFollow {
+interface PreviewFollow {
   problem: () => void;
   /**
    * A call or query was refused as the preview's test data doesn't fit
@@ -1541,7 +1539,7 @@ export interface DraftRevisions {
 }
 
 /** What a preview opens: the draft as it is, its checkpoint `point`, or the App's `version`. */
-export interface PreviewOpening {
+interface PreviewOpening {
   app: string;
   point?: number;
   version?: number;

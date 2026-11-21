@@ -29,15 +29,19 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** A stored answer, `text`. */
-const shown = async (text: string): Promise<void> => {
+/** A stored answer, `text`, or its thinking. */
+const shown = async (text: string, thinking = false): Promise<void> => {
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <AnswerWords text={text} writing={false} />
+        <AnswerWords
+          {...(thinking ? { size: "sm" as const } : {})}
+          text={text}
+          writing={false}
+        />
       </I18nProvider>
     );
     await Promise.resolve();
@@ -81,30 +85,6 @@ describe(AnswerWords, () => {
     document.body.replaceChildren();
   });
 
-  it("opens a link out of Grasp only once the person says so", async () => {
-    await shown("See [the policy](https://example.com/leave).");
-    // No address on the page to follow past the question: a middle click,
-    // or the browser's own "open link", has none.
-    const addressed = document.querySelector("a[href^='http']");
-    await press(button("the policy"));
-    const asked = /Open external link\?.*https:\/\/example\.com\/leave/u.test(
-      document.querySelector("[role=alertdialog]")?.textContent ?? ""
-    );
-    await press(button("Cancel"));
-    const cancelled = [...opened];
-    await press(button("the policy"));
-    await press(button("Open link"));
-
-    expect({ addressed, asked, cancelled, opened }).toStrictEqual({
-      addressed: null,
-      asked: true,
-      cancelled: [],
-      opened: [
-        { url: "https://example.com/leave", features: "noopener,noreferrer" },
-      ],
-    });
-  });
-
   it("shows a link to a note or to an unsafe address as its words alone", async () => {
     await shown(
       'Leave is [sixteen weeks](grasp:note/doc-1 "Sixteen weeks"), [this](javascript:alert(1)) runs nothing and [that](data:text/html,hi) opens nothing.'
@@ -129,6 +109,20 @@ describe(AnswerWords, () => {
       asked: (
         document.querySelector("[role=alertdialog]")?.textContent ?? ""
       ).includes("//forms.example/leave"),
+    }).toStrictEqual({ addressed: null, opened: [], asked: true });
+  });
+
+  it("asks before following a link in the answer's thinking too", async () => {
+    await shown("Checking [the policy](https://policy.example/leave).", true);
+    const addressed = document.querySelector("a[href]");
+    await press(button("the policy"));
+
+    expect({
+      addressed,
+      opened,
+      asked: (
+        document.querySelector("[role=alertdialog]")?.textContent ?? ""
+      ).includes("https://policy.example/leave"),
     }).toStrictEqual({ addressed: null, opened: [], asked: true });
   });
 

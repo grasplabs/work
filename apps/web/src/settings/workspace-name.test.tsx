@@ -14,7 +14,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { useShownName } from "../frame/organization-name.tsx";
+import { useShownOrganization } from "../frame/organization-name.tsx";
 import { OrgCard } from "./org-card.tsx";
 
 // Settings › Workspace's card, its name against core's organization as the page
@@ -67,7 +67,7 @@ const settled = async (): Promise<void> => {
 
 /** The sidebar's line: the name it shows, read once from core. */
 const Sidebar = ({ read }: { read: () => Promise<Organization> }) => (
-  <p data-testid="sidebar">{useShownName(read)}</p>
+  <p data-testid="sidebar">{useShownOrganization(read).name}</p>
 );
 
 /** The name field, and the sidebar beside it, on what `organization` holds. */

@@ -17,6 +17,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -293,7 +294,7 @@ const ManagePeople = ({
               : t`They lose access to what is shared with everyone in the project, unless it is also shared with them another way. Their open pages of it stop within seconds.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={async () => {
                 if (removing === undefined) {

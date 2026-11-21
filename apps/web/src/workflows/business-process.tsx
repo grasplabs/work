@@ -92,16 +92,13 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
   },
-  hint: { display: "flex", flexDirection: "column", gap: grasp.space1 },
-  hintName: { fontWeight: grasp.weightMedium },
   picker: { display: "flex", flexDirection: "column", gap: grasp.space1 },
 });
 
 /**
  * Each process's parts, on Lucide's grid of 24: where the process ends
  * (cash in the till, a paid receipt, a solved message, a checked shield,
- * a report's bars, a person who comes and goes). Their parts move as
- * `icon-moves.css` says, by their order here: keep the two together.
+ * a report's bars, a person who comes and goes).
  */
 const Paths = ({ process }: { process: BusinessProcess }) => {
   switch (process) {
@@ -169,7 +166,6 @@ export const ProcessGlyph = ({ process }: { process: BusinessProcess }) => (
   <svg
     aria-hidden="true"
     {...stylex.props(styles.glyph)}
-    data-moves={process}
     fill="none"
     stroke="currentColor"
     strokeLinecap="round"
@@ -188,19 +184,6 @@ export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
     <ProcessGlyph process={process} />
   </span>
 );
-
-/** Its name over what it covers: what a process says when pointed at. */
-export const ProcessHint = ({ process }: { process: BusinessProcess }) => {
-  const { i18n } = useLingui();
-  return (
-    <span {...stylex.props(styles.hint)}>
-      <span {...stylex.props(styles.hintName)}>
-        {i18n._(processNames[process])}
-      </span>
-      <span>{i18n._(processCovers[process])}</span>
-    </span>
-  );
-};
 
 /**
  * A process as a badge, its icon and name. What it covers goes beside it,

@@ -119,7 +119,7 @@ const styles = stylex.create({
 });
 
 /** One line: when, and what happened. */
-export const ActivityLine = ({
+const ActivityLine = ({
   row,
   names,
 }: {

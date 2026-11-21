@@ -174,7 +174,7 @@ const NAMED_UP_TO = 9;
 /** The ring grows with the work it holds, past the size a ring of teams has, by so many pixels across and up for each more. */
 const RING_GROWS = { from: 6, across: 14, up: 8 };
 /** Where the ring would put two workflows closer than this, as on a phone, they stand in rows instead (closer when their names wait to be pointed at): so many across, this far from the room's sides, the rows at most this far apart. */
-export const GRID = {
+const GRID = {
   closest: 112,
   quiet: 64,
   across: 3,
@@ -196,7 +196,7 @@ interface Point {
  * it, from the top left round the way a clock goes: evenly by angle they
  * would crowd where the ring turns most.
  */
-export const ringPoints = (
+const ringPoints = (
   count: number,
   wide: number,
   high: number,

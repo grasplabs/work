@@ -9,6 +9,7 @@ import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -26,7 +27,7 @@ import { useCore } from "../use-core.ts";
 // it is gone from then on, so it asks first and then leaves for Apps.
 
 /** Whether `identity` may delete `app`: archived, and theirs or an admin's. */
-export const removesApp = (
+const removesApp = (
   app: Pick<App, "archived" | "owner">,
   identity: Pick<Identity, "userId" | "role" | "staff">
 ): boolean =>
@@ -73,7 +74,7 @@ export const RemoveApp = ({
         </AlertDialogDescription>
         {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={remove}
             failedLabel={t`Could not delete`}

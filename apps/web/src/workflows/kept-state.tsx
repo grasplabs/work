@@ -12,6 +12,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -124,7 +125,7 @@ const KeptEntries = ({
                 {t`Runs that start after this read nothing kept. Runs already going keep what they read. This can't be undone.`}
               </AlertDialogDescription>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={resetAll}
                   failedLabel={t`Not reset`}

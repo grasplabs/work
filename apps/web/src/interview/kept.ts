@@ -82,7 +82,7 @@ const keepAfterMs = 400;
 const showSavingAfterMs = 900;
 
 /** How long to wait before a save is tried again: longer each time, never more than half a minute. */
-export const retryAfter = (failed: number): number =>
+const retryAfter = (failed: number): number =>
   Math.min(30_000, 1000 * 2 ** Math.min(failed, 5));
 
 let kept: Kept | null = null;

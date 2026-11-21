@@ -347,7 +347,7 @@ interface DisconnectProps {
 }
 
 /** Disconnecting, from its own button, once confirmed. */
-export const Disconnect = ({ connection, label, last }: DisconnectProps) => {
+const Disconnect = ({ connection, label, last }: DisconnectProps) => {
   const { t } = useLingui();
   return (
     <AlertDialog>

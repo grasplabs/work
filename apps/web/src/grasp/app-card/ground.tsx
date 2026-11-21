@@ -6,8 +6,8 @@ import { useEffect, useState } from "react";
 import { defaultScenes } from "../backdrop/backdrop";
 import { nothingDrawn } from "../backdrop/drawing";
 import type { Drawing } from "../backdrop/drawing";
-import { isSand, isScene, sceneKinds } from "../backdrop/look";
-import type { BackdropLook } from "../backdrop/look";
+import { isSand, sceneKinds } from "../backdrop/look";
+import type { BackdropLook, BackdropSand } from "../backdrop/look";
 import { simply } from "../motion/simply.stylex";
 import { grasp } from "../tokens/tokens.stylex";
 import { useInView } from "./watch";
@@ -65,7 +65,7 @@ const keep = () => {
 /** A drawing in the page's line: it calls `handOn` once it has let its canvas go. */
 type Job = (handOn: () => void) => void;
 
-/** The page's one line of ground drawings: each starts when the one before has let its context go. */
+/** The page's one line of sand grounds: each starts when the one before has let its canvas go. */
 const waiting: Job[] = [];
 let busy = false;
 const startNext = () => {
@@ -84,70 +84,45 @@ const inLine = (job: Job) => {
 const noBoxes = new Map<string, DOMRect>();
 const nowhere = () => noBoxes.get("");
 
-/** A drawing given up on: its canvas drew nothing in this long (a scene's picture that never came). */
+/** A drawing given up on: its canvas drew nothing in this long. */
 const LIMIT = 6000;
 
-/** Turns the light's ramp on `canvas` to the hue its ground box carries, each stop keeping its lightness and chroma. */
-const turn = (canvas: HTMLCanvasElement, box: HTMLElement) => {
+/**
+ * The light's seven stops as they resolve on `box`, turned to the hue it carries (each stop keeping
+ * its lightness and chroma), and its text colour: the colours a drawing on it takes.
+ */
+const coloursOf = (box: HTMLElement) => {
   const style = getComputedStyle(box);
   const given = style.getPropertyValue("--app-card-ground-hue").trim();
   const hue = Number(given);
-  if (given === "" || !Number.isFinite(hue)) {
-    return;
-  }
-  for (const stop of STOPS) {
+  const turned = given !== "" && Number.isFinite(hue);
+  const palette = STOPS.map((stop) => {
     const value = style.getPropertyValue(`--grasp-light-${stop}`).trim();
     const parts =
       /^oklch\(\s*(?<lightness>[\d.]+)\s+(?<chroma>[\d.]+)\s+(?<own>[\d.]+)/u.exec(
         value
       )?.groups;
     if (
+      !turned ||
       parts?.lightness === undefined ||
       parts.chroma === undefined ||
       parts.own === undefined
     ) {
-      continue;
+      return value;
     }
-    canvas.style.setProperty(
-      `--grasp-light-${stop}`,
-      `oklch(${parts.lightness} ${parts.chroma} ${hue + Number(parts.own) - MINT_HUE})`
-    );
-  }
-};
-
-/** Starts the look's drawer on `canvas`, one still picture. */
-const startOn = async (
-  canvas: HTMLCanvasElement,
-  look: BackdropLook,
-  scenes: string
-) => {
-  const { backdrop } = look;
-  const options = { clear: nowhere, still: true, progress: () => 0 };
-  if (backdrop === "none") {
-    return nothingDrawn;
-  }
-  if (isSand(backdrop)) {
-    const { startSand } = await import("../backdrop/sand");
-    return startSand(canvas, backdrop, options);
-  }
-  const { startShader } = await import("../backdrop/shader");
-  return startShader(
-    canvas,
-    backdrop,
-    { pattern: look.pattern, tone: look.tone },
-    { ...options, scenes, small: true }
-  );
+    return `oklch(${parts.lightness} ${parts.chroma} ${hue + Number(parts.own) - MINT_HUE})`;
+  });
+  return { palette, flat: style.color };
 };
 
 /**
- * Draws `look` once on a canvas in `box`, hands its picture to `keepPicture` (none if it drew nothing), lets
- * the canvas and its context go, and then hands on to the next drawing.
+ * Draws the sand `kind` once on a canvas in `box`, hands its picture to `keepPicture` (none if it drew
+ * nothing), lets the canvas go, and then hands on to the next drawing.
  */
-const drawOnce =
+const drawSandOnce =
   (
     box: HTMLElement,
-    look: BackdropLook,
-    scenes: string,
+    kind: BackdropSand,
     keepPicture: (picture: string | null) => void
   ): Job =>
   (handOn) => {
@@ -156,11 +131,7 @@ const drawOnce =
     canvas.style.cssText =
       "position:absolute;inset:0;width:100%;height:100%;visibility:hidden";
     box.append(canvas);
-    turn(canvas, box);
-    // A scene draws three times before it stands whole: at once, when its canvas is first sized
-    // (the drawer's ResizeObserver), and when its picture has come. A dither or sand is whole at once.
-    const need = isScene(look.backdrop) ? 3 : 1;
-    const count = () => Number(canvas.dataset.drawn ?? "0");
+    const drew = () => canvas.dataset.drawn !== undefined;
     let drawing: Drawing = nothingDrawn;
     let finished = false;
     // What waits on the drawing, let go once it has finished.
@@ -175,15 +146,14 @@ const drawOnce =
       finished = true;
       held.watch?.disconnect();
       clearTimeout(held.limit);
-      const picture = count() >= 1 ? canvas.toDataURL("image/png") : null;
-      // Off the page first, so stopping lets its context go at once (backdrop/shader.ts).
+      const picture = drew() ? canvas.toDataURL("image/png") : null;
       canvas.remove();
       drawing.stop();
       keepPicture(picture);
       handOn();
     };
     held.watch = new MutationObserver(() => {
-      if (count() >= need) {
+      if (drew()) {
         finish();
       }
     });
@@ -194,18 +164,52 @@ const drawOnce =
     held.limit = setTimeout(finish, LIMIT);
     const start = async () => {
       try {
-        drawing = await startOn(canvas, look, scenes);
+        const { startSand } = await import("../backdrop/sand");
+        drawing = await startSand(canvas, kind, {
+          clear: nowhere,
+          still: true,
+          progress: () => 0,
+        });
       } catch {
         drawing = nothingDrawn;
       }
       if (finished) {
         drawing.stop();
-      } else if (count() >= need || drawing === nothingDrawn) {
+      } else if (drew() || drawing === nothingDrawn) {
         finish();
       }
     };
     void start();
   };
+
+/** Hands `keepPicture` the still picture of `look` on `box`; none if it drew nothing. */
+const makePicture = (
+  box: HTMLElement,
+  look: BackdropLook,
+  scenes: string,
+  keepPicture: (picture: string | null) => void
+) => {
+  const { backdrop } = look;
+  if (backdrop === "none") {
+    keepPicture(null);
+    return;
+  }
+  if (isSand(backdrop)) {
+    inLine(drawSandOnce(box, backdrop, keepPicture));
+    return;
+  }
+  const draw = async () => {
+    const { stillPictureOf } = await import("../backdrop/shader");
+    const { width, height } = box.getBoundingClientRect();
+    stillPictureOf(
+      backdrop,
+      { pattern: look.pattern, tone: look.tone },
+      { scenes, small: true, width, height, ...coloursOf(box) },
+      keepPicture
+    );
+  };
+  void draw();
+};
 
 interface AppCardGroundProps {
   look: BackdropLook;
@@ -214,7 +218,7 @@ interface AppCardGroundProps {
   scenes?: string;
 }
 
-/** The drawn ground: its still picture, drawn once when the card first comes into view. */
+/** The drawn ground: its still picture, made when the card first comes into view. */
 export const AppCardGround = ({
   look,
   hue,
@@ -232,16 +236,10 @@ export const AppCardGround = ({
       return keep;
     }
     let gone = false;
-    inLine((handOn) => {
-      if (gone) {
-        handOn();
-        return;
+    makePicture(box, { backdrop, pattern, tone }, scenes, (drawn) => {
+      if (!gone && drawn !== null) {
+        setPicture(drawn);
       }
-      drawOnce(box, { backdrop, pattern, tone }, scenes, (drawn) => {
-        if (!gone && drawn !== null) {
-          setPicture(drawn);
-        }
-      })(handOn);
     });
     return () => {
       gone = true;

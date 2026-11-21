@@ -43,7 +43,7 @@ const followMs = 1500;
 const endedStatuses = new Set(["completed", "failed", "cancelled"]);
 
 /** Whether every item of `test` is done: ended, refused, or removed. */
-export const itemTestSettled = (test: WorkflowItemTest): boolean =>
+const itemTestSettled = (test: WorkflowItemTest): boolean =>
   test.items.every(({ run }) => run === null || endedStatuses.has(run.status));
 
 const styles = stylex.create({

@@ -15,10 +15,11 @@ import { useState } from "react";
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
-import { PartNotLoaded } from "../frame/part-failed.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -58,14 +59,11 @@ import { useCoreAction } from "../use-core-action.ts";
 // audit log.
 
 /** The members of `kind`'s subjects, over `session`. */
-export const membersOf = (
-  session: Session,
-  kind: SubjectKind
-): SubjectMembersApi =>
+const membersOf = (session: Session, kind: SubjectKind): SubjectMembersApi =>
   kind === "app" ? session.apps.members : session.workflowResources.members;
 
 /** Whom `subject` is shared with. */
-export const readMembers = async (
+const readMembers = async (
   session: Session,
   { kind, id }: Subject
 ): Promise<SubjectMember[]> => await membersOf(session, kind).list(id);
@@ -366,7 +364,7 @@ const ShareWith = ({
             {t`Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={async () => {
                 if (removing === undefined) {
@@ -466,7 +464,15 @@ export const Sharing = ({
   const members = read?.state === "ready" ? read.data : [];
   const named = useNamed(members);
   if (read?.state !== "ready") {
-    return read === undefined ? null : <PartNotLoaded page={read} />;
+    return read === undefined ? null : (
+      <NotLoadedState
+        again={() => {
+          setChanges(changes + 1);
+        }}
+        heading="h3"
+        page={read}
+      />
+    );
   }
   return (
     <div {...stylex.props(styles.section)}>

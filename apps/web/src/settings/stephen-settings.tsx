@@ -130,7 +130,7 @@ const styles = stylex.create({
 });
 
 /** One setting's row: its name, what it means behind its info mark, then its control. */
-export const Row = ({
+const Row = ({
   name,
   description,
   children,
@@ -155,7 +155,7 @@ const stateDot = {
  * A place's fact has a dot before it: filled where he is on there, hollow
  * where he is off. The mark is `logo`, or `icon` where Grasp has no logo.
  */
-export const OpenRow = ({
+const OpenRow = ({
   logo,
   icon,
   name,
@@ -193,13 +193,7 @@ export const OpenRow = ({
   return onOpen === undefined ? (
     <Item size="sm">{parts}</Item>
   ) : (
-    <Item
-      render={
-        // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the row's name and line are its words, as the Item's children
-        <button onClick={onOpen} type="button" />
-      }
-      size="sm"
-    >
+    <Item onPress={onOpen} size="sm">
       {parts}
     </Item>
   );

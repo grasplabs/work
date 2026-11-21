@@ -63,7 +63,7 @@ const RunLink = ({
 );
 
 /** No runs yet, where a list of them would stand. */
-export const NoRuns = () => {
+const NoRuns = () => {
   const { t } = useLingui();
   return (
     <Empty size="md">

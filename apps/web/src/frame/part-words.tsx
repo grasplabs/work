@@ -6,6 +6,7 @@ import { useApprovalWords } from "../chat/approval-words.ts";
 import { formatBytes, formatList, formatNumber } from "../format.ts";
 import { addConnectionWords } from "../grasp/add-connection/words.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
+import { alertDialogWords } from "../grasp/alert-dialog/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appBuildingWords } from "../grasp/app-building/words.ts";
 import { englishLabels as appCardWords } from "../grasp/app-card/words.ts";
@@ -29,8 +30,8 @@ import {
 } from "../grasp/backdrop/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
 import { appIntegrationWords } from "../grasp/blocks/app-integration/words.ts";
-import { connectAppWords } from "../grasp/blocks/connect-app/connect-app.tsx";
-import { connectServiceWords } from "../grasp/blocks/connect-service/connect-service.tsx";
+import { connectAppWords } from "../grasp/blocks/connect-app/words.ts";
+import { connectServiceWords } from "../grasp/blocks/connect-service/words.ts";
 import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { calendarWords } from "../grasp/calendar/words.ts";
@@ -142,11 +143,12 @@ const englishDraftWords: DraftWords = {
 };
 
 /** Every installed part's words in English: the library's own. */
-export const englishPartWords: GraspWordsCatalog = {
+const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
   agentActivity: agentActivityWords,
   askBar: askBarWords,
   alert: alertWords,
+  alertDialog: alertDialogWords,
   appBuilding: appBuildingWords,
   artifactViewer: artifactViewerWords,
   artifactViewerBox: artifactViewerBoxWords,
@@ -229,7 +231,7 @@ export const englishPartWords: GraspWordsCatalog = {
 };
 
 /** Every installed part's words in the page's language, from its Lingui catalog. */
-export const usePartWords = (): GraspWordsCatalog => {
+const usePartWords = (): GraspWordsCatalog => {
   const { t, i18n } = useLingui();
   const approval = useApprovalWords();
   // Why a file stays out, from what the part says (its reason's code).
@@ -581,6 +583,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       close: t`Close`,
     },
     alert: { dismiss: t`Dismiss` },
+    alertDialog: { cancel: t`Cancel` },
     // The viewer shows a page (the weekly report) and nothing else here:
     // the words a person meets in that mode are translated. Comments,
     // editing, PDF, tables and images are not installed, so their words
@@ -1086,7 +1089,14 @@ export const usePartWords = (): GraspWordsCatalog => {
       step: (step, count) => t`${step} of ${count}`,
       failed: t`Could not send the answer`,
     },
-    datePicker: { choose: t`Choose date` },
+    datePicker: {
+      choose: t`Choose date`,
+      presets: t`Presets`,
+      today: t`Today`,
+      last7: t`Last 7 days`,
+      last30: t`Last 30 days`,
+      thisMonth: t`This month`,
+    },
     dateRangePicker: {
       trigger: t`Choose date`,
       presets: t`Presets`,

@@ -1,6 +1,6 @@
 // Return focus: a layer opened by a prop, with no trigger of its own, gives focus back to what
 // had it. UI SDK does this while the layer's panel stays in the tree; it cannot when the panel is
-// drawn only while there is something to ask (`{asking && <AlertDialogPanel>}`), because the panel
+// drawn only while there is something to ask (`{asking && <AlertDialogContent>}`), because the panel
 // then leaves the page in the same draw that closes it, and focus falls to the page.
 //
 //   useReturnFocus(open)      in a layer's root, with its `open` prop

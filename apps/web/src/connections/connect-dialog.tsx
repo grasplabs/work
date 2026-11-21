@@ -35,6 +35,7 @@ import {
   Field,
   FieldContent,
   FieldDescription,
+  FieldError,
   FieldLabel,
 } from "../grasp/field/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
@@ -348,7 +349,7 @@ const Actions = ({
  * Where a native provider's sign-in page is, shown as the prototype shows
  * it: the host connect sends the browser to (apps/connect/src/providers.ts).
  */
-export const signInHosts: Readonly<Record<OAuthProvider, string>> = {
+const signInHosts: Readonly<Record<OAuthProvider, string>> = {
   microsoft: "login.microsoftonline.com",
   google: "accounts.google.com",
 };
@@ -575,6 +576,7 @@ const KeyFields = ({
           {description === null ? null : (
             <FieldDescription>{description}</FieldDescription>
           )}
+          <FieldError match="valueMissing">{t`Fill in ${label}.`}</FieldError>
         </Field>
       ))}
     </form>

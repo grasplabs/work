@@ -18,7 +18,7 @@ import { useRouter, useRouterState } from "@tanstack/react-router";
 // rules, agent.ts); a change waits for the person's act on the page.
 
 /** Where an App's routes sit in the page's address. */
-export interface AppAddress {
+interface AppAddress {
   /** The App's `/`: its page. */
   readonly root: string;
   /** What every other route of the App sits under. */
@@ -49,7 +49,7 @@ export const pageHref = ({ root, sub }: AppAddress, href: string): string => {
  * The App's route the page's address `href` is at: `/` for the App's page,
  * the rest under `sub`, with the address's search and hash.
  */
-export const appHref = ({ sub }: AppAddress, href: string): string => {
+const appHref = ({ sub }: AppAddress, href: string): string => {
   const end = pathEnd(href);
   const path = href.slice(0, end);
   const rest = href.slice(end);
@@ -59,7 +59,7 @@ export const appHref = ({ sub }: AppAddress, href: string): string => {
 };
 
 /** Whether the page's `pathname` is one of the App's own routes. */
-export const isAppPath = ({ root, sub }: AppAddress, pathname: string) =>
+const isAppPath = ({ root, sub }: AppAddress, pathname: string) =>
   pathname === root || pathname.startsWith(`${sub}/`);
 
 /**

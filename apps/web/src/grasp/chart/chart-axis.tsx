@@ -13,6 +13,7 @@ import type {
 
 import { grasp } from "../tokens/tokens.stylex";
 import { useChart } from "./chart-context";
+import { chartAxisRoom } from "./room";
 
 /** Every prop a ChartAxis takes. */
 export interface ChartAxisProps {
@@ -68,12 +69,6 @@ const Tick = ({
     </text>
   );
 };
-
-/**
- * The room the axes take, px: the x axis's names under the drawing, the y axis's values before it.
- * A chart's waiting frame (page-skeleton-dashboard) stands its lines in the same places.
- */
-export const chartAxisRoom = { x: 30, y: 36 } as const;
 
 export const ChartAxis = ({
   side,

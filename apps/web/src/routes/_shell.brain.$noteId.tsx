@@ -40,7 +40,7 @@ import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
-import { formatDay, formatMonth } from "../format.ts";
+import { formatDay, formatList, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
@@ -546,7 +546,7 @@ const useDetailRows = (
       const where = (byId.get(ref.to ?? "")?.points ?? [])
         .filter((point) => point.refs.some((each) => each.to === note.id))
         .map((point) => `“${point.label}”`);
-      const under = where.join(", ");
+      const under = formatList(where);
       return where.length > 0
         ? [[ref.to ?? "", t`Names ${title} under ${under}`]]
         : [];

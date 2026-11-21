@@ -14,6 +14,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { modelName } from "../chat/model-names.tsx";
+import { formatDollars } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { AgentCard, agentCardStyles } from "../grasp/agent-card/index.ts";
 import type { AgentCardFact } from "../grasp/agent-card/index.ts";
@@ -29,17 +30,13 @@ import {
 } from "../grasp/empty/index.ts";
 import { AgentPerson, Plus } from "../grasp/icons/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "../grasp/tabs/index.ts";
+import { Tabs, TabsContent } from "../grasp/tabs/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { dollars } from "../settings/money.ts";
 import { nextWakeAt, useAudienceLine, wakesOn } from "./agent-facts.tsx";
 import { OfferedAgents } from "./agent-share.tsx";
 import { lookOf } from "./figure/look.ts";
+import { AgentTabList, agentsTabOf } from "./tabs.tsx";
+import type { AgentsTab } from "./tabs.tsx";
 
 // The Agents page: the agents as portraits, on the library's AgentCard: the agent's own light on the
 // page's ground, its name in the serif with its job under it, its figure (in the shape and palette
@@ -58,14 +55,6 @@ import { lookOf } from "./figure/look.ts";
 // offered the company (agent-share.tsx) and people's own agents (own-agents-admin.tsx) under them.
 // The tab is in the address (`?tab=`). Anyone else has only their own and the agents shared with
 // them, and so no tabs.
-
-/** The overview's tabs, by the names its address carries. */
-export const agentsTabs = ["mine", "organization"] as const;
-export type AgentsTab = (typeof agentsTabs)[number];
-
-/** The tab an address names; none for any other. */
-export const agentsTabOf = (value: unknown): AgentsTab | undefined =>
-  agentsTabs.find((tab) => tab === value);
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
 export interface ManagedAgents {
@@ -224,7 +213,7 @@ const useFacts = (teams: StephenReach["teams"]) => {
         // Left out where core didn't say what it used.
         ...(usage === undefined
           ? []
-          : [{ key: t`This month`, value: dollars(usage.spent) }]),
+          : [{ key: t`This month`, value: formatDollars(usage.spent) }]),
       ],
       failed: failed(lastRunOf(wakes)),
     };
@@ -343,31 +332,6 @@ const AgentGroups = ({
     </div>
   );
 };
-
-/** The tab row, as the loaded page and its skeleton both stand it. */
-const AgentTabList = () => {
-  const { t } = useLingui();
-  const tabName = { mine: t`My agents`, organization: t`Organization` };
-  return (
-    <TabsList aria-label={t`Agents`}>
-      {agentsTabs.map((each) => (
-        <TabsTrigger key={each} value={each}>
-          {tabName[each]}
-        </TabsTrigger>
-      ))}
-    </TabsList>
-  );
-};
-
-/**
- * An admin's tabs before the agents arrive, in their place over the skeleton's cards: on the tab
- * the address names, else Organization, which always holds the company's first agent.
- */
-export const AgentTabsWaiting = ({ tab }: { tab: AgentsTab | undefined }) => (
-  <Tabs value={tab ?? "organization"}>
-    <AgentTabList />
-  </Tabs>
-);
 
 /**
  * An admin's agents under their two tabs, the chosen one's shown: their own (`mine`) under My

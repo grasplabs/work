@@ -17,7 +17,12 @@ import type { ReactNode } from "react";
 
 import { downloadCsv } from "../csv.ts";
 import { readPeople } from "../directory.ts";
-import { formatDateTime, formatNumber, valueText } from "../format.ts";
+import {
+  formatDateTime,
+  formatList,
+  formatNumber,
+  valueText,
+} from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -61,7 +66,6 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
-import { Link } from "../grasp/link/index.ts";
 import {
   Select,
   SelectContent,
@@ -129,8 +133,6 @@ const styles = stylex.create({
     borderBottomColor: grasp.line,
   },
   spacer: { flexGrow: 1 },
-  // A button centres its words; a row's name starts where its header does.
-  nameButton: { textAlign: "start" },
   barField: { width: BAR_FIELD, maxWidth: "100%" },
   notes: {
     display: "grid",
@@ -272,7 +274,7 @@ const ChangeItem = ({
   const { t } = useLingui();
   const who = actorText(change.actor, people);
   const when = formatDateTime(change.at);
-  const fields = change.fields.join(", ");
+  const fields = formatList(change.fields);
   return (
     <li {...stylex.props(styles.entry)}>
       <div {...stylex.props(styles.entryHead)}>
@@ -686,7 +688,7 @@ const formatAgo = (value: string, now: Date = new Date()): string => {
 };
 
 /** A column of a table's records: the field whose values it shows, and its name in the head. */
-export interface RecordColumn {
+interface RecordColumn {
   field: string;
   header: string;
   /** A number: aligned to the end, as a table's numbers are. */
@@ -701,15 +703,14 @@ interface RecordColumnWords {
 
 /**
  * The table's columns: each record by what people call it (`recordName`),
- * which opens it, its fields, and when it last changed. The first column
+ * which opens it (the table's `onRowOpen`), its fields, and when it last changed. The first column
  * names the row, as a table's does, so the field that names it (`title`,
  * else `name`) has no column of its own besides; numbers and the time
  * stand at the row's end.
  */
 const recordColumns = (
   columns: readonly RecordColumn[],
-  words: RecordColumnWords,
-  onOpen: (record: AppDataRecord) => void
+  words: RecordColumnWords
 ): DataTableColumn<AppDataRecord>[] => {
   const naming =
     columns.find(({ field }) => field === "title") ??
@@ -721,28 +722,8 @@ const recordColumns = (
       // The row's name: it wraps in whole words where the row is narrow,
       // as a table's first column does, so it stands in no control's box.
       value: (record) => recordName(record),
-      // Until the library's table opens a row itself, the name is a link
-      // drawn as a button: start-aligned under its header, wrapping in
-      // whole words, with no padding of its own.
-      cell: (record) => (
-        <Link
-          render={
-            <button
-              aria-label={recordName(record)}
-              onClick={() => {
-                onOpen(record);
-              }}
-              // Its whole ID, for whoever looks a record up by it.
-              title={record.id}
-              type="button"
-              {...stylex.props(styles.nameButton)}
-            />
-          }
-          variant="standalone"
-        >
-          {recordName(record)}
-        </Link>
-      ),
+      // Its whole ID on hover, for whoever looks a record up by it.
+      cell: (record) => <span title={record.id}>{recordName(record)}</span>,
     },
     ...columns
       .filter((column) => column !== naming)
@@ -826,7 +807,7 @@ const RecordNotes = ({
  * App's draft (`apps.preview.records`), which nothing records,
  * exports or imports.
  */
-export type RecordSource = { kind: "live"; version: number } | { kind: "test" };
+type RecordSource = { kind: "live"; version: number } | { kind: "test" };
 
 /** A table, and where its records are read. */
 interface ReadTable {
@@ -1055,11 +1036,10 @@ export const TableRecords = ({
       setOpen(found);
     }
   };
-  const tableColumns = recordColumns(
-    columns,
-    { record: t`Record`, changed: t`Changed` },
-    setOpen
-  );
+  const tableColumns = recordColumns(columns, {
+    record: t`Record`,
+    changed: t`Changed`,
+  });
   return (
     <div {...stylex.props(styles.records)}>
       <div {...stylex.props(styles.bar)}>
@@ -1112,6 +1092,8 @@ export const TableRecords = ({
             loading={pages.loading}
             loadingMore={pages.loadingMore}
             onEndReached={pages.handleEnd}
+            onRowOpen={setOpen}
+            rowCurrent={(record) => record.id === open?.id}
             rowKey={(record) => record.id}
             rows={pages.records}
             unit={{ one: t`record`, other: t`records` }}

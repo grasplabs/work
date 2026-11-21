@@ -20,7 +20,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppSettings } from "./app-settings.tsx";
-import type { AppSettingsSection } from "./app-settings.tsx";
+import type { AppSettingsSection } from "./settings-sections.ts";
 
 // An App's settings against core's `apps` and `pages` as the page
 // reaches them over RPC (the boundary from the web app), faked: the
@@ -188,6 +188,9 @@ const opened = async (
         connections: typeof connections;
       }) => Promise<T>
     ): Promise<T> => await action({ apps, pages, permissions, connections }),
+    // A section that didn't load reads again once core is back: never, here.
+    connected: false,
+    onConnected: () => () => {},
   };
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),

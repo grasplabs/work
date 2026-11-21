@@ -51,7 +51,7 @@ const thoughtOf = (
 };
 
 /** Grasp's thinking as the brain page shows it. */
-export interface BrainThinking {
+interface BrainThinking {
   thought?: Thought;
   /** What the picture is of, and the part of the brain it is about, where the way back leads. */
   title?: string;

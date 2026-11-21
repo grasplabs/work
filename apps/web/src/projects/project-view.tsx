@@ -22,6 +22,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -151,7 +152,7 @@ const RemoveItem = ({
               : t`It stops being shared with everyone in the project: ${who} lose access, unless it is shared with them another way. It isn’t deleted.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={takeOut}
               failedLabel={t`Not taken out`}
@@ -295,7 +296,7 @@ const DeleteProject = ({
         </AlertDialogDescription>
         <ErrorText>{failure}</ErrorText>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={remove}
             failedLabel={t`Couldn't delete`}

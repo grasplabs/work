@@ -8,6 +8,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -103,7 +104,7 @@ export const DeleteWorkflow = ({
             ) : null}
             <ErrorText>{failure}</ErrorText>
             <AlertDialogFooter>
-              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+              <AlertDialogCancel />
               <AlertDialogAction
                 action={remove}
                 failedLabel={t`Not deleted`}
