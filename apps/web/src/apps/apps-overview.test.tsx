@@ -22,7 +22,7 @@ import { AppsOverview } from "./apps-overview.tsx";
 // The Apps page as people read it, from the Apps core lists
 // (`apps.overview`), faked at the RPC boundary: each App one card that
 // opens the App, the newest first, with where it stands; its window runs
-// the App's first page only while the card is on screen; its menu opens
+// no App; its menu opens
 // it, leads to its settings and lets its builders archive and restore it;
 // the Apps in three tabs, the person's own, shared with them by name and
 // the company's; a search over their names; Build new app for who builds.
@@ -30,37 +30,6 @@ import { AppsOverview } from "./apps-overview.tsx";
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
-
-/** What the browser's IntersectionObserver tells of an element. */
-type Seen = (entries: { target: Element; isIntersecting: boolean }[]) => void;
-
-/** The browser's IntersectionObserver, as the test brings a card on screen. */
-const observers: Seen[] = [];
-
-class FakeObserver {
-  readonly #watched = new Set<Element>();
-
-  constructor(seen: Seen) {
-    observers.push((entries) => {
-      seen(entries.filter(({ target }) => this.#watched.has(target)));
-    });
-  }
-
-  observe(element: Element): void {
-    this.#watched.add(element);
-  }
-
-  unobserve(element: Element): void {
-    this.#watched.delete(element);
-  }
-
-  disconnect(): void {
-    this.#watched.clear();
-  }
-}
-
-// The page keeps one observer for all its cards, made on first use.
-Reflect.set(globalThis, "IntersectionObserver", FakeObserver);
 
 /** An App made at `createdAt`, live with pages or not yet, archived or not. */
 const overview = (
