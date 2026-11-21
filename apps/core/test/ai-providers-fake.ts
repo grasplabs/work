@@ -134,8 +134,13 @@ export interface ProviderRequest {
   body: string;
   /** The key it carried, from `x-api-key` or a bearer token. */
   key: string | null;
-  /** Set once its sender dropped it while it waited for an answer (`hang`). */
+  /**
+   * Set once its sender dropped it while it waited for an answer (`hang`),
+   * or while its answer was held (`hold`).
+   */
   dropped?: true;
+  /** Set once its held answer's beginning was taken off its stream (`hold`). */
+  begun?: true;
 }
 
 export const aiProvidersFake = () => {
@@ -506,26 +511,31 @@ export const aiProvidersFake = () => {
           await writer.closed;
         } catch {
           reader.gone = true;
+          seenAs.dropped = true;
         }
       };
       void watchClosed();
       const { resume } = reply;
       const resumed = (): boolean =>
         resume !== undefined && released.has(resume.release);
+      // Held for longer than any test waits, as `hang` is.
+      const endsAt = Date.now() + 10 * 60_000;
       const answer = async (): Promise<void> => {
         try {
+          // Settled once what reads the stream took it: sent on its way.
           await writer.write(encoder.encode(reply.hold));
+          seenAs.begun = true;
           // Waited out on a timer of this request's own: with nothing left
           // to wait on, workerd would take the paused stream for a Worker
           // that hung and break it off, which no provider pausing does.
-          while (!reader.gone && !resumed()) {
+          while (!reader.gone && !resumed() && Date.now() < endsAt) {
             // oxlint-disable-next-line no-await-in-loop -- until released, or gone
             await scheduler.wait(10);
           }
-          if (resume !== undefined && !reader.gone) {
+          if (resume !== undefined && resumed() && !reader.gone) {
             await writer.write(encoder.encode(resume.rest));
-            await writer.close();
           }
+          await writer.close();
         } catch {
           // Its reader went away: nobody reads the rest.
         }

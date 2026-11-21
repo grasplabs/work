@@ -58,7 +58,7 @@ import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
 import { teamsMade } from "./members-teams.ts";
 import type { Answer } from "./model-provider.ts";
-import { recordedUsage } from "./model-usage.ts";
+import { recordedUsage, usageRows } from "./model-usage.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
 import { streamParts, streamText } from "./provider-streams.ts";
 import {
@@ -99,6 +99,41 @@ const carrying = async (text: string): Promise<ProviderRequest[]> => {
     `${aiProvidersControlUrl}?anywhere=${encodeURIComponent(text)}`
   );
   return await response.json();
+};
+
+/** `promise`, and whether it has settled yet. */
+const watched = <T>(promise: Promise<T>) => {
+  const state = { settled: false };
+  const settling = async (): Promise<T> => {
+    try {
+      return await promise;
+    } finally {
+      state.settled = true;
+    }
+  };
+  return { promise: settling(), settled: () => state.settled };
+};
+
+/** Once the beginning of the held answer to `key`'s request was sent on. */
+const answerBegun = async (key: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const [request] = await carrying(key);
+      expect(request?.begun).toBeTruthy();
+    },
+    { timeout: 10_000, interval: 20 }
+  );
+};
+
+/** Once `key`'s one request was dropped by its sender. */
+const providerRequestDropped = async (key: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const requests = await carrying(key);
+      expect(requests).toMatchObject([{ dropped: true }]);
+    },
+    { timeout: 5000, interval: 50 }
+  );
 };
 
 /** Lets a reply held by `name` go on (`PlannedReply`). */
@@ -1699,7 +1734,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await expect(placesOf(key)).resolves.toStrictEqual(onlyAt(each));
     });
 
-    it("waits out an answer that pauses mid-stream, and records its usage and the route in the audit log and its usage", async () => {
+    it("waits out an answer that pauses mid-stream, and records its usage, cost and route in the audit log and its usage", async () => {
       const key = await connected(each);
       const [begun = "", rest = ""] = streamParts(each.api, {
         text: "Hello, Ada.",
@@ -1712,20 +1747,29 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const trigger = newPerson();
 
       // Read whole, with nothing told of its text as it streams.
-      const call = models(env).call(await callOf(each.model, { trigger }));
-      await vi.waitFor(
-        async () => {
-          await expect(carrying(key)).resolves.toHaveLength(1);
-        },
-        { timeout: 10_000, interval: 50 }
+      const call = watched(
+        models(env).call(await callOf(each.model, { trigger }))
       );
-      // A model thinking a while between its words.
-      await scheduler.wait(1000);
+      await answerBegun(key);
+      const pausedThen = call.settled();
       await release(paused);
 
-      await expect(call).resolves.toMatchObject({ text: "Hello, Ada." });
-
+      const answer = await call.promise;
       const [event] = await auditedFor(trigger.userId, 1);
+      // Written in the same batch as its audit event: all there is.
+      const rows = await usageRows(spendMonth(env), {
+        personId: trigger.userId,
+      });
+      expect({
+        pausedThen,
+        text: answer.text,
+        priced: answer.cost > 0,
+      }).toStrictEqual({
+        pausedThen: false,
+        text: "Hello, Ada.",
+        // At its list prices; a custom endpoint's model has none.
+        priced: each.provider !== "openai-compatible",
+      });
       expect(event).toMatchObject({
         action: "model.call",
         model: {
@@ -1733,6 +1777,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
           inputTokens: 1000,
           outputTokens: 100,
         },
+        cost: { amount: answer.cost },
         detail: {
           outcome: "answered",
           transport: "connect",
@@ -1740,20 +1785,18 @@ describe("AI providers", { timeout: 60_000 }, () => {
           credential: "organization",
         },
       });
-      const rows = await recordedUsage(spendMonth(env), 1, {
-        personId: trigger.userId,
-      });
       expect(rows).toMatchObject([
         {
           model: each.model,
           credential: "organization",
           inputTokens: 1000,
           outputTokens: 100,
+          cost: answer.cost,
         },
       ]);
     });
 
-    it("stops a request its caller cancels mid-answer, whether it reads the answer as it streams or whole", async () => {
+    it("stops a request its caller cancels mid-answer as it reads the answer streaming", async () => {
       const key = await connected(each);
       const begun = streamText(each.api, {
         text: "Hello",
@@ -1761,51 +1804,65 @@ describe("AI providers", { timeout: 60_000 }, () => {
         outputTokens: 100,
         cut: 3,
       });
-      await plan(key, [{ hold: begun }, { hold: begun }]);
-      const streaming = new AbortController();
-      const whole = new AbortController();
-      const readsAsItStreams = newPerson();
-      const readsWhole = newPerson();
+      await plan(key, [{ hold: begun }]);
+      const cancel = new AbortController();
+      const trigger = newPerson();
 
-      const cancelledStreaming = await outcome(
+      const cancelled = await outcome(
         models(env).call(
           await callOf(each.model, {
-            trigger: readsAsItStreams,
-            signal: streaming.signal,
+            trigger,
+            signal: cancel.signal,
             onText: () => {
-              streaming.abort();
+              cancel.abort();
             },
           })
         )
       );
-      const call = outcome(
-        models(env).call(
-          await callOf(each.model, {
-            trigger: readsWhole,
-            signal: whole.signal,
-          })
+
+      expect(cancelled).toBe("model.failed");
+      const [event] = await auditedFor(trigger.userId, 1);
+      expect(event?.detail).toMatchObject({
+        outcome: "failed",
+        errorType: "cancelled",
+      });
+      await providerRequestDropped(key);
+    });
+
+    it("stops a request its caller cancels mid-answer as it waits for the answer whole", async () => {
+      const key = await connected(each);
+      const begun = streamText(each.api, {
+        text: "Hello",
+        inputTokens: 1000,
+        outputTokens: 100,
+        cut: 3,
+      });
+      await plan(key, [{ hold: begun }]);
+      const cancel = new AbortController();
+      const trigger = newPerson();
+
+      const call = watched(
+        outcome(
+          models(env).call(
+            await callOf(each.model, { trigger, signal: cancel.signal })
+          )
         )
       );
-      await vi.waitFor(
-        async () => {
-          await expect(carrying(key)).resolves.toHaveLength(2);
-        },
-        { timeout: 10_000, interval: 50 }
-      );
-      // Well after its answer began: it is paused, not over.
-      await scheduler.wait(1000);
-      whole.abort();
+      await answerBegun(key);
+      const pausedThen = call.settled();
+      cancel.abort();
 
-      expect([cancelledStreaming, await call]).toStrictEqual([
-        "model.failed",
-        "model.failed",
-      ]);
-      const [streamed] = await auditedFor(readsAsItStreams.userId, 1);
-      const [read] = await auditedFor(readsWhole.userId, 1);
-      expect([streamed?.detail, read?.detail]).toMatchObject([
-        { outcome: "failed", errorType: "cancelled" },
-        { outcome: "failed", errorType: "cancelled", status: 200 },
-      ]);
+      expect({ pausedThen, cancelled: await call.promise }).toStrictEqual({
+        pausedThen: false,
+        cancelled: "model.failed",
+      });
+      const [event] = await auditedFor(trigger.userId, 1);
+      expect(event?.detail).toMatchObject({
+        outcome: "failed",
+        errorType: "cancelled",
+        status: 200,
+      });
+      await providerRequestDropped(key);
     });
 
     it("stops the provider's request when its caller cancels before the answer began", async () => {
