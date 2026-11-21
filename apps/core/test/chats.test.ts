@@ -300,19 +300,27 @@ describe("chats", () => {
         expect(
           events
             .filter(({ target }) => target?.id === old.id)
-            .map(({ action, actor }) => ({ action, actor }))
+            .map(({ action, actor, detail }) => ({
+              action,
+              actor,
+              project: detail?.project,
+            }))
         ).toStrictEqual([
           {
             action: "chat.created",
             actor: { type: "person", userId: ann.userId },
+            project: undefined,
           },
+          // In no project: recorded as in none.
           {
             action: "chat.archived",
             actor: { type: "person", userId: ann.userId },
+            project: null,
           },
           {
             action: "chat.unarchived",
             actor: { type: "person", userId: ann.userId },
+            project: null,
           },
         ]);
       },
@@ -515,6 +523,22 @@ describe("chats", () => {
         ).toStrictEqual([
           { project: first.id, from: undefined },
           { project: second.id, from: first.id },
+        ]);
+        // Archived where they were filed: in the project, or in none.
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                (target?.id === done.id || target?.id === loose.id) &&
+                action === "chat.archived"
+            )
+            .map(({ target, detail }) => ({
+              chat: target?.id,
+              project: detail?.project,
+            }))
+        ).toStrictEqual([
+          { chat: done.id, project: first.id },
+          { chat: loose.id, project: null },
         ]);
       },
       { timeout: 10_000 }
@@ -1399,7 +1423,25 @@ describe("chats", () => {
     await expect(
       ann.chats.create("Travel", crypto.randomUUID(), undefined, key)
     ).resolves.toStrictEqual(made);
-    await expect(ann.chats.list()).resolves.toHaveLength(1);
+    const listed = await ann.chats.list();
+    // Archived since, a repeat answers it as archived, as its summary does.
+    await ann.chats.archive(made.id);
+    const repeated = await ann.chats.create(
+      "Travel",
+      undefined,
+      undefined,
+      key
+    );
+    const summary = await ann.chats.summary(made.id);
+    expect({
+      listed: listed.length,
+      repeated,
+      archived: summary.archived,
+    }).toStrictEqual({
+      listed: 1,
+      repeated: { ...made, archived: true },
+      archived: true,
+    });
     // Someone else's same key is their own chat.
     const other = await ben.chats.create("Travel", undefined, undefined, key);
     expect(other.id).not.toBe(made.id);
