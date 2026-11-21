@@ -1048,10 +1048,6 @@ msgstr "{person}, {date}"
 msgid "{place} of {count}"
 msgstr "{place} van {count}"
 
-#: src/tour/tour-layer.tsx
-msgid "{position} of {count}"
-msgstr "{position} van {count}"
-
 #: src/apps/indexes-view.tsx
 msgid "{query} (on {routes})"
 msgstr "{query} (op {routes})"
@@ -3185,7 +3181,6 @@ msgstr "Beschikbaar, via Composio"
 #: src/chat/composer-menu.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
-#: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Terug"
 
@@ -5144,11 +5139,6 @@ msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Afgehandeld"
 
-#: src/tour/tour-layer.tsx
-msgctxt "tour"
-msgid "Done"
-msgstr "Klaar"
-
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: it happened in a run"
 msgid "Done"
@@ -5419,10 +5409,6 @@ msgstr "Toegang van Grasp-medewerkers nu beëindigen?"
 #: src/settings/staff-access.tsx
 msgid "End staff access now"
 msgstr "Toegang van medewerkers nu beëindigen"
-
-#: src/tour/tour-layer.tsx
-msgid "End the tour"
-msgstr "Rondleiding stoppen"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -6853,10 +6839,6 @@ msgstr "Dit is het plan"
 msgid "Here's what Grasp will make"
 msgstr "Dit gaat Grasp maken"
 
-#: src/tour/tour-script.ts
-msgid "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
-msgstr "Hé, fijn dat je er bent. Dit kan allemaal wat veel lijken, dus ik praat je in één minuut bij. Ben je er klaar voor?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hoi {admin}, ik ben Stephen"
@@ -7192,10 +7174,6 @@ msgstr "Ik ben {firstName}."
 #: src/onboarding/forget-teams.tsx
 msgid "I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself."
 msgstr "Ik wis je teams uit je Brain. Dat is nog niet klaar, en ik maak het zelf af."
-
-#: src/tour/tour-script.ts
-msgid "I’m ready"
-msgstr "Ik ben er klaar voor"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ve handled everything else."
@@ -8949,7 +8927,6 @@ msgid "Newest item first. Nothing was sent or changed: every call was answered f
 msgstr "Nieuwste item eerst. Er is niets verzonden of gewijzigd: elke aanroep is beantwoord met wat jij hebt opgegeven."
 
 #: src/chat/asked-questions.tsx
-#: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Volgende"
 
@@ -9527,7 +9504,6 @@ msgid "Not named by the provider"
 msgstr "Niet benoemd door de provider"
 
 #: src/onboarding/hr-leads.tsx
-#: src/tour/tour-script.ts
 msgid "Not now"
 msgstr "Nu niet"
 
@@ -10012,10 +9988,6 @@ msgstr "Onderweg"
 msgctxt "links: drawn workflows, opened on the Workflows page"
 msgid "On the Workflows page"
 msgstr "Op de pagina Workflows"
-
-#: src/tour/tour-script.ts
-msgid "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
-msgstr "Op deze pagina koppel je de applicaties waar jullie organisatie mee werkt. Dat zijn de instrumenten waarmee het platform bouwt wat je nodig hebt."
 
 #: src/make/examples.ts
 msgid "Onboard a new hire"
@@ -13354,10 +13326,6 @@ msgstr "Typend beginnen"
 msgid "Start the run"
 msgstr "Run starten"
 
-#: src/tour/tour-script.ts
-msgid "Start the tour"
-msgstr "Rondleiding starten"
-
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -13741,14 +13709,6 @@ msgstr "Teamleiders uit {name} halen"
 msgid "Take the offer back"
 msgstr "Aanbod intrekken"
 
-#: src/frame/person-menu.tsx
-msgid "Take the tour"
-msgstr "Rondleiding volgen"
-
-#: src/frame/person-menu.tsx
-msgid "Take the tour again"
-msgstr "Rondleiding opnieuw volgen"
-
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Die van hen overnemen"
@@ -14032,10 +13992,6 @@ msgstr "Dat was alles van jou. Nu ga ik in gesprek met je team."
 #: src/onboarding/connect-steps.tsx
 msgid "That’s plenty to start with. Let’s move on."
 msgstr "Daar kan ik goed mee beginnen. Laten we verdergaan."
-
-#: src/tour/tour-script.ts
-msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
-msgstr "Dat was de rondleiding. Je kunt me alles vragen, op elke pagina. Ik zit hier rechtsonder."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} that spent most; more spent less."
@@ -14861,10 +14817,6 @@ msgstr "Er staat niemand in deze lijst."
 msgid "There was nothing to undo: Grasp no longer uses this."
 msgstr "Er was niets om ongedaan te maken: Grasp gebruikt dit niet meer."
 
-#: src/tour/tour-script.ts
-msgid "These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows."
-msgstr "Dit zijn je apps. Elke app is gemaakt voor een team of een persoon, met eigen pagina’s, gegevens en mensen, gebouwd op je workflows."
-
 #: src/settings/ai-providers.tsx
 msgid "These features always use Grasp's own provider keys, whichever providers you connect above."
 msgstr "Deze functies gebruiken altijd de eigen sleutels van Grasp, welke providers je hierboven ook koppelt."
@@ -15047,17 +14999,9 @@ msgstr "Dit gesprek ging verder in een ander venster. Je ziet nu dat gesprek."
 msgid "This is right"
 msgstr "Dit klopt"
 
-#: src/tour/tour-script.ts
-msgid "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
-msgstr "Dit is het Brein. Alles wat ik over jullie bedrijf leer, komt hier samen. Elk antwoord en elke workflow bouwt hierop."
-
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Dit is de toestemming zoals Grasp die nu formuleert. Het auditlog bewaart een hash van de exacte tekst die werd getoond."
-
-#: src/tour/tour-script.ts
-msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
-msgstr "Dit is het werk zelf, één workflow per stuk werk. Je ziet waar de tijd heen gaat, en wat ik van je kan overnemen."
 
 #: src/frame/ai-key-banner.tsx
 msgid "This is usually an outage on their side; Grasp keeps retrying."
@@ -15422,10 +15366,6 @@ msgstr "Toegestane tools: geen vastgelegd"
 #: src/connections/connect-dialog.tsx
 msgid "Tools to allow"
 msgstr "Toe te staan tools"
-
-#: src/tour/tour-layer.tsx
-msgid "Tour of Grasp"
-msgstr "Rondleiding door Grasp"
 
 #: src/make/examples.ts
 msgid "Track the month-end close"
@@ -16204,10 +16144,6 @@ msgstr "Week {week} van {weeks}"
 #: src/dashboard/report.ts
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Week {week} van {weeks} · {stage}"
-
-#: src/tour/tour-script.ts
-msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
-msgstr "Welkom bij Grasp. Zal ik je even rondleiden? Het duurt maar een minuutje."
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"

@@ -943,7 +943,6 @@ export const BrainAtlas = ({
   return (
     <div
       className="bg-muted/30 relative min-h-0 flex-1 overflow-hidden text-sm"
-      data-tour="brain"
       ref={box}
     >
       <canvas

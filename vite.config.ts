@@ -202,13 +202,12 @@ export default defineConfig({
       },
       {
         // Seen once per person, so they may take longer to delight: the
-        // onboarding, the interview, setup and Stephen's tour. And rare: an
+        // onboarding, the interview and setup. And rare: an
         // app connected, a few times per company, whose drawn mark is the
         // delight of it (success-mark.tsx).
         files: [
           "apps/web/src/onboarding/**",
           "apps/web/src/interview/**",
-          "apps/web/src/tour/**",
           "apps/web/src/voice/**",
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
