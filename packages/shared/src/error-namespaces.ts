@@ -68,7 +68,6 @@ export const familyNamespaces = [
   "skills",
   "speech",
   "statistics",
-  "stephen_requests",
   "submission",
   "sync",
   "transcription",

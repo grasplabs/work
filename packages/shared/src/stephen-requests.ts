@@ -1,7 +1,3 @@
-import { z } from "zod";
-
-import { defineErrorFamily } from "./errors.ts";
-
 // Stephen's requests outside Grasp: the unit his use is counted and priced
 // by. One request is one message a known person sends him in a place
 // outside Grasp (Teams, Slack, …) that he takes on: the platform sending
@@ -15,8 +11,7 @@ import { defineErrorFamily } from "./errors.ts";
 // the person gave. Core keeps one record per request (core's
 // stephen-requests.ts) and builds the report from them with
 // `requestsReport`: every split's groups of fewer than five people folded
-// into one, and people one by one only for owners and admins once an
-// owner turned that on. Everything here is pure.
+// into one, and never anyone one by one. Everything here is pure.
 
 /** What he did with a request, the first that applies, read from what he did and never from what was written. */
 export const requestKinds = [
@@ -189,8 +184,6 @@ export interface RequestsReport extends RequestSpan {
   weeks: { week: string; people: number }[];
   /** How the requests spread over the people who made them. */
   spread: { least: number; most: number | null; people: number }[];
-  /** Per person, counts only; null for a viewer who may not see it. */
-  byPerson: (Omit<RequestCount, "people"> & { key: string })[] | null;
 }
 
 /** From this share of rated replies down, once there are `poorDowns` of them, a question's answers count as poor. */
@@ -460,16 +453,13 @@ const askedWith = (shown: readonly StephenRequest[], outcome: RequestOutcome) =>
  * The report of the requests in a span: the counts, a bar per day or
  * month, the splits by kind, place, team and topic, the questions many
  * ask, the tools he called, the people a week, and how the requests spread
- * over people. Per person only with `perPerson`. `reach` is how many
- * people of each team can reach him, so a team's share can be said.
+ * over people. `reach` is how many people of each team can reach him,
+ * so a team's share can be said.
  */
 export const requestsReport = (
   requests: readonly StephenRequest[],
   span: RequestSpan,
-  {
-    perPerson,
-    reach,
-  }: { perPerson: boolean; reach: ReadonlyMap<string, number> }
+  { reach }: { reach: ReadonlyMap<string, number> }
 ): RequestsReport => {
   const shown = requests.filter(
     ({ day }) => day >= span.from && day <= span.to
@@ -554,81 +544,14 @@ export const requestsReport = (
         (each) => each.length >= least && (most === null || each.length <= most)
       ).length,
     })),
-    byPerson: perPerson
-      ? [...perPersonCounts]
-          .map(([key, each]) => ({
-            key,
-            requests: each.length,
-            billed: each.filter(isBilled).length,
-          }))
-          .toSorted((a, b) => b.billed - a.billed || a.key.localeCompare(b.key))
-      : null,
   };
 };
 
 /* ── Over RPC ─────────────────────────────────────────────────────────── */
 
-/** The requests a plan includes each month. */
-const includedSchema = z.number().int().min(0).max(100_000_000);
-
-/** The minutes a request of one kind saves. */
-const minutesSchema = z.number().int().min(0).max(600);
-
-/** What the company set for Stephen's requests: kept in org settings, beside billing. */
-export const stephenRequestSettingsSchema = z.strictObject({
-  /** The requests the plan includes each month; null without a plan that counts them. */
-  requestsIncluded: includedSchema.nullable().default(null),
-  /** The minutes a request of each kind saves, where the company set its own. */
-  minutesSaved: z
-    .strictObject({
-      answered: minutesSchema.optional(),
-      lookedUp: minutesSchema.optional(),
-      changed: minutesSchema.optional(),
-      workflow: minutesSchema.optional(),
-    })
-    .default({}),
-  /**
-   * People one by one, for owners and admins: off until an owner turns it
-   * on (in the Netherlands the works council may need to agree first).
-   */
-  requestsPerPerson: z.boolean().default(false),
-});
-export type StephenRequestSettings = z.output<
-  typeof stephenRequestSettingsSchema
->;
-
-/**
- * A change to the settings: only what it names changes, so two owners
- * changing different settings at once both keep theirs. A kind's minutes
- * set to null go back to the default.
- */
-export const stephenRequestSettingsChangeSchema = z.strictObject({
-  requestsIncluded: includedSchema.nullable().optional(),
-  minutesSaved: z
-    .strictObject({
-      answered: minutesSchema.nullable().optional(),
-      lookedUp: minutesSchema.nullable().optional(),
-      changed: minutesSchema.nullable().optional(),
-      workflow: minutesSchema.nullable().optional(),
-    })
-    .optional(),
-  requestsPerPerson: z.boolean().optional(),
-});
-export type StephenRequestSettingsChange = z.input<
-  typeof stephenRequestSettingsChangeSchema
->;
-
-/** The settings until an owner sets them. */
-export const noRequestSettings: StephenRequestSettings = {
-  requestsIncluded: null,
-  minutesSaved: {},
-  requestsPerPerson: false,
-};
-
-/** The requests billed this month, the whole company's, against what the plan includes (null without a plan that counts them). */
+/** The requests billed this month, the whole company's. */
 export interface MonthBilled {
   billed: number;
-  included: number | null;
 }
 
 /** Stephen's week, for the card on the first agent's Access tab. */
@@ -655,23 +578,8 @@ export interface StephenWeek {
 
 /** Stephen's requests over `/rpc`, on `stephenRequests`: owners and admins only. */
 export interface StephenRequestsApi {
-  /** What the company set: the plan's requests, minutes saved, people one by one. */
-  settings: () => Promise<StephenRequestSettings>;
-  /**
-   * Changes what `change` names and nothing else: the organization's own
-   * admins (owners) only, each setting changed audited on its own.
-   */
-  updateSettings: (
-    change: StephenRequestSettingsChange
-  ) => Promise<StephenRequestSettings>;
   /** Stephen's week, for the first agent's Access tab. */
   week: () => Promise<StephenWeek>;
   /** The requests billed this month and what the plan includes, for Settings › Billing. */
   billed: () => Promise<MonthBilled>;
 }
-
-/** Why a call on Stephen's requests was refused. */
-export const stephenRequestErrors = defineErrorFamily({
-  "stephen_requests.settings_invalid":
-    "Those aren't settings for Stephen's requests: a whole number of requests, minutes from 0 to 600 per kind.",
-});

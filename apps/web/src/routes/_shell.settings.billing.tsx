@@ -75,7 +75,7 @@ const Nothing = () => (
   </span>
 );
 
-/** Stephen's requests outside Grasp this month, against what the plan includes when it says; or why they can't be read. */
+/** Stephen's requests outside Grasp this month; or why they can't be read. */
 const RequestsRow = ({
   requests,
 }: {
@@ -89,21 +89,14 @@ const RequestsRow = ({
       </SettingsRow>
     );
   }
-  const used = formatNumber(requests.billed.billed);
-  const { included } = requests.billed;
-  const of = included === null ? "" : formatNumber(included);
   return (
     <SettingsRow
-      description={
-        included === null
-          ? t`Outside Grasp this month.`
-          : t`Outside Grasp this month, against what the plan includes.`
-      }
+      description={t`Outside Grasp this month.`}
       label={t`Stephen’s requests`}
     >
       <span className="flex items-center gap-3">
         <span className="tabular-nums">
-          {included === null ? used : t`${used} of ${of}`}
+          {formatNumber(requests.billed.billed)}
         </span>
         <Button
           nativeButton={false}

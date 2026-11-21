@@ -93,7 +93,7 @@ describe("Stephen's requests", () => {
         request("2026-09-30", "c", "t"),
       ],
       month,
-      { perPerson: false, reach: noReach }
+      { reach: noReach }
     );
     expect(report.total).toStrictEqual({ requests: 4, billed: 2, people: 2 });
     expect(report.notBilled).toStrictEqual({
@@ -126,7 +126,6 @@ describe("Stephen's requests", () => {
       request("2026-10-07", "y", "team-other"),
     ];
     const report = requestsReport([...big, ...small], month, {
-      perPerson: false,
       reach: new Map([
         ["team-big", 6],
         ["team-small", 1],
@@ -158,7 +157,7 @@ describe("Stephen's requests", () => {
         request("2026-10-08", "q", "t"),
       ],
       month,
-      { perPerson: false, reach: noReach }
+      { reach: noReach }
     );
     expect(report.questions).toStrictEqual([
       {
@@ -188,7 +187,7 @@ describe("Stephen's requests", () => {
         }),
       ],
       month,
-      { perPerson: false, reach: noReach }
+      { reach: noReach }
     );
     expect(report.byTool).toStrictEqual([
       { key: "microsoft.calendar_list", calls: 5, failed: 0, people: 5 },
@@ -197,26 +196,17 @@ describe("Stephen's requests", () => {
     ]);
   });
 
-  it("show people one by one only to whoever may see it, and then only as counts", () => {
-    const requests = [
-      request("2026-10-02", "a", "t"),
-      request("2026-10-03", "a", "t", { outcome: "failed" }),
-      request("2026-10-04", "b", "t"),
-    ];
-    const hidden = requestsReport(requests, month, {
-      perPerson: false,
-      reach: noReach,
-    });
-    const shown = requestsReport(requests, month, {
-      perPerson: true,
-      reach: noReach,
-    });
-    expect(hidden.byPerson).toBeNull();
-    expect(shown.byPerson).toStrictEqual([
-      { key: "a", requests: 2, billed: 1 },
-      { key: "b", requests: 1, billed: 1 },
-    ]);
-    expect(shown.spread[0]).toStrictEqual({ least: 1, most: 2, people: 2 });
+  it("say how the requests spread over people, never who made them", () => {
+    const report = requestsReport(
+      [
+        request("2026-10-02", "a", "t"),
+        request("2026-10-03", "a", "t", { outcome: "failed" }),
+        request("2026-10-04", "b", "t"),
+      ],
+      month,
+      { reach: noReach }
+    );
+    expect(report.spread[0]).toStrictEqual({ least: 1, most: 2, people: 2 });
   });
 
   it("call a question's answers poor once five people rated them, four or more and a quarter of the thumbs down", () => {
@@ -230,7 +220,7 @@ describe("Stephen's requests", () => {
         ...rated(1, "fine", "down"),
       ],
       month,
-      { perPerson: false, reach: noReach }
+      { reach: noReach }
     );
     expect(report.poorAnswers).toStrictEqual([
       { topic: "policies", question: "rate", people: 10, up: 6, down: 4 },
@@ -255,7 +245,7 @@ describe("Stephen's requests", () => {
         ...asked(6, "bonus", { outcome: "unanswered" }),
       ],
       month,
-      { perPerson: false, reach: noReach }
+      { reach: noReach }
     );
     expect(report.notPossible).toStrictEqual([
       {

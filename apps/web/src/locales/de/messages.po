@@ -1362,10 +1362,6 @@ msgstr "{unseen, plural, one {# weiterer Lauf heute, eines Workflows, den du nic
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} von {total} genannt, nicht im Einsatz gesehen"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "{used} of {of}"
-msgstr "{used} von {of}"
-
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# Version} other {# Versionen}}"
@@ -10476,10 +10472,6 @@ msgstr "Ausgabe"
 #: src/connections/http-connections.tsx
 msgid "Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission."
 msgstr "Externe APIs, die ein Admin freigegeben hat, nach Origin, Methoden und Pfaden. Apps und Workflows rufen sie nur mit einer Berechtigung auf."
-
-#: src/routes/_shell.settings.billing.tsx
-msgid "Outside Grasp this month, against what the plan includes."
-msgstr "Außerhalb von Grasp in diesem Monat, gemessen an dem, was der Tarif enthält."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Outside Grasp this month."

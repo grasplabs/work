@@ -19,15 +19,7 @@ import {
   stephenRequestCalls,
   stephenRequestReplies,
 } from "./model-provider.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import {
   member,
   memberAnsweredBy,
@@ -43,8 +35,7 @@ import {
 // Stephen's requests outside Grasp (src/channels/stephen-requests.ts,
 // src/stephen-requests.ts), from their threat models: a record that keeps
 // what someone asked, a message counted twice, what isn't finished billed;
-// a week that points at a few people; and settings someone other than an
-// owner changes.
+// and a week that points at a few people.
 
 const idp = mockIdp();
 
@@ -609,90 +600,10 @@ describe("a request a card's press belongs to", setUpTime, () => {
   });
 });
 
-describe("the settings and the month billed", setUpTime, () => {
+describe("the month billed", setUpTime, () => {
   afterEach(cleanUp);
 
-  it("are changed by owners only, each setting changed audited on its own", async () => {
-    const owner = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
-    const staff = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core } = await openRpc(staff);
-    using staffApi = core.authenticate();
-
-    const events = await auditedDuring(async () => {
-      await owner.api.stephenRequests.updateSettings({
-        requestsPerPerson: true,
-        requestsIncluded: 400,
-      });
-    });
-
-    expect({
-      events: events.map(({ action, detail }) => ({ action, detail })),
-      builder: await outcome(builder.api.stephenRequests.settings()),
-      staffChanges: await outcome(
-        staffApi.stephenRequests.updateSettings({ requestsPerPerson: false })
-      ),
-    }).toStrictEqual({
-      events: [
-        {
-          action: "stephen_requests.settings.updated",
-          detail: { field: "requestsIncluded" },
-        },
-        {
-          action: "stephen_requests.per_person.turned_on",
-          detail: { field: "requestsPerPerson" },
-        },
-      ],
-      builder: "role.forbidden",
-      staffChanges: "role.forbidden",
-    });
-  });
-
-  it("keeps what two owners change at once, each change audited as the one who made it", async () => {
-    const [ann, bo] = await Promise.all([
-      signedInApi(idp, "admin"),
-      signedInApi(idp, "admin"),
-    ]);
-    await ann.api.stephenRequests.updateSettings({
-      minutesSaved: { answered: 2 },
-    });
-
-    const events = await auditedDuring(async () => {
-      await Promise.all([
-        ann.api.stephenRequests.updateSettings({ requestsIncluded: 400 }),
-        bo.api.stephenRequests.updateSettings({
-          minutesSaved: { workflow: 30 },
-        }),
-      ]);
-    });
-    const unchanged = await auditedDuring(async () => {
-      await bo.api.stephenRequests.updateSettings({ requestsIncluded: 400 });
-    });
-
-    expect({
-      settings: await ann.api.stephenRequests.settings(),
-      events: events
-        .map(({ actor, detail }) => ({
-          by: actor.type === "person" ? actor.userId : actor.type,
-          detail,
-        }))
-        .toSorted((a, b) => a.by.localeCompare(b.by)),
-      unchanged,
-    }).toStrictEqual({
-      settings: {
-        requestsIncluded: 400,
-        minutesSaved: { answered: 2, workflow: 30 },
-        requestsPerPerson: false,
-      },
-      events: [
-        { by: ann.userId, detail: { field: "requestsIncluded" } },
-        { by: bo.userId, detail: { field: "minutesSaved" } },
-      ].toSorted((a, b) => a.by.localeCompare(b.by)),
-      unchanged: [],
-    });
-  });
-
-  it("bill what he finished this month against what the plan includes, for admins only", async () => {
+  it("counts what he finished this month, for admins only", async () => {
     const owner = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const today = await companyDay(env);
@@ -700,13 +611,12 @@ describe("the settings and the month billed", setUpTime, () => {
       ...people(5, { kind: "workflow" }),
       ...people(5, { kind: "answered", outcome: "notPossible" }),
     ]);
-    await owner.api.stephenRequests.updateSettings({ requestsIncluded: 400 });
 
     expect({
       billed: await owner.api.stephenRequests.billed(),
       builderBilled: await outcome(builder.api.stephenRequests.billed()),
     }).toStrictEqual({
-      billed: { billed: 5, included: 400 },
+      billed: { billed: 5 },
       builderBilled: "role.forbidden",
     });
   });

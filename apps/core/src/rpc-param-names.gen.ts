@@ -454,8 +454,6 @@ export const rpcParamNames: ParamNames = {
   },
   "StephenRequestsRpc": {
     "billed": [],
-    "settings": [],
-    "updateSettings": ["change"],
     "week": [],
   },
   "Subscription": {
