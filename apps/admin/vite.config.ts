@@ -8,6 +8,16 @@ import { bindings } from "cf/config";
 import { defineConfig } from "vite-plus";
 
 /**
+ * The build the admin's pages run, in the errors they report
+ * (src/admin/page-errors.ts): the commit CI built it from, or `local`.
+ */
+export const adminDefine = {
+  "import.meta.env.VITE_GRASP_BUILD": JSON.stringify(
+    process.env.GITHUB_SHA ?? "local"
+  ),
+};
+
+/**
  * The admin's plugins, its Worker as cloudflare.config.ts builds it from
  * wrangler.jsonc, with `worker` on top: what the browser journeys change
  * (vite.e2e.config.ts).
@@ -20,6 +30,7 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
   // of silently shipping it uncompiled.
   babel({ presets: [reactCompilerPreset({ panicThreshold: "all_errors" })] }),
   tailwindcss(),
+  { name: "grasp-admin-build", config: () => ({ define: adminDefine }) },
 ];
 
 /**

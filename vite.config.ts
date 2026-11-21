@@ -461,6 +461,7 @@ export default defineConfig({
       "apps/*",
       "!apps/admin",
       "apps/admin/vite.test.config.ts",
+      "apps/admin/vite.components.config.ts",
       "apps/core/vite.pages.config.ts",
       "apps/core/vite.on-prem.config.ts",
       "apps/core/vite.brain-meaning.config.ts",

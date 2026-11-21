@@ -2,6 +2,7 @@ import { createRouter } from "@tanstack/react-router";
 
 import { NotFound, RouteFailure } from "./admin/failure.tsx";
 import { orgReads } from "./admin/org-reads.ts";
+import { reportPageError, reportUncaughtErrors } from "./admin/page-errors.ts";
 import { routeTree } from "./routeTree.gen.ts";
 
 declare module "@tanstack/react-router" {
@@ -15,8 +16,8 @@ declare module "@tanstack/react-router" {
   }
 }
 
-export const getRouter = () =>
-  createRouter({
+export const getRouter = () => {
+  const router = createRouter({
     routeTree,
     scrollRestoration: true,
     // This router's own reads of clients' cores: one tab's.
@@ -28,4 +29,13 @@ export const getRouter = () =>
     defaultErrorComponent: RouteFailure,
     // A page there isn't says so in the admin's frame, under its bar.
     defaultNotFoundComponent: NotFound,
+    // A route that fails is reported to the Worker's logs too.
+    defaultOnCatch: (error) => {
+      void reportPageError("render", error);
+    },
   });
+  // What the page throws and never catches, reported with the route's
+  // pattern (such as `/organizations/$clientId`), never its URL.
+  reportUncaughtErrors(() => router.state.matches.at(-1)?.fullPath);
+  return router;
+};
