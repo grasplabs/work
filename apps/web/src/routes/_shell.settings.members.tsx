@@ -13,7 +13,7 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
@@ -126,6 +126,48 @@ const styles = stylex.create({
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
 
+/**
+ * The members whose role is being changed and their list read again. A
+ * row's role and its menu are cells of their own, so the menu reads it
+ * here to stay off with the role.
+ */
+const changingRoles = new Set<string>();
+const roleWatchers = new Set<() => void>();
+
+const watchRoles = (changed: () => void): (() => void) => {
+  roleWatchers.add(changed);
+  return () => {
+    roleWatchers.delete(changed);
+  };
+};
+
+const markChanging = (userId: string, changing: boolean): void => {
+  if (changing) {
+    changingRoles.add(userId);
+  } else {
+    changingRoles.delete(userId);
+  }
+  for (const changed of roleWatchers) {
+    changed();
+  }
+};
+
+/**
+ * Runs `change` with `userId`'s role marked as changing. Outside
+ * components, as the React Compiler can't compile `try`/`finally`.
+ */
+const whileChanging = async (
+  userId: string,
+  change: () => Promise<void>
+): Promise<void> => {
+  markChanging(userId, true);
+  try {
+    await change();
+  } finally {
+    markChanging(userId, false);
+  }
+};
+
 /** A member's role and the menu of what else may be done to them. */
 const MemberActions = ({
   member,
@@ -142,6 +184,11 @@ const MemberActions = ({
   const core = useCore();
   const router = useRouter();
   const { busy, run } = useCoreAction();
+  const roleChanging = useSyncExternalStore(
+    watchRoles,
+    () => changingRoles.has(member.userId),
+    () => false
+  );
   const [asking, setAsking] = useState<"promote" | "remove">();
   const { name } = member;
   // Names needn't be unique; with the email, each row's controls are.
@@ -154,9 +201,11 @@ const MemberActions = ({
   const setRole = async (role: Role): Promise<void> => {
     await run(
       async ({ members }) => {
-        await changeThenRefresh(async () => {
-          await members.setRole(member.userId, role);
-        }, refresh);
+        await whileChanging(member.userId, async () => {
+          await changeThenRefresh(async () => {
+            await members.setRole(member.userId, role);
+          }, refresh);
+        });
       },
       // A menu's change has no place of its own: said as a toast.
       (failure) => {
@@ -263,7 +312,7 @@ const MemberActions = ({
             {/* Off while a role change is sent and the list read again, as the
               role is: nothing acts on a row that is about to change. */}
             <DropdownMenuTrigger
-              disabled={busy}
+              disabled={busy || roleChanging}
               icon={More}
               aria-label={t`Actions for ${who}`}
               size="sm"
