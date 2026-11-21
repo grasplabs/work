@@ -175,11 +175,33 @@ const drawOnce =
       finished = true;
       held.watch?.disconnect();
       clearTimeout(held.limit);
-      const picture = count() >= 1 ? canvas.toDataURL("image/png") : null;
+      const drew = count() >= 1;
+      // Encoded off the main thread: toDataURL held the page for tens of milliseconds a card.
+      // toBlob copies the picture as it is called, so the canvas can go at once.
+      if (drew) {
+        canvas.toBlob((blob) => {
+          if (blob === null) {
+            keepPicture(null);
+            return;
+          }
+          const reader = new FileReader();
+          reader.addEventListener("load", () => {
+            keepPicture(
+              typeof reader.result === "string" ? reader.result : null
+            );
+          });
+          reader.addEventListener("error", () => {
+            keepPicture(null);
+          });
+          reader.readAsDataURL(blob);
+        }, "image/png");
+      }
       // Off the page first, so stopping lets its context go at once (backdrop/shader.ts).
       canvas.remove();
       drawing.stop();
-      keepPicture(picture);
+      if (!drew) {
+        keepPicture(null);
+      }
       handOn();
     };
     held.watch = new MutationObserver(() => {
