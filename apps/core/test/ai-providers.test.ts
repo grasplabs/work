@@ -36,6 +36,7 @@ import {
   describe,
   expect,
   it,
+  onTestFinished,
   vi,
 } from "vite-plus/test";
 import { z } from "zod";
@@ -104,8 +105,8 @@ const carrying = async (text: string): Promise<ProviderRequest[]> => {
 
 /**
  * `promise`, whether it has settled yet, and `done`, which settles with it
- * and never rejects: awaited in a test's `finally`, its failure is never
- * left unhandled, whatever ends the test.
+ * and never rejects: awaited once the test finished, its failure is never
+ * left unhandled, whatever ended the test.
  */
 const watched = <T>(promise: Promise<T>) => {
   const state = { settled: false };
@@ -124,15 +125,32 @@ const watched = <T>(promise: Promise<T>) => {
   };
 };
 
-/** Once the beginning of the held answer to `key`'s request was sent on. */
-const answerBegun = async (key: string): Promise<void> => {
+/**
+ * Once the beginning of the held answer to `key`'s request was sent on,
+ * with `call` still waiting for the rest; failed at once, with what it
+ * ended with, should `call` end first.
+ */
+const answerBegun = async (
+  key: string,
+  call: { promise: Promise<unknown>; settled: () => boolean }
+): Promise<void> => {
   await vi.waitFor(
     async () => {
+      if (call.settled()) {
+        return;
+      }
       const [request] = await carrying(key);
       expect(request?.begun).toBeTruthy();
     },
     { timeout: 10_000, interval: 20 }
   );
+  if (call.settled()) {
+    // Its own error, should it have failed, rather than the wait's.
+    const ended = await call.promise;
+    throw new Error(
+      `The call ended before its answer began: ${JSON.stringify(ended)}`
+    );
+  }
 };
 
 /** Once `key`'s one request was dropped by its sender. */
@@ -1763,15 +1781,14 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const call = watched(
         models(env).call(await callOf(each.model, { trigger }))
       );
-      let pausedThen = true;
-      try {
-        await answerBegun(key);
-        pausedThen = call.settled();
-      } finally {
-        // Let go of the held answer however this ends, and wait for it.
+      // Let go of the held answer however the test ends, and wait for it:
+      // after the test's own error, never in its place.
+      onTestFinished(async () => {
         await release(paused);
         await call.done;
-      }
+      });
+      await answerBegun(key, call);
+      await release(paused);
 
       const answer = await call.promise;
       const [event] = await auditedFor(trigger.userId, 1);
@@ -1782,11 +1799,9 @@ describe("AI providers", { timeout: 60_000 }, () => {
         personId: trigger.userId,
       });
       expect({
-        pausedThen,
         text: answer.text,
         priced: answer.cost > 0,
       }).toStrictEqual({
-        pausedThen: false,
         text: "Hello, Ada.",
         // At its list prices; a custom endpoint's model has none.
         priced: each.provider !== "openai-compatible",
@@ -1869,20 +1884,15 @@ describe("AI providers", { timeout: 60_000 }, () => {
           )
         )
       );
-      let pausedThen = true;
-      try {
-        await answerBegun(key);
-        pausedThen = call.settled();
-      } finally {
-        // Cancelled however this ends, and waited for.
+      // Cancelled however the test ends, and waited for.
+      onTestFinished(async () => {
         cancel.abort();
         await call.done;
-      }
-
-      expect({ pausedThen, cancelled: await call.promise }).toStrictEqual({
-        pausedThen: false,
-        cancelled: "model.failed",
       });
+      await answerBegun(key, call);
+      cancel.abort();
+
+      await expect(call.promise).resolves.toBe("model.failed");
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event?.detail).toMatchObject({
         outcome: "failed",
