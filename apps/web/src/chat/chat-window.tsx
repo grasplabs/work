@@ -231,7 +231,7 @@ const useChanges = (onChanged: () => void) => {
     }
     onChanged();
     // The sidebar and the chat's page show the change too.
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   return {
     failure,

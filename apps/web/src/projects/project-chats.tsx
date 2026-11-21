@@ -118,7 +118,7 @@ export const AddChat = ({
       await session.chats.setProject(chatId, project.id);
     });
     setOpen(false);
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   const offered = mine?.filter(({ id }) => !inIt.has(id));
   const found = (offered ?? []).filter((chat) => matches(chat, query));
@@ -221,7 +221,7 @@ export const ProjectChatList = ({
     await run(async (session) => {
       await session.chats.setProject(chatId, null);
     });
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   return (
     <>

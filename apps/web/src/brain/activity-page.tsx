@@ -291,7 +291,7 @@ export const ActivityPage = () => {
     await run(
       async (session) => {
         await session.brain.askAboutGap(gap.id);
-        await router.invalidate();
+        await router.invalidate({ sync: true });
       },
       (why) => {
         setFailed({ gap: gap.id, reason: why });

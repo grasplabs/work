@@ -408,7 +408,7 @@ export const ReportItem = ({
               onClick={() => {
                 // Read again first, so the report is as it stands now.
                 void (async () => {
-                  await router.invalidate();
+                  await router.invalidate({ sync: true });
                   setOpen(true);
                 })();
               }}

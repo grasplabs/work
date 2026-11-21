@@ -441,7 +441,7 @@ const takeBack = async (
     restored = await restore();
   }
   onDone();
-  await router.invalidate();
+  await router.invalidate({ sync: true });
   if (!rolled.ok) {
     undoFailed(rolled.error);
     return;
@@ -574,7 +574,7 @@ const usePublishing = (
       return false;
     }
     onPublished();
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     const made = published.value;
     // Nothing to go back to after a first version: Undo only over one.
     const back =

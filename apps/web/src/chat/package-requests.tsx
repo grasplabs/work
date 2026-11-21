@@ -123,7 +123,7 @@ const PackageRequest = ({
     if (decided === true && approved) {
       onApproved();
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     // A refusal reaches the card, which says it could not.
     if (decided !== true) {
       throw new Error("The decision was not taken");
