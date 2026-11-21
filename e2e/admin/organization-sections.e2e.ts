@@ -226,7 +226,7 @@ test("a frame that can't be read says so with Try again, which brings the admin 
   await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
     waitUntil: "networkidle",
   });
-  await fault(request, "fetchPlatformSidebar");
+  await fault(request, "fetchClientGrid");
   // The frame read again, as it is once its read went stale, and failing.
   await page.evaluate(async () => {
     // The router the page made: TanStack Router keeps it on the window.
@@ -418,7 +418,7 @@ const coreAsked = async (
     .asked;
 };
 
-test("opening an organization while the frame reads it again waits on that read, asking its core once", async ({
+test("opening an organization while the frame reads it again asks its core no second time", async ({
   page,
   request,
 }) => {
@@ -460,6 +460,12 @@ test("opening an organization while the frame reads it again waits on that read,
   await expect(page.getByText("Read just now.")).toBeVisible({
     timeout: 10_000,
   });
+  // The frame's read lands, the only one: the page shows the answer it
+  // had while it was fresh, or takes the frame's, never asking alone.
+  await expect
+    .poll(async () => await core(request, answered), { timeout: 10_000 })
+    .toBe(before + 1);
+  await page.waitForTimeout(500);
   expect(await core(request, answered)).toBe(before + 1);
   await core(request, answered, 0);
 });
