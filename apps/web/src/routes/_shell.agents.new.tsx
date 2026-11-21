@@ -34,7 +34,7 @@ const NewAgentPage = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   const { way } = Route.useSearch();
-  const { taken, models, apps, teams, people, ownOn } = Route.useLoaderData();
+  const { taken, models, apps, teams, ownOn } = Route.useLoaderData();
   const company = isMemberAdmin(identity);
   return (
     <>
@@ -48,9 +48,7 @@ const NewAgentPage = () => {
           company={company}
           models={models}
           own={ownOn}
-          people={people}
           personId={identity.userId}
-          personName={identity.name}
           taken={taken}
           teams={teams}
         />
@@ -165,10 +163,9 @@ export const Route = createFileRoute("/_shell/agents/new")({
     models: string[];
     apps: CatalogApp[];
     teams: { teamId: string; name: string }[];
-    people: string[];
     ownOn: boolean;
   }> => {
-    const [agents, own, models, connections, catalog, reach, setting, members] =
+    const [agents, own, models, connections, catalog, reach, setting] =
       await Promise.allSettled([
         core.withSession(async (session) => await session.connections.agents()),
         core.withSession(
@@ -185,8 +182,6 @@ export const Route = createFileRoute("/_shell/agents/new")({
         core.withSession(
           async (session) => await session.orgSettings.ownAgents()
         ),
-        // The company's people, whose faces show who an agent reaches.
-        core.withSession(async (session) => await session.members.list()),
       ]);
     const ownOn = setting.status === "fulfilled" ? setting.value.on : true;
     // Someone who may make neither kind has nothing to make here.
@@ -224,10 +219,6 @@ export const Route = createFileRoute("/_shell/agents/new")({
       models: models.status === "fulfilled" ? models.value : [],
       apps,
       teams: reach.status === "fulfilled" ? reach.value.teams : [],
-      people:
-        members.status === "fulfilled"
-          ? members.value.map(({ name, email }) => (name === "" ? email : name))
-          : [],
       ownOn,
     };
   },

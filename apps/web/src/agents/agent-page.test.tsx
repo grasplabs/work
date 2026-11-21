@@ -430,9 +430,7 @@ const Page = ({
         company={editable}
         models={models}
         own
-        people={[anna.name]}
         personId={anna.userId}
-        personName={anna.name}
         taken={data.agents.map(({ name }) => name)}
         teams={teams}
       />
@@ -818,11 +816,49 @@ const rowSwitch = (words: string): HTMLElement => {
   return found;
 };
 
-/** The switch in the page's heading, which turns the agent off and on. */
-const onSwitch = (): HTMLElement => {
-  const found = document.querySelector("header [role='switch']");
-  if (!(found instanceof HTMLElement)) {
-    throw new TypeError("No on switch");
+/** The heading's "…" button, which holds Edit, turning it off or on, and Delete. */
+const moreButton = (): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find((each) =>
+    (each.getAttribute("aria-label") ?? "").startsWith("More for")
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new TypeError("No More button");
+  }
+  return found;
+};
+
+/** The open menu's item whose words start with `words`. */
+const menuItem = (words: string): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
+    (each) => each.textContent.trim().startsWith(words)
+  );
+
+/** The heading's menu item whose words start with `words`, the menu opened first. */
+const fromMenu = async (words: string): Promise<HTMLElement> => {
+  await press(moreButton());
+  const found = menuItem(words);
+  if (found === undefined) {
+    throw new TypeError(`No menu item ${words}`);
+  }
+  return found;
+};
+
+/** Whether `element` can't be chosen now. */
+const isDisabled = (element: HTMLElement): boolean =>
+  Object.hasOwn(element.dataset, "disabled") ||
+  element.getAttribute("aria-disabled") === "true" ||
+  element.hasAttribute("disabled");
+
+/** The switch in the settings row that says `words`. */
+const settingSwitch = (words: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>("[role='switch']"),
+  ].find((each) => {
+    const rows = each.closest("[data-slot='settings-rows']");
+    return rows !== null && rows.textContent.includes(words);
+  });
+  if (found === undefined) {
+    throw new TypeError(`No setting switch ${words}`);
   }
   return found;
 };
@@ -1071,7 +1107,7 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" });
-    await press(button("Edit"));
+    await press(await fromMenu("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     expect(asked).toStrictEqual([
@@ -1083,22 +1119,21 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" });
-    await press(onSwitch());
+    await press(await fromMenu("Turn off"));
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(onSwitch().getAttribute("aria-checked")).toBe("false");
+    expect(document.querySelector("header")?.textContent).toContain("Off");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" }, false);
-    expect({
-      edit: button("Edit").disabled,
-      on:
-        Object.hasOwn(onSwitch().dataset, "disabled") ||
-        onSwitch().getAttribute("aria-disabled") === "true" ||
-        onSwitch().hasAttribute("disabled"),
-    }).toStrictEqual({ edit: true, on: true });
+    const edit = isDisabled(await fromMenu("Edit"));
+    const turnOff = menuItem("Turn off");
+    const off = turnOff !== undefined && isDisabled(turnOff);
+    // Closed again before the tabs are pressed.
+    await press(moreButton());
+    expect({ edit, off }).toStrictEqual({ edit: true, off: true });
     await openTab("schedule");
     expect(document.body.textContent).toContain(
       "Claire only works when asked."
@@ -1129,7 +1164,7 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Claire", tab: "instructions" });
     await set(field("Instructions"), "A draft, not saved.", "input");
     // Paused: core is asked and the page read again.
-    await press(onSwitch());
+    await press(await fromMenu("Turn off"));
     const afterPause = field("Instructions").value;
     await openTab("access");
     await openTab("instructions");
@@ -1191,7 +1226,7 @@ describe("an agent's page", () => {
     await press(button("Add a time"));
     await set(field("What to ask it each time"), "refuse this", "input");
     // Another change on the page saves and the page is read again.
-    await press(onSwitch());
+    await press(await fromMenu("Turn off"));
     expect(field("What to ask it each time").value).toBe("refuse this");
     // Core refuses it: still there to be corrected, and said why.
     await press(exactButton("Add"));
@@ -1220,7 +1255,7 @@ describe("an agent's page", () => {
     // The name's dialog is opened after the instructions were saved.
     await set(field("Instructions"), "Only invoices over 30 days.", "input");
     await press(exactButton("Save"));
-    await press(button("Edit"));
+    await press(await fromMenu("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     expect(asked).toStrictEqual([
@@ -1580,14 +1615,14 @@ describe("an agent's page", () => {
     asked.length = 0;
     await shown(fake, { agent: "Claire" });
     const text = document.body.textContent;
-    await press(button("Edit"));
+    await press(await fromMenu("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     await openTab("access");
     const access = choice("Who may use Clara");
     await openTab("schedule");
     expect({
-      alone: text.includes("Yours alone: nobody else sees or asks it"),
+      alone: text.includes("Just for you"),
       who: text.includes("Only you"),
       access,
       schedule: [...document.querySelectorAll("button")].some(
@@ -1609,11 +1644,9 @@ describe("an agent's page", () => {
     await connections.makeOwnAgent(claire);
     asked.length = 0;
     await shown(fake, { agent: "Claire" });
-    await press(button("Offer to the company"));
-    const offered = document.body.textContent.includes(
-      "Your company's admins may take Claire on. What you told it doesn't go with it"
-    );
-    await press(button("Take the offer back"));
+    await press(settingSwitch("Offer to the company"));
+    const offered = document.body.textContent.includes("Offered on");
+    await press(settingSwitch("Offer to the company"));
     expect({ offered, asked }).toStrictEqual({
       offered: true,
       asked: [

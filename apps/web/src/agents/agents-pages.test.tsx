@@ -273,6 +273,18 @@ const press = async (element: Element | null | undefined) => {
   await settled();
 };
 
+/** The agent page's "…" button in its heading. */
+const moreButton = (): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>("button")].find((each) =>
+    (each.getAttribute("aria-label") ?? "").startsWith("More for")
+  );
+
+/** The open menu's item whose words start with `words`. */
+const menuItem = (words: string): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
+    (each) => each.textContent.trim().startsWith(words)
+  );
+
 /** The agents' names, as the rows start with them. */
 const names = ["Stephen", "Claire", "Milan", "Scribe", "Idle"];
 
@@ -835,7 +847,8 @@ describe("the company's agents, on pages of their own", () => {
       expect(
         document.querySelector("a[href='/?agent=agent-claire']")?.textContent
       ).toBe("Chat");
-      await press(document.querySelector("[role='switch']"));
+      await press(moreButton());
+      await press(menuItem("Turn off"));
       expect(asked).toStrictEqual([["paused", "agent-claire", true]]);
     });
 
@@ -891,7 +904,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("deletes an agent only once the admin says so again, and offers no delete for the first agent", async () => {
       const asked = await mounted(page(claire, "overview"));
-      await press(buttonNamed("Delete"));
+      await press(moreButton());
+      await press(menuItem("Delete"));
       const before = [...asked];
       await press(buttonStarting("Delete for good"));
       act(() => {
@@ -902,7 +916,10 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         before,
         asked,
-        firstOffers: buttonNamed("Delete") !== undefined,
+        firstOffers: await (async () => {
+          await press(moreButton());
+          return menuItem("Delete") !== undefined;
+        })(),
       }).toStrictEqual({
         before: [],
         asked: [["deleted", "agent-claire"]],

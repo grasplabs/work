@@ -27,8 +27,8 @@ import {
   AlertDialogFooter,
   AlertDialogContent,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
@@ -38,17 +38,19 @@ import {
   DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
+import { DropdownMenuMore } from "../grasp/dropdown-menu/index.ts";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
 import {
   CalendarIcon,
   Conversation,
   Edit,
+  Pause,
+  Play,
   Trash,
 } from "../grasp/icons/index.ts";
 import {
@@ -67,7 +69,6 @@ import {
   SettingRow,
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
-import { Switch } from "../grasp/switch/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import { dollars } from "../settings/money.ts";
@@ -268,9 +269,6 @@ const Facts = ({
       {/* The control column, not each value's own width: a job is a
           sentence, which would leave its name no room on a phone. */}
       <SettingsRows>
-        <FactRow label={t`What it is for`}>
-          {agent.job === "" ? t`No job written yet` : agent.job}
-        </FactRow>
         <FactRow
           label={t`Answers`}
           {...(own ? { info: t`In Grasp's chat` } : {})}
@@ -521,14 +519,18 @@ const AgentInstructions = ({
   );
 };
 
-/** Edit: the agent's name, job, picture and model, in a dialog. */
+/** Edit: the agent's name, job, picture and model, in a dialog the head's menu opens. */
 const EditAgent = ({
   agent,
   typed,
   models,
   can,
   save,
+  open,
+  setOpen,
 }: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
   agent: Agent;
   typed: Typed;
   models: readonly string[];
@@ -538,108 +540,177 @@ const EditAgent = ({
   const { t } = useLingui();
   const formId = useId();
   const { name } = agent;
-  const [open, setOpen] = useState(false);
   const parts: readonly Part[] = ["name", "job", "model"];
   return (
-    <>
-      <Button
-        disabled={!can}
-        icon={Edit}
-        onClick={() => {
-          setOpen(true);
-        }}
-        size="sm"
-      >
-        {t`Edit`}
-      </Button>
-      <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent closeLabel={t`Close`}>
-          <DialogTitle>{t`Edit ${name}`}</DialogTitle>
-          <DialogBody>
-            {/* Mounted only while open, so it starts from what core keeps. */}
-            {open ? (
-              <AgentForm
-                can={can}
-                id={formId}
-                initial={typed}
-                models={models}
-                onSave={async (said) => {
-                  if (await save(said)) {
-                    setOpen(false);
-                  }
-                }}
-                parts={parts}
-              />
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <DialogAction>{t`Cancel`}</DialogAction>
-            <Button
-              disabled={!can}
-              form={formId}
-              size="sm"
-              type="submit"
-              variant="ink"
-            >
-              {t`Save`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    <Dialog onOpenChange={setOpen} open={open}>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Edit ${name}`}</DialogTitle>
+        <DialogBody>
+          {/* Mounted only while open, so it starts from what core keeps. */}
+          {open ? (
+            <AgentForm
+              can={can}
+              id={formId}
+              initial={typed}
+              models={models}
+              onSave={async (said) => {
+                if (await save(said)) {
+                  setOpen(false);
+                }
+              }}
+              parts={parts}
+            />
+          ) : null}
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <Button
+            disabled={!can}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="ink"
+          >
+            {t`Save`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
-/** Delete, for good, behind a question; never the first agent. */
+/** Delete, for good, behind a question the head's menu opens; never the first agent. */
 const DeleteAgent = ({
   name,
-  can,
   remove,
+  open,
+  setOpen,
 }: {
   name: string;
-  can: boolean;
   remove: () => Promise<void>;
+  open: boolean;
+  setOpen: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
   return (
-    <SectionCard
-      variant="grouped"
-      density="compact"
-      actions={
-        <AlertDialog>
-          <AlertDialogTrigger
-            disabled={!can}
-            icon={Trash}
-            size="sm"
+    <AlertDialog onOpenChange={setOpen} open={open}>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead.`}
+        </AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
+            action={remove}
+            failedLabel={t`Couldn't delete`}
             variant="danger"
           >
-            {t`Delete`}
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs.`}
-            </AlertDialogDescription>
-            <AlertDialogFooter>
-              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-              <AlertDialogAction
-                action={remove}
-                failedLabel={t`Couldn't delete`}
-                variant="danger"
-              >
-                {t`Delete for good`}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+            {t`Delete for good`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+/**
+ * The page's head: the agent's name, what it is for under it, whose it is
+ * and that it is off beside it; Chat, the one button people come for, and
+ * everything else (Edit, turning it off or on, Delete) in "…" (Ruben, 21
+ * November: the switch, Edit and Chat side by side were cluttered).
+ */
+const AgentHead = ({
+  agent,
+  first,
+  can,
+  usable,
+  change,
+  onEdit,
+  onDelete,
+}: {
+  agent: Agent;
+  first: boolean;
+  can: boolean;
+  usable: boolean;
+  change: Change;
+  onEdit: () => void;
+  onDelete: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name } = agent;
+  const on = agent.state === "on";
+  const own = agent.ownerId !== null;
+  return (
+    <PageHeader
+      actions={
+        // One button, the one people come for; the rest in "…"
+        // (Ruben, 21 November: the switch, Edit and Chat were cluttered).
+        <div {...stylex.props(styles.actions)}>
+          <DropdownMenuMore
+            actions={[
+              {
+                label: t`Edit`,
+                icon: Edit,
+                disabled: !can,
+                onSelect: () => {
+                  onEdit();
+                },
+              },
+              {
+                label: on ? t`Turn off` : t`Turn on`,
+                icon: on ? Pause : Play,
+                disabled: !can,
+                onSelect: () => {
+                  void change(async (session) => {
+                    await session.connections.setAgentPaused(agent.id, on);
+                  });
+                },
+              },
+              ...(first
+                ? []
+                : [
+                    {
+                      label: t`Delete`,
+                      icon: Trash,
+                      danger: true,
+                      disabled: !can,
+                      onSelect: () => {
+                        onDelete();
+                      },
+                    },
+                  ]),
+            ]}
+            label={t`More for ${name}`}
+          />
+          {usable && on ? (
+            <Button
+              icon={Conversation}
+              render={<Link search={{ agent: agent.id }} to="/" />}
+              size="sm"
+              variant="ink"
+            >
+              {t`Chat`}
+            </Button>
+          ) : null}
+        </div>
       }
-      description={t`To stop it for a while, turn it off instead.`}
-      // Its head says it all: no body, so no room under it.
-      flush
-      title={t`Delete ${name}`}
-    >
-      {null}
-    </SectionCard>
+      // Beside its name, only what is worth a word: whose it is when it
+      // is the person's own, and that it is off.
+      aside={
+        own || !on ? (
+          <span {...stylex.props(styles.actions)}>
+            {own ? <Badge>{t`Just for you`}</Badge> : null}
+            {on ? null : <Badge tone="attention">{t`Off`}</Badge>}
+          </span>
+        ) : undefined
+      }
+      // What it is for, under its name: the details no longer repeat it.
+      description={agent.job === "" ? undefined : agent.job}
+      size="md"
+      // The agent's name on every part: the side nav marks which part.
+      title={name}
+    />
   );
 };
 
@@ -717,8 +788,9 @@ export const AgentPage = ({
     });
   };
   const can = editable && !busy;
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { name } = agent;
-  const on = agent.state === "on";
   const typed: Typed = {
     name: agent.name,
     job: agent.job,
@@ -764,46 +836,36 @@ export const AgentPage = ({
   return (
     <Page>
       <PageColumn measure="settings">
-        <PageHeader
-          actions={
-            <div {...stylex.props(styles.actions)}>
-              <Field orientation="horizontal" disabled={!can}>
-                <FieldLabel>{t`On`}</FieldLabel>
-                <Switch
-                  checked={on}
-                  onCheckedChange={(next) => {
-                    void change(async (session) => {
-                      await session.connections.setAgentPaused(agent.id, !next);
-                    });
-                  }}
-                />
-              </Field>
-              <EditAgent
-                agent={agent}
-                can={can}
-                models={models}
-                save={save}
-                typed={typed}
-              />
-              {usable && on ? (
-                <Button
-                  icon={Conversation}
-                  render={<Link search={{ agent: agent.id }} to="/" />}
-                  size="sm"
-                  variant="ink"
-                >
-                  {t`Chat`}
-                </Button>
-              ) : null}
-            </div>
-          }
-          {...(own
-            ? { description: t`Yours alone: nobody else sees or asks it` }
-            : {})}
-          size="md"
-          // The agent's name on every part: the side nav marks which part.
-          title={name}
+        <AgentHead
+          agent={agent}
+          can={can}
+          change={change}
+          first={first}
+          onDelete={() => {
+            setDeleting(true);
+          }}
+          onEdit={() => {
+            setEditing(true);
+          }}
+          usable={usable}
         />
+        <EditAgent
+          agent={agent}
+          can={can}
+          models={models}
+          open={editing}
+          save={save}
+          setOpen={setEditing}
+          typed={typed}
+        />
+        {first ? null : (
+          <DeleteAgent
+            name={name}
+            open={deleting}
+            remove={remove}
+            setOpen={setDeleting}
+          />
+        )}
         <AgentFailure>{failure}</AgentFailure>
         {/* Every tab stays mounted, the others hidden: what is typed and
           not yet saved on one stays while another is looked at. */}
@@ -824,7 +886,6 @@ export const AgentPage = ({
           />
           <RecentActivity usage={usage} wakes={wakes} />
           <ShareAgent agent={agent} can={can} change={change} />
-          {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
         </div>
         <div
           hidden={shownTab !== "instructions"}

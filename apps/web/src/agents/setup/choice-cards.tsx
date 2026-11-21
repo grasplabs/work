@@ -23,6 +23,8 @@ export interface ChoiceCard<T extends string> {
   description: string;
   /** Its mark, beside or above its words. */
   media?: ReactNode;
+  /** A small picture under its words, such as how far it reaches. */
+  foot?: ReactNode;
 }
 
 const HOVER = media.hover;
@@ -173,6 +175,7 @@ export const ChoiceCards = <T extends string>({
               <span {...stylex.props(styles.description)}>
                 {card.description}
               </span>
+              {card.foot}
             </span>
             {chosen ? (
               <span aria-hidden="true" {...stylex.props(styles.tick)}>

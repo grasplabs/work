@@ -2339,10 +2339,6 @@ msgstr "En ajouter une autre"
 msgid "Add connector"
 msgstr "Ajouter un connecteur"
 
-#: src/agents/agent-documents.tsx
-msgid "Add documents"
-msgstr "Ajouter des documents"
-
 #: src/apps/field-editor.tsx
 msgid "Add field"
 msgstr "Ajouter le champ"
@@ -4793,6 +4789,7 @@ msgstr "Choisir des documents"
 msgid "Choose every {one} shown"
 msgstr "Choisir chaque {one} affiché"
 
+#: src/agents/agent-documents.tsx
 #: src/frame/part-words.tsx
 msgid "Choose files"
 msgstr "Choisir des fichiers"
@@ -6067,10 +6064,6 @@ msgid "Delete “{title}”?"
 msgstr "Supprimer « {title} » ?"
 
 #: src/agents/agent-page.tsx
-msgid "Delete {name}"
-msgstr "Supprimer {name}"
-
-#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
 #: src/settings/event-sources.tsx
@@ -6686,6 +6679,10 @@ msgstr "Cartographié en workflow : {workflow}"
 #: src/inbox/items.ts
 msgid "Drive"
 msgstr "Lecteur"
+
+#: src/agents/agent-documents.tsx
+msgid "Drop documents here"
+msgstr "Déposez les documents ici"
 
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
@@ -8104,6 +8101,10 @@ msgstr "Obtenir une clé chez {provider}"
 msgid "Give {app} back"
 msgstr "Rendre {app}"
 
+#: src/agents/agent-documents.tsx
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
+msgstr "Donnez à {name} ce qu’il doit connaître par cœur : une checklist, une grille tarifaire, une politique. Il les lit quand une question en a besoin, pour que ses réponses suivent vos propres documents."
+
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
 msgstr "Donner une valeur"
@@ -9082,6 +9083,10 @@ msgstr "Si une partie est illisible, dis laquelle."
 msgid "If a week was quiet, say so in a short report."
 msgstr "Si la semaine a été calme, dis-le dans un rapport court."
 
+#: src/agents/agent-share.tsx
+msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
+msgstr "Si un administrateur le reprend, il devient l’un des agents de l’entreprise : il choisit qui peut l’interroger et ce qu’il peut faire. Ce que vous lui avez dit ne le suit pas, et vous ne pouvez plus le modifier ni l’ouvrir."
+
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
 msgstr "Si un montant ou un client n’est pas clair, dis-le au lieu de deviner."
@@ -9475,8 +9480,8 @@ msgid "It answers in a chat, whenever it is asked."
 msgstr "Il répond dans un chat, chaque fois qu’on le lui demande."
 
 #: src/agents/agent-page.tsx
-msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs."
-msgstr "Il ne répond plus à personne, et sa planification et ses réglages sont supprimés. Les chats que chacun a eus avec lui restent les siens."
+msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead."
+msgstr "Il ne répond plus à personne, et son horaire et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, désactivez-le plutôt."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9944,6 +9949,7 @@ msgstr "Aller au plus récent"
 msgid "Just for me"
 msgstr "Rien que pour moi"
 
+#: src/agents/agent-page.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Just for you"
@@ -11135,6 +11141,7 @@ msgstr "D’autres Apps ont leurs propres modèles."
 msgid "More for {label}"
 msgstr "Plus pour {label}"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-page.tsx
 #: src/settings/event-sources.tsx
 msgid "More for {name}"
@@ -11749,7 +11756,6 @@ msgstr "Aucune intégration ne correspond à votre recherche."
 msgid "No integrations yet."
 msgstr "Pas encore d’intégrations."
 
-#: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
 msgstr "Aucune tâche décrite pour l'instant"
@@ -12680,6 +12686,7 @@ msgstr "Océan"
 msgid "of them wait for a decision"
 msgstr "d’entre elles attendent une décision"
 
+#: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
 msgstr "Désactivé"
@@ -12698,10 +12705,6 @@ msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Désactivé, il ne fait que répondre ici : il ne prépare aucune modification à confirmer."
 
 #: src/agents/agent-share.tsx
-msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
-msgstr "Proposez {name} aux administrateurs de votre entreprise. S'ils le reprennent, il devient un agent de l'entreprise : ils choisissent qui peut l'interroger et ce qu'il peut faire, et vous ne le modifiez plus."
-
-#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Proposer à l'entreprise"
 
@@ -12710,8 +12713,8 @@ msgid "Offered an agent to the company, or took the offer back"
 msgstr "A proposé un agent à l’entreprise, ou a retiré l’offre"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
-msgstr "Proposé le {since}. Les administrateurs de votre entreprise peuvent reprendre {name}. Ce que vous lui avez dit ne part pas avec lui, et une fois qu'ils l'ont repris, vous ne pouvez plus l'ouvrir."
+msgid "Offered on {since}"
+msgstr "Proposé le {since}"
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -12729,7 +12732,6 @@ msgstr "Modifications plus anciennes"
 msgid "Older versions"
 msgstr "Versions plus anciennes"
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/setup/schedule-step.tsx
 #: src/settings/stephen-card.tsx
@@ -16177,7 +16179,6 @@ msgstr "Partager avec une équipe"
 msgid "Share with others: {statement}"
 msgstr "Partager avec d’autres : {statement}"
 
-#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
 msgstr "Partager avec l'entreprise"
@@ -16245,6 +16246,10 @@ msgstr "Partagé. Ceux avec qui vous l’avez partagé le voient sous le même n
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
 msgstr "Partages qui vous attendent"
+
+#: src/agents/agent-share.tsx
+msgid "Sharing"
+msgstr "Partage"
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -17401,10 +17406,6 @@ msgstr "Retirer : {text}"
 msgid "Take the leads from {name}"
 msgstr "Reprendre les responsables depuis {name}"
 
-#: src/agents/agent-share.tsx
-msgid "Take the offer back"
-msgstr "Retirer l'offre"
-
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Reprendre la sienne"
@@ -18019,6 +18020,10 @@ msgstr "Le Cerveau de l’entreprise : {percent} % connu. Les points foncés
 #: src/brain/skills-page.tsx
 msgid "The company has no skills of its own yet."
 msgstr "L'entreprise n'a pas encore de skills à elle."
+
+#: src/agents/agent-share.tsx
+msgid "The company's admins may take {name} on"
+msgstr "Les administrateurs de l’entreprise peuvent reprendre {name}"
 
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."
@@ -19074,10 +19079,6 @@ msgstr "À tous"
 msgid "To everyone at {company}"
 msgstr "À tous chez {company}"
 
-#: src/agents/agent-page.tsx
-msgid "To stop it for a while, turn it off instead."
-msgstr "Pour l'arrêter un temps, désactivez-le plutôt."
-
 #: src/frame/part-words.tsx
 msgid "To tell this key from others."
 msgstr "Pour distinguer cette clé des autres."
@@ -19284,12 +19285,17 @@ msgstr "Transforme une boîte de réception pleine en une courte liste de ce qui
 msgid "Turn into"
 msgstr "Transformer en"
 
+#: src/agents/agent-page.tsx
+msgid "Turn off"
+msgstr "Désactiver"
+
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
 msgid "Turn off"
 msgstr "Désactiver"
 
 #: src/agents/agent-apps-card.tsx
+#: src/agents/agent-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Turn on"
 msgstr "Activer"
@@ -20324,7 +20330,6 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
 
 #: src/agents/agent-form.tsx
-#: src/agents/agent-page.tsx
 #: src/agents/setup/job-step.tsx
 #: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
@@ -21843,10 +21848,6 @@ msgstr "Vos mots"
 #: src/agents/agents-overview.tsx
 msgid "Yours"
 msgstr "Les vôtres"
-
-#: src/agents/agent-page.tsx
-msgid "Yours alone: nobody else sees or asks it"
-msgstr "À vous seul : personne d'autre ne le voit ni ne l'interroge"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Yours alone: only you ask it"

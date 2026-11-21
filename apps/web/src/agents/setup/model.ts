@@ -183,10 +183,6 @@ export interface StepProps {
   /** The company's catalog of apps, connected ones marked. */
   apps: readonly CatalogApp[];
   teams: StephenReach["teams"];
-  /** The company's people, by name: their faces show who it reaches. */
-  people: readonly string[];
-  /** The person making it, by name: their own face. */
-  me: string;
   /** The models the organization chose, which an agent can be given. */
   models: readonly string[];
   /** Whether another agent has the name typed. */

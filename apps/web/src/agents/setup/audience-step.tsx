@@ -1,12 +1,9 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-} from "../../grasp/avatar/index.ts";
-import { Tick } from "../../grasp/icons/index.ts";
+import { IconTile } from "../../grasp/icon-tile/index.ts";
+import { Company, People, Person, Tick } from "../../grasp/icons/index.ts";
+import type { IconData } from "../../grasp/icons/index.ts";
 import { Text } from "../../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../../grasp/toggle/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
@@ -16,14 +13,24 @@ import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
 // Who may use it, the first question, as three cards to press (Ruben,
-// 21 November: the card itself is the choice, no radio dot; be creative),
-// each picturing who: the person's own face, a few of the company's teams
-// as a stack of faces, or the whole company, its teams and "+N". Just the
-// maker (an agent of their own, which they may offer the company later),
-// some teams, or everyone. Just me only while the company lets people
-// have their own. Some teams brings up the company's teams under the
-// cards as chips to press, in a row whose room is always kept, so the
-// cards never move when it comes or goes.
+// 21 November: the card itself is the choice, no radio dot; the icons, but
+// a little more creative): each card its mark and, under its words, how far
+// it reaches as a row of dots: one lit for just the maker, some for a few
+// teams, all of them for everyone, lit in green on the chosen card. Just me
+// only while the company lets people have their own. Some teams brings up
+// the company's teams under the cards as toggles, in a row whose room is
+// always kept, so the cards never move when it comes or goes.
+
+/** Each choice's mark. */
+const marks: Record<Audience, IconData> = {
+  me: Person,
+  teams: People,
+  everyone: Company,
+};
+
+/** How many dots the reach has, and how many each choice lights. */
+const reachDots = 12;
+const reaches: Record<Audience, number> = { me: 1, teams: 5, everyone: 12 };
 
 const styles = stylex.create({
   teams: {
@@ -32,11 +39,41 @@ const styles = stylex.create({
     gap: grasp.space2,
     minHeight: grasp.controlSm,
   },
-  // The faces stand a little apart from the words, at one height on every card.
-  faces: { display: "flex", alignItems: "center", minHeight: "2.5rem" },
   // Out of sight and out of reach until Some teams is chosen, its room kept.
   away: { visibility: "hidden" },
+  // How far it reaches: a row of small dots, the lit ones first.
+  reach: {
+    display: "flex",
+    gap: "0.3125rem",
+    marginBlockStart: grasp.space2,
+  },
+  dot: {
+    width: "0.375rem",
+    height: "0.375rem",
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: grasp.line,
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  },
+  lit: { backgroundColor: grasp.muted },
+  litChosen: { backgroundColor: grasp.success },
 });
+
+/** How far a choice reaches, as dots: lit up to `reach`, in green when it is chosen. */
+const Reach = ({ reach, chosen }: { reach: number; chosen: boolean }) => (
+  <span aria-hidden="true" {...stylex.props(styles.reach)}>
+    {Array.from({ length: reachDots }, (_, at) => (
+      <span
+        key={at}
+        {...stylex.props(
+          styles.dot,
+          at < reach && (chosen ? styles.litChosen : styles.lit)
+        )}
+      />
+    ))}
+  </span>
+);
 
 /** The teams to press when some teams may use it. */
 const TeamsChoice = ({
@@ -79,24 +116,10 @@ export const AudienceStep = ({
   setup,
   change,
   teams,
-  people,
-  me,
   audiences,
 }: StepProps) => {
   const { t } = useLingui();
   const { audienceNames } = useSetupWords();
-  // The company's people as faces: a few for some teams, all for everyone.
-  const crowd = people.map((person) => ({ name: person }));
-  // Who each choice reaches, as faces: one, a few teams, or all of them.
-  const faces: Record<Audience, React.ReactNode> = {
-    me: (
-      <Avatar name={me} size="md">
-        <AvatarFallback />
-      </Avatar>
-    ),
-    teams: <AvatarGroup max={3} people={crowd.slice(0, 3)} size="md" />,
-    everyone: <AvatarGroup max={4} people={crowd} size="md" />,
-  };
   const explained: Record<Audience, string> = {
     me: t`Only you can use it. Share it later.`,
     teams: t`Only the teams you pick.`,
@@ -105,12 +128,21 @@ export const AudienceStep = ({
   return (
     <Question title={t`Who can use it?`}>
       <ChoiceCards
-        cards={audiences.map((audience) => ({
-          value: audience,
-          title: audienceNames[audience],
-          description: explained[audience],
-          media: <span {...stylex.props(styles.faces)}>{faces[audience]}</span>,
-        }))}
+        cards={audiences.map((audience) => {
+          const chosen = setup.audience === audience;
+          return {
+            value: audience,
+            title: audienceNames[audience],
+            description: explained[audience],
+            media: (
+              <IconTile
+                icon={marks[audience]}
+                variant={chosen ? "gradient" : "raised"}
+              />
+            ),
+            foot: <Reach chosen={chosen} reach={reaches[audience]} />,
+          };
+        })}
         label={t`Who can use it`}
         onValueChange={(audience) => {
           change({ audience });

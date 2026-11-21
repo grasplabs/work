@@ -7,7 +7,7 @@ import {
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { ComponentType, SubmitEvent } from "react";
 
@@ -20,6 +20,7 @@ import { arrive } from "../grasp/motion/arrive.ts";
 import { Shimmer } from "../grasp/shimmer/index.ts";
 import { StepBar } from "../grasp/step-bar/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { briefOf, instructionsOf, ownBrief } from "./agent-brief.ts";
 import { AgentFailure } from "./agent-facts.tsx";
@@ -238,10 +239,8 @@ export const ManualAgent = ({
   models,
   apps,
   teams,
-  people,
   taken,
   personId,
-  personName,
   company,
   own,
 }: {
@@ -250,14 +249,10 @@ export const ManualAgent = ({
   /** The company's catalog of apps, connected ones marked. */
   apps: readonly CatalogApp[];
   teams: StephenReach["teams"];
-  /** The company's people, by name: their faces show who it reaches. */
-  people: readonly string[];
   /** The names other agents have: core keeps each name to one agent. */
   taken: readonly string[];
   /** The person making it: a schedule chosen here works for them. */
   personId: string;
-  /** Their name, for their own face. */
-  personName: string;
   /** Whether they may make one for the company: its own admins. */
   company: boolean;
   /** Whether the company lets people have agents of their own. */
@@ -265,6 +260,7 @@ export const ManualAgent = ({
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
+  const router = useRouter();
   const { failure, run } = useCoreAction();
   // Who it may be for: one of their own only while the company lets them,
   // the company's only for its admins.
@@ -418,12 +414,31 @@ export const ManualAgent = ({
       throw new Error("The agent wasn't made.");
     }
     setPhase("made");
-    await wait(readyFor);
+    const agent = made.agent.id;
+    // Its instructions didn't save: its page opens where they wait.
+    const search = made.told ? {} : { tab: "instructions" as const };
+    // Its page is read while it stands ready, so the page comes whole, with
+    // no loading step between (Ruben, 21 November: "very smooth"); one
+    // that can't be read now loads as any page does.
+    await Promise.all([
+      wait(readyFor),
+      // One that fails to read now is read again as the page opens.
+      orNull(
+        async () =>
+          await router.preloadRoute({
+            to: "/agents/$agent",
+            params: { agent },
+            search,
+          })
+      ),
+    ]);
+    // The ready agent fades into its page (a view transition), where the
+    // browser has them; at once where it doesn't, or with less motion.
     await navigate({
       to: "/agents/$agent",
-      params: { agent: made.agent.id },
-      // Its instructions didn't save: its page opens where they wait.
-      search: made.told ? {} : { tab: "instructions" },
+      params: { agent },
+      search,
+      viewTransition: true,
     });
   };
   // Making it takes a few calls to core: the button says it is working.
@@ -491,8 +506,6 @@ export const ManualAgent = ({
               nameTaken={nameTaken}
               pick={pick}
               setup={setup}
-              me={personName}
-              people={people}
               teams={teams}
             />
           </div>
