@@ -213,6 +213,31 @@ const guardedAnswer = (status: number) => ({
   resourcePolicy: "same-origin",
 });
 
+/**
+ * Real images, 8 by 8 pixels, from Pillow (libpng, libjpeg-turbo with
+ * optimised Huffman tables, libwebp lossy), each one checked to decode.
+ */
+const realImages = {
+  "image/png":
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAGUlEQVR42mNkYGhQYGDARCwMCgxYweCUAABobwJednxjlwAAAABJRU5ErkJggg==",
+  "image/jpeg":
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAP/xAAXEAEBAQEAAAAAAAAAAAAAAAAABSIx/8QAFQEBAQAAAAAAAAAAAAAAAAAAAgT/xAAbEQACAQUAAAAAAAAAAAAAAAADBAABEhMhMf/aAAwDAQACEQMRAD8AhPhcwAnKyS7saDZcNNz/2Q==",
+  "image/webp":
+    "UklGRkQAAABXRUJQVlA4IDgAAADQAQCdASoIAAgAAsBMJbACdAD0MaxAAAD+8ad5vDCBK46si+GWLKzuoS7Rv/N9T+hHeP9O5VwAAA==",
+};
+
+const fromBase64 = (text: string): Uint8Array =>
+  Uint8Array.from(atob(text), (char) => char.codePointAt(0) ?? 0);
+
+/** What a member downloads at `path`: its type and its bytes. */
+const downloaded = async (path: string, cookie: string) => {
+  const response = await routed(path, { headers: { cookie } });
+  return {
+    type: response.headers.get("content-type"),
+    bytes: new Uint8Array(await response.arrayBuffer()),
+  };
+};
+
 /** How many logos the files bucket holds. */
 const logosKept = async (): Promise<number> => {
   const listed = await env.FILES.list({ prefix: "organization/logo/" });
@@ -255,6 +280,11 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
       await admin.api.organization.removeLogo();
     });
     const after = await admin.api.organization.get();
+    const configChanges = await admin.api.audit.search({
+      type: "config",
+      actorId: admin.userId,
+      action: "organization.logo",
+    });
 
     expect({
       refused,
@@ -267,6 +297,7 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
         .filter(({ action }) => action.startsWith("organization.logo"))
         .map(({ action, actor }) => ({ action, actor })),
       after: after.logo,
+      configChanges: configChanges.records.map(({ event }) => event?.action),
     }).toStrictEqual({
       refused: Array.from({ length: 5 }, () => "role.forbidden"),
       unset: null,
@@ -285,6 +316,8 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
         },
       ],
       after: null,
+      // Found among configuration changes, newest first.
+      configChanges: ["organization.logo.removed", "organization.logo.updated"],
     });
   });
 
@@ -442,6 +475,29 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
       ],
     });
     await admin.api.organization.removeLogo();
+  });
+
+  it("gives back a real PNG, JPEG or WebP exactly as it was set, as its type", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const user = await signedInApi(idp, "user");
+
+    const roundTrips = [];
+    for (const text of Object.values(realImages)) {
+      const bytes = fromBase64(text);
+      // oxlint-disable-next-line no-await-in-loop -- one logo after another
+      const { logo } = await admin.api.organization.setLogo(bytes);
+      // oxlint-disable-next-line no-await-in-loop -- read before the next
+      const got = await downloaded(logo ?? "", user.session);
+      roundTrips.push({
+        type: got.type,
+        same: got.bytes.join(",") === bytes.join(","),
+      });
+    }
+    await admin.api.organization.removeLogo();
+
+    expect(roundTrips).toStrictEqual(
+      Object.keys(realImages).map((type) => ({ type, same: true }))
+    );
   });
 
   it("is shown to signed-in members only, as an image that runs nothing, and only the logo the organization has now", async () => {
