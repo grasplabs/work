@@ -8,7 +8,6 @@ import type {
 } from "./agents.ts";
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
-import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type { PageBundle } from "./pages.ts";
@@ -161,8 +160,12 @@ export const chatListOptionsSchema = z
   .object({
     /** Only those the person archived (`ChatsApi.archive`); else only the rest. */
     archived: z.boolean().optional(),
-    /** Only those the person filed in this project (`ChatsApi.setProject`). */
-    project: identifierSchema.optional(),
+    /**
+     * Only those the person filed in this project (`ChatsApi.setProject`).
+     * Any string: one that names no project they are in, malformed or not,
+     * is `project.not_found`, as `setProject` answers it.
+     */
+    project: z.string().optional(),
   })
   .strict();
 
@@ -1260,7 +1263,9 @@ export interface ChatsApi {
   /**
    * The person's own chats that hold every word of `query` in their title
    * or what was said in them, the most recently active first: at most a
-   * page's worth. Never anyone else's.
+   * page's worth. Never anyone else's. Archived chats are found too, each
+   * marked `archived`: archiving only takes a chat out of `list`, and
+   * search is how the person finds one to bring back.
    */
   search: (query: string) => Promise<ChatSearchHit[]>;
   /**

@@ -4975,8 +4975,9 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Files `personId`'s own chat in project `project`, or takes it out of
    * the one it is in (`null`), audited as `by`'s; nothing, and no event,
-   * where it is so already. Whether they may put it in that project is
-   * the caller's to check (`ChatsRpc.setProject`).
+   * where it is so already. A chat moved from one project straight to
+   * another records the one it came `from` too. Whether they may put it
+   * in that project is the caller's to check (`ChatsRpc.setProject`).
    */
   setChatProject(
     chatId: unknown,
@@ -4994,12 +4995,16 @@ export class Workspace extends DurableObject<Env> {
         .set({ projectId: project })
         .where(eq(chats.id, chat.id))
         .run();
-      this.#outboxed(
-        by,
-        project === null ? "chat.unfiled" : "chat.filed",
-        chat.id,
-        { project: project ?? chat.projectId }
-      );
+      if (project === null) {
+        this.#outboxed(by, "chat.unfiled", chat.id, {
+          project: chat.projectId,
+        });
+      } else {
+        this.#outboxed(by, "chat.filed", chat.id, {
+          project,
+          ...(chat.projectId === null ? {} : { from: chat.projectId }),
+        });
+      }
     });
     this.#deliverAudit();
   }

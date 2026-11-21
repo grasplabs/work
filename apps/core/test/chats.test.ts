@@ -24,6 +24,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { maxChatsPerPerson } from "../src/workspace.ts";
+import { newTeam } from "./admin-teams.ts";
 import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -351,6 +352,9 @@ describe("chats", () => {
       // Someone outside it can neither file in it nor list it.
       outcome(cy.chats.setProject(cys.id, project)),
       outcome(cy.chats.list({ project })),
+      // A malformed ID is a project nobody is in, wherever it is given.
+      outcome(ann.chats.setProject(kept.id, "not-a-project")),
+      outcome(ann.chats.list({ project: "not-a-project" })),
     ]);
     const listed = {
       ann: await ann.chats.list({ project }),
@@ -384,6 +388,8 @@ describe("chats", () => {
       refused: [
         "agent.chat_not_found",
         "agent.chat_not_found",
+        "project.not_found",
+        "project.not_found",
         "project.not_found",
         "project.not_found",
       ],
@@ -432,6 +438,80 @@ describe("chats", () => {
             actor: { type: "person", userId: ann.userId },
             project,
           },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("are filed by someone in a project through a team, listed there archived only when asked, and moved straight to another, which records where from", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "builder");
+    const dee = await person();
+    const team = await newTeam(admin, [dee]);
+    const [first, second] = await Promise.all(
+      ["Year-end close", "Audit"].map(
+        async (name) =>
+          await owner.api.projects.create({
+            name,
+            description: "",
+            icon: "folder",
+          })
+      )
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Expected both projects");
+    }
+    for (const { id } of [first, second]) {
+      // oxlint-disable-next-line no-await-in-loop -- one project at a time
+      await owner.api.projects.addMember(id, {
+        type: "team",
+        id: team,
+        role: "user",
+      });
+    }
+    const open = await dee.chats.create("Accruals");
+    const done = await dee.chats.create("Last year's close");
+    await dee.chats.setProject(open.id, first.id);
+    await dee.chats.setProject(done.id, first.id);
+    await dee.chats.archive(done.id);
+    const inFirst = {
+      listed: await dee.chats.list({ project: first.id }),
+      archived: await dee.chats.list({ project: first.id, archived: true }),
+    };
+    await dee.chats.setProject(open.id, second.id);
+    const moved = {
+      first: await dee.chats.list({ project: first.id }),
+      second: await dee.chats.list({ project: second.id }),
+    };
+
+    expect({
+      listed: inFirst.listed.map(({ id }) => id),
+      archived: inFirst.archived.map(({ id }) => id),
+      first: moved.first.map(({ id }) => id),
+      second: moved.second.map(({ id }) => id),
+    }).toStrictEqual({
+      listed: [open.id],
+      archived: [done.id],
+      first: [],
+      second: [open.id],
+    });
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                target?.id === open.id && action === "chat.filed"
+            )
+            .map(({ detail }) => ({
+              project: detail?.project,
+              from: detail?.from,
+            }))
+        ).toStrictEqual([
+          { project: first.id, from: undefined },
+          { project: second.id, from: first.id },
         ]);
       },
       { timeout: 10_000 }

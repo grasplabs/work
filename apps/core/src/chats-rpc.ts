@@ -515,6 +515,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async setProject(chatId: string, project: string | null): Promise<void> {
     await withPerson(this.#check, async (person) => {
       const id = chatIdOf(chatId);
+      if (project !== null && typeof project !== "string") {
+        throw agentErrors.create("agent.invalid_request");
+      }
       // Only in a project they are in now; out of one, wherever they are.
       const access =
         project === null
