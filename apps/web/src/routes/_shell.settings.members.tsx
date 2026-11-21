@@ -493,7 +493,7 @@ const stateOf = (row: PersonRow, words: PeopleWords): string => {
   if (row.kind === "invited") {
     return words.invited;
   }
-  if (row.kind === "member") {
+  if (row.kind !== "removed") {
     return "";
   }
   return (row.removed?.erasure?.completedAt ?? null) === null

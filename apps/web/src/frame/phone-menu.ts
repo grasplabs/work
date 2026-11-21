@@ -22,6 +22,11 @@ const setMenuOpen = (next: boolean): void => {
   }
 };
 
+/** Closes the phone's menu: on signing out, so whoever signs in next finds it closed. */
+export const closePhoneMenu = (): void => {
+  setMenuOpen(false);
+};
+
 /** The phone's menu: whether it is open, and how to open or close it. */
 export const usePhoneMenu = (): [boolean, (open: boolean) => void] => [
   useSyncExternalStore(watch, () => open),

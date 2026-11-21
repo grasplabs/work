@@ -344,7 +344,11 @@ const StartDialog = ({
                     invalid={problem !== undefined && problem.field === name}
                     key={name}
                   >
-                    <FieldLabel htmlFor={id} id={`${id}-label`}>
+                    <FieldLabel
+                      // A person is picked with a button, named by this label.
+                      htmlFor={field.kind === "person" ? undefined : id}
+                      id={`${id}-label`}
+                    >
                       {field.required ? name : t`${name} (optional)`}
                     </FieldLabel>
                     <FieldInput
@@ -455,10 +459,13 @@ export const StartIndependentRun = ({
     };
   }, [core, workflow, live]);
 
+  if (live === null) {
+    return null;
+  }
   if (unread !== undefined) {
     return <ErrorText>{t`Can't offer Run: ${unread}`}</ErrorText>;
   }
-  const version = live === null ? null : (form?.version ?? null);
+  const version = form?.version ?? null;
   if (version === null) {
     return null;
   }
