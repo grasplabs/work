@@ -2,14 +2,14 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, lineOf, openAdmin } from "../../test/app.tsx";
+import type { Answers } from "../../test/app.tsx";
 import {
   emptyAdminSnapshot,
   readySnapshot,
   toldSnapshot,
 } from "../../test/snapshots.ts";
 import type { Crm } from "../crm/crm.ts";
-import { answeredAdmin, gridRow, lineOf, openAdmin } from "../test-app.tsx";
-import type { Answers } from "../test-app.tsx";
 import { formatDate } from "./words.ts";
 
 // An organization's page: its column of sections, its overview and what

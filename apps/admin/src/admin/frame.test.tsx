@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
-import { FailedError, gridRow, openAdmin, settle } from "../test-app.tsx";
+import { FailedError, gridRow, openAdmin, settle } from "../../test/app.tsx";
 
 // What the browser shows around every page, now that it renders the admin
 // alone: while the admin's own records come, an address no page has, an

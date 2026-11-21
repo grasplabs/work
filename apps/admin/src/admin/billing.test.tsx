@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, lineOf, openAdmin } from "../../test/app.tsx";
 import type { BillingAccount } from "../billing/billing.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
-import { answeredAdmin, gridRow, lineOf, openAdmin } from "../test-app.tsx";
 import { formatDate } from "./words.ts";
 
 // An organization's Billing, under Details' Contract tab, and what of it

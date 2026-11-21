@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
 import type { ClientSetup } from "../clients/setup.ts";
 import type { WatchedSignals } from "../clients/watch-signals.ts";
-import { answeredAdmin, gridRow, openAdmin } from "../test-app.tsx";
 
 // What an organization's Setup says of its own staff's secrets, its Teams
 // bot and how Stephen fares there, and which tab it opens on, as the

@@ -1,14 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
-import { brainReport, heardSnapshot } from "../../test/snapshots.ts";
 import {
   answeredAdmin,
   gridRow,
   openAdmin,
   settle,
   until,
-} from "../test-app.tsx";
+} from "../../test/app.tsx";
+import { brainReport, heardSnapshot } from "../../test/snapshots.ts";
 
 // An organization's Brain section around its report, as the browser shows
 // it: what it says of the brain from the snapshot, and the rest of the

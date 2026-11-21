@@ -2,6 +2,7 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
 import {
   emptyAdminSnapshot,
   fact,
@@ -9,7 +10,6 @@ import {
   linkCode,
   said,
 } from "../../test/snapshots.ts";
-import { answeredAdmin, gridRow, openAdmin } from "../test-app.tsx";
 import { formatDate } from "./words.ts";
 
 // An organization's interviews, and Stephen across every organization in

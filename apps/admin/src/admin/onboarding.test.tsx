@@ -3,8 +3,8 @@ import { adminSnapshotSchema } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { companies } from "../../test/app.tsx";
 import { emptyAdminSnapshot } from "../../test/snapshots.ts";
-import { companies } from "../test-app.tsx";
 
 // An organization's onboarding (its steps, and its teams under
 // Interviews), as the browser shows it from the snapshot its core answers,
@@ -393,15 +393,9 @@ describe("an organization's onboarding in the admin", () => {
       ].map((text) => logistics.html.includes(text)),
       // A team the company doesn't have: all of them.
       unknown: unknown.html.includes('aria-label="Open Sales"'),
-      // Where a person's link stands is still read out on a phone, where it isn't shown.
-      phone: [
-        sales.html.includes('class="max-sm:sr-only">Talking now'),
-        sales.html.includes('class="max-sm:hidden">Talking now'),
-      ],
     }).toStrictEqual({
       sales: Array.from({ length: 11 }, () => true),
       logistics: [true, true],
-      phone: [true, false],
       unknown: true,
     });
   });

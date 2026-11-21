@@ -1,7 +1,7 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 /**
  * The admin as the browser runs it, for the component tests
- * (vite.components.config.ts): its real router, routes, loaders and
+ * (vite.components.config.ts, the .test.tsx files under src): its real router, routes, loaders and
  * components, at an address, in happy-dom. Its server functions are
  * answered here, at the page's own boundary (`/_serverFn`, in Start's wire
  * format), as the Worker would answer them: what the Worker answers, and
@@ -16,11 +16,11 @@ import { fromJSON, toCrossJSONAsync } from "seroval";
 import type { SerovalJSON } from "seroval";
 import { afterEach, vi } from "vite-plus/test";
 
-import { emptyAdminSnapshot } from "../test/snapshots.ts";
-import type { AnsweredAdmin } from "./admin/org-reads.ts";
-import type { ClientAdmin } from "./clients/admin.ts";
-import type { GridRow } from "./clients/grid.ts";
-import { getRouter } from "./router.tsx";
+import type { AnsweredAdmin } from "../src/admin/org-reads.ts";
+import type { ClientAdmin } from "../src/clients/admin.ts";
+import type { GridRow } from "../src/clients/grid.ts";
+import { getRouter } from "../src/router.tsx";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -197,7 +197,7 @@ export const openAdmin = async (
   const answered: Answers = {
     fetchClientGrid: [] satisfies GridRow[],
     fetchClientAdmins: [] satisfies ClientAdmin[],
-    reportPageErrorFn: undefined,
+    reportPageErrorFn: { logged: true },
     ...answers,
   };
   vi.stubGlobal(

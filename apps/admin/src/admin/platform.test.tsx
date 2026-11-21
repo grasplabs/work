@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
+import { gridRow, openAdmin } from "../../test/app.tsx";
+import type { Answers } from "../../test/app.tsx";
 import type { OffboardedClient } from "../hosting/offboarding.ts";
-import { gridRow, openAdmin } from "../test-app.tsx";
-import type { Answers } from "../test-app.tsx";
 import type { Readiness } from "./readiness.ts";
 
 // Platform's pages and Home's banner as the browser shows them from what

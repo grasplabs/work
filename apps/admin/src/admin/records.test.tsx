@@ -2,8 +2,8 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
 import { emptyAdminSnapshot } from "../../test/snapshots.ts";
-import { answeredAdmin, gridRow, openAdmin } from "../test-app.tsx";
 
 // An organization's records (the Brain's Data, and its Log), as the
 // browser shows them from the snapshot its core answers and the trail the

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, lineOf, openAdmin } from "../../test/app.tsx";
 import type { Crm, CrmRecords } from "../crm/crm.ts";
-import { answeredAdmin, gridRow, lineOf, openAdmin } from "../test-app.tsx";
 
 // An organization's company in Attio, under its Details, as Attio's answer
 // reads (test/admin-crm.test.ts: what the Worker reads of Attio, and that
