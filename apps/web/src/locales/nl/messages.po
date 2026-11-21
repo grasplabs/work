@@ -6915,6 +6915,7 @@ msgid "Erase…"
 msgstr "Wissen…"
 
 #: src/onboarding/setup-steps.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Gewist"
@@ -14524,6 +14525,10 @@ msgstr "Verwijderen: {text}"
 msgctxt "a table row of something taken away"
 msgid "removed"
 msgstr "verwijderd"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Removed"
+msgstr "Verwijderd"
 
 #: src/frame/part-words.tsx
 msgctxt "a guest a change takes off"

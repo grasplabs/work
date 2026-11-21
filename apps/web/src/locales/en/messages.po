@@ -6915,6 +6915,7 @@ msgid "Erase…"
 msgstr "Erase…"
 
 #: src/onboarding/setup-steps.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Erased"
@@ -14524,6 +14525,10 @@ msgstr "Remove: {text}"
 msgctxt "a table row of something taken away"
 msgid "removed"
 msgstr "removed"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Removed"
+msgstr "Removed"
 
 #: src/frame/part-words.tsx
 msgctxt "a guest a change takes off"
