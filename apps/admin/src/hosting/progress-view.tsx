@@ -4,15 +4,15 @@
  * taken. Once live it is one line, its steps and who is invited folded
  * under it. Codes and the technical part only under each line's Details.
  */
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/collapsible";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ReactNode } from "react";
 
 import { Section } from "../admin/section.tsx";

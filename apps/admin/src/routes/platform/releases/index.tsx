@@ -1,4 +1,4 @@
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import {
   Table,
   TableBody,
@@ -6,7 +6,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { PageLoading } from "../../../admin/failure.tsx";

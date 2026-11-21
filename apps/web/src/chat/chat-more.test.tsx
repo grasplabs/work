@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+
+import { Toaster } from "@grasp-os/app-kit/components/toast";
 import type { ChatSummary, ChatUpdate } from "@grasp-os/shared/chat";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {

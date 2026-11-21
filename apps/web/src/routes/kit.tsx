@@ -2,8 +2,8 @@ import {
   Avatar,
   AvatarFallback,
   AvatarGroup,
-} from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
+} from "@grasp-os/app-kit/components/avatar";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,21 +11,21 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/breadcrumb";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+} from "@grasp-os/app-kit/components/card";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+} from "@grasp-os/app-kit/components/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -33,51 +33,51 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+} from "@grasp-os/app-kit/components/field";
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
-} from "@grasp-os/ui/components/hover-card";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/hover-card";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { Kbd } from "@grasp-os/ui/components/kbd";
-import { Label } from "@grasp-os/ui/components/label";
+} from "@grasp-os/app-kit/components/item";
+import { Kbd } from "@grasp-os/app-kit/components/kbd";
+import { Label } from "@grasp-os/app-kit/components/label";
 // Local check that the UI kit renders with the theme, in light and dark mode
 // (e2e/kit.e2e.ts). Not product UI: builds in production mode answer not
 // found. Gated on the mode rather than `DEV`, because the local stack serves
 // a `--mode development` build, which Vite still builds with `DEV` false.
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -85,7 +85,7 @@ import {
   PageSidebarRailButton,
   PageSidebarRailDivider,
   PageSidebarRailExpand,
-} from "@grasp-os/ui/components/page-sidebar";
+} from "@grasp-os/app-kit/components/page-sidebar";
 import {
   Popover,
   PopoverContent,
@@ -93,15 +93,15 @@ import {
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
+} from "@grasp-os/app-kit/components/popover";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Separator } from "@grasp-os/ui/components/separator";
+} from "@grasp-os/app-kit/components/select";
+import { Separator } from "@grasp-os/app-kit/components/separator";
 import {
   Sheet,
   SheetContent,
@@ -109,7 +109,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@grasp-os/ui/components/sheet";
+} from "@grasp-os/app-kit/components/sheet";
 import {
   Sidebar,
   SidebarContent,
@@ -119,11 +119,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-} from "@grasp-os/ui/components/sidebar";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Stat } from "@grasp-os/ui/components/stat";
-import { Switch } from "@grasp-os/ui/components/switch";
+} from "@grasp-os/app-kit/components/sidebar";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import {
   Table,
   TableBody,
@@ -131,22 +131,22 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { toast, Toaster } from "@grasp-os/ui/components/toast";
+} from "@grasp-os/app-kit/components/tabs";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { toast, Toaster } from "@grasp-os/app-kit/components/toast";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/tooltip";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   BookOpenIcon,

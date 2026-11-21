@@ -1,3 +1,10 @@
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   ChannelAccount,
@@ -6,13 +13,6 @@ import type {
   ChannelReach,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { MessageSquareIcon } from "lucide-react";

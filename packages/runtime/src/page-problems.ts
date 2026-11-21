@@ -116,7 +116,7 @@ export const fallbackOf = (error: unknown, tryAgain: () => void): ReactNode =>
         ? error.message
         : "Something went wrong showing this page."
     ),
-    // A plain button, not @grasp-os/ui's Button: the UI kit depends on
+    // A plain button, not @grasp-os/app-kit's Button: the UI kit depends on
     // the SDK, so the SDK can't depend on it back. Styled with theme
     // utilities only, nothing arbitrary.
     createElement(

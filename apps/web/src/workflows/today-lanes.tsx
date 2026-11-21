@@ -1,12 +1,12 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { cssVars } from "@grasp-os/app-kit/lib/css-vars";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type {
   DecisionAnswerInput,
   DecisionView,
 } from "@grasp-os/shared/decisions";
 import type { TodayWaitsOn, WorkflowsToday } from "@grasp-os/shared/workflows";
-import { Button } from "@grasp-os/ui/components/button";
-import { cssVars } from "@grasp-os/ui/lib/css-vars";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";

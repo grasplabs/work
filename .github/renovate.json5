@@ -78,7 +78,7 @@
       matchPackageNames: ["@tanstack/**"],
     },
     {
-      groupName: "ui kit",
+      groupName: "app kit",
       matchPackageNames: [
         "@base-ui/react",
         "shadcn",

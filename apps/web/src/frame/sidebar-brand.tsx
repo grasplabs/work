@@ -1,5 +1,5 @@
+import { BrandHeader } from "@grasp-os/app-kit/components/brand-header";
 import type { Organization } from "@grasp-os/shared/organization";
-import { BrandHeader } from "@grasp-os/ui/components/brand-header";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState, useSyncExternalStore } from "react";
 

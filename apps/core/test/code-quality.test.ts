@@ -283,7 +283,7 @@ export default appTest(schema, {
     // one only a type predicate reads. Not a parameter before one used (a
     // handler's `ctx`), one starting with `_`, nor a name a type query
     // reads, which is used (as TypeScript and oxlint read it).
-    const source = `import { Badge } from "@grasp-os/ui/components/badge";
+    const source = `import { Badge } from "@grasp-os/app-kit/components/badge";
 
 const row = { id: 1 };
 export type Row = typeof row;

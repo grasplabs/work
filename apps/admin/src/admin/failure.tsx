@@ -8,7 +8,7 @@
  * column and the admin's sidebar, which keep working; only a frame that
  * can't be read at all shows `FrameFailure` in its place.
  */
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -16,8 +16,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
+} from "@grasp-os/app-kit/components/empty";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { Link, useMatch, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";

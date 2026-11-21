@@ -1,9 +1,9 @@
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import { failureText } from "@grasp-os/shared/errors";
 import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";

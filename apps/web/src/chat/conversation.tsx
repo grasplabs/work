@@ -5,8 +5,8 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
   useMessageScroller,
-} from "@grasp-os/ui/components/message-scroller";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/message-scroller";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 

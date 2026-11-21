@@ -1,9 +1,9 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { XIcon } from "lucide-react";

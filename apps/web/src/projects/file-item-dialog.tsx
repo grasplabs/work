@@ -1,6 +1,5 @@
-import type { Project, ProjectItemCandidate } from "@grasp-os/shared/projects";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -10,13 +9,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   NativeSelect,
   NativeSelectOptGroup,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+} from "@grasp-os/app-kit/components/native-select";
+import type { Project, ProjectItemCandidate } from "@grasp-os/shared/projects";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";

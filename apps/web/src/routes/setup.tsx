@@ -1,3 +1,4 @@
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
@@ -19,7 +20,6 @@ import type {
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import {
   createFileRoute,

@@ -1,5 +1,5 @@
+import type { FieldTypeOption } from "@grasp-os/app-kit/components/data-model";
 import type { FieldKind, FieldType } from "@grasp-os/shared/data-model";
-import type { FieldTypeOption } from "@grasp-os/ui/components/data-model";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

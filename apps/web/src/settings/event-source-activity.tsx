@@ -1,3 +1,15 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Label } from "@grasp-os/app-kit/components/label";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type {
   EventSource,
   EventSourceDelivery,
@@ -6,18 +18,6 @@ import type {
   EventSourceTestResult,
   EventSourceTrigger,
 } from "@grasp-os/shared/event-sources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";

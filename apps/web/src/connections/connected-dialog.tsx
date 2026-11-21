@@ -1,13 +1,13 @@
-import type { ListedConnection } from "@grasp-os/shared/connect";
-import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
-import { Button } from "@grasp-os/ui/components/button";
+import { AutoHeight, FadeIn } from "@grasp-os/app-kit/components/auto-height";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { SuccessMark } from "@grasp-os/ui/components/success-mark";
+} from "@grasp-os/app-kit/components/dialog";
+import { SuccessMark } from "@grasp-os/app-kit/components/success-mark";
+import type { ListedConnection } from "@grasp-os/shared/connect";
 import { Trans, useLingui } from "@lingui/react/macro";
 
 // What the connect dialog ends on, as the prototype's `Done` view

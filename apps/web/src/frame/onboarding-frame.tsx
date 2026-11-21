@@ -1,4 +1,4 @@
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
 import type { ReactNode } from "react";
 
 import { LanguageButton } from "../language-picker.tsx";

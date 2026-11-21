@@ -1,12 +1,12 @@
-import type { Identity } from "@grasp-os/shared/rpc";
 import {
   AppShell,
   AppShellContent,
   AppShellDock,
   AppShellMain,
-} from "@grasp-os/ui/components/app-shell";
-import { Toaster } from "@grasp-os/ui/components/toast";
-import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/app-shell";
+import { Toaster } from "@grasp-os/app-kit/components/toast";
+import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { useState } from "react";
 import type { ReactNode } from "react";
 

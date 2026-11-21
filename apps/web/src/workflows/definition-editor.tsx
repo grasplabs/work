@@ -1,14 +1,14 @@
+import { Alert, AlertDescription } from "@grasp-os/app-kit/components/alert";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Label } from "@grasp-os/app-kit/components/label";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   WorkflowDefinitionProblem,
   WorkflowDraft,
 } from "@grasp-os/shared/workflow-resources";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Label } from "@grasp-os/ui/components/label";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 

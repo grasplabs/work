@@ -1,12 +1,12 @@
-import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/tabs";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";

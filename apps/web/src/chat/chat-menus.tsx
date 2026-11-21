@@ -1,14 +1,14 @@
-import type { ChatSummary } from "@grasp-os/shared/chat";
-import { chatTitleSchema } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import { Input } from "@grasp-os/app-kit/components/input";
+import type { ChatSummary } from "@grasp-os/shared/chat";
+import { chatTitleSchema } from "@grasp-os/shared/chat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react";

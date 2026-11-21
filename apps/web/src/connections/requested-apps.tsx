@@ -1,5 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { AppRequest } from "@grasp-os/shared/connect";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await } from "@tanstack/react-router";
 import { ClockIcon } from "lucide-react";

@@ -1,4 +1,7 @@
 // @vitest-environment happy-dom
+
+import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import type { DataGridState } from "@grasp-os/app-kit/components/data-grid";
 import {
   paginationOptionsValidator,
   paginationResultValidator,
@@ -6,8 +9,6 @@ import {
 } from "@grasp-os/runtime/app";
 import type { Id } from "@grasp-os/runtime/app";
 import { useMutation } from "@grasp-os/runtime/react";
-import { DataGrid } from "@grasp-os/ui/components/data-grid";
-import type { DataGridState } from "@grasp-os/ui/components/data-grid";
 import { act } from "react";
 import { describe, expect, it } from "vite-plus/test";
 

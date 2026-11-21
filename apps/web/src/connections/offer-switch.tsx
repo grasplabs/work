@@ -1,4 +1,4 @@
-import { Switch } from "@grasp-os/ui/components/switch";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
 
 import { ErrorText } from "../error-text.tsx";

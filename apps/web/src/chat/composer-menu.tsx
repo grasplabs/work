@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandEmpty,
@@ -7,15 +7,15 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
-} from "@grasp-os/ui/components/command";
+} from "@grasp-os/app-kit/components/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import type { PromptSuggestion } from "@grasp-os/ui/components/prompt-editor";
-import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/popover";
+import type { PromptSuggestion } from "@grasp-os/app-kit/components/prompt-editor";
+import { PromptInputButton } from "@grasp-os/app-kit/components/prompt-input";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   ArrowLeftIcon,

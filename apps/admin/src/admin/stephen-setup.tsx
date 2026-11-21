@@ -5,6 +5,26 @@
  * (commands.tsx), it holds from the next interview turn on; taking it
  * back leaves what the first conversation suggests.
  */
+
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
@@ -15,25 +35,6 @@ import {
   stephenTermMaxLength,
   stephenTermsMax,
 } from "@grasp-os/shared/onboarding-staff";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { PencilIcon, RotateCcwIcon } from "lucide-react";
 import { useId, useState } from "react";
 

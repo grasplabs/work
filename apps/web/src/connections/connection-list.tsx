@@ -1,3 +1,13 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@grasp-os/app-kit/components/dialog";
 import {
   composioConsentText,
   composioKeyConsentText,
@@ -7,16 +17,6 @@ import type { ListedConnection } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";

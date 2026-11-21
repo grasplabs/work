@@ -1,5 +1,4 @@
-import type { LinkState } from "@grasp-os/shared/admin/onboarding-admin";
-import { Progress } from "@grasp-os/ui/components/progress";
+import { Progress } from "@grasp-os/app-kit/components/progress";
 /**
  * The marks the Interviews section draws its counts with, ported from the
  * prototype (grasplabs/prototype `components/admin/admin-parts.tsx` and
@@ -7,7 +6,8 @@ import { Progress } from "@grasp-os/ui/components/progress";
  * prototype sizes a bar with an inline style, a bar here is the UI's
  * progress bar, which is also announced as the share it is.
  */
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { LinkState } from "@grasp-os/shared/admin/onboarding-admin";
 
 /** One row of a bar list: what it counts, how many, and the number as shown when it isn't the count. */
 export interface BarRow {

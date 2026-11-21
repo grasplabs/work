@@ -1,14 +1,14 @@
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type {
   AppClassAudience,
   PlaceAudience,
   StephenReach,
 } from "@grasp-os/shared/stephen-reach";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

@@ -5,8 +5,7 @@
  * another. It is in place before anyone at the company signs in; what
  * the company goes through after that is changed on its Flow page.
  */
-import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
-import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
+
 import {
   Field,
   FieldContent,
@@ -14,11 +13,13 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/field";
 import {
   RadioGroup,
   RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
+} from "@grasp-os/app-kit/components/radio-group";
+import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
+import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
 import { useId } from "react";
 
 /** Each flow staff start from, as staff read it, and what the company goes through in it. */

@@ -1,19 +1,19 @@
-import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card } from "@grasp-os/app-kit/components/card";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
+import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
 import {
   createFileRoute,
   Link,

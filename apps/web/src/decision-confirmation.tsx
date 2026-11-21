@@ -1,8 +1,3 @@
-import type {
-  DecisionAnswerInput,
-  DecisionView,
-  DecisionWithheld,
-} from "@grasp-os/shared/decisions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,7 +7,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import type {
+  DecisionAnswerInput,
+  DecisionView,
+  DecisionWithheld,
+} from "@grasp-os/shared/decisions";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 import { z } from "zod";

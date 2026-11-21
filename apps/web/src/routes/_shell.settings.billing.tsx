@@ -1,15 +1,15 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import { firstAgentId } from "@grasp-os/shared/agents";
 import { failureText } from "@grasp-os/shared/errors";
 import { noBilling } from "@grasp-os/shared/org-settings";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { MonthBilled } from "@grasp-os/shared/stephen-requests";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLinkIcon, InfoIcon } from "lucide-react";

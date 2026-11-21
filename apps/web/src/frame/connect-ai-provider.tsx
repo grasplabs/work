@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -6,7 +6,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import { Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";

@@ -1,15 +1,15 @@
-import type { GateView } from "@grasp-os/shared/onboarding-gate";
-import type { Organization } from "@grasp-os/shared/organization";
-import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Input } from "@grasp-os/ui/components/input";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
+import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import type { Organization } from "@grasp-os/shared/organization";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

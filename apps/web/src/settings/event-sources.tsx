@@ -1,10 +1,10 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Label } from "@grasp-os/app-kit/components/label";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
 import type { EventSource } from "@grasp-os/shared/event-sources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";

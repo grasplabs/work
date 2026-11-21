@@ -1,13 +1,13 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Label } from "@grasp-os/app-kit/components/label";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
 import type {
   WorkflowResourceVersion,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { Label } from "@grasp-os/ui/components/label";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { DownloadIcon } from "lucide-react";
 import { useId, useState } from "react";

@@ -1,5 +1,3 @@
-import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Table,
   TableBody,
@@ -7,7 +5,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 

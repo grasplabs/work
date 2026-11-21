@@ -1,19 +1,19 @@
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { Kbd } from "@grasp-os/ui/components/kbd";
+import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
+import { Kbd } from "@grasp-os/app-kit/components/kbd";
 import {
   PromptBar,
   PromptBarAction,
   PromptBarActions,
   PromptBarIcon,
-} from "@grasp-os/ui/components/prompt-bar";
-import type { PromptEditorHandle } from "@grasp-os/ui/components/prompt-editor";
-import { Separator } from "@grasp-os/ui/components/separator";
+} from "@grasp-os/app-kit/components/prompt-bar";
+import type { PromptEditorHandle } from "@grasp-os/app-kit/components/prompt-editor";
+import { Separator } from "@grasp-os/app-kit/components/separator";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
 import {
   ArrowUpIcon,

@@ -1,11 +1,11 @@
-import type { Project } from "@grasp-os/shared/projects";
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
+import type { Project } from "@grasp-os/shared/projects";
 import type { ReactElement, ReactNode } from "react";
 
 import type { Session } from "../core.ts";

@@ -60,7 +60,7 @@ interface UseForm {
  *   the run's `respond`.
  *
  * Render it with `Form`, `TextField`, `TextareaField`, `FormError` and
- * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through
+ * `SubmitButton` from `@grasp-os/app-kit/form`, or custom controls through
  * `form.Field`.
  */
 export const useForm: UseForm = (

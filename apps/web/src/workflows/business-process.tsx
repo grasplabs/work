@@ -1,18 +1,18 @@
-import { businessProcesses } from "@grasp-os/shared/business-processes";
-import type { BusinessProcess } from "@grasp-os/shared/business-processes";
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
+import { businessProcesses } from "@grasp-os/shared/business-processes";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

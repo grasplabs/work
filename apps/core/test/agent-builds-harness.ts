@@ -37,7 +37,7 @@ export const appName = "Invoice desk";
 export const ledgerDefinition = testApp({ name: "Ledger" });
 
 /** A page whose button is restyled, which the design system's class checks refuse. */
-export const restyled = `import { Button } from "@grasp-os/ui/components/button";
+export const restyled = `import { Button } from "@grasp-os/app-kit/components/button";
 import { createFileRoute } from "@tanstack/react-router";
 
 const Desk = () => (

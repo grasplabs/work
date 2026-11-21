@@ -1,4 +1,3 @@
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -6,7 +5,8 @@ import {
   PageSidebarRailButton,
   PageSidebarRailDivider,
   PageSidebarRailExpand,
-} from "@grasp-os/ui/components/page-sidebar";
+} from "@grasp-os/app-kit/components/page-sidebar";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouteContext } from "@tanstack/react-router";
 import {

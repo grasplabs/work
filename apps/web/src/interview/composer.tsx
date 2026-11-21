@@ -1,13 +1,13 @@
-import { turnAnswerMax } from "@grasp-os/shared/interview-turn";
-import type { FactTag } from "@grasp-os/shared/interview-turn";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
-} from "@grasp-os/ui/components/input-group";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/input-group";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { turnAnswerMax } from "@grasp-os/shared/interview-turn";
+import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { useLingui } from "@lingui/react/macro";
 import { ArrowUpIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

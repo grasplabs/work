@@ -1,5 +1,5 @@
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import { runActivityDefaultDays } from "@grasp-os/shared/workflows";
-import { Stat } from "@grasp-os/ui/components/stat";
 import { Plural, Trans } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 

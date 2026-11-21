@@ -11,9 +11,9 @@ import {
   PageHeaderContent,
   PageHeaderDescription,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { SiteHeader } from "@grasp-os/ui/components/site-header";
-import type { SiteCrumb } from "@grasp-os/ui/components/site-header";
+} from "@grasp-os/app-kit/components/page-header";
+import { SiteHeader } from "@grasp-os/app-kit/components/site-header";
+import type { SiteCrumb } from "@grasp-os/app-kit/components/site-header";
 import { Link } from "@tanstack/react-router";
 import type { ReactElement, ReactNode } from "react";
 

@@ -1,7 +1,7 @@
 import type {
   DockablePlacement,
   FloatingOffset,
-} from "@grasp-os/ui/components/dockable-panel";
+} from "@grasp-os/app-kit/components/dockable-panel";
 import { useSyncExternalStore } from "react";
 
 // How Grasp's one chat is laid out (global-chat.tsx): open or closed to its

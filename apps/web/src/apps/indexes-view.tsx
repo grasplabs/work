@@ -1,15 +1,14 @@
-import type { DataModelTable, IndexUse } from "@grasp-os/shared/data-model";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Alert, AlertDescription } from "@grasp-os/app-kit/components/alert";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Field,
   FieldDescription,
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/field";
 import {
   Item,
   ItemActions,
@@ -18,18 +17,19 @@ import {
   ItemGroup,
   ItemMedia,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
+} from "@grasp-os/app-kit/components/item";
 import {
   RadioGroup,
   RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
+} from "@grasp-os/app-kit/components/radio-group";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
+import type { DataModelTable, IndexUse } from "@grasp-os/shared/data-model";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   ListOrderedIcon,
