@@ -61,7 +61,7 @@ describe("an organization's page as read", () => {
     // Read again: its core times out (the page's read joins the one under way).
     const failing = Promise.withResolvers<ClientAdmin | null>();
     const underWay = reads.read(client.id, async () => await failing.promise);
-    reads.askAnew(client.id);
+    reads.show(client.id);
     const readAgain = opened(reads, true);
     failing.resolve(timedOut);
     await underWay;
@@ -86,7 +86,7 @@ describe("an organization's page as read", () => {
 });
 
 describe("an organization's page loaded again", () => {
-  it("asks its core only when staff asked anew, never because the router ran it again over a fresh answer", async () => {
+  it("asks its core again on the organization it shows, but takes the fresh answer on coming to it, the router counting that as staying or not", async () => {
     const reads = orgReads();
     const fresh = answered(1000);
     reads.remember(fresh);
@@ -96,23 +96,28 @@ describe("an organization's page loaded again", () => {
       return await Promise.resolve(answered(0));
     };
 
-    const rerun = await opened(reads, true);
-    const askedOnRerun = asked;
-    reads.askAnew(client.id);
+    // Another organization's page is shown; the router comes to Acme's,
+    // counting it as staying (as it can after a preload).
+    reads.show("globex");
+    const cameTo = await opened(reads, true);
+    const askedOnComing = asked;
+    // Acme's page loads again where it is: after a change, Read again.
     const underWay = reads.read(client.id, ask);
-    const readAgain = await opened(reads, true);
+    const loadedAgain = await opened(reads, true);
     await underWay;
 
     expect({
-      rerun: rerun?.admin,
-      askedOnRerun,
-      readAgain: readAgain?.admin.state,
+      cameTo: cameTo?.admin,
+      askedOnComing,
+      loadedAgain: loadedAgain?.admin.state,
       asked,
+      newer: loadedAgain !== undefined && loadedAgain.admin !== fresh,
     }).toStrictEqual({
-      rerun: fresh,
-      askedOnRerun: 0,
-      readAgain: "answered",
+      cameTo: fresh,
+      askedOnComing: 0,
+      loadedAgain: "answered",
       asked: 1,
+      newer: true,
     });
   });
 });

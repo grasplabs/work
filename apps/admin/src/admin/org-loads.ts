@@ -144,9 +144,18 @@ const unanswered = (client: GridRow): ClientAdmin => ({
 
 /**
  * Organization `client`'s page as read: an answer the page has while it
- * is fresh, at once (unless staff asked anew over it, `askAnew`);
- * otherwise its core asked now, unless only preloaded (undefined: asked
- * once opened). The frame's read (`admins`) counts once it is in.
+ * is fresh, at once, when staff come to the page (a navigation, a
+ * preload); otherwise its core asked now, unless only preloaded
+ * (undefined: asked once opened). The frame's read (`admins`) counts once
+ * it is in.
+ *
+ * The rule for when a fresh answer may be reused: only on coming to the
+ * page. When the page loads again on the organization it already shows
+ * (`again`, on it): after any change staff made there (every change reads
+ * the page again, `router.invalidate`), Read again, Try again, or its
+ * answer going stale, its core is asked anew, and the page waits for that
+ * answer. So a change can't be followed by the answer from before it,
+ * whichever action made it: none of them has to say so.
  */
 export const readOrganization = async ({
   reads,
@@ -158,18 +167,23 @@ export const readOrganization = async ({
   reads: OrgReads;
   client: GridRow;
   admins: Promise<ClientAdmin[] | null>;
-  /** Run again on the page it is on: the load waits for the read, keeping what the page shows. */
+  /**
+   * The router ran the load again where it stays (its `cause`). Only the
+   * page the tab shows counts as loading again: the router can count a
+   * navigation to another organization as staying too.
+   */
   again: boolean;
   /** Only pointed at, not opened: what the page has, its core never asked. */
   preload: boolean;
 }): Promise<{ read: Deferred<OrgRead> | undefined }> => {
-  // Staff asked anew (Read again, `askAnew`): the fresh answer isn't
-  // reused. Only that: how the router came to run the loader (`again`)
-  // says nothing of who asked, and a navigation it counts as staying put
-  // must still take the frame's read under way.
-  const anew =
-    reads.takeAskedAnew(client.id) &&
-    reads.fresh(client.id, Date.now()) !== undefined;
+  // Loading again on the organization the tab shows: a change, Read
+  // again, Try again, a stale answer. Never a navigation the router counts
+  // as staying put: that takes the answer it has, or the frame's read.
+  const onIt = again && !preload && reads.showing(client.id);
+  const anew = onIt && reads.fresh(client.id, Date.now()) !== undefined;
+  if (!preload) {
+    reads.show(client.id);
+  }
   if (!anew) {
     const framed = await peek(admins);
     const found =
@@ -223,5 +237,5 @@ export const readOrganization = async ({
   // it isn't waited on, so the page shows at once and waits for it in
   // place; held in an object, as an async function awaits a promise it
   // returns.
-  return again ? { read: await read } : { read };
+  return onIt ? { read: await read } : { read };
 };

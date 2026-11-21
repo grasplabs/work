@@ -50,7 +50,7 @@ export const Route = createFileRoute("/organizations/$clientId")({
       reads: context.reads,
       client,
       admins: loaderData.admins,
-      // Run again on the page it is on: its answer went stale, or staff asked anew.
+      // Run again where it stays: on the page it shows, its core is asked anew.
       again: cause === "stay",
       preload,
     });

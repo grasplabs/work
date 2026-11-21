@@ -58,10 +58,10 @@ export interface OrgReads {
   settle: (admin: ClientAdmin, now: number) => OrgRead;
   /** Forgets everything of `clientId`, as for one offboarded. */
   forget: (clientId: string) => void;
-  /** Marks client `clientId` as asked anew by staff (Read again): its next page load reads its core over a fresh answer. */
-  askAnew: (clientId: string) => void;
-  /** Whether staff asked client `clientId` anew since its page last loaded; the mark goes with the asking. */
-  takeAskedAnew: (clientId: string) => boolean;
+  /** Records that client `clientId`'s page is the one the tab now shows. */
+  show: (clientId: string) => void;
+  /** Whether client `clientId`'s page is the one the tab shows. */
+  showing: (clientId: string) => boolean;
 }
 
 /** A router's reads, empty. */
@@ -70,8 +70,8 @@ export const orgReads = (): OrgReads => {
   const answers = new Map<string, AnsweredAdmin>();
   /** Why the last read failed and when, for a client with an answer kept, until a later one. */
   const failed = new Map<string, NonNullable<OrgRead["stale"]>>();
-  /** Clients staff asked anew (Read again), until their page loads. */
-  const askedAnew = new Set<string>();
+  /** The organization whose page the tab shows, once one loaded. */
+  let shown: string | undefined;
 
   const remember = (admin: ClientAdmin): void => {
     if (admin.state !== "answered") {
@@ -130,11 +130,10 @@ export const orgReads = (): OrgReads => {
       underWay.delete(clientId);
       answers.delete(clientId);
       failed.delete(clientId);
-      askedAnew.delete(clientId);
     },
-    askAnew: (clientId) => {
-      askedAnew.add(clientId);
+    show: (clientId) => {
+      shown = clientId;
     },
-    takeAskedAnew: (clientId) => askedAnew.delete(clientId),
+    showing: (clientId) => shown === clientId,
   };
 };

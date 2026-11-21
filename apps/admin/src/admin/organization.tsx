@@ -540,15 +540,12 @@ const aboutOf = (view: AdminView): string => {
  * Reads the organization's core again, keeping what the page shows until
  * the answer is in: `busy` while it is read.
  */
-const useReadAgain = (
-  clientId: string
-): { busy: boolean; readAgain: () => void } => {
+const useReadAgain = (): { busy: boolean; readAgain: () => void } => {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   // The router never throws for a load: one that fails shows where it would be.
   const read = async () => {
     setBusy(true);
-    router.options.context.reads.askAnew(clientId);
     await router.invalidate({
       filter: (match) => match.routeId === "/organizations/$clientId",
     });
@@ -575,7 +572,7 @@ const UnreadSection = ({
   section: OrgSection;
 }) => {
   const { id: clientId, name } = admin.client;
-  const { busy, readAgain } = useReadAgain(clientId);
+  const { busy, readAgain } = useReadAgain();
   const unset = admin.error === "not_deployed";
   return (
     <Empty data-unread={admin.error}>
@@ -636,7 +633,7 @@ const capitalized = (text: string): string =>
  * reading it again failed just now, why, above what it last answered.
  */
 const ReadNote = ({ read }: { read: OrgRead & { admin: AnsweredAdmin } }) => {
-  const { busy, readAgain } = useReadAgain(read.admin.client.id);
+  const { busy, readAgain } = useReadAgain();
   const again = (
     <Button disabled={busy} onClick={readAgain} size="xs" variant="link">
       {busy ? "Reading…" : "Read again"}
