@@ -5,6 +5,7 @@ import { useRouter } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import {
   ApprovalRequest,
@@ -14,7 +15,6 @@ import { Button } from "../grasp/button/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useApprovalWords } from "./approval-words.ts";
 import { useChatRequests } from "./chat-requests.ts";
@@ -181,7 +181,7 @@ export const ConnectionRequests = ({
     return null;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    return <NotLoadedState again={again} heading="h3" page={read} />;
   }
   if (read.data.length === 0) {
     return null;

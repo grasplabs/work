@@ -1782,13 +1782,20 @@ describe(SourcesPage, () => {
     await press("Version 1");
     const none = learnedSection();
     await press("Board minutes");
-    const refused = learnedSection();
+    const refused = learnedSection() ?? "";
 
-    expect({ nothing, none, refused }).toStrictEqual({
+    expect({
+      nothing,
+      none,
+      refused: {
+        why: refused.includes("The Brain is busy."),
+        again: refused.includes("Try again"),
+      },
+    }).toStrictEqual({
       nothing:
         "What the Brain learned from this versionThe Brain hasn't learned anything from this version.",
       none: undefined,
-      refused: "What the Brain learned from this versionThe Brain is busy.",
+      refused: { why: true, again: true },
     });
   });
 

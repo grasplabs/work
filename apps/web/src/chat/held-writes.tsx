@@ -13,6 +13,7 @@ import { useEffect, useId, useState } from "react";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import {
   ApprovalRequest,
@@ -25,7 +26,7 @@ import { EmailDraft, EventDraft, TaskDraft } from "../grasp/draft/index.ts";
 import type { DraftStatus } from "../grasp/draft/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -996,7 +997,15 @@ const ChatHeldWrites = ({
     return null;
   }
   if (held.state !== "ready") {
-    return <NotLoaded page={held} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setReads((read) => read + 1);
+        }}
+        heading="h3"
+        page={held}
+      />
+    );
   }
   const { actions, calls } = held.data;
   const count = actions.length + calls.length;

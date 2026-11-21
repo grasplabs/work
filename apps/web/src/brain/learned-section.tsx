@@ -13,6 +13,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -254,6 +255,8 @@ export const LearnedSection = ({
   const [more, setMore] = useState<
     { state: "loading" } | { state: "failed"; page: NotReady }
   >();
+  // Counts the tries, so Try again reads the first page again.
+  const [tried, setTried] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
@@ -279,7 +282,8 @@ export const LearnedSection = ({
     return () => {
       left.abort();
     };
-  }, [core, source, version]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [core, source, version, tried]);
 
   if (learned.state === "none") {
     return null;
@@ -312,7 +316,15 @@ export const LearnedSection = ({
         </Text>
       ) : null}
       {learned.state === "loading" ? <Spinner aria-label={t`Loading`} /> : null}
-      {learned.state === "failed" ? <NotLoaded page={learned.page} /> : null}
+      {learned.state === "failed" ? (
+        <NotLoadedState
+          again={() => {
+            setTried(tried + 1);
+          }}
+          heading="h3"
+          page={learned.page}
+        />
+      ) : null}
       {learned.state === "ready" && memories.length === 0 ? (
         <Text size="sm" tone="muted">
           <Trans>

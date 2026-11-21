@@ -1267,7 +1267,7 @@ const ContestedList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoadedState again={contested.again} heading="h2" page={first} />;
+    return <NotLoadedState again={contested.again} heading="h3" page={first} />;
   }
   // A page can hold no fact and still have more after it.
   if (facts.length === 0 && next === null) {
@@ -1364,7 +1364,7 @@ const EntityList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoadedState again={entities.again} heading="h2" page={first} />;
+    return <NotLoadedState again={entities.again} heading="h3" page={first} />;
   }
   if (items.length === 0 && entities.next === null) {
     return (
@@ -1634,7 +1634,7 @@ const SharedList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoadedState again={shared.again} heading="h2" page={first} />;
+    return <NotLoadedState again={shared.again} heading="h3" page={first} />;
   }
   if (items.length === 0 && next === null) {
     return (
