@@ -263,7 +263,10 @@ const subjectOfBuilt = ({ app, workflow }: ChatBuilt) => {
     : { subject: { kind: "workflow" as const, ...workflow } };
 };
 
-/** A chat just made, as its person's list shows it: nothing running in it yet. */
+/**
+ * A chat just made, or made before for the same key, as its person's list
+ * shows it: nothing running in it yet, and archived if a repeat finds it so.
+ */
 const summaryOfMade = (chat: Chat): ChatSummary => ({
   id: chat.id,
   title: chat.title,
@@ -272,7 +275,7 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   lastAt: chat.lastAt.toISOString(),
   running: false,
   make: makeOf(chat),
-  archived: false,
+  archived: chat.archivedAt !== null,
 });
 
 /**

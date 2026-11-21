@@ -5031,10 +5031,13 @@ export class Workspace extends DurableObject<Env> {
         .set({ archivedAt: archived ? new Date() : null })
         .where(eq(chats.id, chat.id))
         .run();
+      // With the project it is filed in then, null for none: the record
+      // shows it after the chat is moved or taken out.
       this.#outboxed(
         by,
         archived ? "chat.archived" : "chat.unarchived",
-        chat.id
+        chat.id,
+        { project: chat.projectId }
       );
     });
     this.#deliverAudit();
