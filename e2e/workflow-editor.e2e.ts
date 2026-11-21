@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
+import { dialogTitled } from "./dialogs.ts";
 import { dockedChat } from "./docked-chat.ts";
 import { modelScripts, workflowPlanned } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -269,7 +270,7 @@ test("a builder sees every declared branch of the checked definition, a test run
 
   // A run of the live version, started with Run in the bar.
   await page.getByRole("button", { name: "Run", exact: true }).click();
-  const start = page.getByRole("dialog", { name: "Start a run" });
+  const start = dialogTitled(page, "Start a run");
   await start.getByLabel("who").fill("Ada");
   await start.getByRole("button", { name: "Start the run" }).click();
   await expect(start.getByRole("status")).toHaveText(

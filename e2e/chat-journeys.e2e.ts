@@ -265,8 +265,8 @@ test("a person renames a chat where its name stands: in the page's bar, and in t
   // In the bar: a double-click on the name, a new one, Enter.
   const named = `Sales report ${tag}`;
   await page
-    .locator("[data-slot=app-shell-bar] [aria-haspopup=dialog]")
-    .last()
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .locator("[data-slot=app-shell-renamable]")
     .dblclick();
   await page.getByRole("textbox", { name: "Name" }).fill(named);
   await page.getByRole("textbox", { name: "Name" }).press("Enter");

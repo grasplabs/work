@@ -237,7 +237,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(rowOf(chats, title).locator("mark")).toHaveText("Ben");
   await search.fill(`never said ${tag}`);
   await expect(chats.getByRole("option")).toHaveCount(0);
-  await expect(chats).toContainText("No chat has that.");
+  await expect(chats).toContainText(`No chat has “never said ${tag}”`);
   await page.keyboard.press("Escape");
   await expect(chats).toHaveCount(0);
 
@@ -480,40 +480,36 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   });
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
-  const control = page.getByRole("button", { name: /^Model: /u });
+  const control = page.getByRole("button", { name: /^Model and effort: /u });
+  const picker = page.getByRole("dialog", { name: /^Model and effort: /u });
+  const thinking = picker.getByRole("radiogroup", { name: "Thinking" });
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: mistral-large-latest. Change model"
+    "Model and effort: mistral-large-latest"
   );
   await control.click();
-  const choices = page.getByRole("menuitemradio");
-  await expect(choices).toHaveText([
-    /mistral-large-latest/u,
-    /claude-sonnet-4-6/u,
-  ]);
+  await expect(
+    picker.getByRole("group", { name: "Makers" }).getByRole("button")
+  ).toHaveText([/mistral/u, /Anthropic/u]);
+  await expect(thinking).toHaveCount(0);
 
-  // One that thinks offers its efforts in the same menu, which stays open
+  // One that thinks offers its efforts in the same picker, which stays open
   // for them, at the model's own default.
-  await page
-    .getByRole("menuitemradio", { name: /^claude-sonnet-4-6/u })
-    .click();
-  await expect(choices).toHaveText([
-    /mistral-large-latest/u,
-    /claude-sonnet-4-6/u,
+  await picker.getByRole("button", { name: "Anthropic" }).click();
+  await picker.getByRole("option", { name: "claude-sonnet-4-6" }).click();
+  await expect(thinking.getByRole("radio")).toHaveText([
     "Low",
     "Medium",
     "High",
     "Max",
   ]);
-  await expect(
-    page.getByRole("menuitemradio", { name: "Medium" })
-  ).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("menuitemradio", { name: "Max" }).click();
+  await expect(thinking.getByRole("radio", { name: "Medium" })).toBeChecked();
+  await thinking.getByRole("radio", { name: "Max" }).click();
   await page.keyboard.press("Escape");
-  await expect(choices).toHaveCount(0);
+  await expect(picker).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
+    "Model and effort: claude-sonnet-4-6, Max"
   );
 
   const question = `Think hard ${tag}.`;
@@ -530,23 +526,20 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   expect(asked).toContain('"effort":"max"');
   expect(asked).toContain('"model":"anthropic/claude-sonnet-4-6"');
 
-  // Kept for the person in this browser: back on the page, the chat closed.
-  await chat.getByRole("button", { name: "Close" }).click();
-  await expect(chat).toBeHidden();
-  await page.reload();
+  // Kept for the person in this browser: back on Chat's start.
+  await page.goto("/");
   await expect(control).toHaveAccessibleName(
-    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
+    "Model and effort: claude-sonnet-4-6, Max"
   );
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
-  await page
-    .getByRole("menuitemradio", { name: /^mistral-large-latest/u })
-    .click();
-  await expect(choices).toHaveCount(2);
+  await picker.getByRole("button", { name: "mistral" }).click();
+  await picker.getByRole("option", { name: "mistral-large-latest" }).click();
+  await expect(thinking).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
-    "Model: mistral-large-latest. Change model"
+    "Model and effort: mistral-large-latest"
   );
 });
 
