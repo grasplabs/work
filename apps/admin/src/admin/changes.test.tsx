@@ -87,6 +87,7 @@ const onAcme = async (
     applies = true,
     held,
     framed,
+    frameMisses,
   }: {
     /** Whether the command changes what Acme's core answers. */
     applies?: boolean;
@@ -94,6 +95,8 @@ const onAcme = async (
     held?: { call: number; until: Promise<unknown> };
     /** The frame's reads of every client, by which (1 is the first), held back until each promise settles. */
     framed?: Record<number, Promise<unknown>>;
+    /** The frame's reads that fail outright, or answer without Acme (its core past its deadline), by which. */
+    frameMisses?: Record<number, "fails" | "without acme">;
   } = {}
 ) => {
   const empty = emptyAdminSnapshot("Acme");
@@ -142,6 +145,7 @@ const onAcme = async (
     // Every client but the one the page reads alone.
     fetchClientAdmins: async (data: unknown) => {
       frameReads += 1;
+      const call = frameReads;
       const except: unknown =
         typeof data === "object" && data !== null
           ? Reflect.get(data, "except")
@@ -150,10 +154,15 @@ const onAcme = async (
         Array.isArray(except) && except.includes(clientId);
       // What they hold when asked, stamped when they answer.
       const acmeHeld = core.admin();
-      await framed?.[frameReads];
+      await framed?.[call];
+      if (frameMisses?.[call] === "fails") {
+        throw new FailedError();
+      }
       const at = new Date().toISOString();
       return [
-        ...(left("acme") ? [] : [{ ...acmeHeld, at }]),
+        ...(left("acme") || frameMisses?.[call] === "without acme"
+          ? []
+          : [{ ...acmeHeld, at }]),
         ...(left("globex") ? [] : [answeredAdmin({ client: globex, at })]),
       ];
     },
@@ -191,6 +200,24 @@ const agreementsForm = (): HTMLFormElement | undefined =>
   [...document.querySelectorAll("form")].find((form) =>
     form.textContent?.includes("Works council")
   );
+
+/** Opens the dialog and submits what was agreed, without waiting for it to go through. */
+const giveAgreements = async (page: Element): Promise<void> => {
+  const open = [...page.querySelectorAll("button")].find(
+    (button) => button.textContent === "Change what was agreed"
+  );
+  await act(async () => {
+    open?.click();
+    await Promise.resolve();
+  });
+  await until(() => agreementsForm() !== undefined);
+  await act(async () => {
+    agreementsForm()?.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true })
+    );
+    await Promise.resolve();
+  });
+};
 
 /** Gives what was agreed on the page, as staff do in its dialog. */
 const agree = async (page: Element): Promise<void> => {
@@ -555,6 +582,126 @@ describe("a change on an organization's page", () => {
       }).toStrictEqual({ on: "/organizations/acme/details", agreed: true });
     }
   );
+
+  it.each([
+    ["the frame's read after it leaves Acme out", "without acme", true],
+    ["the frame's read after it fails", "fails", true],
+    ["the frame's read after it fails, and so does Acme's own", "fails", false],
+  ] as const)(
+    "never shows an answer from before a change as current, nothing left to wait on: %s",
+    async (_, miss, answers) => {
+      const through = Promise.withResolvers<null>();
+      const { container, router, calls, asked, fail } = await onAcme(
+        async () => {},
+        async () => {
+          await through.promise;
+          return { refused: null, issuedAt: new Date().toISOString() };
+        },
+        { frameMisses: { 2: miss } }
+      );
+      const askedBefore = asked();
+      await giveAgreements(container);
+      await act(async () => {
+        router.history.push("/organizations/globex");
+        await Promise.resolve();
+      });
+      await until(
+        () =>
+          router.state.resolvedLocation?.pathname === "/organizations/globex"
+      );
+      through.resolve(null);
+      await until(
+        () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
+      );
+      await settle();
+      if (!answers) {
+        fail();
+      }
+      await go(() => {
+        router.history.push(acmeContract);
+      });
+      const main = container.querySelector("main")?.textContent ?? "";
+
+      expect({
+        agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
+        marked: main.includes("couldn’t be read again"),
+        askedAgain: asked() - askedBefore,
+      }).toStrictEqual({
+        // Read alone once: the change, or, not answering, the last answer marked.
+        agreed: answers,
+        marked: !answers,
+        askedAgain: 1,
+      });
+    }
+  );
+
+  it("never shows an answer from before a change as current when it came in after the change, nothing running", async () => {
+    const slow = Promise.withResolvers<null>();
+    const through = Promise.withResolvers<null>();
+    const { container, router, calls, asked } = await onAcme(
+      async () => {},
+      async () => {
+        await through.promise;
+        return { refused: null, issuedAt: new Date().toISOString() };
+      },
+      // Read again's read (Acme's second) is slow; the frame's after the change fails.
+      { held: { call: 2, until: slow.promise }, frameMisses: { 2: "fails" } }
+    );
+    const again = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Read again"
+    );
+    await act(async () => {
+      again?.click();
+      await Promise.resolve();
+    });
+    await until(() => asked() === 2);
+    await giveAgreements(container);
+    await act(async () => {
+      router.history.push("/organizations/globex");
+      await Promise.resolve();
+    });
+    await until(
+      () => router.state.resolvedLocation?.pathname === "/organizations/globex"
+    );
+    through.resolve(null);
+    await until(
+      () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
+    );
+    // Read again's read answers now, after the change, with what was before it.
+    slow.resolve(null);
+    await settle();
+    const askedBefore = asked();
+    await go(() => {
+      router.history.push(acmeContract);
+    });
+
+    expect({
+      agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
+      askedAgain: asked() - askedBefore,
+    }).toStrictEqual({ agreed: true, askedAgain: 1 });
+  });
+
+  it("a Setup reloading itself marks no change: coming to another organization after it shows its answer at once", async () => {
+    const { router, calls } = await onAcme(async () => {});
+    await go(async () => {
+      await router.invalidate({
+        filter: (match) => match.routeId === "/organizations/$clientId/setup",
+      });
+    });
+    await go(() => {
+      router.history.push("/organizations/globex/details?tab=contract");
+    });
+
+    expect(
+      calls.filter(
+        ({ fn, data }) =>
+          fn === "fetchClientAdmin" &&
+          typeof data === "object" &&
+          data !== null &&
+          Reflect.get(data, "clientId") === "globex"
+      )
+    ).toHaveLength(0);
+  });
 
   it("coming to another organization while the frame reads every client again, nothing changed since its answer, shows that answer at once", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -19,8 +19,7 @@
 import type { ClientAdmin } from "../clients/admin.ts";
 import { fetchClientAdmin, fetchClientAdmins } from "../clients/functions.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { freshMs } from "./org-reads.ts";
-import type { AnsweredAdmin, OrgRead, OrgReads } from "./org-reads.ts";
+import type { OrgRead, OrgReads } from "./org-reads.ts";
 import type { Deferred } from "./settled.tsx";
 
 const openOrganization = /^\/organizations\/(?<clientId>[^/]+)/u;
@@ -38,12 +37,12 @@ export const openClientId = (pathname: string): string | undefined => {
 const readOne = async (
   reads: OrgReads,
   clientId: string,
-  anew = false
+  options: { anew?: boolean; after?: number } = {}
 ): Promise<ClientAdmin | null> =>
   await reads.read(
     clientId,
     async () => await fetchClientAdmin({ data: { clientId } }),
-    { anew }
+    options
   );
 
 /** Every client as `readAdmins` reads them, asked at `asked`. */
@@ -69,7 +68,7 @@ const adminsAnswer = async (
         return null;
       }
       try {
-        return await readOne(reads, open, anew);
+        return await readOne(reads, open, { anew });
       } catch {
         return null;
       }
@@ -115,12 +114,6 @@ export const readAdmins = (
   return { asked, admins: adminsAnswer(reads, asked, clients, open, anew) };
 };
 
-/** What a settled promise is, at once, or `notYet` while it isn't. */
-const notYet = Symbol("not yet");
-const peek = async <T>(value: Promise<T>): Promise<T | typeof notYet> =>
-  // A promise settled already wins the race: its callbacks run first.
-  await Promise.race([value, Promise.resolve(notYet)]);
-
 /**
  * How long an organization's page waits on the frame's read for its
  * client before asking it alone: a little past the page's own deadline
@@ -129,34 +122,19 @@ const peek = async <T>(value: Promise<T>): Promise<T | typeof notYet> =>
 export const frameWaitMs = 4000;
 
 /**
- * What the frame's read (`admins`) answered for `clientId`, once it is in,
- * or undefined: when it holds up the page past `frameWaitMs`, failed, or
- * has no fresh answer from its core (asked alone then, as staff opened
- * it).
+ * Waits for the frame's read (`admins`) to be in, which keeps what it
+ * read (`readAdmins`), but no longer than `frameWaitMs`.
  */
-const framedAnswer = async (
-  admins: Promise<ClientAdmin[] | null>,
-  clientId: string
-): Promise<AnsweredAdmin | undefined> => {
+const frameIn = async (admins: Promise<unknown>): Promise<void> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const framed = await Promise.race([
+    await Promise.race([
       admins,
       // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => {
-          resolve(null);
-        }, frameWaitMs);
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, frameWaitMs);
       }),
     ]);
-    const found = framed?.find((admin) => admin.client.id === clientId);
-    // Only an answer that is still fresh: an older one is read again.
-    return found?.state === "answered" &&
-      Date.now() - Date.parse(found.at) < freshMs
-      ? found
-      : undefined;
-  } catch {
-    return undefined;
   } finally {
     clearTimeout(timer);
   }
@@ -175,8 +153,14 @@ const unanswered = (client: GridRow): ClientAdmin => ({
  * is fresh, at once, when staff come to the page (a navigation, a
  * preload); otherwise its core asked now, unless only preloaded
  * (undefined: asked once opened). The frame's read (`admins`) counts once
- * it is in; while a read of it asked since that answer (the frame's, or
- * one of its own) is under way, the page waits for it instead.
+ * it is in.
+ *
+ * Coming to the page, an answer kept from before a change staff made
+ * since (src/router.tsx) is never shown as current: the page takes a
+ * read asked after that change if one is under way (the frame's, or one
+ * of its own), and otherwise asks its core alone; not answering, it shows
+ * the answer it had, marked stale. An answer with no change since shows
+ * at once.
  *
  * The rule for when a fresh answer may be reused: only on coming to the
  * page. When the page loads while the tab already shows this
@@ -214,20 +198,14 @@ export const readOrganization = async ({
   // again, a stale answer. Coming to it takes the answer it has, or the
   // frame's read.
   const anew = onIt && !preload;
-  // Whether a read of it under way may hold a change the answer kept
-  // doesn't: asked since a change staff made, the answer before it (the
-  // frame reads every client again after one). The frame's read, once in,
-  // is kept already (`readAdmins`).
-  const framing = (await peek(admins)) === notYet;
-  const frameOutdates = (): boolean =>
-    framing && reads.outdates(client.id, adminsAsked);
-  const ownOutdates = (): boolean => {
-    const own = reads.reading(client.id);
-    return own !== undefined && reads.outdates(client.id, own);
-  };
+  // An answer kept from before a change staff made since (src/router.tsx)
+  // is never shown as current: a read asked after that change answers
+  // for it, the frame's or its own, if one is under way, and otherwise its
+  // core is asked alone. One with no change since shows at once.
+  const since = reads.changedSince(client.id);
   if (!anew) {
     const fresh = reads.fresh(client.id, Date.now());
-    if (fresh !== undefined && !frameOutdates() && !ownOutdates()) {
+    if (fresh !== undefined && since === undefined) {
       // Still marked stale when reading it again failed since.
       return { read: reads.settle(fresh, Date.now()) };
     }
@@ -241,32 +219,31 @@ export const readOrganization = async ({
     // When the frame reads this client alone (the open one), the page
     // takes that read as soon as it answers (`readOne` joins it), never
     // waiting on other cores. Otherwise the frame's read of every client,
-    // still under way, has this one in it: waited on, rather than asking
-    // its core, Stripe and Attio a second time, unless it holds up the
-    // page past `frameWaitMs`.
+    // if asked after the change its answer predates, has this one in it:
+    // waited on, rather than asking its core, Stripe and Attio a second
+    // time, unless it holds up the page past `frameWaitMs`. When neither
+    // gives an answer with no change since, its core is asked alone.
     if (!anew) {
-      if (reads.reading(client.id) === undefined) {
-        const framed = await framedAnswer(admins, client.id);
-        if (framed !== undefined) {
-          // Kept by now, unless an answer asked later is: that one.
-          return reads.settle(
-            reads.fresh(client.id, Date.now()) ?? framed,
-            Date.now()
-          );
-        }
+      // Only a read asked after the change its kept answer predates counts.
+      const after = since ?? 0;
+      const own = reads.reading(client.id);
+      if ((own === undefined || own <= after) && adminsAsked > after) {
+        await frameIn(admins);
       }
-      // An answer kept while the page waited is not asked for again,
-      // unless a read that may hold a change it doesn't is under way: its
-      // own is joined, and the frame's, past `frameWaitMs`, is not waited
-      // on further: its core is asked alone.
+      // An answer kept by now, with no change since it, is not asked for
+      // again: the frame's, or one that came in while the page waited.
       const kept = reads.fresh(client.id, Date.now());
-      if (kept !== undefined && !frameOutdates() && !ownOutdates()) {
+      if (kept !== undefined && reads.changedSince(client.id) === undefined) {
         return reads.settle(kept, Date.now());
       }
     }
     let admin: ClientAdmin | null = null;
     try {
-      admin = await readOne(reads, client.id, anew);
+      // Not answering, the page shows the answer it had, marked stale.
+      admin = await readOne(reads, client.id, {
+        anew,
+        after: reads.changedSince(client.id) ?? 0,
+      });
     } catch {
       // As a core that didn't answer.
     }

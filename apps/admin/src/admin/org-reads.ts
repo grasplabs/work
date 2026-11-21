@@ -15,8 +15,8 @@
  *   (the page alone, or the frame for every client);
  * - an answer stays fresh `freshMs`, moving between an organization's
  *   sections, or coming back to it, asks its core nothing, unless it was
- *   asked before a change staff made and a read asked since that change
- *   is under way: then that one is waited on;
+ *   asked before a change staff made since: then a read asked after the
+ *   change answers for it (src/admin/org-loads.ts);
  * - when its core doesn't answer, or not in time, the page shows the last
  *   answer it had, marked stale with why and since when, until a later
  *   read answers.
@@ -51,12 +51,13 @@ export interface OrgReads {
    * Client `clientId`'s read under way, else a new one with `read`, shared
    * until it settles. Asked `anew`, only a read begun in the router's
    * load under way counts as under way: one begun before it may have
-   * been answered before the change that load shows.
+   * been answered before the change that load shows. Asked for one
+   * `after` a number of reads, only a read asked after those counts.
    */
   read: (
     clientId: string,
     read: () => Promise<ClientAdmin | null>,
-    options?: { anew?: boolean }
+    options?: { anew?: boolean; after?: number }
   ) => Promise<ClientAdmin | null>;
   /** The router began a load (src/router.tsx): every read asked before it is older. */
   loadBegan: () => void;
@@ -65,18 +66,18 @@ export interface OrgReads {
   /** When the read of client `clientId` under way was asked (`ask`), if one is. */
   reading: (clientId: string) => number | undefined;
   /**
-   * Staff may have changed something (src/router.tsx: every change
-   * reloads with `router.invalidate`): answers asked before now may be
+   * Staff may have changed something (src/router.tsx: a reload of the
+   * frame, as every change makes): answers asked before now may be
    * outdated.
    */
   changed: () => void;
   /**
-   * Whether a read of client `clientId` asked at `asked` may hold a change
-   * the answer kept of it doesn't: none is kept, or a change lies between
-   * when that answer was asked and when this read was, whatever changed
-   * since.
+   * How many reads had been asked by the first change after client
+   * `clientId`'s kept answer was asked: that answer may predate it, and
+   * only a read asked after that many holds it for sure. Undefined while
+   * no change came since (or none is kept).
    */
-  outdates: (clientId: string, asked: number) => boolean;
+  changedSince: (clientId: string) => number | undefined;
   /**
    * Keeps `admin`'s answer to a read asked at `asked`, unless an answer
    * to a read asked later is kept, or the client was forgotten since; a
@@ -150,9 +151,12 @@ export const orgReads = (): OrgReads => {
   };
 
   return {
-    read: async (clientId, read, { anew = false } = {}) => {
+    read: async (clientId, read, { anew = false, after = 0 } = {}) => {
       const pending = underWay.get(clientId);
-      if (pending !== undefined && (!anew || pending.asked > loadFrom)) {
+      if (
+        pending !== undefined &&
+        pending.asked > Math.max(after, anew ? loadFrom : 0)
+      ) {
         return await pending.answer;
       }
       const asked = ask();
@@ -186,13 +190,7 @@ export const orgReads = (): OrgReads => {
         kept.changedAt ??= asks;
       }
     },
-    outdates: (clientId, asked) => {
-      const kept = answers.get(clientId);
-      return (
-        kept === undefined ||
-        (kept.changedAt !== undefined && asked > kept.changedAt)
-      );
-    },
+    changedSince: (clientId) => answers.get(clientId)?.changedAt,
     remember,
     fresh: (clientId, now) => {
       const kept = answers.get(clientId)?.admin;
