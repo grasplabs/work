@@ -32,16 +32,24 @@ const folders = [
   "../../apps/core/test/fixtures/blueprints",
 ].map((folder) => path.join(import.meta.dirname, folder));
 
-/** The heap the compiler's builds must fit in, in MB: a Cloudflare isolate's. */
+/**
+ * The heap the compiler's builds must fit in, in MB: a Cloudflare
+ * isolate's, whatever it builds. `hello` takes 32–34 MB (November 2026):
+ * most of a build's heap is the compiler and the kit, not the App, so
+ * this guards what every build carries; a large App's own share is
+ * guarded again once the release ships built-ins.
+ */
 const heapMb = 128;
 
 /**
  * What a check may take, heap and WebAssembly together, in MB: above the
  * 128 MB past which Cloudflare replaces an isolate after its call (the
  * checker keeps nothing, so a replaced one costs a start), well below the
- * about 256 MB at which it ends one mid-call. Measured 136–162 MB on the
- * six built-ins the release shipped until November 2026, tsrs's 80 MiB
- * shadow stack included.
+ * about 256 MB at which it ends one mid-call. `hello` takes 125–153 MB
+ * (November 2026), nearly all of it tsrs's WebAssembly memory for the
+ * kit's types, its 80 MiB shadow stack included; the six far larger
+ * built-ins shipped until then took 136–162 MB, so an App's own code adds
+ * little.
  */
 const checkMb = 192;
 
@@ -66,7 +74,6 @@ const harnessRun = (args: string[]): string =>
 
 /** Every built-in core ships, and its tests' own: each folder with its manifest, by name. */
 const builtIns = folders
-  .filter((folder) => existsSync(folder))
   .flatMap((folder) =>
     readdirSync(folder, { withFileTypes: true })
       .filter(

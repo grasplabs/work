@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -18,8 +17,7 @@ import {
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { digestModuleOf, writeBlueprints } from "./build-blueprints.ts";
-import { blueprintsDigestText } from "./src/builtin-digest.ts";
+import { writeBlueprints } from "./build-blueprints.ts";
 
 // The build step's checks, in Node (the root config's "scripts" project):
 // each built-in that the install would refuse fails the build instead.
@@ -128,22 +126,32 @@ describe("the built-in blueprints' build", () => {
     ]);
   });
 
-  it("embeds none, with the digest of none, from a release that ships none and so has no folder", () => {
+  it("embeds none from a release that ships none, its folder empty but for its .gitkeep", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
     made.push(dir);
+    const folder = path.join(dir, "blueprints");
+    mkdirSync(folder);
+    writeFileSync(path.join(folder, ".gitkeep"), "");
     const out = path.join(dir, "blueprints.js");
-    const count = writeBlueprints([path.join(dir, "blueprints")], out);
     expect({
-      count,
+      count: writeBlueprints([folder], out),
       embedded: embedded(out),
-      digest: readFileSync(digestModuleOf(out), "utf-8"),
-    }).toStrictEqual({
-      count: 0,
-      embedded: [],
-      digest: `export default ${JSON.stringify(
-        createHash("sha256").update(blueprintsDigestText([])).digest("hex")
-      )};\n`,
-    });
+    }).toStrictEqual({ count: 0, embedded: [] });
+  });
+
+  it("fails without the folder, rather than ship none", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+    made.push(dir);
+    expect(() =>
+      writeBlueprints([path.join(dir, "blueprints")], path.join(dir, "out.js"))
+    ).toThrow("isn't there");
+    expect(existsSync(path.join(dir, "out.js"))).toBeFalsy();
+  });
+
+  it("fails for a built-in named as one an earlier release removed", () => {
+    const dir = fixture("crm", schema);
+    expect(() => build(dir)).toThrow("an earlier release removed");
+    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
 
   it.each([

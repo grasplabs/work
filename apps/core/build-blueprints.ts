@@ -28,9 +28,12 @@
  *   like any App's, its `grasp.config.ts` and `server/schema.ts` exactly
  *   as its definition generates them.
  *
- * A release may ship none: then apps/core/blueprints/ isn't there (git
- * keeps no empty folder), and the build embeds none, with the digest of
- * none, which the install takes as a release without built-ins.
+ * A release may ship none: then apps/core/blueprints/ holds only its
+ * `.gitkeep` (git keeps no empty folder), and the build embeds none,
+ * which the install takes as a release without built-ins, removing those
+ * an earlier release installed. A missing folder fails the build, so
+ * none is never shipped by accident. An id a removed built-in had is
+ * never taken again (`retiredBuiltinIds`).
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
@@ -164,6 +167,25 @@ const manifestSchema = fromBlueprintSchema
     { path: ["workflows"], message: "Each binding name once" }
   );
 
+/**
+ * The ids of built-ins earlier releases shipped and a later one removed,
+ * which no built-in takes again: Apps created from one keep its id as
+ * their origin (`app_origins`), and a new built-in under it would be
+ * offered to them as an update of the old one, its code merged over
+ * theirs. Add a built-in's id here when its folder goes. A list in the
+ * repo, not a record the install keeps: a rollback to a release that
+ * ships a removed built-in installs it again, as it should, which a
+ * record of retired ids in the database would have to refuse or except.
+ */
+export const retiredBuiltinIds: ReadonlySet<string> = new Set([
+  "approvals",
+  "crm",
+  "dashboard",
+  "intake",
+  "kanban-board",
+  "workflow-map",
+]);
+
 /** A folder name that is safe in an ID, a URL and an audit event. */
 const idSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
 
@@ -185,16 +207,21 @@ export const filesIn = (dir: string): Record<string, string> => {
 };
 
 /**
- * The folders of the built-ins in `dir`, one each, by name: none when
- * `dir` isn't there, as when a release ships no built-in (git keeps no
- * empty folder).
+ * The folders of the built-ins in `dir`, one each, by name. `dir` must be
+ * there, empty but for its `.gitkeep` when the release ships none: the
+ * install removes every built-in a release doesn't ship, so a build that
+ * missed the folder must fail, never ship none.
  */
-export const blueprintFolders = (dir: string): string[] =>
-  existsSync(dir)
-    ? readdirSync(dir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map(({ name }) => name)
-    : [];
+export const blueprintFolders = (dir: string): string[] => {
+  if (!existsSync(dir)) {
+    throw new Error(
+      `The built-in blueprints' folder ${dir} isn't there: a release that ships none keeps it, empty but for its .gitkeep`
+    );
+  }
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map(({ name }) => name);
+};
 
 /** The built-ins in `dir`, one per folder, checked. */
 const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
@@ -203,6 +230,11 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
     const where = `Built-in blueprint ${folder}`;
     if (!idSchema.safeParse(name).success) {
       throw new Error(`${where}: name the folder in lowercase-kebab-case`);
+    }
+    if (retiredBuiltinIds.has(name)) {
+      throw new Error(
+        `${where}: ${name} is the id of a built-in an earlier release removed, which Apps created from it keep as their origin: name it another way`
+      );
     }
     const manifest = manifestSchema.safeParse(
       JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))

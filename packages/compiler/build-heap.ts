@@ -6,8 +6,8 @@
  * build-heap.test.ts runs it, in two processes:
  *
  * - `node build-heap.ts files <out.json> <blueprints>...` writes the files
- *   of each blueprint in those of the folders `<blueprints>` that are
- *   there, with the modules the host generates for it
+ *   of each blueprint in the folders `<blueprints>`, with the modules
+ *   the host generates for it
  *   (`server/_generated/`), as core's save does
  *   (apps/core/src/draft-references.ts).
  *   It loads the SDK and the App's code, so it runs without the cap.
@@ -77,7 +77,6 @@ const blueprintFiles = async (
   const { serverModuleOf } = await import("@grasp-os/runtime/server-modules");
   const all: z.infer<typeof blueprintsSchema> = {};
   const blueprints = folders
-    .filter((folder) => existsSync(folder))
     .flatMap((folder) =>
       readdirSync(folder)
         .filter((name) =>
