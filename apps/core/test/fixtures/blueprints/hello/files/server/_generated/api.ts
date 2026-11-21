@@ -13,10 +13,16 @@ const frozen = <Value>(value: Value): Value => {
 };
 
 export const api: {
+  readonly greeted: {
+    readonly list: FunctionReferenceFromExport<typeof import("../greeted.ts").list>;
+  };
   readonly greetings: {
     readonly hello: FunctionReferenceFromExport<typeof import("../greetings.ts").hello>;
   };
 } = frozen({
+  greeted: {
+    list: { name: "greeted.list" },
+  },
   greetings: {
     hello: { name: "greetings.hello" },
   },

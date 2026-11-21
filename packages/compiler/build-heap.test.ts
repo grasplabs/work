@@ -36,12 +36,10 @@ const folders = [
 
 /**
  * The heap the compiler's builds must fit in, in MB: a Cloudflare
- * isolate's, whatever it builds. Measured in November 2026, built one
- * after another as here: `hello` 32–34 MB; the six built-ins shipped
- * until then 36–48 MB, the largest of them (the workflow map, 30 files,
- * 160 KB) 42–48 MB. An App's own code adds a few MB to what every build
- * carries, so `hello` guards the compiler and the kit within about 15 MB
- * of the largest App the release shipped.
+ * isolate's, whatever it builds. `hello` has two routes, a form, a data
+ * grid and a page header, so a build pulls in the kit modules a real App
+ * imports. Measured in November 2026, built one after another as here:
+ * `hello` 34–47 MB; the six built-ins shipped until then 36–48 MB.
  */
 const heapMb = 128;
 
@@ -50,9 +48,10 @@ const heapMb = 128;
  * 128 MB past which Cloudflare replaces an isolate after its call (the
  * checker keeps nothing, so a replaced one costs a start), well below the
  * about 256 MB at which it ends one mid-call. Measured in November 2026:
- * `hello` 125–153 MB, the six built-ins shipped until then 128–159 MB,
+ * `hello` 125–155 MB, the six built-ins shipped until then 128–159 MB,
  * nearly all of it tsrs's WebAssembly memory for the kit's types, its
- * 80 MiB shadow stack included.
+ * 80 MiB shadow stack included: past the 128 MB line, so each check of a
+ * page costs a fresh isolate.
  */
 const checkMb = 192;
 
