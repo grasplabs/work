@@ -326,7 +326,7 @@ export const useShown = ({
 };
 
 /** A held write's name: what it does, on which connection. */
-export const useHeldName = (action: PendingAction): string => {
+const useHeldName = (action: PendingAction): string => {
   const { t } = useLingui();
   const title = action.description?.title ?? action.action;
   const connection = action.connectionName ?? action.connectionId;

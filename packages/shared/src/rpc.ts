@@ -1,6 +1,7 @@
 import type { AiProvidersApi } from "./ai-providers.ts";
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
+import type { BoardReportApi } from "./board-report.ts";
 import type { BrainMemoriesApi } from "./brain-memories.ts";
 import type { BrainSourcesApi } from "./brain-sources.ts";
 import type { BrainApi } from "./brain.ts";
@@ -11,7 +12,6 @@ import type {
   PendingActionsApi,
   UnknownOutcomesApi,
 } from "./connect.ts";
-import type { DashboardApi } from "./dashboard.ts";
 import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
@@ -97,8 +97,8 @@ export interface SessionApi {
    * and each chat's messages as they stream in.
    */
   readonly chats: ChatsApi;
-  /** The person's own dashboard: which widgets are on it, in what order. */
-  readonly dashboard: DashboardApi;
+  /** The weekly report on the programme with Grasp, as the person may read it. */
+  readonly boardReport: BoardReportApi;
   /** The person's own sessions: the browsers they are signed in on, and ending one. */
   readonly sessions: SessionsApi;
   /** The person's own accounts on chat platforms, linked so the agent knows them there. */
@@ -172,7 +172,7 @@ export interface SessionApi {
   readonly notifications: NotificationsApi;
   /**
    * Everything that waits on the person, in one feed, each item with the
-   * verdicts it takes: what the inbox and the dashboard's to-do show.
+   * verdicts it takes: what the inbox shows.
    */
   readonly waiting: WaitingApi;
   /**

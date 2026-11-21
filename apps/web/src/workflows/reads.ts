@@ -1,4 +1,3 @@
-import type { App } from "@grasp-os/shared/apps";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
 import type {
@@ -29,10 +28,6 @@ export const noneIfRefused = async <T>(read: Promise<T[]>): Promise<T[]> => {
     throw error;
   }
 };
-
-/** The Apps core lets the person open: their own, those shared with them, and every one for admins. */
-export const openableApps = async (session: Session): Promise<App[]> =>
-  await noneIfRefused(session.apps.list());
 
 /** The workflows core lists for the person. */
 export const listWorkflows = async (

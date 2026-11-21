@@ -18,7 +18,7 @@ import { useFrameRead } from "../frame/frame-read.ts";
 // What needs them today is a decision of a run waiting for their answer;
 // a change waiting for its test and approval, and a workflow in testing,
 // join it with the workflow lifecycle (GRA-512). Read again as the
-// Dashboard's count is (frame/frame-read.ts): after every change on a page,
+// Inbox's count is (frame/frame-read.ts): after every change on a page,
 // and on the way to another once the count is older than half a minute.
 
 /** The workflow a decision's run belongs to. */

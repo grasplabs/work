@@ -11,10 +11,10 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { loadEveryPage } from "../dashboard/outcome-pages.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { loadEveryPage } from "../inbox/outcome-pages.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -26,8 +26,8 @@ import {
 // Settings → Unknown outcomes, for the organization's own admins: every
 // person's open calls of unknown outcome, changes Grasp sent for them
 // whose answer was lost, so an admin can follow up with each person. Read
-// only: only the person a call acted for says what became of it, on their
-// dashboard, and only they see what was sent (core's unknown-outcomes.ts
+// only: only the person a call acted for says what became of it, in their
+// inbox, and only they see what was sent (core's unknown-outcomes.ts
 // lists these without it). Each shows its receipt, the effect key's hash
 // the audit log's events of the call and of its resolution carry, so the
 // trail of each is found in an export. Core checks the role on every read.
@@ -121,7 +121,7 @@ const UnknownOutcomes = () => {
         <Trans>
           Changes Grasp sent for someone whose answer was lost, so nobody can
           tell whether they took effect. Only that person can say what happened,
-          on their dashboard; follow up with them.
+          in their inbox; follow up with them.
         </Trans>
       }
       title={t`Unknown outcomes`}

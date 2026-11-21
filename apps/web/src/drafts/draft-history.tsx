@@ -58,11 +58,11 @@ import {
 } from "../apps/release-controls.tsx";
 import type { ReleaseAction } from "../apps/release-controls.tsx";
 import type { CoreConnection } from "../core-connection.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList, formatSince } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";

@@ -7,14 +7,14 @@ import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { seedResourceRun } from "./runs.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// The dashboard's runs over time: the runs of the independent workflows a
-// person has a role in, by the UTC day they started and how they stand
-// now, and the decisions they asked people for. What could go wrong: a run
-// of a workflow the person has no role in counted, another person's run
-// counted for one of its users, a run counted on the wrong day or as the wrong outcome, a day
-// without runs missing, a decision that ended with its run counted as
-// open, a window longer than core reads, and a read that walks every run
-// there is.
+// The runs over time the Workflows page and the weekly report read: the
+// runs of the independent workflows a person has a role in, by the UTC day
+// they started and how they stand now, and the decisions they asked people
+// for. What could go wrong: a run of a workflow the person has no role in
+// counted, another person's run counted for one of its users, a run
+// counted on the wrong day or as the wrong outcome, a day without runs
+// missing, a decision that ended with its run counted as open, a window
+// longer than core reads, and a read that walks every run there is.
 
 const idp = mockIdp();
 

@@ -440,7 +440,7 @@ export interface ReportWindow {
 }
 
 /**
- * The programme with Grasp, as the dashboard shows it to everyone signed
+ * The programme with Grasp, as the inbox shows it to everyone signed
  * in: when it began, where the onboarding stands, and where today falls
  * in its weeks and its weekly reports, nothing more. It begins on the
  * Monday (UTC) of the week the interviews start, and runs in weeks from
@@ -481,7 +481,7 @@ export interface OnboardingApi
     OnboardingChoicesApi,
     OnboardingPlacesApi,
     OnboardingHrApi {
-  /** The programme, for the dashboard; null without a plan. Any role. */
+  /** The programme, for the weekly report; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
   /**
