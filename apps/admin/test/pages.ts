@@ -6,6 +6,7 @@ import { accessJwt } from "./access.ts";
 
 const origin = "https://ops.grasp.test";
 
+// MIGRATION-ONLY: removed once every page test reads server functions.
 const scripts = /<script\b[^>]*>[\s\S]*?<\/script>/gu;
 
 /** A part of a page streamed in after the rest, and the placeholder it replaces: React's `$RC("B:n","S:n")`. */
@@ -99,6 +100,20 @@ export const page = async (
   const rendered = renderAfter(previous, path, email);
   previous = rendered;
   return await rendered;
+};
+
+/**
+ * The document the Worker answers `path` with, as `email`'s browser gets
+ * it: the admin's shell, which its scripts fill in the browser.
+ */
+export const documentOf = async (
+  path: string,
+  email = "staff@grasp.test"
+): Promise<{ status: number; html: string }> => {
+  const response = await exports.default.fetch(`${origin}${path}`, {
+    headers: { "cf-access-jwt-assertion": await accessJwt(email) },
+  });
+  return { status: response.status, html: await response.text() };
 };
 
 /** What TanStack Start's route for server functions answers, deserialized. */

@@ -4,10 +4,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page as pageAt } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-onboarding-5c1e93";
 const cloudflare = mockCloudflareApi(token);

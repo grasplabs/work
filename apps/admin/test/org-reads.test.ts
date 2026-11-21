@@ -5,7 +5,7 @@ import { orgReads } from "../src/admin/org-reads.ts";
 import type { AnsweredAdmin, OrgRead } from "../src/admin/org-reads.ts";
 import type { ClientAdmin } from "../src/clients/admin.ts";
 import type { GridRow } from "../src/clients/grid.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const client: GridRow = {
   id: "acme",

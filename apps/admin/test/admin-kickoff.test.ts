@@ -10,10 +10,10 @@ import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 // The kickoff brought in from an organization's Steps (GRA-1099,
 // src/clients/kickoff.ts). The ways it can fail, tried first: a caller

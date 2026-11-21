@@ -15,6 +15,8 @@ import { fromJSON, toCrossJSONAsync } from "seroval";
 import type { SerovalJSON } from "seroval";
 import { afterEach, vi } from "vite-plus/test";
 
+import { emptyAdminSnapshot } from "../test/snapshots.ts";
+import type { AnsweredAdmin } from "./admin/org-reads.ts";
 import type { ClientAdmin } from "./clients/admin.ts";
 import type { GridRow } from "./clients/grid.ts";
 import { getRouter } from "./router.tsx";
@@ -62,6 +64,30 @@ export const gridRow = (overrides: Partial<GridRow> = {}): GridRow => ({
   ...overrides,
 });
 
+/**
+ * A client whose core answered just now, as `fetchClientAdmin` answers
+ * it: an empty snapshot, and neither Stripe nor Attio linked, unless given.
+ */
+export const answeredAdmin = (
+  overrides: Partial<Omit<AnsweredAdmin, "state">> = {}
+): AnsweredAdmin => {
+  const client = overrides.client ?? gridRow();
+  return {
+    client,
+    state: "answered",
+    snapshot: emptyAdminSnapshot(client.name),
+    at: new Date().toISOString(),
+    billing: { state: "not_linked" },
+    crm: { state: "not_linked" },
+    ...overrides,
+  };
+};
+
+/** The text of the line under `label` in a list of terms, or undefined. */
+export const lineOf = (root: Element, label: string): string | undefined =>
+  [...root.querySelectorAll("dt")].find((term) => term.textContent === label)
+    ?.nextElementSibling?.textContent ?? undefined;
+
 /** The server function a call at `url` is: its export's name, as Start names it. */
 const fnOf = (url: URL): string => {
   const id = url.pathname.split("/")[2] ?? "";
@@ -95,25 +121,51 @@ const dataOf = (url: URL, init: RequestInit | undefined): unknown => {
 
 let mounted: Root | undefined;
 
+/** Server function calls the page made that aren't answered yet. */
+let inFlight = 0;
+
+/** The router of the admin opened last. */
+let opened: { state: { status: string } } | undefined;
+
 afterEach(() => {
   act(() => {
     mounted?.unmount();
   });
   mounted = undefined;
+  opened = undefined;
+  inFlight = 0;
   document.body.replaceChildren();
   vi.unstubAllGlobals();
 });
 
-/** Lets the page's reads and renders run to rest. */
-export const settle = async (rounds = 5): Promise<void> => {
-  for (let round = 0; round < rounds; round += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- each round waits on what the last one started
-    await act(async () => {
-      // oxlint-disable-next-line promise/avoid-new -- a macrotask, past React's and the router's microtasks
-      await new Promise((resolve) => {
-        setTimeout(resolve, 0);
-      });
+/** How long a page may take to come to rest before a test fails on it. */
+const restMs = 5000;
+
+/** One macrotask, past React's and the router's microtasks. */
+const tick = async (): Promise<void> => {
+  await act(async () => {
+    // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
     });
+  });
+};
+
+/**
+ * Lets the page's reads, its routes' code and its renders run to rest:
+ * until the router is idle with no server function call unanswered, a few
+ * turns in a row.
+ */
+export const settle = async (): Promise<void> => {
+  const until = Date.now() + restMs;
+  let still = 0;
+  while (still < 3) {
+    if (Date.now() > until) {
+      throw new Error("The page didn't come to rest");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each turn waits on what the last one started
+    await tick();
+    still = inFlight === 0 && opened?.state.status === "idle" ? still + 1 : 0;
   }
 };
 
@@ -122,7 +174,12 @@ export const settle = async (rounds = 5): Promise<void> => {
  * `answers` over a frame with no organizations: what the page shows
  * (`main`, `text`), every call it made (`calls`), and its router.
  */
-export const openAdmin = async (path: string, answers: Answers = {}) => {
+export const openAdmin = async (
+  path: string,
+  answers: Answers = {},
+  /** Whether to wait for the page to come to rest: not while a read never answers. */
+  { rest = true }: { rest?: boolean } = {}
+) => {
   const calls: Call[] = [];
   const answered: Answers = {
     fetchClientGrid: [] satisfies GridRow[],
@@ -140,23 +197,30 @@ export const openAdmin = async (path: string, answers: Answers = {}) => {
       const fn = fnOf(url);
       const data = dataOf(url, init);
       calls.push({ fn, data });
-      if (!Object.hasOwn(answered, fn)) {
-        throw new Error(`The page called ${fn}, which the test doesn't answer`);
-      }
-      const answer = answered[fn];
-      let result: unknown;
+      inFlight += 1;
       try {
-        result = isAnswerFn(answer) ? await answer(data) : answer;
-      } catch (error) {
-        if (error instanceof FailedError) {
-          return new Response("Internal Server Error", { status: 500 });
+        if (!Object.hasOwn(answered, fn)) {
+          throw new Error(
+            `The page called ${fn}, which the test doesn't answer`
+          );
         }
-        throw error;
+        const answer = answered[fn];
+        let result: unknown;
+        try {
+          result = isAnswerFn(answer) ? await answer(data) : answer;
+        } catch (error) {
+          if (error instanceof FailedError) {
+            return new Response("Internal Server Error", { status: 500 });
+          }
+          throw error;
+        }
+        return Response.json(
+          await toCrossJSONAsync({ result }, { refs: new Map() }),
+          { headers: { "x-tss-serialized": "true" } }
+        );
+      } finally {
+        inFlight -= 1;
       }
-      return Response.json(
-        await toCrossJSONAsync({ result }, { refs: new Map() }),
-        { headers: { "x-tss-serialized": "true" } }
-      );
     }
   );
   const router = getRouter();
@@ -164,13 +228,14 @@ export const openAdmin = async (path: string, answers: Answers = {}) => {
     context: router.options.context,
     history: createMemoryHistory({ initialEntries: [path] }),
   });
+  opened = router;
   const container = document.createElement("div");
   document.body.replaceChildren(container);
   act(() => {
     mounted = createRoot(container);
     mounted.render(<RouterProvider router={router} />);
   });
-  await settle();
+  await (rest ? settle() : tick());
   const main = (): string => container.querySelector("main")?.textContent ?? "";
   return {
     calls,

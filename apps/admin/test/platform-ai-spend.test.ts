@@ -8,10 +8,10 @@ import { clients } from "../src/db/schema.ts";
 import { fetchPlatformSpend } from "../src/platform-ai-functions.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { aiStatusOf, emptyAdminSnapshot, monthBack } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { aiStatusOf, emptyAdminSnapshot, monthBack } from "./snapshots.ts";
 
 // What Grasp's own AI features cost on its keys, read only: on an
 // organization's AI use, this month and last by feature and by model, as

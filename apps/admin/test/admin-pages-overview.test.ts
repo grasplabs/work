@@ -9,14 +9,16 @@ import {
   db,
   recordClient,
   liveClient,
-  readySnapshot,
-  toldSnapshot,
   rowOf,
 } from "./admin-frame.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import {
+  emptyAdminSnapshot,
+  readySnapshot,
+  toldSnapshot,
+} from "./snapshots.ts";
 
 // Here: the overview's counts and filters, and opening or adding an
 // organization from it; the rest in the other admin-pages*.test.ts files.
