@@ -231,19 +231,6 @@ const placeOf = (name: string): Element => {
   return found;
 };
 
-/** Brings the card of `name` on screen. */
-const scroll = async (name: string): Promise<void> => {
-  const target = placeOf(name).querySelector('[data-slot="app-card-live"]');
-  await act(async () => {
-    if (target !== null) {
-      for (const seen of observers) {
-        seen([{ target, isIntersecting: true }]);
-      }
-    }
-    await Promise.resolve();
-  });
-};
-
 /** What runs in the window of `name`: the address of the App in it, or what it says instead. */
 const windowOf = (name: string) => {
   const place = placeOf(name);
@@ -320,19 +307,6 @@ const search = async (value: string): Promise<void> => {
   });
 };
 
-/** The App in a window says it has drawn, as heard from `source`. */
-const tell = async (source: MessageEventSource | null) => {
-  await act(async () => {
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        data: { type: "app-card", state: "ready" },
-        source,
-      })
-    );
-    await Promise.resolve();
-  });
-};
-
 const makeLink = (): string | null | undefined =>
   [...document.querySelectorAll("a")]
     .find((link) => link.textContent === "Build new app")
@@ -373,35 +347,20 @@ describe(AppsOverview, () => {
     });
   });
 
-  it("runs an App's first page in its window only while its card is on screen", async () => {
-    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
-    const holidays = overview("Holidays", "2026-10-20T08:00:00.000Z", true);
-    await shown([invoices, holidays]);
-    const before = windowOf("Invoices");
-    await scroll("Invoices");
-
-    expect({
-      before,
-      invoices: windowOf("Invoices"),
-      holidays: windowOf("Holidays"),
-    }).toStrictEqual({
-      before: { runs: null, says: null },
-      invoices: { runs: `/apps/${invoices.app.id}/full`, says: null },
-      holidays: { runs: null, says: null },
-    });
-  });
-
-  it("keeps the window quiet for an App with no page to run or put away", async () => {
+  it("keeps every App's window quiet, running no App in it, whether it has a page to run or not", async () => {
     await shown([
+      overview("Invoices", "2026-10-01T08:00:00.000Z", true),
       overview("Holidays", "2026-10-20T08:00:00.000Z", false),
       overview("Old desk", "2026-09-01T08:00:00.000Z", true, {
         archived: true,
       }),
     ]);
     expect({
+      live: windowOf("Invoices"),
       draft: windowOf("Holidays"),
       archived: windowOf("Old desk"),
     }).toStrictEqual({
+      live: { runs: null, says: "No preview yet" },
       draft: { runs: null, says: "No preview yet" },
       archived: { runs: null, says: "No preview yet" },
     });
@@ -486,31 +445,6 @@ describe(AppsOverview, () => {
       company: ["Desk"],
       mine: [],
       said: true,
-    });
-  });
-
-  it("keeps an App's window waiting until the App says it has drawn, from its own frame alone", async () => {
-    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
-    await shown([invoices]);
-    await scroll("Invoices");
-    const running = () =>
-      placeOf("Invoices").querySelector<HTMLElement>(
-        '[data-slot="app-card-running"]'
-      )?.dataset.loaded !== undefined;
-    const frame = placeOf("Invoices").querySelector("iframe");
-    await act(async () => {
-      frame?.dispatchEvent(new Event("load"));
-      await Promise.resolve();
-    });
-    const loadedAlone = running();
-    await tell(window);
-    const fromElsewhere = running();
-    await tell(frame?.contentWindow ?? null);
-
-    expect({ loadedAlone, fromElsewhere, told: running() }).toStrictEqual({
-      loadedAlone: false,
-      fromElsewhere: false,
-      told: true,
     });
   });
 
