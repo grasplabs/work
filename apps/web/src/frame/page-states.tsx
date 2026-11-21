@@ -23,6 +23,7 @@ import { useCore } from "../use-core.ts";
 import { InFrame } from "./in-frame.ts";
 import { PageFailed, useCoreReach } from "./page-failed.tsx";
 import type { FailedHeading } from "./page-failed.tsx";
+import { useShowsFailed } from "./page-fill.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
@@ -295,6 +296,8 @@ export const PageError = ({
   reload?: boolean;
 }) => {
   const { t } = useLingui();
+  // It stands for the whole page: the frame gives it the card, edge to edge.
+  useShowsFailed();
   return (
     <Place crumbs={crumbs ?? [{ label: title ?? t`This page didn't load` }]}>
       <ErrorState reason={reason} reload={reload} title={title} />

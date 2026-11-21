@@ -141,8 +141,8 @@ export const agentTemplates: readonly AgentTemplate[] = [
     icon: CalendarIcon,
     label: msg`Prepare meetings`,
     description: msg`Gathers what to know before each meeting.`,
-    cadence: msg`Before each meeting`,
-    outcome: msg`Send a briefing`,
+    cadence: msg`Before meetings`,
+    outcome: msg`Brief you`,
     keywords: [
       "meeting",
       "meetings",

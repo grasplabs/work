@@ -585,6 +585,7 @@ const cast = {
   chatPhone: { user: "user" },
   models: { admin: "admin", builder: "builder" },
   settings: { admin: "admin", member: "user" },
+  aiSpend: { admin: "admin", builder: "builder" },
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },

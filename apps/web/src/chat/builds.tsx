@@ -3,14 +3,10 @@ import type { ChatWork } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { Alert } from "../grasp/alert/index.ts";
-import { Button } from "../grasp/button/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
@@ -153,35 +149,22 @@ export const useChatBuilds = (
   };
 };
 
-const styles = stylex.create({
-  body: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: grasp.space2,
-  },
-});
-
 /**
  * Why the builds didn't load, beside the chat, and a way to read them
  * again: the App being built would otherwise be missing without a word.
  */
 export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
   const { t } = useLingui();
-  const { failure, retrying, retry } = read;
+  const { failure, retry } = read;
   if (failure === undefined) {
     return null;
   }
   return (
-    <Alert title={t`The Apps this chat builds didn't load.`} tone="attention">
-      <div {...stylex.props(styles.body)}>
-        {/* Gone while trying, so the alert is announced again if it fails again. */}
-        {retrying ? null : <NotLoaded page={failure} />}
-        <Button disabled={retrying} onClick={retry} size="sm" variant="quiet">
-          {retrying ? t`Trying again…` : t`Try again`}
-        </Button>
-      </div>
-    </Alert>
+    <PartNotLoaded
+      onRetry={retry}
+      page={failure}
+      what={t`The Apps this chat builds didn't load`}
+    />
   );
 };
 

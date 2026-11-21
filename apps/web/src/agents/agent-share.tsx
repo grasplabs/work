@@ -16,6 +16,8 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { Switch } from "../grasp/switch/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A person's own agent offered to the company (core's agent-builder.ts,
@@ -57,34 +59,32 @@ export const ShareAgent = ({
       : new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
           new Date(agent.offeredAt)
         );
+  // A row as Settings has its settings (Ruben, 21 November: the card with
+  // a long sentence and a loose button didn't feel right): a switch, one
+  // short line, and what it means behind the info mark.
   return (
-    <SectionCard
-      actions={
-        <Button
-          disabled={!can}
-          onClick={() => {
-            void change(async (session) => {
-              await session.connections.offerOwnAgent(agent.id, !offered);
-            });
-          }}
-          size="sm"
-          variant="ghost"
+    <SectionCard density="compact" flush title={t`Sharing`} variant="grouped">
+      <SettingsRows>
+        <SettingRow
+          help={
+            offered
+              ? t`Offered on ${since}`
+              : t`The company's admins may take ${name} on`
+          }
+          info={t`If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it.`}
+          label={t`Offer to the company`}
         >
-          {offered ? t`Take the offer back` : t`Offer to the company`}
-        </Button>
-      }
-      density="compact"
-      description={
-        offered
-          ? t`Offered on ${since}. Your company's admins may take ${name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it.`
-          : t`Offer ${name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it.`
-      }
-      // Its head says it all: no body, so no room under it.
-      flush
-      title={t`Share with the company`}
-      variant="grouped"
-    >
-      {null}
+          <Switch
+            checked={offered}
+            disabled={!can}
+            onCheckedChange={(next) => {
+              void change(async (session) => {
+                await session.connections.offerOwnAgent(agent.id, next);
+              });
+            }}
+          />
+        </SettingRow>
+      </SettingsRows>
     </SectionCard>
   );
 };

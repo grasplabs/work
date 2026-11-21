@@ -121,7 +121,7 @@ test("someone has their interview by typing, carries on after stopping, and agre
   await page.reload();
   await expect(page.getByText(back)).toBeVisible();
 
-  const answer = page.getByLabel("Your answer");
+  const answer = page.getByRole("textbox", { name: "Your answer" });
   await answer.fill("I check it in Exact, then I send it to Sam.");
   await answer.press("Enter");
 
@@ -299,7 +299,7 @@ test("someone removes a line of theirs and takes out what was written from it, a
     .getByRole("button", { name: "Type instead, without sound" })
     .click();
   await expect(page.getByText(first)).toBeVisible();
-  const answer = page.getByLabel("Your answer");
+  const answer = page.getByRole("textbox", { name: "Your answer" });
   await answer.fill(`Only Ria knows ${run}, in Exact.`);
   // The save after their answer lands in core, but its answer is still on
   // its way when they remove their line and the page goes.
@@ -356,7 +356,7 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await page.getByRole("button", { name: "Add something" }).click();
   // He asks what they'd like to add before they answer.
   await expect(page.getByText(adding)).toBeVisible();
-  const more = page.getByLabel("Your answer");
+  const more = page.getByRole("textbox", { name: "Your answer" });
   await more.fill("Then I book it in Exact.");
   const added = keptWith(page, "You check the invoice in Exact.");
   await more.press("Enter");

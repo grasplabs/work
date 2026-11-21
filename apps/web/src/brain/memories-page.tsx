@@ -25,6 +25,7 @@ import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
@@ -65,7 +66,6 @@ import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useAsk, usePaged } from "./memories-asks.ts";
 
@@ -710,7 +710,7 @@ const AudienceField = ({
         ) : null}
       </Field>
       {loaded === undefined || loaded.state === "ready" ? null : (
-        <NotLoaded page={loaded} />
+        <PartNotLoaded page={loaded} />
       )}
     </>
   );

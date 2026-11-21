@@ -49,14 +49,17 @@ const connectedWeight = 2;
 const recommendedMost = 4;
 
 /** The words of `text`, lowercase, long enough to mean something. */
-const wordsOf = (text: string): string[] =>
+export const wordsOf = (text: string): string[] =>
   text
     .toLowerCase()
     .split(wordBreak)
     .filter((word) => word.length >= shortest);
 
 /** How well `app` suits the words; 0 when none of them points to it. */
-const scoreOf = (app: CatalogApp, words: readonly string[]): number => {
+export const scoreOf = (
+  app: Pick<CatalogApp, "id" | "name" | "categories" | "description">,
+  words: readonly string[]
+): number => {
   const about = [app.id, app.name, ...app.categories, app.description ?? ""]
     .join(" ")
     .toLowerCase();

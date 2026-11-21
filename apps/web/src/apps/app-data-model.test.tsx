@@ -416,7 +416,7 @@ describe("an App's data model, changed in its workspace", () => {
     const emptyShown = document.body.textContent.includes("No tables yet");
 
     await press(button("New table"));
-    await type("Table name", "Open tasks");
+    await type("Name", "Open tasks");
     const savedAs = document.body.textContent.includes("Saved as openTasks");
     await choose("Who can see and change its records", "Only the person");
     await press(button("Create table"));

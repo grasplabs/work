@@ -9,11 +9,9 @@ import {
   AgentFigure,
   AgentFigureAura,
 } from "../../grasp/agent-figure/index.ts";
-import { Badge } from "../../grasp/badge/index.ts";
 import { Card, CardDescription } from "../../grasp/card/index.ts";
 import { Heading } from "../../grasp/heading/index.ts";
 import { KeyValueList } from "../../grasp/key-value/index.ts";
-import { Text } from "../../grasp/text/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { lookFromName } from "../figure/look.ts";
 import { abilities } from "./model.ts";
@@ -21,34 +19,40 @@ import type { Schedule, StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
-// The last look before it is made: the agent's card as the Agents page
-// draws it (its night, its figure large and cropped by the corner, its
-// name and job), opened out with everything the setup said, each a row.
+// The last look before it is made (Ruben, 21 November: one wide card, its
+// corners round, less cluttered): the agent's portrait as the Agents page
+// draws it (its light, its figure large and cropped by the corner, its
+// name and job) and, in the same card, what the setup said, each name
+// over its value in plain words: its apps as their marks, what it can do
+// in one line, how it thinks, when it works and who can use it.
 
 const styles = stylex.create({
-  // The portrait beside its details; one above the other when narrow.
+  // The portrait beside its facts, clipped to the card's round corners;
+  // one above the other when narrow.
   card: {
     display: "grid",
     gridTemplateColumns: {
-      default: "16rem minmax(0, 1fr)",
+      default: "15rem minmax(0, 1fr)",
       "@media (width < 40rem)": "minmax(0, 1fr)",
     },
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    overflow: "clip",
     textAlign: "start",
   },
-  // As the Agents page's card: the agent's light on the page's own ground.
   portrait: {
     position: "relative",
     display: "grid",
     alignContent: "start",
-    minHeight: "18rem",
-    padding: grasp.space5,
+    minHeight: "17rem",
+    padding: grasp.space6,
     overflow: "hidden",
     isolation: "isolate",
   },
   figure: {
     position: "absolute",
-    insetBlockEnd: "-3.5rem",
-    insetInlineEnd: "-3.5rem",
+    insetBlockEnd: "-3rem",
+    insetInlineEnd: "-3rem",
     zIndex: 0,
   },
   words: {
@@ -57,14 +61,13 @@ const styles = stylex.create({
     display: "grid",
     gap: grasp.space2,
   },
-  details: { padding: grasp.space5 },
+  facts: { alignSelf: "center", padding: grasp.space6 },
   marks: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
     gap: grasp.space2,
   },
-  app: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
 });
 
 /** A weekday's name: a known Sunday (4 Jan 2026) and the days after it. */
@@ -111,6 +114,16 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
       : modelName(setup.model);
   const effort = words.effortNames[setup.effort];
   const own = setup.audience === "me";
+  const can = formatList(
+    abilities
+      .filter((ability) => setup.abilities.has(ability))
+      .map((ability) => words.abilityNames[ability].label)
+  );
+  const who =
+    setup.audience === "teams"
+      ? formatList(chosenTeams.map((team) => team.name))
+      : words.audienceNames[setup.audience];
+  const goal = setup.goal.trim();
   return (
     <Question
       line={t`You can change all of this later.`}
@@ -130,13 +143,13 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
               <CardDescription>{setup.job}</CardDescription>
             </span>
           </div>
-          <div {...stylex.props(styles.details)}>
+          <div {...stylex.props(styles.facts)}>
             <KeyValueList
               items={[
-                {
-                  key: t`Goal`,
-                  value: setup.goal.trim() === "" ? setup.job : setup.goal,
-                },
+                // Only a goal the job doesn't say already.
+                ...(goal === "" || goal === setup.job.trim()
+                  ? []
+                  : [{ key: t`Goal`, value: goal }]),
                 {
                   key: t`Apps`,
                   value:
@@ -145,59 +158,27 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
                     ) : (
                       <span {...stylex.props(styles.marks)}>
                         {chosenApps.map((app) => (
-                          <span key={app.id} {...stylex.props(styles.app)}>
-                            <ProviderMark
-                              id={app.id}
-                              logo={app.logo}
-                              name={app.name}
-                              size="sm"
-                            />
-                            <Text element="span" size="sm">
-                              {app.name}
-                            </Text>
-                          </span>
+                          <ProviderMark
+                            id={app.id}
+                            key={app.id}
+                            logo={app.logo}
+                            name={app.name}
+                            size="sm"
+                          />
                         ))}
                       </span>
                     ),
                 },
                 // One of their own has no kinds of work or schedule of its own.
-                ...(own
-                  ? []
-                  : [
-                      {
-                        key: t`Can do`,
-                        value: (
-                          <span {...stylex.props(styles.marks)}>
-                            {abilities
-                              .filter((ability) => setup.abilities.has(ability))
-                              .map((ability) => (
-                                <Badge key={ability} size="sm" tone="neutral">
-                                  {words.abilityNames[ability].label}
-                                </Badge>
-                              ))}
-                          </span>
-                        ),
-                      },
-                    ]),
+                ...(own || can === "" ? [] : [{ key: t`Can do`, value: can }]),
                 { key: t`Thinking`, value: `${thinksWith} · ${effort}` },
                 ...(own
                   ? []
-                  : [
-                      {
-                        key: t`Works`,
-                        value: scheduleLine(setup.schedule),
-                      },
-                    ]),
-                {
-                  key: t`Who can use it`,
-                  value:
-                    setup.audience === "teams"
-                      ? formatList(chosenTeams.map((team) => team.name))
-                      : words.audienceNames[setup.audience],
-                },
+                  : [{ key: t`Works`, value: scheduleLine(setup.schedule) }]),
+                { key: t`Who can use it`, value: who },
               ]}
               valueAlign="start"
-              variant="inline"
+              variant="stacked"
             />
           </div>
         </div>

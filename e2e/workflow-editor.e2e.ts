@@ -4,9 +4,11 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { modelScripts, workflowPlanned } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { goTo } from "./tabs-nav.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against grasp-workflow/2 and says what to fix at
@@ -69,19 +71,13 @@ const create = async (page: Page, person: Person): Promise<string> => {
 
 /** Opens view `name` of the workflow on `page`: Flow, Runs or Settings. */
 const view = async (page: Page, name: string): Promise<void> => {
-  await page
-    .getByRole("navigation", { name: "Workflow views" })
-    .getByRole("link", { name })
-    .click();
+  await goTo(page.getByRole("navigation", { name: "Workflow views" }), name);
 };
 
 /** Opens section `name` of the workflow's Settings on `page`. */
 const section = async (page: Page, name: string): Promise<void> => {
   await view(page, "Settings");
-  await page
-    .getByRole("navigation", { name: "Settings sections" })
-    .getByRole("link", { name })
-    .click();
+  await goTo(page.getByRole("navigation", { name: "Settings sections" }), name);
 };
 
 /** Shows the definition's JSON on `page`, in its Settings. */
@@ -135,7 +131,13 @@ const publish = async (page: Page, name: string): Promise<void> => {
     .getByRole("dialog")
     .getByRole("button", { name: "Publish", exact: true })
     .click();
-  await expect(page.getByText(`${name} is live`)).toBeVisible(pageRead);
+  await expect(
+    page
+      .getByRole("region", { name: "Notifications" })
+      .getByText(`${name} is live`)
+  ).toBeVisible(pageRead);
+  // Its dialog closes once it is live: a press meanwhile would close it.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 };
 
 /** A version's label, `YY.MM.N`, as History names it. */
@@ -272,11 +274,11 @@ test("a builder sees every declared branch of the checked definition, a test run
   const start = page.getByRole("dialog", { name: "Start a run" });
   await start.getByLabel("who").fill("Ada");
   await start.getByRole("button", { name: "Start the run" }).click();
-  await expect(start.getByRole("status")).toHaveText(
-    "The run started. It is listed with the workflow's runs.",
-    pageRead
-  );
+  await expect(
+    start.getByText("The run started. It is listed with the workflow's runs.")
+  ).toBeVisible(pageRead);
   await start.getByRole("button", { name: "Close" }).first().click();
+  await expect(start).toHaveCount(0);
 
   // A second version, published as the first was.
   await save(page, definition("done"));
@@ -288,7 +290,8 @@ test("a builder sees every declared branch of the checked definition, a test run
   // laid over its version's diagram, marking only the tasks it reached.
   await view(page, "Runs");
   await page
-    .getByRole("button", { name: /^Open the run started/u })
+    .getByRole("table", { name: "Runs" })
+    .getByRole("link")
     .last()
     .click();
   const steps = page.getByRole("dialog");
@@ -315,6 +318,7 @@ test("a builder sees every declared branch of the checked definition, a test run
     ran.getByRole("listitem", { name: "greetOther" })
   ).toHaveAttribute("data-state", "none");
   await page.keyboard.press("Escape");
+  await expect(steps).toHaveCount(0);
 
   // Paused once the person says so and the moment to take it back has
   // passed: it says so, and Resume runs it again.
@@ -408,7 +412,7 @@ test("a builder makes something that runs on its own by saying what they want do
   // drawn: it isn't ready yet, with Try again, never an empty Flow.
   await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u);
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
-  const chat = page.getByRole("region", { name: "Chat" });
+  const chat = dockedChat(page);
   // Exactly: the recall's step ("Searched the brain for …") holds it too.
   await expect(chat.getByText(opener, { exact: true })).toBeVisible();
   await expect(chat.getByText(reply.text)).toBeVisible(pageRead);

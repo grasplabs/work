@@ -39,7 +39,7 @@ import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import { formatNumber } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
@@ -562,6 +562,12 @@ const shownOf = (
   };
 };
 
+/** The crumbs to the page: Integrations, then the kind of app it shows, if one. */
+const crumbsOf = (integrations: string, kind: string | undefined) =>
+  kind === undefined
+    ? [{ label: integrations }]
+    : [{ label: integrations, to: "/integrations" as const }, { label: kind }];
+
 const Integrations = () => {
   const { catalog, connections, known, requests, toRevoke, uses } =
     Route.useLoaderData();
@@ -577,9 +583,6 @@ const Integrations = () => {
   // stand then; the count of what shows doesn't change after.
   const first = sectionsOf(integrations, { show: "all" }, q);
   const { others, shown } = shownOf(first, listed ?? [], group, q);
-  // One of the two said once: out of reach, both say the same.
-  const failed = [catalog, connections].find((read) => read.state !== "ready");
-  const loaded = failed === undefined;
   const opened = integrations.find((integration) => integration.key === app);
   const [requesting, setRequesting] = useState(false);
   // The tile an app was opened from, so its panel grows from it.
@@ -596,13 +599,13 @@ const Integrations = () => {
   const overview = group === undefined && q === undefined;
   const recommended = overview ? recommendedOf(integrations, known) : [];
   const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
-  const crumbs =
-    kind === undefined
-      ? [{ label: t`Integrations` }]
-      : [
-          { label: t`Integrations`, to: "/integrations" as const },
-          { label: kind },
-        ];
+  const crumbs = crumbsOf(t`Integrations`, kind);
+  // The apps and the connections are the page: without either, it failed
+  // as a whole, and says so across the card.
+  const unread = catalog.state === "ready" ? connections : catalog;
+  if (unread.state !== "ready") {
+    return <PageNotLoaded crumbs={crumbs} page={unread} />;
+  }
   return (
     <>
       <RequestAppDialog
@@ -639,16 +642,13 @@ const Integrations = () => {
             catalog.state === "ready" && catalog.data.composio === "unavailable"
           }
         />
-        {failed === undefined ? null : (
-          <NotLoadedState heading="h2" page={failed} />
-        )}
         <output {...stylex.props(visuallyHidden)}>
           {q === undefined
             ? ""
             : t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`}
         </output>
         <div {...stylex.props(styles.lists)}>
-          {overview && loaded ? (
+          {overview ? (
             <IntegrationsBand identity={identity} integrations={integrations} />
           ) : null}
           <RecommendedApps
@@ -697,7 +697,7 @@ const Integrations = () => {
               new Set(recommended.map(({ integration }) => integration.key))
             }
           />
-          {loaded && shown === 0 ? (
+          {shown === 0 ? (
             <NothingFound
               onRequest={() => {
                 setRequesting(true);

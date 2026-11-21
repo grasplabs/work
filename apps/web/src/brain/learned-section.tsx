@@ -14,6 +14,7 @@ import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -22,7 +23,7 @@ import { Item, ItemContent, ItemGroup } from "../grasp/item/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
@@ -361,7 +362,7 @@ export const LearnedSection = ({
           withRivals
         />
       ) : null}
-      {more?.state === "failed" ? <NotLoaded page={more.page} /> : null}
+      {more?.state === "failed" ? <PartNotLoaded page={more.page} /> : null}
       {next === null ? null : (
         <Button
           disabled={more?.state === "loading"}

@@ -7,7 +7,6 @@ import {
 } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
@@ -47,20 +46,17 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // keeps only that (agent-documents.ts); the agent is told its documents
 // by name and reads one when a question needs it. Whoever may ask the
 // agent may learn what a document says, and the card says so where one
-// is added (behind the card's info mark). A card of Grasp UI's Items, with
-// File upload's button in its head ("Add documents"): each file is sent to
-// core as it is chosen, said on its own row in the card's body under the
-// documents, and once core keeps it, it is a document's row.
+// is added (behind the card's info mark). A card of Grasp UI's Items under
+// File upload's drop zone, with a line on what to give it and why: each
+// file is sent to core as it is dropped or chosen, said on its row in the
+// zone, and once core keeps it, it is a document's row.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 const styles = stylex.create({
-  // Where File upload draws the files on their way to core: room around
-  // them in the flush card while there are any, none when there are none.
-  sending: {
-    padding: { default: 0, ":has(li)": grasp.space3 },
-  },
+  // The drop zone, inset in the flush card above the documents.
+  zone: { padding: grasp.space3 },
 });
 
 /** The kinds of file core takes, by their extensions. */
@@ -85,8 +81,6 @@ export const AgentDocuments = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
-  // The card's body, where File upload lists the files it is sending.
-  const [sending, setSending] = useState<HTMLDivElement | null>(null);
   const kept = documents?.length ?? 0;
   const added = (at: string): string =>
     new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
@@ -124,22 +118,26 @@ export const AgentDocuments = ({
       flush
       // Behind the info mark: who may learn what a document says.
       info={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
-      actions={
-        editing ? (
+      // What to give it, and what it gets from them (Ruben, 21 November:
+      // say what people should drop in and how it helps the agent).
+      description={t`Give ${name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents.`}
+      title={t`Documents`}
+    >
+      {editing ? (
+        <div {...stylex.props(styles.zone)}>
           <FileUpload
             accept={accepted}
             disabled={!can}
             // Each file a new list: those core kept are documents' rows.
             key={kept}
-            listIn={sending}
             maxSize={chatFileMaxBytes}
             multiple
-            // Said to a screen reader on the button; refusals say the rest.
             hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each.`}
             upload={send}
-            variant="button"
+            variant="zone"
             words={{
-              choose: t`Add documents`,
+              drop: t`Drop documents here`,
+              choose: t`Choose files`,
               uploading: t`Adding`,
               done: t`Added`,
               failed: t`Not added`,
@@ -157,10 +155,8 @@ export const AgentDocuments = ({
               },
             }}
           />
-        ) : undefined
-      }
-      title={t`Documents`}
-    >
+        </div>
+      ) : null}
       {documents === undefined ? (
         <Empty size="sm" tone="danger">
           <EmptyHeader>
@@ -230,7 +226,6 @@ export const AgentDocuments = ({
           })}
         </ItemGroup>
       )}
-      <div ref={setSending} {...stylex.props(styles.sending)} />
     </SectionCard>
   );
 };

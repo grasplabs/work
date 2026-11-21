@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import type { WebSocketRoute } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 
@@ -130,10 +131,14 @@ test("a builder makes an App from what they want done, shares it with their team
   const app = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // The chat read how an App is written, wrote it, and said so.
-  const chat = page.getByRole("region", { name: "Chat" });
-  await expect(chat.getByText("Read /guides/project in the docs")).toBeVisible(
-    agentTurn
-  );
+  const chat = dockedChat(page);
+  // What it did is folded into one line: open, it lists each step.
+  const did = chat.getByRole("button", { name: /read 1 file/u });
+  await expect(did).toBeVisible(agentTurn);
+  await did.click();
+  await expect(
+    chat.getByText("Read /guides/project in the docs")
+  ).toBeVisible();
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
   // Where it stands, in the bar: beside the docked chat it gives way to
   // the name and Share, so it is there, unseen.
@@ -156,7 +161,13 @@ test("a builder makes an App from what they want done, shares it with their team
   // the first version. Everyone the stack signs in is called Person, and a builder
   // sees names, not emails: they are told apart by the ID each goes by.
   const userIdEnd = `ID …${user.userId.slice(-namesakeIdEnd)}`;
-  await page.getByRole("button", { name: "Share", exact: true }).click(built);
+  // Beside the docked chat the bar is narrow: Share folds into Publish's
+  // dialog, as who can open it.
+  await page.getByRole("button", { name: "Publish", exact: true }).click(built);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Manage" })
+    .click();
   const sharing = page.getByRole("dialog", { name: `Share ${appPlanned}` });
   await sharing.getByLabel("Add people, teams or projects").click();
   await page
@@ -164,6 +175,8 @@ test("a builder makes an App from what they want done, shares it with their team
     .filter({ hasText: userIdEnd })
     .click(built);
   blip.sharing = true;
+  // The picker stays open for more: Escape closes it, and the dialog stays.
+  await sharing.getByLabel("Add people, teams or projects").press("Escape");
   await sharing.getByRole("button", { name: "Add", exact: true }).click();
   // Its read again after sharing lost its connection: Grasp can't be
   // reached, until a connection answers again, when the page reads the
@@ -188,8 +201,25 @@ test("a builder makes an App from what they want done, shares it with their team
   ).toBeAttached(built);
   await expect(unreachable).toHaveCount(0);
   expect(uncaught).toStrictEqual([]);
-  // The share held: Share lists them, its one Person.
-  await page.getByRole("button", { name: "Share", exact: true }).click(built);
+  // The share held: Share lists them, its one Person. The bar folds as the
+  // chat takes its width again, Publish an icon of the same name: pressed
+  // once the bar has settled.
+  const publishing = page.getByRole("dialog", {
+    name: `Publish ${appPlanned}`,
+  });
+  const openPublishing = async (): Promise<void> => {
+    await expect(async () => {
+      if ((await publishing.count()) === 0) {
+        await page
+          .getByRole("button", { name: "Publish", exact: true })
+          .filter({ visible: true })
+          .click({ timeout: 2000 });
+      }
+      await expect(publishing).toBeVisible({ timeout: 2000 });
+    }).toPass(built);
+  };
+  await openPublishing();
+  await publishing.getByRole("button", { name: "Manage" }).click();
   await expect(
     sharing
       .getByRole("list", { name: "Shared with" })
@@ -197,13 +227,17 @@ test("a builder makes an App from what they want done, shares it with their team
       .filter({ hasText: "Person" })
   ).toHaveCount(1, built);
   await sharing.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(sharing).toHaveCount(0);
   // Publish checks the draft and makes it the first version.
-  await page.getByRole("button", { name: "Publish", exact: true }).click(built);
-  await page
-    .getByRole("dialog", { name: `Publish ${appPlanned}` })
+  await openPublishing();
+  await publishing
     .getByRole("button", { name: "Publish", exact: true })
     .click(built);
-  await expect(page.getByText(`${appPlanned} is live`)).toBeVisible(built);
+  await expect(
+    page
+      .getByRole("region", { name: "Notifications" })
+      .getByText(`${appPlanned} is live`)
+  ).toBeVisible(built);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);
@@ -225,11 +259,13 @@ test("a builder makes an App from what they want done, shares it with their team
   // sees: its Data shows its builder the contact they added, a row of its
   // table's grid, and none of the preview's.
   await page
-    .getByRole("navigation", { name: "Workspace views" })
+    .getByRole("navigation", { name: /s workspace$/u })
     .getByRole("link", { name: "Data" })
     .click();
-  await expect(page.getByRole("cell", { name: "Grace Hopper" })).toBeVisible(
-    built
-  );
-  await expect(page.getByRole("cell", { name: "Ada Lovelace" })).toHaveCount(0);
+  await expect(
+    page.getByRole("rowheader", { name: "Grace Hopper" })
+  ).toBeVisible(built);
+  await expect(
+    page.getByRole("rowheader", { name: "Ada Lovelace" })
+  ).toHaveCount(0);
 });

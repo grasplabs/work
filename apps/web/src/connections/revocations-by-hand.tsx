@@ -4,6 +4,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Await } from "@tanstack/react-router";
 
 import { formatDate } from "../format.ts";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import {
   Item,
@@ -16,7 +17,6 @@ import {
 } from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ProviderMark } from "./provider-mark.tsx";
 
@@ -166,9 +166,7 @@ const ToDoList = ({
         </ItemGroup>
       ) : (
         // A failed read is said, never taken for nothing to remove.
-        // A line, not the failed state: read again under its `Await`, that
-        // state would remount with each read and ask again at once.
-        <NotLoaded page={toDos} />
+        <PartNotLoaded page={toDos} />
       )}
     </SectionCard>
   );
