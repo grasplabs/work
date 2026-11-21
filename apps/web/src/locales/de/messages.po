@@ -5427,7 +5427,6 @@ msgstr "Kopenhagen"
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
 #: src/frame/part-words.tsx
-#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/pages/frame-failure.tsx
 #: src/routes/_shell.settings.members.tsx
