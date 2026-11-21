@@ -235,10 +235,32 @@ const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
       })
     )
     .join("\n");
-  const root = document.documentElement;
+  // Built as a document, not glued from strings, so the title (the
+  // company's name, which may hold `<` or `&`) is text in the file that is
+  // shared, never markup.
+  const file = document.implementation.createHTMLDocument();
+  file.documentElement.lang = document.documentElement.lang;
+  const meta = (attributes: Record<string, string>): HTMLMetaElement => {
+    const element = file.createElement("meta");
+    for (const [name, value] of Object.entries(attributes)) {
+      element.setAttribute(name, value);
+    }
+    return element;
+  };
+  const named = file.createElement("title");
+  named.textContent = title;
+  const style = file.createElement("style");
   // Light or dark as whatever opens it is: the tokens' light-dark() follow
   // the colour scheme, not the theme that was on when it was saved.
-  return `<!doctype html><html lang="${root.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${title}</title><style>${css}\n:root{color-scheme:light dark}</style></head><body>${page.outerHTML}</body></html>`;
+  style.textContent = `${css}\n:root{color-scheme:light dark}`;
+  file.head.prepend(
+    meta({ charset: "utf-8" }),
+    meta({ name: "viewport", content: "width=device-width, initial-scale=1" }),
+    meta({ name: "color-scheme", content: "light dark" })
+  );
+  file.head.append(named, style);
+  file.body.append(file.importNode(page, true));
+  return `<!doctype html>${file.documentElement.outerHTML}`;
 };
 
 /** The report's file, read from its page once the company's name is in and the charts have drawn. */
