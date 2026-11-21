@@ -210,8 +210,8 @@ export const PageFailed = ({
   // Only words that tell the reader something: never a bare "it failed".
   const sentence = useful(split.sentence);
   // Said once, as it appears: why it failed (the heading is read with the
-  // page), as an alert, as every failure is.
-  const said = sentence ?? title;
+  // page), as an alert, as every failure is. Without a useful reason, the
+  // title is said, from a line only a screen reader reads.
   const retry = useAction(
     async () => {
       await onRetry();
@@ -244,7 +244,9 @@ export const PageFailed = ({
         )}
         <Heading {...stylex.props(styles.heading)}>{title}</Heading>
         {sentence === undefined ? null : (
-          <p {...stylex.props(styles.sentence)}>{sentence}</p>
+          <p role="alert" {...stylex.props(styles.sentence)}>
+            {sentence}
+          </p>
         )}
         {/* What is useful first (why, the reference to quote), then the way on under it (Ruben, 21 November). */}
         {reference === undefined ? null : (
@@ -264,9 +266,11 @@ export const PageFailed = ({
         </div>
         {children}
       </div>
-      <p role="alert" {...stylex.props(visuallyHidden)}>
-        {said}
-      </p>
+      {sentence === undefined ? (
+        <p role="alert" {...stylex.props(visuallyHidden)}>
+          {title}
+        </p>
+      ) : null}
     </Backdrop>
   );
 };

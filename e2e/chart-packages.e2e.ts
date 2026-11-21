@@ -60,10 +60,10 @@ test("a builder approves a chart library the agent asked for, a page draws with 
     const page = await pageOf(builder);
     await page.goto(`/chats/${chat.id}`);
     const card = page
-      .getByRole("region", { name: "Package requests" })
+      .getByRole("region", { name: `Add npm packages to ${name}` })
       .filter({ hasText: "react-minimal-pie-chart@8.4.0" });
     await card
-      .getByRole("button", { name: `Approve the packages for ${name}` })
+      .getByRole("button", { name: "Approve the packages" })
       .click(drawn);
     await expect(card).toHaveCount(0, drawn);
 

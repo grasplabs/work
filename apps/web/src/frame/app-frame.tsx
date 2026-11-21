@@ -26,6 +26,7 @@ import { useMatchLatest } from "./match-latest.ts";
 import { usePageFills, usePageWhole } from "./page-fill.ts";
 import { PagePanelProvider, usePagePanelSlot } from "./page-panel.tsx";
 import { PersonTheme } from "./person-theme.tsx";
+import { usePhoneMenu } from "./phone-menu.ts";
 
 const styles = stylex.create({
   // The window's height, which App shell fills.
@@ -147,7 +148,7 @@ export const AppFrame = ({
   const { t } = useLingui();
   // Folded as the person left it in this browser.
   const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = usePhoneMenu();
   const fold = (next: boolean) => {
     setOpen(next);
     void keepFolded("sidebar", !next);

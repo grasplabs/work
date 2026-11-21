@@ -333,7 +333,6 @@ const NewTableDialog = ({
             <Field>
               <FieldLabel>{t`Name`}</FieldLabel>
               <Input
-                aria-label={t`Table name`}
                 onValueChange={(value: string) => {
                   setName(value);
                 }}

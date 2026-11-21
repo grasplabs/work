@@ -19,10 +19,12 @@ test("loads the frontend from core, reaches core over RPC, and asks whoever isn'
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Grasp" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Log in" })
+  ).toBeVisible();
   // Only once core answered: without an answer, the page says so instead.
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
@@ -151,8 +153,12 @@ test("names each member's actions for them, and asks before making someone an ad
   await signInTo(context, admin);
   await page.goto("/settings/members");
 
+  const search = page.getByRole("searchbox", { name: "Search members" });
   for (const person of [one, two]) {
     const who = `Person (${person.email})`;
+    // The table shows a page at a time: each is found first.
+    // oxlint-disable-next-line no-await-in-loop -- one search at a time
+    await search.fill(person.email);
     // oxlint-disable-next-line no-await-in-loop -- one control at a time
     await expect(
       page.getByRole("button", { name: `Actions for ${who}`, exact: true })
@@ -164,6 +170,7 @@ test("names each member's actions for them, and asks before making someone an ad
       buttons.map((button) => button.getAttribute("aria-label"))
     );
   expect(new Set(labels).size).toBe(labels.length);
+  await search.fill(one.email);
   await page
     .getByRole("button", { name: `Actions for Person (${one.email})` })
     .click();
@@ -177,7 +184,7 @@ test("names each member's actions for them, and asks before making someone an ad
     name: `Role of Person (${one.email})`,
   });
   await role.click();
-  await page.getByRole("option", { name: "Admin" }).click();
+  await page.getByRole("option", { name: /^Admin/u }).click();
   await expect(
     page.getByRole("alertdialog", { name: "Make Person an admin?" })
   ).toBeVisible();
@@ -209,7 +216,7 @@ for (const [where, path, landed] of [
     await page.route("**/api/auth/sign-out", async (route) => {
       await route.fulfill({ status: 503, body: "Unavailable" });
     });
-    await page.getByRole("button", { name: "Person", exact: true }).click();
+    await page.getByRole("button", { name: /^Person\b/u }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
 
     await expect(page.getByText("Signing out didn't work")).toBeVisible();
@@ -218,7 +225,7 @@ for (const [where, path, landed] of [
     ).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
     await expect(
-      page.getByRole("button", { name: "Person", exact: true })
+      page.getByRole("button", { name: /^Person\b/u })
     ).toBeVisible();
   });
 }
@@ -231,6 +238,9 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   await signInTo(context, admin);
   await page.goto("/settings/members");
   const who = `Person (${leaving.email})`;
+  await page
+    .getByRole("searchbox", { name: "Search members" })
+    .fill(leaving.email);
   const actions = page.getByRole("button", { name: `Actions for ${who}` });
   // What a change did, said over the people's table.
   const notice = page.getByRole("status").filter({ hasText: /^Person is/u });
@@ -245,14 +255,15 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   await page.getByRole("menuitem", { name: "Remove" }).click();
   const confirm = page.getByRole("alertdialog", { name: "Remove Person?" });
   await confirm.getByRole("button", { name: "Remove" }).click();
-  await expect(notice).toHaveText(
-    "Person is removed. 0 personal connections were disconnected."
-  );
-  await expect(actions).toHaveCount(0);
-  // Their row, and the menu that had the focus, are gone: the focus goes on.
+  // They had no personal connections, so none is counted.
+  await expect(notice).toHaveText("Person is removed.");
+  // They stay in the people's table, a state of their row.
   await expect(
-    page.getByRole("textbox", { name: "Search members" })
-  ).toBeFocused();
+    page
+      .getByRole("table", { name: "Members" })
+      .getByRole("row")
+      .filter({ hasText: leaving.email })
+  ).toContainText("Removed");
 });
 
 test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
@@ -263,38 +274,43 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   const { admin, member } = peopleIn("workspaceSettings");
   await signInTo(context, admin);
   await page.goto("/settings/workspace");
-  const name = page.getByRole("textbox", { name: "Name" });
+  // The organization's card names it, and its pencil renames it.
+  const card = page.getByRole("region", { name: "Organization", exact: true });
+  const heading = card.getByRole("heading");
   const zone = page.getByRole("combobox", { name: "Time zone" });
-  const before = await name.inputValue();
+  const before = (await heading.textContent()) ?? "";
+  const dialog = page.getByRole("dialog", { name: "Organization name" });
   const renamed = `Acme ${crypto.randomUUID().slice(0, 6)}`;
+  const rename = async (to: string): Promise<void> => {
+    await card.getByRole("button", { name: "Edit the name" }).click();
+    const name = dialog.getByRole("textbox", { name: "Name" });
+    await name.fill(to);
+    await name.press("Enter");
+    await expect(dialog).toBeHidden();
+    await expect(heading).toHaveText(to);
+  };
 
-  await name.fill(renamed);
-  await name.press("Enter");
+  await rename(renamed);
   await zone.click();
   await page.getByRole("option", { name: /^Amsterdam/u }).click();
-  await expect(zone).toHaveText(/^Amsterdam/u);
-  await expect(page.getByText("European Union")).toBeVisible();
+  await expect(zone).toHaveValue(/^Amsterdam/u);
+  await expect(card).toContainText("European Union");
 
+  // A member sees the new name beside their own, at the sidebar's foot.
   const other = await newContext();
   const theirs = await other.newPage();
   await signInTo(other, member);
-  await theirs.goto("/settings/workspace");
-  await expect(theirs.getByRole("textbox", { name: "Name" })).toHaveValue(
-    renamed
-  );
-  await expect(theirs.getByRole("textbox", { name: "Name" })).toBeDisabled();
-  await expect(theirs.getByRole("combobox", { name: "Time zone" })).toHaveText(
-    /^Amsterdam/u
-  );
+  await theirs.goto("/apps");
+  await expect(
+    theirs.getByRole("button", { name: `Person ${renamed}` })
+  ).toBeVisible();
   await other.close();
 
-  await name.fill(before);
-  await name.press("Enter");
-  await expect(name).toHaveValue(before);
+  await rename(before);
   // Back to UTC, where every deployment starts.
   await zone.click();
   await page.getByRole("option", { name: "UTC", exact: true }).click();
-  await expect(zone).toHaveText(/^UTC/u);
+  await expect(zone).toHaveValue(/^UTC/u);
 });
 
 test("invites someone with a role, says what each role may do, and withdraws the invitation", async ({
@@ -321,7 +337,7 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(
     dialog.getByText(
-      "Use an email address in one of the domains your organization signs in with."
+      /Use an email address in one of the domains your organization signs in with/u
     )
   ).toBeVisible();
   await addresses.press("Backspace");
@@ -335,13 +351,16 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await expect(dialog).toBeHidden();
 
   // The invited stand in the people's table, a state of their row.
+  await page.getByRole("searchbox", { name: "Search members" }).fill(email);
   const members = page.getByRole("table", { name: "Members" });
   const row = members.getByRole("row").filter({ hasText: email });
   await expect(row).toContainText("Invited");
   await expect(row).toContainText("Builder");
   await members.getByRole("button", { name: `Actions for ${email}` }).click();
   await page.getByRole("menuitem", { name: "Withdraw invitation" }).click();
-  await expect(members.getByText(email)).toHaveCount(0);
+  await expect(
+    members.getByRole("button", { name: `Actions for ${email}` })
+  ).toHaveCount(0);
 });
 
 test("an admin makes a team, puts someone in it and takes them off, renames it and deletes it", async ({
@@ -365,7 +384,7 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await teams.getByRole("button", { name, exact: true }).click();
   const team = page.getByRole("dialog", { name });
   await team.getByRole("searchbox", { name: "Find people" }).fill(member.email);
-  await team.getByRole("checkbox", { name: "Person" }).check();
+  await team.getByRole("checkbox", { name: `Person ${member.email}` }).check();
   await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
   await expect(teams.getByText("1 person")).toBeVisible();
@@ -373,7 +392,9 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   // Untick them and rename it, in one save.
   const renamed = `${name} and legal`;
   await teams.getByRole("button", { name, exact: true }).click();
-  await team.getByRole("checkbox", { name: "Person" }).uncheck();
+  await team
+    .getByRole("checkbox", { name: `Person ${member.email}` })
+    .uncheck();
   await team.getByRole("textbox", { name: "Name" }).fill(renamed);
   await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
@@ -394,13 +415,15 @@ test("shows the members page only to someone signed in, and never signs them out
 }) => {
   await page.goto("/settings/members");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-in");
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(
     "/settings/members"
   );
-  await expect(page.getByRole("heading", { name: "Members" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Members and roles" })
+  ).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: /^Role of /u })).toHaveCount(
     0
   );
@@ -423,7 +446,9 @@ test("shows the members page only to someone signed in, and never signs them out
   // growing pause, and lets them in.
   failing = 2;
   await page.goto("/settings/members");
-  await expect(page.getByRole("heading", { name: "Members" })).toBeVisible({
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Members and roles" })
+  ).toBeVisible({
     timeout: reconnectMs,
   });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
@@ -440,7 +465,7 @@ test("shows the members page only to someone signed in, and never signs them out
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toHaveCount(0);
 
   // Trying again shows it's trying, then says so again while core fails.
@@ -454,12 +479,18 @@ test("shows the members page only to someone signed in, and never signs them out
     "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }
   );
+  // The alert keeps its words while it tries: the first try ends first.
+  await expect(retry).not.toHaveAttribute("aria-busy", "true", {
+    timeout: reconnectMs,
+  });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
 
   // Once core answers again, trying again lets them in.
   failing = 0;
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("heading", { name: "Members" })).toBeVisible({
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Members and roles" })
+  ).toBeVisible({
     timeout: reconnectMs,
   });
 });
@@ -473,12 +504,13 @@ test("an admin changes a member's role, and the controls wait for the list to sh
   const gate = await callGate(page, '["members","list"]');
   await page.goto("/settings/members");
   const who = `Person (${one.email})`;
+  await page.getByRole("searchbox", { name: "Search members" }).fill(one.email);
   const role = page.getByRole("combobox", { name: `Role of ${who}` });
   await expect(role).toContainText("User");
 
   gate.hold();
   await role.click();
-  await page.getByRole("option", { name: "Builder" }).click();
+  await page.getByRole("option", { name: /^Builder/u }).click();
   // The change went through; the list that shows it hasn't come back yet.
   // The controls went off before the change was sent, so they're read
   // right away, then the list is let through, well before the page would
@@ -507,18 +539,19 @@ test("shows the page loading while the members list is slow, then says core can'
   await page.goto("/settings/members");
   // In the frame, as skeletons, while the read is slow.
   await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
-  const nav = page.getByRole("navigation", { name: "Main" });
+  const nav = page.getByRole("complementary", { name: "Sidebar" });
   await expect(nav).toBeVisible();
 
-  // Then the page says it didn't load and why, with a way to ask again,
-  // still in the frame.
-  await expect(
-    page.getByRole("heading", { name: "This page didn't load" })
-  ).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("alert")).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment."
+  // Then the members' section says why it didn't load, with a way to ask
+  // again, still in the frame.
+  const members = page.getByRole("region", { name: "Members", exact: true });
+  await expect(members.getByRole("alert")).toHaveText(
+    "Grasp can't be reached right now. Try again in a moment.",
+    { timeout: 15_000 }
   );
-  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(
+    members.getByRole("button", { name: "Try again" })
+  ).toBeVisible();
   await expect(nav).toBeVisible();
   await expect(page.getByRole("combobox", { name: /^Role of /u })).toHaveCount(
     0
@@ -540,7 +573,7 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await endSession(member);
   await nav.getByRole("link", { name: "Apps" }).click();
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible({
     timeout: reconnectMs,
   });
@@ -631,7 +664,7 @@ test("never sends what it gave up on while core was out of reach, once core is b
       server.send(message);
     });
   });
-  await page.goto("/settings/members");
+  await page.goto("/apps");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Brain" })).toBeVisible();
 
@@ -656,9 +689,9 @@ test("never sends what it gave up on while core was out of reach, once core is b
     .getByRole("main")
     .getByRole("button", { name: "Try again" })
     .click();
-  await expect(
-    page.getByRole("complementary", { name: "The brain" })
-  ).toBeVisible({ timeout: reconnectMs });
+  await expect(page.getByRole("tree", { name: "In the brain" })).toBeVisible({
+    timeout: reconnectMs,
+  });
   const brainReads = sent.filter((message) =>
     message.includes('["brain","read"]')
   );

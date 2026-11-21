@@ -63,7 +63,9 @@ test("an admin sets a board goal, words it again and links a workflow; a member 
   const memberPage = await pageOf(member);
   await memberPage.goto("/brain/sections/vision");
   await expect(
-    memberPage.getByRole("link", { name: new RegExp(worded, "u") })
+    memberPage
+      .getByRole("main")
+      .getByRole("link", { name: new RegExp(worded, "u") })
   ).toBeVisible(pageRead);
   await expect(
     memberPage.getByRole("button", { name: "Add a goal" })

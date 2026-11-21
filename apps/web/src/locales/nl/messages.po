@@ -6952,6 +6952,7 @@ msgid "Erase…"
 msgstr "Wissen…"
 
 #: src/onboarding/setup-steps.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Gewist"
@@ -14637,6 +14638,10 @@ msgctxt "a table row of something taken away"
 msgid "removed"
 msgstr "verwijderd"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "Removed"
+msgstr "Verwijderd"
+
 #: src/frame/part-words.tsx
 msgctxt "a guest a change takes off"
 msgid "Removed"
@@ -17217,10 +17222,6 @@ msgstr "Tabel"
 msgctxt "a kind of block"
 msgid "Table"
 msgstr "Tabel"
-
-#: src/apps/app-data-model.tsx
-msgid "Table name"
-msgstr "Tabelnaam"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/sources-page.tsx
