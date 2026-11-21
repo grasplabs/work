@@ -123,7 +123,7 @@ const start = async (
 ): Promise<Drawing | undefined> => {
   if (isSand(backdrop)) {
     const { startSand } = await import("./sand");
-    return startSand(element, backdrop, options);
+    return await startSand(element, backdrop, options);
   }
   if (isScene(backdrop) || isDither(backdrop)) {
     const { startShader } = await import("./shader");

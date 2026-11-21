@@ -128,7 +128,7 @@ const startOn = async (
   }
   if (isSand(backdrop)) {
     const { startSand } = await import("../backdrop/sand");
-    return startSand(canvas, backdrop, options);
+    return await startSand(canvas, backdrop, options);
   }
   const { startShader } = await import("../backdrop/shader");
   return startShader(

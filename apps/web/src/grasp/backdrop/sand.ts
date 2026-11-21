@@ -371,12 +371,41 @@ const colourFrames = 30;
 /** The most canvas pixels to a CSS pixel: a grain is a dot of 1 to 1.6px, crisp at 2. */
 const mostRatio = 2;
 
-/** Draws sand of `kind` on `element`, run and held by Backdrop. */
-export const startSand = (
+/** How long a slice of the first settling runs before the page gets its turn, in ms. */
+const settleSliceMs = 4;
+
+/**
+ * Settles new sand a few steps at a time between the page's own work: settled at once, it held
+ * the page still for a quarter of a second as it opened. The still under the canvas shows meanwhile.
+ */
+const settle = async (
+  sand: ReturnType<typeof sandOn>,
+  scene: Scene
+): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<number>();
+  let done = 0;
+  const slice = (): void => {
+    const until = performance.now() + settleSliceMs;
+    while (done < settleFrames && performance.now() < until) {
+      sand.step(scene);
+      done += 1;
+    }
+    if (done < settleFrames) {
+      setTimeout(slice, 0);
+    } else {
+      resolve(done);
+    }
+  };
+  slice();
+  await promise;
+};
+
+/** Draws sand of `kind` on `element`, run and held by Backdrop, once it has settled. */
+export const startSand = async (
   element: HTMLCanvasElement,
   kind: BackdropSand,
   options: DrawOptions
-): Drawing => {
+): Promise<Drawing> => {
   const ctx = element.getContext("2d");
   if (ctx === null) {
     return nothingDrawn;
@@ -390,8 +419,6 @@ export const startSand = (
     press: 0,
     clear: undefined,
   };
-  const pixel = kind === "pixels";
-  let sand: ReturnType<typeof sandOn> | undefined;
   const begun = performance.now();
   let last = begun;
   let frame = 0;
@@ -427,8 +454,16 @@ export const startSand = (
             bottom: kept.bottom - box.top,
           };
   };
+  // The settled picture: all there is with less motion, and the first frame otherwise, so the
+  // sand is never seen as a plain scatter.
+  const first = element.getBoundingClientRect();
+  scene.width = Math.max(1, first.width);
+  scene.height = Math.max(1, first.height);
+  place();
+  const sand = sandOn(scene, plates[kind], kind === "pixels");
+  await settle(sand, scene);
   const paint = (): void => {
-    sand?.draw(ctx, scene, colours());
+    sand.draw(ctx, scene, colours());
     drawn(element);
   };
   const fit = (): void => {
@@ -441,18 +476,9 @@ export const startSand = (
     scene.width = Math.max(1, box.width);
     scene.height = Math.max(1, box.height);
     place();
-    if (sand === undefined) {
-      sand = sandOn(scene, plates[kind], pixel);
-      // The settled picture: all there is with less motion, and the first frame otherwise, so the
-      // sand is never seen as a plain scatter.
-      for (let done = 0; done < settleFrames; done += 1) {
-        sand.step(scene);
-      }
-    } else {
-      // Resized (the sidebar folding, say): the same sand, moved with the field, so it is never
-      // scattered and settled again.
-      sand.stretch(scene.width / before.width, scene.height / before.height);
-    }
+    // Resized (the sidebar folding, say, or while it settled): the same sand, moved with the
+    // field, so it is never scattered and settled again.
+    sand.stretch(scene.width / before.width, scene.height / before.height);
     // Sizing the canvas clears it: drawn again at once, so no frame is bare.
     paint();
   };
@@ -465,7 +491,7 @@ export const startSand = (
     scene.time = (now - begun) / 1000;
     const ease = 1 - (1 - pressEase) ** rate;
     scene.press += ((pointing ? 1 : 0) - scene.press) * ease;
-    sand?.step(scene, rate);
+    sand.step(scene, rate);
     paint();
   };
   const point = (event: PointerEvent): void => {
