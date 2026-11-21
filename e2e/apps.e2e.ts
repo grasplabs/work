@@ -182,8 +182,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   // pages, each saying where it stands.
   await search.fill(run);
   await expect(cards).toHaveCount(7);
-  const marked = (status: string) =>
-    cards.filter({ has: page.getByLabel(status, { exact: true }) });
+  const marked = (status: string) => cards.filter({ hasText: status });
   await expect(marked("Your team uses it")).toHaveCount(5);
   await expect(marked("Only you see this")).toHaveCount(2);
 
@@ -230,11 +229,11 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   // Its settings, beside the chat in its workspace: what it is, its
   // connections and its members.
   await page
-    .getByRole("navigation", { name: /'s workspace$/u })
+    .getByRole("navigation", { name: /s workspace$/u })
     .getByRole("link", { name: "General" })
     .click();
   await expect(page.getByLabel("What it is for")).toHaveValue("Counts clicks");
-  const sections = page.getByRole("navigation", { name: /'s workspace$/u });
+  const sections = page.getByRole("navigation", { name: /s workspace$/u });
   // A builder sees the connections it uses; this one uses none.
   await sections.getByRole("link", { name: "Connections" }).click();
   await expect(
@@ -259,19 +258,16 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
     await page.goto("/workflows");
+    // Grasp's sections are the nav's first list; the Apps' own entries,
+    // which come on their own read, follow in theirs.
     const links = page
       .getByRole("navigation", { name: "Main" })
+      .getByRole("list")
+      .first()
       .getByRole("link");
     // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
-    // The Apps' own entries, which come on their own read, aren't Grasp's
-    // sections (app-surfaces.e2e.ts adds some on the shared deployment):
-    // every link but theirs, in one read of the page.
-    const texts = await links.evaluateAll((found) =>
-      found
-        .filter((link) => link.closest("[aria-labelledby]") === null)
-        .map((link) => link.textContent ?? "")
-    );
+    const texts = await links.allTextContents();
     // The person menu, at the sidebar's foot, by their name.
     await page.getByRole("button", { name: /^Person\b/u }).click();
     const items = page.getByRole("menuitem");

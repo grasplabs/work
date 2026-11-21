@@ -72,7 +72,9 @@ test("a person stops an answer mid-way: what was written stays, said as stopped,
 
   await page.getByRole("button", { name: "Stop", exact: true }).click();
 
-  await expect(messages.getByText("Stopped", { exact: true })).toBeVisible({
+  await expect(
+    messages.getByRole("status").filter({ hasText: /^Stopped$/u })
+  ).toBeVisible({
     timeout: 30_000,
   });
   await expect(messages.getByText(firstWords, { exact: false })).toBeVisible();
@@ -203,12 +205,21 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   // A draft, then closed and opened again: in the same place, the draft kept.
   const draft = "Half a question";
   await page.getByRole("textbox", { name: "Ask Grasp" }).fill(draft);
-  const placed = await head.boundingBox();
+  // Where it stands once it has settled from full screen.
+  let placed = await head.boundingBox();
+  await expect
+    .poll(async () => {
+      const now = await head.boundingBox();
+      const settled = JSON.stringify(now) === JSON.stringify(placed);
+      placed = now;
+      return settled;
+    })
+    .toBe(true);
   await head.getByRole("button", { name: "Close" }).click();
   await expect(head).toBeHidden();
   await page.getByRole("button", { name: "Show or hide the chat" }).click();
   await expect(head).toBeVisible();
-  expect(await head.boundingBox()).toStrictEqual(placed);
+  await expect.poll(async () => await head.boundingBox()).toStrictEqual(placed);
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveText(
     draft
   );
@@ -295,7 +306,9 @@ test("on a phone, a person asks, follows the words coming in, and stops the answ
 
   await page.getByRole("button", { name: "Stop", exact: true }).click();
 
-  await expect(messages.getByText("Stopped", { exact: true })).toBeVisible({
+  await expect(
+    messages.getByRole("status").filter({ hasText: /^Stopped$/u })
+  ).toBeVisible({
     timeout: 30_000,
   });
   // Nothing runs off the screen's side.

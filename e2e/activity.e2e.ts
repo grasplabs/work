@@ -106,8 +106,11 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   );
   await granted.getByRole("button", { name: /^Details of event /u }).click();
   await expect(
-    page.getByText(`"requestedBy": "${builder.userId}"`)
-  ).toBeVisible();
+    page
+      .getByRole("dialog", { name: "Event details" })
+      .getByRole("listitem")
+      .filter({ hasText: builder.userId })
+  ).toHaveText(`RequestedBy ${builder.userId}`);
   await page.keyboard.press("Escape");
 
   // Narrowed to grants, the request drops out; the action is taken as

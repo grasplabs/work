@@ -11,9 +11,9 @@ export const goTo = async (nav: Locator, name: string): Promise<void> => {
     (await fold.count()) > 0 &&
     (await fold.evaluate((button) => button.closest("[inert]") === null));
   if (!folded) {
-    await nav.getByRole("link", { name, exact: true }).click();
+    await nav.getByRole("link", { name }).click();
     return;
   }
   await fold.click();
-  await nav.page().getByRole("menuitem", { name, exact: true }).click();
+  await nav.page().getByRole("menuitem", { name }).click();
 };

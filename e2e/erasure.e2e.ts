@@ -67,7 +67,15 @@ test("an admin removes someone, erases them by typing their name, follows it to 
   await expect(
     people.getByRole("button", { name: `Actions for ${who}` })
   ).toHaveCount(0);
-  await search.fill("Erased");
+  // The latest change first: newest since, the erased row is on the first
+  // page however many people there are.
+  await search.fill("");
+  const since = people.getByRole("columnheader", { name: "Since" });
+  await since.getByRole("button").click();
+  if ((await since.getAttribute("aria-sort")) !== "descending") {
+    await since.getByRole("button").click();
+  }
+  await expect(since).toHaveAttribute("aria-sort", "descending");
   const erasedRows = people
     .getByRole("row")
     .filter({ hasText: "Person" })

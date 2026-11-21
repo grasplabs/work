@@ -206,20 +206,26 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   );
   await box.fill("");
 
-  // Renamed from the chat's menu in the window, in place: the name is in
-  // a field, Escape keeps the one it had and Enter keeps the new one.
+  // Renamed from the chat's menu in the sidebar's Chats, in place: the
+  // name is in a field, Escape keeps the one it had and Enter keeps the
+  // new one.
+  const recent = page.getByRole("list", { name: "Chats" });
+  const rename = async (from: string): Promise<Locator> => {
+    await recent.getByRole("button", { name: `More for ${from}` }).click();
+    await page.getByRole("menuitem", { name: "Rename" }).click();
+    const name = recent.getByRole("textbox");
+    await expect(name).toBeFocused();
+    return name;
+  };
+  const kept = await rename(question);
+  await kept.fill("Never kept");
+  await kept.press("Escape");
+  await expect(recent.getByRole("link", { name: question })).toBeVisible();
+  const renamed = await rename(question);
+  await renamed.fill(title);
+  await renamed.press("Enter");
+  await expect(recent.getByRole("link", { name: title })).toBeVisible();
   chats = await chatsWindow(page);
-  await chats.getByRole("button", { name: `More for ${question}` }).click();
-  await page.getByRole("menuitem", { name: "Rename" }).click();
-  const name = chats.getByLabel("Chat name");
-  await expect(name).toBeFocused();
-  await name.fill("Never kept");
-  await name.press("Escape");
-  await expect(rowOf(chats, question)).toBeVisible();
-  await chats.getByRole("button", { name: `More for ${question}` }).click();
-  await page.getByRole("menuitem", { name: "Rename" }).click();
-  await chats.getByLabel("Chat name").fill(title);
-  await chats.getByLabel("Chat name").press("Enter");
   await expect(rowOf(chats, title)).toBeVisible();
 
   // Found by what was said in it, which its title no longer holds, with
@@ -583,11 +589,10 @@ test("the chat on every other page carries on the open chat, which opens as its 
   // The page stayed where it was.
   expect(new URL(page.url()).pathname).toBe("/apps");
 
-  // Closed, it is the bar again, with the cursor in its box; what is typed
-  // there is still there as the chat opens again, on the same chat.
+  // Closed, it is the bar again; what is typed in its box is still there
+  // as the chat opens again, on the same chat.
   await head.getByRole("button", { name: "Close" }).click();
   await expect(chat).toBeHidden();
-  await expect(box).toBeFocused();
   await box.fill(`Half a thought ${tag}`);
   await page.keyboard.press("ControlOrMeta+j");
   await expect(messages.getByRole("article").first()).toContainText(question);

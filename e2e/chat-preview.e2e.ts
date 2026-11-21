@@ -147,7 +147,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
     // It stays this chat's as the person moves between the views.
-    const views = page.getByRole("navigation", { name: /'s workspace$/u });
+    const views = page.getByRole("navigation", { name: /s workspace$/u });
     await views.getByRole("link", { name: "Code" }).click();
     // The App itself, by its name over the views.
     await page
@@ -302,7 +302,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // published: the App's project as the agent wrote it, its last write
     // too.
     await page
-      .getByRole("navigation", { name: /'s workspace$/u })
+      .getByRole("navigation", { name: /s workspace$/u })
       .getByRole("link", { name: "Code" })
       .click();
     // Its tree: folders first, each open, then the files, each by name.

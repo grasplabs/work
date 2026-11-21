@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import { testApp } from "../apps/core/test/app-definitions.ts";
 import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
+import { dialogTitled } from "./dialogs.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 
 // An App's declared permissions and their bindings, end to end in a
@@ -100,9 +101,11 @@ test("an admin binds an App's AI to a model, with no budget of its own, and revo
   // Revoked, once confirmed: unbound again, for the admin and the builder
   // alike.
   await ai.getByRole("button", { name: "Revoke the binding of ai" }).click();
-  const confirm = deciding.getByRole("dialog", {
-    name: "Revoke the binding of ai?",
-  });
+  const confirm = dialogTitled(
+    deciding,
+    "Revoke the binding of ai?",
+    "alertdialog"
+  );
   await confirm.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(ai).toContainText(unbound);
   await expect(ai).not.toContainText("Bound to");
