@@ -80,7 +80,7 @@ describe("an organization's page", () => {
     ];
     const column = columnOf(container)?.textContent ?? "";
     const positions = titles.map((title) => column.indexOf(title));
-    const text = container.textContent ?? "";
+    const text = container.querySelector("main")?.textContent ?? "";
 
     expect({
       inOrder:
@@ -123,9 +123,9 @@ describe("an organization's page", () => {
     const last = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
     last.setUTCDate(last.getUTCDate() + 4);
 
-    const { text } = await openAcme("", snapshot);
+    const { main } = await openAcme("", snapshot);
 
-    expect(text()).toContain(
+    expect(main()).toContain(
       `The interviews closed on ${formatDate(last.toISOString().slice(0, 10))}`
     );
   });
@@ -200,7 +200,7 @@ describe("an organization's page", () => {
 
   it("says nothing is known of a contract core doesn't hold, with no draft or fee, beside the agreements as core has them", async () => {
     const empty = emptyAdminSnapshot("Acme");
-    const { container, text } = await openAcme("/details?tab=contract", {
+    const { container, main } = await openAcme("/details?tab=contract", {
       ...empty,
       agreements: {
         processing: true,
@@ -225,7 +225,7 @@ describe("an organization's page", () => {
         },
       ],
     });
-    const page = text();
+    const page = main();
     const agreed = partOf(container, "Agreed before the first interview");
     const agreementOf = (name: string): string =>
       [...(agreed?.querySelectorAll("li") ?? [])].find((item) =>
@@ -356,12 +356,12 @@ describe("an organization's overview", () => {
   });
 
   it("counts the interviews' days to the company's own plan", async () => {
-    const { text } = await openAcme(
+    const { main } = await openAcme(
       "",
       toldSnapshot("Acme", { days: 21, daysIn: 3, leadTalked: true })
     );
 
-    expect(text()).toMatch(/Day \d+ of 21/u);
+    expect(main()).toMatch(/Day \d+ of 21/u);
   });
 });
 

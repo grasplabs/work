@@ -71,19 +71,12 @@ import {
   TriangleAlertIcon,
   UnplugIcon,
 } from "lucide-react";
-import {
-  createContext,
-  Fragment,
-  Suspense,
-  use,
-  useEffect,
-  useState,
-} from "react";
+import { createContext, Fragment, Suspense, use, useState } from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import type { AnsweredAdmin, OrgRead, OrgReads } from "./org-reads.ts";
+import type { AnsweredAdmin, OrgRead } from "./org-reads.ts";
 import { AdminHeader, PageBody, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
@@ -733,19 +726,6 @@ const ReadNotes = ({ section }: { section: OrgSection }) => {
 };
 
 /**
- * Keeps the answer the page shows in its router's reads: one read on the
- * server, for the page this tab opened on, too; read again and not
- * answering, the page keeps it.
- */
-const KeepRead = ({ reads }: { reads: OrgReads }) => {
-  const { admin } = useOrgRead();
-  useEffect(() => {
-    reads.remember(admin);
-  }, [reads, admin]);
-  return null;
-};
-
-/**
  * One organization's page: its column of sections and the section it is
  * on, shown at once from what the admin recorded (`client`). What its
  * core answers (`read`; undefined until it is asked) fills in the parts
@@ -759,11 +739,9 @@ const KeepRead = ({ reads }: { reads: OrgReads }) => {
 export const OrganizationPage = ({
   client,
   read,
-  reads,
 }: {
   client: GridRow;
   read: Deferred<OrgRead> | undefined;
-  reads: OrgReads;
 }) => {
   const { id: clientId, name } = client;
   const { section, withoutCore } = useShownSection();
@@ -771,9 +749,6 @@ export const OrganizationPage = ({
   return (
     <OrgReadContext value={read}>
       <AdminHeader page={name} />
-      <Suspense fallback={null}>
-        <KeepRead reads={reads} />
-      </Suspense>
       <div className="flex min-h-0 flex-1 text-sm">
         <OrgColumn clientId={clientId} name={name} />
         <div className="relative min-w-0 flex-1 overflow-y-auto">

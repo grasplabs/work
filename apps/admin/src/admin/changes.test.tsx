@@ -12,7 +12,7 @@ import {
   until,
 } from "../../test/app.tsx";
 import { emptyAdminSnapshot } from "../../test/snapshots.ts";
-import type { ClientAdmin } from "../clients/admin.ts";
+import type { AnsweredAdmin } from "./org-reads.ts";
 import { freshMs } from "./org-reads.ts";
 
 // What staff change on an organization's page shows changed once the
@@ -28,7 +28,7 @@ const globex = gridRow({
 });
 
 /** Acme's core answering `before` until `changed` says the change went through, then `after`. */
-const answering = (before: ClientAdmin, after: ClientAdmin) => {
+const answering = (before: AnsweredAdmin, after: AnsweredAdmin) => {
   let changed = false;
   return {
     change: () => {
@@ -85,11 +85,14 @@ const onAcme = async (
   {
     applies = true,
     held,
+    framed,
   }: {
     /** Whether the command changes what Acme's core answers. */
     applies?: boolean;
     /** Acme's core's answer to its `call`th read, what it held then, held back `until`. */
     held?: { call: number; until: Promise<unknown> };
+    /** The frame's `call`th read of every client, what they held then, held back `until`. */
+    framed?: { call: number; until: Promise<unknown> };
   } = {}
 ) => {
   const empty = emptyAdminSnapshot("Acme");
@@ -109,6 +112,16 @@ const onAcme = async (
     })
   );
   let reads = 0;
+  let frameReads = 0;
+  let down = false;
+  /** What Acme's core holds when asked, stamped as the Worker stamps it: when its answer came in. */
+  const answerOnceIn = async (
+    heldUntil: Promise<unknown> | undefined
+  ): Promise<AnsweredAdmin> => {
+    const answer = core.admin();
+    await heldUntil;
+    return { ...answer, at: new Date().toISOString() };
+  };
   const page = await openAdmin(acmeContract, {
     fetchClientGrid: [acme, globex],
     fetchClientAdmin: async (data: unknown) => {
@@ -120,19 +133,35 @@ const onAcme = async (
         return answeredAdmin({ client: globex });
       }
       reads += 1;
-      const answer = core.admin();
-      if (reads === held?.call) {
-        await held.until;
+      if (down) {
+        throw new FailedError();
       }
-      return answer;
+      return await answerOnceIn(reads === held?.call ? held.until : undefined);
     },
-    fetchClientAdmins: [],
+    // Every client but the one the page reads alone.
+    fetchClientAdmins: async (data: unknown) => {
+      frameReads += 1;
+      const except: unknown =
+        typeof data === "object" && data !== null
+          ? Reflect.get(data, "except")
+          : undefined;
+      const others =
+        Array.isArray(except) && except.includes("globex")
+          ? [
+              await answerOnceIn(
+                frameReads === framed?.call ? framed.until : undefined
+              ),
+            ]
+          : [];
+      return others;
+    },
     ...sectionReads,
-    commandFn: () => {
+    commandFn: async () => {
+      const answer = await command();
       if (applies) {
         core.change();
       }
-      return command();
+      return answer;
     },
   });
   await journey(page.router);
@@ -144,7 +173,15 @@ const onAcme = async (
         data !== null &&
         Reflect.get(data, "clientId") === "acme"
     ).length;
-  return { ...page, core, asked };
+  return {
+    ...page,
+    core,
+    asked,
+    /** Acme's core stops answering. */
+    fail: () => {
+      down = true;
+    },
+  };
 };
 
 /** The dialog's form for what was agreed, in the document beside the page, once open. */
@@ -282,7 +319,9 @@ describe("a change on an organization's page", () => {
 
     expect({
       shows: agreedOn(container).includes("Not recorded yet"),
-      failed: document.body.textContent?.includes("That didn't work.") ?? false,
+      // Said in the dialog it was given from.
+      failed:
+        agreementsForm()?.textContent?.includes("That didn't work.") ?? false,
       askedAgain: asked() - askedBefore,
     }).toStrictEqual({ shows: true, failed: true, askedAgain: 1 });
   });
@@ -290,9 +329,11 @@ describe("a change on an organization's page", () => {
   it("shows what a command gives, though a slower Read again begun before it was still under way", async () => {
     const slow = Promise.withResolvers<null>();
     // Its second read (Read again's) answers only once let, with what it held before.
-    const { container, asked } = await onAcme(async () => {}, undefined, {
-      held: { call: 2, until: slow.promise },
-    });
+    const { container, router, asked, fail } = await onAcme(
+      async () => {},
+      undefined,
+      { held: { call: 2, until: slow.promise } }
+    );
     const again = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Read again"
     );
@@ -317,13 +358,99 @@ describe("a change on an organization's page", () => {
     });
     // The page asks its core again for the change, never waiting on the older read.
     await until(() => asked() === 3);
+    // The older read answers last, so its answer is stamped last.
     slow.resolve(null);
+    await settle();
+    const after = agreedOn(container);
+    // Back to it from another organization within the minute: the answer kept.
+    await go(() => {
+      router.history.push("/organizations/globex");
+    });
+    await go(() => {
+      router.history.back();
+    });
+    const cameBack = agreedOn(container);
+    // Its core stops answering; Read again shows the last answer, marked.
+    fail();
+    const again2 = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Read again"
+    );
+    await go(() => {
+      again2?.click();
+    });
+
+    expect({
+      after: after.includes("In place since 2 Sep 2026"),
+      cameBack: cameBack.includes("In place since 2 Sep 2026"),
+      failedAgain: agreedOn(container).includes("In place since 2 Sep 2026"),
+      marked: (container.querySelector("main")?.textContent ?? "").includes(
+        "couldn’t be read again"
+      ),
+      asked: asked(),
+    }).toStrictEqual({
+      after: true,
+      cameBack: true,
+      failedAgain: true,
+      marked: true,
+      asked: 4,
+    });
+  });
+
+  it("shows a change that came through after staff left its page, on coming back while the frame still reads it", async () => {
+    const through = Promise.withResolvers<null>();
+    const frame = Promise.withResolvers<null>();
+    const { container, router, asked, calls } = await onAcme(
+      async () => {},
+      async () => {
+        await through.promise;
+        return { refused: null, issuedAt: new Date().toISOString() };
+      },
+      // The frame's read after the change (its second) is slow.
+      { framed: { call: 2, until: frame.promise } }
+    );
+    const askedBefore = asked();
+    const open = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Change what was agreed"
+    );
+    await go(() => {
+      open?.click();
+    });
+    await act(async () => {
+      agreementsForm()?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true })
+      );
+      await Promise.resolve();
+    });
+    // Staff go to another organization before the change is through.
+    await act(async () => {
+      router.history.push("/organizations/globex");
+      await Promise.resolve();
+    });
+    await until(
+      () => router.state.resolvedLocation?.pathname === "/organizations/globex"
+    );
+    through.resolve(null);
+    // Through, the change reads the frame again, every client's core.
+    await until(
+      () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
+    );
+    await act(async () => {
+      router.history.push(acmeContract);
+      await Promise.resolve();
+    });
+    frame.resolve(null);
     await settle();
 
     expect({
-      after: agreedOn(container).includes("In place since 2 Sep 2026"),
-      asked: asked(),
-    }).toStrictEqual({ after: true, asked: 3 });
+      on: router.state.location.pathname,
+      agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
+      // The page took the frame's read: its core asked no second time.
+      askedAgain: asked() - askedBefore,
+    }).toStrictEqual({
+      on: "/organizations/acme/details",
+      agreed: true,
+      askedAgain: 0,
+    });
   });
 
   it("shows both of two changes given at once from two parts of the page", async () => {
@@ -457,6 +584,46 @@ describe("a change on an organization's page", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("an organization deleted while its page is open", () => {
+  it("keeps nothing of what its core answered, should one be added again under its id", async () => {
+    let listed = true;
+    let answers = true;
+    const { router, main, container } = await openAdmin(acmeContract, {
+      fetchClientGrid: () => (listed ? [acme] : []),
+      fetchClientAdmin: () =>
+        answers
+          ? answeredAdmin({ client: acme })
+          : {
+              client: acme,
+              state: "unreachable",
+              lastAnsweredAt: null,
+              error: "timeout",
+            },
+      fetchClientAdmins: [],
+      ...sectionReads,
+    });
+    const before = agreedOn(container);
+    // Deleted: the page, read again, finds it no longer there.
+    listed = false;
+    await go(async () => {
+      await router.invalidate();
+    });
+    const gone = main();
+    // Added again under the same id, its core not answering yet.
+    listed = true;
+    answers = false;
+    await go(async () => {
+      await router.invalidate();
+    });
+
+    expect({
+      before: before.includes("Not recorded yet"),
+      gone: gone.includes("This page is not here"),
+      again: main().includes("’s Grasp didn’t answer"),
+    }).toStrictEqual({ before: true, gone: true, again: true });
   });
 });
 

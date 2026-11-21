@@ -30,6 +30,14 @@ const answered = (agoMs: number): AnsweredAdmin => ({
   crm: { state: "not_linked" },
 });
 
+/** Lets everything already started run as far as it can. */
+const aTurn = async (): Promise<void> => {
+  // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10);
+  });
+};
+
 const timedOut: ClientAdmin = {
   client,
   state: "unreachable",
@@ -39,16 +47,19 @@ const timedOut: ClientAdmin = {
 
 /**
  * Acme's page as `reads` has it, come to (`onIt` false) or loaded again
- * while the tab shows it; the frame's read failed.
+ * while the tab shows it; the frame's read failed, unless `frame` is given.
  */
 const opened = async (
   reads: ReturnType<typeof orgReads>,
-  onIt: boolean
+  onIt: boolean,
+  frame?: { admins: Promise<ClientAdmin[] | null>; asked: number }
 ): Promise<OrgRead | undefined> => {
   const { read } = await readOrganization({
     reads,
     client,
-    admins: Promise.resolve(null),
+    // The frame's read failed, unless given.
+    admins: frame?.admins ?? Promise.resolve(null),
+    adminsAsked: frame?.asked ?? 0,
     onIt,
     preload: false,
   });
@@ -59,7 +70,7 @@ describe("an organization's page as read", () => {
   it("stays marked stale after reading it again failed, until a later read answers", async () => {
     const reads = orgReads();
     const first = answered(10_000);
-    reads.remember(first);
+    reads.remember(first, reads.ask());
 
     // Read again: its core times out (the page's read joins the one under way).
     const failing = Promise.withResolvers<ClientAdmin | null>();
@@ -72,7 +83,7 @@ describe("an organization's page as read", () => {
     const reopened = await opened(reads, false);
 
     const later = answered(0);
-    reads.remember(later);
+    reads.remember(later, reads.ask());
     const afterAnswer = await opened(reads, false);
 
     expect({
@@ -91,7 +102,7 @@ describe("an organization's page loaded again", () => {
   it("asks its core again while the tab shows it, but takes the fresh answer on coming to it", async () => {
     const reads = orgReads();
     const fresh = answered(1000);
-    reads.remember(fresh);
+    reads.remember(fresh, reads.ask());
     let asked = 0;
     const ask = async (): Promise<ClientAdmin | null> => {
       asked += 1;
@@ -121,20 +132,24 @@ describe("an organization's page loaded again", () => {
     });
   });
 
-  it("asked anew, never joins a read begun before the load, though it is still under way: its answer may be from before the change", async () => {
+  it("asked anew, never joins a read begun before the load, and that read's answer, coming in last, never replaces the newer one", async () => {
     const reads = orgReads();
-    const before = answered(2000);
-    const after = answered(0);
     let asked = 0;
     const ask = async (): Promise<ClientAdmin | null> => {
       asked += 1;
-      return await Promise.resolve(after);
+      return await Promise.resolve(answered(0));
     };
     // A slow read, begun before the change: Read again, a moment before.
-    const slow = Promise.withResolvers<ClientAdmin | null>();
-    const older = reads.read(client.id, async () => await slow.promise, {
-      anew: true,
-    });
+    const slow = Promise.withResolvers<null>();
+    const older = reads.read(
+      client.id,
+      async () => {
+        await slow.promise;
+        // Stamped as the Worker stamps it: when core's answer came in.
+        return answered(0);
+      },
+      { anew: true }
+    );
     // The change is through, and the router loads the page again.
     reads.loadBegan();
     // The frame's read in it takes the one under way, as any read does;
@@ -142,35 +157,95 @@ describe("an organization's page loaded again", () => {
     // the page's, asked anew, its core again, once: a second in that load joins it.
     const page = reads.read(client.id, ask, { anew: true });
     const second = reads.read(client.id, ask, { anew: true });
-    // The slow read answers, with what its core held before the change.
-    slow.resolve(before);
     const [pageAnswer, secondAnswer] = await Promise.all([page, second]);
+    // The slow read answers last, with what its core held before the change.
+    slow.resolve(null);
+    const olderAnswer = await older;
+    const kept = reads.fresh(client.id, Date.now());
+    // Later, reading it again fails: the page shows the last answer, marked.
+    const failedAgain = reads.settle(timedOut, Date.now());
+    // Coming back to it within the minute.
+    const cameBack = await opened(reads, false);
 
     expect({
-      page: pageAnswer,
-      second: secondAnswer,
-      framed: await framed,
-      older: await older,
+      second: secondAnswer === pageAnswer,
+      framed: (await framed) === olderAnswer,
       asked,
-      kept: reads.fresh(client.id, Date.now()),
+      kept: kept === pageAnswer,
+      failedAgain: [failedAgain.admin === pageAnswer, failedAgain.stale?.error],
+      cameBack: cameBack?.admin === pageAnswer,
     }).toStrictEqual({
-      page: after,
-      second: after,
-      framed: before,
-      older: before,
+      second: true,
+      framed: true,
       asked: 1,
-      kept: after,
+      kept: true,
+      failedAgain: [true, "timeout"],
+      cameBack: true,
     });
+  });
+
+  it("coming to the page while a read asked since its answer is under way waits for that read, the page's own or the frame's", async () => {
+    const reads = orgReads();
+    const before = answered(1000);
+    reads.remember(before, reads.ask());
+    // A read of it asked since: the frame's alone, in a load the page wasn't in.
+    const own = Promise.withResolvers<null>();
+    const ownRead = reads.read(client.id, async () => {
+      await own.promise;
+      return answered(0);
+    });
+    const cameToOwn = opened(reads, false);
+    // The page decides before that read answers.
+    await aTurn();
+    own.resolve(null);
+    const ownAnswer = await ownRead;
+    const shownOwn = await cameToOwn;
+
+    // The frame reading every client again after a change, still under way.
+    const frame = Promise.withResolvers<ClientAdmin[] | null>();
+    const frameAsked = reads.ask();
+    const cameToFrame = opened(reads, false, {
+      admins: frame.promise,
+      asked: frameAsked,
+    });
+    await aTurn();
+    const frameAnswer = answered(0);
+    // As `readAdmins` keeps what the frame read, then hands it on.
+    reads.remember(frameAnswer, frameAsked);
+    frame.resolve([frameAnswer]);
+    const shownFrame = await cameToFrame;
+
+    expect({
+      own: shownOwn?.admin === ownAnswer,
+      frame: shownFrame?.admin === frameAnswer,
+    }).toStrictEqual({ own: true, frame: true });
   });
 });
 
 describe("an organization's answers kept", () => {
-  it("keeps the later answer when an older one arrives after it, as the frame's slower read can", () => {
+  it("keeps the answer asked later when one asked earlier comes in after it, as the frame's slower read can", () => {
     const reads = orgReads();
+    const earlier = reads.ask();
+    const later = reads.ask();
     const newer = answered(0);
-    reads.remember(newer);
-    reads.remember(answered(5000));
+    reads.remember(newer, later);
+    // Asked first, answered last: stamped later.
+    reads.remember(answered(0), earlier);
 
     expect(reads.fresh(client.id, Date.now())).toBe(newer);
+  });
+
+  it("keeps nothing of a read asked before the organization was forgotten, as one offboarded", async () => {
+    const reads = orgReads();
+    const slow = Promise.withResolvers<null>();
+    const underWay = reads.read(client.id, async () => {
+      await slow.promise;
+      return answered(0);
+    });
+    reads.forget(client.id);
+    slow.resolve(null);
+    await underWay;
+
+    expect(reads.fresh(client.id, Date.now())).toBeUndefined();
   });
 });

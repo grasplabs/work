@@ -66,7 +66,7 @@ export const Route = createRootRouteWithContext<AdminContext>()({
   loader: async ({ context, location, preload }) => {
     const grid = fetchClientGrid();
     const open = openClientId(location.pathname);
-    const admins = readAdmins(
+    const frame = readAdmins(
       context.reads,
       grid,
       open,
@@ -74,7 +74,12 @@ export const Route = createRootRouteWithContext<AdminContext>()({
       open !== undefined && !preload && context.shown() === open
     );
     const clients = await grid;
-    return { clients, platform: platformCounts(clients), admins };
+    return {
+      clients,
+      platform: platformCounts(clients),
+      admins: frame.admins,
+      adminsAsked: frame.asked,
+    };
   },
   staleTime: freshMs,
   head: () => ({

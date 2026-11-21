@@ -6,7 +6,6 @@ import { OffboardedPage, OrganizationPage } from "../../admin/organization.tsx";
 
 const Organization = () => {
   const loaded = Route.useLoaderData();
-  const { reads } = Route.useRouteContext();
   if (loaded.state === "offboarded") {
     return <OffboardedPage client={loaded.client} />;
   }
@@ -16,7 +15,6 @@ const Organization = () => {
       client={loaded.client}
       key={loaded.client.id}
       read={loaded.read}
-      reads={reads}
     />
   );
 };
@@ -40,6 +38,8 @@ export const Route = createFileRoute("/organizations/$clientId")({
     const { loaderData } = await parentMatchPromise;
     const client = loaderData?.clients.find(({ id }) => id === params.clientId);
     if (loaderData === undefined || client === undefined) {
+      // Gone, as one deleted while its page was open: nothing of it is kept.
+      context.reads.forget(params.clientId);
       throw notFound();
     }
     if (client.status === "offboarded") {
@@ -50,6 +50,7 @@ export const Route = createFileRoute("/organizations/$clientId")({
       reads: context.reads,
       client,
       admins: loaderData.admins,
+      adminsAsked: loaderData.adminsAsked,
       // Loaded while the tab shows it: its core is asked anew.
       onIt: context.shown() === client.id,
       preload,

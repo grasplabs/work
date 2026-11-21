@@ -301,8 +301,8 @@ describe("an organization's sections without its core", () => {
       for (const section of orgSections.filter((each) => each !== "setup")) {
         const path = sectionTo[section].replace(`/organizations/$clientId`, "");
         // oxlint-disable-next-line no-await-in-loop -- one page at a time, as one tab opens them
-        const { container, text } = await openAt(client, admin, path);
-        const page = text();
+        const { container, main } = await openAt(client, admin, path);
+        const page = main();
         const column = container.querySelector(
           `nav[aria-label="${client.name}"]`
         )?.textContent;
@@ -339,13 +339,13 @@ describe("an organization's sections without its core", () => {
     const downSections = await sectionsOf(down, downAdmin);
     const waitingSections = await sectionsOf(waiting, waitingAdmin);
     const downPage = await openAt(down, downAdmin);
-    const downWhy = downPage.text();
+    const downWhy = downPage.main();
     const membersPage = await openAt(down, downAdmin, "/details?tab=members");
-    const membersWhy = membersPage.text();
+    const membersWhy = membersPage.main();
     const setupPage = await openAt(down, downAdmin, "/setup");
-    const setup = setupPage.text();
+    const setup = setupPage.main();
     const waitingPage = await openAt(waiting, waitingAdmin);
-    const waitingWhy = waitingPage.text();
+    const waitingWhy = waitingPage.main();
 
     expect({
       downSections,
@@ -373,11 +373,11 @@ describe("an organization's sections without its core", () => {
     const shown = [];
     for (const path of ["", "/details", "/setup"]) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time, as one tab opens them
-      const { container, text } = await openAt(gone, null, path);
+      const { container, main } = await openAt(gone, null, path);
       const sidebar =
         container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
       shown.push({
-        said: text().includes(`${gone.name} was offboarded`),
+        said: main().includes(`${gone.name} was offboarded`),
         toOffboarded:
           container.querySelector('main a[href="/platform/offboarded"]') !==
           null,
