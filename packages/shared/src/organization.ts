@@ -55,6 +55,12 @@ export type OrganizationLogoType = (typeof organizationLogoTypes)[number];
 /** The largest logo core takes, in bytes: a mark in a sidebar, not a photograph. */
 export const organizationLogoMaxBytes = 512 * 1024;
 
+/**
+ * The most pixels a logo may be on either side: every member's browser
+ * decodes it on every page, and a small file can declare a huge image.
+ */
+export const organizationLogoMaxPixels = 4096;
+
 /** The path every logo is served under (`organizationLogoPath`). */
 export const organizationLogoPrefix = "/api/organization/logo/";
 
@@ -82,7 +88,8 @@ export interface OrganizationApi {
   update: (changes: OrganizationChanges) => Promise<Organization>;
   /**
    * Sets the organization's logo from an image's bytes: a PNG, JPEG or
-   * WebP of at most {@link organizationLogoMaxBytes}, and returns the
+   * WebP of at most {@link organizationLogoMaxBytes} and
+   * {@link organizationLogoMaxPixels} pixels a side, and returns the
    * result. Its own admins only.
    */
   setLogo: (image: Uint8Array) => Promise<Organization>;
@@ -102,6 +109,8 @@ export const organizationErrors = defineErrorFamily({
   "organization.time_zone_invalid": "That isn't a time zone Grasp knows.",
   "organization.logo_invalid": "Choose a PNG, JPEG or WebP image.",
   "organization.logo_too_large": "Choose an image of at most 512 KB.",
+  "organization.logo_too_wide":
+    "Choose an image of at most 4096 by 4096 pixels.",
   "organization.changes_invalid":
     "Say what to change: the name, the time zone or both.",
 });
