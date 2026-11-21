@@ -331,7 +331,7 @@ test("a tab holds one connection to core for its shell and every App frame it op
   };
 
   // The shell, then one App's frame after another, and back to the first.
-  await page.goto("/dashboard");
+  await page.goto("/inbox");
   await expect(page.getByRole("navigation").first()).toBeVisible();
   await moveTo(`/apps/${app}`);
   await shows("Notes");

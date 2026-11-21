@@ -5,7 +5,7 @@ import type { NextReport, ReportWindow } from "@grasp-os/shared/onboarding";
 // prototype (`lib/weekly-report.ts`): the programme runs in weeks from its
 // first Monday, and a week's report is ready on the first day of the week
 // after it: the week has closed, so what the report says of it won't
-// change. Core counts them, so the dashboard's line, its report bar and
+// change. Core counts them, so the programme's line, its report bar and
 // the report all say the same week. Pure dates, UTC.
 
 const dayMs = 86_400_000;

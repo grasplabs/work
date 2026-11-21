@@ -1,4 +1,4 @@
-import type { BoardReport } from "@grasp-os/shared/dashboard";
+import type { BoardReport } from "@grasp-os/shared/board-report";
 import type { NextReport } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -34,9 +34,10 @@ import {
 // report-dialog.tsx`): the report itself, to read through before taking
 // it, as Markdown or as a PDF from the print window, the two ways every
 // export in Grasp offers (export/export-file.tsx). It is made from core's
-// read of it (`dashboard.report()`), as it stands when the dialog opens. The prototype's
-// printer and sheet of paper aren't here: the report shows as the page it
-// prints from, its key figures in tiles over its text, as the PDF has them.
+// read of it (`boardReport.read()`), as it stands when the dialog opens.
+// The prototype's printer and sheet of paper aren't here: the report shows
+// as the page it prints from, its key figures in tiles over its text, as
+// the PDF has them.
 // The prototype's hours bars aren't either: core keeps no hours.
 
 /** The report, once its reads came: what it says, and the two ways to take it. */

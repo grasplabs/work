@@ -54,7 +54,7 @@ const revealPlatform = async (
  * given its go (`open`), core is asked again now and then, so it begins
  * the moment it does; once it has and the step has been `explained`, a
  * breath, then the brain fills while Stephen says `line`, and its dots
- * build the platform's first page, the dashboard.
+ * build the platform's first page, the inbox.
  */
 export const useWayIn = ({
   open,
@@ -82,7 +82,7 @@ export const useWayIn = ({
       open && explained
         ? window.setTimeout(() => {
             void revealPlatform(line, () => {
-              void navigate({ to: "/dashboard" });
+              void navigate({ to: "/inbox" });
             });
           }, wayInAfterMs)
         : undefined;

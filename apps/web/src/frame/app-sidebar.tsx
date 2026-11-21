@@ -29,7 +29,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
 import type { CoreConnection } from "../core-connection.ts";
-import { DashboardItem } from "../dashboard/nav-item.tsx";
+import { InboxNavItem } from "../inbox/nav-item.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
 import { WorkflowsItem } from "../workflows/nav-item.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
@@ -165,7 +165,8 @@ export const AppSidebar = ({
               <nav aria-label={t`Main`}>
                 <SidebarMenu>
                   <SectionItem section={chat} />
-                  <DashboardItem />
+                  {/* With how many things wait on the person. */}
+                  <InboxNavItem />
                   <SectionItem section={brain} />
                   <SectionItem section={projects} />
                   <SectionItem section={apps} />

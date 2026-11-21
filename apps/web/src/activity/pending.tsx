@@ -22,9 +22,9 @@ import {
 } from "../workflows/trigger-description.ts";
 
 // Pending approvals: the permissions Apps and agents asked for, which an
-// admin grants or rejects on the dashboard's pile (`dashboard/pile-cards.tsx`).
-// Core checks the role on every call; the dashboard reads them only for
-// those core lets decide (the organization's own admins, never Grasp staff).
+// admin grants or rejects in the inbox (`inbox/item-detail.tsx`). Core
+// checks the role on every call; the inbox reads them only for those core
+// lets decide (the organization's own admins, never Grasp staff).
 
 /** The requests an admin decides, oldest first, with the names to show. */
 export interface PendingRequests {

@@ -81,7 +81,6 @@ const HAND_TOPIC: Record<TrailEntry["what"], LogTopic> = {
   contract: "agreements",
   go: "platform",
   goBack: "platform",
-  part: "platform",
   invited: "platform",
   removed: "platform",
   restored: "platform",

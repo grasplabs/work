@@ -20,7 +20,7 @@ import { resourceDecisionPending } from "../decisions/decisions.ts";
 import { runView, visibleToMember } from "./run-view.ts";
 
 // The runs a person can list, started over the last days, and the people
-// they needed: the dashboard's Runs widget. The same runs as the Workflows
+// they needed: the Workflows page's and the weekly report's. The same runs as the Workflows
 // page's Runs tab (run-view.ts), and, like it, a read nobody audits: counts
 // of runs the person may list one by one anyway.
 //

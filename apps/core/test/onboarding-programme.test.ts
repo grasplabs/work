@@ -7,7 +7,7 @@ import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
 
-// The programme with Grasp, as the dashboard reads it
+// The programme with Grasp, as the inbox's weekly report reads it
 // (`onboarding.programme()` in src/onboarding/rpc.ts): for everyone signed
 // in, so nothing in it but the Monday it began and where the onboarding
 // stands. The ways it can fail, tried here:

@@ -81,10 +81,7 @@ interface Reader {
 /** What one part came to: its items, and for notifications, what the page says besides. */
 interface PartRead {
   items: WaitingItem[];
-  notifications?: Pick<
-    WaitingFeed,
-    "moreNotifications" | "unreadNotifications"
-  >;
+  notifications?: Pick<WaitingFeed, "unreadNotifications">;
 }
 
 /** Each part's read, through its namespace, into the feed's items. */
@@ -245,7 +242,6 @@ const notificationItems = async (
       }
     }),
     notifications: {
-      moreNotifications: page.more,
       unreadNotifications: page.unread,
     },
   };
@@ -472,7 +468,6 @@ const feedOf = async (
     readAt,
     items: ordered(items, readAt),
     unread,
-    moreNotifications: notifications?.moreNotifications ?? false,
     unreadNotifications: notifications?.unreadNotifications ?? 0,
   };
 };

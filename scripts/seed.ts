@@ -502,7 +502,7 @@ const seedApp = async (
 
 /**
  * How many whole weeks before this one the programme began: the
- * prototype's dashboard is in its fifth week of eight.
+ * prototype's programme is in its fifth week of eight.
  */
 const programmeWeeksAgo = 4;
 

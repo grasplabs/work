@@ -2,8 +2,8 @@ import type { AuditEventType } from "@grasp-os/shared/audit-log";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
-// Apart from audit-log.tsx: the dashboard and the inbox name an event's
-// type without the log's page.
+// Apart from audit-log.tsx: the inbox names an event's type without the
+// log's page.
 
 export const typeLabels: Record<AuditEventType, MessageDescriptor> = {
   read: msg`Read`,

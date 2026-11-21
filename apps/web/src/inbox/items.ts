@@ -17,11 +17,11 @@ import { plural, t } from "@lingui/core/macro";
 import { objectOf, subjectOf } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
-import type { NotificationsPage } from "../dashboard/notifications-page.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
-import type { Viewer, Waiting } from "../dashboard/waiting.ts";
 import { formatDateTime, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import type { NotificationsPage } from "./notifications-page.ts";
+import { decidesRequests } from "./waiting.ts";
+import type { Viewer, Waiting } from "./waiting.ts";
 
 // The inbox, as the prototype derives it (`lib/inbox.ts`): what waits on a
 // person to decide, each item made from what core says waits now, so an
@@ -257,7 +257,7 @@ export const outcomeName = (outcome: UnknownOutcome): string => {
 
 /**
  * A change Grasp sent for the person whose answer was lost: only they say
- * whether it happened (the dashboard's `outcome-card.tsx`).
+ * whether it happened (`item-detail.tsx`).
  */
 const outcomeItems = (
   outcomes: readonly UnknownOutcome[],

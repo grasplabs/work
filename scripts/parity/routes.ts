@@ -22,7 +22,6 @@ export interface ParityRoute {
 /** Every page compared, in the order the sidebar has them. */
 export const parityRoutes: readonly ParityRoute[] = [
   { name: "chat", prototype: "/", grasp: "/" },
-  { name: "dashboard", prototype: "/dashboard", grasp: "/dashboard" },
   { name: "inbox", prototype: "/inbox", grasp: "/inbox" },
   { name: "apps", prototype: "/apps", grasp: "/apps" },
   { name: "workflows", prototype: "/workflows", grasp: "/workflows" },

@@ -5,13 +5,13 @@ import {
 } from "@grasp-os/ui/components/sidebar";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { LayoutDashboardIcon } from "lucide-react";
+import { InboxIcon } from "lucide-react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 
-// The nav's way to the dashboard, with how many things wait on the person
+// The nav's way to the inbox, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): everything core's feed of
 // what waits lists (`session.waiting`), the failed workflows, questions,
 // stopped schedules, sources and package notices among it only while
@@ -43,8 +43,8 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   }
 };
 
-/** The sidebar's Dashboard entry, with how many things wait. */
-export const DashboardItem = () => {
+/** The sidebar's Inbox entry, with how many things wait. */
+export const InboxNavItem = () => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const { value: waiting } = useFrameRead(readCount);
@@ -52,13 +52,13 @@ export const DashboardItem = () => {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={matchRoute({ to: "/dashboard" }) !== false}
-        render={<Link to="/dashboard" />}
-        tooltip={t`Dashboard`}
+        isActive={matchRoute({ to: "/inbox" }) !== false}
+        render={<Link to="/inbox" />}
+        tooltip={t`Inbox`}
       >
-        <LayoutDashboardIcon />
+        <InboxIcon />
         <span>
-          <Trans>Dashboard</Trans>
+          <Trans>Inbox</Trans>
         </span>
         {/* Inside the link, so its name says how many wait. */}
         {shown ? (
