@@ -39,9 +39,16 @@ const path =
     let best = 9;
     const last = points.length - 1;
     for (let index = 0; index < last; index += 1) {
-      const [ax, ay] = points[index] ?? [0, 0];
-      const [bx, by] = points[index + 1] ?? [0, 0];
-      const near = onSegment(x, y, ax, ay, bx, by);
+      const from = points[index];
+      const to = points[index + 1];
+      const near = onSegment(
+        x,
+        y,
+        from?.[0] ?? 0,
+        from?.[1] ?? 0,
+        to?.[0] ?? 0,
+        to?.[1] ?? 0
+      );
       best = Math.min(
         best,
         near.d - (ra + ((rb - ra) * (index + near.along)) / last)
@@ -58,8 +65,12 @@ const polygonEdge = (
 ): number => {
   let best = -9;
   for (let index = 0; index < corners.length; index += 1) {
-    const [ax, ay] = corners[index] ?? [0, 0];
-    const [bx, by] = corners[(index + 1) % corners.length] ?? [0, 0];
+    const from = corners[index];
+    const to = corners[(index + 1) % corners.length];
+    const ax = from?.[0] ?? 0;
+    const ay = from?.[1] ?? 0;
+    const bx = to?.[0] ?? 0;
+    const by = to?.[1] ?? 0;
     const length = Math.hypot(bx - ax, by - ay) || 1;
     best = Math.max(
       best,
@@ -99,8 +110,8 @@ const blend =
   (k: number, ...shapes: Shape[]): Shape =>
   (x, y) => {
     let d = shapes[0]?.(x, y) ?? 9;
-    for (const shape of shapes.slice(1)) {
-      const other = shape(x, y);
+    for (let index = 1; index < shapes.length; index += 1) {
+      const other = shapes[index]?.(x, y) ?? 9;
       const h = clamp(0.5 + (0.5 * (other - d)) / k);
       d = other * (1 - h) + d * h - k * h * (1 - h);
     }
@@ -109,16 +120,26 @@ const blend =
 
 const union =
   (...shapes: Shape[]): Shape =>
-  (x, y) =>
-    Math.min(...shapes.map((shape) => shape(x, y)));
+  (x, y) => {
+    let d = Infinity;
+    for (const shape of shapes) {
+      d = Math.min(d, shape(x, y));
+    }
+    return d;
+  };
 const cut =
   (shape: Shape, away: Shape): Shape =>
   (x, y) =>
     Math.max(shape(x, y), -away(x, y));
 const meet =
   (...shapes: Shape[]): Shape =>
-  (x, y) =>
-    Math.max(...shapes.map((shape) => shape(x, y)));
+  (x, y) => {
+    let d = -Infinity;
+    for (const shape of shapes) {
+      d = Math.max(d, shape(x, y));
+    }
+    return d;
+  };
 
 /** A star's silhouette: `points` points, from `inner` to `outer`. */
 const star =
@@ -157,25 +178,32 @@ const STEP = 0.004;
 /** A silhouette inflated into a rounded solid: its edge leans out, its middle faces you. */
 const soft = (shape: Shape, { round, depth = 0, tone }: Soft): Drawn => ({
   kind: "drawn",
-  hit: (x: number, y: number): Hit => {
+  hit: (x: number, y: number, reach: number): Hit => {
     const d = shape(x, y);
-    if (d > 0.2) {
+    if (d > reach) {
       return missed(d);
     }
-    const gx = shape(x + STEP, y) - shape(x - STEP, y);
-    const gy = shape(x, y + STEP) - shape(x, y - STEP);
-    const length = Math.hypot(gx, gy) || 1;
     const rise = clamp(-d / round);
     const out = 1 - rise;
-    return {
+    const hit: Hit = {
       edge: d,
       depth: depth + rise * round,
-      nx: (gx / length) * out,
-      ny: (gy / length) * out,
-      nz: Math.sqrt(Math.max(0, 1 - out ** 4)),
+      nx: 0,
+      ny: 0,
+      nz: 1,
       grain: 0.5,
-      tone: tone?.(x, y) ?? 1,
+      // Its surface is worked out only where it is the one in front.
+      surface: () => {
+        const gx = shape(x + STEP, y) - shape(x - STEP, y);
+        const gy = shape(x, y + STEP) - shape(x, y - STEP);
+        const length = Math.hypot(gx, gy) || 1;
+        hit.nx = (gx / length) * out;
+        hit.ny = (gy / length) * out;
+        hit.nz = Math.sqrt(Math.max(0, 1 - out ** 4));
+        hit.tone = tone?.(x, y) ?? 1;
+      },
     };
+    return hit;
   },
 });
 
@@ -197,7 +225,8 @@ const hoop = (
   lift: number
 ): Drawn => ({
   kind: "drawn",
-  hit: (x: number, y: number): Hit => {
+  rough: true,
+  hit: (x: number, y: number, reach: number): Hit => {
     const ring = ellipseAt(x - cx, y - cy, big, tilt, 0);
     return tube(
       ring.d,
@@ -205,22 +234,29 @@ const hoop = (
       ring.gy,
       thick,
       ring.near + lift,
+      reach,
       noise(ring.d * 30, 2.1)
     );
   },
 });
 
-const drawn = (hit: (x: number, y: number) => Hit): Drawn => ({
-  kind: "drawn",
-  hit,
-});
+const drawn = (
+  hit: (x: number, y: number, reach: number) => Hit,
+  rough = false
+): Drawn => ({ kind: "drawn", hit, rough });
 
 // ---- The first round's four.
 
 /** A doughnut tipped toward you: the hole shows the night. */
-const torusHit = (x: number, y: number, size: number, turn: number): Hit => {
+const torusHit = (
+  x: number,
+  y: number,
+  size: number,
+  turn: number,
+  reach: number
+): Hit => {
   const ring = ellipseAt(x, y, 0.56 * size, 1, turn);
-  return tube(ring.d, ring.gx, ring.gy, 0.24 * size, ring.near * 0.6);
+  return tube(ring.d, ring.gx, ring.gy, 0.24 * size, ring.near * 0.6, reach);
 };
 
 /** Where the craters sit on the crater orb, in its radius: across, up, and how wide. */
@@ -233,13 +269,20 @@ const CRATERS = [
 ] as const;
 
 /** A plain orb with shallow craters: each catches the light on its far wall. */
-const craterHit = (x: number, y: number, size: number, spin: number): Hit => {
+const craterHit = (
+  x: number,
+  y: number,
+  size: number,
+  spin: number,
+  reach: number
+): Hit => {
   const r = 0.74 * size;
   const surface = sphereHit(
     { kind: "sphere", x: 0, y: 0, z: 0, r, silk: false },
     x,
     y,
-    0
+    0,
+    reach
   );
   if (surface.edge > 0) {
     return surface;
@@ -275,11 +318,20 @@ const tailHit = (
   y: number,
   size: number,
   hx: number,
-  hy: number
+  hy: number,
+  reach: number
 ): Hit => {
   const near = onSegment(x, y, hx, hy, hx - 0.86 * size, hy - 0.62 * size);
   const a = 0.3 * size * (1 - near.along) ** 1.3 + 0.01;
-  const hit = tube(near.d, near.ox, near.oy, a, -0.4, 0.5 - 0.5 * near.along);
+  const hit = tube(
+    near.d,
+    near.ox,
+    near.oy,
+    a,
+    -0.4,
+    reach,
+    0.5 - 0.5 * near.along
+  );
   return { ...hit, edge: hit.edge + near.along * 0.05 };
 };
 
@@ -289,7 +341,8 @@ const orbitRing = (
   y: number,
   size: number,
   tilt: number,
-  turn: number
+  turn: number,
+  reach: number
 ): Hit => {
   const ring = ellipseAt(x, y, 0.8 * size, tilt, turn);
   return tube(
@@ -298,6 +351,7 @@ const orbitRing = (
     ring.gy,
     0.055 * size,
     ring.near,
+    reach,
     noise(ring.d * 30, 2.1)
   );
 };
@@ -451,10 +505,13 @@ const scaled = (parts: readonly FigurePart[], k: number): FigurePart[] =>
   parts.map((part) =>
     part.kind === "sphere"
       ? { ...part, x: part.x * k, y: part.y * k, z: part.z * k, r: part.r * k }
-      : drawn((x, y) => {
-          const hit = part.hit(x / k, y / k);
-          return { ...hit, edge: hit.edge * k, depth: hit.depth * k };
-        })
+      : drawn((x, y, reach) => {
+          // Each hit is made fresh for its cell, so it is scaled in place.
+          const hit = part.hit(x / k, y / k, reach / k);
+          hit.edge *= k;
+          hit.depth *= k;
+          return hit;
+        }, part.rough)
   );
 
 /** The later figures. */
@@ -478,32 +535,50 @@ export const laterParts: Record<
   (size: number, spread: number, turn: number) => FigurePart[]
 > = {
   torus: (size, _spread, turn) => [
-    drawn((x, y) => torusHit(x, y, size, -0.3 + 0.08 * Math.sin(turn * 0.4))),
+    drawn(
+      (x, y, reach) =>
+        torusHit(x, y, size, -0.3 + 0.08 * Math.sin(turn * 0.4), reach),
+      true
+    ),
   ],
   crater: (size, _spread, turn) => [
-    drawn((x, y) => craterHit(x, y, size, 0.05 * Math.sin(turn * 0.3))),
+    drawn((x, y, reach) =>
+      craterHit(x, y, size, 0.05 * Math.sin(turn * 0.3), reach)
+    ),
   ],
   comet: (size, spread, turn) => {
     const hx = 0.32 * size * spread;
     const hy = 0.26 * size * spread + 0.03 * Math.sin(turn * 0.5);
     return [
       sphere(hx, hy, 0.34 * size, 0.2),
-      drawn((x, y) => tailHit(x, y, size, hx, hy)),
+      drawn((x, y, reach) => tailHit(x, y, size, hx, hy, reach)),
     ];
   },
   orbit: (size, spread, turn) => [
     sphere(0, 0, 0.3 * size, 0, true),
-    drawn((x, y) =>
-      orbitRing(x, y, size * spread, 1.2, 0.55 + 0.05 * Math.sin(turn * 0.3))
+    drawn(
+      (x, y, reach) =>
+        orbitRing(
+          x,
+          y,
+          size * spread,
+          1.2,
+          0.55 + 0.05 * Math.sin(turn * 0.3),
+          reach
+        ),
+      true
     ),
-    drawn((x, y) =>
-      orbitRing(
-        x,
-        y,
-        size * spread,
-        1.25,
-        -0.6 + 0.05 * Math.sin(turn * 0.3 + 1)
-      )
+    drawn(
+      (x, y, reach) =>
+        orbitRing(
+          x,
+          y,
+          size * spread,
+          1.25,
+          -0.6 + 0.05 * Math.sin(turn * 0.3 + 1),
+          reach
+        ),
+      true
     ),
   ],
   crescent: (size, _spread, turn) => scaled(crescent(turn), size / 1.12),
