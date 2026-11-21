@@ -126,7 +126,8 @@ interface Started {
 const opened = async (
   id: string,
   connections: ListedConnection[],
-  identity: Identity = person()
+  identity: Identity = person(),
+  given: { core?: object; catalogTools?: () => Promise<CatalogTool[]> } = {}
 ): Promise<(Sent | Started | { disconnected: string })[]> => {
   const sent: (Sent | Started | { disconnected: string })[] = [];
   const api = {
@@ -134,8 +135,9 @@ const opened = async (
       sent.push({ disconnected: connectionId });
       return await Promise.resolve({ revoked: true });
     },
-    catalogTools: async (): Promise<CatalogTool[]> =>
-      await Promise.resolve(tools),
+    catalogTools:
+      given.catalogTools ??
+      (async (): Promise<CatalogTool[]> => await Promise.resolve(tools)),
     connectToolkit: async (request: Sent): Promise<{ url: string }> => {
       sent.push(request);
       // Refused, so the browser stays here for the test to read.
@@ -146,7 +148,7 @@ const opened = async (
       return await Promise.reject(new Error("Not now"));
     },
   };
-  const core = {
+  const core = given.core ?? {
     withSession: async <T,>(
       action: (session: { connections: typeof api }) => Promise<T>
     ): Promise<T> => await action({ connections: api }),
@@ -409,5 +411,34 @@ describe("an app's panel", () => {
     await press(dialogAction("Disconnect"));
 
     expect(sent).toStrictEqual([{ disconnected: "c1" }]);
+  });
+
+  it("reads an app's tools again on the next open when a read failed, in the same tab", async () => {
+    let reads = 0;
+    const flaky = async (): Promise<CatalogTool[]> => {
+      reads += 1;
+      if (reads === 1) {
+        throw new Error("Core can't be reached");
+      }
+      return await Promise.resolve(tools);
+    };
+    const core = {
+      withSession: async <T,>(
+        action: (session: { connections: object }) => Promise<T>
+      ): Promise<T> => await action({ connections: { catalogTools: flaky } }),
+    };
+    await opened("hubspot", [], person(), { core, catalogTools: flaky });
+    const first = document.body.textContent.includes("All 2 tools");
+    act(() => {
+      root?.unmount();
+    });
+    document.body.innerHTML = "";
+    await opened("hubspot", [], person(), { core, catalogTools: flaky });
+
+    expect({
+      reads,
+      first,
+      again: document.body.textContent.includes("All 2 tools"),
+    }).toStrictEqual({ reads: 2, first: false, again: true });
   });
 });
