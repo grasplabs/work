@@ -36,6 +36,7 @@ const leave: ChatSummary = {
   lastAt: "2026-10-20T08:00:00.000Z",
   running: false,
   make: null,
+  archived: false,
 };
 
 /** The chat as core's watch first answers it: a question and its answer. */
