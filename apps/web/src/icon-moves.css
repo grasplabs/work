@@ -1653,27 +1653,6 @@
   --icon-wait: 0.15s;
 }
 
-/* The tiles come up one by one. */
-.lucide-layout-dashboard > :nth-child(1) {
-  --icon-move: icon-pop;
-  --icon-time: 0.42s;
-}
-.lucide-layout-dashboard > :nth-child(2) {
-  --icon-move: icon-pop;
-  --icon-time: 0.42s;
-  --icon-wait: 0.07s;
-}
-.lucide-layout-dashboard > :nth-child(3) {
-  --icon-move: icon-pop;
-  --icon-time: 0.42s;
-  --icon-wait: 0.14s;
-}
-.lucide-layout-dashboard > :nth-child(4) {
-  --icon-move: icon-pop;
-  --icon-time: 0.42s;
-  --icon-wait: 0.21s;
-}
-
 /* The tiles come up one by one, round the clock. */
 .lucide-layout-grid > :nth-child(1) {
   --icon-move: icon-pop;

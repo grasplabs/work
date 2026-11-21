@@ -1,5 +1,4 @@
-import type { ChatMessage } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
@@ -7,7 +6,8 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
+import type { ChatMessage } from "@grasp-os/shared/chat";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";

@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandEmpty,
@@ -6,20 +6,20 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@grasp-os/ui/components/command";
+} from "@grasp-os/app-kit/components/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
+} from "@grasp-os/app-kit/components/popover";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/select";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { FolderIcon, UserPlusIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";

@@ -148,12 +148,18 @@ describe("skills in the Brain", setUpTime, () => {
 
   it("gives every member Grasp's skills as this release ships them, and selects each for the task it is for", async () => {
     const { agent } = await memberAgent();
+    // Of the shipped names alone, whichever runs first: the file's other
+    // tests store company skills, one of them adapting a shipped one.
+    const names = shippedSkills.map(({ name }) => name);
     const listed = await skillsFor(env, agent, "teams", holdsNothing);
+    const ofRelease = listed.filter(({ name }) => names.includes(name));
     const read = await Promise.all(
-      listed.map(
-        async (skill) =>
-          await readSkillFor(env, agent, "teams", holdsNothing, { skill })
-      )
+      ofRelease
+        .filter(({ scope }) => scope === "grasp")
+        .map(
+          async (skill) =>
+            await readSkillFor(env, agent, "teams", holdsNothing, { skill })
+        )
     );
     const first = async (task: string) => {
       const [best] = await selectedFor(agent, task);
@@ -161,27 +167,29 @@ describe("skills in the Brain", setUpTime, () => {
     };
 
     expect({
-      listed: listed.map(({ scope, name }) => [scope, name]),
-      whole: read.map(({ name, text }) => text === shipped(name)),
+      listed: ofRelease.map(({ name }) => name),
+      whole:
+        read.length > 0 &&
+        read.every(({ name, text }) => text === shipped(name)),
       selected: [
-        await first("Draw the workflow for paying supplier invoices"),
-        await first("Run a baseline of how the company works today"),
-        await first("Write the board page before the meeting"),
+        await first("Book the trip to the client"),
+        await first("Close the month for the accounts"),
+        await first("File the expense for the client lunch"),
       ],
       unrelated: await selectSkillsFor(env, agent, "teams", holdsNothing, {
         task: "Bake a sourdough loaf",
       }),
     }).toStrictEqual({
-      listed: shippedSkills.map(({ name }) => ["grasp", name]),
-      whole: shippedSkills.map(() => true),
-      selected: ["draw-a-workflow", "run-a-baseline", "write-board-page"],
+      listed: names,
+      whole: true,
+      selected: ["book-a-trip", "close-the-month", "file-an-expense"],
       unrelated: [],
     });
   });
 
   it("replaces a skill with the next release's text, keeps the version a task pinned, writes nothing for an unchanged one, and audits each install by count", async () => {
     const { agent } = await memberAgent();
-    const name = "draw-a-workflow";
+    const name = "file-an-expense";
     const before = await listedNamed(agent, name);
     if (before === undefined) {
       throw new Error(`${name} isn't listed`);
@@ -243,6 +251,23 @@ describe("skills in the Brain", setUpTime, () => {
     });
   });
 
+  it("installs a release that ships no skill as complete, writing none and auditing it by count", async () => {
+    const { agent } = await memberAgent();
+    const before = await skillsFor(env, agent, "teams", holdsNothing);
+    const complete = await installShippedSkills(env, []);
+    const after = await skillsFor(env, agent, "teams", holdsNothing);
+    const audit = await lastInstall();
+    expect({
+      complete,
+      unchanged: after.map(({ name, version }) => [name, version]),
+      audit: [audit?.shipped, audit?.changed, audit?.failed],
+    }).toStrictEqual({
+      complete: true,
+      unchanged: before.map(({ name, version }) => [name, version]),
+      audit: [0, 0, 0],
+    });
+  });
+
   it("never selects or reads a Grasp skill this release doesn't ship, though the Brain keeps it", async () => {
     const { agent } = await memberAgent();
     const name = `retired-${unique().toLowerCase()}`;
@@ -274,10 +299,10 @@ describe("skills in the Brain", setUpTime, () => {
     const own = `quotes-${unique().toLowerCase()}`;
     const adapted = await storeSkill(
       "company",
-      "write-board-page",
+      "book-a-trip",
       skillText(
-        "write-board-page",
-        "Writes our board page, the way our board reads it."
+        "book-a-trip",
+        "Books our trips, the way our finance team allows them."
       )
     );
     await storeSkill(
@@ -288,13 +313,13 @@ describe("skills in the Brain", setUpTime, () => {
     const listed = await skillsFor(env, agent, "teams", holdsNothing);
 
     expect({
-      boardPages: listed
-        .filter(({ name }) => name === "write-board-page")
+      trips: listed
+        .filter(({ name }) => name === "book-a-trip")
         .map(({ scope, version }) => [scope, version]),
       selected: await selectedFor(agent, "A quote for this customer"),
       read: await textOf(agent, { scope: "company", name: own, version: 1 }),
     }).toStrictEqual({
-      boardPages: [["company", adapted]],
+      trips: [["company", adapted]],
       selected: [["company", own]],
       read: skillText(own, "Writes a quote for a customer."),
     });
@@ -370,52 +395,50 @@ describe("skills in the Brain", setUpTime, () => {
 
   it("installs the others when the Brain fails one skill, reports the install incomplete, and puts that one in on the next install", async () => {
     const { agent } = await memberAgent();
-    const drawing = `${shipped("draw-a-workflow")}\nA step for partial installs.\n`;
-    const baseline = `${shipped("run-a-baseline")}\nA step for partial installs.\n`;
-    const before = await listedNamed(agent, "run-a-baseline");
-    const partial = await installedWithFailing("run-a-baseline", [
-      { name: "draw-a-workflow", text: drawing },
-      { name: "run-a-baseline", text: baseline },
+    const expense = `${shipped("file-an-expense")}\nA step for partial installs.\n`;
+    const month = `${shipped("close-the-month")}\nA step for partial installs.\n`;
+    const before = await listedNamed(agent, "close-the-month");
+    const partial = await installedWithFailing("close-the-month", [
+      { name: "file-an-expense", text: expense },
+      { name: "close-the-month", text: month },
     ]);
     const afterPartial = {
-      drawing: await listedNamed(agent, "draw-a-workflow"),
-      baseline: await listedNamed(agent, "run-a-baseline"),
+      expense: await listedNamed(agent, "file-an-expense"),
+      month: await listedNamed(agent, "close-the-month"),
       audit: await lastInstall(),
     };
     const retried = await installShippedSkills(env, [
-      { name: "draw-a-workflow", text: drawing },
-      { name: "run-a-baseline", text: baseline },
+      { name: "file-an-expense", text: expense },
+      { name: "close-the-month", text: month },
     ]);
     const afterRetry = {
-      baseline: await listedNamed(agent, "run-a-baseline"),
+      month: await listedNamed(agent, "close-the-month"),
       audit: await lastInstall(),
     };
-    const [drawingText, baselineText] = await Promise.all([
-      afterPartial.drawing === undefined
+    const [expenseText, monthText] = await Promise.all([
+      afterPartial.expense === undefined
         ? null
-        : textOf(agent, afterPartial.drawing),
-      afterRetry.baseline === undefined
-        ? null
-        : textOf(agent, afterRetry.baseline),
+        : textOf(agent, afterPartial.expense),
+      afterRetry.month === undefined ? null : textOf(agent, afterRetry.month),
     ]);
     // Put back as shipped, for the file's other tests.
     await installShippedSkills(env, [
-      { name: "draw-a-workflow", text: shipped("draw-a-workflow") },
-      { name: "run-a-baseline", text: shipped("run-a-baseline") },
+      { name: "file-an-expense", text: shipped("file-an-expense") },
+      { name: "close-the-month", text: shipped("close-the-month") },
     ]);
 
     expect({
       partial,
-      drawing: drawingText === drawing,
-      baselineUnchanged: afterPartial.baseline?.version === before?.version,
+      expense: expenseText === expense,
+      monthUnchanged: afterPartial.month?.version === before?.version,
       partialAudit: afterPartial.audit,
       retried,
-      baseline: baselineText === baseline,
+      month: monthText === month,
       retryAudit: afterRetry.audit,
     }).toStrictEqual({
       partial: false,
-      drawing: true,
-      baselineUnchanged: true,
+      expense: true,
+      monthUnchanged: true,
       partialAudit: {
         release: env.CF_VERSION_METADATA.id,
         shipped: 2,
@@ -425,7 +448,7 @@ describe("skills in the Brain", setUpTime, () => {
         failed: 1,
       },
       retried: true,
-      baseline: true,
+      month: true,
       retryAudit: {
         release: env.CF_VERSION_METADATA.id,
         shipped: 2,
@@ -439,36 +462,36 @@ describe("skills in the Brain", setUpTime, () => {
 
   it("doesn't hold the install back for a shipped skill the Brain refuses, which can't succeed until another release, and audits it by name", async () => {
     const { agent } = await memberAgent();
-    const drawing = `${shipped("draw-a-workflow")}\nA step beside a refused skill.\n`;
-    const before = await listedNamed(agent, "run-a-baseline");
+    const expense = `${shipped("file-an-expense")}\nA step beside a refused skill.\n`;
+    const before = await listedNamed(agent, "close-the-month");
 
     const complete = await installShippedSkills(env, [
-      { name: "draw-a-workflow", text: drawing },
+      { name: "file-an-expense", text: expense },
       // Its frontmatter names another skill: refused, every time.
       {
-        name: "run-a-baseline",
-        text: shipped("run-a-baseline").replace(
-          "name: run-a-baseline",
+        name: "close-the-month",
+        text: shipped("close-the-month").replace(
+          "name: close-the-month",
           "name: someone-else"
         ),
       },
     ]);
     const audit = await lastInstall();
     const after = {
-      drawing: await listedNamed(agent, "draw-a-workflow"),
-      baseline: await listedNamed(agent, "run-a-baseline"),
+      expense: await listedNamed(agent, "file-an-expense"),
+      month: await listedNamed(agent, "close-the-month"),
     };
-    const drawingText =
-      after.drawing === undefined ? null : await textOf(agent, after.drawing);
+    const expenseText =
+      after.expense === undefined ? null : await textOf(agent, after.expense);
     await installShippedSkills(env, [
-      { name: "draw-a-workflow", text: shipped("draw-a-workflow") },
+      { name: "file-an-expense", text: shipped("file-an-expense") },
     ]);
 
     expect({
       complete,
       audit,
-      drawing: drawingText === drawing,
-      baselineUnchanged: after.baseline?.version === before?.version,
+      expense: expenseText === expense,
+      monthUnchanged: after.month?.version === before?.version,
     }).toStrictEqual({
       complete: true,
       audit: {
@@ -476,11 +499,11 @@ describe("skills in the Brain", setUpTime, () => {
         shipped: 2,
         changed: 1,
         invalid: 1,
-        invalidNames: "run-a-baseline",
+        invalidNames: "close-the-month",
         failed: 0,
       },
-      drawing: true,
-      baselineUnchanged: true,
+      expense: true,
+      monthUnchanged: true,
     });
   });
 
@@ -522,7 +545,7 @@ describe("skills in the Brain", setUpTime, () => {
 
   it("refuses a skill this release doesn't ship or whose text isn't one of its own name, and someone who left", async () => {
     const { userId, agent } = await memberAgent();
-    const name = "draw-a-workflow";
+    const name = "file-an-expense";
     const add = async (text: string, as = name) => await addShipped(as, text);
     const refusals = {
       noCard: await add("# Just a note\n\nNo frontmatter."),
@@ -548,7 +571,7 @@ describe("skills in the Brain", setUpTime, () => {
       left: await outcome(skillsFor(env, agent, "teams", holdsNothing)),
       leftReading: await outcome(
         readSkillFor(env, agent, "teams", holdsNothing, {
-          skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+          skill: { scope: "grasp", name: "file-an-expense", version: 1 },
         })
       ),
     }).toStrictEqual({

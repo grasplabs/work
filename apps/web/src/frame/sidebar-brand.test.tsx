@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import type { Organization } from "@grasp-os/shared/organization";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -31,6 +32,7 @@ const organizationNamed = (name: string): Organization => ({
   timeZone: "Europe/Amsterdam",
   dataRegion: "eu",
   signInDomains: [],
+  logo: null,
 });
 
 /** Lets everything already settled run: core's answer, and React's render of it. */

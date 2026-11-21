@@ -1,10 +1,10 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import type {
   ChainBreak,
   ChainVerification,
   FullVerification,
 } from "@grasp-os/shared/audit-log";
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

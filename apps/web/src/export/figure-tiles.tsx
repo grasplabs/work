@@ -1,4 +1,4 @@
-import { Stat } from "@grasp-os/ui/components/stat";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 // An export's key figures as tiles, as the prototype's board report sets
 // them (`lib/report.ts`, `.tiles`): each figure in Newsreader
 // (the kit's Stat) over what it counts, side by side in one bordered row.

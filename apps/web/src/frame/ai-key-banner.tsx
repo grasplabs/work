@@ -1,3 +1,8 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
 import { aiProviders } from "@grasp-os/shared/ai-providers";
 import type {
   AiProvidersListing,
@@ -5,11 +10,6 @@ import type {
 } from "@grasp-os/shared/ai-providers";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";

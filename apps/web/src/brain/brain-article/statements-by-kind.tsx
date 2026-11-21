@@ -1,10 +1,10 @@
-import type { Statement } from "@grasp-os/shared/brain";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
+import type { Statement } from "@grasp-os/shared/brain";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 

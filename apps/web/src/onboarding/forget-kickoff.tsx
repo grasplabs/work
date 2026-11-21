@@ -1,5 +1,3 @@
-import { onboardingErrors } from "@grasp-os/shared/onboarding";
-import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,8 +7,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { onboardingErrors } from "@grasp-os/shared/onboarding";
+import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 

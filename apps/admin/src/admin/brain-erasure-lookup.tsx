@@ -7,18 +7,19 @@
  * never existed. Core writes every lookup to the company's audit log, by
  * the staff member, before it answers; nothing of it is kept here.
  */
-import type { BrainErasureLookup } from "@grasp-os/shared/brain-report";
-import { Button } from "@grasp-os/ui/components/button";
+
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+} from "@grasp-os/app-kit/components/native-select";
+import type { BrainErasureLookup } from "@grasp-os/shared/brain-report";
 import { useId, useState } from "react";
 
 import { brainErasureFn } from "../clients/brain-functions.ts";

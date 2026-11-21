@@ -1,19 +1,19 @@
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandEmpty,
   CommandInput,
   CommandItem,
   CommandList,
-} from "@grasp-os/ui/components/command";
+} from "@grasp-os/app-kit/components/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/popover";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";

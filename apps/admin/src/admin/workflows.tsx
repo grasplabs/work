@@ -1,3 +1,44 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/app-kit/components/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import {
   STANDINGS,
@@ -31,47 +72,6 @@ import type {
   Settler,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Progress } from "@grasp-os/ui/components/progress";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { SlidersHorizontalIcon, WorkflowIcon } from "lucide-react";
 import { useId, useState } from "react";
 

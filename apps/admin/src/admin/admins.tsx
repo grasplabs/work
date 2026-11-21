@@ -6,15 +6,15 @@
  * until then. When they couldn't be read at all, it says so, with Try
  * again, in its place.
  */
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
+} from "@grasp-os/app-kit/components/empty";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { getRouteApi, rootRouteId, useRouter } from "@tanstack/react-router";
 import { Suspense } from "react";
 import type { ReactElement } from "react";

@@ -5,7 +5,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 import type { Components } from "react-markdown";

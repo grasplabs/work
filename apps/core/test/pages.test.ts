@@ -7,8 +7,8 @@ import { buildKeepMs, buildPages, sweepBuilds } from "../src/pages.ts";
 
 /** A sample App: two pages on the kit, sharing one of its own components. */
 const sampleApp: Record<string, string> = {
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@grasp-os/app-kit/components/card";
 import { useState } from "react";
 
 import { Greeting } from "../components/greeting";
@@ -30,8 +30,8 @@ function Desk() {
 }
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-  "src/routes/inbox.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Badge } from "@grasp-os/ui/components/badge";
-import { Input } from "@grasp-os/ui/components/input";
+  "src/routes/inbox.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { type LucideProps, InboxIcon } from "lucide-react";
 
 import { Greeting } from "../components/greeting";
@@ -218,7 +218,7 @@ describe("page builds", { timeout: 60_000 }, () => {
   it("keeps every component of the kit available, and loads none a page doesn't import", async () => {
     const { modules } = await kitModules(env.ASSETS);
     const components = Object.keys(modules).filter((name) =>
-      name.startsWith("@grasp-os~ui~components~")
+      name.startsWith("@grasp-os~app-kit~components~")
     );
     const specifiers = components.map((name) =>
       name.slice(0, -".js".length).replaceAll("~", "/")
@@ -258,7 +258,9 @@ export const Route = createFileRoute("/all")({ component: All });
     ).resolves.toMatchObject({ [route]: { Route: "object" } });
     // An App whose pages import none of them loads none of them.
     expect(
-      kitModulesOf(small).filter((name) => name.startsWith("@grasp-os~ui~"))
+      kitModulesOf(small).filter((name) =>
+        name.startsWith("@grasp-os~app-kit~")
+      )
     ).toStrictEqual([]);
   });
 
@@ -269,7 +271,7 @@ export const Route = createFileRoute("/all")({ component: All });
     const withSidebar = await buildPages(
       env,
       {
-        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Sidebar, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Sidebar, SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 
 function Desk() {
   return (
@@ -325,7 +327,7 @@ export const Route = createFileRoute("/counter")({ component: Counter });
       {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import leftPad from "left-pad";
 import { Dialog } from "@base-ui/react/dialog";
-import { Nope } from "@grasp-os/ui/components/nope";
+import { Nope } from "@grasp-os/app-kit/components/nope";
 import { secret } from "../../outside";
 import { InboxIcon, NotAnIcon } from "lucide-react";
 import * as icons from "lucide-react";
@@ -355,7 +357,7 @@ export const Route = createFileRoute("/")({ component: Desk });
         'src/routes/index.tsx:2 imports: "@base-ui/react/dialog" is outside the kit'
       ),
       expect.stringContaining(
-        'src/routes/index.tsx:3 imports: "@grasp-os/ui/components/nope" is outside the kit'
+        'src/routes/index.tsx:3 imports: "@grasp-os/app-kit/components/nope" is outside the kit'
       ),
       'src/routes/index.tsx:4 imports: "../../outside" is not a file in this App.',
       'src/routes/index.tsx:5 imports: "NotAnIcon" is not a lucide-react icon.',

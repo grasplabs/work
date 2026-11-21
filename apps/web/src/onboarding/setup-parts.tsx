@@ -1,8 +1,8 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Stat } from "@grasp-os/ui/components/stat";
-import { cn } from "@grasp-os/ui/lib/utils";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { CheckIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";

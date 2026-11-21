@@ -80,8 +80,8 @@ const setUpTime = { timeout: 90_000 };
 
 type Member = Awaited<ReturnType<typeof person>>;
 
-/** A task the release's draw-a-workflow skill is for. */
-const task = "Draw how invoices are paid as a workflow";
+/** A task the release's file-an-expense skill is for. */
+const task = "File the expense for the client lunch";
 
 const rolesOf = (by: Identity) => ({
   app: async (named: string, role: "user" | "builder") =>
@@ -501,7 +501,7 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
       run: fromRun,
     }).toStrictEqual({
       // Grasp's own skill for the task, read whole at the version chosen.
-      chose: ["draw-a-workflow"],
+      chose: ["file-an-expense"],
       read: true,
       app: returned,
       run: z.object({ read: z.unknown() }).parse(returned).read,
@@ -511,7 +511,7 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
     const events = await skillEvents(ada.userId, 4);
     expect({
       actions: events.map(({ action }) => action).toSorted(),
-      said: [task, "draw-a-workflow", inChat.read?.text ?? ""].some((said) =>
+      said: [task, "file-an-expense", inChat.read?.text ?? ""].some((said) =>
         JSON.stringify(events).includes(said)
       ),
     }).toStrictEqual({
@@ -557,7 +557,7 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
         bound,
         ada,
         "skills.ask",
-        reading({ skill: { scope: "grasp", name: "draw-a-workflow" } })
+        reading({ skill: { scope: "grasp", name: "file-an-expense" } })
       ),
       unknown: await calledOf(
         bound,
@@ -831,7 +831,7 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
       afterRevoke,
       said: JSON.stringify([afterErasure, afterRevoke]).includes(word),
     }).toStrictEqual({
-      left: "draw-a-workflow",
+      left: "file-an-expense",
       afterErasure: { failed: "brain.revoked" },
       afterRevoke: { failed: "brain.revoked" },
       said: false,

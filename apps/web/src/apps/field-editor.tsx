@@ -1,17 +1,10 @@
-import { fieldCode, fieldKindCode } from "@grasp-os/shared/data-model";
-import type {
-  DataModelField,
-  DataModelTable,
-  FieldKind,
-  FieldType,
-} from "@grasp-os/shared/data-model";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   FieldTypeGallery,
   FieldTypeIcon,
   FieldTypePicker,
   ModelFieldButton,
-} from "@grasp-os/ui/components/data-model";
+} from "@grasp-os/app-kit/components/data-model";
 import {
   Field,
   FieldDescription,
@@ -19,25 +12,32 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   RadioGroup,
   RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
+} from "@grasp-os/app-kit/components/radio-group";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
 import {
   SortableItem,
   SortableList,
-} from "@grasp-os/ui/components/sortable-list";
-import type { SortableWords } from "@grasp-os/ui/components/sortable-list";
-import { Switch } from "@grasp-os/ui/components/switch";
+} from "@grasp-os/app-kit/components/sortable-list";
+import type { SortableWords } from "@grasp-os/app-kit/components/sortable-list";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import { fieldCode, fieldKindCode } from "@grasp-os/shared/data-model";
+import type {
+  DataModelField,
+  DataModelTable,
+  FieldKind,
+  FieldType,
+} from "@grasp-os/shared/data-model";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { PlusIcon, Table2Icon, TrashIcon, XIcon } from "lucide-react";
 import { useId, useState } from "react";

@@ -1,5 +1,4 @@
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Table,
   TableBody,
@@ -7,7 +6,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 

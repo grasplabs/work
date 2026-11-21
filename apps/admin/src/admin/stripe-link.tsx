@@ -5,13 +5,13 @@
  * (src/billing/link.ts). Saved, audited, and the admin read again, so
  * Billing shows what Stripe says of the customer just linked.
  */
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { useRouter } from "@tanstack/react-router";
 
 import { setStripeCustomerFn } from "../billing/functions.ts";

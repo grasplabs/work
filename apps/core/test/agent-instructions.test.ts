@@ -119,7 +119,7 @@ describe("a chat's instructions", setUpTime, () => {
       second: held(second),
       // Grasp's own skills, from the Brain, without a grant: guidance
       // every member's chat gets.
-      skills: first?.includes("- draw-a-workflow (grasp, version "),
+      skills: first?.includes("- file-an-expense (grasp, version "),
       builds: first?.includes(
         "list the person's Apps for one that already does the job"
       ),

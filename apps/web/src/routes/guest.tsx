@@ -1,12 +1,12 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Item,
   ItemContent,
   ItemDescription,
   ItemGroup,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/item";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { Trans } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";

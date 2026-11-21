@@ -1,5 +1,5 @@
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { PageLoading } from "../../../admin/failure.tsx";

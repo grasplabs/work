@@ -1,5 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { CatalogSource } from "@grasp-os/shared/connect";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans } from "@lingui/react/macro";
 
 /**

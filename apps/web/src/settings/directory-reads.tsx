@@ -1,13 +1,13 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
 import type {
   DirectoryDeletedFailure,
   DirectoryProvider,
 } from "@grasp-os/shared/directory";
 import type { DirectoryRead } from "@grasp-os/shared/members";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { CircleAlertIcon, TriangleAlertIcon } from "lucide-react";
 import type { ReactElement } from "react";

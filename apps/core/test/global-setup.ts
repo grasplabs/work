@@ -4,6 +4,7 @@ import path from "node:path";
 import { writeAgentDocs } from "../build-agent-docs.ts";
 import {
   blueprintsDir,
+  testBlueprintsDir,
   testBlueprintsModule,
   writeBlueprints,
 } from "../build-blueprints.ts";
@@ -51,10 +52,7 @@ const prepare = async (): Promise<void> => {
   // The release's built-ins, and one of the tests' own, so the install
   // has a blueprint to write while the release ships none: into the
   // tests' module, never the one core's build ships.
-  writeBlueprints(
-    [blueprintsDir, path.join(import.meta.dirname, "fixtures/blueprints")],
-    testBlueprintsModule
-  );
+  writeBlueprints([blueprintsDir, testBlueprintsDir], testBlueprintsModule);
   // The guides the agent reads, as core's build embeds them.
   writeAgentDocs();
   // The builds below, reused when their inputs are those of a build kept

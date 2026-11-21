@@ -13,6 +13,38 @@
  * its time (each link, each interview, each drawing), which core's snapshot
  * doesn't carry; and exporting what is shown.
  */
+
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  XAxis,
+  YAxis,
+  chartColor,
+} from "@grasp-os/app-kit/components/chart";
+import type {
+  ChartColor,
+  ChartConfig,
+} from "@grasp-os/app-kit/components/chart";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/app-kit/components/input-group";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import {
   LOG_ACTORS,
   LOG_TOPICS,
@@ -24,34 +56,6 @@ import type { LogActor, LogItem } from "@grasp-os/shared/admin/admin-log";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { peopleOf } from "@grasp-os/shared/admin/onboarding-admin";
 import type { TrailEntry } from "@grasp-os/shared/admin/trail";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  XAxis,
-  YAxis,
-  chartColor,
-} from "@grasp-os/ui/components/chart";
-import type { ChartColor, ChartConfig } from "@grasp-os/ui/components/chart";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { cn } from "@grasp-os/ui/lib/utils";
 import {
   ListFilterIcon,
   SearchIcon,

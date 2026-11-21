@@ -1,3 +1,13 @@
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/app-kit/components/select";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import type {
   App,
@@ -10,16 +20,6 @@ import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -38,7 +38,6 @@ import {
 import type { HttpListed, Integration } from "../connections/integrations.ts";
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
@@ -46,6 +45,7 @@ import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";

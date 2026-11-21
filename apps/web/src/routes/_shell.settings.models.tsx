@@ -1,6 +1,3 @@
-import type { ModelSettings } from "@grasp-os/shared/models";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Table,
   TableBody,
@@ -8,7 +5,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { ModelSettings } from "@grasp-os/shared/models";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";

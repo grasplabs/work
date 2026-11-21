@@ -1,0 +1,692 @@
+/* Grasp OS theme. Shared by the frontend, the admin and every App page. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@source "./";
+
+/*
+ * Paper is light: in print the light theme applies, whatever the theme on
+ * page, so a page printed from the dark theme isn't light text on white.
+ */
+@custom-variant dark {
+  @media screen {
+    &:is(.dark *, [data-theme="dark"] *) {
+      @slot;
+    }
+  }
+}
+
+/*
+ * Grasp's theme is shadcn's: every colour stands once in :root (light) and
+ * once in .dark, under shadcn's own names, and @theme inline maps each to
+ * its Tailwind utility. Components only ever use those utilities.
+ *
+ * The values are the brand book's: deep green ink on a cool white page,
+ * Newsreader (`font-serif`) for what Grasp says and Geist (`font-sans`)
+ * for the product. Dark is not in the brand book; it is built on the base
+ * of its Ink painting.
+ *
+ * Beside shadcn's names, only what a component or a page needs and shadcn
+ * has no name for. A surface comes as a pair, `x` and `x-foreground` for
+ * the text on it, as shadcn's own do:
+ *   - `highlight`: lime, the one action a page is for (Button
+ *     variant="highlight"). Rare, so it keeps its meaning.
+ *   - `tile`: the light ground of a brand's logo. `tinted`: a light tint
+ *     of the primary (Bubble variant="tinted"). `row-group`: the band
+ *     over a group of rows.
+ * Signals, which are never a ground for text:
+ *   - `status-agreed` (green) for what is done, `status-attention` (amber)
+ *     for what needs someone; as a badge, on a tint of themselves
+ *     (Badge variant="passed" and "attention"), as shadcn's destructive is.
+ *   - `destructive` (red) is for errors, a form's error or something that
+ *     failed, and for actions that can't be undone. Nothing else is red.
+ *   - `syntax-*`, the hues of highlighted code.
+ *   - `mention-*`, what a mention in the box to ask in is (an App, a
+ *     workflow, a person, a command), each its own hue, as the chip's icon
+ *     and on a tint of itself.
+ *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
+ *     a dialog; the brain's and the charts' own colours.
+ * And three shadows: a block resting on the page, what floats above it,
+ * and the highlight's soft light.
+ */
+:root {
+  --radius: 0.625rem;
+  /*
+   * The app shell's frame: the ink between the sidebar, the page's card and
+   * the chat docked beside it, and round them at the window's edges.
+   */
+  --app-shell-gap: 0.25rem;
+  --font-sans:
+    "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  /*
+   * Where the page loads Newsreader (the frontend and the admin bundle it).
+   * An App page's frame loads no fonts, so there the serif falls back to
+   * the sans, as the sans falls back to the system's: a system serif such
+   * as Georgia has no light weight to set a title in.
+   */
+  --font-serif:
+    "Newsreader Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  /*
+   * JetBrains Mono, for code wherever it is shown, where the page loads it
+   * (the frontend and the admin bundle it); in an App screen's frame, the
+   * system's monospace.
+   */
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+  --background: #fbfdff;
+  --foreground: #062d22;
+  --card: #ffffff;
+  --card-foreground: #062d22;
+  --popover: #ffffff;
+  --popover-foreground: #062d22;
+  --primary: #062d22;
+  --primary-foreground: #fbfdff;
+  --secondary: #f3f6f4;
+  --secondary-foreground: #062d22;
+  --muted: #f3f6f4;
+  /* The brand book's #5f7769, a step darker: 4.5:1 on muted too. */
+  --muted-foreground: #5a7264;
+  --faint: #8a9d92;
+  --accent: #f8faf8;
+  --accent-foreground: #062d22;
+  --destructive: #b04a35;
+  --border: #e0e7e2;
+  --input: #ccd5cf;
+  --ring: #3f7a57;
+  --scrim: #062d2229;
+  --highlight: #d9f9ad;
+  --highlight-foreground: #062d22;
+  --tile: #ffffff;
+  --tile-foreground: #062d22;
+  --tinted: #dfe9e3;
+  --tinted-foreground: #062d22;
+  --row-group: #f9faf9;
+  --row-group-foreground: #062d22;
+  /* Charts rank in the greens of the ink: the biggest part is the darkest. */
+  --chart-1: #062d22;
+  --chart-2: #b0beb5;
+  --chart-3: #5f7769;
+  --chart-4: #8a9d92;
+  --chart-5: #34503f;
+  --chart-6: #1d3d31;
+  /*
+   * The frame: the sidebar is the brand's ink, the page lying on it as a
+   * white sheet. On it text is the canvas, and the place you are is a wash
+   * of the canvas.
+   */
+  --sidebar: #062d22;
+  --sidebar-foreground: #fbfdff;
+  --sidebar-primary: #fbfdff;
+  --sidebar-primary-foreground: #062d22;
+  --sidebar-accent: oklch(1 0 0 / 11%);
+  --sidebar-accent-foreground: #fbfdff;
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: #6fb48a;
+  --status-agreed: #1c7148;
+  --status-attention: #82560f;
+  --mention-app: oklch(0.5 0.13 245);
+  --mention-workflow: oklch(0.5 0.14 305);
+  --mention-person: oklch(0.52 0.12 60);
+  --mention-agent: oklch(0.5 0.12 150);
+  --mention-command: oklch(0.5 0.1 165);
+  /*
+   * Code's colours, wherever code is highlighted (the chat's answers, an
+   * App's Code view): what a word is to the language, in quiet hues that
+   * keep the ink's weight. Comments and punctuation are the muted text,
+   * anything else the text itself.
+   */
+  --syntax-keyword: oklch(0.47 0.14 305);
+  --syntax-string: oklch(0.5 0.11 155);
+  --syntax-constant: oklch(0.53 0.13 55);
+  --syntax-function: oklch(0.47 0.12 250);
+  /*
+   * The brain's notes are the one place with colour: one soft hue per
+   * group, as a dot per note in its file tree, note pages and the atlas's
+   * cards. Gaps, what nobody has answered yet, are drawn hollow in a teal
+   * of their own. Everything else stays neutral.
+   */
+  --graph-vision: oklch(0.76 0.14 70);
+  --graph-teams: oklch(0.72 0.13 150);
+  --graph-tools: oklch(0.7 0.12 250);
+  --graph-statements: oklch(0.78 0.1 355);
+  --graph-candidates: oklch(0.64 0.16 300);
+  --graph-sources: oklch(0.82 0.01 286);
+  --graph-gaps: oklch(0.7 0.1 195);
+  /*
+   * The warmth of Grasp's dots (the brain, the buddy, Stephen's head),
+   * where there is activity, and its glow on the hottest dots. A dot at
+   * rest is the text's own colour.
+   */
+  --brain-heat: #e0542c;
+  --brain-glow: #f6c35a;
+  --shadow-block: 0 1px 2px -1px #062d2212, 0 30px 70px -50px #062d2240;
+  --shadow-lifted:
+    0 0 0 1px #0f3a2a14, 0 30px 70px -30px #0b2c2059,
+    0 10px 24px -14px #0b2c2030;
+  --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 24px -14px #6fae2ecc;
+}
+
+/*
+ * On screen only: paper keeps the light theme. `data-theme="dark"` is how
+ * the SDK docs (apps/docs, Blume) switch to the dark theme.
+ */
+@media screen {
+  :is(.dark, [data-theme="dark"]) {
+    --background: #0d1714;
+    --foreground: #eef4f0;
+    --card: #14211c;
+    --card-foreground: #eef4f0;
+    --popover: #172520;
+    --popover-foreground: #eef4f0;
+    --primary: #eef4f0;
+    --primary-foreground: #062d22;
+    --secondary: #1b2a24;
+    --secondary-foreground: #eef4f0;
+    --muted: #1b2a24;
+    --muted-foreground: #94a89c;
+    --faint: #6c8277;
+    --accent: #1a2822;
+    --accent-foreground: #eef4f0;
+    --destructive: #e4826b;
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: #6fb48a;
+    --scrim: #0000008c;
+    /* Lime leads in dark too. */
+    --highlight: #d9f9ad;
+    --highlight-foreground: #062d22;
+    /* Brand logos are drawn for light backgrounds, so their tile stays light. */
+    --tile: #f3f6f4;
+    --tile-foreground: #062d22;
+    --tinted: #1f3a2f;
+    --tinted-foreground: #eef4f0;
+    --row-group: #111d18;
+    --row-group-foreground: #eef4f0;
+    --chart-1: #eef4f0;
+    --chart-2: #2f423a;
+    --chart-3: #94a89c;
+    --chart-4: #6c8277;
+    --chart-5: #c9d6cf;
+    --chart-6: #dde7e1;
+    --sidebar: #0a1311;
+    --sidebar-foreground: #eef4f0;
+    --sidebar-primary: #eef4f0;
+    --sidebar-primary-foreground: #062d22;
+    --sidebar-accent: #1b2b25;
+    --sidebar-accent-foreground: #eef4f0;
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: #6fb48a;
+    --status-agreed: #3fae6a;
+    --status-attention: #e2b360;
+    --mention-app: oklch(0.79 0.1 245);
+    --mention-workflow: oklch(0.78 0.11 305);
+    --mention-person: oklch(0.82 0.11 70);
+    --mention-agent: oklch(0.8 0.11 150);
+    --mention-command: oklch(0.8 0.1 165);
+    --syntax-keyword: oklch(0.78 0.11 305);
+    --syntax-string: oklch(0.8 0.12 155);
+    --syntax-constant: oklch(0.82 0.11 70);
+    --syntax-function: oklch(0.79 0.1 245);
+    --graph-vision: oklch(0.72 0.13 70);
+    --graph-teams: oklch(0.68 0.12 150);
+    --graph-tools: oklch(0.68 0.12 250);
+    --graph-statements: oklch(0.72 0.1 355);
+    --graph-candidates: oklch(0.66 0.15 300);
+    --graph-sources: oklch(0.5 0.01 286);
+    --graph-gaps: oklch(0.68 0.1 195);
+    --brain-heat: oklch(0.68 0.19 38);
+    --brain-glow: #f6c35a;
+    --shadow-block: 0 0 0 1px oklch(1 0 0 / 9%), 0 24px 60px -40px #000000b3;
+    --shadow-lifted:
+      0 0 0 1px oklch(1 0 0 / 9%), 0 36px 80px -28px #000000a6,
+      0 12px 28px -14px #00000059;
+    --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 28px -14px #6fae2e73;
+  }
+}
+
+/* Motion is the same in light and dark. */
+@theme {
+  /*
+   * The house curve: away at once, then a long, soft landing. Every
+   * transition uses it unless it says otherwise; each is over within 300ms.
+   */
+  --ease-house: cubic-bezier(0.22, 1, 0.36, 1);
+  --default-transition-timing-function: var(--ease-house);
+  /*
+   * How what opens and closes beside the page moves: quick out of the
+   * gate, settling softly, as Grasp's own sidebar does, the same both ways.
+   * The sidebars, the chat (its room, its card, its idle bar, going full
+   * screen) and the page fading under it all move on it.
+   */
+  --ease-sidebar: cubic-bezier(0.32, 0.72, 0, 1);
+  /*
+   * How long what opens, closes and moves beside the page takes (a Panel,
+   * the chat's card and its idle bar, the page fading under the chat full
+   * screen), and how far behind the second of two moving together starts
+   * (`delayed`): three quarters through the first, as it settles.
+   */
+  --motion-duration: 250ms;
+  --motion-stagger: calc(var(--motion-duration) * 0.75);
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  /* Card titles and the like are the brand book's h4: the sans at 500. */
+  --font-heading: var(--font-sans);
+  /*
+   * The prototype's corners, in shadcn's steps of --radius: md 8, lg 10,
+   * xl 14 for cards, 2xl 16 for a bar that floats, 3xl 20.
+   */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-3xl: calc(var(--radius) * 2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-block: var(--shadow-block);
+  --shadow-lifted: var(--shadow-lifted);
+  --shadow-glow: var(--shadow-glow);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-scrim: var(--scrim);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
+  --color-tinted: var(--tinted);
+  --color-tinted-foreground: var(--tinted-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-tile: var(--tile);
+  --color-tile-foreground: var(--tile-foreground);
+  --color-status-agreed: var(--status-agreed);
+  --color-status-attention: var(--status-attention);
+  --color-mention-app: var(--mention-app);
+  --color-mention-workflow: var(--mention-workflow);
+  --color-mention-person: var(--mention-person);
+  --color-mention-agent: var(--mention-agent);
+  --color-mention-command: var(--mention-command);
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-constant: var(--syntax-constant);
+  --color-syntax-function: var(--syntax-function);
+  --color-row-group: var(--row-group);
+  --color-row-group-foreground: var(--row-group-foreground);
+  --color-brain-heat: var(--brain-heat);
+  --color-graph-vision: var(--graph-vision);
+  --color-graph-teams: var(--graph-teams);
+  --color-graph-tools: var(--graph-tools);
+  --color-graph-statements: var(--graph-statements);
+  --color-graph-candidates: var(--graph-candidates);
+  --color-graph-sources: var(--graph-sources);
+  --color-graph-gaps: var(--graph-gaps);
+}
+
+/*
+ * The serif's one look that no kit component owns: what Grasp asks or says
+ * out loud, the brand book's h2, on plain elements of the interview and
+ * the onboarding's spoken story, line by line. Titles and figures are the
+ * kit's (PageHeaderTitle, the dialogs' titles, Stat).
+ */
+@utility type-display {
+  font-family: var(--font-serif);
+  font-size: clamp(1.75rem, 2.6vw, 2.5rem);
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+
+/*
+ * The brand's one highlight of words: a line under them, from lime to
+ * green and 0.09em thick, never a marker behind them (brand book, chapter
+ * 04). For what Grasp heard or marked in what someone said, inside running
+ * text, so a utility and not a component.
+ */
+@utility line-under {
+  padding-bottom: 0.06em;
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--highlight), var(--status-agreed) 35%),
+    var(--status-agreed)
+  );
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 0.09em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/*
+ * The brand book's Rings (chapter 05) on the sidebar, which is the brand's
+ * ink: soft white lines rising faintly from the foot. A pseudo-element of
+ * layered gradients, which classes can't draw, shared by the sidebar's
+ * container and its phone sheet (components/sidebar.tsx). The rings
+ * themselves are drawn once, with a painted field's, below.
+ */
+@utility patterned {
+  isolation: isolate;
+  --rings-at: 88% 100%;
+  --line: oklch(1 0 0 / 10%);
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+}
+
+/*
+ * The brand's painted field (brand book, chapter 05), drawn by
+ * <PaintedField painting pattern> for the one or two things on a page
+ * that matter most. Four layers, never fewer: the painting's base colour,
+ * so the field has its tone before the painting comes; the painting, an
+ * image file of a few kB that a browser fetches only where a field is
+ * drawn (`?no-inline` keeps it out of this stylesheet); a fine grain; and
+ * in ::before a pattern of white lines that fades out before the far
+ * edge. Lines are white at 42% on a light painting and 10% on a dark one;
+ * text is the ink on a light painting and the canvas on a dark one. In
+ * dark mode each light painting gives way to a dark one, so a field never
+ * stands as a bright block on a dark page. The base colours are the
+ * paintings' own, not the theme's. An App page's frame loads no images
+ * from here, so there a field is its base, grain and pattern.
+ */
+@utility painted-field {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  --field-lines: 0.42;
+  --field-text: var(--foreground);
+  --rings-at: 88% 0;
+  /* What is quieter on it is the same ink, a little lighter: never the page's grey, which a painting swallows. */
+  --muted-foreground: color-mix(in oklab, var(--field-text) 76%, transparent);
+  color: var(--field-text);
+  background-color: var(--field-base);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncG type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncB type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncA type='linear' slope='0' intercept='.24'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    var(--field-paint);
+  background-position:
+    0 0,
+    center;
+  background-size: 180px, cover;
+  background-repeat: repeat, no-repeat;
+  background-blend-mode: overlay, normal;
+  box-shadow: inset 0 0 0 0.5px
+    color-mix(in oklab, var(--foreground) 7%, transparent);
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    --line: oklch(1 0 0 / var(--field-lines));
+    --lit: oklch(1 0 0 / calc(var(--field-lines) * 0.45));
+    --dim: oklch(1 0 0 / calc(var(--field-lines) * 0.18));
+  }
+
+  &[data-painting="dawn"] {
+    --field-base: #b9c8c8;
+    --field-paint: url("../paintings/dawn.avif?no-inline");
+  }
+  &[data-painting="mist"] {
+    --field-base: #b4c6cc;
+    --field-paint: url("../paintings/mist.avif?no-inline");
+  }
+  &[data-painting="sand"] {
+    --field-base: #cdc8b2;
+    --field-paint: url("../paintings/sand.avif?no-inline");
+  }
+  &[data-painting="sage"] {
+    --field-base: #b8ccb2;
+    --field-paint: url("../paintings/sage.avif?no-inline");
+  }
+  &[data-painting="blush"] {
+    --field-base: #d6c4c4;
+    --field-paint: url("../paintings/blush.avif?no-inline");
+  }
+  &[data-painting="stone"] {
+    --field-base: #c8c8c6;
+    --field-paint: url("../paintings/stone.avif?no-inline");
+  }
+  &[data-painting="grove"] {
+    --field-base: #173f2d;
+    --field-paint: url("../paintings/grove.avif?no-inline");
+  }
+  &[data-painting="tide"] {
+    --field-base: #12282e;
+    --field-paint: url("../paintings/tide.avif?no-inline");
+  }
+  &[data-painting="ink"] {
+    --field-base: #0d1714;
+    --field-paint: url("../paintings/ink.avif?no-inline");
+  }
+
+  &:is([data-painting="grove"], [data-painting="tide"], [data-painting="ink"]) {
+    --field-lines: 0.1;
+    --field-text: var(--primary-foreground);
+  }
+
+  @variant dark {
+    --field-lines: 0.1;
+    --field-text: var(--foreground);
+    &[data-painting="sand"] {
+      --field-base: #173f2d;
+      --field-paint: url("../paintings/grove.avif?no-inline");
+    }
+    &[data-painting="sage"] {
+      --field-base: #173f2d;
+      --field-paint: url("../paintings/grove.avif?no-inline");
+    }
+    &[data-painting="dawn"] {
+      --field-base: #12282e;
+      --field-paint: url("../paintings/tide.avif?no-inline");
+    }
+    &[data-painting="mist"] {
+      --field-base: #12282e;
+      --field-paint: url("../paintings/tide.avif?no-inline");
+    }
+    &[data-painting="blush"] {
+      --field-base: #0d1714;
+      --field-paint: url("../paintings/ink.avif?no-inline");
+    }
+    &[data-painting="stone"] {
+      --field-base: #0d1714;
+      --field-paint: url("../paintings/ink.avif?no-inline");
+    }
+  }
+}
+
+/*
+ * The book's seven patterns, white lines over the paint. Which one is a
+ * data attribute (`data-pattern`), so no inline style is needed under the
+ * strict CSP.
+ */
+.painted-field[data-pattern="columns"]::before {
+  /* Six columns of light, each its own brightness. */
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 calc(100% / 6 - 1px),
+      var(--line) calc(100% / 6 - 1px) calc(100% / 6)
+    ),
+    linear-gradient(
+      90deg,
+      var(--lit) 0 16.66%,
+      var(--dim) 16.66% 33.33%,
+      var(--lit) 33.33% 50%,
+      transparent 50% 66.66%,
+      var(--lit) 66.66% 83.33%,
+      var(--dim) 83.33%
+    );
+  mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
+}
+
+.painted-field[data-pattern="horizon"]::before {
+  /* Three wide columns and a horizon. */
+  background:
+    linear-gradient(
+      180deg,
+      transparent 38%,
+      var(--line) 38% calc(38% + 1px),
+      transparent calc(38% + 1px)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 calc(100% / 3 - 1px),
+      var(--line) calc(100% / 3 - 1px) calc(100% / 3)
+    ),
+    linear-gradient(
+      90deg,
+      transparent 0 33.33%,
+      var(--lit) 33.33% 66.66%,
+      transparent 66.66%
+    );
+  mask-image: linear-gradient(180deg, #000 20%, transparent 95%);
+}
+
+.painted-field[data-pattern="grid"]::before {
+  /* Squares of 56px, strongest in the middle. */
+  background:
+    repeating-linear-gradient(90deg, transparent 0 55px, var(--line) 55px 56px),
+    repeating-linear-gradient(180deg, transparent 0 55px, var(--line) 55px 56px);
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, #000, transparent);
+}
+
+.painted-field[data-pattern="rows"]::before {
+  /* A line every 44px, with two lit bands. */
+  background:
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 43px,
+      var(--line) 43px 44px
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0 88px,
+      var(--lit) 88px 176px,
+      transparent 176px 264px,
+      var(--dim) 264px 352px,
+      transparent 352px
+    );
+  mask-image: linear-gradient(90deg, #000, transparent 90%);
+}
+
+.painted-field[data-pattern="dots"]::before {
+  /* A fine grid of dots, 22px apart: the quietest of the seven. */
+  background: radial-gradient(circle, var(--line) 1.2px, transparent 1.6px) 0 0
+    / 22px 22px;
+  mask-image: radial-gradient(
+    ellipse 80% 70% at 50% 30%,
+    #000,
+    transparent 85%
+  );
+}
+
+.painted-field[data-pattern="mosaic"]::before {
+  /* Staggered blocks of light, no lines. */
+  background: conic-gradient(
+      var(--lit) 25%,
+      transparent 0 50%,
+      var(--dim) 0 75%,
+      transparent 0
+    )
+    0 0 / 25% 33.33%;
+  mask-image: linear-gradient(180deg, #000 10%, transparent 88%);
+}
+
+/*
+ * The Rings, the sidebar's and a field's alike: soft rings 64px apart,
+ * from the top right of a field and the foot of the sidebar.
+ */
+:is(.patterned, .painted-field[data-pattern="rings"])::before {
+  background: repeating-radial-gradient(
+    circle at var(--rings-at),
+    transparent 0 63px,
+    var(--line) 63px 64px
+  );
+  mask-image: radial-gradient(
+    circle at var(--rings-at),
+    #000 30%,
+    transparent 85%
+  );
+}
+
+@layer base {
+  /*
+   * The sidebar's widths (components/sidebar.tsx), as variables a page
+   * overrides in its own stylesheet instead of an inline style.
+   */
+  [data-slot="sidebar-wrapper"] {
+    --sidebar-width: 16rem;
+    --sidebar-width-icon: 3rem;
+  }
+
+  [data-slot="sidebar"][data-mobile="true"] {
+    --sidebar-width: 18rem;
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/*
+ * Base UI hides native scrollbars (a Select's list, a scroll area) with
+ * this class, and the rule in an inline <style> it renders. The frontend
+ * renders Base UI with that element turned off (CSPProvider's
+ * `disableStyleElements`, apps/web/src/main.tsx), which keeps its document
+ * free of style elements nobody wrote; the rule lives here instead.
+ */
+.base-ui-disable-scrollbar {
+  scrollbar-width: none;
+}
+
+.base-ui-disable-scrollbar::-webkit-scrollbar {
+  display: none;
+}

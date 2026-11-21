@@ -1,5 +1,4 @@
-import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogClose,
@@ -8,9 +7,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/dialog";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

@@ -1,6 +1,4 @@
-import { onlyForAsking } from "@grasp-os/shared/interview-links";
-import type { InterviewFact } from "@grasp-os/shared/interview-links";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Sheet,
   SheetClose,
@@ -10,8 +8,10 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@grasp-os/ui/components/sheet";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/sheet";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { onlyForAsking } from "@grasp-os/shared/interview-links";
+import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import { useLingui } from "@lingui/react/macro";
 import { EyeOffIcon, UsersIcon } from "lucide-react";
 import { useId, useState } from "react";

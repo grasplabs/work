@@ -1,6 +1,3 @@
-import type { ToolClassAudience } from "@grasp-os/shared/connect";
-import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,21 +7,29 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Switch } from "@grasp-os/ui/components/switch";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/tooltip";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { ToolClassAudience } from "@grasp-os/shared/connect";
+import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { useRouteContext } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { setActiveChat } from "../chat/active-chat.ts";
+import { openChat } from "../chat/chat-layout.ts";
+import { readChoice, resolveChoice } from "../chat/model-choice.ts";
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber, formatPercent } from "../format.ts";
-import { useAskGrasp } from "../workflows/requests/request-needs.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import { SettingsRow, SettingsSection } from "./settings-parts.tsx";
 import { AudienceControl, audienceOf, chosenOf } from "./stephen-audience.tsx";
 import { StephenAvatar } from "./stephen-avatar.tsx";
@@ -105,6 +110,68 @@ const Usage = ({ week }: { week: StephenWeek }) => {
       <WeekBars weeks={week.weeks} />
     </div>
   );
+};
+
+/**
+ * Asks Grasp, in a new chat in the corner, what `prompt` says, with the
+ * model and effort `userId` last chose; null, making no chat, when no
+ * model is set up to ask with.
+ */
+const askGrasp = async (
+  session: Session,
+  userId: string,
+  title: string,
+  prompt: string
+): Promise<string | null> => {
+  const [models, efforts] = await Promise.all([
+    session.chats.models(),
+    session.chats.efforts(),
+  ]);
+  if (models.length === 0) {
+    return null;
+  }
+  const { model, effort } = resolveChoice(models, efforts, readChoice(userId));
+  const chat = await session.chats.create(title);
+  await session.chats.send(chat.id, {
+    text: prompt,
+    model,
+    ...(effort === undefined ? {} : { effort }),
+  });
+  return chat.id;
+};
+
+/**
+ * Asks Grasp in the corner chat, in a chat of its own named `title`, and
+ * opens it; resolves whether it was asked.
+ */
+const useAskGrasp = () => {
+  const { t } = useLingui();
+  const { identity } = useRouteContext({ from: "/_shell" });
+  const { busy, failure, run } = useCoreAction();
+  const [noModel, setNoModel] = useState(false);
+  const ask = async (title: string, prompt: string): Promise<boolean> => {
+    setNoModel(false);
+    const chatId = await run(
+      async (session) => await askGrasp(session, identity.userId, title, prompt)
+    );
+    if (chatId === null) {
+      setNoModel(true);
+      return false;
+    }
+    if (chatId === undefined) {
+      return false;
+    }
+    setActiveChat(chatId);
+    openChat();
+    return true;
+  };
+  return {
+    busy,
+    failure:
+      failure ??
+      (noModel ? t`No model is set up for this deployment yet.` : undefined),
+    ask,
+  };
 };
 
 /** One question he did not know: how many asked and who knows, and Grasp asks that role in the corner chat. */

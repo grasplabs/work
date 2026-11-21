@@ -10,14 +10,7 @@
  * far that conversation is), and the way to the transcripts (core keeps
  * them back).
  */
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
-import { DELETE_DAYS, peopleOf } from "@grasp-os/shared/admin/onboarding-admin";
-import type { OrgState } from "@grasp-os/shared/admin/onboarding-admin";
-import {
-  companySees,
-  keptOf,
-} from "@grasp-os/shared/admin/onboarding-admin-record";
+
 import {
   Table,
   TableBody,
@@ -26,7 +19,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
+import { DELETE_DAYS, peopleOf } from "@grasp-os/shared/admin/onboarding-admin";
+import type { OrgState } from "@grasp-os/shared/admin/onboarding-admin";
+import {
+  companySees,
+  keptOf,
+} from "@grasp-os/shared/admin/onboarding-admin-record";
 
 import { Section, SectionRow } from "./section.tsx";
 

@@ -1,47 +1,65 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import { readDefinition } from "@grasp-os/runtime/definition";
 import { expect } from "@playwright/test";
 import type { FrameLocator } from "@playwright/test";
 
+import { filesIn, testBlueprintsDir } from "../apps/core/build-blueprints.ts";
+import { appOf, publishApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { apiOf, peopleIn } from "./people.ts";
+import { tallyFiles } from "./tally-app.ts";
 
-// Every built-in App's first page renders the same in a chat's preview and
-// published, from the same files and the same data (none yet). The
-// preview runs on a build of its own, instrumented for React Fast
-// Refresh, on React's development build, with its modules on the
-// preview's own addresses, and what it shows must be what goes live. The
-// differences meant to stay don't reach the page's markup: Fast Refresh's
-// hooks, React's development build, and the preview's own store instead
-// of the App's data. The preview is the App's workspace's (chat-preview.e2e
-// .ts), of a draft that adds a file no page imports; the published page
-// is the App's own, as people open it.
+// An App's page renders the same in a chat's preview and published, from
+// the same files and the same data (none yet). The preview runs on a
+// build of its own, instrumented for React Fast Refresh, on React's
+// development build, with its modules on the preview's own addresses, and
+// what it shows must be what goes live. The differences meant to stay
+// don't reach the page's markup: Fast Refresh's hooks, React's
+// development build, and the preview's own store instead of the App's
+// data. The preview is the App's workspace's (chat-preview.e2e.ts), of a
+// draft that adds a file no page imports; the published page is the
+// App's own, as people open it.
+
+/** An App to check, the text its first page shows once its reads answered, and any page linked from it to check too. */
+interface Parity {
+  readonly name: string;
+  readonly files: () => TestApp;
+  readonly settled: string;
+  readonly linked?: { readonly link: string; readonly settled: string };
+}
 
 /**
- * How long the release's install may take to list the built-ins: it runs
- * on the first request, in the background.
+ * Core's tests' own built-in, `hello`: a form on its first page, a data
+ * grid on the one it links to, which bring in the kit modules a real App
+ * imports.
  */
-const installedMs = 30_000;
+const helloFiles = (): TestApp => {
+  const folder = path.join(testBlueprintsDir, "hello");
+  return appOf(
+    readDefinition(
+      JSON.parse(readFileSync(path.join(folder, "definition.json"), "utf-8"))
+    ),
+    filesIn(path.join(folder, "files"))
+  );
+};
 
-/**
- * Each built-in App, its page, the heading it shows, and the empty state
- * it shows once its reads answered: for an admin with none of its data,
- * the page's list empty and the access it checks granted (the line that
- * asks them to make the first one shows only then). The intake's saved
- * sources show nothing while empty, answered or not.
- */
-const pages = [
+const apps: readonly Parity[] = [
   {
-    blueprint: "intake",
-    appPage: "intake",
-    heading: "Intake",
-    settled: "No drafts wait for review.",
+    name: "Tally",
+    files: () => tallyFiles("in the App"),
+    settled: "0 in the App",
   },
   {
-    blueprint: "workflow-map",
-    heading: "Workflow map",
-    settled: "No workflows yet. Draw the first one.",
+    name: "Hello",
+    files: helloFiles,
+    settled: "No greeting yet",
+    linked: { link: "Everyone greeted", settled: "Nothing here yet." },
   },
-] as const;
+];
 
 /** The markup a frame's page shows once it shows `settled`. */
 const settledMarkupOf = async (
@@ -55,29 +73,34 @@ const settledMarkupOf = async (
   return await frame.locator("body").evaluate((body) => body.innerHTML);
 };
 
-for (const { blueprint, heading, settled } of pages) {
-  test(`renders the ${blueprint} page the same in a preview and published`, async ({
+/** The markup of each page `parity` checks, from its first. */
+const markupsOf = async (
+  frame: FrameLocator,
+  parity: Parity
+): Promise<string[]> => {
+  const first = await settledMarkupOf(frame, parity.settled);
+  if (parity.linked === undefined) {
+    return [first];
+  }
+  await frame.getByRole("link", { name: parity.linked.link }).click();
+  return [first, await settledMarkupOf(frame, parity.linked.settled)];
+};
+
+for (const parity of apps) {
+  test(`renders the ${parity.name} App's pages the same in a preview and published`, async ({
     pageOf,
   }) => {
     const { admin } = peopleIn("previewParity");
     const tag = crypto.randomUUID().slice(0, 8);
-    const name = `${heading} ${tag}`;
+    const name = `${parity.name} ${tag}`;
     const { core, api } = apiOf(admin);
     let app: string;
+    let version: number;
     let chat: string;
     try {
-      await expect
-        .poll(
-          async () => {
-            const listed = await api.apps.blueprints.list();
-            return listed.some(({ id }) => id === blueprint);
-          },
-          { timeout: installedMs }
-        )
-        .toBeTruthy();
-      const created = await api.apps.blueprints.create(blueprint, { name });
-      app = created.app.id;
-      await api.versions.rollback({ kind: "app", id: app }, 1);
+      const created = await api.apps.create({ name });
+      app = created.id;
+      ({ version } = await publishApp(api, app, parity.files()));
       const thread = await api.chats.create(`Build ${tag}`);
       chat = thread.id;
     } finally {
@@ -86,13 +109,13 @@ for (const { blueprint, heading, settled } of pages) {
 
     const page = await pageOf(admin);
     await page.goto(`/apps/${app}/full`);
-    const live = await settledMarkupOf(
+    const live = await markupsOf(
       page.frameLocator('iframe[title="App"]'),
-      settled
+      parity
     );
 
     // A draft that renders as the version does: a file no page imports.
-    await writeDraft(admin.userId, chat, app, 1, {
+    await writeDraft(admin.userId, chat, app, version, {
       "src/components/parity.ts": "export const parity = true;\n",
     });
     await page.goto(`/apps/${app}?chat=${chat}`);
@@ -100,6 +123,6 @@ for (const { blueprint, heading, settled } of pages) {
       .getByRole("region", { name: `${name}, your version` })
       .frameLocator("iframe");
 
-    expect(await settledMarkupOf(preview, settled)).toBe(live);
+    expect(await markupsOf(preview, parity)).toStrictEqual(live);
   });
 }

@@ -1,10 +1,10 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Slider } from "@grasp-os/ui/components/slider";
+} from "@grasp-os/app-kit/components/popover";
+import { Slider } from "@grasp-os/app-kit/components/slider";
 import { useLingui } from "@lingui/react/macro";
 import {
   PauseIcon,

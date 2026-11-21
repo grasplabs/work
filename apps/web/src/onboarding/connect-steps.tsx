@@ -1,12 +1,5 @@
-import type { OAuthProvider } from "@grasp-os/shared/connect";
-import { hrPlatforms } from "@grasp-os/shared/onboarding-choices";
-import type {
-  DocumentSourceId,
-  SetupChoices,
-} from "@grasp-os/shared/onboarding-choices";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Item,
   ItemActions,
@@ -14,8 +7,15 @@ import {
   ItemGroup,
   ItemMedia,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/item";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { hrPlatforms } from "@grasp-os/shared/onboarding-choices";
+import type {
+  DocumentSourceId,
+  SetupChoices,
+} from "@grasp-os/shared/onboarding-choices";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { CheckIcon, ChevronDownIcon, PlusIcon } from "lucide-react";

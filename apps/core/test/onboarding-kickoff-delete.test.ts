@@ -1,12 +1,12 @@
 import type { KickoffReading } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
-import { noRegionsOwed } from "./interview-link.ts";
+import { holdAlarm } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -111,12 +111,16 @@ const keptWhere = async (marker: string) => ({
 });
 
 describe("deleting the kickoff", { timeout: 60_000 }, () => {
+  // The onboarding store's own alarm, set half a second on by a save of
+  // the staff list, would arrange its teams into regions (GRA-1993): no
+  // part of deleting the kickoff, and its model call would take the reply
+  // queued for the kickoff's reading, or land amid the audit read
+  // (`holdAlarm`).
+  beforeEach(holdAlarm);
+
   it("takes it and everything drawn from it out of every read, with one audit event", async () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);
-    // Arranging the list's teams into regions (GRA-1993) is no part of
-    // deleting the kickoff: its model call stays out of the audit read here.
-    await noRegionsOwed();
     const marker = markerOf();
     await bringIn(marker);
     // Staff answer again.

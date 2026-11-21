@@ -89,27 +89,11 @@ export const formatDayMonth = (value: string | number | Date): string =>
     month: "short",
   }).format(new Date(value));
 
-/**
- * A calendar day kept as an ISO date ("2026-10-03"), as its day and month
- * only, "3 Oct": for days of this month or the last, as a chart's ticks.
- * Read at noon UTC, so it is the same day wherever the reader is.
- */
-export const formatIsoDayMonth = (iso: string): string =>
-  iso === "" ? iso : formatDayMonth(`${iso.slice(0, 10)}T12:00:00Z`);
-
-/** An amount in whole euros, as the page's language writes it, such as "€1,240". */
 /** An amount in US dollars, to the cent: what the model gateway counts spend in. */
 export const formatDollars = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, {
     style: "currency",
     currency: "USD",
-  }).format(value);
-
-export const formatEuro = (value: number): string =>
-  new Intl.NumberFormat(i18n.locale, {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
   }).format(value);
 
 /** The ISO week number (1 to 53) of a day kept as an ISO date: week 1 holds the year's first Thursday. */

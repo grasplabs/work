@@ -695,7 +695,7 @@ export class FormBinding {
 /** Bindings by form, for the field helpers (`bindingOf`). */
 const bindings = new WeakMap<object, FormBinding>();
 
-/** The binding of `form`, which `@grasp-os/ui/form`'s helpers read. */
+/** The binding of `form`, which `@grasp-os/app-kit/form`'s helpers read. */
 export const bindingOf = (form: object): FormBinding => {
   const binding = bindings.get(form);
   if (binding === undefined) {

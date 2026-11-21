@@ -1,6 +1,4 @@
-import { linkErrors } from "@grasp-os/shared/app-links";
-import { decisionErrors } from "@grasp-os/shared/decisions";
-import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import { Alert, AlertTitle } from "@grasp-os/app-kit/components/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,9 +8,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { linkErrors } from "@grasp-os/shared/app-links";
+import { decisionErrors } from "@grasp-os/shared/decisions";
 import { i18n as pageI18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

@@ -1,11 +1,4 @@
-import type {
-  PendingWorkflowBindings,
-  ListedWorkflowBindingApproval,
-  WorkflowBindingTarget,
-  WorkflowFile,
-  WorkflowResourceVersion,
-} from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import {
   Table,
   TableBody,
@@ -13,7 +6,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type {
+  PendingWorkflowBindings,
+  ListedWorkflowBindingApproval,
+  WorkflowBindingTarget,
+  WorkflowFile,
+  WorkflowResourceVersion,
+} from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";

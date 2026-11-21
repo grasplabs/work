@@ -6,9 +6,7 @@
  * used, recorded after it, at list prices, in US dollars, read from each
  * core now. Nothing caps these features: this is where staff watch them.
  */
-import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
-import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
+
 import {
   Table,
   TableBody,
@@ -16,7 +14,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
+import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 import { Await, Link } from "@tanstack/react-router";
 
 import { Figure } from "./parts.tsx";

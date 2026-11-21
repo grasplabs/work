@@ -1,13 +1,13 @@
-import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
-import { messageOf } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
+import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
+import { messageOf } from "@grasp-os/shared/errors";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 

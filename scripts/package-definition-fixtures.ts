@@ -31,7 +31,7 @@ import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { parse } from "yaml";
 import { z } from "zod";
 
-import { filesIn } from "../apps/core/build-blueprints.ts";
+import { filesIn, testBlueprintsDir } from "../apps/core/build-blueprints.ts";
 import { hostModules } from "../apps/core/src/host-modules.ts";
 import { oxcWasmModule } from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
@@ -456,7 +456,7 @@ export const graspRulesOf = (files: Record<string, string>): string[] =>
  * parameter, and one only a type predicate reads (oxlint reports it; it
  * passes a name only a type query reads).
  */
-export const unusedNames = `import { Badge } from "@grasp-os/ui/components/badge";
+export const unusedNames = `import { Badge } from "@grasp-os/app-kit/components/badge";
 
 const row = { id: 1 };
 export type Row = typeof row;
@@ -470,9 +470,9 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
   typeof value === "number";
 `;
 
-/** A built-in blueprint's App files, by path. */
-export const blueprintFiles = (name: string): Record<string, string> =>
-  filesIn(path.join(ROOT, "apps/core/blueprints", name, "files"));
+/** The App files of core's tests' own built-in blueprint, `hello`, by path. */
+export const blueprintFiles = (): Record<string, string> =>
+  filesIn(path.join(testBlueprintsDir, "hello", "files"));
 
 /**
  * A definition package of an App of `files` that binds no workflow but

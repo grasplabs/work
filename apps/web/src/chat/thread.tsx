@@ -1,3 +1,27 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
+import { Bubble, BubbleContent } from "@grasp-os/app-kit/components/bubble";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+} from "@grasp-os/app-kit/components/message";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@grasp-os/app-kit/components/trace";
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
   ChatAgent,
@@ -9,30 +33,6 @@ import type {
   ChatToolCall,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-} from "@grasp-os/ui/components/message";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  Trace,
-  TraceCollapsible,
-  TraceCollapsibleContent,
-  TraceCollapsibleTrigger,
-  TraceDescription,
-  TraceIcon,
-  TraceLine,
-  TraceTitle,
-} from "@grasp-os/ui/components/trace";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -43,7 +43,6 @@ import {
   CircleIcon,
   ClockIcon,
   CopyIcon,
-  LayoutDashboardIcon,
   RefreshCcwIcon,
   TriangleAlertIcon,
   XCircleIcon,
@@ -82,7 +81,6 @@ import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
-import { widgetLinesOf } from "./widget-lines.ts";
 
 /**
  * An answer's thinking as a card (thinking-card.tsx), loaded once an
@@ -604,31 +602,6 @@ const Reasoning = ({
   );
 };
 
-/** The calls the chat's code made, as the thread was given them. */
-const ChatTools = createContext<readonly ChatToolEvent[]>([]);
-
-/** Under a code step: each widget it made or changed on the dashboard, with the way there. */
-const WidgetLines = ({ callId }: { callId: string }) => {
-  const lines = widgetLinesOf(use(ChatTools), callId);
-  return lines.map(({ id, done }) => (
-    <TraceLine key={id} wrap>
-      <TraceIcon>
-        <LayoutDashboardIcon />
-      </TraceIcon>
-      <TraceTitle>
-        {done === "made" ? (
-          <Trans>Grasp added a widget to your dashboard.</Trans>
-        ) : (
-          <Trans>Grasp changed a widget on your dashboard.</Trans>
-        )}{" "}
-        <Link className="text-foreground underline" to="/dashboard">
-          <Trans>Open the dashboard</Trans>
-        </Link>
-      </TraceTitle>
-    </TraceLine>
-  ));
-};
-
 /**
  * A response's steps as one trace: what Grasp does or how long it worked,
  * what the model thought, and each code step with what it did; none for a
@@ -684,18 +657,13 @@ const ReplySteps = ({
               />
             ))}
           {code === undefined ? null : (
-            <>
-              <CodeStep
-                code={code}
-                output={
-                  output?.callId === code.callId ? output.text : undefined
-                }
-                result={results.get(code.callId)}
-                running={running}
-                writing={writing}
-              />
-              <WidgetLines callId={code.callId} />
-            </>
+            <CodeStep
+              code={code}
+              output={output?.callId === code.callId ? output.text : undefined}
+              result={results.get(code.callId)}
+              running={running}
+              writing={writing}
+            />
           )}
         </Fragment>
       ))}
@@ -1129,8 +1097,7 @@ export const ChatThread = ({
   /** Whether its turn checks the drafts it wrote now, past its answer. */
   checking?: boolean;
   /**
-   * The calls the chat's code made: what it did to the dashboard, under its
-   * step, and what it reads, while it reads it.
+   * The calls the chat's code made: what it reads, while it reads it.
    */
   tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
@@ -1332,38 +1299,36 @@ export const ChatThread = ({
   };
   const recovered = recoveredSteps(messages);
   return (
-    <ChatTools value={tools}>
-      <Recovered value={recovered}>
-        <Conversation>
-          <ConversationContent label={t`Messages`}>
-            <ol
-              aria-label={t`Messages`}
-              className={
-                compact
-                  ? "flex w-full flex-col gap-7 p-5"
-                  : "mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
-              }
-            >
-              {loaded ? null : (
-                <li className="flex justify-center py-8">
-                  <Spinner aria-label={t`Loading…`} />
-                </li>
-              )}
-              {items.map((item, at): ReactNode =>
-                item.kind === "question"
-                  ? questionItem(item.message, at)
-                  : answerItem(item.replies, at)
-              )}
-              {written === null || writtenGoesOn ? null : (
-                <li aria-busy="true">{written}</li>
-              )}
-              {reading === null ? null : <li>{reading}</li>}
-              {children === undefined ? null : <li>{children}</li>}
-            </ol>
-          </ConversationContent>
-          <ConversationScrollButton label={t`Jump to the newest message`} />
-        </Conversation>
-      </Recovered>
-    </ChatTools>
+    <Recovered value={recovered}>
+      <Conversation>
+        <ConversationContent label={t`Messages`}>
+          <ol
+            aria-label={t`Messages`}
+            className={
+              compact
+                ? "flex w-full flex-col gap-7 p-5"
+                : "mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+            }
+          >
+            {loaded ? null : (
+              <li className="flex justify-center py-8">
+                <Spinner aria-label={t`Loading…`} />
+              </li>
+            )}
+            {items.map((item, at): ReactNode =>
+              item.kind === "question"
+                ? questionItem(item.message, at)
+                : answerItem(item.replies, at)
+            )}
+            {written === null || writtenGoesOn ? null : (
+              <li aria-busy="true">{written}</li>
+            )}
+            {reading === null ? null : <li>{reading}</li>}
+            {children === undefined ? null : <li>{children}</li>}
+          </ol>
+        </ConversationContent>
+        <ConversationScrollButton label={t`Jump to the newest message`} />
+      </Conversation>
+    </Recovered>
   );
 };

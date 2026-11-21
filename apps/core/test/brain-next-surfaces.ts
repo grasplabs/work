@@ -3823,26 +3823,26 @@ export const coreProbes = {
         name,
         async () => await coreBrain.addShippedSkill(env, unchecked(added))
       );
-    const drawing = shippedSkills.find(
-      ({ name }) => name === "draw-a-workflow"
+    const expense = shippedSkills.find(
+      ({ name }) => name === "file-an-expense"
     );
     const named = (name: string) =>
       `---\nname: ${name}\ndescription: ${text}\n---\n${text}`;
     return [
       await add("the release's own", {
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         change: crypto.randomUUID(),
-        text: drawing?.text,
+        text: expense?.text,
       }),
       await add("text with no card", {
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         change: crypto.randomUUID(),
         text,
       }),
       await add("a card of another name", {
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         change: crypto.randomUUID(),
-        text: named("run-a-baseline"),
+        text: named("close-the-month"),
       }),
       await add("a name the release doesn't ship", {
         name: "unwritten",
@@ -3850,20 +3850,20 @@ export const coreProbes = {
         text: named("unwritten"),
       }),
       await add("too much text", {
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         change: crypto.randomUUID(),
-        text: named("draw-a-workflow").padEnd(instructionsMaxLength + 1, " x"),
+        text: named("file-an-expense").padEnd(instructionsMaxLength + 1, " x"),
       }),
       await add("a name of the markers", {
         name: markers.join("\n"),
         change: crypto.randomUUID(),
-        text: named("draw-a-workflow"),
+        text: named("file-an-expense"),
       }),
       await add("a scope named by the markers", {
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         scope: markers.join(""),
         change: crypto.randomUUID(),
-        text: named("draw-a-workflow"),
+        text: named("file-an-expense"),
       }),
     ];
   },
@@ -3874,7 +3874,7 @@ export const coreProbes = {
         await coreBrain.listSkillsAs(
           env,
           personId,
-          new Set(["draw-a-workflow"]),
+          new Set(["file-an-expense"]),
           { reach: skillsReach(personal) }
         )
     ),
@@ -3884,7 +3884,7 @@ export const coreProbes = {
         await coreBrain.listSkillsAs(
           env,
           personId,
-          new Set(["draw-a-workflow"]),
+          new Set(["file-an-expense"]),
           { reach: "teams" }
         )
     ),
@@ -3894,7 +3894,7 @@ export const coreProbes = {
         await coreBrain.listSkillsAs(
           env,
           personId,
-          new Set(["draw-a-workflow"]),
+          new Set(["file-an-expense"]),
           { reach: "company" }
         )
     ),
@@ -3952,7 +3952,7 @@ export const coreProbes = {
           await coreBrain.readSkillAs(
             env,
             stranger(),
-            { scope: "grasp", name: "draw-a-workflow", version: 1 },
+            { scope: "grasp", name: "file-an-expense", version: 1 },
             { reach: "person" }
           )
       ),
@@ -4646,14 +4646,14 @@ export const coreProbes = {
       await Promise.resolve();
       return coreBrain.skillVersionRefOf({
         scope: "grasp",
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         version: 1,
       });
     }),
     await answer("not a skill's scope", async () => {
       await Promise.resolve();
       return coreBrain.skillVersionRefOf(
-        unchecked({ scope: "upload", name: "draw-a-workflow", version: 1 })
+        unchecked({ scope: "upload", name: "file-an-expense", version: 1 })
       );
     }),
   ],
@@ -5362,8 +5362,8 @@ export const skillProbes = {
         "nothing",
         "beside the shared word"
       ),
-      await select("a workflow, beside the markers", {
-        task: `draw a workflow ${markers.join(" ")}`,
+      await select("an expense, beside the markers", {
+        task: `file an expense ${markers.join(" ")}`,
       }),
       await select("not a task", { task: markers }),
       await answer(
@@ -5432,7 +5432,7 @@ export const skillProbes = {
       }),
       await read("a version past any", {
         scope: "grasp",
-        name: "draw-a-workflow",
+        name: "file-an-expense",
         version: 1_000_000,
       }),
       await answer(
@@ -5443,7 +5443,7 @@ export const skillProbes = {
             readersAgent(stranger()),
             reach,
             holdsNothing,
-            { skill: { scope: "grasp", name: "draw-a-workflow", version: 1 } }
+            { skill: { scope: "grasp", name: "file-an-expense", version: 1 } }
           )
       ),
       ...(await pairedOverSkills(
@@ -6178,8 +6178,8 @@ export const recallProbes = {
         "nothing",
         "beside the shared word"
       ),
-      await call("a workflow, beside the markers", "skills.select", {
-        task: `draw a workflow ${hidden}`,
+      await call("an expense, beside the markers", "skills.select", {
+        task: `file an expense ${hidden}`,
       }),
       await call("not a task", "skills.select", { task: markers }),
       await call("a skill the release ships", "skills.read", {
@@ -6189,7 +6189,7 @@ export const recallProbes = {
         skill: { scope: "company", name: markers.join("-"), version: 1 },
       }),
       await call("a scope of the markers", "skills.read", {
-        skill: { scope: hidden, name: "draw-a-workflow", version: 1 },
+        skill: { scope: hidden, name: "file-an-expense", version: 1 },
       }),
       // A person's own skill, named by the markers or their twins: code
       // may name none (each pair from one call site, as the answers are

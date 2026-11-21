@@ -1281,8 +1281,9 @@ export const pagePolicies = sqliteTable("screen_policies", {
  * from it asks for. One is a version of an App a builder marked (`app_id`
  * and `version`, at most one per version), or one the release ships
  * (`blueprints/` in core), which has neither and is changed only by the
- * install. Unmarking deletes the row; who marked, unmarked or installed
- * which is in the audit log.
+ * install, which deletes it once a release no longer ships it. Unmarking
+ * deletes the row; who marked, unmarked, installed or removed which is in
+ * the audit log.
  */
 export const blueprints = sqliteTable(
   "blueprints",
@@ -1338,9 +1339,10 @@ export const blueprints = sqliteTable(
  * taken, stored under the App as a version's tree is, for an
  * update to be merged over. Written in the batch that creates the App
  * from the blueprint, and moved on to a built-in's newer code only in the
- * batch that commits an update a builder accepted: unlike
+ * batch that commits an update a builder accepted, and deleted, which
+ * detaches the App, when a release removes the built-in. Unlike
  * `apps.blueprint`, a label a creator may give any App, this is core's
- * record, which the release's vouching for a built-in's code reads.
+ * record, which only a built-in's updates read.
  */
 export const appOrigins = sqliteTable("app_origins", {
   appId: text("app_id")
@@ -6888,7 +6890,11 @@ export const stephenRequestQuestions = sqliteTable(
   (table) => [index("stephen_request_questions_topic_idx").on(table.topicId)]
 );
 
-/** What an owner or admin is doing about one thing Needs you lists (stephen-requests.ts). */
+/**
+ * What an owner or admin was doing about one thing Needs you listed.
+ * Nothing writes it since Workflows › Requests went; it is dropped in a
+ * later release, and swept until then.
+ */
 export const stephenRequestNeeds = sqliteTable("stephen_request_needs", {
   key: text().primaryKey(),
   status: text({ enum: ["working", "fixed", "leftAsIs"] }).notNull(),
@@ -6896,7 +6902,11 @@ export const stephenRequestNeeds = sqliteTable("stephen_request_needs", {
   statusAt: timestamp("status_at").notNull(),
 });
 
-/** Grasp's proposal for one thing Needs you lists, in one language, made once. */
+/**
+ * Grasp's proposal for one thing Needs you listed, in one language.
+ * Nothing writes it since Workflows › Requests went; it is dropped in a
+ * later release, and swept until then.
+ */
 export const stephenRequestProposals = sqliteTable(
   "stephen_request_proposals",
   {
@@ -6908,14 +6918,22 @@ export const stephenRequestProposals = sqliteTable(
   (table) => [primaryKey({ columns: [table.key, table.locale] })]
 );
 
-/** Where an owner or admin has the weekly summary of Stephen's requests go. */
+/**
+ * Where an owner or admin had the weekly summary of Stephen's requests go.
+ * Nothing writes it since Workflows › Requests went; it is dropped in a
+ * later release, and erased until then.
+ */
 export const stephenSummaryReaders = sqliteTable("stephen_summary_readers", {
   personId: text("person_id").primaryKey(),
   via: text({ enum: ["teams", "email"] }).notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
 
-/** One weekly summary, queued for one reader and sent from there once (stephen-summary.ts). */
+/**
+ * One weekly summary, queued for one reader. Nothing writes or sends it
+ * since Workflows › Requests went; it is dropped in a later release, and
+ * swept and erased until then.
+ */
 export const stephenSummaries = sqliteTable(
   "stephen_summaries",
   {

@@ -15,9 +15,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import type { Waiting } from "../dashboard/waiting.ts";
 import { ItemDetail } from "./item-detail.tsx";
 import { inboxItems } from "./items.ts";
+import type { Waiting } from "./waiting.ts";
 
 // A workflow's bindings that wait on an admin, in the inbox, against core's
 // workflowResources as the page reaches them over RPC, faked: each binding
@@ -96,7 +96,7 @@ const shown = async () => {
     outcomes: { state: "ready", data: [] },
     notifications: {
       state: "ready",
-      data: { page: { notifications: [], unread: 0, more: false } },
+      data: { page: { notifications: [], unread: 0 } },
     },
     reconnect: { state: "ready", data: [] },
     requests: undefined,

@@ -1,16 +1,16 @@
-import type { Statement } from "@grasp-os/shared/brain";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/collapsible";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
+import type { Statement } from "@grasp-os/shared/brain";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, Trash2Icon } from "lucide-react";

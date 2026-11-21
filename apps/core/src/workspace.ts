@@ -46,16 +46,6 @@ import type {
 } from "@grasp-os/shared/chat";
 import { foldOf, hasEvery, searchWordsOf } from "@grasp-os/shared/chat-search";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
-import {
-  dashboardErrors,
-  dashboardWidgetIdSchema,
-  standardWidgetIdSchema,
-} from "@grasp-os/shared/dashboard";
-import type {
-  DashboardLayout,
-  DashboardWidgetId,
-  StandardWidgetId,
-} from "@grasp-os/shared/dashboard";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   internalErrors,
@@ -81,8 +71,6 @@ import type { Role } from "@grasp-os/shared/roles";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject } from "@grasp-os/shared/subject";
-import { customWidgetsMax } from "@grasp-os/shared/widgets";
-import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
 import {
   and,
@@ -173,8 +161,6 @@ import {
   utf8Bytes,
 } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
-import { keptWidgetOf } from "./custom-widgets.ts";
-import type { KeptWidget } from "./custom-widgets.ts";
 import { inList } from "./db/d1.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
@@ -198,9 +184,6 @@ import {
   chatSources,
   chatToolEvents,
   chats,
-  customWidgets,
-  dashboardWidgets,
-  dashboards,
   heldAppCalls,
   memoryUses,
 } from "./db/workspace/schema.ts";
@@ -217,6 +200,7 @@ import {
 } from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
+import { chatTurnPurpose } from "./model-spend.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import type { WorkContext } from "./restricted.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -694,13 +678,6 @@ const memoryUseOf = (source: string) =>
   brainMemoryOf(source, brainMemoryPrefix);
 
 /**
- * How long Grasp holds a widget in hand at most (`claimWidget`): longer
- * than making one takes, with its repairs, so a request that never let go
- * of it doesn't hold it for good.
- */
-const widgetHandMs = 5 * 60 * 1000;
-
-/**
  * Most chats a person's list shows: their newest. Older ones are still
  * there, and open from a link.
  */
@@ -1090,11 +1067,6 @@ export class Workspace extends DurableObject<Env> {
   readonly #stopped = new Map<ChatId, string>();
   /** The chats whose turn checks the drafts it wrote now (`turnChecking`). */
   readonly #checking = new Set<ChatId>();
-  /**
-   * The widgets Grasp is making or changing now, by `<person>/<widget>`,
-   * each until when it holds them (`claimWidget`).
-   */
-  readonly #widgetsInHand = new Map<string, number>();
 
   /**
    * Turns `send` started, each settled once its turn ends: the alarm waits
@@ -1302,6 +1274,7 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
+        archivedAt: chats.archivedAt,
         agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
@@ -1765,6 +1738,10 @@ export class Workspace extends DurableObject<Env> {
     action:
       | "chat.created"
       | "chat.renamed"
+      | "chat.archived"
+      | "chat.unarchived"
+      | "chat.filed"
+      | "chat.unfiled"
       | "chat.answer_rated"
       | "chat.deleted"
       | "chat.moved"
@@ -2675,7 +2652,7 @@ export class Workspace extends DurableObject<Env> {
         {
           model: asked,
           effort: parsed.data.effort,
-          purpose: "chat.turn",
+          purpose: chatTurnPurpose,
           trigger: delegateActorOf(authority, via),
           provenance: this.#sources(chat.id),
           work: { authority, context: work },
@@ -4343,9 +4320,11 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * `personId`'s chats in Grasp (`shownInGrasp`), the most recently active
-   * first: at most {@link listedChats}.
+   * first: at most {@link listedChats}. Those they archived only with
+   * `archived`, and then only those; with `project`, only those they filed in
+   * it.
    */
-  chats(personId: string): ChatSummary[] {
+  chats(personId: string, archived = false, project?: string): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
@@ -4355,9 +4334,16 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
+        archivedAt: chats.archivedAt,
       })
       .from(chats)
-      .where(shownInGrasp(personId))
+      .where(
+        and(
+          shownInGrasp(personId),
+          archived ? isNotNull(chats.archivedAt) : isNull(chats.archivedAt),
+          project === undefined ? undefined : eq(chats.projectId, project)
+        )
+      )
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
@@ -4375,6 +4361,7 @@ export class Workspace extends DurableObject<Env> {
       | "lastAt"
       | "makeKind"
       | "makeProject"
+      | "archivedAt"
     >
   ): ChatSummary {
     return {
@@ -4385,6 +4372,7 @@ export class Workspace extends DurableObject<Env> {
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
       make: makeOf(chat),
+      archived: chat.archivedAt !== null,
     };
   }
 
@@ -4643,266 +4631,6 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * `personId`'s dashboard as they last saved it, in order; `null` when
-   * they never did. A widget this release no longer has, or one Grasp made
-   * that they no longer have, is left out.
-   */
-  dashboardLayout(personId: string): DashboardLayout | null {
-    const saved = this.#db
-      .select({ personId: dashboards.personId })
-      .from(dashboards)
-      .where(eq(dashboards.personId, personId))
-      .get();
-    if (saved === undefined) {
-      return null;
-    }
-    const made = new Set<string>(this.#customWidgetIds(personId));
-    const widgets = this.#db
-      .select({ widgetId: dashboardWidgets.widgetId })
-      .from(dashboardWidgets)
-      .where(eq(dashboardWidgets.personId, personId))
-      .orderBy(asc(dashboardWidgets.position))
-      .all()
-      .flatMap(({ widgetId }) => {
-        const widget = dashboardWidgetIdSchema.safeParse(widgetId);
-        return widget.success &&
-          (standardWidgetIdSchema.safeParse(widget.data).success ||
-            made.has(widget.data))
-          ? [widget.data]
-          : [];
-      });
-    return { widgets };
-  }
-
-  /**
-   * Saves `personId`'s whole dashboard, `widgets` in order (checked by
-   * the caller, `dashboardLayoutSchema`), in place of what they saved
-   * before: in one transaction, so a reader sees one or the other. A
-   * widget Grasp made that they don't have refuses it.
-   */
-  saveDashboardLayout(
-    personId: string,
-    widgets: readonly DashboardWidgetId[]
-  ): void {
-    const made = new Set<string>(this.#customWidgetIds(personId));
-    if (
-      widgets.some(
-        (widget) =>
-          !standardWidgetIdSchema.safeParse(widget).success && !made.has(widget)
-      )
-    ) {
-      throw dashboardErrors.create("dashboard.invalid_layout");
-    }
-    this.ctx.storage.transactionSync(() => {
-      this.#placeWidgets(personId, widgets);
-    });
-  }
-
-  /** Puts `widgets` on `personId`'s dashboard, in order, in place of what was there. */
-  #placeWidgets(personId: string, widgets: readonly DashboardWidgetId[]): void {
-    const updatedAt = new Date();
-    this.#db
-      .insert(dashboards)
-      .values({ personId, updatedAt })
-      .onConflictDoUpdate({ target: dashboards.personId, set: { updatedAt } })
-      .run();
-    this.#db
-      .delete(dashboardWidgets)
-      .where(eq(dashboardWidgets.personId, personId))
-      .run();
-    if (widgets.length > 0) {
-      this.#db
-        .insert(dashboardWidgets)
-        .values(
-          widgets.map((widgetId, position) => ({
-            personId,
-            position,
-            widgetId,
-          }))
-        )
-        .run();
-    }
-  }
-
-  /** The IDs of the widgets Grasp made for `personId`. */
-  #customWidgetIds(personId: string): CustomWidgetId[] {
-    return this.#db
-      .select({ id: customWidgets.id })
-      .from(customWidgets)
-      .where(eq(customWidgets.personId, personId))
-      .all()
-      .map(({ id }) => id);
-  }
-
-  /**
-   * The widgets Grasp made for `personId`, oldest first, each whose spec
-   * still reads as one (`widgetSpecSchema`).
-   */
-  customWidgets(personId: string): KeptWidget[] {
-    return this.#db
-      .select()
-      .from(customWidgets)
-      .where(eq(customWidgets.personId, personId))
-      .orderBy(asc(customWidgets.madeAt))
-      .all()
-      .flatMap((row) => {
-        const kept = keptWidgetOf(row);
-        return kept === undefined ? [] : [kept];
-      });
-  }
-
-  /** Widget `id` Grasp made for `personId`; `null` when they have none such. */
-  customWidget(personId: string, id: CustomWidgetId): KeptWidget | null {
-    const row = this.#db
-      .select()
-      .from(customWidgets)
-      .where(
-        and(eq(customWidgets.personId, personId), eq(customWidgets.id, id))
-      )
-      .get();
-    return (row === undefined ? undefined : keptWidgetOf(row)) ?? null;
-  }
-
-  /**
-   * Takes widget `id` of `personId`'s in hand while Grasp works on it:
-   * false when it is in hand already, unless that hand has been held past
-   * {@link widgetHandMs}, as by a request that never came back.
-   */
-  claimWidget(personId: string, id: string): boolean {
-    const key = `${personId}/${id}`;
-    const now = Date.now();
-    const held = this.#widgetsInHand.get(key);
-    if (held !== undefined && held > now) {
-      return false;
-    }
-    this.#widgetsInHand.set(key, now + widgetHandMs);
-    return true;
-  }
-
-  /** Lets go of widget `id` of `personId`'s (`claimWidget`). */
-  releaseWidget(personId: string, id: string): void {
-    this.#widgetsInHand.delete(`${personId}/${id}`);
-  }
-
-  /**
-   * Keeps a widget Grasp made or changed for `personId`: a new one goes
-   * last on their dashboard (their board as it begins, `offered`, when
-   * they never saved one), and at most {@link customWidgetsMax} are kept;
-   * a changed one keeps its place. Refused as `dashboard.widget_not_found`
-   * for a change to one they no longer have.
-   */
-  keepCustomWidget(
-    personId: string,
-    widget: { id: CustomWidgetId; spec: WidgetSpec; asked: string },
-    {
-      change,
-      offered,
-      by,
-      attempts,
-    }: {
-      change: boolean;
-      offered: readonly StandardWidgetId[];
-      /** Who asked: the person, or a chat's agent for them. */
-      by: AuditActor;
-      /** The model calls it took. */
-      attempts: number;
-    }
-  ): KeptWidget {
-    const now = new Date();
-    const spec = JSON.stringify(widget.spec);
-    const kept = this.ctx.storage.transactionSync(() => {
-      // Recorded with the change, or neither: what was asked stays out,
-      // as it may quote anything.
-      this.#outboxEntry({
-        actor: by,
-        action: change ? "dashboard.widget_changed" : "dashboard.widget_made",
-        target: { type: "widget", id: widget.id },
-        detail: { person: personId, attempts },
-      });
-      if (change) {
-        const changed = this.#db
-          .update(customWidgets)
-          .set({ spec, asked: widget.asked, changedAt: now })
-          .where(
-            and(
-              eq(customWidgets.personId, personId),
-              eq(customWidgets.id, widget.id)
-            )
-          )
-          .returning()
-          .get();
-        const shown = changed === undefined ? undefined : keptWidgetOf(changed);
-        if (shown === undefined) {
-          throw dashboardErrors.create("dashboard.widget_not_found");
-        }
-        return shown;
-      }
-      if (this.#customWidgetIds(personId).length >= customWidgetsMax) {
-        throw dashboardErrors.create("dashboard.too_many_widgets");
-      }
-      const row = this.#db
-        .insert(customWidgets)
-        .values({
-          personId,
-          id: widget.id,
-          spec,
-          asked: widget.asked,
-          madeAt: now,
-          changedAt: now,
-        })
-        .returning()
-        .get();
-      const board = this.dashboardLayout(personId)?.widgets ?? offered;
-      this.#placeWidgets(personId, [...board, widget.id]);
-      const made = keptWidgetOf(row);
-      if (made === undefined) {
-        throw dashboardErrors.create("dashboard.widget_unreadable");
-      }
-      return made;
-    });
-    this.#deliverAudit();
-    return kept;
-  }
-
-  /**
-   * Takes widget `id` off `personId`'s dashboard and forgets it; false when
-   * they had none such.
-   */
-  removeCustomWidget(
-    personId: string,
-    id: CustomWidgetId,
-    by: AuditActor
-  ): boolean {
-    const removed = this.ctx.storage.transactionSync(() => {
-      const gone = this.#db
-        .delete(customWidgets)
-        .where(
-          and(eq(customWidgets.personId, personId), eq(customWidgets.id, id))
-        )
-        .returning({ id: customWidgets.id })
-        .get();
-      if (gone === undefined) {
-        return false;
-      }
-      const board = this.dashboardLayout(personId);
-      if (board !== null) {
-        this.#placeWidgets(personId, board.widgets);
-      }
-      this.#outboxEntry({
-        actor: by,
-        action: "dashboard.widget_removed",
-        target: { type: "widget", id },
-        detail: { person: personId },
-      });
-      return true;
-    });
-    if (removed) {
-      this.#deliverAudit();
-    }
-    return removed;
-  }
-
-  /**
    * Keeps what `personId` thought of an answer of their own chat, or
    * takes it back (`null`): refused for anything but an answer of that
    * chat. Audited as `by`'s, as a rename is: that they rated an answer
@@ -4952,6 +4680,77 @@ export class Workspace extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(chats).set({ title }).where(eq(chats.id, id)).run();
       this.#outboxed(by, "chat.renamed", id);
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Files `personId`'s own chat in project `project`, or takes it out of
+   * the one it is in (`null`), audited as `by`'s; nothing, and no event,
+   * where it is so already. A chat moved from one project straight to
+   * another records the one it came `from` too. Whether they may put it
+   * in that project is the caller's to check (`ChatsRpc.setProject`).
+   */
+  setChatProject(
+    chatId: unknown,
+    personId: string,
+    project: string | null,
+    by: AuditActor
+  ): void {
+    const chat = this.#graspChat(chatId, personId);
+    if (chat.projectId === project) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ projectId: project })
+        .where(eq(chats.id, chat.id))
+        .run();
+      if (project === null) {
+        this.#outboxed(by, "chat.unfiled", chat.id, {
+          project: chat.projectId,
+        });
+      } else {
+        this.#outboxed(by, "chat.filed", chat.id, {
+          project,
+          ...(chat.projectId === null ? {} : { from: chat.projectId }),
+        });
+      }
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Archives `personId`'s own chat, out of their list, or brings it back
+   * (`archived` false), audited as `by`'s; nothing, and no event, where it
+   * is so already. Nothing else about the chat changes: it opens and takes
+   * questions as ever.
+   */
+  archiveChat(
+    chatId: unknown,
+    personId: string,
+    archived: boolean,
+    by: AuditActor
+  ): void {
+    const chat = this.#graspChat(chatId, personId);
+    if ((chat.archivedAt !== null) === archived) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ archivedAt: archived ? new Date() : null })
+        .where(eq(chats.id, chat.id))
+        .run();
+      // With the project it is filed in then, null for none: the record
+      // shows it after the chat is moved or taken out.
+      this.#outboxed(
+        by,
+        archived ? "chat.archived" : "chat.unarchived",
+        chat.id,
+        { project: chat.projectId }
+      );
     });
     this.#deliverAudit();
   }

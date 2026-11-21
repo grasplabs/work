@@ -42,7 +42,7 @@ export const outline = action({
 
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
 import { useStream } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
 

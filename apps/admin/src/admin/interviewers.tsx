@@ -1,7 +1,7 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { OrgView } from "@grasp-os/shared/admin/onboarding-admin";
 import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
 import { RATINGS } from "@grasp-os/shared/admin/org-record";
-import { Badge } from "@grasp-os/ui/components/badge";
 /**
  * Stephen and Claire at one organization, ported from the prototype
  * (grasplabs/prototype `components/admin/org-stephen.tsx`): two of the

@@ -1,19 +1,19 @@
-import type { ViewedApp } from "@grasp-os/shared/apps";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
+import type { ViewedApp } from "@grasp-os/shared/apps";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
 import {

@@ -1,3 +1,53 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  ModelTableItem,
+  ModelTableList,
+} from "@grasp-os/app-kit/components/data-model";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/app-kit/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { RecordGridHeader } from "@grasp-os/app-kit/components/record-grid";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/app-kit/components/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@grasp-os/app-kit/components/sheet";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
 import type { AppDataAccess, AppDataTable } from "@grasp-os/shared/app-data";
 import { fieldCode } from "@grasp-os/shared/data-model";
 import type {
@@ -8,56 +58,6 @@ import type {
   IndexUse,
   PlanField,
 } from "@grasp-os/shared/data-model";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  ModelTableItem,
-  ModelTableList,
-} from "@grasp-os/ui/components/data-model";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { RecordGridHeader } from "@grasp-os/ui/components/record-grid";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
   Columns3Icon,

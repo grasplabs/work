@@ -29,7 +29,6 @@ import path from "node:path";
 import { defaultTreeAdapter, parse } from "parse5";
 import type { DefaultTreeAdapterTypes } from "parse5";
 
-import { writeExamples } from "./example-apps.ts";
 import { writeReference } from "./reference.ts";
 import type { ReferenceOptions } from "./reference.ts";
 
@@ -206,7 +205,6 @@ const withoutViteVariables = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
   );
 
 await buildReference();
-writeExamples();
 // From a fresh project: Blume keeps the one it generates (`.blume/`) to
 // write only what changed, a speed-up for `blume dev`, never a release.
 rmSync(path.join(root, ".blume"), { force: true, recursive: true });

@@ -8,21 +8,21 @@
  * and the conversation so far; an answer can be stopped while it comes,
  * copied, and asked again.
  */
-import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
-import { Button } from "@grasp-os/ui/components/button";
+import { Bubble, BubbleContent } from "@grasp-os/app-kit/components/bubble";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupTextarea,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemGroup,
-} from "@grasp-os/ui/components/item";
-import { PromptInputSubmit } from "@grasp-os/ui/components/prompt-input";
-import { Shimmer } from "@grasp-os/ui/components/shimmer";
+} from "@grasp-os/app-kit/components/item";
+import { PromptInputSubmit } from "@grasp-os/app-kit/components/prompt-input";
+import { Shimmer } from "@grasp-os/app-kit/components/shimmer";
 import { ChevronRightIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 

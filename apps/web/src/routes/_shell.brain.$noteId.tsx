@@ -1,16 +1,16 @@
-import type { Source, Statement, Workspace } from "@grasp-os/shared/brain";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+} from "@grasp-os/app-kit/components/collapsible";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
+import type { Source, Statement, Workspace } from "@grasp-os/shared/brain";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {

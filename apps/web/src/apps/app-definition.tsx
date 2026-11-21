@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans } from "@lingui/react/macro";
 import { DownloadIcon } from "lucide-react";
 

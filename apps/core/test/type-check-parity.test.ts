@@ -14,19 +14,21 @@ import { buildPages, checkAppCode } from "../src/pages.ts";
 // The type check is a gate: what it passes is sealed and run. These tests
 // hold the checker to what the platform's previous one (TypeScript 6's
 // compiler API) said of the same files, recorded as it said it: the
-// built-in blueprints, which pass every target, and a corpus of mistakes
-// added to one of them, each in a file of its own so its lines don't move
-// as the blueprint changes. A mistake that passes is the failure to
+// tests' own built-in blueprint (test/fixtures/blueprints/hello), which
+// passes every target, and a corpus of mistakes added to it, each in a
+// file of its own so its lines don't move as the blueprint changes. A mistake that passes is the failure to
 // prevent; one refused that passed before blocks a builder.
 
-/** A blueprint's files with the modules the host generates for them, as a seal and a draft's check have them. */
-const blueprintApp = async (
-  id: string
-): Promise<{ app: AppId; files: Record<string, string> }> => {
+/** The tests' built-in's files with the modules the host generates for them, as a seal and a draft's check have them. */
+const blueprintApp = async (): Promise<{
+  app: AppId;
+  files: Record<string, string>;
+}> => {
+  const id = "hello";
   const release = await loadBuiltinRelease();
   const blueprint = release.blueprints.find((found) => found.id === id);
   if (blueprint === undefined) {
-    throw new Error(`No built-in blueprint ${id}`);
+    throw new Error("The global setup didn't embed the tests' built-in");
   }
   const app = appIdSchema.parse(crypto.randomUUID());
   const { files, standIn } = await withDraftReferences(env, app, {
@@ -67,15 +69,11 @@ const typeDiagnostics = (
     )
     .toSorted();
 
-/** The release's built-ins, the example Apps among them: not the tests' own. */
-const { blueprints: builtins } = await loadBuiltinRelease();
-const blueprints = builtins.map(({ id }) => id).filter((id) => id !== "hello");
-
 /** Mistakes in a page's files, each a component of its own. */
 const pageMistakes: Record<string, string> = {
   "src/components/m-assign.tsx": 'export const wrong: number = "x";\n',
   "src/components/m-prop.tsx":
-    'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button nope={1}>x</Button>;\n',
+    'import { Button } from "@grasp-os/app-kit/components/button";\n\nexport const Wrong = () => <Button nope={1}>x</Button>;\n',
   "src/components/m-hook.tsx":
     'import { useQuery } from "@grasp-os/sdk/react";\n\nexport const wrong: number = useQuery;\n',
   "src/components/m-export.tsx":
@@ -102,7 +100,7 @@ const pageMistakes: Record<string, string> = {
   "src/components/m-utf16.tsx":
     'const face = "😀😀"; export const wrong: number = face;\n',
   "src/components/m-child.tsx":
-    'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button>{{ a: 1 }}</Button>;\n',
+    'import { Button } from "@grasp-os/app-kit/components/button";\n\nexport const Wrong = () => <Button>{{ a: 1 }}</Button>;\n',
   "src/components/m-declared.d.ts":
     "export interface Wrong {\n  field: Missing;\n}\n",
   // Modules the kit holds but doesn't give a page, by name and by path.
@@ -243,25 +241,22 @@ describe(
   "the type check, against what TypeScript 6 said",
   { timeout: 300_000 },
   () => {
-    it.each(blueprints)(
-      "passes the %s blueprint's pages and server code, as it did",
-      async (id) => {
-        const { app, files } = await blueprintApp(id);
-        const pages = await buildPages(env, files, app);
-        const server = await checkAppCode(
-          env,
-          await sealedServer(app, files),
-          app
-        );
-        expect({ pages, server: server.ok }).toMatchObject({
-          pages: { ok: true, diagnostics: [] },
-          server: true,
-        });
-      }
-    );
+    it("passes a blueprint's pages and server code, as it did", async () => {
+      const { app, files } = await blueprintApp();
+      const pages = await buildPages(env, files, app);
+      const server = await checkAppCode(
+        env,
+        await sealedServer(app, files),
+        app
+      );
+      expect({ pages, server: server.ok }).toMatchObject({
+        pages: { ok: true, diagnostics: [] },
+        server: true,
+      });
+    });
 
     it("gives a page's mistakes, and refuses its paths into the kit before the check", async () => {
-      const { app, files } = await blueprintApp("intake");
+      const { app, files } = await blueprintApp();
       const built = await buildPages(env, { ...files, ...pageMistakes }, app);
       const { found, said: was } = parity("pages", built);
       expect(found).toStrictEqual(was);
@@ -294,7 +289,7 @@ describe(
           '/// <reference path="./d-own-types.d.ts" />\nexport const h: Own = 1;\n',
         "src/components/d-own-types.d.ts": "type Own = 1;\n",
       };
-      const { app, files } = await blueprintApp("intake");
+      const { app, files } = await blueprintApp();
       const built = await buildPages(env, { ...files, ...directives }, app);
       expect(
         importRefusals(built).filter((line) => /d-/u.test(line))
@@ -310,7 +305,7 @@ describe(
     });
 
     it("gives server code's mistakes, and refuses its paths into the kit before the check", async () => {
-      const { app, files } = await blueprintApp("intake");
+      const { app, files } = await blueprintApp();
       const { found, said: was } = parity(
         "server",
         await checkAppCode(
@@ -345,7 +340,7 @@ describe("the type checker's isolate", { timeout: 120_000 }, () => {
     const apps: AppId[] = [];
     for (const mark of marks) {
       // oxlint-disable-next-line no-await-in-loop -- one App after another
-      const { app, files } = await blueprintApp("intake");
+      const { app, files } = await blueprintApp();
       apps.push(app);
       // oxlint-disable-next-line no-await-in-loop -- one App after another
       const built = await buildPages(
