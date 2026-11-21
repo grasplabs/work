@@ -38,7 +38,7 @@ export const ReportBar = ({
 }) => {
   const { inDays, week } = next;
   return (
-    <div className="bg-muted/50 relative flex min-w-0 items-center gap-3 overflow-hidden rounded-xl py-1.5 pr-1.5 pl-4 text-sm">
+    <div className="bg-muted/50 @container/report relative flex min-w-0 items-center gap-3 overflow-hidden rounded-xl py-1.5 pr-1.5 pl-4 text-sm">
       <span
         aria-hidden="true"
         className={cn(
@@ -50,9 +50,10 @@ export const ReportBar = ({
         aria-hidden="true"
         className="text-muted-foreground relative size-4 flex-none"
       />
-      {/* The week and stage beside what the report says, or over it where the bar is narrow. */}
-      <div className="relative flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
-        <span className="text-muted-foreground flex-none">{line}</span>
+      {/* The week and stage beside what the report says, or over it where the bar itself is narrow
+        (the sidebar and the docked chat open, a phone): both wrap, and Export keeps its room. */}
+      <div className="relative flex min-w-0 flex-1 flex-col @xl/report:flex-row @xl/report:items-center @xl/report:gap-3">
+        <span className="text-muted-foreground">{line}</span>
         <p className="text-pretty">
           {inDays === 0 ? (
             <Trans>Your report on week {week} is ready</Trans>
