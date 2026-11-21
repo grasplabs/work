@@ -16,7 +16,7 @@ import type { LabWho } from "@grasp-os/shared/lab";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import worker from "../src/index.ts";
@@ -26,12 +26,13 @@ import {
   answering,
   approveAgreed,
   countedFor,
+  holdAlarm,
   modelOf,
   onLink,
   openLinkAs,
+  participate,
   quick,
   signedInAs,
-  participate,
 } from "./interview-link.ts";
 import { keyChanger } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -202,6 +203,12 @@ const ordersDrawn = (karin: string): ProviderReply => ({
 });
 
 describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
+  // The onboarding store's own alarm, set half a second on by every save
+  // of the staff list, agreement or drawing, would otherwise draw or
+  // arrange what a test saved, outside its fake provider or with a reply
+  // queued for the test's own call (`holdAlarm`).
+  beforeEach(holdAlarm);
+
   it.each([
     ["how it reaches its models", { action: "via" }],
     // What a practice person said is the lab's to read on a local stack:
