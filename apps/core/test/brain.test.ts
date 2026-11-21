@@ -4,12 +4,13 @@ import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { mondayOf } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
+import { holdAlarm } from "./interview-link.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { teamsMade } from "./members-teams.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -245,6 +246,12 @@ const kickoffTeams = (teams: { sourceId: string; name: string }[]) =>
   );
 
 describe("the brain's workspace", { timeout: 120_000 }, () => {
+  // The onboarding store's own alarm, set half a second on by every save
+  // of the staff list, agreement or drawing, would otherwise draw or
+  // arrange what a test saved, outside its fake provider or with a reply
+  // queued for the test's own call (`holdAlarm`).
+  beforeEach(holdAlarm);
+
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
     const admin = await signedInApi(idp, "admin");
     const workspace = await admin.api.brain.read();

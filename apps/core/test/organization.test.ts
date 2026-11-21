@@ -34,6 +34,7 @@ describe("the organization", () => {
       timeZone: "UTC",
       dataRegion: "eu",
       signInDomains: signInConfig.domains,
+      logo: null,
     });
   });
 

@@ -44,7 +44,7 @@ export type ProviderReply =
       truncated?: boolean;
       /**
        * Streams the text's first `at` characters, then waits for `until`
-       * before the rest (Anthropic and chat completions): an answer caught
+       * before the rest: an answer caught
        * mid-stream. `reached` is called when the stream gets there, its
        * first characters delivered. Several, in order of `at`, stop it at
        * each.
@@ -404,6 +404,7 @@ const responsesEvents = ({
   outputTokens,
   thinking,
   truncated,
+  pause,
 }: Answer) => {
   const message = { type: "message", id: "msg_1", role: "assistant" };
   const reasoning = { type: "reasoning", id: "rs_1" };
@@ -480,7 +481,13 @@ const responsesEvents = ({
           item: added,
         },
       },
-      ...deltas.map((delta) => ({ data: { ...delta, output_index: index } })),
+      ...deltas.flatMap((delta) =>
+        delta.type === "response.output_text.delta"
+          ? piecesOf(text, pause, (part) => ({
+              data: { ...delta, delta: part, output_index: index },
+            }))
+          : [{ data: { ...delta, output_index: index } }]
+      ),
       {
         data: {
           type: "response.output_item.done",
@@ -512,14 +519,15 @@ const responsesEvents = ({
 };
 
 /**
- * The whole stream `api` sends for `answer`, as text, its pauses left out,
- * or only its beginning for one that breaks off (`cut`): what a provider's
- * own API answers (test/ai-providers-fake.ts).
+ * The whole stream `api` sends for `answer`, as text, in its parts either
+ * side of each pause (`Answer.pause`), or only its beginning for one that
+ * breaks off (`cut`): what a provider's own API answers
+ * (test/ai-providers-fake.ts).
  */
-export const streamText = (
+export const streamParts = (
   api: "anthropic-messages" | "openai-completions" | "openai-responses",
   answer: Answer
-): string => {
+): string[] => {
   const { cut } = answer;
   // An answer that breaks off: only the events up to its first text.
   const begun = { ...answer, text: answer.text.slice(0, cut), toolCalls: [] };
@@ -546,11 +554,22 @@ export const streamText = (
     events = cut === undefined ? all : all.slice(0, firstText + 1);
   }
   const decoder = new TextDecoder();
-  return events
-    .filter((item): item is StreamEvent => !("until" in item))
-    .map((item) => decoder.decode(sse(item)))
-    .join("");
+  const parts = [""];
+  for (const item of events) {
+    if ("until" in item) {
+      parts.push("");
+    } else {
+      parts[parts.length - 1] += decoder.decode(sse(item));
+    }
+  }
+  return parts;
 };
+
+/** The whole stream `api` sends for `answer`, as text (`streamParts`). */
+export const streamText = (
+  api: Parameters<typeof streamParts>[0],
+  answer: Answer
+): string => streamParts(api, answer).join("");
 
 /** The events `answer` streams as, by the API the request's path names. */
 export const eventsFor = (

@@ -113,7 +113,7 @@ import { summaryOf } from "./summary.ts";
 // each read at once (documents.ts). Everything that comes in is checked
 // against the shared schemas before the store sees it. Its programme
 // (when it began, and where it stands) is for everyone signed in, for the
-// dashboard: the plan's first week and the stage, and nothing of the plan
+// weekly report: the plan's first week and the stage, and nothing of the plan
 // or the roster past them. Who works where can also come from the
 // organization's directory, connected here and read for the admin's
 // browser to make the roster of (directory.ts); documents from where

@@ -74,6 +74,7 @@ import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
+import { logoResponse } from "./organization-logo.ts";
 import { pageCallRoute } from "./page-calls.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
 import {
@@ -458,6 +459,10 @@ const route = async (
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {
     return appCall;
+  }
+  const logo = await logoResponse(pathname, request, env, requestId);
+  if (logo !== undefined) {
+    return logo;
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(

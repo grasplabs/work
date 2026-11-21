@@ -259,14 +259,15 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
-    // In Workflows, where an admin's Requests is under it.
+    // Not "/": an admin just signed in there, with the company's
+    // onboarding still open, lands in /setup instead (landing.ts).
     await page.goto("/workflows");
     const links = page
       .getByRole("navigation", { name: "Main" })
       .getByRole("link");
     // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
-    await expect(links.filter({ hasText: /^Dashboard/u })).toBeVisible();
+    await expect(links.filter({ hasText: /^Inbox/u })).toBeVisible();
     // The Apps' own entries, which come on their own read, aren't Grasp's
     // sections (app-surfaces.e2e.ts adds some on the shared deployment):
     // every link but theirs, in one read of the page.
@@ -305,12 +306,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     };
   };
   const [chat, ...rest] = everyone;
-  const nav = [chat, "Dashboard", ...rest];
-  // Stephen's requests sit under Workflows for admins only, while they are
-  // in Workflows.
-  const adminNav = nav.flatMap((section) =>
-    section === "Workflows" ? [section, "Requests"] : [section]
-  );
+  const nav = [chat, "Inbox", ...rest];
   const menu = ["Sign out"];
   // Each person's own instruction file is theirs to write, whatever their
   // role: in every person's Settings.
@@ -321,7 +317,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     user: await sidebarOf(user),
   }).toStrictEqual({
     admin: {
-      nav: adminNav,
+      nav,
       menu,
       settings: [
         "Workspace",
@@ -347,12 +343,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     builder: { nav, menu, settings: account },
     user: { nav, menu, settings: account },
   });
-  // Outside Workflows, Requests isn't under it.
-  const page = await pageOf(admin);
-  await page.goto("/");
-  const main = page.getByRole("navigation", { name: "Main" });
-  await expect(main.getByRole("link", { name: "Chat" })).toBeVisible();
-  await expect(main.getByRole("link", { name: "Requests" })).toHaveCount(0);
 });
 
 test("a link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
@@ -390,7 +380,7 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   ]) {
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
     await page.goto(`/sign-in?returnTo=${encodeURIComponent(elsewhere)}`);
-    // Chat's box, whether its heading greets or offers the tour.
+    // Chat's box.
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
     await expect(page.getByLabel("Your question")).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);

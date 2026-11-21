@@ -79,15 +79,17 @@ export const compatibleHost = "llm.acme-ai.test";
 
 /**
  * One planned reply: a refusal (`status`, with its `headers`), a whole
- * stream (`sse`), a stream that sends `begin` and then nothing more until
- * its reader goes away (`hold`), no answer at all until the request is
- * dropped (`hang`), a redirect elsewhere (`redirect`), or OpenAI's own
- * answer once a test releases it by name (`release`, `releaseUrl`).
+ * stream (`sse`), a stream that sends `hold` and then nothing more until
+ * its reader goes away, or, with `resume`, until a test releases it by
+ * name and it sends the `rest` (a model pausing mid-answer), no answer at
+ * all until the request is dropped (`hang`), a redirect elsewhere
+ * (`redirect`), or OpenAI's own answer once a test releases it by name
+ * (`release`, `releaseUrl`).
  */
 export type PlannedReply =
   | { status: number; headers?: Record<string, string>; body?: unknown }
   | { sse: string }
-  | { hold: string }
+  | { hold: string; resume?: { release: string; rest: string } }
   | { hang: true }
   | { redirect: string }
   | { release: string };
@@ -132,8 +134,13 @@ export interface ProviderRequest {
   body: string;
   /** The key it carried, from `x-api-key` or a bearer token. */
   key: string | null;
-  /** Set once its sender dropped it while it waited for an answer (`hang`). */
+  /**
+   * Set once its sender dropped it while it waited for an answer (`hang`),
+   * or while its answer was held (`hold`).
+   */
   dropped?: true;
+  /** Set once its held answer's beginning was taken off its stream (`hold`). */
+  begun?: true;
 }
 
 export const aiProvidersFake = () => {
@@ -498,7 +505,42 @@ export const aiProvidersFake = () => {
     if ("hold" in reply) {
       const { readable, writable } = new TransformStream<Uint8Array>();
       const writer = writable.getWriter();
-      void writer.write(encoder.encode(reply.hold));
+      const reader = { gone: false };
+      const watchClosed = async (): Promise<void> => {
+        try {
+          await writer.closed;
+        } catch {
+          reader.gone = true;
+          seenAs.dropped = true;
+        }
+      };
+      void watchClosed();
+      const { resume } = reply;
+      const resumed = (): boolean =>
+        resume !== undefined && released.has(resume.release);
+      // Held for longer than any test waits, as `hang` is.
+      const endsAt = Date.now() + 10 * 60_000;
+      const answer = async (): Promise<void> => {
+        try {
+          // Settled once what reads the stream took it: sent on its way.
+          await writer.write(encoder.encode(reply.hold));
+          seenAs.begun = true;
+          // Waited out on a timer of this request's own: with nothing left
+          // to wait on, workerd would take the paused stream for a Worker
+          // that hung and break it off, which no provider pausing does.
+          while (!reader.gone && !resumed() && Date.now() < endsAt) {
+            // oxlint-disable-next-line no-await-in-loop -- until released, or gone
+            await scheduler.wait(10);
+          }
+          if (resume !== undefined && resumed() && !reader.gone) {
+            await writer.write(encoder.encode(resume.rest));
+          }
+          await writer.close();
+        } catch {
+          // Its reader went away: nobody reads the rest.
+        }
+      };
+      void answer();
       return new Response(readable, {
         headers: { "content-type": "text/event-stream" },
       });

@@ -39,8 +39,8 @@ export const dimensionsSchema = z
 export type Dimensions = z.infer<typeof dimensionsSchema>;
 
 /**
- * Most reads one call of an App's method makes: a board page's snapshot
- * makes a few, as one read counts many Apps (`apps`).
+ * Most reads one call of an App's method makes: a page that sums up
+ * several workflows makes a few, as one read counts many Apps (`apps`).
  */
 export const statisticReadsPerCall = 100;
 

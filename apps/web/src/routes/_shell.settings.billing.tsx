@@ -1,3 +1,4 @@
+import { firstAgentId } from "@grasp-os/shared/agents";
 import { failureText } from "@grasp-os/shared/errors";
 import { noBilling } from "@grasp-os/shared/org-settings";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -35,8 +36,9 @@ import {
 // is linked yet, so there is no plan, card or invoice, and every way into
 // Stripe is shown but not usable. Beside the plan, Stephen's requests
 // outside Grasp this month, which the plan bills, with the way to how they
-// are used: left out when core refuses them to the viewer, and saying why
-// when they can't be read otherwise.
+// are used (Stephen's usage, on the first agent's Access tab): left out
+// when core refuses them to the viewer, and saying why when they can't be
+// read otherwise.
 
 /** Stephen's requests this month as the page read them: the count, refused to the viewer, or why not read. */
 type RequestsRead =
@@ -74,7 +76,7 @@ const Nothing = () => (
   </span>
 );
 
-/** Stephen's requests outside Grasp this month, against what the plan includes when it says; or why they can't be read. */
+/** Stephen's requests outside Grasp this month; or why they can't be read. */
 const RequestsRow = ({
   requests,
 }: {
@@ -88,25 +90,24 @@ const RequestsRow = ({
       </SettingsRow>
     );
   }
-  const used = formatNumber(requests.billed.billed);
-  const { included } = requests.billed;
-  const of = included === null ? "" : formatNumber(included);
   return (
     <SettingsRow
-      description={
-        included === null
-          ? t`Outside Grasp this month.`
-          : t`Outside Grasp this month, against what the plan includes.`
-      }
+      description={t`Outside Grasp this month.`}
       label={t`Stephen’s requests`}
     >
       <span className="flex items-center gap-3">
         <span className="tabular-nums">
-          {included === null ? used : t`${used} of ${of}`}
+          {formatNumber(requests.billed.billed)}
         </span>
         <Button
           nativeButton={false}
-          render={<Link to="/workflows/requests" />}
+          render={
+            <Link
+              params={{ agent: firstAgentId }}
+              search={{ tab: "access" }}
+              to="/agents/$agent"
+            />
+          }
           size="sm"
           variant="outline"
         >

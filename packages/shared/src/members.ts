@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type {
   DirectoryDeletedFailure,
   DirectoryProvider,
@@ -339,7 +341,35 @@ export interface MembersApi {
   directoryPlacement: () => Promise<DirectoryPlacement>;
 }
 
-/** Why an admin's change to a member was refused or not finished. */
+/**
+ * A person's name as they give it themselves (`SessionApi.setName`): what
+ * Grasp calls them everywhere. Their sign-in sets it when they first come
+ * in, and never again after, so a name they give stays theirs.
+ */
+export const personNameSchema = z
+  .string()
+  .trim()
+  // At most 100 characters, counted in code points (`u`), as the error
+  // says, not in the UTF-16 units `max` counts: a rare CJK character is
+  // one. Not in graphemes, which combining marks make any length.
+  .regex(/^.{0,100}$/su)
+  // Shown as one line beside what others write, so no control characters,
+  // no line or paragraph separators, and no bidi controls, which could
+  // turn the text around it (a name that reads as someone else's). No tag
+  // characters, which hide text beside a letter (an emoji flag that uses
+  // them goes too), and no half of a surrogate pair alone (`Cs`): only a
+  // well-formed string, checked so because `isWellFormed` is newer than
+  // some browsers the web build targets.
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\p{Bidi_C}\p{Cs}\u{E0000}-\u{E007F}]*$/u)
+  // At least one letter or digit that is drawn, so a name is never blank
+  // to the eye (a zero-width space, a Hangul filler). Format characters
+  // stay allowed beside one: emoji, Persian and Indic text need joiners.
+  .regex(/(?!\p{Default_Ignorable_Code_Point})[\p{L}\p{N}]/u);
+
+/**
+ * Why a change to a member was refused or not finished: an admin's, or a
+ * member's own (`member.name_invalid`).
+ */
 export const memberErrors = defineErrorFamily({
   "member.not_found": "There's no such member.",
   "member.self":
@@ -347,6 +377,8 @@ export const memberErrors = defineErrorFamily({
   "member.connections_pending":
     "They're removed, but not all their personal connections could be disconnected yet. This is retried automatically, or remove them again.",
   "member.role_invalid": "That isn't a role here.",
+  "member.name_invalid":
+    "Give a name of at most 100 characters, on one line, with at least one letter or digit and no control characters.",
   "member.role_changed":
     "Another admin changed their role at the same time. Check it, and try again.",
   "member.last_admin":

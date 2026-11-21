@@ -3,8 +3,8 @@
  * moves through four stages, and its page (`src/routes/index.tsx`) counts
  * the records in each stage and lists them, a record's stage changed in
  * place. Written as an App's builder would, with the public SDK and
- * `@grasp-os/ui` only, as the example Apps in apps/docs/content/examples
- * are. The seed adds each table's records through the App's data import.
+ * `@grasp-os/ui` only. The seed adds each table's records through the
+ * App's data import.
  */
 import type { DefinitionOperation } from "@grasp-os/runtime/definition";
 

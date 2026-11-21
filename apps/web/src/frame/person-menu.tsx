@@ -25,13 +25,12 @@ import { toast } from "@grasp-os/ui/components/toast";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
   RocketIcon,
-  RouteIcon,
   SunIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -41,8 +40,6 @@ import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { roleLabel } from "../labels.ts";
 import { LanguageMenu } from "../language-picker.tsx";
-import { tourStops } from "../tour/tour-script.ts";
-import { startTour, tourTaken } from "../tour/tour-state.ts";
 import {
   applyTheme,
   chooseTheme,
@@ -55,7 +52,7 @@ import type { Theme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar, as in the prototype
 // (`components/nav-user.tsx`): a menu with their onboarding, the language,
-// the theme, Stephen's tour once more and signing out. Settings is in the
+// the theme and signing out. Settings is in the
 // sidebar itself, above it (app-sidebar.tsx).
 
 const nameParts = /\s+/u;
@@ -181,9 +178,7 @@ export const PersonMenu = ({
   useEffect(() => {
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
-  const { isMobile, setOpenMobile } = useSidebar();
-  const { pathname } = useLocation();
-  const toured = tourStops(identity).length > 0;
+  const { isMobile } = useSidebar();
   // The menu is gone once clicked: a sign-out core didn't carry out is
   // said in a toast, and the page stays.
   const signOutOrSay = async (): Promise<void> => {
@@ -224,20 +219,6 @@ export const PersonMenu = ({
               ) : null}
               <LanguageMenu />
               <ThemeMenu userId={identity.userId} />
-              {toured ? (
-                <DropdownMenuItem
-                  onClick={() => {
-                    // On a phone the menu is in a sheet over the page: it goes, so the tour isn't told behind it.
-                    setOpenMobile(false);
-                    startTour(identity.userId, pathname);
-                  }}
-                >
-                  <RouteIcon />
-                  {tourTaken(identity.userId)
-                    ? t`Take the tour again`
-                    : t`Take the tour`}
-                </DropdownMenuItem>
-              ) : null}
               <DropdownMenuItem
                 onClick={() => {
                   void signOutOrSay();

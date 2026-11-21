@@ -9,8 +9,8 @@ import { resourceDecisionPending } from "../decisions/decisions.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
 import type { RunRow } from "./resource-runs.ts";
 
-// The one view of runs the Workflows page, its Runs tab, the dashboard's
-// activity and the platform's statistics read: the runs of independent
+// The one view of runs the Workflows page, its Runs tab, its activity and
+// the platform's statistics read: the runs of independent
 // workflows (`workflow_resource_runs`), as the columns they count and list
 // by.
 //

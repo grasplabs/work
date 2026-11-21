@@ -12,8 +12,8 @@ import { workspace } from "./durable-objects.ts";
 // something only its person may read is marked, for good; from then on
 // what its agent writes where others read waits for the person, who sees
 // exactly what will be sent before it goes. What it writes to their own
-// space (their own memory, their own dashboard, their own connection's
-// request) goes on as before.
+// space (their own memory, their own connection's request) goes on as
+// before.
 //
 // What marks a chat is what it handed over that the person may not have
 // in mind, never where it is, nor what they wrote or brought in

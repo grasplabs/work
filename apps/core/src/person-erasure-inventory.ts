@@ -263,13 +263,14 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.skill_deletions": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },
-  // What they asked Stephen, with where their weekly summary stood.
+  // What they asked Stephen, and the weekly summaries of it they had
+  // (written by no release since Workflows › Requests went).
   "core.stephen_requests": { erased: "channels" },
   "core.stephen_request_cards": { erased: "channels" },
   "core.stephen_summaries": { erased: "channels" },
   "core.stephen_summary_readers": { erased: "channels" },
   "core.stephen_request_needs": {
-    company: "what an owner or admin did about something Needs you lists",
+    company: "what an owner or admin did about something Needs you listed",
   },
   "core.agent_held_starts": { erased: "workspace" },
   "core.preview_fixture_stores": {

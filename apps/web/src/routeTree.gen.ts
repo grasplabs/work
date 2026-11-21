@@ -22,7 +22,6 @@ import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
 import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.connect-microsoft'
-import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
@@ -43,7 +42,6 @@ import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shel
 import { Route as ShellProjectsIndexRouteImport } from './routes/_shell.projects.index'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
-import { Route as ShellSettingsAgentsRouteImport } from './routes/_shell.settings.agents'
 import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.settings.ai-providers'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
@@ -61,7 +59,6 @@ import { Route as ShellSettingsWebhooksRouteImport } from './routes/_shell.setti
 import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
-import { Route as ShellWorkflowsRequestsRouteImport } from './routes/_shell.workflows.requests'
 import { Route as AppsAppDraftRouteImport } from './routes/apps.$app.draft'
 import { Route as AppsAppFullRouteImport } from './routes/apps.$app.full'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
@@ -134,11 +131,6 @@ const ShellBrainRoute = ShellBrainRouteImport.update({
 const ShellConnectMicrosoftRoute = ShellConnectMicrosoftRouteImport.update({
   id: '/connect-microsoft',
   path: '/connect-microsoft',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellDashboardRoute = ShellDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellInboxRoute = ShellInboxRouteImport.update({
@@ -242,11 +234,6 @@ const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsAgentsRoute = ShellSettingsAgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsAiProvidersRoute =
   ShellSettingsAiProvidersRouteImport.update({
     id: '/ai-providers',
@@ -334,11 +321,6 @@ const ShellWorkflowsWorkflowRoute = ShellWorkflowsWorkflowRouteImport.update({
   path: '/workflows/$workflow',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellWorkflowsRequestsRoute = ShellWorkflowsRequestsRouteImport.update({
-  id: '/workflows/requests',
-  path: '/workflows/requests',
-  getParentRoute: () => ShellRoute,
-} as any)
 const AppsAppDraftRoute = AppsAppDraftRouteImport.update({
   id: '/apps/$app/draft',
   path: '/apps/$app/draft',
@@ -399,7 +381,6 @@ export interface FileRoutesByFullPath {
   '/$': typeof ShellSplatRoute
   '/brain': typeof ShellBrainRouteWithChildren
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
-  '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
@@ -414,7 +395,6 @@ export interface FileRoutesByFullPath {
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
-  '/settings/agents': typeof ShellSettingsAgentsRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
@@ -431,7 +411,6 @@ export interface FileRoutesByFullPath {
   '/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
-  '/workflows/requests': typeof ShellWorkflowsRequestsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -460,7 +439,6 @@ export interface FileRoutesByTo {
   '/waiting': typeof WaitingRoute
   '/$': typeof ShellSplatRoute
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
-  '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
@@ -475,7 +453,6 @@ export interface FileRoutesByTo {
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
-  '/settings/agents': typeof ShellSettingsAgentsRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
@@ -492,7 +469,6 @@ export interface FileRoutesByTo {
   '/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
-  '/workflows/requests': typeof ShellWorkflowsRequestsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -524,7 +500,6 @@ export interface FileRoutesById {
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
-  '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
@@ -540,7 +515,6 @@ export interface FileRoutesById {
   '/_shell/brain/sources': typeof ShellBrainSourcesRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
-  '/_shell/settings/agents': typeof ShellSettingsAgentsRoute
   '/_shell/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
@@ -557,7 +531,6 @@ export interface FileRoutesById {
   '/_shell/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
-  '/_shell/workflows/requests': typeof ShellWorkflowsRequestsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit_/components/$name': typeof KitComponentsNameRoute
@@ -590,7 +563,6 @@ export interface FileRouteTypes {
     | '/$'
     | '/brain'
     | '/connect-microsoft'
-    | '/dashboard'
     | '/inbox'
     | '/settings'
     | '/decisions/$decision'
@@ -605,7 +577,6 @@ export interface FileRouteTypes {
     | '/brain/sources'
     | '/integrations/$integration'
     | '/projects/$projectId'
-    | '/settings/agents'
     | '/settings/ai-providers'
     | '/settings/audit'
     | '/settings/billing'
@@ -622,7 +593,6 @@ export interface FileRouteTypes {
     | '/settings/webhooks'
     | '/settings/workspace'
     | '/workflows/$workflow'
-    | '/workflows/requests'
     | '/apps/$app/draft'
     | '/apps/$app/full'
     | '/kit/components/$name'
@@ -651,7 +621,6 @@ export interface FileRouteTypes {
     | '/waiting'
     | '/$'
     | '/connect-microsoft'
-    | '/dashboard'
     | '/inbox'
     | '/decisions/$decision'
     | '/'
@@ -666,7 +635,6 @@ export interface FileRouteTypes {
     | '/brain/sources'
     | '/integrations/$integration'
     | '/projects/$projectId'
-    | '/settings/agents'
     | '/settings/ai-providers'
     | '/settings/audit'
     | '/settings/billing'
@@ -683,7 +651,6 @@ export interface FileRouteTypes {
     | '/settings/webhooks'
     | '/settings/workspace'
     | '/workflows/$workflow'
-    | '/workflows/requests'
     | '/apps/$app/draft'
     | '/apps/$app/full'
     | '/kit/components/$name'
@@ -714,7 +681,6 @@ export interface FileRouteTypes {
     | '/_shell/$'
     | '/_shell/brain'
     | '/_shell/connect-microsoft'
-    | '/_shell/dashboard'
     | '/_shell/inbox'
     | '/_shell/settings'
     | '/decisions/$decision'
@@ -730,7 +696,6 @@ export interface FileRouteTypes {
     | '/_shell/brain/sources'
     | '/_shell/integrations/$integration'
     | '/_shell/projects/$projectId'
-    | '/_shell/settings/agents'
     | '/_shell/settings/ai-providers'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
@@ -747,7 +712,6 @@ export interface FileRouteTypes {
     | '/_shell/settings/webhooks'
     | '/_shell/settings/workspace'
     | '/_shell/workflows/$workflow'
-    | '/_shell/workflows/requests'
     | '/apps/$app/draft'
     | '/apps/$app/full'
     | '/kit_/components/$name'
@@ -874,13 +838,6 @@ declare module '@tanstack/react-router' {
       path: '/connect-microsoft'
       fullPath: '/connect-microsoft'
       preLoaderRoute: typeof ShellConnectMicrosoftRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/dashboard': {
-      id: '/_shell/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof ShellDashboardRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/inbox': {
@@ -1023,13 +980,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsIndexRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/agents': {
-      id: '/_shell/settings/agents'
-      path: '/agents'
-      fullPath: '/settings/agents'
-      preLoaderRoute: typeof ShellSettingsAgentsRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/ai-providers': {
       id: '/_shell/settings/ai-providers'
       path: '/ai-providers'
@@ -1149,13 +1099,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellWorkflowsWorkflowRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/workflows/requests': {
-      id: '/_shell/workflows/requests'
-      path: '/workflows/requests'
-      fullPath: '/workflows/requests'
-      preLoaderRoute: typeof ShellWorkflowsRequestsRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/apps/$app/draft': {
       id: '/apps/$app/draft'
       path: '/apps/$app/draft'
@@ -1249,7 +1192,6 @@ const ShellBrainRouteWithChildren = ShellBrainRoute._addFileChildren(
 )
 
 interface ShellSettingsRouteChildren {
-  ShellSettingsAgentsRoute: typeof ShellSettingsAgentsRoute
   ShellSettingsAiProvidersRoute: typeof ShellSettingsAiProvidersRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
@@ -1269,7 +1211,6 @@ interface ShellSettingsRouteChildren {
 }
 
 const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
-  ShellSettingsAgentsRoute: ShellSettingsAgentsRoute,
   ShellSettingsAiProvidersRoute: ShellSettingsAiProvidersRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
@@ -1308,7 +1249,6 @@ interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellBrainRoute: typeof ShellBrainRouteWithChildren
   ShellConnectMicrosoftRoute: typeof ShellConnectMicrosoftRoute
-  ShellDashboardRoute: typeof ShellDashboardRoute
   ShellInboxRoute: typeof ShellInboxRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
@@ -1318,7 +1258,6 @@ interface ShellRouteChildren {
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
-  ShellWorkflowsRequestsRoute: typeof ShellWorkflowsRequestsRoute
   ShellAgentsIndexRoute: typeof ShellAgentsIndexRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
@@ -1331,7 +1270,6 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellBrainRoute: ShellBrainRouteWithChildren,
   ShellConnectMicrosoftRoute: ShellConnectMicrosoftRoute,
-  ShellDashboardRoute: ShellDashboardRoute,
   ShellInboxRoute: ShellInboxRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
@@ -1341,7 +1279,6 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
-  ShellWorkflowsRequestsRoute: ShellWorkflowsRequestsRoute,
   ShellAgentsIndexRoute: ShellAgentsIndexRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,

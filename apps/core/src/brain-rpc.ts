@@ -139,9 +139,9 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 //
 // The brain's records are company facts with no person in them (no
 // author, no transcript), added by admins (`brain.addRecords`), so every
-// member reads them. The Intake App's statements and sources and the
-// workflow map's workflows stay in each App's own store, which only its
-// builders reach (#716): they reach the brain only as records added here.
+// member reads them. What an App keeps (its statements, sources or
+// workflows) stays in its own store, which only its builders reach
+// (#716): it reaches the brain only as records added here.
 
 /** Who works where, as the admin gave it: the source of the teams' sizes. */
 const rosterSourceId = "src-roster";
@@ -941,7 +941,7 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
  * (`listWorkflowResources`), none of them deleted. The rest are left out,
  * so a goal never names a workflow its reader couldn't open.
  */
-export const goalsFor = async (
+const goalsFor = async (
   env: Env,
   person: Identity,
   goals: readonly Goal[]
@@ -1341,13 +1341,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
       this.#check,
       async (person) => await readThinkingGround(this.#env, person)
     );
-  }
-
-  async goals(): Promise<Goal[]> {
-    return await withPerson(this.#check, async (person) => {
-      const { goals } = await readBrainRecords(this.#env);
-      return await goalsFor(this.#env, person, goals);
-    });
   }
 
   async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {

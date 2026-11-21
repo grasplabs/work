@@ -25,6 +25,7 @@ const generated = [
   "apps/core/blueprints/*/files/server/_generated/**",
   "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
   "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/_generated/**",
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/runtime/src/connector-catalog.gen.ts",
@@ -201,13 +202,12 @@ export default defineConfig({
       },
       {
         // Seen once per person, so they may take longer to delight: the
-        // onboarding, the interview, setup and Stephen's tour. And rare: an
+        // onboarding, the interview and setup. And rare: an
         // app connected, a few times per company, whose drawn mark is the
         // delight of it (success-mark.tsx).
         files: [
           "apps/web/src/onboarding/**",
           "apps/web/src/interview/**",
-          "apps/web/src/tour/**",
           "apps/web/src/voice/**",
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
