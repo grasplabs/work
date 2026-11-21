@@ -24,10 +24,10 @@ import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
 import type { CoreState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-watch-7a2c90";
 const cloudflare = mockCloudflareApi(token);

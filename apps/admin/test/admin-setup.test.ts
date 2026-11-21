@@ -15,12 +15,12 @@ import { importReleases } from "../src/releases/import.ts";
 import { setClientChannel } from "../src/rollout/channels.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { aiStatusOf, emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { onChannel } from "./hosting.ts";
 import { page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { aiStatusOf, emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-setup-5c1e90";
 const cloudflare = mockCloudflareApi(token);

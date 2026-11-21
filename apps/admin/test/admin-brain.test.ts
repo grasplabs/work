@@ -17,10 +17,10 @@ import {
 import { readBrainReport } from "../src/clients/brain.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-brain-5c2d90";
 const cloudflare = mockCloudflareApi(token);

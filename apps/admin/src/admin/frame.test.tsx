@@ -17,7 +17,11 @@ const never = async (): Promise<never> =>
 
 describe("the admin's frame in the browser", () => {
   it("shows the frame as skeletons, announced as loading, until its records come", async () => {
-    const { container } = await openAdmin("/", { fetchClientGrid: never });
+    const { container } = await openAdmin(
+      "/",
+      { fetchClientGrid: never },
+      { rest: false }
+    );
 
     const loading = container.querySelector('output[aria-busy="true"]');
     expect({

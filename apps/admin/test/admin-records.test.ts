@@ -7,10 +7,10 @@ import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-records-5c2e90";
 const cloudflare = mockCloudflareApi(token);
