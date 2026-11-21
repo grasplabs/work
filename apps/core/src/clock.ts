@@ -43,7 +43,6 @@ import {
   readerGroupRequestsPerTick,
 } from "./source-readers.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
-import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
@@ -280,13 +279,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "channels.requests",
     period: "quarterHour",
     run: sweepStephenRequests,
-  },
-  // The weekly summary of Stephen's requests, on Monday mornings
-  // (src/stephen-summary.ts).
-  {
-    name: "stephen.summaries",
-    period: "quarterHour",
-    run: sendStephenSummaries,
   },
   {
     name: "workflows.run_details",

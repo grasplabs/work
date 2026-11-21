@@ -982,7 +982,6 @@
   "@grasp-os/web src/workflows/lists.test.ts": 0.2,
   "@grasp-os/web src/workflows/new-workflow.test.tsx": 0.5,
   "@grasp-os/web src/workflows/param-values.test.ts": 0.9,
-  "@grasp-os/web src/workflows/requests/request-table.test.tsx": 3.2,
   "@grasp-os/web src/workflows/run-detail.test.tsx": 2.6,
   "@grasp-os/web src/workflows/run-figures.test.ts": 0.1,
   "@grasp-os/web src/workflows/run-sheet-actions.test.tsx": 1.4,

@@ -203,9 +203,8 @@ export const connectModels = async (
 };
 
 /**
- * Replies to core's own calls about Stephen's requests (naming one,
- * proposing a fix: src/channels/request-sorting.ts, src/stephen-requests.ts),
- * in the order a test queued them, apart from every provider's script;
+ * Replies to core's own calls naming Stephen's requests
+ * (src/channels/request-sorting.ts), in the order a test queued them, apart from every provider's script;
  * once none is left, a sorting that sorts nothing.
  */
 export const stephenRequestReplies: ProviderReply[] = [];
@@ -253,7 +252,6 @@ const judgeOpening = "You judge whether Stephen";
 const stephenRequestsOpenings = [
   judgeOpening,
   "You sort one message a person sent to Stephen",
-  "You help the owner of a company's Grasp workspace improve Stephen",
 ];
 
 /** Whether a request's body is one of core's own about Stephen's requests. */

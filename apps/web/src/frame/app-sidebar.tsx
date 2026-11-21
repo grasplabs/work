@@ -1,4 +1,3 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Kbd } from "@grasp-os/ui/components/kbd";
 import {
@@ -171,7 +170,7 @@ export const AppSidebar = ({
                   <SectionItem section={projects} />
                   <SectionItem section={apps} />
                   {/* With how many workflows need the person. */}
-                  <WorkflowsItem requests={isAdmin(identity.role)} />
+                  <WorkflowsItem />
                   <SectionItem section={agents} />
                   <SectionItem section={integrations} />
                 </SidebarMenu>

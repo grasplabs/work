@@ -202,8 +202,8 @@ export interface SessionApi {
    */
   readonly orgSettings: OrgSettingsApi;
   /**
-   * Stephen's requests outside Grasp: the report, what needs fixing, the
-   * weekly summary and his week. Owners and admins only.
+   * Stephen's requests outside Grasp: his week and this month's billed
+   * requests. Owners and admins only.
    */
   readonly stephenRequests: StephenRequestsApi;
   /** The audit log: search, export and chain verification. Admins only. */
