@@ -31,6 +31,7 @@ import type {
   ChartLineLook,
 } from "./chart-context";
 import { ChartPatterns } from "./chart-patterns";
+import { chartInset } from "./room";
 
 type Layout = string | number | null;
 
@@ -179,8 +180,6 @@ const writtenValue = (
 
 // The drawing's margin: a little at the top and the right, and at the right the room the names at
 // the lines' ends ask for.
-/** The drawing's own inset, px, before any room for names: a waiting frame stands its lines inside it too. */
-export const chartInset = { top: 8, right: 8 } as const;
 const marginOf = (room: number) => ({
   top: chartInset.top,
   right: chartInset.right + room,

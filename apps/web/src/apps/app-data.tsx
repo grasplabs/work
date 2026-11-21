@@ -17,7 +17,12 @@ import type { ReactNode } from "react";
 
 import { downloadCsv } from "../csv.ts";
 import { readPeople } from "../directory.ts";
-import { formatDateTime, formatNumber, valueText } from "../format.ts";
+import {
+  formatDateTime,
+  formatList,
+  formatNumber,
+  valueText,
+} from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -269,7 +274,7 @@ const ChangeItem = ({
   const { t } = useLingui();
   const who = actorText(change.actor, people);
   const when = formatDateTime(change.at);
-  const fields = change.fields.join(", ");
+  const fields = formatList(change.fields);
   return (
     <li {...stylex.props(styles.entry)}>
       <div {...stylex.props(styles.entryHead)}>

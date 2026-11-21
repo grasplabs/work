@@ -466,6 +466,10 @@ msgstr "{count, plural, one {Lecture de # workflow} other {Lecture de # workflow
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 msgstr "{count, plural, one {Afficher # ligne inchangée} other {Afficher # lignes inchangées}}"
 
+#: src/chat/held-writes.tsx
+msgid "{count, plural, one {Show all # line ({characters} characters)} other {Show all # lines ({characters} characters)}}"
+msgstr "{count, plural, one {Afficher la # ligne ({characters} caractères)} other {Afficher les # lignes ({characters} caractères)}}"
+
 #: src/frame/part-words.tsx
 msgid "{count, plural, one {Show the # {group} tool} other {Show the # {group} tools}}"
 msgstr "{count, plural, one {Afficher l’outil {group}} other {Afficher les # outils {group}}}"
@@ -1195,10 +1199,6 @@ msgstr "{people, plural, one {pour # personne} other {pour # personnes}}"
 msgid "{percent}% known now"
 msgstr "{percent} % connu à ce jour"
 
-#: src/inbox/report-view.tsx
-msgid "{percentAlone}% of this week's {total} runs needed nobody."
-msgstr "{percentAlone} % des {total} exécutions de cette semaine n’ont eu besoin de personne."
-
 #: src/inbox/items.ts
 msgid "{person} · {connection}"
 msgstr "{person} · {connection}"
@@ -1526,8 +1526,16 @@ msgid "{total, plural, one {{count} of # interview} other {{count} of # intervie
 msgstr "{total, plural, one {{count} sur # entretien} other {{count} sur # entretiens}}"
 
 #: src/inbox/report-view.tsx
-msgid "{total} runs from {from} to {to}."
-msgstr "{total} exécutions du {from} au {to}."
+msgid "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+msgstr "{total, plural, one {{percent} de la # exécution de cette semaine n’a eu besoin de personne.} other {{percent} des # exécutions de cette semaine n’ont eu besoin de personne.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+msgstr "{total, plural, one {# exécution du {from} au {to}.} other {# exécutions du {from} au {to}.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
+msgstr "{total, plural, one {Où est allée la # exécution de cette semaine.} other {Où sont allées les # exécutions de cette semaine.}}"
 
 #: src/settings/ai-spend.tsx
 msgid "{total} so far this month."
@@ -2538,6 +2546,7 @@ msgid "Agent not found"
 msgstr "Agent introuvable"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
@@ -2592,7 +2601,7 @@ msgstr "Outil d’IA"
 msgid "All"
 msgstr "Tout"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Tout"
@@ -3086,7 +3095,7 @@ msgstr "Applications"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Appliquez-la si le domaine de l’expéditeur est {domain}."
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Approvals"
 msgstr "Approbations"
@@ -3559,7 +3568,7 @@ msgstr "Demandé dans cette page"
 msgid "Asked of the {owner}"
 msgstr "Posée à {owner}"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Posée à vous"
@@ -3900,7 +3909,7 @@ msgstr "Lié à"
 msgid "Brain"
 msgstr "Cerveau"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
@@ -4109,7 +4118,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/brain/memories-page.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4121,6 +4129,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
+#: src/frame/leave-confirm.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
@@ -4475,7 +4484,7 @@ msgstr "Modifications demandées"
 msgid "Changes only you see"
 msgstr "Modifications que vous seul voyez"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
 msgstr "Changements non confirmés"
@@ -5259,7 +5268,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Connexions"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Connexions"
@@ -5470,6 +5479,7 @@ msgstr "Copier l’URL de {name}"
 #: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/guests.tsx
 msgid "Copying didn't work"
@@ -6852,6 +6862,10 @@ msgstr "Termine le workflow"
 msgid "Enter a name for the organization."
 msgstr "Saisissez un nom pour l'organisation."
 
+#: src/settings/event-sources.tsx
+msgid "Enter a name for the sender."
+msgstr "Saisissez un nom pour l’expéditeur."
+
 #: src/settings/teams.tsx
 msgid "Enter a name for the team."
 msgstr "Saisissez un nom pour l'équipe."
@@ -6859,6 +6873,10 @@ msgstr "Saisissez un nom pour l'équipe."
 #: src/frame/part-words.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Saisissez une adresse qui commence par https://."
+
+#: src/settings/event-source-activity.tsx
+msgid "Enter an event type."
+msgstr "Saisissez un type d’événement."
 
 #: src/settings/erasures.tsx
 msgid "Enter the address to let in again."
@@ -7535,6 +7553,10 @@ msgstr "Fichiers écrits par ses exécutions"
 msgid "Files to send"
 msgstr "Fichiers à envoyer"
 
+#: src/connections/connect-dialog.tsx
+msgid "Fill in {label}."
+msgstr "Renseignez {label}."
+
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Remplissez ce champ."
@@ -7996,7 +8018,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "Général"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "Général"
@@ -8661,7 +8683,7 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "Historique"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Historique"
@@ -11132,7 +11154,7 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Micro coupé"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 msgid "My agents"
 msgstr "Mes agents"
 
@@ -12905,7 +12927,7 @@ msgstr "Ouvrir le chat"
 msgid "Open Data"
 msgstr "Ouvrir Données"
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open external link?"
 msgstr "Ouvrir le lien externe ?"
 
@@ -12936,7 +12958,7 @@ msgstr "Les factures impayées dans la comptabilité, avec leurs dates d’éch�
 msgid "Open leads and deals in the CRM."
 msgstr "Les prospects et affaires en cours dans le CRM."
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open link"
 msgstr "Ouvrir le lien"
 
@@ -13071,7 +13093,7 @@ msgstr "Option {place}"
 msgid "Options"
 msgstr "Options"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Options"
@@ -13096,7 +13118,7 @@ msgstr "Sphère"
 msgid "Order"
 msgstr "Ordre"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -16044,7 +16066,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Partage"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Partage"
@@ -16075,10 +16097,6 @@ msgstr "Afficher à nouveau"
 #: src/frame/part-words.tsx
 msgid "Show all"
 msgstr "Tout afficher"
-
-#: src/chat/held-writes.tsx
-msgid "Show all {count} lines ({characters} characters)"
-msgstr "Afficher les {count} lignes ({characters} caractères)"
 
 #: src/routes/_shell.settings.security.tsx
 msgid "Show all {devices}"
@@ -17771,7 +17789,12 @@ msgstr "Les modifications publiées n'ont pas pu être remises en brouillon. Ell
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "Le chat ajoute des index en écrivant les requêtes de l’App."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "Impossible d'archiver le chat. Réessayez."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "Impossible de renommer le chat. Réessayez."
 
@@ -19874,7 +19897,7 @@ msgstr "Déclencheur de webhook"
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
@@ -20513,10 +20536,6 @@ msgstr "Où va le temps"
 #: src/brain/brain-article/team-work.tsx
 msgid "Where the work passes on"
 msgstr "Où le travail passe la main"
-
-#: src/inbox/report-view.tsx
-msgid "Where this week's {total} runs went."
-msgstr "Où sont allées les {total} exécutions de cette semaine."
 
 #: src/interview/destination.tsx
 msgid "Where your lines go"

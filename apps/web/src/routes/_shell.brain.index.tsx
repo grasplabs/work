@@ -20,6 +20,7 @@ import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
 import { useBrainData } from "../brain/brain-data.ts";
 import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
+import { brainCloudReady } from "../brain/dot-shapes.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
 import { isRegion } from "../brain/region-id.ts";
@@ -403,5 +404,10 @@ const page = stylex.create({
 
 export const Route = createFileRoute("/_shell/brain/")({
   validateSearch,
+  // The atlas's dots, made between frames rather than in its first render
+  // (dot-shapes.ts): the shell has usually made them already.
+  loader: async () => {
+    await brainCloudReady();
+  },
   component: AtlasPage,
 });

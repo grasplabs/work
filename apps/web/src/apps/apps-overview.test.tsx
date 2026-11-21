@@ -22,7 +22,7 @@ import { AppsOverview } from "./apps-overview.tsx";
 // The Apps page as people read it, from the Apps core lists
 // (`apps.overview`), faked at the RPC boundary: each App one card that
 // opens the App, the newest first, with where it stands; its window runs
-// the App's first page only while the card is on screen; its menu opens
+// no App; its menu opens
 // it, leads to its settings and lets its builders archive and restore it;
 // the Apps in three tabs, the person's own, shared with them by name and
 // the company's; a search over their names; Build new app for who builds.
@@ -30,37 +30,6 @@ import { AppsOverview } from "./apps-overview.tsx";
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
-
-/** What the browser's IntersectionObserver tells of an element. */
-type Seen = (entries: { target: Element; isIntersecting: boolean }[]) => void;
-
-/** The browser's IntersectionObserver, as the test brings a card on screen. */
-const observers: Seen[] = [];
-
-class FakeObserver {
-  readonly #watched = new Set<Element>();
-
-  constructor(seen: Seen) {
-    observers.push((entries) => {
-      seen(entries.filter(({ target }) => this.#watched.has(target)));
-    });
-  }
-
-  observe(element: Element): void {
-    this.#watched.add(element);
-  }
-
-  unobserve(element: Element): void {
-    this.#watched.delete(element);
-  }
-
-  disconnect(): void {
-    this.#watched.clear();
-  }
-}
-
-// The page keeps one observer for all its cards, made on first use.
-Reflect.set(globalThis, "IntersectionObserver", FakeObserver);
 
 /** An App made at `createdAt`, live with pages or not yet, archived or not. */
 const overview = (
@@ -231,19 +200,6 @@ const placeOf = (name: string): Element => {
   return found;
 };
 
-/** Brings the card of `name` on screen. */
-const scroll = async (name: string): Promise<void> => {
-  const target = placeOf(name).querySelector('[data-slot="app-card-live"]');
-  await act(async () => {
-    if (target !== null) {
-      for (const seen of observers) {
-        seen([{ target, isIntersecting: true }]);
-      }
-    }
-    await Promise.resolve();
-  });
-};
-
 /** What runs in the window of `name`: the address of the App in it, or what it says instead. */
 const windowOf = (name: string) => {
   const place = placeOf(name);
@@ -320,19 +276,6 @@ const search = async (value: string): Promise<void> => {
   });
 };
 
-/** The App in a window says it has drawn, as heard from `source`. */
-const tell = async (source: MessageEventSource | null) => {
-  await act(async () => {
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        data: { type: "app-card", state: "ready" },
-        source,
-      })
-    );
-    await Promise.resolve();
-  });
-};
-
 const makeLink = (): string | null | undefined =>
   [...document.querySelectorAll("a")]
     .find((link) => link.textContent === "Build new app")
@@ -373,35 +316,20 @@ describe(AppsOverview, () => {
     });
   });
 
-  it("runs an App's first page in its window only while its card is on screen", async () => {
-    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
-    const holidays = overview("Holidays", "2026-10-20T08:00:00.000Z", true);
-    await shown([invoices, holidays]);
-    const before = windowOf("Invoices");
-    await scroll("Invoices");
-
-    expect({
-      before,
-      invoices: windowOf("Invoices"),
-      holidays: windowOf("Holidays"),
-    }).toStrictEqual({
-      before: { runs: null, says: null },
-      invoices: { runs: `/apps/${invoices.app.id}/full`, says: null },
-      holidays: { runs: null, says: null },
-    });
-  });
-
-  it("keeps the window quiet for an App with no page to run or put away", async () => {
+  it("keeps every App's window quiet, running no App in it, whether it has a page to run or not", async () => {
     await shown([
+      overview("Invoices", "2026-10-01T08:00:00.000Z", true),
       overview("Holidays", "2026-10-20T08:00:00.000Z", false),
       overview("Old desk", "2026-09-01T08:00:00.000Z", true, {
         archived: true,
       }),
     ]);
     expect({
+      live: windowOf("Invoices"),
       draft: windowOf("Holidays"),
       archived: windowOf("Old desk"),
     }).toStrictEqual({
+      live: { runs: null, says: "No preview yet" },
       draft: { runs: null, says: "No preview yet" },
       archived: { runs: null, says: "No preview yet" },
     });
@@ -486,31 +414,6 @@ describe(AppsOverview, () => {
       company: ["Desk"],
       mine: [],
       said: true,
-    });
-  });
-
-  it("keeps an App's window waiting until the App says it has drawn, from its own frame alone", async () => {
-    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
-    await shown([invoices]);
-    await scroll("Invoices");
-    const running = () =>
-      placeOf("Invoices").querySelector<HTMLElement>(
-        '[data-slot="app-card-running"]'
-      )?.dataset.loaded !== undefined;
-    const frame = placeOf("Invoices").querySelector("iframe");
-    await act(async () => {
-      frame?.dispatchEvent(new Event("load"));
-      await Promise.resolve();
-    });
-    const loadedAlone = running();
-    await tell(window);
-    const fromElsewhere = running();
-    await tell(frame?.contentWindow ?? null);
-
-    expect({ loadedAlone, fromElsewhere, told: running() }).toStrictEqual({
-      loadedAlone: false,
-      fromElsewhere: false,
-      told: true,
     });
   });
 

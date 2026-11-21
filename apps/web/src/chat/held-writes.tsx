@@ -218,7 +218,7 @@ const TextValue = ({
         >
           {all
             ? t`Show less`
-            : t`Show all ${count} lines (${characters} characters)`}
+            : t`${plural(count, { one: `Show all # line (${characters} characters)`, other: `Show all # lines (${characters} characters)` })}`}
         </Button>
       ) : null}
     </dd>
@@ -613,7 +613,7 @@ const useDecide = (what: string, { onDecided, onConfirmed }: Decided) => {
     if (confirming && reason === undefined) {
       onConfirmed();
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     return reason === undefined;
   };
   return { busy, decide };
@@ -783,7 +783,7 @@ const HeldWrite = ({
         if (done && confirmed) {
           decided.onConfirmed();
         }
-        await router.invalidate();
+        await router.invalidate({ sync: true });
       }}
     />
   );
@@ -958,7 +958,7 @@ const RejectAll = ({
             );
             onDecided(failed);
             // Each rejection is noted in the chat: its place in the list moves.
-            await router.invalidate();
+            await router.invalidate({ sync: true });
           })();
         }}
         size="sm"

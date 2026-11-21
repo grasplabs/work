@@ -24,7 +24,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
@@ -274,6 +274,7 @@ const TestEvent = ({
           required
           value={type}
         />
+        <FieldError match="valueMissing">{t`Enter an event type.`}</FieldError>
       </Field>
       <Field>
         <FieldLabel>{t`Its data, as JSON`}</FieldLabel>

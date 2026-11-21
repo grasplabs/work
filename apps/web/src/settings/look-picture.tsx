@@ -2,33 +2,99 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { onThemeChange } from "../frame/theme.ts";
-import {
-  Backdrop,
-  isDither,
-  isSand,
-  isScene,
-} from "../grasp/backdrop/index.ts";
+import { BackdropField } from "../grasp/backdrop/field.tsx";
+import { defaultScenes, isDither, isScene } from "../grasp/backdrop/index.ts";
 import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
 
 // Still pictures of looks, for choosing one by sight (look-tiles.tsx). A
 // browser allows only a handful of WebGL contexts, so no tile draws live:
-// one hidden stage draws one look at a time with Grasp UI's Backdrop,
-// at a tile's size, takes its picture (a data URL), lets the field go, and
-// moves on to the next. Each picture is kept for this visit, by the look
-// and, for what is drawn on the page's ground, the page's theme. Only the
-// big preview stays live.
+// one hidden stage draws one look at a time with Grasp UI's backdrop field,
+// still and small as its own picker's tiles are, at a tile's size, takes its
+// picture (a data URL) as soon as it stands, lets the field go, and
+// moves on to the next. Each picture is kept by the look and, for what is
+// drawn on the page's ground, the page's theme: in this browser until the
+// next release, so the tiles stand at once from the second visit on. The
+// shell mounts the one stage and has the person's tiles drawn once it has
+// loaded (look-pictures-warm.tsx), so even the first visit finds them
+// drawn. Only the big preview stays live.
 
 /** A tile's size in CSS pixels: what the stage draws at. */
 const pictureWidth = 160;
 const pictureHeight = 90;
 
 /**
- * How long a look draws before its picture is taken: a scene waits for
- * its picture to load; a dither for its first frames; sand settles at once.
+ * The longest a look draws before its picture is taken anyway: it is taken
+ * as soon as it stands, a dither or sand once it has drawn, a scene once its
+ * picture has come. Waiting a fixed time for every look, the tiles took
+ * eight seconds to fill.
  */
-const settleMs = { scene: 900, dither: 260, sand: 60 } as const;
+const longestMs = 2000;
 
-const pictures = new Map<string, string>();
+/** How long a scene waits, once its picture has come and its field has started, for the field to draw it. */
+const sceneDrawMs = 150;
+
+/** Where this browser keeps the pictures, with the release that drew them. */
+const keptKey = "grasp-look-pictures";
+const build = import.meta.env.VITE_GRASP_BUILD;
+/** A build of no release (development, or built by hand) keeps nothing: its drawers change under its pictures. */
+const keeps = build !== "local";
+
+/** The pictures this release drew here before; none from another release. */
+const keptPictures = (): Map<string, string> => {
+  if (!keeps) {
+    return new Map();
+  }
+  try {
+    const kept: unknown = JSON.parse(localStorage.getItem(keptKey) ?? "null");
+    if (
+      typeof kept !== "object" ||
+      kept === null ||
+      !("build" in kept) ||
+      kept.build !== build ||
+      !("pictures" in kept) ||
+      typeof kept.pictures !== "object" ||
+      kept.pictures === null
+    ) {
+      return new Map();
+    }
+    return new Map(
+      Object.entries(kept.pictures).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+    );
+  } catch {
+    // Storage blocked or unreadable: drawn again.
+    return new Map();
+  }
+};
+
+const pictures = keptPictures();
+/**
+ * The pictures taken once their look had drawn, the only ones kept: one
+ * taken when the longest wait ran out (a tab out of sight, a picture that
+ * never came) may be blank, and is drawn again next visit.
+ */
+const whole = new Set(pictures.keys());
+
+/** Keeps the whole pictures in this browser, for the next visit. */
+const keepPictures = (): void => {
+  if (!keeps) {
+    return;
+  }
+  try {
+    localStorage.setItem(
+      keptKey,
+      JSON.stringify({
+        build,
+        pictures: Object.fromEntries(
+          [...pictures].filter(([key]) => whole.has(key))
+        ),
+      })
+    );
+  } catch {
+    // Storage blocked or full: drawn again next visit.
+  }
+};
 const queue: { key: string; look: Look }[] = [];
 const listeners = new Set<() => void>();
 
@@ -81,9 +147,24 @@ const ask = (key: string, look: Look): void => {
   changed();
 };
 
+/** The page's theme, following a change. */
+const usePageTheme = (): string => useSyncExternalStore(onPageTheme, pageTheme);
+
+/** Asks for every one of `looks`' pictures, in the page's theme, ahead of their tiles. */
+export const useLookPicturesAhead = (looks: readonly Look[]): void => {
+  const theme = usePageTheme();
+  useEffect(() => {
+    for (const look of looks) {
+      if (look.backdrop !== "none") {
+        ask(keyOf(look, theme), look);
+      }
+    }
+  }, [looks, theme]);
+};
+
 /** `look`'s still picture, once drawn; undefined until then, and for "none". */
 export const useLookPicture = (look: Look): string | undefined => {
-  const theme = useSyncExternalStore(onPageTheme, pageTheme);
+  const theme = usePageTheme();
   const key = keyOf(look, theme);
   const picture = useSyncExternalStore(subscribe, () => pictures.get(key));
   const { backdrop, pattern, tone } = look;
@@ -97,7 +178,6 @@ export const useLookPicture = (look: Look): string | undefined => {
 
 const styles = stylex.create({
   // Drawn, never seen: out of the way of the pointer and of a screen reader.
-  fill: { width: "100%", height: "100%" },
   stage: {
     position: "fixed",
     insetBlockStart: 0,
@@ -111,20 +191,12 @@ const styles = stylex.create({
   },
 });
 
-/** How a look is drawn, for how long it draws before its picture. */
-const familyOf = ({ backdrop }: Look): keyof typeof settleMs => {
-  if (isScene(backdrop)) {
-    return "scene";
-  }
-  return isSand(backdrop) ? "sand" : "dither";
-};
-
 /** The first look waiting for its picture. */
 const first = () => queue.at(0);
 
 /**
- * Draws the waiting looks one at a time and keeps their pictures. Mount
- * one wherever tiles ask for pictures.
+ * Draws the waiting looks one at a time and keeps their pictures. The shell
+ * mounts the one there is (look-pictures-warm.tsx).
  */
 export const LookPictureStage = () => {
   const next = useSyncExternalStore(subscribe, first);
@@ -135,21 +207,98 @@ export const LookPictureStage = () => {
         // Nothing drawing.
       };
     }
-    const timer = setTimeout(() => {
+    const canvas = stage.current?.querySelector("canvas");
+    let taken = false;
+    const take = (drawn: boolean): void => {
+      if (taken) {
+        return;
+      }
+      taken = true;
       // Our own pictures, from this origin: a canvas that is always read.
-      const canvas = stage.current?.querySelector("canvas");
-      pictures.set(next.key, canvas?.toDataURL() ?? "");
+      const picture = canvas?.toDataURL() ?? "";
+      pictures.set(next.key, picture);
+      if (drawn && picture !== "") {
+        whole.add(next.key);
+      }
       queue.shift();
+      if (queue.length === 0) {
+        keepPictures();
+      }
       changed();
-    }, settleMs[familyOf(next.look)]);
+    };
+    const scene = isScene(next.look.backdrop);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    // Out of sight a field doesn't draw: the longest wait starts once the
+    // page is seen.
+    const waitWhenSeen = (): void => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      document.removeEventListener("visibilitychange", waitWhenSeen);
+      timers.push(
+        setTimeout(() => {
+          take(false);
+        }, longestMs)
+      );
+    };
+    document.addEventListener("visibilitychange", waitWhenSeen);
+    waitWhenSeen();
+    // A scene's picture, fetched here too: once it has come, the field's
+    // own copy comes from the cache at once.
+    let came = !scene;
+    const ready = (): void => {
+      if (came && canvas?.dataset.drawn !== undefined) {
+        timers.push(
+          setTimeout(
+            () => {
+              take(true);
+            },
+            scene ? sceneDrawMs : 0
+          )
+        );
+      }
+    };
+    const watch = new MutationObserver(ready);
+    if (canvas !== undefined && canvas !== null) {
+      watch.observe(canvas, {
+        attributes: true,
+        attributeFilter: ["data-drawn"],
+      });
+    }
+    if (scene) {
+      const picture = new Image();
+      picture.addEventListener(
+        "load",
+        () => {
+          came = true;
+          ready();
+        },
+        { once: true }
+      );
+      picture.src = `${defaultScenes}${next.look.backdrop}.small.jpg`;
+    }
+    ready();
     return () => {
-      clearTimeout(timer);
+      // A picture that comes after this is not this stage's to take.
+      taken = true;
+      document.removeEventListener("visibilitychange", waitWhenSeen);
+      watch.disconnect();
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
     };
   }, [next]);
   return (
     <div aria-hidden="true" ref={stage} {...stylex.props(styles.stage)}>
       {next === undefined ? null : (
-        <Backdrop key={next.key} layout={styles.fill} variant={next.look} />
+        <BackdropField
+          key={next.key}
+          look={next.look}
+          clear={undefined}
+          scenes={defaultScenes}
+          small
+          still
+        />
       )}
     </div>
   );

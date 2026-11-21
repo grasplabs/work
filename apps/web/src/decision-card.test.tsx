@@ -368,3 +368,54 @@ describe("a decision's card, its ask withheld while it is open", () => {
     }).toStrictEqual({ revised: true, before: false });
   });
 });
+
+describe("a decision's confirmation", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.innerHTML = "";
+  });
+
+  it("records nothing for a click whose press began while Confirm was disabled, as an App's page could time it", async () => {
+    const confirmed: unknown[] = [];
+    await shown({
+      review: async (_id: string, answer: { approved: boolean }) =>
+        await Promise.resolve({
+          state: "review",
+          decision: asked,
+          response: answer,
+        }),
+      confirm: async (...args: unknown[]) => {
+        confirmed.push(args);
+        await Promise.resolve();
+      },
+      get: async () => await Promise.resolve(asked),
+    });
+    await press("Approve");
+    const confirm = [...document.querySelectorAll("button")].find(
+      (each) => each.textContent.trim() === "Confirm"
+    );
+
+    await act(async () => {
+      confirm?.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true })
+      );
+      await Promise.resolve();
+    });
+    await waited(1100);
+    await act(async () => {
+      confirm?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 })
+      );
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({ found: confirm !== undefined, confirmed }).toStrictEqual({
+      found: true,
+      confirmed: [],
+    });
+  });
+});

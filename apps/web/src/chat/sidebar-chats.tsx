@@ -8,6 +8,7 @@ import { useMatchLatest } from "../frame/match-latest.ts";
 import type { MenuEntries } from "../grasp/context-menu/index.ts";
 import { Archive, ArrowRight, Edit, Trash } from "../grasp/icons/index.ts";
 import type { SidebarRow } from "../grasp/sidebar/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
@@ -73,32 +74,48 @@ const useChats = (enabled: boolean): ChatSummary[] => {
  * window does it (chat-window.tsx), for any of the rows.
  */
 const useRowChanges = () => {
+  const { t } = useLingui();
   const router = useRouter();
   const { run } = useCoreAction();
+  // A row has no place of its own to say it failed: a toast says it, as the
+  // chat's own menu does (chat-more.tsx).
   const change = async (
-    action: (session: Parameters<Parameters<typeof run>[0]>[0]) => Promise<void>
+    action: (
+      session: Parameters<Parameters<typeof run>[0]>[0]
+    ) => Promise<void>,
+    failed: string
   ): Promise<void> => {
     const changed = await run(async (session) => {
       await action(session);
       return true;
     });
     if (changed === true) {
-      await router.invalidate();
+      await router.invalidate({ sync: true });
+      return;
     }
+    toast.error(failed);
   };
   return {
     rename: async (chat: ChatSummary, name: string): Promise<void> => {
-      if (!chatTitleSchema.safeParse(name).success) {
+      const parsed = chatTitleSchema.safeParse(name);
+      if (!parsed.success) {
+        toast.error(t`The chat couldn't be renamed. Try again.`);
         return;
       }
-      await change(async (session) => {
-        await session.chats.rename(chat.id, name);
-      });
+      await change(
+        async (session) => {
+          await session.chats.rename(chat.id, parsed.data);
+        },
+        t`The chat couldn't be renamed. Try again.`
+      );
     },
     archive: async (chat: ChatSummary): Promise<void> => {
-      await change(async (session) => {
-        await session.chats.archive(chat.id);
-      });
+      await change(
+        async (session) => {
+          await session.chats.archive(chat.id);
+        },
+        t`The chat couldn't be archived. Try again.`
+      );
     },
   };
 };

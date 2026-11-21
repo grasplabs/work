@@ -14,8 +14,7 @@ import * as stylex from "@stylexjs/stylex";
 import type { RowData } from "@tanstack/react-table";
 import type { ReactNode } from "react";
 
-import { chartInset } from "../../chart/chart";
-import { chartAxisRoom } from "../../chart/chart-axis";
+import { chartAxisRoom, chartInset } from "../../chart/room";
 import { DataTable } from "../../data-table";
 import type { DataTableProps } from "../../data-table";
 import { PageHeader } from "../../page-header";

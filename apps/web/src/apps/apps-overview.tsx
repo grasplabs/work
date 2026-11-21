@@ -179,21 +179,10 @@ const OneApp = ({
         meta={metaOf[status]}
         render={<Link params={{ app: app.id }} to="/apps/$app" />}
         title={name}
-        // Its window: the App itself, running while the card is in view. An
-        // App with no page to run keeps a quiet window.
-        {...(runs
-          ? {
-              preview: {
-                kind: "live" as const,
-                src: full,
-                // Our own site's pages: in the page's process, so sharp.
-                sandbox: "allow-scripts allow-same-origin",
-                // Grasp's page loads before the App draws in it: the
-                // window waits for the App's own word (apps.$app.full.tsx).
-                ready: "message" as const,
-              },
-            }
-          : {})}
+        // No live window: core frames none of its own pages
+        // (`frame-ancestors 'none'`), and a running App per card was a
+        // whole second Grasp. The window stays quiet until core keeps a
+        // picture of each App to show (core need 65).
         {...(app.description === "" ? {} : { description: app.description })}
       />
       <ArchiveDialog

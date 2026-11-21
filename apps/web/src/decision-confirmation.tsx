@@ -5,7 +5,6 @@ import type {
 } from "@grasp-os/shared/decisions";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
@@ -23,6 +22,7 @@ import { CodeBlock } from "./grasp/code-block/index.ts";
 import { KeyValueList } from "./grasp/key-value/index.ts";
 import type { KeyValueItem } from "./grasp/key-value/index.ts";
 import { grasp } from "./grasp/tokens/tokens.stylex.ts";
+import { useConfirmGate } from "./use-confirm-gate.ts";
 
 // The trusted host decision UI's confirmation (spec 10.7.2, GRA-624):
 // before a person's answer to a decision is recorded, Grasp itself shows
@@ -56,8 +56,9 @@ export interface PendingConfirmation {
 }
 
 /**
- * How long Confirm stays disabled once the dialog opens: a click already
- * on its way, which a page could time its request for, never confirms.
+ * How long Confirm stays disabled once the dialog opens, and after every
+ * press or key while it is: a click already on its way, which a page
+ * could time its request for, never confirms (use-confirm-gate.ts).
  */
 const confirmDelayMs = 1000;
 
@@ -208,15 +209,7 @@ export const DecisionConfirmDialog = ({
   onCancel: (pending: PendingConfirmation) => void;
 }) => {
   const { t } = useLingui();
-  const [ready, setReady] = useState<PendingConfirmation>();
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setReady(pending);
-    }, confirmDelayMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [pending]);
+  const { enabled, press, accepts } = useConfirmGate(pending, confirmDelayMs);
   const decision = pending?.decision;
   const approved = pending?.response.approved === true;
   const payload = usePayloadItem(pending?.response.payload, source);
@@ -269,12 +262,14 @@ export const DecisionConfirmDialog = ({
         <AlertDialogFooter>
           <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
           <AlertDialogAction
-            disabled={ready !== pending}
-            onClick={() => {
-              if (pending !== undefined) {
+            disabled={!enabled}
+            onClick={(event) => {
+              if (pending !== undefined && accepts(event.detail)) {
                 onConfirm(pending);
               }
             }}
+            onKeyDown={press}
+            onPointerDown={press}
             variant="ink"
           >
             {t({

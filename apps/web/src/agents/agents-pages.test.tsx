@@ -23,9 +23,10 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
-import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
+import type { FirstAgentAccess } from "./agent-page.tsx";
 import { AgentsOverview } from "./agents-overview.tsx";
-import type { AgentsTab, ManagedAgents } from "./agents-overview.tsx";
+import type { ManagedAgents } from "./agents-overview.tsx";
+import type { AgentsTab, AgentTab } from "./tabs.tsx";
 
 // The Agents page and one agent's page, on what their routes read from
 // core. These start from the ways the pages can fail: someone who isn't an

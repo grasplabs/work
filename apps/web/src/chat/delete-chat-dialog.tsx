@@ -51,7 +51,7 @@ export const DeleteChatDialog = ({
     if (active) {
       await navigate({ to: "/", search: {} });
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>

@@ -19,6 +19,7 @@ import { useId, useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
+import { formatDollars } from "../format.ts";
 import { Page } from "../frame/page.tsx";
 import {
   AlertDialog,
@@ -70,7 +71,6 @@ import {
 import { Switch } from "../grasp/switch/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
-import { dollars } from "../settings/money.ts";
 import {
   AudienceControl,
   appAudienceOf,
@@ -94,6 +94,7 @@ import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins, or a person's own agent's,
@@ -129,19 +130,6 @@ import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
-
-/** An agent's tabs, by the names its address carries. */
-export const agentTabs = [
-  "overview",
-  "instructions",
-  "access",
-  "schedule",
-] as const;
-export type AgentTab = (typeof agentTabs)[number];
-
-/** The tab an address names; Overview for any other. */
-export const agentTabOf = (value: unknown): AgentTab =>
-  agentTabs.find((tab) => tab === value) ?? "overview";
 
 const styles = stylex.create({
   actions: {
@@ -218,7 +206,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
   const { t } = useLingui();
   const monthName = useMonthName();
   const { requests, people } = usage;
-  const before = dollars(usage.spentBefore);
+  const before = formatDollars(usage.spentBefore);
   return (
     <FactRow
       info={[
@@ -231,7 +219,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
       ].join(" · ")}
       label={monthName(usage.month)}
     >
-      {dollars(usage.spent)}
+      {formatDollars(usage.spent)}
     </FactRow>
   );
 };

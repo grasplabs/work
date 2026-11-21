@@ -141,7 +141,6 @@ export const formatDayMonth = (value: string | number | Date): string =>
     month: "short",
   }).format(new Date(value));
 
-/** An amount in whole euros, as the page's language writes it, such as "€1,240". */
 /** An amount in US dollars, to the cent: what the model gateway counts spend in. */
 export const formatDollars = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, {

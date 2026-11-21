@@ -5,15 +5,19 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { agentTemplates } from "../agents/agent-templates.ts";
 import { ManualAgent } from "../agents/manual-agent.tsx";
-import { NewAgentStart, newAgentWayOf } from "../agents/new-agent-start.tsx";
-import type { NewAgentWay } from "../agents/new-agent-start.tsx";
+import { NewAgentStart } from "../agents/new-agent-start.tsx";
+import { newAgentWayOf } from "../agents/new-agent-way.ts";
+import type { NewAgentWay } from "../agents/new-agent-way.ts";
 import { NewAgent } from "../agents/new-agent.tsx";
 import type { CatalogApp } from "../agents/setup/model.ts";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { PageSkeletonChoice } from "../grasp/blocks/page-skeleton-choice/page-skeleton-choice.tsx";
 import { PageSkeletonQuestion } from "../grasp/blocks/page-skeleton-question/page-skeleton-question.tsx";
 import { PageSkeletonSetup } from "../grasp/blocks/page-skeleton-setup/page-skeleton-setup.tsx";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 
 // A new agent: anyone of the company makes one of their own, while the
 // company lets them, and its own admins one for the company. Grasp's staff
@@ -34,13 +38,16 @@ const NewAgentPage = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   const { way } = Route.useSearch();
-  const { taken, models, apps, teams, ownOn } = Route.useLoaderData();
+  const page = Route.useLoaderData();
   const company = isMemberAdmin(identity);
+  const crumbs = [{ label: t`Agents`, to: "/agents" }, { label: t`New agent` }];
+  if (page.state !== "ready") {
+    return <PageNotLoaded crumbs={crumbs} page={page} />;
+  }
+  const { taken, models, apps, teams, ownOn } = page.data;
   return (
     <>
-      <SiteHeader
-        crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`New agent` }]}
-      />
+      <SiteHeader crumbs={crumbs} />
       {way === undefined ? <NewAgentStart /> : null}
       {way === "manual" ? (
         <ManualAgent
@@ -156,22 +163,65 @@ export const Route = createFileRoute("/_shell/agents/new")({
   // offers, connected and working ones marked, and the company's teams.
   // Whether the company lets people have agents of their own: on when core
   // won't say, as core still refuses what it refuses.
+  // The choice of two ways needs none of it, so it stands at once: what a
+  // way offers is read once it is picked (each list read is audited, so
+  // never ahead), and only whether the company lets people have their own
+  // agents before.
+  loaderDeps: ({ search: { way } }) => ({ way }),
   loader: async ({
     context: { core, identity },
-  }): Promise<{
-    taken: string[];
-    models: string[];
-    apps: CatalogApp[];
-    teams: { teamId: string; name: string }[];
-    ownOn: boolean;
-  }> => {
-    const [agents, own, models, connections, catalog, reach, setting] =
-      await Promise.allSettled([
+    deps: { way },
+  }): Promise<
+    Loaded<{
+      taken: string[];
+      models: string[];
+      apps: CatalogApp[];
+      teams: { teamId: string; name: string }[];
+      ownOn: boolean;
+    }>
+  > => {
+    const readOwnOn = async (): Promise<boolean> => {
+      try {
+        const setting = await core.withSession(
+          async (session) => await session.orgSettings.ownAgents()
+        );
+        return setting.on;
+      } catch {
+        return true;
+      }
+    };
+    // An admin makes the company's agents whatever the setting says.
+    const admin = isMemberAdmin(identity);
+    if (way === undefined && admin) {
+      return {
+        state: "ready",
+        data: { taken: [], models: [], apps: [], teams: [], ownOn: true },
+      };
+    }
+    const ownOnRead = readOwnOn();
+    if (way === undefined) {
+      const ownOn = await ownOnRead;
+      if (!ownOn) {
+        // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+        throw redirect({ to: "/agents", replace: true });
+      }
+      return {
+        state: "ready",
+        data: { taken: [], models: [], apps: [], teams: [], ownOn },
+      };
+    }
+    // The models an agent can be given: without them there is no setup to
+    // show, so the page says core can't be reached, as every page does.
+    const modelsRead = loadFromCore(
+      core,
+      async (session) => await session.chats.models()
+    );
+    const [agents, own, connections, catalog, reach] = await Promise.allSettled(
+      [
         core.withSession(async (session) => await session.connections.agents()),
         core.withSession(
           async (session) => await session.connections.ownAgents()
         ),
-        core.withSession(async (session) => await session.chats.models()),
         core.withSession(async (session) => await session.connections.list()),
         core.withSession(
           async (session) => await session.connections.catalog()
@@ -179,13 +229,15 @@ export const Route = createFileRoute("/_shell/agents/new")({
         core.withSession(
           async (session) => await session.connections.stephenReach()
         ),
-        core.withSession(
-          async (session) => await session.orgSettings.ownAgents()
-        ),
-      ]);
-    const ownOn = setting.status === "fulfilled" ? setting.value.on : true;
+      ]
+    );
+    const models = await modelsRead;
+    if (models.state !== "ready") {
+      return models;
+    }
+    const ownOn = await ownOnRead;
     // Someone who may make neither kind has nothing to make here.
-    if (!ownOn && !isMemberAdmin(identity)) {
+    if (!ownOn && !admin) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/agents", replace: true });
     }
@@ -213,13 +265,16 @@ export const Route = createFileRoute("/_shell/agents/new")({
       };
     });
     return {
-      taken: [agents, own].flatMap((read) =>
-        read.status === "fulfilled" ? read.value.map(({ name }) => name) : []
-      ),
-      models: models.status === "fulfilled" ? models.value : [],
-      apps,
-      teams: reach.status === "fulfilled" ? reach.value.teams : [],
-      ownOn,
+      state: "ready",
+      data: {
+        taken: [agents, own].flatMap((read) =>
+          read.status === "fulfilled" ? read.value.map(({ name }) => name) : []
+        ),
+        models: models.data,
+        apps,
+        teams: reach.status === "fulfilled" ? reach.value.teams : [],
+        ownOn,
+      },
     };
   },
 });

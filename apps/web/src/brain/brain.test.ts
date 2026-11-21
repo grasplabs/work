@@ -339,7 +339,7 @@ describe("the inventory", () => {
     );
     expect(interview.tags).toContain("article");
     expect(words(noteIn(ws, "team-service"), "Roles")).toBe(
-      "Head of customer service (1), Service desk (14)"
+      "Head of customer service (1) and Service desk (14)"
     );
   });
 

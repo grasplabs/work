@@ -108,7 +108,7 @@ const Actions = ({ gap }: { gap: Gap }) => {
     const done = await run(action);
     if (done !== undefined) {
       // The brain is read again: the question shows as it is now.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   return (
