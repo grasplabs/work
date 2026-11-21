@@ -16,6 +16,7 @@ import {
 } from "./core.ts";
 import type { Session } from "./core.ts";
 import { forgetSignedIn } from "./frame/signed-in-here.ts";
+import { forgetChatLink } from "./settings/chat-link.ts";
 
 /** Why the person's session ended under the page. */
 export type SessionEnded = "signed-out" | "principal-changed";
@@ -735,6 +736,20 @@ export const signOut = async (core: CoreConnection): Promise<void> => {
   // Core didn't sign the person out (it failed, or a proxy answered).
   if (!response.ok) {
     throw new Error(`Signing out failed (${response.status}).`);
+  }
+  // What this browser kept for the person alone goes with them, so the
+  // next person here isn't offered it: a chat link they opened, and the
+  // setup's place and unsent message (routes/setup.tsx). Not on every
+  // session end: a chat link is kept across the sign-in it may need.
+  forgetChatLink();
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("grasp.setup.")) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // A private window may refuse storage: nothing was kept.
   }
   core.end("signed-out");
 };
