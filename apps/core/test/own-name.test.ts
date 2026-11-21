@@ -109,6 +109,11 @@ describe("a person's own name", { timeout: 60_000 }, () => {
         "\u2060",
         "\u00AD",
         "\u3164",
+        // Hidden text beside a letter: tag characters, and half a
+        // surrogate pair alone.
+        "Sam\u{E0001}\u{E0068}\u{E0069}",
+        "\uD800Sam",
+        "Sam\uDC00",
       ].map(async (name) => await outcome(me.api.setName(name)))
     );
     const kept = await storedName(me.userId);
@@ -116,8 +121,10 @@ describe("a person's own name", { timeout: 60_000 }, () => {
       "x".repeat(100),
       // 100 characters, though each (a rare CJK one) is two UTF-16 units.
       "\u{20000}".repeat(100),
-      // A zero-width joiner inside an emoji beside a name.
+      // A zero-width joiner inside an emoji beside a name, and a
+      // zero-width non-joiner inside a Persian one.
       "Sam \u{1F469}\u200D\u{1F4BB}",
+      "\u0632\u0647\u0631\u0627\u200C\u0633\u0627\u062F\u0627\u062A",
       // A name in a right-to-left script needs no bidi control.
       "\u0633\u0627\u0645 \u062F\u064A \u0641\u0631\u064A\u0633",
     ];
