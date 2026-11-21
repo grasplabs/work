@@ -7,7 +7,8 @@
  *
  * - while a read of a client is under way, whoever else asks for it (the
  *   frame and the organization's page, on the same render) waits on that
- *   one;
+ *   one; one asked anew, after a change, waits only on a read begun in
+ *   the same load of the router, never on an older one;
  * - an answer stays fresh `freshMs`, moving between an organization's
  *   sections, or coming back to it, asks its core nothing;
  * - when its core doesn't answer, or not in time, the page shows the last
@@ -40,11 +41,19 @@ export const freshMs = 60_000;
 
 /** The reads one router keeps. */
 export interface OrgReads {
-  /** Client `clientId`'s read under way, else a new one with `read`, shared until it settles. */
+  /**
+   * Client `clientId`'s read under way, else a new one with `read`, shared
+   * until it settles. Asked `anew`, only a read begun in the router's
+   * load under way counts as under way: one begun before it may have
+   * been answered before the change that load shows.
+   */
   read: (
     clientId: string,
-    read: () => Promise<ClientAdmin | null>
+    read: () => Promise<ClientAdmin | null>,
+    options?: { anew?: boolean }
   ) => Promise<ClientAdmin | null>;
+  /** The router began a load (src/router.tsx): every read begun before it is older. */
+  loadBegan: () => void;
   /** Whether a read of client `clientId` is under way. */
   reading: (clientId: string) => boolean;
   /** Keeps `admin`'s answer, unless a later one is kept; a later one ends a failed read's mark. */
@@ -58,20 +67,20 @@ export interface OrgReads {
   settle: (admin: ClientAdmin, now: number) => OrgRead;
   /** Forgets everything of `clientId`, as for one offboarded. */
   forget: (clientId: string) => void;
-  /** Records that client `clientId`'s page is the one the tab now shows. */
-  show: (clientId: string) => void;
-  /** Whether client `clientId`'s page is the one the tab shows. */
-  showing: (clientId: string) => boolean;
 }
 
 /** A router's reads, empty. */
 export const orgReads = (): OrgReads => {
-  const underWay = new Map<string, Promise<ClientAdmin | null>>();
+  /** Each client's read under way, with the load of the router it began in. */
+  const underWay = new Map<
+    string,
+    { load: number; answer: Promise<ClientAdmin | null> }
+  >();
+  /** The router's load under way, counted from the first. */
+  let load = 0;
   const answers = new Map<string, AnsweredAdmin>();
   /** Why the last read failed and when, for a client with an answer kept, until a later one. */
   const failed = new Map<string, NonNullable<OrgRead["stale"]>>();
-  /** The organization whose page the tab shows, once one loaded. */
-  let shown: string | undefined;
 
   const remember = (admin: ClientAdmin): void => {
     if (admin.state !== "answered") {
@@ -87,24 +96,31 @@ export const orgReads = (): OrgReads => {
   };
 
   return {
-    read: async (clientId, read) => {
+    read: async (clientId, read, { anew = false } = {}) => {
       const pending = underWay.get(clientId);
-      if (pending !== undefined) {
-        return await pending;
+      if (pending !== undefined && (!anew || pending.load === load)) {
+        return await pending.answer;
       }
-      const started = (async () => {
-        try {
-          const admin = await read();
-          if (admin !== null) {
-            remember(admin);
-          }
-          return admin;
-        } finally {
+      const answer = (async () => {
+        const admin = await read();
+        if (admin !== null) {
+          remember(admin);
+        }
+        return admin;
+      })();
+      const begun = { load, answer };
+      underWay.set(clientId, begun);
+      try {
+        return await answer;
+      } finally {
+        // Unless a read asked anew took its place since.
+        if (underWay.get(clientId) === begun) {
           underWay.delete(clientId);
         }
-      })();
-      underWay.set(clientId, started);
-      return await started;
+      }
+    },
+    loadBegan: () => {
+      load += 1;
     },
     reading: (clientId) => underWay.has(clientId),
     remember,
@@ -131,9 +147,5 @@ export const orgReads = (): OrgReads => {
       answers.delete(clientId);
       failed.delete(clientId);
     },
-    show: (clientId) => {
-      shown = clientId;
-    },
-    showing: (clientId) => shown === clientId,
   };
 };

@@ -37,16 +37,19 @@ const timedOut: ClientAdmin = {
   error: "timeout",
 };
 
-/** Acme's page as `reads` has it, opened (`again` false) or read again; the frame's read failed. */
+/**
+ * Acme's page as `reads` has it, come to (`onIt` false) or loaded again
+ * while the tab shows it; the frame's read failed.
+ */
 const opened = async (
   reads: ReturnType<typeof orgReads>,
-  again: boolean
+  onIt: boolean
 ): Promise<OrgRead | undefined> => {
   const { read } = await readOrganization({
     reads,
     client,
     admins: Promise.resolve(null),
-    again,
+    onIt,
     preload: false,
   });
   return await read;
@@ -61,7 +64,6 @@ describe("an organization's page as read", () => {
     // Read again: its core times out (the page's read joins the one under way).
     const failing = Promise.withResolvers<ClientAdmin | null>();
     const underWay = reads.read(client.id, async () => await failing.promise);
-    reads.show(client.id);
     const readAgain = opened(reads, true);
     failing.resolve(timedOut);
     await underWay;
@@ -86,7 +88,7 @@ describe("an organization's page as read", () => {
 });
 
 describe("an organization's page loaded again", () => {
-  it("asks its core again on the organization it shows, but takes the fresh answer on coming to it, the router counting that as staying or not", async () => {
+  it("asks its core again while the tab shows it, but takes the fresh answer on coming to it", async () => {
     const reads = orgReads();
     const fresh = answered(1000);
     reads.remember(fresh);
@@ -96,12 +98,10 @@ describe("an organization's page loaded again", () => {
       return await Promise.resolve(answered(0));
     };
 
-    // Another organization's page is shown; the router comes to Acme's,
-    // counting it as staying (as it can after a preload).
-    reads.show("globex");
-    const cameTo = await opened(reads, true);
+    const cameTo = await opened(reads, false);
     const askedOnComing = asked;
     // Acme's page loads again where it is: after a change, Read again.
+    reads.loadBegan();
     const underWay = reads.read(client.id, ask);
     const loadedAgain = await opened(reads, true);
     await underWay;
@@ -119,5 +119,58 @@ describe("an organization's page loaded again", () => {
       asked: 1,
       newer: true,
     });
+  });
+
+  it("asked anew, never joins a read begun before the load, though it is still under way: its answer may be from before the change", async () => {
+    const reads = orgReads();
+    const before = answered(2000);
+    const after = answered(0);
+    let asked = 0;
+    const ask = async (): Promise<ClientAdmin | null> => {
+      asked += 1;
+      return await Promise.resolve(after);
+    };
+    // A slow read, begun before the change: Read again, a moment before.
+    const slow = Promise.withResolvers<ClientAdmin | null>();
+    const older = reads.read(client.id, async () => await slow.promise, {
+      anew: true,
+    });
+    // The change is through, and the router loads the page again.
+    reads.loadBegan();
+    // The frame's read in it takes the one under way, as any read does;
+    const framed = reads.read(client.id, ask);
+    // the page's, asked anew, its core again, once: a second in that load joins it.
+    const page = reads.read(client.id, ask, { anew: true });
+    const second = reads.read(client.id, ask, { anew: true });
+    // The slow read answers, with what its core held before the change.
+    slow.resolve(before);
+    const [pageAnswer, secondAnswer] = await Promise.all([page, second]);
+
+    expect({
+      page: pageAnswer,
+      second: secondAnswer,
+      framed: await framed,
+      older: await older,
+      asked,
+      kept: reads.fresh(client.id, Date.now()),
+    }).toStrictEqual({
+      page: after,
+      second: after,
+      framed: before,
+      older: before,
+      asked: 1,
+      kept: after,
+    });
+  });
+});
+
+describe("an organization's answers kept", () => {
+  it("keeps the later answer when an older one arrives after it, as the frame's slower read can", () => {
+    const reads = orgReads();
+    const newer = answered(0);
+    reads.remember(newer);
+    reads.remember(answered(5000));
+
+    expect(reads.fresh(client.id, Date.now())).toBe(newer);
   });
 });

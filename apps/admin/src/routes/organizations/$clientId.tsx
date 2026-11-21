@@ -36,7 +36,7 @@ const Organization = () => {
  * sections: a client may be named `platform`.
  */
 export const Route = createFileRoute("/organizations/$clientId")({
-  loader: async ({ params, parentMatchPromise, context, cause, preload }) => {
+  loader: async ({ params, parentMatchPromise, context, preload }) => {
     const { loaderData } = await parentMatchPromise;
     const client = loaderData?.clients.find(({ id }) => id === params.clientId);
     if (loaderData === undefined || client === undefined) {
@@ -50,8 +50,8 @@ export const Route = createFileRoute("/organizations/$clientId")({
       reads: context.reads,
       client,
       admins: loaderData.admins,
-      // Run again where it stays: on the page it shows, its core is asked anew.
-      again: cause === "stay",
+      // Loaded while the tab shows it: its core is asked anew.
+      onIt: context.shown() === client.id,
       preload,
     });
     return { state: "open" as const, client, read };

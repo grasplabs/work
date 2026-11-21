@@ -249,13 +249,19 @@ export const openAdmin = async (
     history: createMemoryHistory({ initialEntries: [path] }),
   });
   opened = router;
-  const container = document.createElement("div");
-  document.body.replaceChildren(container);
+  // On the document, as Start's client entry mounts it: the root route
+  // renders the document's own <html> and <body>. Mounted on an element
+  // inside the body instead, the app's <body> would sit above the root it
+  // renders from: once a dialog had portalled into the body (React
+  // listens there from then on), an event bubbling to it walks from the
+  // body up to that root and back to the body without end (react-dom's
+  // dispatchEventForPluginEventSystem), and the test hangs.
   act(() => {
-    mounted = createRoot(container);
+    mounted = createRoot(document);
     mounted.render(<RouterProvider router={router} />);
   });
   await (rest ? settle() : tick());
+  const container = document.body;
   const main = (): string => container.querySelector("main")?.textContent ?? "";
   return {
     calls,
@@ -271,7 +277,7 @@ export const openAdmin = async (
 };
 
 /** What an organization's sections read beside its snapshot, while nothing more is set. */
-const sectionReads: Answers = {
+export const sectionReads: Answers = {
   fetchClientSetup: null,
   fetchPinChoices: { releases: [] },
   fetchClientHosting: null,

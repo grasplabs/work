@@ -15,9 +15,12 @@ import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
 
-/** What every route's loader is given: the router's own reads of clients' cores. */
+/** What every route's loader is given (src/router.tsx). */
 interface AdminContext {
+  /** The router's own reads of clients' cores. */
   reads: OrgReads;
+  /** The organization whose page the tab shows, if one: as the router last resolved its address. */
+  shown: () => string | undefined;
 }
 
 /** The document every page renders in. */
@@ -60,12 +63,15 @@ export const Route = createRootRouteWithContext<AdminContext>()({
   ssr: false,
   // Beside Platform, what the admin recorded alone: no account is read.
   // Every client's core is asked at once, beside the grid, never after it.
-  loader: async ({ context, location }) => {
+  loader: async ({ context, location, preload }) => {
     const grid = fetchClientGrid();
+    const open = openClientId(location.pathname);
     const admins = readAdmins(
       context.reads,
       grid,
-      openClientId(location.pathname)
+      open,
+      // Loaded while the tab shows it (src/admin/org-loads.ts).
+      open !== undefined && !preload && context.shown() === open
     );
     const clients = await grid;
     return { clients, platform: platformCounts(clients), admins };

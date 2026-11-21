@@ -1,6 +1,7 @@
 import { createRouter } from "@tanstack/react-router";
 
 import { NotFound, RouteFailure } from "./admin/failure.tsx";
+import { openClientId } from "./admin/org-loads.ts";
 import { orgReads } from "./admin/org-reads.ts";
 import { reportPageError, reportUncaughtErrors } from "./admin/page-errors.ts";
 import { routeTree } from "./routeTree.gen.ts";
@@ -17,11 +18,19 @@ declare module "@tanstack/react-router" {
 }
 
 export const getRouter = () => {
+  // This router's own reads of clients' cores: one tab's.
+  const reads = orgReads();
   const router = createRouter({
     routeTree,
     scrollRestoration: true,
-    // This router's own reads of clients' cores: one tab's.
-    context: { reads: orgReads() },
+    context: {
+      reads,
+      // What the tab shows is the address the router last resolved, never
+      // one it is loading: a load that runs while it is an organization's
+      // page is that page loading again (src/admin/org-loads.ts).
+      shown: (): string | undefined =>
+        openClientId(router.state.resolvedLocation?.pathname ?? "/"),
+    },
     // A link's page is read as the pointer rests on it, or it takes focus:
     // a section switch then shows at once.
     defaultPreload: "intent",
@@ -33,6 +42,10 @@ export const getRouter = () => {
     defaultOnCatch: (error) => {
       void reportPageError("render", error);
     },
+  });
+  // A read asked anew joins only one begun in the load under way.
+  router.subscribe("onBeforeLoad", () => {
+    reads.loadBegan();
   });
   // What the page throws and never catches, reported with the route's
   // pattern (such as `/organizations/$clientId`), never its URL.

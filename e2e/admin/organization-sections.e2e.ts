@@ -547,6 +547,40 @@ test("opening an organization while the frame reads it again asks its core no se
   await core(request, answered, 0);
 });
 
+test("coming back to an organization within the minute takes its answer, and Read again there asks its core", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  const failures = failuresOf(page);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  const before = await core(request, answered);
+
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Unset Acme" })
+    .click();
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("heading", { level: 1, name: "Unset Acme" })
+  ).toBeVisible();
+  await page.goBack({ waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  // Come back to: the answer it had, its core not asked.
+  expect(await core(request, answered)).toBe(before);
+
+  await page.getByRole("button", { name: "Read again" }).click();
+  // On the page the tab shows: its core asked anew, once.
+  await expect
+    .poll(async () => await core(request, answered), { timeout: 10_000 })
+    .toBe(before + 1);
+  await expect(page.getByRole("button", { name: "Read again" })).toBeEnabled();
+  expect(await core(request, answered)).toBe(before + 1);
+  expect(failures).toStrictEqual([]);
+});
+
 test("pointing at an organization's Setup asks its core nothing, and opening it does", async ({
   page,
   request,

@@ -32,26 +32,33 @@ export const openClientId = (pathname: string): string | undefined => {
   return clientId === undefined ? undefined : decodeURIComponent(clientId);
 };
 
-/** Client `clientId` as read through `reads`: shared with any read of it under way. */
+/**
+ * Client `clientId` as read through `reads`: shared with any read of it
+ * under way, or asked `anew` only one begun in the router's load under way.
+ */
 const readOne = async (
   reads: OrgReads,
-  clientId: string
+  clientId: string,
+  anew = false
 ): Promise<ClientAdmin | null> =>
   await reads.read(
     clientId,
-    async () => await fetchClientAdmin({ data: { clientId } })
+    async () => await fetchClientAdmin({ data: { clientId } }),
+    { anew }
   );
 
 /**
  * Every client, as its core answers now, in the order of `clients` (the
  * grid, read beside it rather than before it: neither waits on the
- * other); the open one's (`open`) read on its own, as its page reads it.
- * Null when they couldn't be read at all.
+ * other); the open one's (`open`) read on its own, as its page reads it:
+ * `anew` when the tab shows it already, so the page's read in the same
+ * load joins this one. Null when they couldn't be read at all.
  */
 export const readAdmins = async (
   reads: OrgReads,
   clients: Promise<readonly GridRow[]>,
-  open: string | undefined
+  open: string | undefined,
+  anew: boolean
 ): Promise<ClientAdmin[] | null> => {
   const [rest, one, rows] = await Promise.all([
     (async () => {
@@ -68,7 +75,7 @@ export const readAdmins = async (
         return null;
       }
       try {
-        return await readOne(reads, open);
+        return await readOne(reads, open, anew);
       } catch {
         return null;
       }
@@ -150,40 +157,38 @@ const unanswered = (client: GridRow): ClientAdmin => ({
  * it is in.
  *
  * The rule for when a fresh answer may be reused: only on coming to the
- * page. When the page loads again on the organization it already shows
- * (`again`, on it): after any change staff made there (every change reads
- * the page again, `router.invalidate`), Read again, Try again, or its
- * answer going stale, its core is asked anew, and the page waits for that
- * answer. So a change can't be followed by the answer from before it,
- * whichever action made it: none of them has to say so.
+ * page. When the page loads while the tab already shows this
+ * organization (`onIt`, as the router resolved the tab's address): after
+ * any change staff made there (every change reads the page again,
+ * `router.invalidate`), Read again, Try again, or its answer going stale,
+ * its core is asked anew, by a read begun in that load, and the page
+ * waits for that answer. So a change can't be followed by the answer from
+ * before it, whichever action made it: none of them has to say so, and
+ * nothing is remembered of where the tab was.
  */
 export const readOrganization = async ({
   reads,
   client,
   admins,
-  again,
+  onIt,
   preload,
 }: {
   reads: OrgReads;
   client: GridRow;
   admins: Promise<ClientAdmin[] | null>;
   /**
-   * The router ran the load again where it stays (its `cause`). Only the
-   * page the tab shows counts as loading again: the router can count a
-   * navigation to another organization as staying too.
+   * The tab shows this organization's page already: the address the
+   * router last resolved is one of its pages. Never a navigation to it,
+   * which the router may count as staying, from another organization.
    */
-  again: boolean;
+  onIt: boolean;
   /** Only pointed at, not opened: what the page has, its core never asked. */
   preload: boolean;
 }): Promise<{ read: Deferred<OrgRead> | undefined }> => {
-  // Loading again on the organization the tab shows: a change, Read
-  // again, Try again, a stale answer. Never a navigation the router counts
-  // as staying put: that takes the answer it has, or the frame's read.
-  const onIt = again && !preload && reads.showing(client.id);
-  const anew = onIt && reads.fresh(client.id, Date.now()) !== undefined;
-  if (!preload) {
-    reads.show(client.id);
-  }
+  // Loading on the organization the tab shows: a change, Read again, Try
+  // again, a stale answer. Coming to it takes the answer it has, or the
+  // frame's read.
+  const anew = onIt && !preload;
   if (!anew) {
     const framed = await peek(admins);
     const found =
@@ -226,7 +231,7 @@ export const readOrganization = async ({
     }
     let admin: ClientAdmin | null = null;
     try {
-      admin = await readOne(reads, client.id);
+      admin = await readOne(reads, client.id, anew);
     } catch {
       // As a core that didn't answer.
     }
@@ -237,5 +242,5 @@ export const readOrganization = async ({
   // it isn't waited on, so the page shows at once and waits for it in
   // place; held in an object, as an async function awaits a promise it
   // returns.
-  return onIt ? { read: await read } : { read };
+  return anew ? { read: await read } : { read };
 };
