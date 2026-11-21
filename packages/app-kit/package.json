@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/app-kit",
   "private": true,
-  "description": "Grasp OS UI kit: shadcn on Base UI, Tailwind v4, shared with App pages",
+  "description": "The component kit for Grasp App pages: shadcn on Base UI, Tailwind v4",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {

@@ -14,7 +14,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
 | `packages/sdk` | `@grasp-os/sdk`: the server, page and workflow SDK, the only API App code sees |
 | `packages/runtime` | `@grasp-os/runtime`: what the SDK re-exports, and the hosts, pages and checks only platform code imports |
-| `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages (shadcn on Base UI, Tailwind v4), still used by `apps/web` and `apps/admin` for now |
+| `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages (shadcn on Base UI, Tailwind v4), still used by `apps/web`, `apps/admin` and `apps/docs` for now |
 | `packages/compiler` | `@grasp-os/compiler`: builds and checks App code and pages |
 | `packages/connectors/*` | Native MCP servers, loaded by connect |
 | `packages/connector-kit` | `@grasp-os/connector-kit`: how a native connector is written (manifest, tools, MCP server) |

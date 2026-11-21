@@ -251,7 +251,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm's store, and Chromium for the UI kit's browser checks, only
+      # pnpm's store, and Chromium for the app kit's browser checks, only
       # where a test needs them: the first shard holds every such file
       # (scripts/test-shards.ts, `runsInFirstShard`). The rest restore
       # node_modules alone, 9 s sooner.
@@ -360,14 +360,14 @@ jobs:
           path: ${{ runner.temp }}/test-progress.log
           if-no-files-found: ignore
           retention-days: 14
-      # The UI kit's browser tests (@grasp-os/app-kit:browser) save a screenshot
+      # The app kit's browser tests (@grasp-os/app-kit:browser) save a screenshot
       # of each failing page, and what it attached: kept when the shard
       # fails, else lost with the runner. Only the first shard runs them
       # (scripts/test-shards.ts, `runsInFirstShard`).
       - if: failure() && matrix.shard == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ui-browser-failures-${{ matrix.shard }}-of-${{ strategy.job-total }}
+          name: app-kit-browser-failures-${{ matrix.shard }}-of-${{ strategy.job-total }}
           path: |
             packages/app-kit/test/__screenshots__
             packages/app-kit/.vitest-attachments
