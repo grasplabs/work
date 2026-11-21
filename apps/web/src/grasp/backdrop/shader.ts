@@ -775,12 +775,17 @@ const withScenePicture = (
   void load();
 };
 
-/** The one context the stills are drawn on while any is waiting, with each kind's program; let go once none is. */
+/**
+ * The one context the stills are drawn on while any is waiting, with each kind's program; let go once
+ * none is. They are drawn into `target`, a framebuffer of its own, so presenting the canvas never
+ * clears a picture before it is read back.
+ */
 interface StillCanvas {
   gl: WebGL2RenderingContext;
   scene: boolean;
   programs: Map<BackdropScene | BackdropDither, WebGLProgram | null>;
   texture: WebGLTexture | null;
+  target: WebGLRenderbuffer | null;
 }
 let stillCanvas: StillCanvas | undefined;
 const letStillCanvasGo = (): void => {
@@ -792,11 +797,9 @@ const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
     return stillCanvas;
   }
   letStillCanvasGo();
-  const gl = document.createElement("canvas").getContext("webgl2", {
-    alpha: !scene,
-    antialias: false,
-    preserveDrawingBuffer: true,
-  });
+  const gl = document
+    .createElement("canvas")
+    .getContext("webgl2", { alpha: !scene, antialias: false });
   if (gl === null) {
     return undefined;
   }
@@ -809,7 +812,16 @@ const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
   for (const filter of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) {
     gl.texParameteri(gl.TEXTURE_2D, filter, gl.LINEAR);
   }
-  stillCanvas = { gl, scene, programs: new Map(), texture };
+  const target = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, target);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, gl.createFramebuffer());
+  gl.framebufferRenderbuffer(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.RENDERBUFFER,
+    target
+  );
+  stillCanvas = { gl, scene, programs: new Map(), texture, target };
   return stillCanvas;
 };
 
@@ -975,8 +987,12 @@ const drawWith = (
     const position = gl.getAttribLocation(program, "a_pos");
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-    gl.canvas.width = still.width;
-    gl.canvas.height = still.height;
+    gl.renderbufferStorage(
+      gl.RENDERBUFFER,
+      canvas.scene ? gl.RGB8 : gl.RGBA8,
+      still.width,
+      still.height
+    );
     gl.viewport(0, 0, still.width, still.height);
     setUniforms(canvas, program, still, image);
     gl.drawArrays(gl.TRIANGLES, 0, 6);

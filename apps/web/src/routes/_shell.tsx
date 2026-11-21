@@ -6,8 +6,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useState } from "react";
-import type { ComponentType } from "react";
+import { useEffect } from "react";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
 import { useChatPanels } from "../chat/chat-panel.tsx";
@@ -65,31 +64,9 @@ const makeBrainCloud = async () => {
   }
 };
 
-/** The Appearance tiles' pictures, drawn by the shell (settings/look-pictures-warm.tsx). */
-const LookPicturesWarm = lazy(
-  async (): Promise<{
-    default: ComponentType<{ userId: string; ahead: boolean }>;
-  }> => {
-    try {
-      const { LookPicturesWarm: Warm } =
-        await import("../settings/look-pictures-warm.tsx");
-      return { default: Warm };
-    } catch {
-      // Not fetched (a deploy since this page loaded): nothing is drawn
-      // ahead, and the shell stands.
-      return { default: () => null };
-    }
-  }
-);
-
-/**
- * Fetches the sidebar's pages and makes the Brain's dots once the frame
- * stands; true once that is done, when the shell has the Appearance tiles
- * drawn ahead.
- */
-const useSidebarPagesFetched = (): boolean => {
+/** Fetches the sidebar's pages and makes the Brain's dots once the frame stands. */
+const useSidebarPagesFetched = (): void => {
   const router = useRouter();
-  const [settled, setSettled] = useState(false);
   useEffect(() => {
     const fetchCode = async (id: (typeof sidebarPages)[number]) => {
       try {
@@ -101,13 +78,8 @@ const useSidebarPagesFetched = (): boolean => {
     for (const id of sidebarPages) {
       void fetchCode(id);
     }
-    const settle = async () => {
-      await makeBrainCloud();
-      setSettled(true);
-    };
-    void settle();
+    void makeBrainCloud();
   }, [router]);
-  return settled;
 };
 
 /**
@@ -127,7 +99,7 @@ const ShellFrame = () => {
   const chatStart = useMatchLatest()({ to: "/" }) !== false;
   // A page that takes someone through a task of its own has no chat box.
   const docked = usePageDock();
-  const settled = useSidebarPagesFetched();
+  useSidebarPagesFetched();
   return (
     <AppFrame
       bar={chatStart ? "none" : "page"}
@@ -139,9 +111,6 @@ const ShellFrame = () => {
       panels={panels}
     >
       <Outlet />
-      <Suspense fallback={null}>
-        <LookPicturesWarm ahead={settled} userId={identity.userId} />
-      </Suspense>
     </AppFrame>
   );
 };

@@ -64,7 +64,7 @@ const styles = stylex.create({
 
 // A dither's flat colour is the canvas's own colour, so the shader reads it as it resolves here,
 // light or dark (backdrop-tone-*). The runs (rim, core, aurora) are drawn in the light's stops.
-const tones = stylex.create({
+export const toneColours = stylex.create({
   light: { color: grasp.backdropToneLight },
   deep: { color: grasp.backdropToneDeep },
   mint: { color: grasp.backdropToneMint },
@@ -256,7 +256,7 @@ const Canvas = ({
         isSand(backdrop) && styles.sand,
         isScene(backdrop) && styles.crisp,
         isDither(backdrop) && styles.dithered,
-        isDither(backdrop) && tones[tone]
+        isDither(backdrop) && toneColours[tone]
       )}
     />
   );
@@ -265,7 +265,7 @@ const Canvas = ({
 /** The look's still, in the first HTML: a dither's glow in its own tone; a scene and sand have none. */
 // A scene has no still: its canvas is not opaque where it dims round its words, and a picture
 // under it would show through there, below the words' 4.5:1 (measured 2.56:1 on Aurora).
-const Still = ({ look }: { look: BackdropLook }) => {
+export const Still = ({ look }: { look: BackdropLook }) => {
   if (isDither(look.backdrop)) {
     return (
       <span
@@ -275,7 +275,7 @@ const Still = ({ look }: { look: BackdropLook }) => {
           styles.still,
           styles.stillDither,
           styles.dithered,
-          tones[look.tone]
+          toneColours[look.tone]
         )}
       />
     );
