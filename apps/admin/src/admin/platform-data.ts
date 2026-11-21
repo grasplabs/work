@@ -8,15 +8,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { and, desc, inArray, ne } from "drizzle-orm";
 
-import { clientGrid } from "../clients/grid.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { auditEvents } from "../db/schema.ts";
 import type { PromotionEvent } from "../rollout/channels.ts";
 import { channelsProgress } from "../rollout/progress.ts";
 import type { ChannelProgress } from "../rollout/progress.ts";
-import { platformCounts } from "./platform.ts";
-import type { PlatformCounts } from "./platform.ts";
 
 /**
  * What someone at Grasp does to the platform by hand, as the admin's
@@ -118,13 +115,4 @@ export const fetchChannels = createServerFn({ method: "GET" }).handler(
     const { channels } = await channelsProgress(env);
     return channels;
   }
-);
-
-/** What the admin's sidebar says beside Platform (`platformCounts`). */
-export const platformSidebar = async (envOf: Env): Promise<PlatformCounts> =>
-  platformCounts(await clientGrid(envOf));
-
-/** What the admin's sidebar says beside Platform. */
-export const fetchPlatformSidebar = createServerFn({ method: "GET" }).handler(
-  async () => await platformSidebar(env)
 );
