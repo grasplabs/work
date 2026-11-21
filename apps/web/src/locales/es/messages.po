@@ -4096,13 +4096,11 @@ msgstr "No se puede mostrar ahora."
 msgid "Can't offer Run: {unread}"
 msgstr "No se puede ofrecer Ejecutar: {unread}"
 
-#: src/agents/agent-documents.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-own-link.tsx
-#: src/apps/app-remove.tsx
 #: src/apps/app-reset.tsx
 #: src/apps/app-status.tsx
 #: src/apps/app-webhooks.tsx
@@ -4111,55 +4109,28 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/apps/release-controls.tsx
-#: src/apps/reset-test-data.tsx
-#: src/apps/resource-bindings.tsx
-#: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
-#: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
-#: src/chat/delete-chat-dialog.tsx
-#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/decision-confirmation.tsx
-#: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
-#: src/drafts/sharing.tsx
-#: src/frame/leave-confirm.tsx
 #: src/frame/part-words.tsx
-#: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
-#: src/interview/transcript.tsx
-#: src/link-confirmation.tsx
-#: src/onboarding/document-drop.tsx
-#: src/onboarding/forget-kickoff.tsx
-#: src/onboarding/forget-teams.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-people.tsx
-#: src/projects/project-view.tsx
-#: src/routes/_shell.settings.members.tsx
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
-#: src/settings/chat-accounts.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
-#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 #: src/settings/org-card.tsx
-#: src/settings/staff-access.tsx
-#: src/settings/stephen-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/workflows/delete-workflow.tsx
-#: src/workflows/files-and-apps.tsx
-#: src/workflows/kept-state.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Cancel"
 msgstr "Cancelar"
@@ -16884,6 +16855,10 @@ msgstr "Paso"
 msgctxt "what the Brain remembers about something"
 msgid "Step"
 msgstr "Paso"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Step {step}"
+msgstr "Paso {step}"
 
 #: src/frame/part-words.tsx
 msgid "Step {step} of {total}"
