@@ -11,6 +11,7 @@
  * operation as that runner and releases the client when it's done,
  * whether it worked or not.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";

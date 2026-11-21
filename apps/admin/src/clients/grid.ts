@@ -12,6 +12,7 @@
  * shows as unknown, and is read again the next time: only an answer with
  * nothing unknown in it is kept. Nothing live fails the grid.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
 import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";

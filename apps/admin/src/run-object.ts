@@ -4,6 +4,7 @@
  * definition it was started under; an unknown name runs nothing, and
  * the engine fails the run.
  */
+import "@tanstack/react-start/server-only";
 import type {
   DefinitionIdentity,
   WorkflowDefinition,

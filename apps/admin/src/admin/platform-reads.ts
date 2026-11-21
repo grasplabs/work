@@ -4,6 +4,7 @@
  * promotion history (src/rollout/progress.ts), and what staff did
  * (`staffEvents`). All of it is what the admin recorded.
  */
+import "@tanstack/react-start/server-only";
 import { and, desc, inArray, ne } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";

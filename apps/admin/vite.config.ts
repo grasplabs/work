@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { cloudflare } from "@cloudflare/vite-plugin";
 import type { PluginConfig } from "@cloudflare/vite-plugin";
 import babel from "@rolldown/plugin-babel";
@@ -6,6 +8,8 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { bindings } from "cf/config";
 import { defineConfig } from "vite-plus";
+
+import { serverOnlyCheck } from "./server-only-check.ts";
 
 /**
  * The build the admin's pages run, in the errors they report
@@ -25,14 +29,20 @@ export const adminDefine = {
 export const adminPlugins = (worker: PluginConfig = {}) => [
   cloudflare({ viteEnvironment: { name: "ssr" }, ...worker }),
   // The browser's build fails on anything of the Worker's that would reach
-  // it: its bindings, its database and the queries over it. A server
-  // function's own body is the server's alone, and never counts.
+  // it: a module marked server-only (`import
+  // "@tanstack/react-start/server-only"`) whose code survives into it, its
+  // bindings, its database, and test helpers. A server function's own body
+  // is the server's alone, and never counts. Every module the browser
+  // doesn't load must be marked (server-only-check.ts).
   tanstackStart({
     importProtection: {
       behavior: "error",
       client: {
         specifiers: ["cloudflare:workers", "drizzle-orm", /^drizzle-orm\//u],
-        files: ["**/src/db/**"],
+        // Start's own default (`*.server.*`) as well, which a list of
+        // files would otherwise replace; and the tests' helpers, never the
+        // app's.
+        files: ["**/*.server.*", "**/src/db/**", "test/**"],
       },
     },
   }),
@@ -42,6 +52,7 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
   babel({ presets: [reactCompilerPreset({ panicThreshold: "all_errors" })] }),
   tailwindcss(),
   { name: "grasp-admin-build", config: () => ({ define: adminDefine }) },
+  serverOnlyCheck(path.join(import.meta.dirname, "src")),
 ];
 
 /**

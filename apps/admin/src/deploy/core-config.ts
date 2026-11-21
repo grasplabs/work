@@ -8,6 +8,7 @@
  * the check every deploy makes of the config it is about to set before it
  * changes anything (`checkDeployedConfig`).
  */
+import "@tanstack/react-start/server-only";
 import {
   signInConfigSchema,
   staffWindowMaxMs,

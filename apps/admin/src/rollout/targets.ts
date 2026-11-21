@@ -4,6 +4,7 @@
  * it runs now, as a deploy, an apply and provisioning read them. Apart
  * from the reconciler, so the hosting code imports it without it.
  */
+import "@tanstack/react-start/server-only";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 

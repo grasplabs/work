@@ -3,6 +3,7 @@
  * scripts (with their static assets and secrets), reading what is live,
  * and applying D1 migrations.
  */
+import "@tanstack/react-start/server-only";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";

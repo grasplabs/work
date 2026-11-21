@@ -1,4 +1,5 @@
 /** Reading clients and their provisioning, as the client pages show them. */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";

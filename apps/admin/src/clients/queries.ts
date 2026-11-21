@@ -1,4 +1,5 @@
 /** Reading a client's settings and history, as its page shows them. */
+import "@tanstack/react-start/server-only";
 import { desc, eq, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";

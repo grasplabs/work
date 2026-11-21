@@ -11,6 +11,7 @@
  * has the steps of its install connecting instead, which arrive with
  * GRA-1291: until then they wait, and say so.
  */
+import "@tanstack/react-start/server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 

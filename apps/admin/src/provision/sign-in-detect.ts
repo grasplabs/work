@@ -14,6 +14,7 @@
  * that doesn't answer, or answers otherwise, finds nothing: staff choose
  * by hand then. Nothing here is a secret; only the domain leaves.
  */
+import "@tanstack/react-start/server-only";
 import { z } from "zod";
 
 /** What was found of a domain's sign-in. */

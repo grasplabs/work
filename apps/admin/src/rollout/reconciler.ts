@@ -30,6 +30,7 @@
  * the next is read; no tick holds more than a page in memory or in a
  * statement.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import { and, asc, count, eq, gt, lte, sql } from "drizzle-orm";
 

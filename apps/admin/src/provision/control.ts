@@ -4,6 +4,7 @@
  * from its Setup (src/hosting/placement.ts), in its stage's one shared
  * destination. No account is adopted or created for a client.
  */
+import "@tanstack/react-start/server-only";
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import { newClientIdSchema } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";

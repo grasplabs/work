@@ -11,6 +11,7 @@
  * (`configChangedAt`), so its Setup says a change waits until staff
  * apply it, or a deploy of its next release carries it.
  */
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";

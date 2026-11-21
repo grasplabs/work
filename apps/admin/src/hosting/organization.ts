@@ -5,6 +5,7 @@
  * is provisioned: every database, bucket and Durable Object is created in
  * its jurisdiction and can't move, and an on-prem install is its own.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 

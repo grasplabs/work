@@ -17,6 +17,7 @@
  *
  * A channel's history is its `channel.promote` events in the audit log.
  */
+import "@tanstack/react-start/server-only";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
   and,
