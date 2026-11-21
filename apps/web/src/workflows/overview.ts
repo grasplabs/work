@@ -22,7 +22,6 @@ import type { Brand } from "../grasp/brand-icon/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows } from "./reads.ts";
-import { summaryOf, triggerDescription } from "./trigger-description.ts";
 
 // What the Workflows page shows (workflow-rows.tsx): every workflow the
 // person has a role in, each in the phase it stands in, with the tools it
@@ -224,18 +223,26 @@ export const readTools = async (
   return read.state === "ready" ? read.data : new Map();
 };
 
-/** What starts a workflow's runs, as its row's route begins: its kind, in words. */
+/** What starts a workflow's runs, as its row's route begins. */
 export interface RowTrigger {
   kind: TriggerKind;
-  words: string;
+  /** An email trigger's address, the part before the `@`; null for any other kind. */
+  address: string | null;
+  /** When a schedule trigger next starts a run; null for any other kind. */
+  nextAt: string | null;
 }
 
 /** What starts each workflow, by the workflow's ID: its enabled triggers, oldest first. */
 export type TriggersByWorkflow = ReadonlyMap<string, readonly RowTrigger[]>;
 
-const rowTrigger = (trigger: WorkflowTrigger): RowTrigger => ({
-  kind: trigger.kind,
-  words: triggerDescription(summaryOf(trigger)),
+const rowTrigger = ({
+  kind,
+  address,
+  nextAt,
+}: WorkflowTrigger): RowTrigger => ({
+  kind,
+  address,
+  nextAt,
 });
 
 /**

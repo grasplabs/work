@@ -70,8 +70,8 @@ const triggers: TriggersByWorkflow = new Map([
   [
     "wf-archive",
     [
-      { kind: "schedule", words: "On the schedule 0 9 * * 1, in UTC" },
-      { kind: "email", words: "When an email arrives for archive" },
+      { kind: "email", address: "archive", nextAt: null },
+      { kind: "schedule", address: null, nextAt: "2026-11-23T08:00:00.000Z" },
     ],
   ],
   ["wf-expenses", []],
@@ -179,7 +179,7 @@ describe("the Workflows page's rows", () => {
     await shown();
     const archive = rowOf("Archive");
 
-    expect(archive.textContent).toContain("On a schedule, and 1 more");
+    expect(archive.textContent).toContain("Mail to archive, and 1 more");
     expect(
       archive
         .querySelector('[data-slot="brand-icon-group"]')

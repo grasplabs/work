@@ -10711,6 +10711,10 @@ msgstr "El correo aún no está disponible en este alojamiento"
 msgid "Mail that asks for something."
 msgstr "Correos que piden algo."
 
+#: src/workflows/workflow-rows.tsx
+msgid "Mail to {address}"
+msgstr "Correo a {address}"
+
 #: src/inbox/items.ts
 msgid "Mailbox"
 msgstr "Buzón"
@@ -11508,6 +11512,10 @@ msgstr "Más recientes"
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Siguiente"
+
+#: src/workflows/workflow-rows.tsx
+msgid "Next {when}"
+msgstr "Próxima {when}"
 
 #: src/frame/part-words.tsx
 msgid "Next match"

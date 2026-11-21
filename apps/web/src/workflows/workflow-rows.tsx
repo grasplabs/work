@@ -1,5 +1,5 @@
 import type { TriggerKind } from "@grasp-os/shared/workflow-triggers";
-import type { MessageDescriptor } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -91,6 +91,29 @@ const triggerIcons: Readonly<Record<TriggerKind, IconData>> = {
   webhook: LinkIcon,
 };
 
+/**
+ * What starts a workflow, in the few words its route has room for: the
+ * address an email trigger receives mail at, when it was given a name
+ * ("Mail to invoices"), and when a schedule next starts a run ("Next Mon
+ * 07:00"); otherwise only its kind (`kind`, in words).
+ */
+const startWords = (trigger: RowTrigger, kind: string, i18n: I18n): string => {
+  const { address, nextAt } = trigger;
+  // One core made up (`trigger-` and random bits) says nothing to a reader.
+  if (address !== null && !address.startsWith("trigger-")) {
+    return i18n._(msg`Mail to ${address}`);
+  }
+  if (nextAt !== null) {
+    const when = new Intl.DateTimeFormat(i18n.locale, {
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(nextAt));
+    return i18n._(msg`Next ${when}`);
+  }
+  return kind;
+};
+
 /** The tools a route shows before it says how many more. */
 const toolsShown = 4;
 
@@ -161,7 +184,7 @@ const Route = ({
   const start =
     first === undefined
       ? t({ message: "By hand", context: "what starts a workflow" })
-      : i18n._(triggerNames[first.kind]);
+      : startWords(first, i18n._(triggerNames[first.kind]), i18n);
   return (
     <span {...stylex.props(styles.route)}>
       {triggers === undefined ? null : (
