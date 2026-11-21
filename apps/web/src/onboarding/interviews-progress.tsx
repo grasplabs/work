@@ -368,7 +368,7 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
     await run(async (session) => {
       await session.onboarding.linksTaken(people);
     });
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   const freshCount = fresh.length;
   const outCount = out.length;

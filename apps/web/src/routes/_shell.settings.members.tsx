@@ -107,9 +107,6 @@ const styles = stylex.create({
   search: { width: grasp.frameSearch },
   notice: { padding: grasp.space4 },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
-  // A dialog opened from a row is drawn inside the row's end-aligned cell
-  // and would inherit its alignment: its words start where they should.
-  dialog: { display: "contents", textAlign: "start" },
   // A suspended member: their face and name, and why under them.
   person: { display: "flex", flexDirection: "column", gap: grasp.space1 },
   // The roles compared: each name over what it may do.
@@ -242,35 +239,33 @@ const MemberActions = ({
             </SelectTrigger>
             <SelectContent />
           </Select>
-          <div {...stylex.props(styles.dialog)}>
-            <AlertDialog
-              onOpenChange={(open) => {
-                if (!open) {
-                  setAsking(undefined);
-                }
-              }}
-              open={asking === "promote"}
-            >
-              <AlertDialogContent>
-                <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
-                </AlertDialogDescription>
-                <AlertDialogFooter>
-                  <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-                  <AlertDialogAction
-                    action={async () => {
-                      await setRole("admin");
-                    }}
-                    failedLabel={t`Not changed`}
-                    variant="ink"
-                  >
-                    {t`Make admin`}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!open) {
+                setAsking(undefined);
+              }
+            }}
+            open={asking === "promote"}
+          >
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={async () => {
+                    await setRole("admin");
+                  }}
+                  failedLabel={t`Not changed`}
+                  variant="ink"
+                >
+                  {t`Make admin`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       ) : (
         <>
@@ -316,34 +311,32 @@ const MemberActions = ({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <div {...stylex.props(styles.dialog)}>
-            <AlertDialog
-              onOpenChange={(open) => {
-                if (!open) {
-                  setAsking(undefined);
-                }
-              }}
-              open={asking === "remove"}
-            >
-              <AlertDialogContent>
-                <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
-                </AlertDialogDescription>
-                <AlertDialogFooter>
-                  <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-                  <AlertDialogAction
-                    action={remove}
-                    failedLabel={t`Not removed`}
-                    variant="danger"
-                    workingLabel={t`Removing`}
-                  >
-                    {t`Remove`}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!open) {
+                setAsking(undefined);
+              }
+            }}
+            open={asking === "remove"}
+          >
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={remove}
+                  failedLabel={t`Not removed`}
+                  variant="danger"
+                  workingLabel={t`Removing`}
+                >
+                  {t`Remove`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       )}
     </div>

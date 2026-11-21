@@ -62,6 +62,17 @@ export const drawerStyles = stylex.create({
     boxShadow: grasp.liftHigh,
     cornerShape: grasp.cornerShape,
     fontFamily: grasp.fontSans,
+    // A panel that opens inside its trigger's parent (it is not portalled) would take that parent's
+    // text: an end-aligned table cell would line its words up on the right. It sets its own, and
+    // keeps only the direction, which follows the page.
+    textAlign: "start",
+    whiteSpace: "normal",
+    fontWeight: "normal",
+    fontStyle: "normal",
+    textTransform: "none",
+    letterSpacing: "normal",
+    wordSpacing: "normal",
+    textIndent: 0,
     outline: "none",
     // Along the bottom: as wide as the window up to drawer-width, in the middle; as tall as its
     // content up to drawer-height. Along a side: the window's height, sheet-width wide, and on a

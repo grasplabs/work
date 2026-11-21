@@ -105,7 +105,7 @@ const useSaveChoices = () => {
     if (kept === undefined) {
       return false;
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     return true;
   };
   return { save, busy, failure };

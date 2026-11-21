@@ -363,7 +363,7 @@ const connectProps = ({ data, onward }: StepProps) => ({
 const useRefresh = (): (() => Promise<void>) => {
   const router = useRouter();
   return async () => {
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
 };
 

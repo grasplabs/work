@@ -98,8 +98,7 @@ const styles = stylex.create({
 /**
  * Each process's parts, on Lucide's grid of 24: where the process ends
  * (cash in the till, a paid receipt, a solved message, a checked shield,
- * a report's bars, a person who comes and goes). Their parts move as
- * `icon-moves.css` says, by their order here: keep the two together.
+ * a report's bars, a person who comes and goes).
  */
 const Paths = ({ process }: { process: BusinessProcess }) => {
   switch (process) {
@@ -167,7 +166,6 @@ export const ProcessGlyph = ({ process }: { process: BusinessProcess }) => (
   <svg
     aria-hidden="true"
     {...stylex.props(styles.glyph)}
-    data-moves={process}
     fill="none"
     stroke="currentColor"
     strokeLinecap="round"

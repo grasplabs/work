@@ -1,6 +1,5 @@
 import type { Guest } from "@grasp-os/shared/members";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -28,12 +27,6 @@ import { copyEmail } from "./invitations.tsx";
 // guest is someone outside the company invited by address, who reaches
 // nothing but what is shared with them. Their email to copy, and a way to
 // remove them, which signs them out everywhere.
-
-const styles = stylex.create({
-  // The dialog is drawn inside the row's end-aligned cell and would inherit
-  // its alignment: its words start where they should.
-  dialog: { display: "contents", textAlign: "start" },
-});
 
 export const GuestActions = ({ guest }: { guest: Guest }) => {
   const { t } = useLingui();
@@ -88,26 +81,24 @@ export const GuestActions = ({ guest }: { guest: Guest }) => {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <div {...stylex.props(styles.dialog)}>
-        <AlertDialog onOpenChange={setAsking} open={asking}>
-          <AlertDialogContent>
-            <AlertDialogTitle>{t`Remove ${email}?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t`They are signed out everywhere and cannot sign in again.`}
-            </AlertDialogDescription>
-            <AlertDialogFooter>
-              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-              <AlertDialogAction
-                action={remove}
-                failedLabel={t`Not removed`}
-                variant="danger"
-              >
-                {t`Remove`}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
+      <AlertDialog onOpenChange={setAsking} open={asking}>
+        <AlertDialogContent>
+          <AlertDialogTitle>{t`Remove ${email}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`They are signed out everywhere and cannot sign in again.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={remove}
+              failedLabel={t`Not removed`}
+              variant="danger"
+            >
+              {t`Remove`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

@@ -146,7 +146,7 @@ export const HrLeads = ({
     const found = await readHrRoster(core, connecting, noTeam, roster);
     setBusy(false);
     if (connecting !== null) {
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
     if (typeof found === "string") {
       if (found === "inactive") {

@@ -52,6 +52,8 @@ test("the dot brain holds still for people who ask for less motion", async ({
 }) => {
   const { admin } = peopleIn("dotBrain");
   const page = await pageOf(admin);
+  // A phone's screen, where the step leaves the brain its room.
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/setup?step=sources");
   const brain = brainOf(page);
