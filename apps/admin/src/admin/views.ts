@@ -14,7 +14,7 @@ import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 import type { Billing } from "../billing/billing.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import type { Channel } from "../db/schema.ts";
+import type { Channel } from "../rollout/channel-ids.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import { formatDate } from "./words.ts";
 

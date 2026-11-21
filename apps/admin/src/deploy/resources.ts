@@ -4,6 +4,7 @@
  * it sends mail: what provisioning (src/hosting/operation.ts) and Setup
  * read of a release.
  */
+import "@tanstack/react-start/server-only";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 
 import { DeployError } from "./errors.ts";

@@ -4,6 +4,7 @@
  * hasn't verified itself: every request must carry an Access JWT signed by
  * the team's keys, for the admin's application, or it is refused.
  */
+import "@tanstack/react-start/server-only";
 import { loopbackHosts } from "@grasp-os/shared/router";
 import { createLocalJWKSet, errors, jwtVerify } from "jose";
 import type { JSONWebKeySet } from "jose";
@@ -165,8 +166,11 @@ const verifiedStaff = async (
   }
 };
 
-/** Where TanStack Start serves server functions (its default base). */
-const serverFunctionBase = "/_serverFn";
+/**
+ * Where TanStack Start serves server functions (its default base). Start
+ * guards these against cross-site calls itself (src/start.ts).
+ */
+const serverFunctionBase = "/_serverFn/";
 
 /** Where the admin's MCP is served (src/admin/mcp.ts). */
 const mcpPath = "/mcp";
@@ -188,25 +192,19 @@ const isMcpRequest = (request: Request, url: URL): boolean =>
 
 /**
  * Whether a request could be a cross-site forgery (CSRF), on top of
- * Access's SameSite cookie:
- * - a non-GET request whose `Origin` isn't the admin's own (a missing
- *   `Origin` counts as foreign; browsers send it on every non-GET request);
- * - a call to a server function, whatever its method, without the
- *   `x-tsr-serverFn: true` header TanStack's client always sends. A server
- *   function can be a GET, which a link or an image on another site could
- *   otherwise run, and a cross-site request can't set that header without a
- *   CORS preflight, which the admin never allows.
+ * Access's SameSite cookie: a non-GET request whose `Origin` isn't the
+ * admin's own (a missing `Origin` counts as foreign; browsers send it on
+ * every non-GET request), other than an MCP client's call. Server
+ * functions are left to Start's own check (src/start.ts), which refuses
+ * any call, GET included, a page elsewhere could make.
  */
 const isForgeable = (request: Request): boolean => {
   const url = new URL(request.url);
-  if (isMcpRequest(request, url)) {
-    return false;
-  }
   if (
-    url.pathname.startsWith(serverFunctionBase) &&
-    request.headers.get("x-tsr-serverfn") !== "true"
+    url.pathname.startsWith(serverFunctionBase) ||
+    isMcpRequest(request, url)
   ) {
-    return true;
+    return false;
   }
   return (
     !safeMethods.has(request.method) &&

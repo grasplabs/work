@@ -6,7 +6,6 @@ import { OffboardedPage, OrganizationPage } from "../../admin/organization.tsx";
 
 const Organization = () => {
   const loaded = Route.useLoaderData();
-  const { reads } = Route.useRouteContext();
   if (loaded.state === "offboarded") {
     return <OffboardedPage client={loaded.client} />;
   }
@@ -16,7 +15,6 @@ const Organization = () => {
       client={loaded.client}
       key={loaded.client.id}
       read={loaded.read}
-      reads={reads}
     />
   );
 };
@@ -36,10 +34,12 @@ const Organization = () => {
  * sections: a client may be named `platform`.
  */
 export const Route = createFileRoute("/organizations/$clientId")({
-  loader: async ({ params, parentMatchPromise, context, cause, preload }) => {
+  loader: async ({ params, parentMatchPromise, context, preload }) => {
     const { loaderData } = await parentMatchPromise;
     const client = loaderData?.clients.find(({ id }) => id === params.clientId);
     if (loaderData === undefined || client === undefined) {
+      // Gone, as one deleted while its page was open: nothing of it is kept.
+      context.reads.forget(params.clientId);
       throw notFound();
     }
     if (client.status === "offboarded") {
@@ -50,8 +50,9 @@ export const Route = createFileRoute("/organizations/$clientId")({
       reads: context.reads,
       client,
       admins: loaderData.admins,
-      // Run again on the page it is on: its answer went stale, or staff asked anew.
-      again: cause === "stay",
+      adminsAsked: loaderData.adminsAsked,
+      // Loaded while the tab shows it: its core is asked anew.
+      onIt: context.shown() === client.id,
       preload,
     });
     return { state: "open" as const, client, read };

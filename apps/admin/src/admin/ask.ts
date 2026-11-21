@@ -18,6 +18,7 @@
  * - The document or a question steering the model to do something: it has
  *   no tools; all it can do is answer in words, which the page shows.
  */
+import "@tanstack/react-start/server-only";
 import type {
   Api,
   AssistantMessage,

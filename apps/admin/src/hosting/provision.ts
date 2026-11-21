@@ -17,6 +17,7 @@
  * jurisdiction the inventory records (the organization's) is used: one
  * anywhere else stops the run (`resource_outside_jurisdiction`).
  */
+import "@tanstack/react-start/server-only";
 import { and, eq, isNull } from "drizzle-orm";
 
 import {

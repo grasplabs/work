@@ -1,4 +1,4 @@
-import type { Channel } from "../db/schema.ts";
+import type { Channel } from "./channel-ids.ts";
 
 /** A release channel, as the admin names it (src/rollout/channels.ts). */
 export const channelWords: Readonly<Record<Channel, string>> = {

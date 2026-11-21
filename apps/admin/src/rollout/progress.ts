@@ -4,13 +4,15 @@
  * release, how many of its clients run it, each client's state, and the
  * moves it may make. Nothing here is stored.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { channelIds, clients } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
+import { clients } from "../db/schema.ts";
 import { listDeployableReleases } from "../releases/queries.ts";
+import { channelIds } from "./channel-ids.ts";
+import type { Channel } from "./channel-ids.ts";
 import { channelsOfReleases, promotionHistory } from "./channels.ts";
 import type { PromotionEvent } from "./channels.ts";
 import { failsChannel, promotableReleases, stateOf } from "./desired.ts";

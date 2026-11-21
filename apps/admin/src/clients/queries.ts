@@ -1,11 +1,12 @@
 /** Reading a client's settings and history, as its page shows them. */
+import "@tanstack/react-start/server-only";
 import { desc, eq, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { auditEvents, clients } from "../db/schema.ts";
-import { clientSignInSchema } from "../deploy/core-config.ts";
-import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { isConfigPending } from "../rollout/targets.ts";
+import { clientSignInSchema } from "./sign-in-schema.ts";
+import type { ClientSignInRecord } from "./sign-in-schema.ts";
 import { teamsBotOf } from "./teams-bot.ts";
 import type { TeamsBot } from "./teams-bot.ts";
 

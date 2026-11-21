@@ -7,6 +7,7 @@
  * Read only: there is no cap on these features; staff watch what they
  * cost here instead.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import {

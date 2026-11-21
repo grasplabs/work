@@ -13,10 +13,10 @@ import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import type { CoreState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admins-5c1e70";
 const cloudflare = mockCloudflareApi(token);

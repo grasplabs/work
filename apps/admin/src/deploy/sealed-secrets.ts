@@ -22,6 +22,7 @@
  * would change every client's derived ones: a deploy then stops with
  * `sealed_secret_unreadable` until staff set the secret again.
  */
+import "@tanstack/react-start/server-only";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { and, eq, inArray } from "drizzle-orm";
 

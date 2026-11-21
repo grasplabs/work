@@ -4,6 +4,8 @@
  * token that reaches client accounts lives in Secrets Store, never here
  * (threat model R17).
  */
+
+import "@tanstack/react-start/server-only";
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import {
   index,
@@ -14,15 +16,9 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
+import { channelIds } from "../rollout/channel-ids.ts";
 
-/**
- * The release channels (src/rollout/channels.ts): every client follows
- * one, and each points at one release. Every new release goes to Edge on
- * its own; staff promote one to Beta or Stable.
- */
-export const channelIds = ["edge", "beta", "stable"] as const;
-export type Channel = (typeof channelIds)[number];
+const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
@@ -169,7 +165,7 @@ export const clients = sqliteTable(
     createdBy: text("created_by"),
     /**
      * How its people sign in, as staff gave it when provisioning: JSON
-     * (`clientSignInSchema`, src/deploy/core-config.ts), the client's own
+     * (`clientSignInSchema`, src/clients/sign-in-schema.ts), the client's own
      * Entra tenant and/or Google Workspace, its email domains and first
      * admins. Every deploy makes core's `SIGN_IN` from it; null for a
      * client without one, whose core gets no `SIGN_IN`.

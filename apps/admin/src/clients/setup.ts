@@ -7,6 +7,7 @@
  * admin itself recorded in D1, read with the client pages' own queries
  * where they have one; nothing here asks its account or its core.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
@@ -19,7 +20,7 @@ import {
 } from "../db/schema.ts";
 import { signInApps } from "../deploy/context.ts";
 import { staffWindowOf } from "../deploy/core-config.ts";
-import type { ClientSignInRecord, StaffWindow } from "../deploy/core-config.ts";
+import type { StaffWindow } from "../deploy/core-config.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { bucketNames, databaseNames } from "../deploy/resources.ts";
 import { getProvisioning } from "../provision/queries.ts";
@@ -28,6 +29,7 @@ import { listReleases } from "../releases/queries.ts";
 import { targetReleaseOf } from "../rollout/targets.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
+import type { ClientSignInRecord } from "./sign-in-schema.ts";
 import { daysUntil } from "./teams-bot.ts";
 import type { TeamsBot } from "./teams-bot.ts";
 import type { WatchedSignals } from "./watch-signals.ts";

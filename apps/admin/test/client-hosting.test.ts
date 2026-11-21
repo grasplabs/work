@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { fetchClientGrid } from "../src/clients/functions.ts";
 import {
   auditEvents,
   channels,
@@ -18,6 +19,7 @@ import {
   deletePlacedClientFn,
   discardClientFn,
   fetchClientHosting,
+  fetchOffboardedClients,
   offboardPlacedClientFn,
   placeAndProvisionFn,
 } from "../src/hosting/functions.ts";
@@ -25,6 +27,7 @@ import {
   allocateClientResources,
   placeClient,
 } from "../src/hosting/inventory.ts";
+import type { OffboardedClient } from "../src/hosting/offboarding.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
 import { pinClient } from "../src/rollout/channels.ts";
 import { pinClientFn } from "../src/rollout/functions.ts";
@@ -34,10 +37,11 @@ import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { client, db, destination, release, staff } from "./hosting.ts";
 import { ownId } from "./own-destination.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
 import type { Starts } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { setupPage } from "./setup-page.ts";
 
 const token = "test-deployer-token-hosting-3c81d2";
 mockCloudflareApi(token);
@@ -67,36 +71,12 @@ const importedRelease = async (): Promise<string> => {
   return manifest.releaseId;
 };
 
-/** What Platform's Offboarded page `html` shows of client `clientId` alone. */
-const offboardedOf = (html: string, clientId: string): string => {
-  const at = html.indexOf(`(${clientId})`);
-  if (at === -1) {
-    return "";
-  }
-  // Up to the next client's item.
-  const next = html.indexOf("rounded-xl", at);
-  return html.slice(at, next === -1 ? undefined : next);
-};
-
-/** Whether the button saying `label` in `html` is off. */
-const buttonOff = (html: string, label: string): boolean | null => {
-  const at = html.indexOf(`${label}</button>`);
-  if (at === -1) {
-    return null;
-  }
-  const tag = html.slice(html.lastIndexOf("<button", at), at);
-  return tag.includes("disabled");
-};
-
-/** Whether the box confirming no export was made, in `html`, is off. */
-const confirmOff = (html: string): boolean | null => {
-  const at = html.indexOf('id="no-export-');
-  if (at === -1) {
-    return null;
-  }
-  const tag = html.slice(html.lastIndexOf("<", at), html.indexOf(">", at));
-  return tag.includes("disabled");
-};
+/** Client `clientId` among the offboarded clients Platform lists, if it is. */
+const offboardedOf = (
+  listed: readonly OffboardedClient[],
+  clientId: string
+): OffboardedClient | undefined =>
+  listed.find((each) => each.clientId === clientId);
 
 /** Client `clientId`'s hosting, as its page reads it. */
 const hostingOf = async (clientId: string) => {
@@ -418,7 +398,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     await db.delete(clientRuns).where(eq(clientRuns.clientId, clientId));
 
     const view = await hostingOf(clientId);
-    const { html } = await page(`/organizations/${clientId}/setup`, caller);
+    const html = (await setupPage(clientId, "status", caller)) ?? "";
 
     expect({
       run: view.run,
@@ -582,10 +562,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       .set({ status: "active" })
       .where(eq(clients.id, clientId));
 
-    const { status, html } = await page(
-      `/organizations/${clientId}/setup?tab=releases`,
-      caller
-    );
+    const html = (await setupPage(clientId, "releases", caller)) ?? "";
     const refused = await callServerFn(
       pinClientFn,
       { clientId, releaseId: later },
@@ -598,12 +575,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       .get();
 
     expect({
-      status,
       offer: html.includes("Pin it to"),
       refused: refused.includes("answered 403"),
       pinned,
     }).toStrictEqual({
-      status: 200,
       offer: true,
       refused: true,
       pinned: { pinnedReleaseId: null },
@@ -625,10 +600,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       .set({ status: "active" })
       .where(eq(clients.id, clientId));
 
-    const live = await page(
-      `/organizations/${clientId}/setup?tab=settings`,
-      caller
-    );
+    const live = (await setupPage(clientId, "settings", caller)) ?? "";
     const refused = await Promise.all([
       callServerFn(offboardPlacedClientFn, { clientId }, { email: null }).then(
         () => "answered",
@@ -651,40 +623,30 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       { email: caller }
     );
     // Offboarded, its page says so and nothing more, pointing to Platform's
-    // Offboarded page, where its deletion is.
-    const gone = await page(
-      `/organizations/${clientId}/setup?tab=settings`,
-      caller
+    // Offboarded page (src/admin/sections.test.tsx), where its deletion is
+    // offered, off until its retention is over (src/admin/platform.test.tsx).
+    const grid = await callServerFn(fetchClientGrid, undefined, {
+      email: caller,
+    });
+    const listed = offboardedOf(
+      await callServerFn(fetchOffboardedClients, undefined, { email: caller }),
+      clientId
     );
-    const after = await page("/platform/offboarded", caller);
-    const listed = offboardedOf(after.html, clientId);
 
     expect({
-      offer: live.html.includes("Offboard it"),
+      offer: live.includes("Offboard it"),
       refused: refused.map((answer) => answer.includes("answered 403")),
       offboarded,
       early,
-      gone: {
-        status: gone.status,
-        said: gone.html.includes("was offboarded"),
-        toOffboarded: gone.html.includes('href="/platform/offboarded"'),
-        offer: gone.html.includes("Offboard it"),
-      },
-      // Offered, but off until its retention is over, saying from when.
-      deleteOff: buttonOff(listed, "Delete its resources"),
-      confirm: confirmOff(listed),
-      from: listed.includes("It can be deleted from"),
-      kept: listed !== "",
+      gone: grid.find(({ id }) => id === clientId)?.status,
+      listed: listed === undefined ? null : { deletable: listed.deletable },
     }).toStrictEqual({
       offer: true,
       refused: [true, true],
       offboarded: { refused: null, deletion: null },
       early: { refused: "retention_running", deletion: null },
-      gone: { status: 200, said: true, toOffboarded: true, offer: false },
-      deleteOff: true,
-      confirm: true,
-      from: true,
-      kept: true,
+      gone: "offboarded",
+      listed: { deletable: false },
     });
   });
 
@@ -704,12 +666,13 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       })
     );
 
-    const { status, html } = await page("/platform/offboarded", caller);
+    const listed = await callServerFn(fetchOffboardedClients, undefined, {
+      email: caller,
+    });
 
-    expect({
-      status,
-      listed: ids.filter((id) => offboardedOf(html, id) !== "").length,
-    }).toStrictEqual({ status: 200, listed: 101 });
+    expect(
+      ids.filter((id) => offboardedOf(listed, id) !== undefined)
+    ).toHaveLength(101);
   });
 
   it("offers deleting an offboarded client's resources once its retention is over, and says on every read which bucket is still emptying", async () => {
@@ -753,8 +716,14 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       detail: JSON.stringify({ role: bucket.role, physicalName: bucket.name }),
     });
 
-    const whileEmptying = await page("/platform/offboarded", caller);
-    const emptying = offboardedOf(whileEmptying.html, clientId);
+    const read = async () =>
+      offboardedOf(
+        await callServerFn(fetchOffboardedClients, undefined, {
+          email: caller,
+        }),
+        clientId
+      );
+    const emptying = await read();
     // Its objects expired, and a later deletion deleted it.
     await db
       .update(clientResources)
@@ -765,21 +734,17 @@ describe("placing a client and provisioning it, through the admin's entry", () =
           eq(clientResources.role, bucket.role)
         )
       );
-    const onceDeleted = await page("/platform/offboarded", caller);
-    const deleted = offboardedOf(onceDeleted.html, clientId);
-    const note = `${bucket.name} still held objects`;
+    const deleted = await read();
 
+    // What Platform's Offboarded page says of each: src/admin/platform.test.tsx.
     expect({
-      // Its button waits only for staff to confirm no export was made.
-      confirm: confirmOff(emptying),
-      waits: emptying.includes("It can be deleted from"),
-      emptying: emptying.includes(note),
-      deleted: deleted.includes(note),
+      deletable: emptying?.deletable,
+      emptying: emptying?.emptying.map(({ physicalName }) => physicalName),
+      deleted: deleted?.emptying.map(({ physicalName }) => physicalName),
     }).toStrictEqual({
-      confirm: false,
-      waits: false,
-      emptying: true,
-      deleted: false,
+      deletable: true,
+      emptying: [bucket.name],
+      deleted: [],
     });
   });
 });

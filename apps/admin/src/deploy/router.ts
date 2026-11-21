@@ -1,3 +1,4 @@
+import "@tanstack/react-start/server-only";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 /**
  * The last steps of a deploy: checking that the client's core runs the
