@@ -93,6 +93,7 @@ import {
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
+import { AgentLook } from "./agent-look.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
@@ -695,15 +696,18 @@ const AgentHead = ({
           ) : null}
         </div>
       }
-      // Beside its name, only what is worth a word: whose it is when it
-      // is the person's own, and that it is off.
+      // Beside its name: whether it works, always (Ruben, 21 November:
+      // with the switch gone it was hard to tell), and whose it is when it
+      // is the person's own.
       aside={
-        own || !on ? (
-          <span {...stylex.props(styles.actions)}>
-            {own ? <Badge>{t`Just for you`}</Badge> : null}
-            {on ? null : <Badge tone="attention">{t`Off`}</Badge>}
-          </span>
-        ) : undefined
+        <span {...stylex.props(styles.actions)}>
+          {on ? (
+            <Badge tone="success">{t`On`}</Badge>
+          ) : (
+            <Badge tone="attention">{t`Off`}</Badge>
+          )}
+          {own ? <Badge>{t`Just for you`}</Badge> : null}
+        </span>
       }
       // What it is for, under its name: the details no longer repeat it.
       description={agent.job === "" ? undefined : agent.job}
@@ -884,6 +888,7 @@ export const AgentPage = ({
             usage={usage}
             wakes={wakes}
           />
+          {first ? null : <AgentLook agent={agent} can={can} save={save} />}
           <RecentActivity usage={usage} wakes={wakes} />
           <ShareAgent agent={agent} can={can} change={change} />
         </div>
@@ -894,6 +899,15 @@ export const AgentPage = ({
             shownTab !== "instructions" && styles.hidden
           )}
         >
+          {/* What it reads first (Ruben, 21 November: documents at the top,
+              for what is worked out of them), then what it is told. */}
+          <AgentDocuments
+            agent={agent}
+            can={can}
+            change={change}
+            documents={documents}
+            editable={editable}
+          />
           {/* No title: the side nav says "Instructions" already. */}
           <SectionCard
             variant="grouped"
@@ -908,6 +922,7 @@ export const AgentPage = ({
             />
           </SectionCard>
           <AgentAppsPanel
+            told={instructions?.text ?? ""}
             agent={agent}
             apps={apps}
             can={can}
@@ -916,13 +931,6 @@ export const AgentPage = ({
             first={first}
             people={people}
             wakes={wakes}
-          />
-          <AgentDocuments
-            agent={agent}
-            can={can}
-            change={change}
-            documents={documents}
-            editable={editable}
           />
         </div>
         <div

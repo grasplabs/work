@@ -9,9 +9,12 @@ import type { CatalogEntry } from "@grasp-os/shared/connect";
 import type { Member } from "@grasp-os/shared/members";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { integrationKey } from "../connections/integrations.ts";
+import { ProviderMark } from "../connections/provider-mark.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
@@ -24,6 +27,7 @@ import {
   EmptyTitle,
 } from "../grasp/empty/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Plus, Sparkles } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemActions,
@@ -31,6 +35,7 @@ import {
   ItemDescription,
   ItemGroup,
   ItemTitle,
+  ItemMedia,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -43,6 +48,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { scoreOf, wordsOf } from "./setup/apps-recommend.ts";
 
 // An agent's apps (core's agent-app-access.ts), on its Instructions part:
 // the apps it may use, which whoever manages it takes off or adds by
@@ -54,10 +60,15 @@ import { useCoreAction } from "../use-core-action.ts";
 // suggests is said under the rows: kinds of work that change or send
 // things only with a press.
 
+/** At most this many apps are suggested. */
+const suggestedMost = 3;
+
 /** An agent's apps and the apps the company offers, as its page reads them. */
 export interface AgentAppsShown {
   apps: readonly AgentApp[] | undefined;
   offered: readonly Offered[];
+  /** The apps connected now, by their catalog id: a suggestion says whether one needs connecting. */
+  connected?: readonly string[];
   /** Who looks: whom a schedule it proposes works for, unless they pick another. */
   userId?: string;
 }
@@ -81,7 +92,10 @@ export const workOutQuietly = async (
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 /** An app the company offers, as the catalog has it. */
-type Offered = Pick<CatalogEntry, "source" | "id" | "name">;
+type Offered = Pick<
+  CatalogEntry,
+  "source" | "id" | "name" | "categories" | "description" | "logo"
+>;
 
 const styles = stylex.create({
   // What working the apps out said: its lines, then a row per thing to press.
@@ -338,12 +352,18 @@ export const AgentApps = ({
   userId,
   people,
   wakes,
+  connected,
+  told,
 }: {
   agent: Agent;
   /** Its apps; undefined where core didn't say. */
   apps: readonly AgentApp[] | undefined;
   /** The apps the company offers, which it can be given. */
   offered: readonly Offered[];
+  /** The apps connected now, by their catalog id. */
+  connected: readonly string[];
+  /** Its instructions as they are saved, which its suggestions read. */
+  told: string;
   /** Whether the person may change it at all. */
   editable: boolean;
   /** Whether they may now: not while a change is on its way to core. */
@@ -383,6 +403,15 @@ export const AgentApps = ({
   const addable = offered.filter(
     ({ source, id }) => !on.has(agentAppOf(source, id))
   );
+  // The apps its job, name and instructions point to and it hasn't got,
+  // the best first (Ruben, 21 November: "you need to connect this").
+  const words = wordsOf(`${agent.name} ${agent.job} ${told}`);
+  const suggested = addable
+    .map((app) => ({ app, score: scoreOf(app, words) }))
+    .filter(({ score }) => score > 0)
+    .toSorted((a, b) => b.score - a.score)
+    .slice(0, suggestedMost)
+    .map(({ app }) => app);
   const set = (app: string, next: boolean): void => {
     void change(async (session) => {
       await session.connections.setAgentApp(agent.id, app, next);
@@ -409,9 +438,10 @@ export const AgentApps = ({
         editable ? (
           <Button
             disabled={!can || busy}
+            icon={Sparkles}
             onClick={workOut}
             size="sm"
-            variant="ghost"
+            variant="quiet"
           >
             {busy
               ? t`Reading its instructions…`
@@ -468,6 +498,61 @@ export const AgentApps = ({
           })}
         </ItemGroup>
       )}
+      {editable && suggested.length > 0 ? (
+        <ItemGroup aria-label={t`Suggested apps`} separated>
+          {suggested.map((app) => {
+            const linked = connected.includes(app.id);
+            const appName = app.name;
+            return (
+              <Item key={agentAppOf(app.source, app.id)} size="sm">
+                <ItemMedia>
+                  <ProviderMark id={app.id} logo={app.logo} name={app.name} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{appName}</ItemTitle>
+                  <ItemDescription>
+                    {linked
+                      ? t`Suggested for ${name}`
+                      : t`Suggested for ${name}: connect it first`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {linked ? (
+                    <Button
+                      aria-label={t`Add ${appName}`}
+                      disabled={!can}
+                      icon={Plus}
+                      onClick={() => {
+                        set(agentAppOf(app.source, app.id), true);
+                      }}
+                      size="sm"
+                      variant="quiet"
+                    >
+                      {t`Add`}
+                    </Button>
+                  ) : (
+                    <Button
+                      aria-label={t`Connect ${appName}`}
+                      render={
+                        <Link
+                          params={{
+                            integration: integrationKey(app.source, app.id),
+                          }}
+                          to="/integrations/$integration"
+                        />
+                      }
+                      size="sm"
+                      variant="quiet"
+                    >
+                      {t`Connect`}
+                    </Button>
+                  )}
+                </ItemActions>
+              </Item>
+            );
+          })}
+        </ItemGroup>
+      ) : null}
       {editable && apps !== undefined ? (
         <div {...stylex.props(styles.foot)}>
           <Field disabled={!can || addable.length === 0} layout={styles.pick}>
@@ -529,9 +614,12 @@ export const AgentAppsPanel = ({
   change,
   people,
   wakes,
+  told,
 }: {
   agent: Agent;
   apps: AgentAppsShown | undefined;
+  /** Its instructions as saved, which its suggestions read. */
+  told: string;
   first: boolean;
   editable: boolean;
   can: boolean;
@@ -546,7 +634,9 @@ export const AgentAppsPanel = ({
       can={can}
       change={change}
       editable={editable}
+      connected={apps?.connected ?? []}
       offered={apps?.offered ?? []}
+      told={told}
       people={people}
       userId={apps?.userId}
       wakes={wakes}

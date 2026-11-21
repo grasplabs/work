@@ -2225,6 +2225,7 @@ msgctxt "put in a project"
 msgid "Add"
 msgstr "Ajouter"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/setup/apps-step.tsx
 msgid "Add {appName}"
 msgstr "Ajouter {appName}"
@@ -2770,6 +2771,7 @@ msgstr "Toujours clair"
 msgid "Always uses this model"
 msgstr "Utilise toujours ce modèle"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Amber"
 msgstr "Ambre"
@@ -5037,6 +5039,7 @@ msgstr "Collègues entendus"
 msgid "Colour"
 msgstr "Couleur"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Colours"
@@ -5176,6 +5179,7 @@ msgctxt "an event's"
 msgid "Conflicts"
 msgstr "Conflit"
 
+#: src/agents/agent-apps-card.tsx
 #: src/chat/plan-card.tsx
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5193,6 +5197,10 @@ msgstr "Connecter {app}"
 #: src/frame/part-words.tsx
 msgid "Connect {app} again"
 msgstr "Reconnecter {app}"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Connect {appName}"
+msgstr "Connecter {appName}"
 
 #: src/frame/part-words.tsx
 msgid "Connect {label}"
@@ -5804,6 +5812,7 @@ msgstr "CRM"
 msgid "Cron fields"
 msgstr "Champs cron"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Crystal"
 msgstr "Cristal"
@@ -6884,6 +6893,7 @@ msgstr "Reçus de paiement par e-mail"
 msgid "Email trigger"
 msgstr "Déclencheur d'e-mail"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Ember"
 msgstr "Braise"
@@ -7117,6 +7127,7 @@ msgstr "Événements dans les archives"
 msgid "Events in the log"
 msgstr "Événements dans le journal"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Evergreen"
 msgstr "Persistant"
@@ -10623,6 +10634,10 @@ msgstr "Logo supprimé"
 msgid "London"
 msgstr "Londres"
 
+#: src/agents/agent-look.tsx
+msgid "Look"
+msgstr "Apparence"
+
 #: src/agents/agent-wakes.tsx
 msgid "Look for overdue invoices and say which."
 msgstr "Cherche les factures en retard et dis lesquelles."
@@ -10886,6 +10901,7 @@ msgstr "Maximal"
 msgid "May do"
 msgstr "Peut faire"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Meadow"
 msgstr "Prairie"
@@ -11057,6 +11073,7 @@ msgstr "Argent"
 msgid "Monthly budget for AI"
 msgstr "Budget mensuel pour l’IA"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Moon"
 msgstr "Lune"
@@ -12677,6 +12694,7 @@ msgstr "Nombre"
 msgid "Numbered list"
 msgstr "Liste numérotée"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Ocean"
 msgstr "Océan"
@@ -12732,6 +12750,7 @@ msgstr "Modifications plus anciennes"
 msgid "Older versions"
 msgstr "Versions plus anciennes"
 
+#: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/setup/schedule-step.tsx
 #: src/settings/stephen-card.tsx
@@ -13281,6 +13300,7 @@ msgstr "Ou retirez-vous : rien de ce que vous avez dit n’est utilisé à parti
 msgid "Or write it yourself"
 msgstr "Ou décrivez-la vous-même"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Orb"
 msgstr "Sphère"
@@ -13496,6 +13516,7 @@ msgstr "Pages d'événements"
 msgid "Pagination"
 msgstr "Pagination"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Pair in orbit"
 msgstr "Paire en orbite"
@@ -13897,6 +13918,7 @@ msgstr "Planifier la journée"
 msgid "Plan the interviews and send the links"
 msgstr "Planifiez les entretiens et envoyez les liens"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Planet"
 msgstr "Planète"
@@ -16129,6 +16151,7 @@ msgstr "Réglé : {choice}"
 msgid "Setup"
 msgstr "Configuration"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Shape"
 msgstr "Forme"
@@ -17251,6 +17274,18 @@ msgstr "Propose jusqu’à trois points à soulever."
 msgid "Suggested"
 msgstr "Suggérées"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Suggested apps"
+msgstr "Apps suggérées"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Suggested for {name}"
+msgstr "Suggérée pour {name}"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Suggested for {name}: connect it first"
+msgstr "Suggérée pour {name} : connectez-la d’abord"
+
 #: src/agents/agent-templates.ts
 msgid "Summarise documents"
 msgstr "Résumer des documents"
@@ -17286,6 +17321,7 @@ msgstr "Service client"
 msgid "Suspended"
 msgstr "Suspendu"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Swarm"
 msgstr "Essaim"
@@ -19000,6 +19036,7 @@ msgstr "Cette version, en lecture seule"
 msgid "This week"
 msgstr "Cette semaine"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Trois en cercle"
@@ -19204,6 +19241,7 @@ msgctxt "a source of the Brain"
 msgid "Transcript"
 msgstr "Transcription"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Triangle"

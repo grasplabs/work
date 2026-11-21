@@ -456,9 +456,25 @@ const Page = ({
       apps={{
         apps: data.apps[agent.id],
         offered: [
-          { source: "native", id: "google", name: "Google Workspace" },
-          { source: "composio", id: "hubspot", name: "HubSpot" },
+          {
+            source: "native",
+            id: "google",
+            name: "Google Workspace",
+            categories: ["email"],
+            description: "Mail, calendar and documents",
+            logo: null,
+          },
+          {
+            source: "composio",
+            id: "hubspot",
+            name: "HubSpot",
+            categories: ["crm"],
+            description: "Deals and contacts",
+            logo: null,
+          },
         ],
+        // Google Workspace is connected; HubSpot isn't yet.
+        connected: ["google"],
         userId: "user-1",
       }}
       documents={data.documents[agent.id]}
@@ -1693,6 +1709,33 @@ describe("an agent's page", () => {
         ["told", "agent-1", "Answer about HubSpot deals too."],
         ["work out", "agent-1"],
       ],
+    });
+  });
+
+  it("suggests the apps its instructions point to, adds a connected one on a press, and leads to connecting one that isn't", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await fake.instructions.save({
+      file: { scope: "agent", agentId: "agent-1" },
+      change: "told-again",
+      text: "Send each reminder by mail, and keep the deals in HubSpot.",
+      after: 1,
+    });
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const connect = document.querySelector("a[aria-label='Connect HubSpot']");
+    const before = asked.length;
+    await press(button("Add Google Workspace"));
+    expect({
+      suggested: [
+        document.body.textContent.includes(
+          "Suggested for Claire: connect it first"
+        ),
+        connect?.getAttribute("href"),
+      ],
+      asked: asked.slice(before).map((each) => each.slice(0, 4)),
+    }).toStrictEqual({
+      suggested: [true, "/integrations/composio%3Ahubspot"],
+      asked: [["app", "agent-1", "native:google", true]],
     });
   });
 

@@ -162,7 +162,7 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
       const [listed] = await Promise.allSettled([session.members.list()]);
       // The agent's documents: not shown when core won't say, and the
       // page still shows the agent.
-      const [kept, apps, catalog, told] = await Promise.allSettled([
+      const [kept, apps, catalog, told, linked] = await Promise.allSettled([
         session.connections.agentDocuments(params.agent),
         session.connections.agentApps(params.agent),
         session.connections.catalog(),
@@ -175,6 +175,9 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
           params.agent,
           mine || isMemberAdmin(identity)
         ),
+        // Which apps are connected, so a suggested app says whether it
+        // still needs connecting.
+        session.connections.list(),
       ]);
       return {
         managed,
@@ -191,6 +194,12 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
           offered:
             catalog.status === "fulfilled"
               ? catalog.value.entries.filter(({ offered }) => offered)
+              : [],
+          connected:
+            linked.status === "fulfilled"
+              ? linked.value
+                  .filter(({ status }) => status === "active")
+                  .map(({ provider }) => provider)
               : [],
         },
         firstAccess:
