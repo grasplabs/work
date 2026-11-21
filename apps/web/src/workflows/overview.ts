@@ -3,6 +3,10 @@ import type { CatalogEntry, ListedConnection } from "@grasp-os/shared/connect";
 import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import type {
+  TriggerKind,
+  WorkflowTrigger,
+} from "@grasp-os/shared/workflow-triggers";
+import type {
   ConnectionWorkflows,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
@@ -18,8 +22,9 @@ import type { Brand } from "../grasp/brand-icon/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows } from "./reads.ts";
+import { summaryOf, triggerDescription } from "./trigger-description.ts";
 
-// What the Workflows page shows (workflows-table.tsx): every workflow the
+// What the Workflows page shows (workflow-rows.tsx): every workflow the
 // person has a role in, each in the phase it stands in, with the tools it
 // reaches. What is published is what runs, so a workflow runs once a
 // version of it is live (`version`); whether it is paused is on its own
@@ -61,7 +66,44 @@ export interface OverviewRow {
   owner: string | null;
   /** The runs it completed this week; null before its first run. */
   runs: number | null;
+  /** The version new runs run; null before the first is published. */
+  version: number | null;
+  /** Its runs waiting for a decision now. */
+  waiting: number;
+  /** Its runs that failed lately. */
+  failed: number;
+  /** When its latest run began; null before its first. */
+  lastRun: string | null;
 }
+
+/**
+ * How a workflow stands, as its row's mark says it: what it needs of the
+ * reader first (a failure before a decision), then that someone paused it,
+ * then whether a version of it runs.
+ */
+export const states = [
+  "failing",
+  "waiting",
+  "paused",
+  "live",
+  "building",
+] as const;
+export type WorkflowState = (typeof states)[number];
+
+export const stateOf = (
+  row: Pick<OverviewRow, "failed" | "waiting" | "paused" | "version">
+): WorkflowState => {
+  if (row.failed > 0) {
+    return "failing";
+  }
+  if (row.waiting > 0) {
+    return "waiting";
+  }
+  if (row.paused) {
+    return "paused";
+  }
+  return row.version === null ? "building" : "live";
+};
 
 /**
  * The page's rows, by phase and within one as core listed them (by name):
@@ -92,6 +134,10 @@ const overviewRows = ({
         process: record?.process ?? null,
         owner: summary.owner.name,
         runs: summary.lastRun === null ? null : summary.handled,
+        version: summary.version,
+        waiting: summary.waiting,
+        failed: summary.failed,
+        lastRun: summary.lastRun?.createdAt ?? null,
       };
     })
     .toSorted(
@@ -176,4 +222,54 @@ export const readTools = async (
     return toolsByWorkflow(uses, connections, catalog?.entries ?? []);
   });
   return read.state === "ready" ? read.data : new Map();
+};
+
+/** What starts a workflow's runs, as its row's route begins: its kind, in words. */
+export interface RowTrigger {
+  kind: TriggerKind;
+  words: string;
+}
+
+/** What starts each workflow, by the workflow's ID: its enabled triggers, oldest first. */
+export type TriggersByWorkflow = ReadonlyMap<string, readonly RowTrigger[]>;
+
+const rowTrigger = (trigger: WorkflowTrigger): RowTrigger => ({
+  kind: trigger.kind,
+  words: triggerDescription(summaryOf(trigger)),
+});
+
+/**
+ * Reads what starts each of `workflows`. Core lists a workflow's triggers
+ * one workflow at a time, so this is a read each, side by side; like the
+ * tools they stand beside a workflow, and one that can't be read leaves
+ * its row without them.
+ */
+export const readTriggers = async (
+  core: Pick<CoreConnection, "withSession">,
+  workflows: readonly string[]
+): Promise<TriggersByWorkflow> => {
+  const read = await loadFromCore(
+    core,
+    async (session) =>
+      await Promise.all(
+        workflows.map(
+          async (id) =>
+            [
+              id,
+              await orNull(
+                async () => await session.workflowResources.triggers.list(id)
+              ),
+            ] as const
+        )
+      )
+  );
+  if (read.state !== "ready") {
+    return new Map();
+  }
+  return new Map(
+    read.data.map(([id, triggers]) => [
+      id,
+      (triggers ?? []).filter(({ enabled }) => enabled).map(rowTrigger),
+    ])
+  );
 };

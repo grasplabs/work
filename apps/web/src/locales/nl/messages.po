@@ -611,6 +611,10 @@ msgstr "{event}, bij {account}"
 msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
 msgstr "{failed, plural, one {Een e-mail heeft iemand niet bereikt} other {# e-mails hebben hun ontvangers niet bereikt}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{failed} failed"
+msgstr "{failed} mislukt"
+
 #: src/apps/data-model-changes.tsx
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} heeft een wijziging in code nodig voordat dit gepubliceerd kan worden."
@@ -1352,6 +1356,10 @@ msgstr "{role}, nog niet uitgenodigd, nog niet geïnterviewd"
 msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgstr "{rows, plural, one {# rij om te importeren.} other {# rijen om te importeren.}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{runs} this week"
+msgstr "{runs} deze week"
+
 #: src/agents/agents-overview.tsx
 msgid "{scheduled, plural, one {# schedule} other {# schedules}}"
 msgstr "{scheduled, plural, one {# schema} other {# schema's}}"
@@ -1423,6 +1431,10 @@ msgstr "{sponsor} gaf me het grote plaatje. Nu heb ik de details nodig."
 #: src/onboarding/setup-steps.tsx
 msgid "{sponsor} told me a lot about your company in our first conversation."
 msgstr "{sponsor} heeft me in ons eerste gesprek veel over jullie bedrijf verteld."
+
+#: src/workflows/workflow-rows.tsx
+msgid "{start}, and {more} more"
+msgstr "{start} en nog {more}"
 
 #: src/settings/event-source-activity.tsx
 msgid "{started, plural, one {Started # workflow} other {Started # workflows}}"
@@ -1640,6 +1652,10 @@ msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows heb
 #: src/drafts/share-with-team.tsx
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder keurt dat één keer goed.} other {Het gebruikt # nieuwe soorten toegang. Een beheerder keurt die één keer goed.}}"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{waiting} waiting"
+msgstr "{waiting} wachten"
 
 #: src/connections/integrations-band.tsx
 msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
@@ -4024,7 +4040,7 @@ msgstr "Nieuwe app bouwen"
 msgid "Builder"
 msgstr "Bouwer"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgctxt "workflow phase"
 msgid "Building"
 msgstr "In aanbouw"
@@ -4066,6 +4082,11 @@ msgstr "door een import"
 msgctxt "how search found a passage"
 msgid "By common words only"
 msgstr "Alleen via veelvoorkomende woorden"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "By hand"
+msgstr "Met de hand"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a memory"
@@ -7475,6 +7496,11 @@ msgctxt "status of a workflow run"
 msgid "Failed"
 msgstr "Mislukt"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Failing"
+msgstr "Mislukt"
+
 #: src/settings/ai-providers.tsx
 msgid "Fallbacks"
 msgstr "Reservemodellen"
@@ -10127,6 +10153,10 @@ msgstr "Laatst uitgevoerd op {when}"
 msgid "Last read {lastRead}"
 msgstr "Laatst gelezen {lastRead}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "Last run {since}"
+msgstr "Laatste run {since}"
+
 #: src/agents/agents-overview.tsx
 msgid "Last run failed"
 msgstr "Laatste run mislukt"
@@ -10468,6 +10498,11 @@ msgstr "Zet op een rij wat vandaag telt uit mail, taken en agenda."
 #: src/agents/agent-templates.ts
 msgid "Lists what matters today from mail, tasks and the calendar."
 msgstr "Zet op een rij wat vandaag telt uit mail, taken en de agenda."
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Live"
+msgstr "Live"
 
 #: src/drafts/share-with-team.tsx
 msgid "Live, {named}"
@@ -11339,7 +11374,7 @@ msgctxt "state of one app"
 msgid "Needs you"
 msgstr "Heeft je nodig"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgctxt "workflow phase"
 msgid "Needs you"
 msgstr "Heeft je nodig"
@@ -11802,6 +11837,10 @@ msgstr "Hier is de laatste tijd geen run mee gestart."
 msgid "No runs match these filters."
 msgstr "Geen runs passen bij deze filters."
 
+#: src/workflows/workflow-rows.tsx
+msgid "No runs yet"
+msgstr "Nog geen runs"
+
 #: src/workflows/resource-runs.tsx
 msgid "No runs yet."
 msgstr "Nog geen runs."
@@ -11862,7 +11901,7 @@ msgstr "Nog geen workflow"
 msgid "No workflows in it yet."
 msgstr "Er zitten nog geen workflows in."
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "No workflows yet"
 msgstr "Nog geen workflows"
 
@@ -12149,6 +12188,11 @@ msgstr "Niet vermeld"
 #: src/drafts/share-with-team.tsx
 msgid "Not live"
 msgstr "Niet live"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Not live yet"
+msgstr "Nog niet live"
 
 #: src/frame/page-failed.tsx
 #: src/inbox/inbox-page.tsx
@@ -12702,6 +12746,26 @@ msgstr "Op {where}"
 msgid "On a later day"
 msgstr "Op een latere dag"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On a schedule"
+msgstr "Volgens een schema"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On a webhook"
+msgstr "Bij een webhook"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On an email"
+msgstr "Bij een e-mail"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On an event"
+msgstr "Bij een gebeurtenis"
+
 #: src/agents/setup/schedule-step.tsx
 msgid "On day"
 msgstr "Op dag"
@@ -12995,7 +13059,7 @@ msgstr "Een link buiten Grasp openen?"
 msgid "Open as a page"
 msgstr "Openen als pagina"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "Open Chat"
 msgstr "Chat openen"
 
@@ -13313,12 +13377,6 @@ msgctxt "a project's owner"
 msgid "Owner"
 msgstr "Eigenaar"
 
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgctxt "column: who owns a workflow"
-msgid "Owner"
-msgstr "Eigenaar"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owner"
@@ -13517,8 +13575,8 @@ msgstr "Stephen buiten Grasp pauzeren?"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
+#: src/workflows/workflow-rows.tsx
 #: src/workflows/workflow-status.tsx
-#: src/workflows/workflows-table.tsx
 msgctxt "a workflow someone paused"
 msgid "Paused"
 msgstr "Gepauzeerd"
@@ -13695,11 +13753,6 @@ msgstr "Persoonlijke koppelingen"
 #: src/settings/erasures.tsx
 msgid "Personal Knowledge and memories"
 msgstr "Persoonlijke Kennis en herinneringen"
-
-#: src/workflows/workflows-table.tsx
-msgctxt "column: a workflow's phase"
-msgid "Phase"
-msgstr "Fase"
 
 #: src/apps/app-section.tsx
 msgid "Phone"
@@ -15249,7 +15302,7 @@ msgctxt "status of a workflow run"
 msgid "Running"
 msgstr "Bezig"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgctxt "workflow phase"
 msgid "Running"
 msgstr "Draait"
@@ -15289,11 +15342,6 @@ msgstr "Runs"
 msgctxt "activity of a workflow: what ran"
 msgid "Runs"
 msgstr "Runs"
-
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgid "Runs a week"
-msgstr "Runs per week"
 
 #: src/onboarding/ai-step.tsx
 msgid "Runs at: {whereItRuns}"
@@ -19078,8 +19126,6 @@ msgstr "Tool"
 
 #: src/brain/brain.ts
 #: src/onboarding/setup-frame.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Tools"
 msgstr "Tools"
 
@@ -19621,6 +19667,10 @@ msgstr "{tool} gebruiken"
 msgid "UTC"
 msgstr "UTC"
 
+#: src/workflows/workflow-rows.tsx
+msgid "v{version}"
+msgstr "v{version}"
+
 #: src/workflows/kept-state.tsx
 msgid "Value"
 msgstr "Waarde"
@@ -19883,6 +19933,11 @@ msgstr "Wacht op je goedkeuring"
 msgctxt "sidebar: the inbox items that have waited longest"
 msgid "Waiting longest"
 msgstr "Wacht het langst"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Waiting on you"
+msgstr "Wacht op jou"
 
 #: src/chat/use-ask.ts
 msgid "Waiting to send. Grasp is out of reach for now; your question goes once it's back."
@@ -21013,19 +21068,13 @@ msgstr "Bepaald hoe kennis wordt gebruikt"
 msgid "Worked out what could be improved"
 msgstr "Bepaald wat er beter kan"
 
-#: src/workflows/workflows-table.tsx
-msgid "workflow"
-msgstr "workflow"
-
 #: src/activity/audit-event.tsx
 #: src/apps/app-workflows.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Workflow"
 msgstr "Workflow"
 
@@ -21074,10 +21123,6 @@ msgstr "Weergaven van de workflow"
 msgid "workflow.json"
 msgstr "workflow.json"
 
-#: src/workflows/workflows-table.tsx
-msgid "workflows"
-msgstr "workflows"
-
 #: src/brain/goals-editor.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
@@ -21091,7 +21136,6 @@ msgstr "workflows"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/settings/stephen-settings.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Workflows"
 msgstr "Workflows"
 
@@ -21115,7 +21159,7 @@ msgctxt "note property: the workflows a tool or team is part of"
 msgid "Workflows"
 msgstr "Workflows"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it."
 msgstr "Workflows maak je in de chat: beschrijf wat vanzelf moet lopen, en Grasp bouwt het."
 

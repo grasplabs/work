@@ -206,6 +206,17 @@ export const PageFailed = ({
       variant={{ backdrop: "dusk", pattern: "bayer", tone: "aurora" }}
     >
       <div data-slot="page-failed" {...stylex.props(styles.words)}>
+        {/* Whether Grasp can be reached, first: it says at a glance whether
+            the fault is this page's or Grasp's (Ruben, 21 November). */}
+        {reach === undefined ? null : (
+          <p {...stylex.props(styles.fact)}>
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.dot, styles[reach])}
+            />
+            {facts[reach]}
+          </p>
+        )}
         <Heading {...stylex.props(styles.heading)}>{title}</Heading>
         {sentence === undefined || sentence === "" ? null : (
           <p {...stylex.props(styles.sentence)}>{sentence}</p>
@@ -216,15 +227,6 @@ export const PageFailed = ({
           </Button>
           {wayOn}
         </div>
-        {reach === undefined ? null : (
-          <p {...stylex.props(styles.fact)}>
-            <span
-              aria-hidden="true"
-              {...stylex.props(styles.dot, styles[reach])}
-            />
-            {facts[reach]}
-          </p>
-        )}
         {reference === undefined ? null : (
           <CopyField
             aria-label={t`Reference for support`}
