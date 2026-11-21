@@ -193,13 +193,7 @@ export const OpenRow = ({
   return onOpen === undefined ? (
     <Item size="sm">{parts}</Item>
   ) : (
-    <Item
-      render={
-        // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the row's name and line are its words, as the Item's children
-        <button onClick={onOpen} type="button" />
-      }
-      size="sm"
-    >
+    <Item onPress={onOpen} size="sm">
       {parts}
     </Item>
   );
