@@ -251,6 +251,55 @@ test("a frame that can't be read says so with Try again, which brings the admin 
   ).toBeVisible();
 });
 
+/** Whether a request at `url` is a call of one of the admin's server functions. */
+const isCall = (url: string): boolean => url.includes("/_serverFn/");
+
+/**
+ * How many of the page's server function calls are unanswered right now,
+ * counted from when this is called.
+ */
+const unansweredCalls = (page: Page): (() => number) => {
+  let unanswered = 0;
+  page.on("request", (sent) => {
+    if (isCall(sent.url())) {
+      unanswered += 1;
+    }
+  });
+  const answered = (sent: { url: () => string }): void => {
+    if (isCall(sent.url())) {
+      unanswered -= 1;
+    }
+  };
+  page.on("requestfinished", answered);
+  page.on("requestfailed", answered);
+  return () => unanswered;
+};
+
+/**
+ * Waits until the router has preloaded `path`, as pointing at a link to it
+ * does (the router shares the preload under way), and every server
+ * function call the page made since has been answered.
+ */
+const preloaded = async (
+  page: Page,
+  path: string,
+  unanswered: () => number
+): Promise<void> => {
+  await page.evaluate(async (to) => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const preloadRoute: unknown = Reflect.get(router, "preloadRoute");
+    if (typeof preloadRoute !== "function") {
+      throw new TypeError("The page's router can't preload");
+    }
+    await Reflect.apply(preloadRoute, router, [{ to }]);
+  }, path);
+  await expect.poll(unanswered).toBe(0);
+};
+
 /** What a seeded core answered so far, holding each answer `holdMs` from now on if given. */
 const core = async (
   request: APIRequestContext,
@@ -366,10 +415,11 @@ test("pointing at another organization's link asks its core nothing, and opening
   const link = page
     .getByRole("navigation", { name: "Organizations" })
     .getByRole("link", { name: "Answering Acme" });
+  const unanswered = unansweredCalls(page);
   await link.hover();
   await link.focus();
-  // Past the router's preload delay, and any read a preload would start.
-  await page.waitForTimeout(1500);
+  // Its preload done, and any read it would have started answered.
+  await preloaded(page, sectionPath(answered, ""), unanswered);
   // Its core's audit log records a read only when staff open it.
   expect(await core(request, answered)).toBe(before);
 
@@ -424,6 +474,7 @@ test("opening an organization while the frame reads it again asks its core no se
 }) => {
   const { answered, unset } = await seed(request);
   await page.goto(sectionPath(unset, "setup"), { waitUntil: "networkidle" });
+  const unanswered = unansweredCalls(page);
   // Well under the frame's deadline and the page's wait on it, past the click.
   await core(request, answered, 1500);
   const before = await core(request, answered);
@@ -465,7 +516,8 @@ test("opening an organization while the frame reads it again asks its core no se
   await expect
     .poll(async () => await core(request, answered), { timeout: 10_000 })
     .toBe(before + 1);
-  await page.waitForTimeout(500);
+  // Every call the page made answered: no read of its own came after.
+  await expect.poll(unanswered).toBe(0);
   expect(await core(request, answered)).toBe(before + 1);
   await core(request, answered, 0);
 });
@@ -483,10 +535,11 @@ test("pointing at an organization's Setup asks its core nothing, and opening it 
     .getByRole("navigation", { name: "Answering Acme" })
     .locator(`a[href="${sectionPath(answered, "setup")}"]`)
     .last();
+  const unanswered = unansweredCalls(page);
   await setup.hover();
   await setup.focus();
-  // Past the router's preload delay, and any read a preload would start.
-  await page.waitForTimeout(1500);
+  // Its preload done, and any read it would have started answered.
+  await preloaded(page, sectionPath(answered, "setup"), unanswered);
   // Its quota policy and spend are read from its core only once it is opened.
   const pointed = await coreAsked(request, answered);
   expect(pointed.slice(before)).toStrictEqual([]);
