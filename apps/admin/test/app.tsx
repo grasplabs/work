@@ -1,4 +1,3 @@
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 /**
  * The admin as the browser runs it, for the component tests
  * (vite.components.config.ts, the .test.tsx files under src): its real router, routes, loaders and
@@ -8,6 +7,8 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
  * who may call it, is tested in workerd (test/). Nothing of the app is
  * replaced.
  */
+
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";

@@ -1,3 +1,10 @@
+/**
+ * Admin D1 schema: intent and history only. What runs in a client's
+ * account (live Worker versions, secrets) is read from that account; the
+ * token that reaches client accounts lives in Secrets Store, never here
+ * (threat model R17).
+ */
+
 import "@tanstack/react-start/server-only";
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import {
@@ -9,12 +16,6 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-/**
- * Admin D1 schema: intent and history only. What runs in a client's
- * account (live Worker versions, secrets) is read from that account; the
- * token that reaches client accounts lives in Secrets Store, never here
- * (threat model R17).
- */
 import { channelIds } from "../rollout/channel-ids.ts";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });

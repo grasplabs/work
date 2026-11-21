@@ -1,5 +1,5 @@
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
-import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
+import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import {
   createMemoryHistory,
   createRootRoute,
