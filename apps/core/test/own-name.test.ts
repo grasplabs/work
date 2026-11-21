@@ -11,7 +11,8 @@ import {
 
 // A person's own name (Settings › Profile). The ways it can fail, first:
 // changing someone else's, a name of nothing, of any length or of more
-// than one line (control characters, line breaks), and the
+// than one line (control characters, line breaks), one that reads as
+// something else (bidirectional overrides), and the
 // next sign-in putting the organization's name for them back.
 
 const idp = mockIdp();
@@ -33,6 +34,7 @@ describe("a person's own name", { timeout: 60_000 }, () => {
       outcome(me.api.setName("Sam\nde Vries")),
       outcome(me.api.setName("Sam\u0007")),
       outcome(me.api.setName("Sam\u2028de Vries")),
+      outcome(me.api.setName("Sam\u202Eseirv ed")),
     ]);
     // Signing in again, the organization's sign-in names them as before.
     const again = await signedIn(idp, "microsoft", me.person);
@@ -56,7 +58,7 @@ describe("a person's own name", { timeout: 60_000 }, () => {
           target: { type: "user", id: me.userId },
         },
       ],
-      refused: Array.from({ length: 5 }, () => "member.name_invalid"),
+      refused: Array.from({ length: 6 }, () => "member.name_invalid"),
       mine: "Sam de Vries",
       theirs: theirName,
     });

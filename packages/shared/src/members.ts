@@ -352,8 +352,9 @@ export const personNameSchema = z
   .min(1)
   .max(100)
   // No control characters or line and paragraph separators: it is shown
-  // as one line.
-  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
+  // as one line. No bidirectional overrides or isolates either, which
+  // make a name read as something else wherever it is shown.
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]*$/u);
 
 /** Why an admin's change to a member was refused or not finished. */
 export const memberErrors = defineErrorFamily({
