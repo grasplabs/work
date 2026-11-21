@@ -27,6 +27,9 @@ import {
 
 const idp = mockIdp();
 
+/** Longer than core keeps a read notification (30 days). */
+const monthAndADayMs = 31 * 24 * 60 * 60 * 1000;
+
 const roster: RosterInput = {
   teams: [{ id: "finance", name: "Finance", lead: null }],
   people: [{ id: "ann", name: "Ann", team: "finance", title: "Accountant" }],
@@ -572,6 +575,59 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         answer: "About 400.",
         answeredBy: name,
       },
+    });
+  });
+
+  it("list in the inbox every open one for an admin, and for anyone else only those asked of them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "user");
+    const other = await signedInApi(idp, "user");
+    const asked = gapRecords(unique());
+    const unasked = gapRecords(unique());
+    const answered = gapRecords(unique());
+    await admin.api.brain.addRecords([
+      ...asked.records,
+      ...unasked.records,
+      ...answered.records,
+    ]);
+    await rosterWith(admin, "Head of finance", owner);
+    await admin.api.brain.askAboutGap(asked.ids.gap);
+    await admin.api.brain.answerGap(answered.ids.gap, "About 400.");
+    const ours = new Set([asked.ids.gap, unasked.ids.gap, answered.ids.gap]);
+    /** The gaps of this test `person` lists, by id. */
+    const listedBy = async (person: Signed) => {
+      const listed = await person.api.brain.openGaps();
+      return listed
+        .filter(({ id }) => ours.has(id))
+        .map(({ id, askedAt }) => ({ id, asked: askedAt !== undefined }));
+    };
+
+    // The owner read the ask over a month ago, and reads their inbox
+    // again, which drops what they read that long ago: an open question
+    // stays theirs.
+    const { notifications } = await owner.api.notifications.list();
+    await owner.api.notifications.markRead(
+      notifications.map(({ id }) => id),
+      new Date().toISOString()
+    );
+    await env.DB.prepare(
+      "UPDATE notifications SET read_at = read_at - ? WHERE person_id = ?"
+    )
+      .bind(monthAndADayMs, owner.userId)
+      .run();
+    await owner.api.notifications.markRead([], new Date().toISOString());
+
+    expect({
+      admin: await listedBy(admin),
+      owner: await listedBy(owner),
+      other: await listedBy(other),
+    }).toStrictEqual({
+      admin: [
+        { id: asked.ids.gap, asked: true },
+        { id: unasked.ids.gap, asked: false },
+      ],
+      owner: [{ id: asked.ids.gap, asked: true }],
+      other: [],
     });
   });
 

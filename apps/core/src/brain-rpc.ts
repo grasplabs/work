@@ -45,6 +45,7 @@ import {
   askAboutGap,
   closeGap,
   gapsWith,
+  openGaps,
   redactGapAnswer,
 } from "./brain-gaps.ts";
 import {
@@ -1394,6 +1395,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await askAboutGap(this.#env, person, gapId)
+    );
+  }
+
+  async openGaps(): Promise<Gap[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await openGaps(this.#env, person)
     );
   }
 
