@@ -57,8 +57,8 @@ import { TargetLink } from "./target-link.tsx";
 
 // An item of the inbox, on Grasp UI: what it is and what happened, what
 // has to be read before deciding, its facts, and its actions in one row
-// under them, the one that settles it first. Each action goes to core with
-// the same calls the dashboard's pile makes, and the inbox is read again
+// under them, the one that settles it first. Each action goes to core, and
+// the inbox is read again
 // once it is through, so a settled item leaves the list. A question the
 // brain asked the person is answered here, in their own words, on the
 // Question tool (`brain.answerGap`); core then lists it no more.
@@ -545,7 +545,7 @@ const RequestItem = ({
 
 /**
  * A change whose answer was lost: "It happened" or "It didn't happen", each
- * asked once more, as on the dashboard's pile (`outcome-card.tsx`). Saying
+ * asked once more. Saying
  * it didn't happen lets it go out again, so it waits while part of what was
  * sent is cut short and unseen, or no longer kept.
  */

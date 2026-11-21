@@ -26,7 +26,7 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // workflows and what could be better, SectionCard, Heading and Text for
 // the rest, PanelTexture behind the one sentence that leads (Ruben's pick
 // of three looks, 18 November). What it shows comes from
-// `dashboard.report()`. It downloads as a snapshot of exactly this page
+// `boardReport.read()`. It downloads as a snapshot of exactly this page
 // (report-row.tsx).
 
 const styles = stylex.create({

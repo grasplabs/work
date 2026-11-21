@@ -25,8 +25,7 @@ import { useInboxGroups, useWaitingItems } from "./sidebar-inbox.tsx";
 // page reaches it over RPC, in Grasp UI's own Sidebar: the inbox's views,
 // each to the inbox with that view open, then what waited longest, each to
 // its place in the inbox, a quiet sentence when nothing waits; and
-// listing them marks no notification read, as only the inbox and the
-// dashboard do.
+// listing them marks no notification read, as only the inbox does.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 

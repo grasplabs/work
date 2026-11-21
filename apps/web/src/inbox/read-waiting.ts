@@ -52,8 +52,7 @@ const partOf = <T>(
 /**
  * What waits on the person: core's feed of it, in one read, and the names
  * permission requests are shown with. Reading it marks the
- * notifications it lists as read, as a page that shows them (the
- * dashboard, the inbox) does; the sidebar's list, which only says what
+ * notifications it lists as read, as the inbox, which shows them, does; the sidebar's list, which only says what
  * waits, reads them with `markShownRead: false`. Everyone's unknown
  * outcomes are listed only with `everyonesOutcomes` (the inbox showing
  * them): core records each such read in the audit trail, so the frame's
