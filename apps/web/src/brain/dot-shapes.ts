@@ -24,8 +24,17 @@ export const PITCH = 0.033;
 /** Points every figure has, seen or waiting, so any one can flow into any other: more than the largest needs. */
 export const POINTS = 4800;
 
+/**
+ * A vector's length. Math.hypot guards against overflow these sizes never reach, and is several
+ * times slower: the brain's surface is sampled a few million times as it is made.
+ */
+const length3 = (x: number, y: number, z: number): number => {
+  const squares = x * x + y * y + z * z;
+  return Math.sqrt(squares);
+};
+
 const sphere = (x: number, y: number, z: number, r: number): number =>
-  Math.hypot(x, y, z) - r;
+  length3(x, y, z) - r;
 
 /** An ellipsoid's distance, close enough to march by. */
 const ellipsoid = (
@@ -36,8 +45,8 @@ const ellipsoid = (
   b: number,
   c: number
 ): number => {
-  const k0 = Math.hypot(x / a, y / b, z / c);
-  const k1 = Math.hypot(x / (a * a), y / (b * b), z / (c * c));
+  const k0 = length3(x / a, y / b, z / c);
+  const k1 = length3(x / (a * a), y / (b * b), z / (c * c));
   return k1 === 0 ? -Math.min(a, b, c) : (k0 * (k0 - 1)) / k1;
 };
 
@@ -63,7 +72,7 @@ const capsule = (
     Math.max((px * dx + py * dy + pz * dz) / (dx * dx + dy * dy + dz * dz), 0),
     1
   );
-  return Math.hypot(px - dx * h, py - dy * h, pz - dz * h) - r;
+  return length3(px - dx * h, py - dy * h, pz - dz * h) - r;
 };
 
 /** A soft union: two surfaces blend where they meet, as skin does. */
@@ -275,7 +284,7 @@ const roundBox = (
   const qx = Math.abs(x) - hx + r;
   const qy = Math.abs(y) - hy + r;
   const qz = Math.abs(z) - hz + r;
-  const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0));
+  const outside = length3(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0));
   return outside + Math.min(Math.max(qx, qy, qz), 0) - r;
 };
 
@@ -1690,16 +1699,6 @@ const spineRing = (ring: number, depth: number): CloudDot[] => {
   return dots;
 };
 
-/** The spine's dots: ring upon ring down its line. */
-const spineDots = (): CloudDot[] => {
-  const dots: CloudDot[] = [];
-  const row = SPINE_PITCH * 0.9;
-  for (let ring = 0; ring * row < SPINE.length; ring += 1) {
-    dots.push(...spineRing(ring, ring * row));
-  }
-  return dots;
-};
-
 /**
  * Which region a point of the brain is in, where it sits on the unturned figure: the stem around its
  * capsule, the cerebellum in its bulge under the back, then the front third (frontal), the back
@@ -1753,9 +1752,13 @@ const brainHit = (
   return null;
 };
 
-/** The brain's own surface, scanned from every side and thinned to one dot per cell of the pitch. */
-const brainSurface = (): CloudDot[] => {
-  const kept = new Map<string, CloudDot>();
+/**
+ * The brain's own surface, scanned from every side and thinned to one dot per cell of the pitch
+ * into `kept`, a row of the scan at each step (cloudSteps).
+ */
+const surfaceRows = function* surfaceRows(
+  kept: Map<string, CloudDot>
+): Generator<void> {
   const directions = 18;
   const e = 0.0015;
   const reach = 1.35;
@@ -1790,26 +1793,34 @@ const brainSurface = (): CloudDot[] => {
           kept.set(key, [px, py, pz, nx, ny, nz]);
         }
       }
+      yield;
     }
   }
-  return [...kept.values()];
 };
 
 let cloud: BrainCloud | null = null;
 
+/** Dots the cloud is given between yields as it is filled: each finds its region, the slow part. */
+const regionsPerStep = 64;
+
 /**
- * The atlas brain, sampled once and kept: the surface scanned from directions spread evenly
- * around it, as a depth camera walked around it would, and thinned to one dot per cell of the
- * pitch, so the dots lie evenly however the surface curves.
+ * The cloud, a step at a time: the surface scanned a row at each step, the spine a ring at each,
+ * then the dots placed and given their regions a few at each, so it can be made between other
+ * work (brainCloudReady).
+ * @yields {void} Between steps; returns the cloud once made.
  */
-export const brainCloud = (): BrainCloud => {
-  if (cloud) {
-    return cloud;
-  }
+const cloudSteps = function* cloudSteps(): Generator<void, BrainCloud> {
+  const kept = new Map<string, CloudDot>();
+  yield* surfaceRows(kept);
   // The stem's rounded end makes way for the spine that leaves it.
-  const points = brainSurface().filter(([x, y, z]) => !inSpine(x, y, z));
+  const points = [...kept.values()].filter(([x, y, z]) => !inSpine(x, y, z));
   const body = points.length;
-  points.push(...spineDots());
+  // The spine down from it, a ring at each step.
+  const row = SPINE_PITCH * 0.9;
+  for (let ring = 0; ring * row < SPINE.length; ring += 1) {
+    points.push(...spineRing(ring, ring * row));
+    yield;
+  }
   const count = points.length;
   const made: BrainCloud = {
     count,
@@ -1830,7 +1841,68 @@ export const brainCloud = (): BrainCloud => {
     made.ny[index] = ny;
     made.nz[index] = nz;
     made.region[index] = index < body ? atlasRegion(x, y, z) : STEM;
+    if (index % regionsPerStep === regionsPerStep - 1) {
+      yield;
+    }
   }
-  cloud = made;
   return made;
+};
+
+/**
+ * The atlas brain, sampled once and kept: the surface scanned from directions spread evenly
+ * around it, as a depth camera walked around it would, and thinned to one dot per cell of the
+ * pitch, so the dots lie evenly however the surface curves. Made here and now when
+ * brainCloudReady hasn't made it yet.
+ */
+export const brainCloud = (): BrainCloud => {
+  if (cloud) {
+    return cloud;
+  }
+  const steps = cloudSteps();
+  let step = steps.next();
+  while (step.done !== true) {
+    step = steps.next();
+  }
+  cloud = step.value;
+  return cloud;
+};
+
+/** How long a slice of brainCloudReady's scan runs before it gives the page its turn, in ms. */
+const scanSliceMs = 4;
+
+let cloudMade: PromiseWithResolvers<BrainCloud> | undefined;
+
+/**
+ * The atlas brain, made a few milliseconds at a time between the page's own work: made at once,
+ * it held the page still for a second as the Brain opened. The shell starts it once it stands,
+ * and the Brain's atlas waits for it.
+ */
+export const brainCloudReady = async (): Promise<BrainCloud> => {
+  if (cloud) {
+    return cloud;
+  }
+  if (cloudMade === undefined) {
+    const made = Promise.withResolvers<BrainCloud>();
+    cloudMade = made;
+    const steps = cloudSteps();
+    const slice = (): void => {
+      // Made at once meanwhile, by a page that couldn't wait.
+      if (cloud) {
+        made.resolve(cloud);
+        return;
+      }
+      const until = performance.now() + scanSliceMs;
+      while (performance.now() < until) {
+        const step = steps.next();
+        if (step.done === true) {
+          cloud = step.value;
+          made.resolve(cloud);
+          return;
+        }
+      }
+      setTimeout(slice, 0);
+    };
+    setTimeout(slice, 0);
+  }
+  return await cloudMade.promise;
 };

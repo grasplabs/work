@@ -66,7 +66,6 @@ import { AppData } from "./app-data.tsx";
 import { AppLinkDialog } from "./app-own-link.tsx";
 import { sharesApp } from "./app-role.ts";
 import { AppSettings, Read } from "./app-settings.tsx";
-import type { AppSettingsSection } from "./app-settings.tsx";
 import { AppStart } from "./app-start.tsx";
 import { useStatusMove } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
@@ -81,6 +80,7 @@ import type {
   PreviewControlsProps,
   PreviewWidth,
 } from "./preview-controls.tsx";
+import type { AppSettingsSection } from "./settings-sections.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 

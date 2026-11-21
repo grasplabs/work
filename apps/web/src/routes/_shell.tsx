@@ -51,6 +51,19 @@ const sidebarPages = [
   "/_shell/integrations/",
 ] as const;
 
+/**
+ * The Brain's atlas's dots, made between frames once the frame stands:
+ * made as the Brain opened, they held the page still for a second.
+ */
+const makeBrainCloud = async () => {
+  try {
+    const { brainCloudReady } = await import("../brain/dot-shapes.ts");
+    await brainCloudReady();
+  } catch {
+    // Made as the atlas opens instead.
+  }
+};
+
 const useSidebarPagesFetched = () => {
   const router = useRouter();
   useEffect(() => {
@@ -64,6 +77,7 @@ const useSidebarPagesFetched = () => {
     for (const id of sidebarPages) {
       void fetchCode(id);
     }
+    void makeBrainCloud();
   }, [router]);
 };
 

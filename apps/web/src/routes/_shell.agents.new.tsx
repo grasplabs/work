@@ -5,8 +5,9 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { agentTemplates } from "../agents/agent-templates.ts";
 import { ManualAgent } from "../agents/manual-agent.tsx";
-import { NewAgentStart, newAgentWayOf } from "../agents/new-agent-start.tsx";
-import type { NewAgentWay } from "../agents/new-agent-start.tsx";
+import { NewAgentStart } from "../agents/new-agent-start.tsx";
+import { newAgentWayOf } from "../agents/new-agent-way.ts";
+import type { NewAgentWay } from "../agents/new-agent-way.ts";
 import { NewAgent } from "../agents/new-agent.tsx";
 import type { CatalogApp } from "../agents/setup/model.ts";
 import { SiteHeader } from "../frame/site-header.tsx";

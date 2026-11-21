@@ -2,8 +2,9 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
-import type { AppSettingsSection } from "../apps/app-settings.tsx";
+import { AppSettings } from "../apps/app-settings.tsx";
+import { settingsSectionOf } from "../apps/settings-sections.ts";
+import type { AppSettingsSection } from "../apps/settings-sections.ts";
 import {
   APP_GENERAL,
   LoadingBar,

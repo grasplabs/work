@@ -2,9 +2,9 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { OpenedApp } from "../apps/app-page.tsx";
-import { settingsSectionOf } from "../apps/app-settings.tsx";
-import type { AppSettingsSection } from "../apps/app-settings.tsx";
 import type { ReadOnlyShown, WorkspaceView } from "../apps/app-workspace.tsx";
+import { settingsSectionOf } from "../apps/settings-sections.ts";
+import type { AppSettingsSection } from "../apps/settings-sections.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import {
   backCrumb,
