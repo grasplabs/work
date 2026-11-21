@@ -1,3 +1,4 @@
+import { firstAgentId } from "@grasp-os/shared/agents";
 import { failureText } from "@grasp-os/shared/errors";
 import { noBilling } from "@grasp-os/shared/org-settings";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -35,7 +36,7 @@ import {
 // is linked yet, so there is no plan, card or invoice, and every way into
 // Stripe is shown but not usable. Beside the plan, Stephen's requests
 // outside Grasp this month, which the plan bills, with the way to how they
-// are used: left out when core refuses them to the viewer, and saying why
+// are used (Stephen's usage, on the first agent's Access tab): left out when core refuses them to the viewer, and saying why
 // when they can't be read otherwise.
 
 /** Stephen's requests this month as the page read them: the count, refused to the viewer, or why not read. */
@@ -106,7 +107,13 @@ const RequestsRow = ({
         </span>
         <Button
           nativeButton={false}
-          render={<Link to="/workflows/requests" />}
+          render={
+            <Link
+              params={{ agent: firstAgentId }}
+              search={{ tab: "access" }}
+              to="/agents/$agent"
+            />
+          }
           size="sm"
           variant="outline"
         >

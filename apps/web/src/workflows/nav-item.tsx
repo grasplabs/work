@@ -3,9 +3,6 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
 } from "@grasp-os/ui/components/sidebar";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
@@ -44,25 +41,17 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   }
 };
 
-/**
- * The sidebar's Workflows entry, with how many workflows need the person;
- * for owners and admins (`requests`), Stephen's requests under it while
- * the person is in Workflows.
- */
-export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
+/** The sidebar's Workflows entry, with how many workflows need the person. */
+export const WorkflowsItem = () => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const { value: waiting } = useFrameRead(readCount);
   const shown = waiting !== undefined && waiting > 0;
-  // As the prototype's: Requests is under Workflows while the person is
-  // in them, and lit on its own there.
   const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
-  const onRequests =
-    matchRoute({ to: "/workflows/requests", fuzzy: true }) !== false;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={inWorkflows && !onRequests}
+        isActive={inWorkflows}
         render={<Link to="/workflows" />}
         tooltip={t`Workflows`}
       >
@@ -84,20 +73,6 @@ export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
           </SidebarMenuBadge>
         ) : null}
       </SidebarMenuButton>
-      {requests && inWorkflows ? (
-        <SidebarMenuSub>
-          <SidebarMenuSubItem>
-            <SidebarMenuSubButton
-              isActive={onRequests}
-              render={<Link to="/workflows/requests" />}
-            >
-              <span>
-                <Trans context="Stephen's requests: the page">Requests</Trans>
-              </span>
-            </SidebarMenuSubButton>
-          </SidebarMenuSubItem>
-        </SidebarMenuSub>
-      ) : null}
     </SidebarMenuItem>
   );
 };
