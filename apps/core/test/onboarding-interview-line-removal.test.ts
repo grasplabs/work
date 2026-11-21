@@ -13,7 +13,7 @@ import type {
 import { speechPath } from "@grasp-os/shared/voice";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { closesOn } from "../src/onboarding/rules.ts";
@@ -24,6 +24,7 @@ import {
   accountOf,
   approve,
   codeOf,
+  holdAlarm,
   noRegionsOwed,
   onLink,
   openedFor,
@@ -255,6 +256,22 @@ const noAlarm = async (): Promise<void> => {
   await runInDurableObject(onboardingStore(env), async (_instance, state) => {
     await state.storage.deleteAlarm();
   });
+};
+
+/**
+ * Runs the store's alarm as its timer would, once the test held it
+ * (`holdAlarm`) from its start: the staff list `takenOutFrom` saves sets
+ * it half a second on, and on a slow runner it went off by itself after
+ * the plan closed, erased before the test ran it, and left nothing to set
+ * an alarm for.
+ */
+const runHeldAlarm = async (
+  store: ReturnType<typeof onboardingStore>
+): Promise<boolean> => {
+  await runInDurableObject(store, (instance) => {
+    vi.spyOn(instance, "alarm").mockRestore();
+  });
+  return await runDurableObjectAlarm(store);
 };
 
 /** As the system sets things in the store. */
@@ -685,6 +702,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
   });
 
   it("erases at the close of an onboarding paused across it, by the alarm, and sets no alarm after", async () => {
+    await holdAlarm();
     const theirs = markerOf();
     const taken = await takenOutFrom(theirs, { approved: false });
     const store = onboardingStore(env);
@@ -704,7 +722,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     // The interviews close while it is paused.
     await store.savePlan(closedLongAgo(), system);
     await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
-    const ran = await runDurableObjectAlarm(store);
+    const ran = await runHeldAlarm(store);
     const left = await leftOf(theirs, taken);
     const after = await alarmSet();
     await store.setPaused(false, system);
@@ -721,6 +739,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
   });
 
   it("erases at the close of an onboarding resumed after it, by the alarm", async () => {
+    await holdAlarm();
     const theirs = markerOf();
     const taken = await takenOutFrom(theirs, { approved: false });
     const store = onboardingStore(env);
@@ -731,7 +750,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
 
     await store.setPaused(false, system);
     await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
-    const ran = await runDurableObjectAlarm(store);
+    const ran = await runHeldAlarm(store);
 
     expect({ ran, ...(await leftOf(theirs, taken)) }).toStrictEqual({
       ran: true,
