@@ -220,11 +220,11 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("0");
   await counter.getByRole("button", { name: "Add one" }).click();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
+  // Its full page, from the bar's menu, and back.
   await page.getByRole("button", { name: "More", exact: true }).click();
-  await expect(
-    page.getByRole("menuitem", { name: "Open full page" })
-  ).toHaveAttribute("href", new RegExp(`^/apps/${app}/full/?$`, "u"));
-  await page.keyboard.press("Escape");
+  await page.getByRole("menuitem", { name: "Open full page" }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/?$`, "u"));
+  await page.goBack();
 
   // Its settings, beside the chat in its workspace: what it is, its
   // connections and its members.

@@ -306,8 +306,14 @@ test("an App's own chat writes its page and server code, and its workspace previ
       .getByRole("link", { name: "Code" })
       .click();
     // Its tree: folders first, each open, then the files, each by name.
-    const files = page.getByRole("navigation", { name: "Files" });
-    await expect(files.getByRole("button")).toHaveText([
+    const files = page.getByRole("tree", { name: "Files" });
+    const entries = await files
+      .getByRole("treeitem")
+      .evaluateAll((items) =>
+        items.map((item) => item.getAttribute("aria-label") ?? "")
+      );
+    expect(entries.length).toBe(7);
+    for (const entry of [
       "server",
       "schema.ts",
       "tally.ts",
@@ -315,8 +321,13 @@ test("an App's own chat writes its page and server code, and its workspace previ
       "routes",
       "index.tsx",
       "grasp.config.ts",
-    ]);
-    await files.getByRole("button", { name: "index.tsx" }).click();
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      await expect(
+        files.getByRole("treeitem", { name: entry, exact: true })
+      ).toBeVisible();
+    }
+    await files.getByRole("treeitem", { name: "index.tsx" }).click();
     const code = page.getByRole("region", {
       name: "Code of src/routes/index.tsx",
     });
