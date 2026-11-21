@@ -350,7 +350,7 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
 }) => {
   const { admin, member } = peopleIn("teams");
   await signInTo(context, admin);
-  await page.goto("/settings/members");
+  await page.goto("/settings/teams");
   const teams = page.getByRole("region", { name: "Teams" });
   const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
 

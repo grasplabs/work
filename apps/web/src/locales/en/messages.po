@@ -2151,6 +2151,7 @@ msgstr "Actions for {name}"
 
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
+#: src/settings/guests.tsx
 msgid "Actions for {who}"
 msgstr "Actions for {who}"
 
@@ -5433,6 +5434,7 @@ msgstr "Copenhagen"
 #: src/pages/frame-failure.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copied"
 msgstr "Copied"
@@ -5481,6 +5483,7 @@ msgid "Copy code"
 msgstr "Copy code"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copy email"
 msgstr "Copy email"
@@ -5537,6 +5540,7 @@ msgstr "Copy the URL of {name}"
 #: src/chat/chat-more.tsx
 #: src/copy.ts
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Copying didn't work"
 msgstr "Copying didn't work"
 
@@ -8522,6 +8526,7 @@ msgid "Grid"
 msgstr "Grid"
 
 #: src/drafts/sharing.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
 msgstr "Guest"
@@ -8533,10 +8538,6 @@ msgstr "Guest accounts can't sign in."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
-
-#: src/settings/guests.tsx
-msgid "Guests"
-msgstr "Guests"
 
 #: src/activity/audit-words.ts
 msgid "Had the Brain forget a record"
@@ -9387,10 +9388,6 @@ msgstr "Invited as a guest?"
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Invited for step 2"
-
-#: src/settings/guests.tsx
-msgid "Invited on {date}"
-msgstr "Invited on {date}"
 
 #: src/activity/audit-words.ts
 msgid "Invited someone"
@@ -13624,7 +13621,7 @@ msgstr "People in it: {count}"
 msgid "People in these teams: {named}"
 msgstr "People in these teams: {named}"
 
-#: src/settings/guests.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
 msgstr "People outside your organization, invited to what is shared with them. They reach nothing else."
 
@@ -14602,10 +14599,6 @@ msgstr "Remove spaces at the start and end"
 #: src/apps/app-data-model.tsx
 msgid "Remove table"
 msgstr "Remove table"
-
-#: src/settings/guests.tsx
-msgid "Remove the guest {email}"
-msgstr "Remove the guest {email}"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
@@ -17438,6 +17431,7 @@ msgstr "Team size unknown."
 
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
+#: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
 msgstr "Teams"

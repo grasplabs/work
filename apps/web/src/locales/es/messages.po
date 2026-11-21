@@ -2151,6 +2151,7 @@ msgstr "Acciones para {name}"
 
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
+#: src/settings/guests.tsx
 msgid "Actions for {who}"
 msgstr "Acciones para {who}"
 
@@ -5433,6 +5434,7 @@ msgstr "Copenhague"
 #: src/pages/frame-failure.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copied"
 msgstr "Copiado"
@@ -5481,6 +5483,7 @@ msgid "Copy code"
 msgstr "Copiar código"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copy email"
 msgstr "Copiar correo"
@@ -5537,6 +5540,7 @@ msgstr "Copiar la URL de {name}"
 #: src/chat/chat-more.tsx
 #: src/copy.ts
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Copying didn't work"
 msgstr "No se ha podido copiar"
 
@@ -8522,6 +8526,7 @@ msgid "Grid"
 msgstr "Cuadrícula"
 
 #: src/drafts/sharing.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
 msgstr "Invitado"
@@ -8533,10 +8538,6 @@ msgstr "Las cuentas de invitado no pueden iniciar sesión."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Las cuentas de invitado no pueden iniciar sesión. Usa una cuenta propia de tu organización."
-
-#: src/settings/guests.tsx
-msgid "Guests"
-msgstr "Invitados"
 
 #: src/activity/audit-words.ts
 msgid "Had the Brain forget a record"
@@ -9387,10 +9388,6 @@ msgstr "¿Eres invitado?"
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Invitado al paso 2"
-
-#: src/settings/guests.tsx
-msgid "Invited on {date}"
-msgstr "Invitado el {date}"
 
 #: src/activity/audit-words.ts
 msgid "Invited someone"
@@ -13624,7 +13621,7 @@ msgstr "Personas en él: {count}"
 msgid "People in these teams: {named}"
 msgstr "Personas de estos equipos: {named}"
 
-#: src/settings/guests.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
 msgstr "Personas de fuera de tu organización, invitadas a lo que se comparte con ellas. No llegan a nada más."
 
@@ -14602,10 +14599,6 @@ msgstr "Quitar los espacios del principio y del final"
 #: src/apps/app-data-model.tsx
 msgid "Remove table"
 msgstr "Quitar tabla"
-
-#: src/settings/guests.tsx
-msgid "Remove the guest {email}"
-msgstr "Quitar al invitado {email}"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
@@ -17438,6 +17431,7 @@ msgstr "Tamaño del equipo desconocido."
 
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
+#: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
 msgstr "Equipos"

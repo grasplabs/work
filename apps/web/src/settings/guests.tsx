@@ -1,9 +1,10 @@
 import type { Guest } from "@grasp-os/shared/members";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { formatDate } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,32 +12,36 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
-import { Person } from "../grasp/icons/index.ts";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Copy, More, Trash } from "../grasp/icons/index.ts";
 import { useCore } from "../use-core.ts";
+import { copyEmail } from "./invitations.tsx";
 
-// The organization's guests, for its admins (Settings › Members): people
-// outside the company invited by address, who reach nothing but what is
-// shared with them. Never members, so listed apart, each with a way to
+// A guest's menu in the people's table (Settings › Members and roles): a
+// guest is someone outside the company invited by address, who reaches
+// nothing but what is shared with them. Their email to copy, and a way to
 // remove them, which signs them out everywhere.
 
-const GuestRow = ({ guest }: { guest: Guest }) => {
+const styles = stylex.create({
+  // The dialog is drawn inside the row's end-aligned cell and would inherit
+  // its alignment: its words start where they should.
+  dialog: { display: "contents", textAlign: "start" },
+});
+
+export const GuestActions = ({ guest }: { guest: Guest }) => {
   const { t } = useLingui();
   const core = useCore();
   const router = useRouter();
+  const [asking, setAsking] = useState(false);
   const { email } = guest;
-  const date = formatDate(guest.invitedAt);
+  const who = email;
   // A refusal throws, so the dialog stays open and its button says so.
   const remove = async (): Promise<void> => {
     await changeThenRefresh(
@@ -51,21 +56,40 @@ const GuestRow = ({ guest }: { guest: Guest }) => {
     );
   };
   return (
-    <Item size="sm">
-      <ItemMedia icon={Person} />
-      <ItemContent>
-        <ItemTitle>{email}</ItemTitle>
-        <ItemDescription>{t`Invited on ${date}`}</ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        <AlertDialog>
-          <AlertDialogTrigger
-            aria-label={t`Remove the guest ${email}`}
-            size="sm"
-            variant="ghost"
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={t`Actions for ${who}`}
+          icon={More}
+          size="sm"
+          variant="ghost"
+        />
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            icon={Copy}
+            onSelect={() => {
+              void copyEmail(email, {
+                copied: t`Copied`,
+                failed: t`Copying didn't work`,
+              });
+            }}
+          >
+            {t`Copy email`}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            icon={Trash}
+            onSelect={() => {
+              setAsking(true);
+            }}
+            variant="danger"
           >
             {t`Remove`}
-          </AlertDialogTrigger>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <div {...stylex.props(styles.dialog)}>
+        <AlertDialog onOpenChange={setAsking} open={asking}>
           <AlertDialogContent>
             <AlertDialogTitle>{t`Remove ${email}?`}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -83,29 +107,7 @@ const GuestRow = ({ guest }: { guest: Guest }) => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </ItemActions>
-    </Item>
-  );
-};
-
-/** The guests, when there are any. */
-export const Guests = ({ guests }: { guests: Guest[] }) => {
-  const { t } = useLingui();
-  if (guests.length === 0) {
-    return null;
-  }
-  return (
-    <SectionCard
-      density="compact"
-      variant="grouped"
-      description={t`People outside your organization, invited to what is shared with them. They reach nothing else.`}
-      title={t`Guests`}
-    >
-      <ItemGroup separated>
-        {guests.map((guest) => (
-          <GuestRow guest={guest} key={guest.userId} />
-        ))}
-      </ItemGroup>
-    </SectionCard>
+      </div>
+    </>
   );
 };
