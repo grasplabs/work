@@ -258,7 +258,7 @@ const deployerCheck = async (
 };
 
 /** The checklist, as this admin stands now. */
-export const readinessOf = async (envOf: Env): Promise<Readiness> => {
+const readinessOf = async (envOf: Env): Promise<Readiness> => {
   const db = adminDatabase(envOf.DB);
   const [[imported], newestId, missing] = await Promise.all([
     db.select({ n: count() }).from(releases),

@@ -24,7 +24,18 @@ export const adminDefine = {
  */
 export const adminPlugins = (worker: PluginConfig = {}) => [
   cloudflare({ viteEnvironment: { name: "ssr" }, ...worker }),
-  tanstackStart(),
+  // The browser's build fails on anything of the Worker's that would reach
+  // it: its bindings, its database and the queries over it. A server
+  // function's own body is the server's alone, and never counts.
+  tanstackStart({
+    importProtection: {
+      behavior: "error",
+      client: {
+        specifiers: ["cloudflare:workers", "drizzle-orm", /^drizzle-orm\//u],
+        files: ["**/src/db/**"],
+      },
+    },
+  }),
   react(),
   // Fail the build on anything the React Compiler can't compile, instead
   // of silently shipping it uncompiled.

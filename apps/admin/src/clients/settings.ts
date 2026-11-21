@@ -25,8 +25,6 @@ import {
   storeSecret,
 } from "../deploy/context.ts";
 import {
-  adminUnreachable,
-  clientSignInSchema,
   missingSignInApp,
   staffWindowMaxDays,
   staffWindowOf,
@@ -35,6 +33,7 @@ import type { StaffWindow } from "../deploy/core-config.ts";
 import { sealSecret } from "../deploy/sealed-secrets.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
+import { adminUnreachable, clientSignInSchema } from "./sign-in-schema.ts";
 import { teamsBotSchema } from "./teams-bot.ts";
 
 /** Why staff's change to a client's settings was refused, as the page words it. */

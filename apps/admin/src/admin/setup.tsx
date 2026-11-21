@@ -49,7 +49,6 @@ import type { HistoryEntry } from "../clients/queries.ts";
 import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
-import { channelIds } from "../db/schema.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import { retryProvisioningFn } from "../hosting/functions.ts";
@@ -63,6 +62,7 @@ import {
 } from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
+import { channelIds } from "../rollout/channel-ids.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift, retryClientFn } from "../rollout/functions.ts";

@@ -8,8 +8,8 @@ import {
   clientDeploys,
   clients,
 } from "../src/db/schema.ts";
-import type { Channel } from "../src/db/schema.ts";
 import { RELEASE_LIST_LIMIT } from "../src/releases/queries.ts";
+import type { Channel } from "../src/rollout/channel-ids.ts";
 import { promoteRelease } from "../src/rollout/channels.ts";
 import { promoteReleaseFn, retryChannelFn } from "../src/rollout/functions.ts";
 import { mockAccess } from "./access.ts";
