@@ -1,5 +1,5 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { Trans } from "@lingui/react/macro";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
