@@ -610,6 +610,7 @@ const cast = {
   brainQuestions: { admin: "admin", member: "user" },
   boardGoals: { admin: "admin", member: "user" },
   setupVoice: { admin: "admin" },
+  dotBrain: { admin: "admin" },
   setupConnect: { admin: "admin" },
   setupDocuments: { admin: "admin" },
   setupStory: { admin: "admin" },
