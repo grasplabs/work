@@ -1,14 +1,17 @@
+import { parse as parseCsv } from "csv-parse/sync";
 import { unzipSync } from "fflate";
 import { extractText } from "unpdf";
 
+import { dataMarkdown, decoded, htmlMarkdown, textMarkdown } from "./text.ts";
 import { TooLargeError } from "./too-large.ts";
 import { vttExtraction } from "./vtt.ts";
 import type { VttExtraction } from "./vtt.ts";
 
 // Each file type's text as Markdown, with the headings that make its
 // sections: a PDF's pages, a Word document's own headings, an Excel
-// workbook's sheets, a WebVTT file's turns (vtt.ts, with its
-// transcript). This runs only inside the extractor's sandbox (worker.ts),
+// workbook's sheets, a PowerPoint deck's slides, a WebVTT file's turns
+// (vtt.ts, with its transcript), a web page's own headings, and text
+// files as they are (text.ts). This runs only inside the extractor's sandbox (worker.ts),
 // never in core: a file crafted to exhaust a parser exhausts
 // only that isolate.
 //
@@ -397,6 +400,63 @@ const xlsxMarkdown = (bytes: Uint8Array): string => {
     .join("\n\n");
 };
 
+/**
+ * A CSV or tab-separated file as one table, its first row as the header,
+ * read as RFC 4180 has it (csv-parse), rows of any length. One that isn't
+ * such a file after all is kept as the text it is.
+ */
+const tableMarkdown =
+  (delimiter: string) =>
+  (bytes: Uint8Array): string => {
+    let rows: string[][];
+    try {
+      rows = parseCsv(decoded(bytes), {
+        bom: true,
+        delimiter,
+        relax_column_count: true,
+        skip_empty_lines: true,
+      });
+    } catch {
+      return dataMarkdown(bytes);
+    }
+    return rows.length === 0 ? "" : markdownTable(rows);
+  };
+
+const slidePath = /^ppt\/slides\/slide(?<number>\d{1,5})\.xml$/u;
+const slideText =
+  /<a:t(?:\s[^<>]*)?>(?<text>[^<]*)<\/a:t>|<a:br(?:\s[^<>]*)?\/>/gu;
+
+/**
+ * A PowerPoint deck, a section per slide in the order of their numbers:
+ * each paragraph of each text box on its own, as written. Its notes and
+ * pictures aren't read.
+ */
+const pptxMarkdown = (bytes: Uint8Array): string => {
+  const parts = unzipParts(bytes, (name) => slidePath.test(name));
+  if (parts.size === 0) {
+    throw new Error("The file has no slides in it");
+  }
+  return [...parts]
+    .map(([name, slide]) => ({
+      number: Number(slidePath.exec(name)?.groups?.number),
+      slide,
+    }))
+    .toSorted((one, other) => one.number - other.number)
+    .map(({ number, slide }) => {
+      const paragraphs = elements(slide, "<a:p", "</a:p>")
+        .map((paragraph) =>
+          Array.from(paragraph.matchAll(slideText), ({ groups }) =>
+            groups?.text === undefined ? "\n" : xmlText(groups.text)
+          )
+            .join("")
+            .trim()
+        )
+        .filter((paragraph) => paragraph !== "");
+      return [`## Slide ${number}`, ...paragraphs].join("\n\n");
+    })
+    .join("\n\n");
+};
+
 /** What reading a file gives: its Markdown, or that and its transcript. */
 export type Extraction = string | VttExtraction;
 
@@ -409,5 +469,15 @@ export const formats: Readonly<
     docxMarkdown,
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     xlsxMarkdown,
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+    pptxMarkdown,
   "text/vtt": vttExtraction,
+  "text/html": htmlMarkdown,
+  "text/plain": textMarkdown,
+  "text/markdown": textMarkdown,
+  "text/csv": tableMarkdown(","),
+  "text/tab-separated-values": tableMarkdown("\t"),
+  "application/json": dataMarkdown,
+  "application/xml": dataMarkdown,
+  "application/yaml": dataMarkdown,
 };

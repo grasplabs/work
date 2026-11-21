@@ -69,6 +69,10 @@ const reading = {
   options: ["Yes, still current", "No, it changed"],
 };
 
+/** Text as the bytes of a file. */
+const fileOf = (content: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(new TextEncoder().encode(content));
+
 const answer = (body: unknown): ProviderReply => ({
   text: JSON.stringify(body),
   inputTokens: 1200,
@@ -504,7 +508,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       await outcome(
         admin.onboarding.shareDocument({
           locale: "en",
-          name: "deck.pptx",
+          name: "deck.key",
           bytes: draft,
         })
       ),
@@ -518,6 +522,64 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       result: ["document.old_format", "document.slides"],
       sent: 0,
       kept: 0,
+    });
+  });
+
+  it("take text, a web page and data as documents, and refuse what is no text", async () => {
+    const { api: admin } = await signedInApi(idp, "admin");
+    const run = crypto.randomUUID();
+    const files = [
+      {
+        name: `notes-${run}.md`,
+        bytes: fileOf("# Claims\n\nApproved by a manager."),
+      },
+      { name: `intake-${run}.txt`, bytes: fileOf("Claims come in by email.") },
+      {
+        name: `handbook-${run}.html`,
+        bytes: fileOf("<title>Handbook</title><p>Claims go to ClaimsPro.</p>"),
+      },
+      { name: `teams-${run}.csv`, bytes: fileOf("Team,Lead\nOps,Ada\n") },
+    ];
+    const { requests, result } = await answering(
+      files.map(() => answer(reading)),
+      async () => {
+        const shared: string[] = [];
+        for (const file of files) {
+          // oxlint-disable-next-line no-await-in-loop -- one answer each, in order
+          const kept = await admin.onboarding.shareDocument({
+            locale: "en",
+            ...file,
+          });
+          shared.push(kept.name);
+        }
+        return {
+          shared,
+          // A picture named as text isn't one: it holds NUL bytes.
+          picture: await outcome(
+            admin.onboarding.shareDocument({
+              locale: "en",
+              name: `scan-${run}.txt`,
+              bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 13]),
+            })
+          ),
+          other: await outcome(
+            admin.onboarding.shareDocument({
+              locale: "en",
+              name: `photo-${run}.jpg`,
+              bytes: new Uint8Array([0xff, 0xd8, 0xff]),
+            })
+          ),
+        };
+      }
+    );
+
+    expect({ result, sent: requests.length }).toStrictEqual({
+      result: {
+        shared: files.map(({ name }) => name),
+        picture: "document.unsupported",
+        other: "document.unsupported",
+      },
+      sent: files.length,
     });
   });
 

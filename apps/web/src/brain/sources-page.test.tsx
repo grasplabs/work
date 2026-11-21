@@ -12,7 +12,7 @@ import type {
   BrainSourcesAfter,
   BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
-import { uploadMaxBytes } from "@grasp-os/shared/uploads";
+import { uploadMaxBytes, uploadTypes } from "@grasp-os/shared/uploads";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -1084,12 +1084,14 @@ describe(SourcesPage, () => {
       chosen,
       accepts: picker.accept,
       // The types and the limit, as core's own lists hold them.
-      says: uploadText.includes(".xlsx, and .vtt files of up to 10 MB."),
+      says: uploadText.includes(".yaml, and .yml files of up to 10 MB."),
       uploadSaysWhy: uploadText.includes(refused),
       panelSaysWhy: panel().includes(refused),
     }).toStrictEqual({
       chosen: "Only me",
-      accepts: ".pdf,.docx,.xlsx,.vtt",
+      accepts: Object.keys(uploadTypes)
+        .map((type) => `.${type}`)
+        .join(","),
       says: true,
       uploadSaysWhy: true,
       panelSaysWhy: true,

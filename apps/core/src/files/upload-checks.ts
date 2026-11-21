@@ -26,17 +26,46 @@ const afterVttSignature: ReadonlySet<number | undefined> = new Set([
 
 const vttSignature = bytesOf("WEBVTT");
 
+/** A ZIP archive's first bytes: what an Office file is. */
+const isZip = (bytes: Uint8Array): boolean =>
+  startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]);
+
+/** How much of a file is looked at to tell text from anything else. */
+const textWithin = 8192;
+
+/**
+ * Whether a file starts as text does: no NUL byte, which text has none of
+ * and nearly every other kind of file has early. Whether all of it is
+ * UTF-8 is for its reader to find (files/extractor/formats.ts).
+ */
+const isText = (bytes: Uint8Array): boolean =>
+  !bytes.subarray(0, textWithin).includes(0);
+
 /**
  * Whether a file starts as its type does: a PDF's header, a ZIP's for
- * Office files, and WebVTT's signature (after a byte order mark, if any)
- * as the WebVTT spec defines it.
+ * Office files, text for the text types, and WebVTT's signature (after a
+ * byte order mark, if any) as the WebVTT spec defines it.
  */
 export const signatures: Readonly<
   Record<UploadExtension, (bytes: Uint8Array) => boolean>
 > = {
   pdf: (bytes) => startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]),
-  docx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
-  xlsx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
+  docx: isZip,
+  xlsx: isZip,
+  pptx: isZip,
+  html: isText,
+  htm: isText,
+  txt: isText,
+  text: isText,
+  log: isText,
+  md: isText,
+  markdown: isText,
+  csv: isText,
+  tsv: isText,
+  json: isText,
+  xml: isText,
+  yaml: isText,
+  yml: isText,
   vtt: (bytes) => {
     const text = startsWith(bytes, byteOrderMark)
       ? bytes.subarray(byteOrderMark.length)
@@ -50,11 +79,11 @@ export const signatures: Readonly<
 
 const headingMarks = /^#{1,6}\s/gmu;
 const tableSyntax = /[\s|-]/gu;
-const pageHeading = /^#{1,6} Page \d+$/gmu;
+const pageHeading = /^#{1,6} (?:Page|Slide) \d+$/gmu;
 
 /**
  * Whether Markdown holds any text: a heading's counts, table rules and
- * the page headings a PDF's sections get don't.
+ * the headings a PDF's pages and a deck's slides get don't.
  */
 export const hasText = (markdown: string): boolean =>
   markdown

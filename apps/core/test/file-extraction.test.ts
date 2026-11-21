@@ -84,6 +84,10 @@ export default class extends WorkerEntrypoint {
   return started;
 };
 
+/** Text as the bytes of a file. */
+const bytesOf = (text: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(new TextEncoder().encode(text));
+
 describe("core's extractor", { timeout: 60_000 }, () => {
   it("reads a PDF by page, a Word file by its headings and a workbook by sheet", async () => {
     const [pdf, docx, xlsx] = await Promise.all([
@@ -112,6 +116,53 @@ describe("core's extractor", { timeout: 60_000 }, () => {
       economy: true,
       xlsx: true,
       facilities: true,
+    });
+  });
+
+  it("reads text as it is, a CSV as a table, data whole, and a web page and a deck by what they show", async () => {
+    const slide = (text: string): Uint8Array =>
+      bytesOf(
+        `<p:sld xmlns:a="a" xmlns:p="p"><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sld>`
+      );
+    const [markdown, latin, csv, json, html, deck] = await Promise.all([
+      extracted(
+        "notes.md",
+        bytesOf("# Returns\n\nWithin *thirty* days."),
+        "md"
+      ),
+      // Windows-1252, as an older export is: "Café" with one byte for é.
+      extracted("old.txt", new Uint8Array([0x43, 0x61, 0x66, 0xe9]), "txt"),
+      extracted(
+        "offices.csv",
+        bytesOf('City,Lead\n"Utrecht, NL",Ada\nGhent,Max\n'),
+        "csv"
+      ),
+      extracted("rules.json", bytesOf('{"note":"uses ``` inside"}'), "json"),
+      extracted(
+        "handbook.html",
+        bytesOf(
+          "<!doctype html><title>Handbook</title><style>p{color:red}</style><body><h2>Leave</h2><p>Ask   your&nbsp;lead <b>first</b>.</p><script>track()</script><ul><li>Two weeks ahead</li></ul>"
+        ),
+        "html"
+      ),
+      extracted(
+        "kickoff.pptx",
+        zipSync({
+          "ppt/slides/slide2.xml": slide("Second: who decides"),
+          "ppt/slides/slide1.xml": slide("First &amp; foremost"),
+          "ppt/notesSlides/notesSlide1.xml": slide("Not read"),
+        }),
+        "pptx"
+      ),
+    ]);
+
+    expect({ markdown, latin, csv, json, html, deck }).toStrictEqual({
+      markdown: "# Returns\n\nWithin *thirty* days.",
+      latin: "Café",
+      csv: "| City | Lead |\n| --- | --- |\n| Utrecht, NL | Ada |\n| Ghent | Max |",
+      json: '````\n{"note":"uses ``` inside"}\n````',
+      html: "# Handbook\n\n## Leave\n\nAsk your lead first.\n\n- Two weeks ahead",
+      deck: "## Slide 1\n\nFirst & foremost\n\n## Slide 2\n\nSecond: who decides",
     });
   });
 
