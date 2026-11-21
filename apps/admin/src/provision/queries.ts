@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { needsAttentionOf } from "../hosting/attention.ts";
 import type { NeedsAttention } from "../hosting/attention.ts";
@@ -12,6 +11,7 @@ import { provisionOf } from "../hosting/operation.ts";
 import { clientHostingOf } from "../hosting/organization.ts";
 import { stageDestinationOf } from "../hosting/placement.ts";
 import type { NotStarted } from "../hosting/placement.ts";
+import type { Channel } from "../rollout/channel-ids.ts";
 import { targetReleaseOf } from "../rollout/targets.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
 

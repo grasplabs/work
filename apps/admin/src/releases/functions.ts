@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { clients, clientWorkers } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
+import type { Channel } from "../rollout/channel-ids.ts";
 import { channelsOfReleases, promotionHistory } from "../rollout/channels.ts";
 import { getRelease, listReleases } from "./queries.ts";
 

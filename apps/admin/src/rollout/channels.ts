@@ -38,12 +38,12 @@ import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import {
   auditEvents,
-  channelIds,
   channels,
   clientDeploys,
   clients,
   releases,
 } from "../db/schema.ts";
+import { channelIds } from "./channel-ids.ts";
 import { promotionRefusal } from "./desired.ts";
 import type { Promotion } from "./desired.ts";
 import { RolloutError } from "./errors.ts";

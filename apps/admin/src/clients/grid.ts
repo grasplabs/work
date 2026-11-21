@@ -28,7 +28,6 @@ import {
   clientWorkers,
   releases,
 } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
 import { clientDomain, deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -47,6 +46,7 @@ import {
 } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
 import { notStartedOf } from "../provision/queries.ts";
+import type { Channel } from "../rollout/channel-ids.ts";
 import { targetOf } from "../rollout/desired.ts";
 import type { ChannelReleases } from "../rollout/desired.ts";
 import { driftOf } from "../rollout/drift.ts";

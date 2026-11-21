@@ -10,8 +10,8 @@ import { env } from "cloudflare:workers";
 
 import { adminDatabase } from "../src/db/act.ts";
 import { channels, clients, hostingDestinations } from "../src/db/schema.ts";
-import type { Channel } from "../src/db/schema.ts";
 import { placeClient } from "../src/hosting/inventory.ts";
+import type { Channel } from "../src/rollout/channel-ids.ts";
 import { buildRelease } from "./releases.ts";
 
 export const db = adminDatabase(env.DB);

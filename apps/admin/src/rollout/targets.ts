@@ -14,7 +14,7 @@ import {
   clients,
   clientWorkers,
 } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
+import type { Channel } from "./channel-ids.ts";
 import { targetOf } from "./desired.ts";
 import type { ChannelReleases } from "./desired.ts";
 

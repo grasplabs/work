@@ -14,12 +14,12 @@ import { AdminPage } from "../../../admin/page.tsx";
 import { PlatformNav, platformCrumb } from "../../../admin/platform-nav.tsx";
 import { Quiet } from "../../../admin/release-parts.tsx";
 import { Section } from "../../../admin/section.tsx";
-import { channelIds } from "../../../db/schema.ts";
-import type { Channel } from "../../../db/schema.ts";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchReleases } from "../../../releases/functions.ts";
 import type { ReleaseSummary } from "../../../releases/queries.ts";
 import { releaseTitle } from "../../../releases/version.ts";
+import { channelIds } from "../../../rollout/channel-ids.ts";
+import type { Channel } from "../../../rollout/channel-ids.ts";
 import { channelWords } from "../../../rollout/channel-words.ts";
 
 /** The channels a release has been on, Edge first. */

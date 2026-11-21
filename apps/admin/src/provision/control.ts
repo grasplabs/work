@@ -10,11 +10,12 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
+import { clientSignInSchema } from "../clients/sign-in-schema.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain, signInApps } from "../deploy/context.ts";
-import { clientSignInSchema, missingSignInApp } from "../deploy/core-config.ts";
+import { missingSignInApp } from "../deploy/core-config.ts";
 import { hostingKinds, jurisdictions } from "../hosting/organization.ts";
 import { clientIdProblem } from "./client-id.ts";
 import { ProvisionError } from "./errors.ts";
