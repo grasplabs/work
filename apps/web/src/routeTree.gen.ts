@@ -42,7 +42,6 @@ import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shel
 import { Route as ShellProjectsIndexRouteImport } from './routes/_shell.projects.index'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
-import { Route as ShellSettingsAgentsRouteImport } from './routes/_shell.settings.agents'
 import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.settings.ai-providers'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
@@ -236,11 +235,6 @@ const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsAgentsRoute = ShellSettingsAgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsAiProvidersRoute =
   ShellSettingsAiProvidersRouteImport.update({
     id: '/ai-providers',
@@ -407,7 +401,6 @@ export interface FileRoutesByFullPath {
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
-  '/settings/agents': typeof ShellSettingsAgentsRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
@@ -467,7 +460,6 @@ export interface FileRoutesByTo {
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
-  '/settings/agents': typeof ShellSettingsAgentsRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
@@ -531,7 +523,6 @@ export interface FileRoutesById {
   '/_shell/brain/sources': typeof ShellBrainSourcesRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
-  '/_shell/settings/agents': typeof ShellSettingsAgentsRoute
   '/_shell/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
@@ -595,7 +586,6 @@ export interface FileRouteTypes {
     | '/brain/sources'
     | '/integrations/$integration'
     | '/projects/$projectId'
-    | '/settings/agents'
     | '/settings/ai-providers'
     | '/settings/audit'
     | '/settings/billing'
@@ -655,7 +645,6 @@ export interface FileRouteTypes {
     | '/brain/sources'
     | '/integrations/$integration'
     | '/projects/$projectId'
-    | '/settings/agents'
     | '/settings/ai-providers'
     | '/settings/audit'
     | '/settings/billing'
@@ -718,7 +707,6 @@ export interface FileRouteTypes {
     | '/_shell/brain/sources'
     | '/_shell/integrations/$integration'
     | '/_shell/projects/$projectId'
-    | '/_shell/settings/agents'
     | '/_shell/settings/ai-providers'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
@@ -1003,13 +991,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsIndexRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/agents': {
-      id: '/_shell/settings/agents'
-      path: '/agents'
-      fullPath: '/settings/agents'
-      preLoaderRoute: typeof ShellSettingsAgentsRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/ai-providers': {
       id: '/_shell/settings/ai-providers'
       path: '/ai-providers'
@@ -1229,7 +1210,6 @@ const ShellBrainRouteWithChildren = ShellBrainRoute._addFileChildren(
 )
 
 interface ShellSettingsRouteChildren {
-  ShellSettingsAgentsRoute: typeof ShellSettingsAgentsRoute
   ShellSettingsAiProvidersRoute: typeof ShellSettingsAiProvidersRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
@@ -1249,7 +1229,6 @@ interface ShellSettingsRouteChildren {
 }
 
 const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
-  ShellSettingsAgentsRoute: ShellSettingsAgentsRoute,
   ShellSettingsAiProvidersRoute: ShellSettingsAiProvidersRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
