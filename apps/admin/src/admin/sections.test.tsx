@@ -400,13 +400,15 @@ describe("an organization's sections without its core", () => {
       answeredAdmin({ client: acme }),
       "/nothing"
     );
+    // Read before the next page opens: one page at a time.
+    const missingSays = missing.main();
     const unknown = await openAdmin("/organizations/client-unknown/details", {
       fetchClientGrid: [acme],
       fetchClientAdmin: null,
     });
 
     expect(
-      [missing.main(), unknown.main()].map((main) =>
+      [missingSays, unknown.main()].map((main) =>
         main.includes("This page is not here")
       )
     ).toStrictEqual([true, true]);

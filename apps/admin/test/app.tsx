@@ -128,11 +128,16 @@ let inFlight = 0;
 /** The router of the admin opened last. */
 let opened: { state: { status: string } } | undefined;
 
-afterEach(() => {
+/** Unmounts the page opened last, its effects, subscriptions and timers with it. */
+const unmountOpened = (): void => {
   act(() => {
     mounted?.unmount();
   });
   mounted = undefined;
+};
+
+afterEach(() => {
+  unmountOpened();
   opened = undefined;
   inFlight = 0;
   document.body.replaceChildren();
@@ -236,6 +241,8 @@ export const openAdmin = async (
       }
     }
   );
+  // One page at a time: the one opened before stops before this one starts.
+  unmountOpened();
   const router = getRouter();
   router.update({
     context: router.options.context,
