@@ -52,6 +52,9 @@ const newMonth = (): string => {
   return `${2200 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
+/** US dollars as whole micros, so sums compare exactly. */
+const micros = (dollars: number): number => Math.round(dollars * 1_000_000);
+
 /** The model each role gets. */
 const roleIn = (settings: ModelsNow) => ({
   quick: modelForRole(settings, "quick"),
@@ -172,7 +175,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     });
   });
 
-  it("show admins this month's spend: the total, and the workflows that spent most with their runs, and nobody else", async () => {
+  it("show admins this month's spend: the total, each day's, chat's, and the workflows that spent most with their runs, and nobody else", async () => {
     // The month it is: workflow runs are counted in it.
     const coreEnv: Env = { ...env, SPEND_MONTH: undefined };
     const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
@@ -260,9 +263,19 @@ describe("model settings", { timeout: 60_000 }, () => {
     const { core } = await openRpc(session, { coreEnv });
     const spend = await core.authenticate().models.spend();
     expect(spend.workflows).toHaveLength(modelSpendListed);
-    // The three calls, and the gone App's workflows'.
+    // Each day of the month so far, today's all of it, and nothing missing:
+    // the days add up to the total, and chat is the person's one turn.
+    const today = new Date().getUTCDate();
+    const { days, chat, ...rest } = spend;
     expect({
-      ...spend,
+      ...rest,
+      days: {
+        length: days.length,
+        sum: micros(days.reduce((sum, each) => sum + each, 0)),
+        today: micros(days[today - 1] ?? 0),
+        others: days.filter((_, at) => at !== today - 1),
+      },
+      chat: micros(chat),
       total: Math.round(spend.total * 1_000_000),
       workflows: spend.workflows.slice(0, 2).map(({ amount, ...listed }) => ({
         ...listed,
@@ -290,6 +303,13 @@ describe("model settings", { timeout: 60_000 }, () => {
         },
       ],
       more: true,
+      days: {
+        length: today,
+        sum: micros(spend.total),
+        today: micros(spend.total),
+        others: Array.from({ length: today - 1 }, () => 0),
+      },
+      chat: 4500,
     });
 
     const { session: builderSession } = await signedInWithRole(idp, "builder");
@@ -297,6 +317,77 @@ describe("model settings", { timeout: 60_000 }, () => {
     await expect(
       outcome(builderCore.authenticate().models.spend())
     ).resolves.toBe("role.forbidden");
+  });
+
+  it("count each call on the UTC day it was answered, all of a month that isn't this one, and as chat only people's chat turns", async () => {
+    // February of a year that isn't a leap year: 28 days.
+    const month = "2300-02";
+    const coreEnv: Env = { ...env, SPEND_MONTH: month };
+    /** A call of `month`'s, answered `at`, costing `dollars`. */
+    const call = (
+      at: string,
+      dollars: number,
+      kept: { purpose: string; credential: string; feature?: string }
+    ) => ({
+      id: crypto.randomUUID(),
+      period: at.slice(0, "yyyy-mm".length),
+      personId: "someone",
+      triggerType: "person",
+      model: anthropic,
+      inputTokens: 1000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: dollars,
+      estimated: false,
+      createdAt: new Date(at),
+      ...kept,
+    });
+    const chatTurn = { purpose: "chat.turn", credential: "organization" };
+    const calls = [
+      call("2300-02-01T00:00:00.000Z", 0.001, chatTurn),
+      call("2300-02-28T23:59:59.999Z", 0.002, chatTurn),
+      call("2300-02-28T12:00:00.000Z", 0.004, {
+        purpose: "workflow.step",
+        credential: "organization",
+      }),
+      // A chat turn on Grasp's AI, which the organization pays Grasp for.
+      call("2300-02-14T08:00:00.000Z", 0.008, {
+        ...chatTurn,
+        credential: "platform",
+        feature: "organization",
+      }),
+      // Grasp's own feature on its own key, and the next month: neither
+      // the organization's spend this month.
+      call("2300-02-14T08:00:00.000Z", 0.1, {
+        purpose: "brain.memory.check",
+        credential: "platform",
+      }),
+      call("2300-03-01T00:00:00.000Z", 1, chatTurn),
+    ];
+    // One row a statement: D1 binds at most 100 values.
+    await Promise.all(
+      calls.map(
+        async (row) => await drizzle(env.DB).insert(modelUsage).values(row)
+      )
+    );
+
+    const { session } = await signedInWithRole(idp, "admin");
+    const { core } = await openRpc(session, { coreEnv });
+    const { days, total, chat } = await core.authenticate().models.spend();
+
+    expect({
+      days: days.map(micros),
+      total: micros(total),
+      chat: micros(chat),
+    }).toStrictEqual({
+      days: Array.from({ length: 28 }, (_, at) => {
+        const spent: Record<number, number> = { 0: 1000, 13: 8000, 27: 6000 };
+        return spent[at] ?? 0;
+      }),
+      total: 15_000,
+      chat: 11_000,
+    });
   });
 
   it("refused to Grasp staff, whatever role their access gives", async () => {
