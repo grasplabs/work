@@ -26,11 +26,11 @@ const reported = new Map<string, Promise<boolean>>();
 /** Where the page is: its route's pattern, never the URL itself. */
 let routeNow = (): string => "unknown";
 
-/** Sends `report`: whether the Worker took it. */
+/** Sends `report`: whether the Worker logged it (not past its limit). */
 const send = async (report: ErrorReport): Promise<boolean> => {
   try {
-    await reportPageErrorFn({ data: report });
-    return true;
+    const { logged } = await reportPageErrorFn({ data: report });
+    return logged;
   } catch {
     return false;
   }
