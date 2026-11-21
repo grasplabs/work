@@ -87,7 +87,13 @@ const execute = (
       persistTo,
       ...args,
     ],
-    { encoding: "utf-8", stdio: ["ignore", "pipe", "inherit"] }
+    {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "inherit"],
+      // Its `--json` answer is a log line: a quieter level set around it
+      // (the e2e stack's `WRANGLER_LOG=warn`) would leave nothing to read.
+      env: { ...process.env, WRANGLER_LOG: "log" },
+    }
   );
 
 const main = (): void => {
