@@ -21,9 +21,10 @@ import {
 } from "@grasp-os/ui/components/select";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { FolderIcon, UserPlusIcon, UsersIcon } from "lucide-react";
+import { FolderIcon, MailIcon, UserPlusIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { z } from "zod";
 
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
@@ -47,6 +48,30 @@ export interface ShareOffer {
   teams: readonly { id: string; name: string }[];
   projects?: readonly { id: string; name: string }[];
 }
+
+/** An address as core takes a guest's (guest-members.ts). */
+const addressSchema = z.email().max(254);
+
+/**
+ * What was typed, as an address to invite: when it is one, and nobody
+ * offered goes by it (a guest is offered by their address).
+ */
+const addressToInvite = (
+  typed: string,
+  people: readonly Pickable[]
+): string | undefined => {
+  const parsed = addressSchema.safeParse(typed.trim().toLowerCase());
+  if (!parsed.success) {
+    return undefined;
+  }
+  const address = parsed.data;
+  return people.some(
+    ({ name, email }) =>
+      name.toLowerCase() === address || email?.toLowerCase() === address
+  )
+    ? undefined
+    : address;
+};
 
 /** Who was picked. */
 export interface Picked {
@@ -108,6 +133,7 @@ export const SharePicker = ({
   roleName,
   empty,
   hintOf,
+  onInvite,
   children,
 }: {
   offered: ShareOffer | undefined;
@@ -126,20 +152,31 @@ export const SharePicker = ({
    * everyone the page knows: those offered and those who have a role.
    */
   hintOf: PeopleApart["hint"];
+  /**
+   * Invites a typed address that belongs to nobody offered as a guest,
+   * who only ever uses it: an App's alone. Core says whether it may.
+   */
+  onInvite?: (address: string) => void;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<ShareRole>("user");
+  const [typed, setTyped] = useState("");
   const pick = (picked: Picked): void => {
     setOpen(false);
     onPick(picked, role);
   };
   const { people, teams, projects = [] } = offered ?? {};
+  const address =
+    onInvite === undefined || people === undefined
+      ? undefined
+      : addressToInvite(typed, people);
   return (
     <Popover
       onOpenChange={(next: boolean) => {
         setOpen(next);
+        setTyped("");
         if (next) {
           onOpen();
         }
@@ -159,7 +196,15 @@ export const SharePicker = ({
           <RoleSelect label={roleName} onChange={setRole} role={role} />
         </div>
         <Command filter={matchTyped}>
-          <CommandInput placeholder={t`Search people and teams`} />
+          <CommandInput
+            onValueChange={setTyped}
+            placeholder={
+              onInvite === undefined
+                ? t`Search people and teams`
+                : t`Search people and teams, or type an email address`
+            }
+            value={typed}
+          />
           <CommandList>
             {people === undefined || teams === undefined ? (
               <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
@@ -175,6 +220,23 @@ export const SharePicker = ({
             ) : (
               <>
                 <CommandEmpty>{empty}</CommandEmpty>
+                {address === undefined || onInvite === undefined ? null : (
+                  <CommandGroup heading={t`Someone new`}>
+                    <CommandItem
+                      keywords={[address]}
+                      onSelect={() => {
+                        setOpen(false);
+                        onInvite(address);
+                      }}
+                      value={`invite:${address}`}
+                    >
+                      <MailIcon className="text-muted-foreground" />
+                      <span className="flex-1 truncate">
+                        <Trans>Invite {address} as a guest</Trans>
+                      </span>
+                    </CommandItem>
+                  </CommandGroup>
+                )}
                 {people.length === 0 ? null : (
                   <CommandGroup heading={t`People`}>
                     {people.map((person) => (
