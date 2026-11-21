@@ -2,8 +2,9 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { onThemeChange } from "../frame/theme.ts";
+import { BackdropField } from "../grasp/backdrop/field.tsx";
 import {
-  Backdrop,
+  defaultScenes,
   isDither,
   isSand,
   isScene,
@@ -12,8 +13,9 @@ import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
 
 // Still pictures of looks, for choosing one by sight (look-tiles.tsx). A
 // browser allows only a handful of WebGL contexts, so no tile draws live:
-// one hidden stage draws one look at a time with Grasp UI's Backdrop,
-// at a tile's size, takes its picture (a data URL), lets the field go, and
+// one hidden stage draws one look at a time with Grasp UI's backdrop field,
+// still and small as its own picker's tiles are, at a tile's size, takes its
+// picture (a data URL) as soon as it stands, lets the field go, and
 // moves on to the next. Each picture is kept for this visit, by the look
 // and, for what is drawn on the page's ground, the page's theme. Only the
 // big preview stays live.
@@ -23,10 +25,15 @@ const pictureWidth = 160;
 const pictureHeight = 90;
 
 /**
- * How long a look draws before its picture is taken: a scene waits for
- * its picture to load; a dither for its first frames; sand settles at once.
+ * The longest a look draws before its picture is taken anyway. It is taken
+ * as soon as it stands: a dither or sand once it has drawn, a scene once
+ * its picture has come. Waiting these out for every look, the tiles took
+ * nine seconds to fill.
  */
 const settleMs = { scene: 900, dither: 260, sand: 60 } as const;
+
+/** How long a scene waits, once its picture has come and its field has started, for the field to draw it. */
+const sceneDrawMs = 150;
 
 const pictures = new Map<string, string>();
 const queue: { key: string; look: Look }[] = [];
@@ -97,7 +104,6 @@ export const useLookPicture = (look: Look): string | undefined => {
 
 const styles = stylex.create({
   // Drawn, never seen: out of the way of the pointer and of a screen reader.
-  fill: { width: "100%", height: "100%" },
   stage: {
     position: "fixed",
     insetBlockStart: 0,
@@ -135,21 +141,66 @@ export const LookPictureStage = () => {
         // Nothing drawing.
       };
     }
-    const timer = setTimeout(() => {
+    const canvas = stage.current?.querySelector("canvas");
+    let taken = false;
+    const take = (): void => {
+      if (taken) {
+        return;
+      }
+      taken = true;
       // Our own pictures, from this origin: a canvas that is always read.
-      const canvas = stage.current?.querySelector("canvas");
       pictures.set(next.key, canvas?.toDataURL() ?? "");
       queue.shift();
       changed();
-    }, settleMs[familyOf(next.look)]);
+    };
+    const family = familyOf(next.look);
+    const timers = [setTimeout(take, settleMs[family])];
+    // A scene's picture, fetched here too: once it has come, the field's
+    // own copy comes from the cache at once.
+    let came = family !== "scene";
+    const ready = (): void => {
+      if (came && canvas?.dataset.drawn !== undefined) {
+        timers.push(setTimeout(take, family === "scene" ? sceneDrawMs : 0));
+      }
+    };
+    const watch = new MutationObserver(ready);
+    if (canvas !== undefined && canvas !== null) {
+      watch.observe(canvas, {
+        attributes: true,
+        attributeFilter: ["data-drawn"],
+      });
+    }
+    if (isScene(next.look.backdrop)) {
+      const picture = new Image();
+      picture.addEventListener(
+        "load",
+        () => {
+          came = true;
+          ready();
+        },
+        { once: true }
+      );
+      picture.src = `${defaultScenes}${next.look.backdrop}.small.jpg`;
+    }
+    ready();
     return () => {
-      clearTimeout(timer);
+      watch.disconnect();
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
     };
   }, [next]);
   return (
     <div aria-hidden="true" ref={stage} {...stylex.props(styles.stage)}>
       {next === undefined ? null : (
-        <Backdrop key={next.key} layout={styles.fill} variant={next.look} />
+        <BackdropField
+          key={next.key}
+          look={next.look}
+          clear={undefined}
+          scenes={defaultScenes}
+          small
+          still
+        />
       )}
     </div>
   );
