@@ -22,7 +22,7 @@ import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../../admin/readiness.ts";
 import { Section } from "../../admin/section.tsx";
-import { fetchGridLive } from "../../clients/functions.ts";
+import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import { fetchPlatformSpend } from "../../platform-ai-functions.ts";
 import { channelWords } from "../../rollout/channel-words.ts";
@@ -194,7 +194,7 @@ const PlatformPage = () => {
 
 /** Every company's own deployment, and the channels. */
 export const Route = createFileRoute("/platform/")({
-  loader: async ({ parentMatchPromise }) => {
+  loader: async () => {
     // Not awaited: every core is read live. A read that fails shows a
     // line, never the error page.
     const spend = (async () => {
@@ -204,13 +204,14 @@ export const Route = createFileRoute("/platform/")({
         return null;
       }
     })();
-    // Every company as the frame read it: not read a second time here.
-    const [{ loaderData }, platform, readiness] = await Promise.all([
-      parentMatchPromise,
+    // Every company read anew on entering, not the frame's minute-old
+    // grid: staff act on their deploys here.
+    const [rows, platform, readiness] = await Promise.all([
+      fetchClientGrid(),
       fetchPlatform(),
       fetchReadiness(),
     ]);
-    return { rows: loaderData?.clients ?? [], platform, readiness, spend };
+    return { rows, platform, readiness, spend };
   },
   component: PlatformPage,
   pendingComponent: PageLoading,
