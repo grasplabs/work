@@ -1,7 +1,6 @@
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { openGapsPageSize } from "@grasp-os/shared/brain";
-import type { Gap, OpenGapsPage } from "@grasp-os/shared/brain";
+import type { Gap } from "@grasp-os/shared/brain";
 import {
   brainGapAnswerSchema,
   brainGapErrors,
@@ -11,7 +10,7 @@ import {
 import { issuesOf } from "@grasp-os/shared/errors";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -170,105 +169,6 @@ export const gapsWith = async (
 const readGap = async (env: Env, gap: GapRecord): Promise<Gap> => {
   const [read] = await gapsWith(env, [gap]);
   return read ?? gapWith(gap, undefined, new Map());
-};
-
-/** The ids among `ids` of records taken out of the brain. */
-const forgottenAmong = async (
-  env: Env,
-  ids: readonly string[]
-): Promise<Set<string>> => {
-  if (ids.length === 0) {
-    return new Set();
-  }
-  const rows = await drizzle(env.DB)
-    .select({ id: brainRecords.id })
-    .from(brainRecords)
-    .where(
-      and(
-        isNotNull(brainRecords.forgottenAt),
-        // Every id as one bound parameter: D1 binds at most 100 to a statement.
-        sql`${brainRecords.id} IN (SELECT value FROM json_each(${JSON.stringify([...new Set(ids)])}))`
-      )
-    );
-  return new Set(rows.map(({ id }) => id));
-};
-
-/**
- * A page of the brain's open gaps `person` may answer from their inbox
- * (`brain.openGaps`), after the gap `after` names: every one for the
- * company's own admins, asked of someone or not; for any other member
- * only those asked of them (a `gap_asked` notification of theirs), so
- * nobody reads from here what was asked of someone else. Grasp's staff
- * never reach it: the brain's RPC refuses them (session-rpc.ts).
- * Neither retired, taken out of the brain nor closed, in the order the
- * brain added them, and each about only what the brain still has, as
- * `brain.read` gives them; so a page shows nobody more than the brain
- * does.
- */
-export const openGaps = async (
-  env: Env,
-  person: Identity,
-  after: unknown
-): Promise<OpenGapsPage> => {
-  const from =
-    after === undefined ? undefined : brainRecordIdSchema.safeParse(after);
-  if (from?.success === false) {
-    throw brainGapErrors.create("brain.gap_not_found");
-  }
-  const db = drizzle(env.DB);
-  const askedOfThem = db
-    .select({ gap: notifications.gapId })
-    .from(notifications)
-    .where(
-      and(
-        eq(notifications.personId, person.userId),
-        eq(notifications.type, "gap_asked")
-      )
-    );
-  // One more than a page, to tell whether more follow.
-  const rows = await db
-    .select({ body: brainRecords.body })
-    .from(brainRecords)
-    .leftJoin(brainGapStates, eq(brainGapStates.gapId, brainRecords.id))
-    .where(
-      and(
-        eq(brainRecords.type, "gap"),
-        isNull(brainRecords.retiredAt),
-        isNull(brainRecords.forgottenAt),
-        isNull(brainGapStates.closedAt),
-        // After the gap the last page ended on, whatever became of it since.
-        from === undefined
-          ? undefined
-          : sql`${brainRecords.position} > (SELECT "position" FROM "brain_records" WHERE "id" = ${from.data})`,
-        isMemberAdmin(person)
-          ? undefined
-          : inArray(brainRecords.id, askedOfThem)
-      )
-    )
-    .orderBy(asc(brainRecords.position))
-    .limit(openGapsPageSize + 1);
-  const gaps = rows.slice(0, openGapsPageSize).flatMap(({ body }) => {
-    const record = brainRecordSchema.parse(JSON.parse(body));
-    if (record.type !== "gap") {
-      return [];
-    }
-    const { type: _gap, ...gap } = record;
-    return [gap];
-  });
-  const forgotten = await forgottenAmong(
-    env,
-    gaps.flatMap(({ about }) => about)
-  );
-  return {
-    gaps: await gapsWith(
-      env,
-      gaps.map((gap) => ({
-        ...gap,
-        about: gap.about.filter((id) => !forgotten.has(id)),
-      }))
-    ),
-    more: rows.length > openGapsPageSize,
-  };
 };
 
 /** Refuses anyone but the company's own admins: never Grasp staff. */

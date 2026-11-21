@@ -18,7 +18,10 @@ import type {
   Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
+import { openGapsPageSize } from "@grasp-os/shared/brain";
 import {
+  brainGapErrors,
+  brainRecordIdSchema,
   companyOpinionIdPrefix,
   companyOpinionsSourceId,
   onboardingIdPrefix,
@@ -32,7 +35,7 @@ import type { KickoffView } from "@grasp-os/shared/kickoff";
 import { minTeamShown, teamNameKey } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { hoursPerWeek } from "@grasp-os/shared/thinking";
 import type { WorkKnowledge } from "@grasp-os/shared/work-knowledge";
@@ -46,7 +49,6 @@ import {
   askAboutGap,
   closeGap,
   gapsWith,
-  openGaps,
   redactGapAnswer,
 } from "./brain-gaps.ts";
 import {
@@ -1254,6 +1256,45 @@ export const readBrain = async (
 };
 
 /**
+ * A page of the brain's open gaps, for the company's own admins to answer
+ * or ask about from their inbox (`brain.openGaps`), after the gap `after`
+ * names, whatever became of it since: the gaps `brain.read` gives, through
+ * the same read (`brainGaps`, on the same records), without the closed
+ * ones. Members get the gaps asked of them in their waiting feed
+ * (waiting-rpc.ts); Grasp's staff never decide a client's gaps. Paged in
+ * memory: `brain.read` loads every gap anyway, and the brain keeps at most
+ * `brainRecordsMaxPerType.gap` of them (brain-records.ts).
+ */
+const openGapsOf = async (
+  env: Env,
+  person: Identity,
+  after: unknown
+): Promise<OpenGapsPage> => {
+  if (!isMemberAdmin(person)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const from =
+    after === undefined ? undefined : brainRecordIdSchema.safeParse(after);
+  if (from?.success === false) {
+    throw brainGapErrors.create("brain.gap_not_found");
+  }
+  const { records } = await readBrainCore(env, person);
+  const gaps = await brainGaps(env, person, records);
+  const at =
+    from === undefined ? -1 : gaps.findIndex(({ id }) => id === from.data);
+  if (from !== undefined && at === -1) {
+    throw brainGapErrors.create("brain.gap_not_found");
+  }
+  const open = gaps
+    .slice(at + 1)
+    .filter(({ closedAt }) => closedAt === undefined);
+  return {
+    gaps: open.slice(0, openGapsPageSize),
+    more: open.length > openGapsPageSize,
+  };
+};
+
+/**
  * What a picture of a chat's thinking is drawn from, as `person` may read
  * it (`brain.thinking`): the teams, what each said with the team whose
  * source said it, and the workflows with their hours a week. Narrower than
@@ -1409,7 +1450,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async openGaps(after?: string): Promise<OpenGapsPage> {
     return await withPerson(
       this.#check,
-      async (person) => await openGaps(this.#env, person, after)
+      async (person) => await openGapsOf(this.#env, person, after)
     );
   }
 

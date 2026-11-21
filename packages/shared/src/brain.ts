@@ -302,7 +302,7 @@ export interface Gap {
 /** Most gaps one page of `brain.openGaps` lists. */
 export const openGapsPageSize = 50;
 
-/** A page of the open gaps a person may answer from their inbox. */
+/** A page of the brain's open gaps, for the company's admins. */
 export interface OpenGapsPage {
   /** At most {@link openGapsPageSize}, in the order the brain added them. */
   gaps: Gap[];
@@ -479,10 +479,11 @@ export interface BrainApi {
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
   /**
-   * The open gaps the person may answer from their inbox, a page at a
-   * time, after the gap `after` names: every one the brain still has for
-   * the company's own admins, asked of someone or not; for any other
-   * member only those asked of them. Not for Grasp's staff.
+   * The brain's open gaps, as `read` gives them, for the company's own
+   * admins to answer or ask about from their inbox: a page at a time,
+   * after the gap `after` names (refused as `brain.gap_not_found` when the
+   * brain doesn't have it). Not for members, who get the gaps asked of
+   * them in their waiting feed, nor Grasp's staff.
    */
   openGaps: (after?: string) => Promise<OpenGapsPage>;
   /**

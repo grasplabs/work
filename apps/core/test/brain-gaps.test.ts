@@ -1,4 +1,5 @@
 import { openGapsPageSize } from "@grasp-os/shared/brain";
+import type { Gap } from "@grasp-os/shared/brain";
 import { brainRecordsMaxPerCall } from "@grasp-os/shared/brain-records";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
@@ -577,10 +578,9 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     });
   });
 
-  it("list in the inbox, a page at a time, every open one for an admin, and for anyone else only those asked of them", async () => {
+  it("list in admins' inbox, a page at a time, the open ones brain.read gives, and refuse anyone else", async () => {
     const admin = await signedInApi(idp, "admin");
     const owner = await signedInApi(idp, "user");
-    const other = await signedInApi(idp, "user");
     const tag = unique();
     const source = `src-${tag}`;
     const candidate = `cand-${tag}`;
@@ -598,6 +598,8 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       unasked: `gap-${tag}-unasked`,
       answered: `gap-${tag}-answered`,
       closed: `gap-${tag}-closed`,
+      retired: `gap-${tag}-retired`,
+      forgotten: `gap-${tag}-forgotten`,
     };
     // More open ones than a page holds, added in two calls.
     const more = Array.from(
@@ -634,29 +636,33 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     await admin.api.brain.closeGap(ids.closed);
     // Taken out of the brain: no gap is about it any more.
     await admin.api.brain.forget({ statements: [statement] });
+    // A gap retired, and one taken out itself, as the brain keeps them:
+    // no call retires or takes out a gap yet.
+    await env.DB.prepare(
+      "UPDATE brain_records SET retired_at = ?1 WHERE id = ?2"
+    )
+      .bind(Date.now(), ids.retired)
+      .run();
+    await env.DB.prepare(
+      "UPDATE brain_records SET forgotten_at = ?1 WHERE id = ?2"
+    )
+      .bind(Date.now(), ids.forgotten)
+      .run();
     const ours = new Set([...Object.values(ids), ...more]);
-    /** This test's gaps `person` lists, page by page, and how many pages. */
-    const listedBy = async (person: Signed) => {
-      const listed: { id: string; asked: boolean; about: string[] }[] = [];
+    /** This test's gaps the admin lists, page by page, and how many pages. */
+    const listed = async () => {
+      const gaps: Gap[] = [];
       let pages = 0;
       let after: string | undefined;
       for (;;) {
         // oxlint-disable-next-line no-await-in-loop -- each page starts after the last
-        const page = await person.api.brain.openGaps(after);
+        const page = await admin.api.brain.openGaps(after);
         pages += 1;
         expect(page.gaps.length).toBeLessThanOrEqual(openGapsPageSize);
-        listed.push(
-          ...page.gaps
-            .filter(({ id }) => ours.has(id))
-            .map(({ id, askedAt, about }) => ({
-              id,
-              asked: askedAt !== undefined,
-              about,
-            }))
-        );
+        gaps.push(...page.gaps.filter(({ id }) => ours.has(id)));
         after = page.gaps.at(-1)?.id;
         if (!page.more || after === undefined) {
-          return { listed, pages };
+          return { gaps, pages };
         }
       }
     };
@@ -667,19 +673,33 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     });
 
     const grasp = await staff();
-    const byAdmin = await listedBy(admin);
+    const byAdmin = await listed();
+    const read = await admin.api.brain.read();
     // A page goes on after the gap the last one ended on, whatever became
     // of that gap since.
     const fromUnasked = await admin.api.brain.openGaps(ids.unasked);
     await admin.api.brain.closeGap(ids.unasked);
 
     expect({
-      admin: byAdmin.listed,
+      admin: byAdmin.gaps.map(({ id, askedAt, about }) => ({
+        id,
+        asked: askedAt !== undefined,
+        about,
+      })),
       paged: byAdmin.pages > 1,
-      owner: await listedBy(owner),
-      other: await listedBy(other),
+      // Each gap as brain.read gives it, so a page shows no more than it.
+      asRead:
+        JSON.stringify(byAdmin.gaps) ===
+        JSON.stringify(
+          read.gaps.filter(
+            ({ id, closedAt }) => ours.has(id) && closedAt === undefined
+          )
+        ),
       afterClosed: await admin.api.brain.openGaps(ids.unasked),
+      unknownCursor: await outcome(admin.api.brain.openGaps(`gap-${unique()}`)),
+      retiredCursor: await outcome(admin.api.brain.openGaps(ids.retired)),
       badCursor: await outcome(admin.api.brain.openGaps("not a gap id")),
+      member: await outcome(owner.api.brain.openGaps()),
       staff: await outcome(grasp.brain.openGaps()),
     }).toStrictEqual({
       admin: [
@@ -688,13 +708,12 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         ...more.map(unaskedOne),
       ],
       paged: true,
-      owner: {
-        listed: [{ id: ids.asked, asked: true, about: [candidate] }],
-        pages: 1,
-      },
-      other: { listed: [], pages: 1 },
+      asRead: true,
       afterClosed: fromUnasked,
+      unknownCursor: "brain.gap_not_found",
+      retiredCursor: "brain.gap_not_found",
       badCursor: "brain.gap_not_found",
+      member: "role.forbidden",
       staff: "role.forbidden",
     });
   });
