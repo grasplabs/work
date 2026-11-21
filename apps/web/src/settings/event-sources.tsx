@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCopy } from "../copy.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatDateTime } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,7 +82,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { RefusedBadge, SourceActivity } from "./event-source-activity.tsx";
-import { SectionNotLoaded, SettingsStack } from "./section.tsx";
+import { SettingsStack } from "./section.tsx";
 
 // Settings › Incoming events, for the organization's own admins: the event
 // sources outside systems send events to (core's event-sources.ts), one per
@@ -973,7 +974,9 @@ export const EventSourcesSettings = ({
         secret={secret}
       />
       <AddSource onChanged={changed} onOpenChange={setAdding} open={adding} />
-      {page.state === "ready" ? null : <SectionNotLoaded page={page} />}
+      {page.state === "ready" ? null : (
+        <NotLoadedState heading="h3" page={page} />
+      )}
       {page.state === "ready" && sources.length === 0 ? (
         <Empty size="md">
           <EmptyHeader>

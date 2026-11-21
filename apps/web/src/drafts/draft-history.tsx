@@ -22,7 +22,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { readPeople } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList, formatSince } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,7 +61,7 @@ import {
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { decidesRequests } from "../inbox/waiting.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -558,6 +558,8 @@ const VersionChanges = ({
   const { t } = useLingui();
   const core = useCore();
   const [read, setRead] = useState<Loaded<FileDiff[]>>();
+  // Counts the tries, so Try again reads it again.
+  const [tried, setTried] = useState(0);
   const { kind, id } = subject;
   const parent = parentOf(version);
   useEffect(() => {
@@ -587,7 +589,8 @@ const VersionChanges = ({
     return () => {
       left.abort();
     };
-  }, [core, kind, id, parent, version.version]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [core, kind, id, parent, version.version, tried]);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -607,7 +610,13 @@ const VersionChanges = ({
         <SheetBody>
           {read === undefined ? <LoadingLines lines={4} /> : null}
           {read !== undefined && read.state !== "ready" ? (
-            <NotLoaded page={read} />
+            <NotLoadedState
+              again={() => {
+                setTried(tried + 1);
+              }}
+              heading="h3"
+              page={read}
+            />
           ) : null}
           {read?.state === "ready" ? <FileChanges files={read.data} /> : null}
         </SheetBody>
@@ -970,6 +979,8 @@ const Published = (of: VersionsOf) => {
   // The releases' reads, a page at a time, kept to show one that failed.
   const [releaseReads, setReleaseReads] = useState<Loaded<AppRelease[]>[]>([]);
   const [reading, setReading] = useState(false);
+  // Counts the tries, so Try again reads the newest page again.
+  const [tried, setTried] = useState(0);
   // The newest page's read, aborted as the next starts: an older page read
   // under it is dropped then, as it continues pages that are gone.
   const newest = useRef<AbortController | null>(null);
@@ -1019,8 +1030,8 @@ const Published = (of: VersionsOf) => {
     return () => {
       left.abort();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `live` says when to read again
-  }, [admin, kind, id, core, live]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `live` and `tried` say when to read again
+  }, [admin, kind, id, core, live, tried]);
   const [first] = pages;
   if (first === undefined) {
     return <LoadingLines lines={3} />;
@@ -1029,7 +1040,15 @@ const Published = (of: VersionsOf) => {
     (page) => page.state !== "ready"
   );
   if (failed !== undefined) {
-    return <NotLoaded page={failed} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setTried(tried + 1);
+        }}
+        heading="h3"
+        page={failed}
+      />
+    );
   }
   const versions = pages.flatMap((page) =>
     page.state === "ready" ? page.data : []

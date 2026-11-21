@@ -17,6 +17,7 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +68,7 @@ import {
   SelectContent,
 } from "../grasp/select/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -80,7 +82,7 @@ import {
 } from "../settings/invitations.tsx";
 import { MemberSuspension } from "../settings/member-suspension.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
-import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
+import { SettingsError } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useNarrow } from "../use-narrow.ts";
@@ -106,7 +108,6 @@ const styles = stylex.create({
   // As wide as the header's own search, on a phone too: beside the Roles
   // mark and Invite it still fits the card's line (its actions never shrink).
   search: { width: grasp.frameSearch },
-  notice: { padding: grasp.space4 },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // A suspended member: their face and name, and why under them.
   person: { display: "flex", flexDirection: "column", gap: grasp.space1 },
@@ -125,23 +126,15 @@ const styles = stylex.create({
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
 
-/** What a change did, or why it failed. */
-interface Notice {
-  failure?: string;
-  done?: string;
-}
-
 /** A member's role and the menu of what else may be done to them. */
 const MemberActions = ({
   member,
   part,
-  onNotice,
   onRemoved,
 }: {
   member: Member;
   /** Which of the row's cells: the role chosen, or the menu of what else may be done. */
   part: "role" | "menu";
-  onNotice: (notice: Notice) => void;
   /** Once they are removed: their row, and what had the focus in it, is gone. */
   onRemoved: () => void;
 }) => {
@@ -159,20 +152,19 @@ const MemberActions = ({
     await router.invalidate({ sync: true });
   };
   const setRole = async (role: Role): Promise<void> => {
-    onNotice({});
     await run(
       async ({ members }) => {
         await changeThenRefresh(async () => {
           await members.setRole(member.userId, role);
         }, refresh);
       },
+      // A menu's change has no place of its own: said as a toast.
       (failure) => {
-        onNotice({ failure });
+        toast.error(failure);
       }
     );
   };
   const signOutEverywhere = async (): Promise<void> => {
-    onNotice({});
     try {
       await changeThenRefresh(async () => {
         await core.withSession(async ({ members }) => {
@@ -181,10 +173,10 @@ const MemberActions = ({
       }, refresh);
     } catch (error) {
       // Core's reason, with its reference to quote; the item says it failed.
-      onNotice({ failure: failureText(error) });
+      toast.error(failureText(error));
       throw error;
     }
-    onNotice({ done: t`${name} is signed out everywhere.` });
+    toast.success(t`${name} is signed out everywhere.`);
   };
   // With none to disconnect, the removal alone is said. Outside the `try`
   // below, as the React Compiler can't compile a conditional within one.
@@ -193,19 +185,16 @@ const MemberActions = ({
       ? t`${name} is removed.`
       : t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`;
   const remove = async (): Promise<void> => {
-    onNotice({});
     try {
       const { connectionsDisconnected: count } = await core.withSession(
         async ({ members }) => await members.remove(member.userId)
       );
-      onNotice({
-        done: removedSaid(count),
-      });
+      toast.success(removedSaid(count));
     } catch (error) {
       // Removed, with some connections still to disconnect: the row goes
-      // all the same, and the notice says why.
+      // all the same, and the toast says why.
       // Core's reason, with its reference to quote, either way.
-      onNotice({ failure: failureText(error) });
+      toast.error(failureText(error));
       if (memberErrors.codeOf(error) !== "member.connections_pending") {
         await refresh();
         throw error;
@@ -451,13 +440,11 @@ const peopleColumns = ({
   words,
   me,
   narrow,
-  onNotice,
 }: {
   words: PeopleWords;
   me: string;
   /** Below the phone's width, Since steps aside so Name and Role fit. */
   narrow: boolean;
-  onNotice: (notice: Notice) => void;
 }): DataTableColumn<PersonRow>[] => {
   const columns: DataTableColumn<PersonRow>[] = [
     {
@@ -572,7 +559,6 @@ const peopleColumns = ({
         ) : (
           <MemberActions
             member={row.member}
-            onNotice={onNotice}
             onRemoved={() => {
               // The table reads again, without their row.
             }}
@@ -603,7 +589,6 @@ const peopleColumns = ({
         return (
           <MemberActions
             member={row.member}
-            onNotice={onNotice}
             onRemoved={() => {
               // The table reads again, without their row.
             }}
@@ -638,7 +623,6 @@ const PeopleTable = ({
   me: string;
 }) => {
   const { t } = useLingui();
-  const [notice, setNotice] = useState<Notice>({});
   const [search, setSearch] = useState("");
   const gone = useRemovedPeople(removed);
   const narrow = useNarrow();
@@ -721,15 +705,6 @@ const PeopleTable = ({
       }
       title={t`Team members`}
     >
-      {notice.failure === undefined && notice.done === undefined ? null : (
-        <div {...stylex.props(styles.notice)}>
-          {notice.failure === undefined ? (
-            <Alert tone="success">{notice.done}</Alert>
-          ) : (
-            <Alert tone="danger">{notice.failure}</Alert>
-          )}
-        </div>
-      )}
       {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
       <DataTable
         key={narrow ? "narrow" : "wide"}
@@ -737,7 +712,6 @@ const PeopleTable = ({
           words,
           me,
           narrow,
-          onNotice: setNotice,
         })}
         label={t`Members`}
         onQueryChange={setSearch}
@@ -779,7 +753,7 @@ const MembersPage = () => {
         />
       ) : (
         <SectionCard variant="grouped" density="compact" title={t`Members`}>
-          <SectionNotLoaded page={page} />
+          <NotLoadedState heading="h3" page={page} />
         </SectionCard>
       )}
       {/* Nothing before a read was tried, or for anyone core refuses it. */}
@@ -787,8 +761,6 @@ const MembersPage = () => {
     </div>
   );
 };
-
-const ignoreNotice = (): void => undefined;
 
 /**
  * The people's card while they are read: the card as the loaded one
@@ -827,7 +799,6 @@ const MembersPending = () => {
             words,
             me: "",
             narrow,
-            onNotice: ignoreNotice,
           }),
           label: t`Members`,
           pageSize,

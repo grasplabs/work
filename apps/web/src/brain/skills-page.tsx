@@ -15,6 +15,7 @@ import type {
   SkillsOverview,
   SkillTeam,
 } from "@grasp-os/shared/skills";
+import { i18n as lingui } from "@lingui/core";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -58,6 +59,7 @@ import { PageHeader } from "../grasp/page-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { skillOf, useStartFrom } from "./opportunity-drafts.ts";
@@ -97,6 +99,24 @@ const callCore = async <T,>(
   } catch (error) {
     return { state: "refused", message: failureText(error) };
   }
+};
+
+/**
+ * What `read` answers on the person's session, or why not, as every read
+ * from core is (`loadFromCore`): within its deadline, and out of reach or
+ * not found said in the person's language, with the reference to quote.
+ */
+const readSkills = async <T,>(
+  core: CoreConnection,
+  read: (skills: Skills) => Promise<T>
+): Promise<Read<T>> => {
+  const loaded = await loadFromCore(
+    core,
+    async (session) => await read(session.skills)
+  );
+  return loaded.state === "ready"
+    ? loaded
+    : { state: "refused", message: notLoadedText(loaded, lingui) ?? "" };
 };
 
 /** A new skill's text, for the person to fill in. */
@@ -900,7 +920,7 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
-      const answer = await callCore(
+      const answer = await readSkills(
         core,
         async (skills) => await skills.proposals()
       );
@@ -931,7 +951,7 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
         onAdded();
       }
       setProposals(
-        await callCore(core, async (skills) => await skills.proposals())
+        await readSkills(core, async (skills) => await skills.proposals())
       );
       setBusy(false);
     })();
@@ -1022,7 +1042,7 @@ export const SkillsPage = ({
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
-      const answer = await callCore(
+      const answer = await readSkills(
         core,
         async (skills) => await skills.overview()
       );
@@ -1069,7 +1089,7 @@ export const SkillsPage = ({
       } else {
         after?.();
       }
-      const page = await callCore(
+      const page = await readSkills(
         core,
         async (skills) => await skills.overview()
       );
@@ -1087,7 +1107,7 @@ export const SkillsPage = ({
   const readAgain = () => {
     setBusy(true);
     void (async () => {
-      show(await callCore(core, async (skills) => await skills.overview()));
+      show(await readSkills(core, async (skills) => await skills.overview()));
       setBusy(false);
     })();
   };
@@ -1098,7 +1118,7 @@ export const SkillsPage = ({
     setReading(name);
     setFailed(undefined);
     void (async () => {
-      const answer = await callCore(
+      const answer = await readSkills(
         core,
         async (skills) => await skills.read("own", name)
       );
@@ -1237,7 +1257,10 @@ export const SkillsPage = ({
           onAdded={() => {
             void (async () => {
               show(
-                await callCore(core, async (skills) => await skills.overview())
+                await readSkills(
+                  core,
+                  async (skills) => await skills.overview()
+                )
               );
             })();
           }}

@@ -4,17 +4,16 @@ import type {
   ActionDescription,
   PendingAction,
 } from "@grasp-os/shared/connect";
-import { failureText } from "@grasp-os/shared/errors";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
 
-import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import {
   ApprovalRequest,
@@ -27,6 +26,8 @@ import { EmailDraft, EventDraft, TaskDraft } from "../grasp/draft/index.ts";
 import type { DraftStatus } from "../grasp/draft/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { draftOf, draftTimeZone } from "./held-drafts.ts";
@@ -63,10 +64,10 @@ import type { DraftShown, HeldDraft } from "./held-drafts.ts";
  * the writes to Apps core holds once the chat used something only the
  * person can read (`calls`).
  */
-type Held =
-  | { state: "loading" }
-  | { state: "refused"; message: string }
-  | { state: "ready"; actions: PendingAction[]; calls: HeldAppCall[] };
+interface Held {
+  actions: PendingAction[];
+  calls: HeldAppCall[];
+}
 
 /**
  * Every App write held in chat `chatId`, oldest first: page after page
@@ -87,32 +88,18 @@ const heldCallsOf = async (
   return calls;
 };
 
-/**
- * The person's held writes from chat `chatId`, newest first. Outside the
- * component, as the React Compiler can't compile `try`.
- */
-const readHeld = async (
-  core: CoreConnection,
-  chatId: string
-): Promise<Held> => {
-  try {
-    const [waiting, calls] = await core.withSession(
-      async (session) =>
-        await Promise.all([
-          session.pendingActions.list(),
-          heldCallsOf(session, chatId),
-        ])
-    );
-    return {
-      state: "ready",
-      actions: waiting.filter(
-        ({ context }) => context.type === "chat" && context.chatId === chatId
-      ),
-      calls,
-    };
-  } catch (error) {
-    return { state: "refused", message: failureText(error) };
-  }
+/** The person's held writes from chat `chatId`, newest first. */
+const readHeld = async (session: Session, chatId: string): Promise<Held> => {
+  const [waiting, calls] = await Promise.all([
+    session.pendingActions.list(),
+    heldCallsOf(session, chatId),
+  ]);
+  return {
+    actions: waiting.filter(
+      ({ context }) => context.type === "chat" && context.chatId === chatId
+    ),
+    calls,
+  };
 };
 
 const styles = stylex.create({
@@ -980,7 +967,7 @@ const ChatHeldWrites = ({
   version: number;
   onConfirmed: () => void;
 }) => {
-  const [held, setHeld] = useState<Held>({ state: "loading" });
+  const [held, setHeld] = useState<Loaded<Held>>();
   const core = useCore();
   const [reads, setReads] = useState(0);
   // Why the person's last decision failed, if it did: its card may be
@@ -988,26 +975,41 @@ const ChatHeldWrites = ({
   const [failed, setFailed] = useState<DecisionFailed>();
   const { t } = useLingui();
   useEffect(() => {
-    let current = true;
+    const left = new AbortController();
     const read = async (): Promise<void> => {
-      const found = await readHeld(core, chatId);
+      const found = await loadFromCore(
+        core,
+        async (session) => await readHeld(session, chatId),
+        left.signal
+      );
       // A read for another chat, or an older one, doesn't show.
-      if (current) {
+      if (!left.signal.aborted) {
         setHeld(found);
       }
     };
     void read();
     return () => {
-      current = false;
+      left.abort();
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `version` and `reads` say when to read again
   }, [core, chatId, version, reads]);
-  if (held.state === "refused") {
-    return <ErrorText>{held.message}</ErrorText>;
+  if (held === undefined) {
+    return null;
   }
-  const count =
-    held.state === "loading" ? 0 : held.actions.length + held.calls.length;
-  if (held.state === "loading" || (count === 0 && failed === undefined)) {
+  if (held.state !== "ready") {
+    return (
+      <NotLoadedState
+        again={() => {
+          setReads((read) => read + 1);
+        }}
+        heading="h3"
+        page={held}
+      />
+    );
+  }
+  const { actions, calls } = held.data;
+  const count = actions.length + calls.length;
+  if (count === 0 && failed === undefined) {
     return null;
   }
   const decided = (failure?: DecisionFailed): void => {
@@ -1019,13 +1021,13 @@ const ChatHeldWrites = ({
       {failed === undefined ? null : <DecisionFailedAlert failed={failed} />}
       {count > 1 ? (
         <RejectAll
-          actions={held.actions}
-          calls={held.calls}
+          actions={actions}
+          calls={calls}
           chatId={chatId}
           onDecided={decided}
         />
       ) : null}
-      {held.calls.map((call) => (
+      {calls.map((call) => (
         <HeldAppCallCard
           call={call}
           chatId={chatId}
@@ -1034,7 +1036,7 @@ const ChatHeldWrites = ({
           onDecided={decided}
         />
       ))}
-      {held.actions.map((action) => (
+      {actions.map((action) => (
         <HeldWrite
           action={action}
           key={action.id}

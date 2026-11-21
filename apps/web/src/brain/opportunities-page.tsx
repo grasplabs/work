@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDecimal, formatList } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
@@ -35,6 +36,8 @@ import { StatsGrid } from "../grasp/stats/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { draftOf, titleOf } from "./opportunity-drafts.ts";
 
@@ -47,29 +50,6 @@ import { draftOf, titleOf } from "./opportunity-drafts.ts";
 // Skills, each started with what the card shows, under the admin's own
 // name (opportunity-drafts.ts). Core holds every rule (opportunities.ts):
 // the page only asks.
-
-/** What a call to core came to. */
-type Read<T> =
-  | { state: "loading" }
-  | { state: "refused"; message: string }
-  | { state: "ready"; data: T };
-
-/**
- * Every opportunity, or why not. Outside the components, as the React
- * Compiler can't compile `try`.
- */
-const readOpportunities = async (
-  core: CoreConnection
-): Promise<Read<Opportunity[]>> => {
-  try {
-    const data = await core.withSession(
-      async (session) => await session.opportunities.list()
-    );
-    return { state: "ready", data };
-  } catch (error) {
-    return { state: "refused", message: failureText(error) };
-  }
-};
 
 /** Hides `opportunity` for every admin, or shows it again; why not, when it wasn't. */
 const acting = async (
@@ -495,24 +475,31 @@ const Dismissed = ({
 export const OpportunitiesPage = () => {
   const core = useCore();
   const { i18n, t } = useLingui();
-  const [read, setRead] = useState<Read<Opportunity[]>>({ state: "loading" });
+  const [read, setRead] = useState<Loaded<Opportunity[]>>();
+  // Counts the tries, so Try again reads them again.
+  const [tried, setTried] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | undefined>();
   // The one hidden last on this page, with Undo, until the page is left.
   const [hidden, setHidden] = useState<Opportunity | undefined>();
 
   useEffect(() => {
-    let current = true;
+    const left = new AbortController();
     void (async () => {
-      const answer = await readOpportunities(core);
-      if (current) {
+      const answer = await loadFromCore(
+        core,
+        async (session) => await session.opportunities.list(),
+        left.signal
+      );
+      if (!left.signal.aborted) {
         setRead(answer);
       }
     })();
     return () => {
-      current = false;
+      left.abort();
     };
-  }, [core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [core, tried]);
 
   /** Hides `opportunity` for every admin, or shows it again. */
   const act = (opportunity: Opportunity, hide: boolean) => {
@@ -527,7 +514,7 @@ export const OpportunitiesPage = () => {
       }
       setHidden(hide ? opportunity : undefined);
       setRead((now) =>
-        now.state === "ready"
+        now?.state === "ready"
           ? {
               state: "ready",
               data: now.data.map((each) =>
@@ -541,7 +528,7 @@ export const OpportunitiesPage = () => {
     })();
   };
 
-  const all = read.state === "ready" ? read.data : [];
+  const all = read?.state === "ready" ? read.data : [];
   const open = all.filter(({ dismissed }) => !dismissed);
   const dismissed = all.filter(({ dismissed: hiddenNow }) => hiddenNow);
   const hiddenTitle = hidden === undefined ? "" : titleOf(hidden, i18n.locale);
@@ -558,9 +545,15 @@ export const OpportunitiesPage = () => {
             </Trans>
           }
         />
-        {read.state === "refused" ? (
-          <ErrorText>{read.message}</ErrorText>
-        ) : null}
+        {read === undefined || read.state === "ready" ? null : (
+          <NotLoadedState
+            again={() => {
+              setTried(tried + 1);
+            }}
+            heading="h2"
+            page={read}
+          />
+        )}
         {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
         {hidden === undefined ? null : (
           <div {...stylex.props(styles.row)}>
@@ -586,10 +579,10 @@ export const OpportunitiesPage = () => {
             </Button>
           </div>
         )}
-        {read.state === "loading" ? (
+        {read === undefined ? (
           <PageSkeletonList header={false} rows={6} variant="items" />
         ) : null}
-        {read.state === "ready" && all.length === 0 ? (
+        {read?.state === "ready" && all.length === 0 ? (
           <Empty size="section">
             <EmptyHeader>
               <EmptyTitle headingLevel={2}>

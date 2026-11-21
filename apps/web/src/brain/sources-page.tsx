@@ -26,6 +26,7 @@ import {
   uploadMaxBytes,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
+import { i18n } from "@lingui/core";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -105,6 +106,7 @@ import { Tag } from "../grasp/tag/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { brandOf } from "../inbox/brand-of.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { given } from "./brain.ts";
 import { LearnedSection } from "./learned-section.tsx";
@@ -145,16 +147,35 @@ type Read<T> =
   | { state: "ready"; data: T };
 
 /**
- * What `read` answers on the person's session, or why not. Outside the
- * components, as the React Compiler can't compile `try`.
+ * What `read` answers on the person's session, or why not, as every read
+ * from core is (`loadFromCore`): within its deadline, and out of reach or
+ * not found said in the person's language, with the reference to quote.
  */
 const readFrom = async <T,>(
   core: CoreConnection,
   read: (sources: CoreSources) => Promise<T>
 ): Promise<Read<T>> => {
+  const loaded = await loadFromCore(
+    core,
+    async (session) => await read(session.brainSources)
+  );
+  return loaded.state === "ready"
+    ? loaded
+    : { state: "refused", message: notLoadedText(loaded, i18n) ?? "" };
+};
+
+/**
+ * What `change` answers on the person's session, or why not, with core's
+ * code for an upload it refused. Outside the components, as the React
+ * Compiler can't compile `try`.
+ */
+const changeIn = async <T,>(
+  core: CoreConnection,
+  change: (sources: CoreSources) => Promise<T>
+): Promise<Read<T>> => {
   try {
     const data = await core.withSession(
-      async (session) => await read(session.brainSources)
+      async (session) => await change(session.brainSources)
     );
     return { state: "ready", data };
   } catch (error) {
@@ -754,7 +775,7 @@ const UploadForm = ({
               return;
             }
             setSent({ state: "loading" });
-            const answer = await readFrom(
+            const answer = await changeIn(
               core,
               async (sources) =>
                 await sources.upload(
@@ -869,7 +890,7 @@ const UploadActions = ({
             setActing({ state: "loading" });
             setUploading(true);
             void (async () => {
-              const answer = await readFrom(
+              const answer = await changeIn(
                 core,
                 async (sources) =>
                   await sources.uploadVersion(
@@ -934,7 +955,7 @@ const UploadActions = ({
                 action={() => {
                   setActing({ state: "loading" });
                   void (async () => {
-                    const answer = await readFrom(core, async (sources) => {
+                    const answer = await changeIn(core, async (sources) => {
                       await sources.deleteUpload(source.id);
                     });
                     if (answer.state === "ready") {
@@ -1692,7 +1713,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                           action={() => {
                             setActing({ state: "loading" });
                             void (async () => {
-                              const answer = await readFrom(
+                              const answer = await changeIn(
                                 core,
                                 async (sources) => {
                                   await sources.deleteUpload(upload.source.id);

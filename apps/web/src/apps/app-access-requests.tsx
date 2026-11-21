@@ -18,7 +18,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { formatDateTime, formatList } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
@@ -58,7 +58,7 @@ import {
   TableRow,
 } from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -165,6 +165,8 @@ const ToolChoice = ({
   const { t } = useLingui();
   const core = useCore();
   const [tools, setTools] = useState<Loaded<CatalogTool[]>>();
+  // Counts the tries, so Try again reads them again.
+  const [tried, setTried] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
@@ -185,12 +187,21 @@ const ToolChoice = ({
     return () => {
       left.abort();
     };
-  }, [connection.provider, connection.source, core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [connection.provider, connection.source, core, tried]);
   if (tools === undefined) {
     return <LoadingLines lines={2} />;
   }
   if (tools.state !== "ready") {
-    return <NotLoaded page={tools} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setTried(tried + 1);
+        }}
+        heading="h3"
+        page={tools}
+      />
+    );
   }
   const { offered } = connection;
   const choices = tools.data.filter(
@@ -496,7 +507,15 @@ export const AppAccessRequests = ({
     return <LoadingLines lines={2} />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setAsked(asked + 1);
+        }}
+        heading="h3"
+        page={read}
+      />
+    );
   }
   return (
     <RequestsView

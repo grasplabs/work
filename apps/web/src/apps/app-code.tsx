@@ -5,7 +5,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import {
@@ -21,10 +21,9 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { Tree } from "../grasp/tree/index.ts";
 import type { TreeNode } from "../grasp/tree/index.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { fileIconOf } from "./file-icon.ts";
-import { useCoreRead } from "./use-core-read.ts";
+import { useHeldCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
 // Code view), as a code editor shows a project, read-only: the files of
@@ -319,11 +318,17 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
 };
 
 /** A read not done: that it is being read, or why it failed. */
-const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) =>
+const ReadState = ({
+  loaded,
+  again,
+}: {
+  loaded: Exclude<Loaded<unknown>, { state: "ready" }> | undefined;
+  again: () => void;
+}) =>
   loaded === undefined ? (
     <LoadingLines lines={6} />
   ) : (
-    <NotLoaded page={loaded} />
+    <NotLoadedState again={again} heading="h2" page={loaded} />
   );
 
 /** One version's files, read. */
@@ -333,7 +338,7 @@ const VersionFiles = ({
   asked,
   onAsk,
 }: OpenFile & { app: string; version: number }) => {
-  const files = useCoreRead(
+  const { loaded: files, again } = useHeldCoreRead(
     `${app}/${version}`,
     async (session) =>
       await session.versions.files({ kind: "app", id: app }, version)
@@ -342,7 +347,7 @@ const VersionFiles = ({
     // A version's own tree, the file asked for open while it has it.
     <FilesView asked={asked} files={files.data} key={version} onAsk={onAsk} />
   ) : (
-    <ReadState loaded={files} />
+    <ReadState again={again} loaded={files} />
   );
 };
 
@@ -352,7 +357,7 @@ const VersionFiles = ({
  */
 const DraftFiles = ({ app, revision }: { app: string; revision: number }) => {
   const [asked, setAsked] = useState<string>();
-  const files = useCoreRead(
+  const { loaded: files, again } = useHeldCoreRead(
     `${app}/${revision}`,
     async (session) => await session.drafts.files({ kind: "app", id: app }),
     app
@@ -360,7 +365,7 @@ const DraftFiles = ({ app, revision }: { app: string; revision: number }) => {
   return files?.state === "ready" ? (
     <FilesView asked={asked} files={files.data} onAsk={setAsked} />
   ) : (
-    <ReadState loaded={files} />
+    <ReadState again={again} loaded={files} />
   );
 };
 

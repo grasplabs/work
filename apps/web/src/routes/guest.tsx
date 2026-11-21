@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { shellStatus, signOut } from "../core-connection.ts";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import {
@@ -15,7 +16,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // Where a guest lands (GRA-2235): someone from outside the company, who
 // reaches only the Apps shared with them (core's guest-access.ts). A plain
@@ -48,7 +49,7 @@ const GuestHome = () => {
       <Heading level={1}>
         <Trans>Apps shared with you</Trans>
       </Heading>
-      {apps.state !== "ready" && <NotLoaded page={apps} />}
+      {apps.state !== "ready" && <NotLoadedState heading="h2" page={apps} />}
       {apps.state === "ready" && apps.data.length === 0 && (
         <Text tone="muted">
           <Trans>Nothing is shared with you yet.</Trans>

@@ -166,6 +166,8 @@ const ToDoList = ({
         </ItemGroup>
       ) : (
         // A failed read is said, never taken for nothing to remove.
+        // A line, not the failed state: read again under its `Await`, that
+        // state would remount with each read and ask again at once.
         <NotLoaded page={toDos} />
       )}
     </SectionCard>
