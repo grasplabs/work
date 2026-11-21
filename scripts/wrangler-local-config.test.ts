@@ -64,6 +64,21 @@ describe(localConfig, () => {
     expect(Reflect.get(missing, "secrets")).toStrictEqual(connect.secrets);
   });
 
+  it("reads the first key of a .dev.vars saved with a BOM", () => {
+    const local = localConfig(connect, {
+      added,
+      devMain: undefined,
+      devVars: "\uFEFFCOMPOSIO_API_KEY=local-composio-value\n",
+    });
+    expect(Reflect.get(local, "secrets")).toStrictEqual({
+      required: [
+        "CAPABILITY_SIGNING_KEY",
+        "TOKEN_ENCRYPTION_KEY",
+        "COMPOSIO_API_KEY",
+      ],
+    });
+  });
+
   it("leaves a key that is a var to the vars, as wrangler refuses one name as both", () => {
     const local = localConfig(connect, {
       added,

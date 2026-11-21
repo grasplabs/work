@@ -34,10 +34,20 @@ import { parseEnv } from "node:util";
 
 import { parseJsonc } from "./jsonc.ts";
 
+const leadingBom = /^\uFEFF/u;
+
 /**
  * The secrets `config` requires, and every other key `devVars` sets that
  * isn't one of its `vars`: wrangler loads a var's value from `.dev.vars`
- * already, and refuses a name that is both a var and a secret.
+ * already, and refuses a name that is both a var and a secret. It refuses
+ * one shared with any other binding too (connect's DB, CLOCK, LOADER,
+ * CF_VERSION_METADATA): such a name in `.dev.vars` stops local dev with
+ * wrangler's own message.
+ *
+ * Wrangler reads `.dev.vars` with dotenv, which isn't a dependency here;
+ * Node's parser lists the same keys once a leading BOM is gone, except a
+ * `KEY: value` line, which wrangler loads and this leaves unbound, and a
+ * name with a space, which this lists and wrangler warns is missing.
  */
 const requiredSecrets = (
   config: object,
@@ -55,7 +65,7 @@ const requiredSecrets = (
   const set =
     devVars === undefined
       ? []
-      : Object.keys(parseEnv(devVars)).filter(
+      : Object.keys(parseEnv(devVars.replace(leadingBom, ""))).filter(
           (name) => !Object.hasOwn(vars, name)
         );
   return [...new Set([...named, ...set])];
