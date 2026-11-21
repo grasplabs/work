@@ -160,6 +160,12 @@ describe("the built-in blueprints' build", () => {
 
   it.each([
     ["isn't listed", "fine", {}, "add"],
+    [
+      "isn't listed, its name a property every object has",
+      "constructor",
+      {},
+      "add",
+    ],
     ["is retired", "fine", { fine: "retired" }, "an earlier release removed"],
     [
       "is listed as shipped but gone",

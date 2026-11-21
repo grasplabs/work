@@ -37,13 +37,17 @@
  * `ids.json` names every id a release ever shipped (`checkShippedIds`):
  * `"shipped"` while its folder is here, `"retired"` once it is gone, and
  * the build of the release fails until both hold, so neither can be
- * forgotten. A retired id is never shipped again: Apps created from the
- * built-in keep its id as their origin (`app_origins`), and a deployment
- * that skips the release that removed it (releases reach clients channel
- * by channel) never detached them, so a new built-in under the id would
- * be offered to them as an update of unrelated code. A list in the repo,
- * not a record the install keeps: a rollback to a release that ships a
- * removed built-in installs it again, as it should.
+ * forgotten. A retired id never takes new, unrelated code: Apps created
+ * from the built-in keep its id as their origin (`app_origins`), and a
+ * deployment that skips the release that removed it (releases reach
+ * clients channel by channel) never detached them, so another built-in
+ * under the id would be offered to them as an update of code they never
+ * came from. Shipping that same built-in again is safe, and right for
+ * those Apps, whose origin it is: mark its id `"shipped"` again, which
+ * the build refuses until someone does, so it is a decision a review
+ * sees. A list in the repo, not a record the install keeps: a rollback to
+ * a release that ships a removed built-in installs it again, as it
+ * should.
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
@@ -232,12 +236,12 @@ export const checkShippedIds = (dir: string): void => {
   const ids = shippedIdsSchema.parse(JSON.parse(readFileSync(file, "utf-8")));
   const folders = blueprintFolders(dir);
   for (const id of folders) {
-    if (ids[id] === undefined) {
+    if (!Object.hasOwn(ids, id)) {
       throw new Error(`Built-in ${id}: add "${id}": "shipped" to ${file}`);
     }
     if (ids[id] === "retired") {
       throw new Error(
-        `Built-in ${id}: an earlier release removed a built-in of this id, which Apps created from it keep as their origin: name it another way`
+        `Built-in ${id}: an earlier release removed a built-in of this id, which Apps created from it keep as their origin: name new code another way, or, to ship that same built-in again, mark it "shipped" in ${file}`
       );
     }
   }
