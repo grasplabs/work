@@ -104,19 +104,9 @@ const styles = stylex.create({
   // mark and Invite it still fits the card's line (its actions never shrink).
   search: { width: grasp.frameSearch },
   notice: { padding: grasp.space4 },
-  // Older removed people, asked for under the ones shown.
-  older: {
-    display: "grid",
-    justifyItems: "start",
-    gap: grasp.space2,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.tableCellInline,
-  },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // A suspended member: their face and name, and why under them.
   person: { display: "flex", flexDirection: "column", gap: grasp.space1 },
-  // Your own row has no menu: its room is kept, so every role stands on one edge.
-  menuRoom: { width: grasp.controlSm, flexShrink: 0 },
   // The roles compared: each name over what it may do.
   roles: {
     display: "grid",

@@ -92,8 +92,6 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
   },
-  hint: { display: "flex", flexDirection: "column", gap: grasp.space1 },
-  hintName: { fontWeight: grasp.weightMedium },
   picker: { display: "flex", flexDirection: "column", gap: grasp.space1 },
 });
 
