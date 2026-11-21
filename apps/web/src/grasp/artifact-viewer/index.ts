@@ -4,6 +4,7 @@ export type {
   ArtifactViewerProps,
 } from "./artifact-viewer";
 export { memoryLocation, queryLocation } from "./location";
+export { allowWorkers } from "./worker/client";
 export type { ViewerLocation, ViewState } from "./location";
 export type { ViewerAction } from "./keys";
 export type { ArtifactSource } from "./source";

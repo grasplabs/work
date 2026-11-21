@@ -49,10 +49,15 @@ export interface Sphere {
   silk: boolean;
 }
 
-/** Any other body: what a cell sees of it, worked out by its own drawing (below). */
+/**
+ * Any other body: what a cell sees of it, worked out by its own drawing (below). Past `reach`
+ * outside its edge the cell can't be covered by it, so only the edge matters: `missed`.
+ */
 export interface Drawn {
   kind: "drawn";
-  hit: (x: number, y: number) => Hit;
+  hit: (x: number, y: number, reach: number) => Hit;
+  /** Its edge is no smooth distance (a tilted circle's jumps at its middle): body.ts never skips a tile on its middle's word. */
+  rough?: boolean;
 }
 
 /** What a cell sees of one part: how far inside its edge, its depth, and its surface. */
@@ -67,6 +72,8 @@ export interface Hit {
   grain: number;
   /** How much of the light it takes, 1 when left out: below 1 a darker stuff, above a glowing one. */
   tone?: number;
+  /** Fills in its normal and tone, left out until the cell shows it: only its edge and depth come first. */
+  surface?: () => void;
 }
 
 /** Too far outside a part for it to matter to the cell. */
@@ -83,13 +90,14 @@ export const sphereHit = (
   part: Sphere,
   x: number,
   y: number,
-  seconds: number
+  seconds: number,
+  reach: number
 ): Hit => {
   const dx = (x - part.x) / part.r;
   const dy = (y - part.y) / part.r;
   const q = dx * dx + dy * dy;
   const edge = (Math.sqrt(q) - 1) * part.r;
-  if (q >= 1.2) {
+  if (q >= 1.2 || edge > reach) {
     return missed(edge);
   }
   const nz = Math.sqrt(1 - Math.min(q, 0.999));
@@ -114,10 +122,11 @@ export const tube = (
   gy: number,
   a: number,
   depth: number,
+  reach: number,
   grain = 0.5
 ): Hit => {
   const edge = Math.abs(d) - a;
-  if (edge > 0.2) {
+  if (edge > reach) {
     return missed(edge);
   }
   const across = clamp(d / a, -1, 1);

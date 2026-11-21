@@ -298,13 +298,13 @@ const hexagon = (x: number, y: number, r: number) => {
   return { edge: along - r * Math.cos(Math.PI / 6), facet };
 };
 
-const prismHit = (part: Solid, x: number, y: number): Hit => {
+const prismHit = (part: Solid, x: number, y: number, reach: number): Hit => {
   const cos = Math.cos(part.turn);
   const sin = Math.sin(part.turn);
   const u = (x - part.x) * cos + (y - part.y) * sin;
   const v = -(x - part.x) * sin + (y - part.y) * cos;
   const edge = triangleEdge(u, v, part.r) - part.r * 0.1;
-  if (edge > 0.2) {
+  if (edge > reach) {
     return missed(edge);
   }
   // A three-sided pyramid seen from above: each face one flat light, leaning to its edge.
@@ -323,13 +323,13 @@ const prismHit = (part: Solid, x: number, y: number): Hit => {
   };
 };
 
-const crystalHit = (part: Solid, x: number, y: number): Hit => {
+const crystalHit = (part: Solid, x: number, y: number, reach: number): Hit => {
   const cos = Math.cos(part.turn);
   const sin = Math.sin(part.turn);
   const u = (x - part.x) * cos + (y - part.y) * sin;
   const v = -(x - part.x) * sin + (y - part.y) * cos;
   const { edge, facet } = hexagon(u, v, part.r);
-  if (edge > 0.2) {
+  if (edge > reach) {
     return missed(edge);
   }
   // A table in the middle, six facets falling away round it: each facet one flat light.
@@ -346,7 +346,7 @@ const crystalHit = (part: Solid, x: number, y: number): Hit => {
   };
 };
 
-const ringHit = (part: Ring, x: number, y: number): Hit => {
+const ringHit = (part: Ring, x: number, y: number, reach: number): Hit => {
   const cos = Math.cos(part.turn);
   const sin = Math.sin(part.turn);
   const u = x * cos + y * sin;
@@ -355,7 +355,7 @@ const ringHit = (part: Ring, x: number, y: number): Hit => {
   const width = (part.outer - part.inner) / 2;
   const middle = (part.outer + part.inner) / 2;
   const edge = (Math.abs(radius - middle) - width) * Math.cos(part.tilt) * 2.4;
-  if (edge > 0.2) {
+  if (edge > reach) {
     return missed(edge);
   }
   // Its near half passes in front of what it circles, its far half behind.
@@ -443,22 +443,28 @@ const partsOf = (body: Body): Part[] => {
   }
 };
 
-const hitOf = (part: Part, x: number, y: number, seconds: number): Hit => {
+const hitOf = (
+  part: Part,
+  x: number,
+  y: number,
+  seconds: number,
+  reach: number
+): Hit => {
   switch (part.kind) {
     case "sphere": {
-      return sphereHit(part, x, y, seconds);
+      return sphereHit(part, x, y, seconds, reach);
     }
     case "prism": {
-      return prismHit(part, x, y);
+      return prismHit(part, x, y, reach);
     }
     case "crystal": {
-      return crystalHit(part, x, y);
+      return crystalHit(part, x, y, reach);
     }
     case "ring": {
-      return ringHit(part, x, y);
+      return ringHit(part, x, y, reach);
     }
     case "drawn": {
-      return part.hit(x, y);
+      return part.hit(x, y, reach);
     }
     default: {
       return missed(9);
@@ -651,13 +657,133 @@ const eyeLight = (
   return (0.32 + 0.8 * light) * shade;
 };
 
-/** Writes every cell's code for `parts` in this body's pose: any scene, in the figures' light. */
+/** The glow round a figure: how fast it fades (figure units), its gain, and the floor a lit dot clears. */
+const GLOW_FADE = 0.11;
+const GLOW_GAIN = 2.6;
+const GLOW_FLOOR = 0.55;
+
+/** Cells to a side of a tile: a part is traced in a tile only if it comes near one of its cells. */
+const TILE = 4;
+
+/**
+ * How steeply a part's edge can change across the figure, at most: an edge measured at a tile's
+ * middle is within this times the distance of the edge at any of its cells (the planet's tilted
+ * ring, the steepest, is 2.4). A rough part (a tilted circle drawn by `ellipseAt`, whose edge jumps
+ * at its middle) is measured at every cell instead.
+ */
+const SLOPE = 3;
+
+/** A band of tiles across the figure: which parts come near each tile, and which tiles any part comes near. */
+interface Band {
+  near: Uint8Array;
+  touched: Uint8Array;
+}
+
+/**
+ * Marks, for the band of rows from `row` (`high` of them), the parts that come within `within` of a
+ * cell of each tile: past that a part can neither cover a cell nor light its glow. A smooth part
+ * is measured at the tile's middle, with room for its slope; a rough one is traced wherever a
+ * smooth one is, and else asked at every cell.
+ */
+const markBand = (
+  band: Band,
+  parts: readonly Part[],
+  rough: ReadonlySet<Part>,
+  row: number,
+  high: number,
+  n: number,
+  seconds: number,
+  within: number
+): void => {
+  const cell = 2 / n;
+  const reach = cell / 2;
+  const y = 1 - ((row + high / 2) / n) * 2;
+  for (let tile = 0; tile < band.touched.length; tile += 1) {
+    const left = tile * TILE;
+    const wide = Math.min(TILE, n - left);
+    const x = ((left + wide / 2) / n) * 2 - 1;
+    const far = within + SLOPE * (Math.hypot(wide, high) / 2) * cell;
+    let touched = 0;
+    for (const [index, part] of parts.entries()) {
+      const near =
+        !rough.has(part) && hitOf(part, x, y, seconds, reach).edge <= far
+          ? 1
+          : 0;
+      band.near[tile * parts.length + index] = near;
+      touched = Math.max(touched, near);
+    }
+    for (const [index, part] of parts.entries()) {
+      if (!rough.has(part)) {
+        continue;
+      }
+      let near = touched;
+      for (let at = 0; at < wide * high && near === 0; at += 1) {
+        const across = left + (at % wide);
+        const down = row + Math.floor(at / wide);
+        near =
+          hitOf(
+            part,
+            ((across + 0.5) / n) * 2 - 1,
+            1 - ((down + 0.5) / n) * 2,
+            seconds,
+            reach
+          ).edge <= within
+            ? 1
+            : 0;
+      }
+      band.near[tile * parts.length + index] = near;
+      touched = Math.max(touched, near);
+    }
+    band.touched[tile] = touched;
+  }
+};
+
+/** What a cell sees: the part in front covering it (if any), and the nearest edge of any. */
+interface Seen {
+  front: Hit | undefined;
+  part: Part | undefined;
+  nearest: number;
+}
+
+/** Fills `seen` for the cell at (x, y), asking only the parts marked near its tile (`near` from `at`). */
+const frontAt = (
+  seen: Seen,
+  parts: readonly Part[],
+  near: Uint8Array,
+  at: number,
+  x: number,
+  y: number,
+  threshold: number,
+  seconds: number,
+  cell: number
+): Seen => {
+  seen.front = undefined;
+  seen.part = undefined;
+  seen.nearest = 9;
+  for (const [index, part] of parts.entries()) {
+    if (near[at + index] === 0) {
+      continue;
+    }
+    const hit = hitOf(part, x, y, seconds, cell / 2);
+    seen.nearest = Math.min(seen.nearest, hit.edge);
+    const covered = clamp(0.5 - hit.edge / cell) > threshold;
+    if (covered && (seen.front === undefined || hit.depth > seen.front.depth)) {
+      seen.front = hit;
+      seen.part = part;
+    }
+  }
+  return seen;
+};
+
+/** Writes the codes of rows `from` to `to` for `parts` in this body's pose: any scene, in the figures' light. */
 const paintScene = (
   body: Body,
   parts: readonly Part[],
   lean: Lean,
   n: number,
-  out: Uint8Array
+  out: Uint8Array,
+  from: number,
+  to: number
 ): void => {
   // The main agent breathes in its sleep: its light rising and falling, slowly.
   const breathing = body.eye && body.blinks && body.state === "asleep";
@@ -675,33 +801,71 @@ const paintScene = (
   };
   // A cell, in figure units: an edge softer than a cell moves one cell at a time.
   const cell = 2 / n;
+  // A part covers a cell only well inside half a cell of its edge: past that only its edge matters.
+  const reach = cell / 2;
+  // How far out a part can matter to a cell: covering it within half a cell, or lighting its glow.
+  const within = Math.max(
+    reach,
+    GLOW_FADE * Math.log(Math.max(1, (now.glow * GLOW_GAIN) / GLOW_FLOOR))
+  );
+  const tiles = Math.ceil(n / TILE);
+  const band: Band = {
+    near: new Uint8Array(tiles * parts.length),
+    touched: new Uint8Array(tiles),
+  };
+  const rough = new Set(
+    parts.filter((part) => part.kind === "drawn" && part.rough === true)
+  );
+  const sight: Seen = { front: undefined, part: undefined, nearest: 9 };
   const gaze = gazeOf(body);
   const orb = body.eye && body.shape === "orb" ? parts[0] : undefined;
-  for (let row = 0; row < n; row += 1) {
+  for (let row = from; row < to; row += 1) {
+    if ((row - from) % TILE === 0) {
+      markBand(
+        band,
+        parts,
+        rough,
+        row,
+        Math.min(TILE, to - row),
+        n,
+        body.seconds,
+        within
+      );
+    }
     for (let column = 0; column < n; column += 1) {
+      const tile = Math.floor(column / TILE);
+      if (band.touched[tile] === 0) {
+        // No part comes near: night.
+        out[row * n + column] = 0;
+        continue;
+      }
       const x = ((column + 0.5) / n) * 2 - 1;
       const y = 1 - ((row + 0.5) / n) * 2;
       const threshold = thresholdAt(column, row);
-      let front: Hit | undefined;
-      let nearest = 9;
-      let frontPart: Part | undefined;
-      for (const part of parts) {
-        const hit = hitOf(part, x, y, body.seconds);
-        nearest = Math.min(nearest, hit.edge);
-        const covered = clamp(0.5 - hit.edge / cell) > threshold;
-        if (covered && (front === undefined || hit.depth > front.depth)) {
-          front = hit;
-          frontPart = part;
-        }
-      }
+      const {
+        front,
+        part: frontPart,
+        nearest,
+      } = frontAt(
+        sight,
+        parts,
+        band.near,
+        tile * parts.length,
+        x,
+        y,
+        threshold,
+        body.seconds,
+        cell
+      );
       const at = row * n + column;
       if (front === undefined) {
         // The glow round it: a few dim dots fading into the night, nothing beyond.
-        const glow = now.glow * Math.exp(-Math.max(0, nearest) / 0.11);
-        const level = Math.floor(glow * 2.6 + threshold - 0.55);
+        const glow = now.glow * Math.exp(-Math.max(0, nearest) / GLOW_FADE);
+        const level = Math.floor(glow * GLOW_GAIN + threshold - GLOW_FLOOR);
         out[at] = level >= 1 ? Math.min(level, 2) + 1 : 0;
         continue;
       }
+      front.surface?.();
       // Its outline catches the rim light too, so a solid lit from behind still has an edge.
       const outline = now.rim * clamp(1 + front.edge / (cell * 2));
       let value = lit(now, light, front) * (front.tone ?? 1) + outline;
@@ -721,14 +885,16 @@ const paintScene = (
   }
 };
 
-/** Writes every cell's code for this frame into `out`, `n` cells across. */
+/** Writes the cells' codes for this frame into `out`, `n` cells across: every row, or rows `from` to `to`. */
 export const paintBody = (
   body: Body,
   lean: Lean,
   n: number,
-  out: Uint8Array
+  out: Uint8Array,
+  from = 0,
+  to = n
 ): void => {
-  paintScene(body, partsOf(body), lean, n, out);
+  paintScene(body, partsOf(body), lean, n, out, from, to);
 };
 
 /** A pose's still: the picture with reduced motion and the server's. */
