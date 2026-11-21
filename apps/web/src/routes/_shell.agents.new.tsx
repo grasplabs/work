@@ -157,8 +157,13 @@ export const Route = createFileRoute("/_shell/agents/new")({
   // offers, connected and working ones marked, and the company's teams.
   // Whether the company lets people have agents of their own: on when core
   // won't say, as core still refuses what it refuses.
+  // The choice of two ways needs none of it, so it stands at once: what a
+  // way offers is read once it is picked (or pointed at, new-agent-start.tsx),
+  // and only whether the company lets people have their own agents before.
+  loaderDeps: ({ search: { way } }) => ({ way }),
   loader: async ({
     context: { core, identity },
+    deps: { way },
   }): Promise<{
     taken: string[];
     models: string[];
@@ -166,7 +171,31 @@ export const Route = createFileRoute("/_shell/agents/new")({
     teams: { teamId: string; name: string }[];
     ownOn: boolean;
   }> => {
-    const [agents, own, models, connections, catalog, reach, setting] =
+    const readOwnOn = async (): Promise<boolean> => {
+      try {
+        const setting = await core.withSession(
+          async (session) => await session.orgSettings.ownAgents()
+        );
+        return setting.on;
+      } catch {
+        return true;
+      }
+    };
+    // An admin makes the company's agents whatever the setting says.
+    const admin = isMemberAdmin(identity);
+    if (way === undefined && admin) {
+      return { taken: [], models: [], apps: [], teams: [], ownOn: true };
+    }
+    const ownOnRead = readOwnOn();
+    if (way === undefined) {
+      const ownOn = await ownOnRead;
+      if (!ownOn) {
+        // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+        throw redirect({ to: "/agents", replace: true });
+      }
+      return { taken: [], models: [], apps: [], teams: [], ownOn };
+    }
+    const [agents, own, models, connections, catalog, reach] =
       await Promise.allSettled([
         core.withSession(async (session) => await session.connections.agents()),
         core.withSession(
@@ -180,13 +209,10 @@ export const Route = createFileRoute("/_shell/agents/new")({
         core.withSession(
           async (session) => await session.connections.stephenReach()
         ),
-        core.withSession(
-          async (session) => await session.orgSettings.ownAgents()
-        ),
       ]);
-    const ownOn = setting.status === "fulfilled" ? setting.value.on : true;
+    const ownOn = await ownOnRead;
     // Someone who may make neither kind has nothing to make here.
-    if (!ownOn && !isMemberAdmin(identity)) {
+    if (!ownOn && !admin) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/agents", replace: true });
     }

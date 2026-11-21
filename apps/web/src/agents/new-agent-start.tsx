@@ -75,7 +75,9 @@ const Way = ({
   description: string;
   children: ReactNode;
 }) => (
-  <CardLink render={<Link search={{ way }} to="/agents/new" />}>
+  <CardLink
+    render={<Link preload="intent" search={{ way }} to="/agents/new" />}
+  >
     <CardMedia>
       <span {...stylex.props(styles.stage)}>{children}</span>
     </CardMedia>
