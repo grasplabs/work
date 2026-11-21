@@ -27,17 +27,16 @@ import { useAsk } from "./use-ask.ts";
 // Chat's own page (routes/_shell.index.tsx): where to start. Grasp's buddy
 // and the question "What should we look at today?", centred, with the box
 // to ask in and questions to start from under it, and Make something for
-// who builds. Make something
-// comes here too (`make`, from `?make=app` or `?make=workflow` and
-// `&project=`): what to get done, and ideas to start from in place of the
-// questions (make/make-ideas.tsx), the blueprints for an App, a few
-// starting sentences for a workflow; the first question starts the chat
-// with what to make (`ChatMake`), which the chat keeps. From an
-// opportunity an admin drafts (`opportunity`, GRA-1751), the box starts
-// with its brief (brain/opportunity-drafts.ts) for them to change and
-// send: nothing is asked until they do. Asking starts a new
-// chat in Grasp's one chat (global-chat.tsx), which opens full screen over
-// the page with the answer coming in, as on every other page.
+// who builds. Make something comes here too (`make`, from `?make=app` or
+// `?make=workflow` and `&project=`): what to get done, and ideas to start
+// from in place of the questions (make/make-ideas.tsx), the blueprints for
+// an App, a few starting sentences for a workflow; the first question
+// starts the chat with what to make (`ChatMake`), which the chat keeps.
+// From an opportunity an admin drafts (`opportunity`, GRA-1751), the box
+// starts with its brief (brain/opportunity-drafts.ts) for them to change
+// and send: nothing is asked until they do. Asking starts a new chat in
+// Grasp's one chat (global-chat.tsx), which opens full screen over the
+// page with the answer coming in, as on every other page.
 
 /** What Make something offers to start from: an App's blueprints, or a workflow's starting sentences. */
 export type MakeIdeas =
