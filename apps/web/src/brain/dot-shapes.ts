@@ -1870,6 +1870,17 @@ export const brainCloud = (): BrainCloud => {
 /** How long a slice of brainCloudReady's scan runs before it gives the page its turn, in ms. */
 const scanSliceMs = 4;
 
+/**
+ * Runs `next` once the page has had its turn: a message, not a timer, which browsers hold back
+ * to 4 ms once timers nest, and so would leave the page idle as long as the scan runs.
+ */
+const afterPageTurn = (next: () => void): void => {
+  const channel = new MessageChannel();
+  channel.port1.addEventListener("message", next, { once: true });
+  channel.port1.start();
+  channel.port2.postMessage(null);
+};
+
 let cloudMade: PromiseWithResolvers<BrainCloud> | undefined;
 
 /**
@@ -1891,18 +1902,25 @@ export const brainCloudReady = async (): Promise<BrainCloud> => {
         made.resolve(cloud);
         return;
       }
-      const until = performance.now() + scanSliceMs;
-      while (performance.now() < until) {
-        const step = steps.next();
-        if (step.done === true) {
-          cloud = step.value;
-          made.resolve(cloud);
-          return;
+      try {
+        const until = performance.now() + scanSliceMs;
+        while (performance.now() < until) {
+          const step = steps.next();
+          if (step.done === true) {
+            cloud = step.value;
+            made.resolve(cloud);
+            return;
+          }
         }
+      } catch (error) {
+        // Asked again, it starts over.
+        cloudMade = undefined;
+        made.reject(error);
+        return;
       }
-      setTimeout(slice, 0);
+      afterPageTurn(slice);
     };
-    setTimeout(slice, 0);
+    afterPageTurn(slice);
   }
   return await cloudMade.promise;
 };

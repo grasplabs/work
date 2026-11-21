@@ -27,6 +27,7 @@ export type AgentTab = (typeof agentTabs)[number];
 export const agentTabOf = (value: unknown): AgentTab =>
   agentTabs.find((tab) => tab === value) ?? "overview";
 
+/** The tab row, as the loaded page and its skeleton both stand it. */
 export const AgentTabList = () => {
   const { t } = useLingui();
   const tabName = { mine: t`My agents`, organization: t`Organization` };

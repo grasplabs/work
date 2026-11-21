@@ -78,11 +78,15 @@ const toneAt = (index: number): readonly [number, number] =>
 /** The highest number in a tone's pair. */
 const highestTone = 5;
 
-/** Samples a CSS pixel along each side of the plate's tables. */
-const tableSamples = 2;
+/**
+ * Samples a CSS pixel along each side of the plate's tables, for a scene this tall: the plate
+ * spans the scene's height, so a short scene needs more of them to be read as closely.
+ */
+const tableSamplesFor = (height: number): number =>
+  Math.max(2, Math.ceil(1800 / height));
 
 /**
- * cos(kπu) along each side of a scene, for every k a tone has, a sample each half CSS pixel:
+ * cos(kπu) along each side of a scene, for every k a tone has, sampled finely enough for its size:
  * three plate readings a grain at every frame, each four Math.cos, were most of the sand's time
  * (and half a second of settling as the page opened). Read between samples, a table is off by
  * less than 1e-4, which no grain shows.
@@ -90,6 +94,7 @@ const tableSamples = 2;
 interface PlateTables {
   width: number;
   height: number;
+  samples: number;
   across: Float64Array[];
   down: Float64Array[];
 }
@@ -114,12 +119,14 @@ const plateTables = (now: Scene): PlateTables => {
   if (kept?.width === now.width && kept.height === now.height) {
     return kept;
   }
+  const samples = tableSamplesFor(now.height);
   // Past each edge too: a grain's slope is read two pixels on.
-  const across = Math.ceil((now.width + 3) * tableSamples) + 1;
-  const down = Math.ceil((now.height + 3) * tableSamples) + 1;
+  const across = Math.ceil((now.width + 3) * samples) + 1;
+  const down = Math.ceil((now.height + 3) * samples) + 1;
   const tables: PlateTables = {
     width: now.width,
     height: now.height,
+    samples,
     across: [],
     down: [],
   };
@@ -128,15 +135,14 @@ const plateTables = (now: Scene): PlateTables => {
       sideTable(
         across,
         k,
-        (sample) => ((sample / tableSamples - now.width / 2) / now.height) * 1.2
+        (sample) => ((sample / samples - now.width / 2) / now.height) * 1.2
       )
     );
     tables.down.push(
       sideTable(
         down,
         k,
-        (sample) =>
-          ((sample / tableSamples - now.height / 2) / now.height) * 1.2
+        (sample) => ((sample / samples - now.height / 2) / now.height) * 1.2
       )
     );
   }
@@ -145,8 +151,12 @@ const plateTables = (now: Scene): PlateTables => {
 };
 
 /** A table's value at `place` CSS pixels, between its two nearest samples; NaN off it. */
-const sampled = (table: Float64Array | undefined, place: number): number => {
-  const at = place * tableSamples;
+const sampled = (
+  table: Float64Array | undefined,
+  samples: number,
+  place: number
+): number => {
+  const at = place * samples;
   const below = Math.floor(at);
   const low = table?.[below];
   const high = table?.[below + 1];
@@ -171,10 +181,11 @@ const chladniAt = (
   const acrossM = tables.across[m];
   const downN = tables.down[n];
   const downM = tables.down[m];
+  const { samples } = tables;
   return (x, y) => {
     const value =
-      sampled(acrossN, x) * sampled(downM, y) -
-      sampled(acrossM, x) * sampled(downN, y);
+      sampled(acrossN, samples, x) * sampled(downM, samples, y) -
+      sampled(acrossM, samples, x) * sampled(downN, samples, y);
     if (!Number.isNaN(value)) {
       return value;
     }
@@ -371,6 +382,17 @@ const colourFrames = 30;
 /** The most canvas pixels to a CSS pixel: a grain is a dot of 1 to 1.6px, crisp at 2. */
 const mostRatio = 2;
 
+/**
+ * Runs `next` once the page has had its turn: a message, not a timer, which browsers hold back
+ * to 4 ms once timers nest, and so would leave the page idle as long as the sand settles.
+ */
+const afterPageTurn = (next: () => void): void => {
+  const channel = new MessageChannel();
+  channel.port1.addEventListener("message", next, { once: true });
+  channel.port1.start();
+  channel.port2.postMessage(null);
+};
+
 /** How long a slice of the first settling runs before the page gets its turn, in ms. */
 const settleSliceMs = 4;
 
@@ -391,7 +413,7 @@ const settle = async (
       done += 1;
     }
     if (done < settleFrames) {
-      setTimeout(slice, 0);
+      afterPageTurn(slice);
     } else {
       resolve(done);
     }

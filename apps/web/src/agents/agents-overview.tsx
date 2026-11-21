@@ -335,7 +335,6 @@ const AgentGroups = ({
   );
 };
 
-/** The tab row, as the loaded page and its skeleton both stand it. */
 /**
  * An admin's agents under their two tabs, the chosen one's shown: their own (`mine`) under My
  * agents, and every agent of the company with what an admin keeps of it (`company`) under
