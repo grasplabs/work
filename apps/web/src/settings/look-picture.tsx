@@ -11,9 +11,12 @@ import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
 // one hidden stage draws one look at a time with Grasp UI's backdrop field,
 // still and small as its own picker's tiles are, at a tile's size, takes its
 // picture (a data URL) as soon as it stands, lets the field go, and
-// moves on to the next. Each picture is kept for this visit, by the look
-// and, for what is drawn on the page's ground, the page's theme. Only the
-// big preview stays live.
+// moves on to the next. Each picture is kept by the look and, for what is
+// drawn on the page's ground, the page's theme: in this browser until the
+// next release, so the tiles stand at once from the second visit on. The
+// shell mounts the one stage and has the person's tiles drawn once it has
+// loaded (look-pictures-warm.tsx), so even the first visit finds them
+// drawn. Only the big preview stays live.
 
 /** A tile's size in CSS pixels: what the stage draws at. */
 const pictureWidth = 160;
@@ -30,7 +33,55 @@ const longestMs = 2000;
 /** How long a scene waits, once its picture has come and its field has started, for the field to draw it. */
 const sceneDrawMs = 150;
 
-const pictures = new Map<string, string>();
+/** Where this browser keeps the pictures, with the release that drew them. */
+const keptKey = "grasp-look-pictures";
+const build = import.meta.env.VITE_GRASP_BUILD;
+
+/** The pictures this release drew here before; none from another release, or in development, where the drawers change under them. */
+const keptPictures = (): Map<string, string> => {
+  if (import.meta.env.DEV) {
+    return new Map();
+  }
+  try {
+    const kept: unknown = JSON.parse(localStorage.getItem(keptKey) ?? "null");
+    if (
+      typeof kept !== "object" ||
+      kept === null ||
+      !("build" in kept) ||
+      kept.build !== build ||
+      !("pictures" in kept) ||
+      typeof kept.pictures !== "object" ||
+      kept.pictures === null
+    ) {
+      return new Map();
+    }
+    return new Map(
+      Object.entries(kept.pictures).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+    );
+  } catch {
+    // Storage blocked or unreadable: drawn again.
+    return new Map();
+  }
+};
+
+const pictures = keptPictures();
+
+/** Keeps the pictures in this browser, for the next visit. */
+const keepPictures = (): void => {
+  if (import.meta.env.DEV) {
+    return;
+  }
+  try {
+    localStorage.setItem(
+      keptKey,
+      JSON.stringify({ build, pictures: Object.fromEntries(pictures) })
+    );
+  } catch {
+    // Storage blocked or full: drawn again next visit.
+  }
+};
 const queue: { key: string; look: Look }[] = [];
 const listeners = new Set<() => void>();
 
@@ -83,9 +134,24 @@ const ask = (key: string, look: Look): void => {
   changed();
 };
 
+/** The page's theme, following a change. */
+const usePageTheme = (): string => useSyncExternalStore(onPageTheme, pageTheme);
+
+/** Asks for every one of `looks`' pictures, in the page's theme, ahead of their tiles. */
+export const useLookPicturesAhead = (looks: readonly Look[]): void => {
+  const theme = usePageTheme();
+  useEffect(() => {
+    for (const look of looks) {
+      if (look.backdrop !== "none") {
+        ask(keyOf(look, theme), look);
+      }
+    }
+  }, [looks, theme]);
+};
+
 /** `look`'s still picture, once drawn; undefined until then, and for "none". */
 export const useLookPicture = (look: Look): string | undefined => {
-  const theme = useSyncExternalStore(onPageTheme, pageTheme);
+  const theme = usePageTheme();
   const key = keyOf(look, theme);
   const picture = useSyncExternalStore(subscribe, () => pictures.get(key));
   const { backdrop, pattern, tone } = look;
@@ -116,8 +182,8 @@ const styles = stylex.create({
 const first = () => queue.at(0);
 
 /**
- * Draws the waiting looks one at a time and keeps their pictures. Mount
- * one wherever tiles ask for pictures.
+ * Draws the waiting looks one at a time and keeps their pictures. The shell
+ * mounts the one there is (look-pictures-warm.tsx).
  */
 export const LookPictureStage = () => {
   const next = useSyncExternalStore(subscribe, first);
@@ -138,6 +204,9 @@ export const LookPictureStage = () => {
       // Our own pictures, from this origin: a canvas that is always read.
       pictures.set(next.key, canvas?.toDataURL() ?? "");
       queue.shift();
+      if (queue.length === 0) {
+        keepPictures();
+      }
       changed();
     };
     const scene = isScene(next.look.backdrop);
