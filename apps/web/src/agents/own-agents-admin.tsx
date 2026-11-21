@@ -4,6 +4,7 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDollars } from "../format.ts";
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
@@ -14,10 +15,12 @@ import {
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
+import { orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// People's own agents, on the Agents page for the company's admins
-// (agents-overview.tsx): whether people may have agents of their own
+// People's own agents, in Settings › Workspace for the company's admins
+// (Ruben, 21 November: a company setting, not part of the Agents page):
+// whether people may have agents of their own
 // (core's own-agents-switch.ts), and per person who has any, how many
 // and what they cost this month. Never what they are called or told:
 // those are their owners' alone. A Section card of rows, as Settings has
@@ -32,6 +35,27 @@ export interface OwnAgentsAdmin {
   /** The company's people, by whom each row is named; undefined where core didn't say them. */
   people: readonly Member[] | undefined;
 }
+
+/**
+ * Reads what an admin sees of people's own agents: the switch, what each
+ * person's cost, and the people to name them by. The cost and the people
+ * are left out where core won't say them, and the card still shows the
+ * rest.
+ */
+export const readOwnAgentsAdmin = async (
+  session: Session
+): Promise<OwnAgentsAdmin> => {
+  const [setting, usage, people] = await Promise.all([
+    session.orgSettings.ownAgents(),
+    orNull(async () => await session.connections.ownAgentsUsage()),
+    orNull(async () => await session.members.list()),
+  ]);
+  return {
+    on: setting.on,
+    usage: usage ?? undefined,
+    people: people ?? undefined,
+  };
+};
 
 /** A row per person with agents of their own, or why there are none to show. */
 const UsageRows = ({

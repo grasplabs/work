@@ -2,13 +2,13 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Suspense, lazy } from "react";
 
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
@@ -142,15 +142,12 @@ export const ChatConversation = ({
       <Loading />
     ) : (
       <div {...stylex.props(styles.centre)}>
-        <NotLoaded page={finding.failure} />
-        <Button
-          onClick={() => {
+        <PartNotLoaded
+          onRetry={() => {
             finding.retry();
           }}
-          size="sm"
-        >
-          {t`Try again`}
-        </Button>
+          page={finding.failure}
+        />
       </div>
     );
   }

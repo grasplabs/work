@@ -134,6 +134,10 @@ describe("the Workflows page's rows", () => {
         process: "o2c",
         owner: "Ada Lovelace",
         runs: 12,
+        version: 1,
+        waiting: 0,
+        failed: 0,
+        lastRun: "2026-10-08T09:00:00.000Z",
       },
       {
         id: "id-Planned",
@@ -143,6 +147,10 @@ describe("the Workflows page's rows", () => {
         process: null,
         owner: null,
         runs: null,
+        version: null,
+        waiting: 0,
+        failed: 0,
+        lastRun: null,
       },
     ]);
   });

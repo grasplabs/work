@@ -26,6 +26,7 @@ import { AgentPage } from "./agent-page.tsx";
 import type { FirstAgentAccess } from "./agent-page.tsx";
 import { AgentsOverview } from "./agents-overview.tsx";
 import type { ManagedAgents } from "./agents-overview.tsx";
+import { OwnAgentsCard } from "./own-agents-admin.tsx";
 import type { AgentsTab, AgentTab } from "./tabs.tsx";
 
 // The Agents page and one agent's page, on what their routes read from
@@ -273,6 +274,18 @@ const press = async (element: Element | null | undefined) => {
   await settled();
 };
 
+/** The agent page's "…" button in its heading. */
+const moreButton = (): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>("button")].find((each) =>
+    (each.getAttribute("aria-label") ?? "").startsWith("More for")
+  );
+
+/** The open menu's item whose words start with `words`. */
+const menuItem = (words: string): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
+    (each) => each.textContent.trim().startsWith(words)
+  );
+
 /** The agents' names, as the rows start with them. */
 const names = ["Stephen", "Claire", "Milan", "Scribe", "Idle"];
 
@@ -488,13 +501,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("shows an admin how many agents of their own each person has and what they cost, never their names, and turns them off", async () => {
       const asked = await mounted(
-        <Overview
-          at="organization"
-          makes
-          makesOwn
-          managed={managed}
-          own={[]}
-          ownAdmin={{
+        <OwnAgentsCard
+          admin={{
             on: true,
             people: [anna],
             usage: [
@@ -516,7 +524,7 @@ describe("the company's agents, on pages of their own", () => {
               },
             ],
           }}
-          usable={[chatAgent(stephen)]}
+          editable={true}
         />
       );
       const text = document.body.textContent ?? "";
@@ -539,13 +547,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("names nobody as gone where the company's people couldn't be read", async () => {
       await mounted(
-        <Overview
-          at="organization"
-          makes
-          makesOwn
-          managed={managed}
-          own={[]}
-          ownAdmin={{
+        <OwnAgentsCard
+          admin={{
             on: true,
             people: undefined,
             usage: [
@@ -559,7 +562,7 @@ describe("the company's agents, on pages of their own", () => {
               },
             ],
           }}
-          usable={[]}
+          editable={true}
         />
       );
       const text = document.body.textContent ?? "";
@@ -571,14 +574,9 @@ describe("the company's agents, on pages of their own", () => {
 
     it("gives an admin among Grasp's staff no way to turn people's own agents off", async () => {
       const asked = await mounted(
-        <Overview
-          at="organization"
-          makes={false}
-          makesOwn={false}
-          managed={managed}
-          own={[]}
-          ownAdmin={{ on: true, people: [], usage: [] }}
-          usable={[]}
+        <OwnAgentsCard
+          admin={{ on: true, people: [], usage: [] }}
+          editable={false}
         />
       );
       const toggle = document.querySelector(
@@ -894,7 +892,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("deletes an agent only once the admin says so again, and offers no delete for the first agent", async () => {
       const asked = await mounted(page(claire, "overview"));
-      await press(buttonNamed("Delete"));
+      await press(moreButton());
+      await press(menuItem("Delete"));
       const before = [...asked];
       await press(buttonStarting("Delete for good"));
       act(() => {
@@ -905,7 +904,10 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         before,
         asked,
-        firstOffers: buttonNamed("Delete") !== undefined,
+        firstOffers: await (async () => {
+          await press(moreButton());
+          return menuItem("Delete") !== undefined;
+        })(),
       }).toStrictEqual({
         before: [],
         asked: [["deleted", "agent-claire"]],

@@ -121,6 +121,10 @@ msgstr "{app}: ejecución de {workflowId}"
 msgid "{app}'s model can't be read, so its calls get no answer."
 msgstr "No se puede leer el modelo de {app}, así que sus llamadas no reciben respuesta."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{app}'s tools"
+msgstr "Las herramientas de {app}"
+
 #: src/projects/project-counts.tsx
 msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
@@ -591,6 +595,10 @@ msgstr "{event}, en {account}"
 msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
 msgstr "{failed, plural, one {Un correo no llegó a alguien} other {# correos no llegaron a sus destinatarios}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{failed} failed"
+msgstr "{failed} con error"
+
 #: src/apps/data-model-changes.tsx
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} en {table} necesita un cambio en el código antes de poder publicarse."
@@ -1031,10 +1039,6 @@ msgstr "{name} puede escribir. Cambiar a Lectura"
 msgid "{name} only works when asked."
 msgstr "{name} solo trabaja cuando se le pide."
 
-#: src/agents/setup/schedule-step.tsx
-msgid "{name} only works when someone asks it something in a chat."
-msgstr "{name} solo trabaja cuando alguien le pregunta algo en un chat."
-
 #: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} solo lee. Cambiar a Escritura"
@@ -1308,6 +1312,10 @@ msgstr "{role}, aún sin invitación ni entrevista"
 msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgstr "{rows, plural, one {# fila para importar.} other {# filas para importar.}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{runs} this week"
+msgstr "{runs} esta semana"
+
 #: src/agents/agents-overview.tsx
 msgid "{scheduled, plural, one {# schedule} other {# schedules}}"
 msgstr "{scheduled, plural, one {# programación} other {# programaciones}}"
@@ -1375,6 +1383,10 @@ msgstr "{sponsor} me dio la visión general. Ahora necesito los detalles."
 #: src/onboarding/setup-steps.tsx
 msgid "{sponsor} told me a lot about your company in our first conversation."
 msgstr "{sponsor} me contó mucho sobre tu empresa en nuestra primera conversación."
+
+#: src/workflows/workflow-rows.tsx
+msgid "{start}, and {more} more"
+msgstr "{start} y {more} más"
 
 #: src/settings/event-source-activity.tsx
 msgid "{started, plural, one {Started # workflow} other {Started # workflows}}"
@@ -1584,6 +1596,10 @@ msgstr "{waiting, plural, one {# flujo de trabajo te necesita} other {# flujos d
 #: src/drafts/share-with-team.tsx
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Usa # nuevo tipo de acceso. Un administrador lo aprueba una vez.} other {Usa # nuevos tipos de acceso. Un administrador los aprueba una vez.}}"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{waiting} waiting"
+msgstr "{waiting} en espera"
 
 #: src/connections/integrations-band.tsx
 msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
@@ -2154,6 +2170,7 @@ msgctxt "put in a project"
 msgid "Add"
 msgstr "Añadir"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/setup/apps-step.tsx
 msgid "Add {appName}"
 msgstr "Añadir {appName}"
@@ -2267,10 +2284,6 @@ msgstr "Añadir otra"
 #: src/agents/setup/apps-step.tsx
 msgid "Add connector"
 msgstr "Añadir conector"
-
-#: src/agents/agent-documents.tsx
-msgid "Add documents"
-msgstr "Añadir documentos"
 
 #: src/apps/field-editor.tsx
 msgid "Add field"
@@ -2701,9 +2714,10 @@ msgid "Always light"
 msgstr "Siempre claro"
 
 #: src/agents/setup/thinking-step.tsx
-msgid "Always uses this model."
-msgstr "Siempre usa este modelo."
+msgid "Always uses this model"
+msgstr "Usa siempre este modelo"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Amber"
 msgstr "Ámbar"
@@ -3407,6 +3421,10 @@ msgstr "Preguntar"
 msgid "Ask {0}"
 msgstr "Preguntar a {0}"
 
+#: src/agents/setup/schedule-step.tsx
+msgid "Ask {name} in any chat"
+msgstr "Pregunta a {name} en cualquier chat"
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Ask {owner} to remove Grasp at {link}."
 msgstr "Pide a {owner} que quite Grasp en {link}."
@@ -3799,13 +3817,13 @@ msgctxt "note property"
 msgid "Before"
 msgstr "Antes"
 
-#: src/agents/agent-templates.ts
-msgid "Before each meeting"
-msgstr "Antes de cada reunión"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Before I reach out, let your team know"
 msgstr "Antes de que me ponga en contacto, avisa a tu equipo"
+
+#: src/agents/agent-templates.ts
+msgid "Before meetings"
+msgstr "Antes de las reuniones"
 
 #: src/interview/words.ts
 msgid "Before the work: what you told me about AI."
@@ -3925,6 +3943,10 @@ msgstr "Pregunta del Brain"
 msgid "Breadcrumb"
 msgstr "Ruta de navegación"
 
+#: src/agents/agent-templates.ts
+msgid "Brief you"
+msgstr "Ponerte al día"
+
 #: src/projects/project-dialog.tsx
 msgid "Briefcase"
 msgstr "Maletín"
@@ -3966,7 +3988,7 @@ msgstr "Crear nueva aplicación"
 msgid "Builder"
 msgstr "Creador"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgctxt "workflow phase"
 msgid "Building"
 msgstr "En construcción"
@@ -4008,6 +4030,11 @@ msgstr "por una importación"
 msgctxt "how search found a passage"
 msgid "By common words only"
 msgstr "Solo por palabras comunes"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "By hand"
+msgstr "A mano"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a memory"
@@ -4678,6 +4705,7 @@ msgstr "Elegir documentos"
 msgid "Choose every {one} shown"
 msgstr "Elegir cada {one} mostrado"
 
+#: src/agents/agent-documents.tsx
 #: src/frame/part-words.tsx
 msgid "Choose files"
 msgstr "Elegir archivos"
@@ -4925,6 +4953,7 @@ msgstr "Compañeros que hablaron"
 msgid "Colour"
 msgstr "Color"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Colours"
@@ -5064,6 +5093,7 @@ msgctxt "an event's"
 msgid "Conflicts"
 msgstr "Coincide"
 
+#: src/agents/agent-apps-card.tsx
 #: src/chat/plan-card.tsx
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5081,6 +5111,10 @@ msgstr "Conectar {app}"
 #: src/frame/part-words.tsx
 msgid "Connect {app} again"
 msgstr "Volver a conectar {app}"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Connect {appName}"
+msgstr "Conectar {appName}"
 
 #: src/frame/part-words.tsx
 msgid "Connect {label}"
@@ -5340,6 +5374,7 @@ msgstr "Copenhague"
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/pages/frame-failure.tsx
@@ -5694,6 +5729,7 @@ msgstr "CRM"
 msgid "Cron fields"
 msgstr "Campos cron"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Crystal"
 msgstr "Cristal"
@@ -5952,10 +5988,6 @@ msgstr "Eliminar"
 #: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "¿Eliminar «{title}»?"
-
-#: src/agents/agent-page.tsx
-msgid "Delete {name}"
-msgstr "Eliminar {name}"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
@@ -6574,6 +6606,10 @@ msgstr "Trazado como flujo: {workflow}"
 msgid "Drive"
 msgstr "Unidad"
 
+#: src/agents/agent-documents.tsx
+msgid "Drop documents here"
+msgstr "Suelta los documentos aquí"
+
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
 msgstr "Suelta los archivos aquí"
@@ -6774,6 +6810,7 @@ msgstr "Recibos de pago por correo"
 msgid "Email trigger"
 msgstr "Disparador de correo"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Ember"
 msgstr "Brasa"
@@ -7015,13 +7052,10 @@ msgstr "Eventos en el archivo"
 msgid "Events in the log"
 msgstr "Eventos en el registro"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Evergreen"
 msgstr "Perenne"
-
-#: src/agents/setup/schedule-step.tsx
-msgid "Every {chosenDays} at {time}, {name} works on its own and sends you what it found."
-msgstr "Cada {chosenDays} a las {time}, {name} trabaja por su cuenta y te envía lo que ha encontrado."
 
 #: src/agents/setup/review-step.tsx
 msgid "Every {days} at {time}"
@@ -7044,10 +7078,6 @@ msgstr "Todos los días"
 #: src/agents/setup/review-step.tsx
 msgid "Every day at {time}"
 msgstr "Todos los días a las {time}"
-
-#: src/agents/setup/schedule-step.tsx
-msgid "Every day at {time}, {name} works on its own and sends you what it found."
-msgstr "Todos los días a las {time}, {name} trabaja por su cuenta y te envía lo que ha encontrado."
 
 #: src/agents/new-agent.tsx
 msgid "Every day at 9:00"
@@ -7400,6 +7430,11 @@ msgctxt "status of a workflow run"
 msgid "Failed"
 msgstr "Fallida"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Failing"
+msgstr "Falla"
+
 #: src/settings/ai-providers.tsx
 msgid "Fallbacks"
 msgstr "Modelos de reserva"
@@ -7695,6 +7730,10 @@ msgstr "Seguir presupuestos hasta el pago"
 #: src/agents/agent-templates.ts
 msgid "Follow up on leads"
 msgstr "Hacer seguimiento de leads"
+
+#: src/agents/setup/thinking-step.tsx
+msgid "Follows the chat's choice"
+msgstr "Sigue la elección del chat"
 
 #: src/frame/part-words.tsx
 msgid "Footnote {number}"
@@ -8001,6 +8040,10 @@ msgstr "Consigue una clave de {provider}"
 #: src/agents/agent-apps-card.tsx
 msgid "Give {app} back"
 msgstr "Devolver {app}"
+
+#: src/agents/agent-documents.tsx
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
+msgstr "Dale a {name} lo que debe saber de memoria: una lista de comprobación, una lista de precios, una política. Los lee cuando una pregunta lo necesita, así sus respuestas siguen tus propios documentos."
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -8972,6 +9015,10 @@ msgstr "Si una parte no se puede leer, di cuál."
 msgid "If a week was quiet, say so in a short report."
 msgstr "Si la semana fue tranquila, dilo en un informe breve."
 
+#: src/agents/agent-share.tsx
+msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
+msgstr "Si un administrador lo adopta, pasa a ser uno de los agentes de la empresa: decide quién puede preguntarle y qué puede hacer. Lo que le dijiste no va con él, y ya no podrás cambiarlo ni abrirlo."
+
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
 msgstr "Si un importe o un cliente no está claro, dilo en lugar de adivinar."
@@ -9352,9 +9399,17 @@ msgctxt "business process"
 msgid "Issue-to-Resolution"
 msgstr "Issue-to-Resolution"
 
+#: src/agents/setup/schedule-step.tsx
+msgid "It also works on its own, at the times you set."
+msgstr "También trabaja por su cuenta, en los horarios que fijes."
+
+#: src/agents/setup/schedule-step.tsx
+msgid "It answers in a chat, whenever it is asked."
+msgstr "Responde en un chat, siempre que se le pregunte."
+
 #: src/agents/agent-page.tsx
-msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs."
-msgstr "No responde a nadie, y se eliminan su programación y sus ajustes. Los chats que la gente tuvo con él siguen siendo suyos."
+msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead."
+msgstr "No responde a nadie, y su horario y sus ajustes se eliminan. Los chats que la gente tuvo con él siguen siendo suyos. Para pararlo un tiempo, desactívalo en su lugar."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9822,6 +9877,7 @@ msgstr "Ir a lo más reciente"
 msgid "Just for me"
 msgstr "Solo para mí"
 
+#: src/agents/agent-page.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Just for you"
@@ -10039,6 +10095,10 @@ msgstr "Última ejecución: {when}"
 #: src/brain/sources-page.tsx
 msgid "Last read {lastRead}"
 msgstr "Leído por última vez {lastRead}"
+
+#: src/workflows/workflow-rows.tsx
+msgid "Last run {since}"
+msgstr "Última ejecución {since}"
 
 #: src/agents/agents-overview.tsx
 msgid "Last run failed"
@@ -10382,6 +10442,11 @@ msgstr "Enumera lo que importa hoy del correo, las tareas y el calendario."
 msgid "Lists what matters today from mail, tasks and the calendar."
 msgstr "Enumera lo que importa hoy del correo, las tareas y el calendario."
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Live"
+msgstr "Activo"
+
 #: src/drafts/share-with-team.tsx
 msgid "Live, {named}"
 msgstr "En vivo, {named}"
@@ -10395,6 +10460,7 @@ msgid "Live, being measured"
 msgstr "En marcha, en medición"
 
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Cargado"
@@ -10480,6 +10546,10 @@ msgstr "Logotipo eliminado"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "London"
 msgstr "Londres"
+
+#: src/agents/agent-look.tsx
+msgid "Look"
+msgstr "Aspecto"
 
 #: src/agents/agent-wakes.tsx
 msgid "Look for overdue invoices and say which."
@@ -10589,6 +10659,10 @@ msgstr "El correo aún no está disponible en este alojamiento"
 msgid "Mail that asks for something."
 msgstr "Correos que piden algo."
 
+#: src/workflows/workflow-rows.tsx
+msgid "Mail to {address}"
+msgstr "Correo a {address}"
+
 #: src/inbox/items.ts
 msgid "Mailbox"
 msgstr "Buzón"
@@ -10606,6 +10680,10 @@ msgstr "Principal"
 msgctxt "the sidebar's main list"
 msgid "Main"
 msgstr "Principal"
+
+#: src/agents/manual-agent.tsx
+msgid "Make {name}"
+msgstr "Crear a {name}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Make {name} an admin?"
@@ -10736,6 +10814,7 @@ msgstr "Máximo"
 msgid "May do"
 msgstr "Puede hacer"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Meadow"
 msgstr "Pradera"
@@ -10907,6 +10986,7 @@ msgstr "Dinero"
 msgid "Monthly budget for AI"
 msgstr "Presupuesto mensual para IA"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Moon"
 msgstr "Luna"
@@ -10991,6 +11071,7 @@ msgstr "Más Apps tienen modelos propios."
 msgid "More for {label}"
 msgstr "Más para {label}"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-page.tsx
 #: src/settings/event-sources.tsx
 msgid "More for {name}"
@@ -11244,7 +11325,7 @@ msgctxt "state of one app"
 msgid "Needs you"
 msgstr "Te necesita"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgctxt "workflow phase"
 msgid "Needs you"
 msgstr "Te necesita"
@@ -11367,6 +11448,7 @@ msgstr "Nueva versión"
 msgid "Newer"
 msgstr "Más recientes"
 
+#: src/agents/manual-agent.tsx
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
@@ -11374,6 +11456,10 @@ msgstr "Más recientes"
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Siguiente"
+
+#: src/workflows/workflow-rows.tsx
+msgid "Next {when}"
+msgstr "Próxima {when}"
 
 #: src/frame/part-words.tsx
 msgid "Next match"
@@ -11588,7 +11674,6 @@ msgstr "Ninguna integración coincide con tu búsqueda."
 msgid "No integrations yet."
 msgstr "Aún no hay integraciones."
 
-#: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
 msgstr "Aún no se ha descrito su tarea"
@@ -11699,6 +11784,10 @@ msgstr "Últimamente no se ha iniciado ninguna ejecución desde ella."
 msgid "No runs match these filters."
 msgstr "Ninguna ejecución coincide con estos filtros."
 
+#: src/workflows/workflow-rows.tsx
+msgid "No runs yet"
+msgstr "Aún sin ejecuciones"
+
 #: src/workflows/resource-runs.tsx
 msgid "No runs yet."
 msgstr "Aún no hay ejecuciones."
@@ -11759,7 +11848,7 @@ msgstr "Aún sin flujo"
 msgid "No workflows in it yet."
 msgstr "Aún no hay flujos de trabajo."
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "No workflows yet"
 msgstr "Todavía no hay flujos de trabajo"
 
@@ -11954,6 +12043,7 @@ msgstr "Aún no conectada"
 #: src/activity/audit-event.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
 #: src/settings/invitations.tsx
 msgid "Not copied"
@@ -12043,7 +12133,13 @@ msgstr "No indicados"
 msgid "Not live"
 msgstr "Sin publicar"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Not live yet"
+msgstr "Aún no activo"
+
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "No cargado"
@@ -12493,6 +12589,7 @@ msgstr "Número"
 msgid "Numbered list"
 msgstr "Lista numerada"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Ocean"
 msgstr "Océano"
@@ -12502,6 +12599,7 @@ msgstr "Océano"
 msgid "of them wait for a decision"
 msgstr "de ellas esperan una decisión"
 
+#: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
 msgstr "Desactivado"
@@ -12520,10 +12618,6 @@ msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Desactivado, aquí solo responde: no deja ningún cambio para confirmar."
 
 #: src/agents/agent-share.tsx
-msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
-msgstr "Ofrece {name} a los administradores de tu empresa. Si lo adoptan, pasa a ser un agente de la empresa: ellos eligen quién puede preguntarle y qué puede hacer, y tú ya no lo cambias."
-
-#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Ofrecer a la empresa"
 
@@ -12532,8 +12626,8 @@ msgid "Offered an agent to the company, or took the offer back"
 msgstr "Ofreció un agente a la empresa, o retiró la oferta"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
-msgstr "Ofrecido el {since}. Los administradores de tu empresa pueden quedarse con {name}. Lo que le dijiste no se va con él y, una vez que se lo queden, ya no podrás abrirlo."
+msgid "Offered on {since}"
+msgstr "Ofrecido el {since}"
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -12598,12 +12692,32 @@ msgid "On a later day"
 msgstr "Un día más adelante"
 
 #: src/agents/setup/schedule-step.tsx
-msgid "On day"
-msgstr "El día"
+msgid "On a schedule"
+msgstr "Según un horario"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On a schedule"
+msgstr "Según un horario"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On a webhook"
+msgstr "Con un webhook"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On an email"
+msgstr "Con un correo"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On an event"
+msgstr "Con un evento"
 
 #: src/agents/setup/schedule-step.tsx
-msgid "On day {dayOfMonth} of every month at {time}, {name} works on its own and sends you what it found."
-msgstr "El día {dayOfMonth} de cada mes a las {time}, {name} trabaja por su cuenta y te envía lo que ha encontrado."
+msgid "On day"
+msgstr "El día"
 
 #: src/onboarding/ai-step.tsx
 msgid "On Grasp’s AI: {grasp}"
@@ -12890,7 +13004,7 @@ msgstr "¿Abrir un enlace fuera de Grasp?"
 msgid "Open as a page"
 msgstr "Abrir como página"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "Open Chat"
 msgstr "Abrir el chat"
 
@@ -13081,6 +13195,7 @@ msgstr "O retírate: nada de lo que dijiste se usa a partir de ahora, y todavía
 msgid "Or write it yourself"
 msgstr "O escríbelo tú"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Orb"
 msgstr "Esfera"
@@ -13208,12 +13323,6 @@ msgctxt "a project's owner"
 msgid "Owner"
 msgstr "Propietario"
 
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgctxt "column: who owns a workflow"
-msgid "Owner"
-msgstr "Responsable"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owner"
@@ -13294,6 +13403,7 @@ msgstr "Páginas de eventos"
 msgid "Pagination"
 msgstr "Paginación"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Pair in orbit"
 msgstr "Pareja en órbita"
@@ -13404,8 +13514,8 @@ msgstr "¿Pausar a Stephen fuera de Grasp?"
 msgid "Paused"
 msgstr "En pausa"
 
+#: src/workflows/workflow-rows.tsx
 #: src/workflows/workflow-status.tsx
-#: src/workflows/workflows-table.tsx
 msgctxt "a workflow someone paused"
 msgid "Paused"
 msgstr "En pausa"
@@ -13534,6 +13644,7 @@ msgid "People with access"
 msgstr "Personas con acceso"
 
 #: src/agents/own-agents-admin.tsx
+#: src/routes/_shell.settings.workspace.tsx
 msgid "People's own agents"
 msgstr "Agentes propios de las personas"
 
@@ -13583,11 +13694,6 @@ msgstr "Conexiones personales"
 msgid "Personal Knowledge and memories"
 msgstr "Conocimiento personal y recuerdos"
 
-#: src/workflows/workflows-table.tsx
-msgctxt "column: a workflow's phase"
-msgid "Phase"
-msgstr "Fase"
-
 #: src/apps/app-section.tsx
 msgid "Phone"
 msgstr "Teléfono"
@@ -13596,6 +13702,10 @@ msgstr "Teléfono"
 msgctxt "a screen width"
 msgid "Phone"
 msgstr "Teléfono"
+
+#: src/agents/setup/schedule-step.tsx
+msgid "Pick {name} in the chat's box, and it answers there."
+msgstr "Elige a {name} en el cuadro del chat y responderá allí."
 
 #: src/frame/part-words.tsx
 msgid "Pick a part of the page. Escape to stop."
@@ -13695,6 +13805,7 @@ msgstr "Planificar el día"
 msgid "Plan the interviews and send the links"
 msgstr "Planifica las entrevistas y envía los enlaces"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Planet"
 msgstr "Planeta"
@@ -14334,6 +14445,7 @@ msgid "Redact this answer?"
 msgstr "¿Censurar esta respuesta?"
 
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 msgid "Reference for support"
 msgstr "Referencia para soporte"
 
@@ -15118,7 +15230,7 @@ msgctxt "status of a workflow run"
 msgid "Running"
 msgstr "En curso"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgctxt "workflow phase"
 msgid "Running"
 msgstr "En marcha"
@@ -15158,11 +15270,6 @@ msgstr "Ejecuciones"
 msgctxt "activity of a workflow: what ran"
 msgid "Runs"
 msgstr "Ejecuciones"
-
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgid "Runs a week"
-msgstr "Ejecuciones a la semana"
 
 #: src/onboarding/ai-step.tsx
 msgid "Runs at: {whereItRuns}"
@@ -15715,10 +15822,6 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Enviar"
 
-#: src/agents/agent-templates.ts
-msgid "Send a briefing"
-msgstr "Enviar un briefing"
-
 #: src/settings/event-source-activity.tsx
 msgid "Send a test event"
 msgstr "Enviar un evento de prueba"
@@ -15913,6 +16016,7 @@ msgstr "Resuelto: {choice}"
 msgid "Setup"
 msgstr "Configuración"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Shape"
 msgstr "Forma"
@@ -15963,7 +16067,6 @@ msgstr "Compartir con un equipo"
 msgid "Share with others: {statement}"
 msgstr "Compartir con otros: {statement}"
 
-#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
 msgstr "Compartir con la empresa"
@@ -16031,6 +16134,10 @@ msgstr "Compartido. Quienes pueden leerlo lo ven con el mismo nombre."
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
 msgstr "Solicitudes que te esperan"
+
+#: src/agents/agent-share.tsx
+msgid "Sharing"
+msgstr "Compartir"
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -16577,6 +16684,7 @@ msgstr "Hay algo que corregir antes"
 msgid "Something went wrong while it opened."
 msgstr "Algo salió mal al abrirla."
 
+#: src/frame/page-failed.tsx
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Algo ha salido mal."
@@ -16788,6 +16896,10 @@ msgstr "Empezó a entregar algo al Brain"
 msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Iniciándose"
+
+#: src/agents/setup/job-step.tsx
+msgid "Starting points"
+msgstr "Puntos de partida"
 
 #: src/workflows/item-test.tsx
 #: src/workflows/start-run.tsx
@@ -17014,6 +17126,18 @@ msgstr "Propón hasta tres puntos para tratar."
 msgid "Suggested"
 msgstr "Sugeridos"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Suggested apps"
+msgstr "Apps sugeridas"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Suggested for {name}"
+msgstr "Sugerida para {name}"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Suggested for {name}: connect it first"
+msgstr "Sugerida para {name}: conéctala primero"
+
 #: src/agents/agent-templates.ts
 msgid "Summarise documents"
 msgstr "Resumir documentos"
@@ -17049,6 +17173,7 @@ msgstr "Atención al cliente"
 msgid "Suspended"
 msgstr "Suspendido"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Swarm"
 msgstr "Enjambre"
@@ -17168,10 +17293,6 @@ msgstr "Quitar: {text}"
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Tomar los responsables de {name}"
-
-#: src/agents/agent-share.tsx
-msgid "Take the offer back"
-msgstr "Retirar la oferta"
 
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
@@ -17295,6 +17416,7 @@ msgstr "Tamaño del equipo desconocido"
 msgid "Team size unknown."
 msgstr "Tamaño del equipo desconocido."
 
+#: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
 #: src/settings/sections.ts
@@ -17672,8 +17794,8 @@ msgid "The App's tests fail, so nothing was shared. Fix them, then share."
 msgstr "Las pruebas de la App fallan, así que no se compartió nada. Corrígelas y luego compártela."
 
 #: src/chat/builds.tsx
-msgid "The Apps this chat builds didn't load."
-msgstr "Las aplicaciones que crea este chat no se cargaron."
+msgid "The Apps this chat builds didn't load"
+msgstr "Las Apps que crea este chat no se cargaron"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
@@ -17784,6 +17906,10 @@ msgstr "El cerebro de la empresa: {percent} % conocido. Los puntos oscuros son 
 #: src/brain/skills-page.tsx
 msgid "The company has no skills of its own yet."
 msgstr "La empresa aún no tiene skills propias."
+
+#: src/agents/agent-share.tsx
+msgid "The company's admins may take {name} on"
+msgstr "Los administradores de la empresa pueden adoptar a {name}"
 
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."
@@ -18422,6 +18548,7 @@ msgid "They'll find it under Workflows, and run it as it is now."
 msgstr "Lo encontrarán en Workflows y lo ejecutarán tal como está ahora."
 
 #: src/agents/setup/review-step.tsx
+#: src/agents/setup/thinking-step.tsx
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgid "Thinking"
@@ -18535,6 +18662,10 @@ msgstr "Este dispositivo"
 
 #: src/frame/part-words.tsx
 msgid "This did not load"
+msgstr "Esto no se cargó"
+
+#: src/frame/part-failed.tsx
+msgid "This didn't load"
 msgstr "Esto no se cargó"
 
 #: src/brain/sources-page.tsx
@@ -18747,6 +18878,7 @@ msgstr "Esta versión, solo lectura"
 msgid "This week"
 msgstr "Esta semana"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Tres en círculo"
@@ -18825,10 +18957,6 @@ msgstr "A todo el equipo"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone at {company}"
 msgstr "A todo el equipo de {company}"
-
-#: src/agents/agent-page.tsx
-msgid "To stop it for a while, turn it off instead."
-msgstr "Para pararlo un tiempo, apágalo en su lugar."
 
 #: src/frame/part-words.tsx
 msgid "To tell this key from others."
@@ -18920,8 +19048,6 @@ msgstr "Herramienta"
 
 #: src/brain/brain.ts
 #: src/onboarding/setup-frame.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Tools"
 msgstr "Herramientas"
 
@@ -18957,6 +19083,7 @@ msgctxt "a source of the Brain"
 msgid "Transcript"
 msgstr "Transcripción"
 
+#: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Triángulo"
@@ -18996,7 +19123,6 @@ msgstr "Intentar"
 #: src/apps/app-settings.tsx
 #: src/brain/own-export.tsx
 #: src/brain/skills-page.tsx
-#: src/chat/builds.tsx
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
@@ -19004,6 +19130,7 @@ msgstr "Intentar"
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
 #: src/frame/setting-up.tsx
 #: src/inbox/inbox-page.tsx
@@ -19024,8 +19151,8 @@ msgstr "Vuelve a intentar preparar {name}."
 msgid "Try the search again"
 msgstr "Vuelve a buscar"
 
-#: src/chat/builds.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"
@@ -19038,12 +19165,17 @@ msgstr "Convierte una bandeja llena en una lista breve de lo que necesita a una 
 msgid "Turn into"
 msgstr "Convertir en"
 
+#: src/agents/agent-page.tsx
+msgid "Turn off"
+msgstr "Desactivar"
+
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
 msgid "Turn off"
 msgstr "Desactivar"
 
 #: src/agents/agent-apps-card.tsx
+#: src/agents/agent-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Turn on"
 msgstr "Activar"
@@ -19447,10 +19579,6 @@ msgstr "Usa"
 msgid "Uses the Apps and workflows shared with them, and chats with Grasp."
 msgstr "Usa las Apps y los flujos de trabajo compartidos con ellos, y chatea con Grasp."
 
-#: src/agents/setup/thinking-step.tsx
-msgid "Uses the model the person chose."
-msgstr "Usa el modelo que eligió la persona."
-
 #: src/chat/thread.tsx
 msgid "Using {tool}"
 msgstr "Usando {tool}"
@@ -19459,6 +19587,10 @@ msgstr "Usando {tool}"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "UTC"
 msgstr "UTC"
+
+#: src/workflows/workflow-rows.tsx
+msgid "v{version}"
+msgstr "v{version}"
 
 #: src/workflows/kept-state.tsx
 msgid "Value"
@@ -19722,6 +19854,11 @@ msgstr "Esperando tu aprobación"
 msgctxt "sidebar: the inbox items that have waited longest"
 msgid "Waiting longest"
 msgstr "Lo que más espera"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Waiting on you"
+msgstr "Te espera"
 
 #: src/chat/use-ask.ts
 msgid "Waiting to send. Grasp is out of reach for now; your question goes once it's back."
@@ -20072,7 +20209,6 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Aquello a lo que está vinculado ha cambiado desde que se aprobó la vinculación. Vincúlalo de nuevo cuando hayas comprobado que sigue encajando."
 
 #: src/agents/agent-form.tsx
-#: src/agents/agent-page.tsx
 #: src/agents/setup/job-step.tsx
 #: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
@@ -20449,6 +20585,10 @@ msgstr "Cuándo cambió por última vez"
 msgid "When it was added"
 msgstr "Cuándo se añadió"
 
+#: src/agents/setup/schedule-step.tsx
+msgid "When it works"
+msgstr "Cuándo trabaja"
+
 #: src/chat/agent-draft-card.tsx
 msgid "When it works on its own"
 msgstr "Cuándo trabaja por su cuenta"
@@ -20456,6 +20596,10 @@ msgstr "Cuándo trabaja por su cuenta"
 #: src/agents/setup/schedule-step.tsx
 msgid "When should {name} work?"
 msgstr "¿Cuándo debe trabajar {name}?"
+
+#: src/agents/setup/schedule-step.tsx
+msgid "When someone asks"
+msgstr "Cuando alguien pregunta"
 
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"
@@ -20531,8 +20675,8 @@ msgid "Which AI should I think with?"
 msgstr "¿Con qué IA debo pensar?"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "Which Apps and agents hold permissions: {why}"
-msgstr "Qué aplicaciones y agentes tienen permisos: {why}"
+msgid "Which Apps and agents hold permissions"
+msgstr "Qué Apps y agentes tienen permisos"
 
 #: src/agents/setup/apps-step.tsx
 msgid "Which apps can {name} use?"
@@ -20848,19 +20992,13 @@ msgstr "Calculó cómo se usa el conocimiento"
 msgid "Worked out what could be improved"
 msgstr "Calculó lo que podría mejorarse"
 
-#: src/workflows/workflows-table.tsx
-msgid "workflow"
-msgstr "flujo de trabajo"
-
 #: src/activity/audit-event.tsx
 #: src/apps/app-workflows.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Workflow"
 msgstr "Flujo de trabajo"
 
@@ -20909,10 +21047,6 @@ msgstr "Vistas del flujo de trabajo"
 msgid "workflow.json"
 msgstr "workflow.json"
 
-#: src/workflows/workflows-table.tsx
-msgid "workflows"
-msgstr "flujos de trabajo"
-
 #: src/brain/goals-editor.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
@@ -20926,7 +21060,6 @@ msgstr "flujos de trabajo"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/settings/stephen-settings.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Workflows"
 msgstr "Flujos de trabajo"
 
@@ -20950,7 +21083,7 @@ msgctxt "note property: the workflows a tool or team is part of"
 msgid "Workflows"
 msgstr "Flujos de trabajo"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it."
 msgstr "Los workflows se crean en el chat: describe lo que debe funcionar solo y Grasp lo construye."
 
@@ -21590,10 +21723,6 @@ msgstr "Tus palabras"
 #: src/agents/agents-overview.tsx
 msgid "Yours"
 msgstr "Tuyos"
-
-#: src/agents/agent-page.tsx
-msgid "Yours alone: nobody else sees or asks it"
-msgstr "Solo tuyo: nadie más lo ve ni le pregunta"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Yours alone: only you ask it"

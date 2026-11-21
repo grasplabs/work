@@ -458,9 +458,25 @@ const Page = ({
       apps={{
         apps: data.apps[agent.id],
         offered: [
-          { source: "native", id: "google", name: "Google Workspace" },
-          { source: "composio", id: "hubspot", name: "HubSpot" },
+          {
+            source: "native",
+            id: "google",
+            name: "Google Workspace",
+            categories: ["email"],
+            description: "Mail, calendar and documents",
+            logo: null,
+          },
+          {
+            source: "composio",
+            id: "hubspot",
+            name: "HubSpot",
+            categories: ["crm"],
+            description: "Deals and contacts",
+            logo: null,
+          },
         ],
+        // Google Workspace is connected; HubSpot isn't yet.
+        connected: ["google"],
         userId: "user-1",
       }}
       documents={data.documents[agent.id]}
@@ -818,11 +834,49 @@ const rowSwitch = (words: string): HTMLElement => {
   return found;
 };
 
-/** The switch in the page's heading, which turns the agent off and on. */
-const onSwitch = (): HTMLElement => {
-  const found = document.querySelector("header [role='switch']");
-  if (!(found instanceof HTMLElement)) {
-    throw new TypeError("No on switch");
+/** The heading's "…" button, which holds Edit, turning it off or on, and Delete. */
+const moreButton = (): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find((each) =>
+    (each.getAttribute("aria-label") ?? "").startsWith("More for")
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new TypeError("No More button");
+  }
+  return found;
+};
+
+/** The open menu's item whose words start with `words`. */
+const menuItem = (words: string): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
+    (each) => each.textContent.trim().startsWith(words)
+  );
+
+/** The heading's menu item whose words start with `words`, the menu opened first. */
+const fromMenu = async (words: string): Promise<HTMLElement> => {
+  await press(moreButton());
+  const found = menuItem(words);
+  if (found === undefined) {
+    throw new TypeError(`No menu item ${words}`);
+  }
+  return found;
+};
+
+/** Whether `element` can't be chosen now. */
+const isDisabled = (element: HTMLElement): boolean =>
+  Object.hasOwn(element.dataset, "disabled") ||
+  element.getAttribute("aria-disabled") === "true" ||
+  element.hasAttribute("disabled");
+
+/** The switch in the settings row that says `words`. */
+const settingSwitch = (words: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>("[role='switch']"),
+  ].find((each) => {
+    const rows = each.closest("[data-slot='settings-rows']");
+    return rows !== null && rows.textContent.includes(words);
+  });
+  if (found === undefined) {
+    throw new TypeError(`No setting switch ${words}`);
   }
   return found;
 };
@@ -912,9 +966,18 @@ const makeInChat = async ({
 
 /** The radio whose row says `words`, in whatever is asked now. */
 const radio = (words: string): HTMLElement => {
-  const found = [
-    ...document.querySelectorAll<HTMLElement>("[role='radio']"),
-  ].find((each) => saysOnItsRow(each, words));
+  // The library's radios, or the setup's cards, each a native radio in its label.
+  const found =
+    [...document.querySelectorAll<HTMLElement>("[role='radio']")].find((each) =>
+      saysOnItsRow(each, words)
+    ) ??
+    [
+      ...document.querySelectorAll<HTMLInputElement>(
+        "fieldset[role='radiogroup'] input[type='radio']"
+      ),
+    ].find(
+      (each) => each.closest("label")?.textContent?.includes(words) === true
+    );
   if (found === undefined) {
     throw new TypeError(`No radio ${words}`);
   }
@@ -1062,7 +1125,7 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" });
-    await press(button("Edit"));
+    await press(await fromMenu("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     expect(asked).toStrictEqual([
@@ -1074,22 +1137,21 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" });
-    await press(onSwitch());
+    await press(await fromMenu("Turn off"));
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(onSwitch().getAttribute("aria-checked")).toBe("false");
+    expect(document.querySelector("header")?.textContent).toContain("Off");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" }, false);
-    expect({
-      edit: button("Edit").disabled,
-      on:
-        Object.hasOwn(onSwitch().dataset, "disabled") ||
-        onSwitch().getAttribute("aria-disabled") === "true" ||
-        onSwitch().hasAttribute("disabled"),
-    }).toStrictEqual({ edit: true, on: true });
+    const edit = isDisabled(await fromMenu("Edit"));
+    const turnOff = menuItem("Turn off");
+    const off = turnOff !== undefined && isDisabled(turnOff);
+    // Closed again before the tabs are pressed.
+    await press(moreButton());
+    expect({ edit, off }).toStrictEqual({ edit: true, off: true });
     await openTab("schedule");
     expect(document.body.textContent).toContain(
       "Claire only works when asked."
@@ -1120,7 +1182,7 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Claire", tab: "instructions" });
     await set(field("Instructions"), "A draft, not saved.", "input");
     // Paused: core is asked and the page read again.
-    await press(onSwitch());
+    await press(await fromMenu("Turn off"));
     const afterPause = field("Instructions").value;
     await openTab("access");
     await openTab("instructions");
@@ -1182,7 +1244,7 @@ describe("an agent's page", () => {
     await press(button("Add a time"));
     await set(field("What to ask it each time"), "refuse this", "input");
     // Another change on the page saves and the page is read again.
-    await press(onSwitch());
+    await press(await fromMenu("Turn off"));
     expect(field("What to ask it each time").value).toBe("refuse this");
     // Core refuses it: still there to be corrected, and said why.
     await press(exactButton("Add"));
@@ -1211,7 +1273,7 @@ describe("an agent's page", () => {
     // The name's dialog is opened after the instructions were saved.
     await set(field("Instructions"), "Only invoices over 30 days.", "input");
     await press(exactButton("Save"));
-    await press(button("Edit"));
+    await press(await fromMenu("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     expect(asked).toStrictEqual([
@@ -1481,7 +1543,11 @@ describe("an agent's page", () => {
     const fake = fakeConnections();
     const { asked } = fake;
     await shown(fake, "new-guided");
-    const offered = radio("Everyone").getAttribute("aria-checked");
+    const everyone = radio("Everyone");
+    const offered =
+      everyone instanceof HTMLInputElement
+        ? String(everyone.checked)
+        : everyone.getAttribute("aria-checked");
     const questions = await setUpByHand("Claire");
     await press(button("Make agent"));
     expect({ offered, questions }).toStrictEqual({
@@ -1567,14 +1633,14 @@ describe("an agent's page", () => {
     asked.length = 0;
     await shown(fake, { agent: "Claire" });
     const text = document.body.textContent;
-    await press(button("Edit"));
+    await press(await fromMenu("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     await openTab("access");
     const access = choice("Who may use Clara");
     await openTab("schedule");
     expect({
-      alone: text.includes("Yours alone: nobody else sees or asks it"),
+      alone: text.includes("Just for you"),
       who: text.includes("Only you"),
       access,
       schedule: [...document.querySelectorAll("button")].some(
@@ -1596,11 +1662,9 @@ describe("an agent's page", () => {
     await connections.makeOwnAgent(claire);
     asked.length = 0;
     await shown(fake, { agent: "Claire" });
-    await press(button("Offer to the company"));
-    const offered = document.body.textContent.includes(
-      "Your company's admins may take Claire on. What you told it doesn't go with it"
-    );
-    await press(button("Take the offer back"));
+    await press(settingSwitch("Offer to the company"));
+    const offered = document.body.textContent.includes("Offered on");
+    await press(settingSwitch("Offer to the company"));
     expect({ offered, asked }).toStrictEqual({
       offered: true,
       asked: [
@@ -1647,6 +1711,33 @@ describe("an agent's page", () => {
         ["told", "agent-1", "Answer about HubSpot deals too."],
         ["work out", "agent-1"],
       ],
+    });
+  });
+
+  it("suggests the apps its instructions point to, adds a connected one on a press, and leads to connecting one that isn't", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await fake.instructions.save({
+      file: { scope: "agent", agentId: "agent-1" },
+      change: "told-again",
+      text: "Send each reminder by mail, and keep the deals in HubSpot.",
+      after: 1,
+    });
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const connect = document.querySelector("a[aria-label='Connect HubSpot']");
+    const before = asked.length;
+    await press(button("Add Google Workspace"));
+    expect({
+      suggested: [
+        document.body.textContent.includes(
+          "Suggested for Claire: connect it first"
+        ),
+        connect?.getAttribute("href"),
+      ],
+      asked: asked.slice(before).map((each) => each.slice(0, 4)),
+    }).toStrictEqual({
+      suggested: [true, "/integrations/composio%3Ahubspot"],
+      asked: [["app", "agent-1", "native:google", true]],
     });
   });
 

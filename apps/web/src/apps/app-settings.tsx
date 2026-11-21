@@ -53,7 +53,6 @@ import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { decidesRequests } from "../inbox/waiting.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
@@ -128,9 +127,7 @@ const RefreshFailed = ({
       title={t`Couldn't refresh. This may be out of date.`}
       tone="attention"
       variant="banner"
-    >
-      <NotLoaded page={first.failure} />
-    </Alert>
+    />
   );
 };
 

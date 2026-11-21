@@ -7,19 +7,20 @@ import {
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { ComponentType, SubmitEvent } from "react";
 
 import { wait } from "../core.ts";
 import { AgentFigure, AgentFigureAura } from "../grasp/agent-figure/index.ts";
 import { Backdrop } from "../grasp/backdrop/index.ts";
-import { useAction } from "../grasp/button/index.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { arrive } from "../grasp/motion/arrive.ts";
 import { Shimmer } from "../grasp/shimmer/index.ts";
 import { StepBar } from "../grasp/step-bar/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { briefOf, instructionsOf, ownBrief } from "./agent-brief.ts";
 import { AgentFailure } from "./agent-facts.tsx";
@@ -164,7 +165,8 @@ const styles = stylex.create({
   },
   // The `hidden` attribute alone loses to the stage's own display.
   away: { display: "none" },
-  // The foot under the answer, as wide as its column.
+  // The foot under the answer: the way on, in its middle.
+  foot: { display: "grid", justifyItems: "center", alignContent: "start" },
   // The bar at the top, as wide as the answer's column.
   bar: { width: "100%", maxWidth: grasp.pageSettingsMeasure },
 });
@@ -258,6 +260,7 @@ export const ManualAgent = ({
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
+  const router = useRouter();
   const { failure, run } = useCoreAction();
   // Who it may be for: one of their own only while the company lets them,
   // the company's only for its admins.
@@ -411,12 +414,31 @@ export const ManualAgent = ({
       throw new Error("The agent wasn't made.");
     }
     setPhase("made");
-    await wait(readyFor);
+    const agent = made.agent.id;
+    // Its instructions didn't save: its page opens where they wait.
+    const search = made.told ? {} : { tab: "instructions" as const };
+    // Its page is read while it stands ready, so the page comes whole, with
+    // no loading step between (Ruben, 21 November: "very smooth"); one
+    // that can't be read now loads as any page does.
+    await Promise.all([
+      wait(readyFor),
+      // One that fails to read now is read again as the page opens.
+      orNull(
+        async () =>
+          await router.preloadRoute({
+            to: "/agents/$agent",
+            params: { agent },
+            search,
+          })
+      ),
+    ]);
+    // The ready agent fades into its page (a view transition), where the
+    // browser has them; at once where it doesn't, or with less motion.
     await navigate({
       to: "/agents/$agent",
-      params: { agent: made.agent.id },
-      // Its instructions didn't save: its page opens where they wait.
-      search: made.told ? {} : { tab: "instructions" },
+      params: { agent },
+      search,
+      viewTransition: true,
     });
   };
   // Making it takes a few calls to core: the button says it is working.
@@ -454,10 +476,10 @@ export const ManualAgent = ({
         {...stylex.props(styles.stage, phase !== "setup" && styles.away)}
       >
         <div {...stylex.props(styles.top)}>
-          {/* The library's quiet bar at the top of a guided flow (Ruben):
-              ghost Back and Next round the thin progress, "Make agent" on
-              the last step; nothing under the answer. Next submits this
-              form; Enter and Mod+Enter go on, Alt+← goes back. */}
+          {/* The library's quiet bar at the top of a guided flow: ghost
+              Back and Next round the thin progress, "Make agent" on the
+              last step. Next submits this form; Enter and Mod+Enter go on,
+              Alt+← goes back. The same way on stands under the answer. */}
           <StepBar
             disabled={!ready[step]}
             finishLabel={t`Make agent`}
@@ -487,6 +509,18 @@ export const ManualAgent = ({
               teams={teams}
             />
           </div>
+        </div>
+        {/* The way on, under the answer where the eye already is (Ruben,
+            21 November); the bar above keeps its arrows both ways. */}
+        <div {...stylex.props(styles.foot)}>
+          <Button
+            disabled={!ready[step] || making.status.status === "working"}
+            size="lg"
+            type="submit"
+            variant="ink"
+          >
+            {step === "review" ? t`Make ${name}` : t`Next`}
+          </Button>
         </div>
       </form>
     </Backdrop>

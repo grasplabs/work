@@ -5,13 +5,11 @@ import {
 } from "@grasp-os/shared/errors";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
 
 import { readWithin } from "./core-connection.ts";
 import type { CoreConnection } from "./core-connection.ts";
 import { CoreTimeoutError, deadline, isConnectionFailure } from "./core.ts";
 import type { Session } from "./core.ts";
-import { ErrorText } from "./error-text.tsx";
 
 /** What a page read from core: its data, or why there is none. */
 export type Loaded<T> =
@@ -117,10 +115,4 @@ export const notLoadedText = (
     return withReference(i18n._(missing), page.requestId);
   }
   return page.state === "refused" ? page.message : undefined;
-};
-
-/** Why a page has no data to show; nothing once it has. */
-export const NotLoaded = ({ page }: { page: Loaded<unknown> }) => {
-  const { i18n } = useLingui();
-  return <ErrorText>{notLoadedText(page, i18n)}</ErrorText>;
 };

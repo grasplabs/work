@@ -1,4 +1,5 @@
 import { useMatches } from "@tanstack/react-router";
+import { useEffect, useSyncExternalStore } from "react";
 
 // Pages that fill the page's card and scroll inside their own panes (an
 // App's or a workflow's shell, Knowledge, the Brain, an
@@ -33,19 +34,66 @@ declare module "@tanstack/react-router" {
   }
 }
 
-/** Whether the page shown fills the card: any of its routes says so, or one failed. */
-export const usePageFills = (): boolean =>
-  useMatches().some(
+// A page whose read came back without its data (frame/page-states.tsx,
+// PageError) failed too, though its route did not throw: while it shows,
+// it says so here, and the frame gives it the whole card as it gives a
+// route that threw.
+
+/** How many failed pages show now: one, or none. */
+let failedShown = 0;
+const watchers = new Set<() => void>();
+
+const watchFailed = (changed: () => void): (() => void) => {
+  watchers.add(changed);
+  return () => {
+    watchers.delete(changed);
+  };
+};
+
+const failedChanged = (by: number): void => {
+  failedShown += by;
+  for (const changed of watchers) {
+    changed();
+  }
+};
+
+/** Says the page shown failed, while the component that calls it shows. */
+export const useShowsFailed = (): void => {
+  useEffect(() => {
+    failedChanged(1);
+    return () => {
+      failedChanged(-1);
+    };
+  }, []);
+};
+
+/** Whether a page that failed shows now. */
+const useFailedShown = (): boolean =>
+  useSyncExternalStore(
+    watchFailed,
+    () => failedShown > 0,
+    () => false
+  );
+
+/** Whether the page shown fills the card: any of its routes says so, or it failed. */
+export const usePageFills = (): boolean => {
+  const failed = useFailedShown();
+  const said = useMatches().some(
     ({ staticData, status }) =>
       staticData.page !== undefined || status === "error"
   );
+  return said || failed;
+};
 
-/** Whether the page shown has the whole card, edge to edge: any of its routes says so, or one failed. */
-export const usePageWhole = (): boolean =>
-  useMatches().some(
+/** Whether the page shown has the whole card, edge to edge: any of its routes says so, or it failed. */
+export const usePageWhole = (): boolean => {
+  const failed = useFailedShown();
+  const said = useMatches().some(
     ({ staticData, status }) =>
       staticData.page === "whole" || status === "error"
   );
+  return said || failed;
+};
 
 /** Whether the page shown keeps the chat box at the card's foot: none of its routes says no. */
 export const usePageDock = (): boolean =>
