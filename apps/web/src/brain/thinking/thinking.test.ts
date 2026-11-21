@@ -372,7 +372,7 @@ describe("the card in an answer", () => {
     });
   });
 
-  it("prints a neuron from the brain's own designs, its soma hollow while it waits", () => {
+  it("prints a neuron from the brain's own designs, the same each time, its soma hollow while it waits", () => {
     const {
       neurons: [neuron],
     } = hoursMap(weighed("hours"), { width: 720, height: 420 });
@@ -381,7 +381,10 @@ describe("the card in an answer", () => {
     }
     const known = printed({ ...neuron, state: "known", bare: true }, 24);
     const waiting = printed({ ...neuron, state: "waiting", bare: true }, 24);
-    expect(waiting.length).toBeLessThan(known.length);
+    expect({
+      same: printed({ ...neuron, state: "known", bare: true }, 24),
+      hollow: waiting.length < known.length,
+    }).toStrictEqual({ same: known, hollow: true });
   });
 });
 

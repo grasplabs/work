@@ -293,8 +293,6 @@ catalog:
   react-resizable-panels: 4.14.2
   # The kit's charts.
   recharts: 3.10.1
-  # An App's Code tab: its files and a draft's changes, virtualised and
-  # highlighted by the library's own highlighter (Highlights).
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0

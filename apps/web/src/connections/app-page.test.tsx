@@ -254,7 +254,7 @@ const openGroup = async (name: string): Promise<void> => {
   );
 };
 
-/** The page's first account row: its state, and how many buttons it has. */
+/** How many buttons the page's first account row has. */
 const rowOf = () =>
   document
     .querySelector<HTMLElement>('[data-slot="app-account"]')

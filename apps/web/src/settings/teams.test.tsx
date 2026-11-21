@@ -17,9 +17,10 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { TeamsPanel } from "./teams.tsx";
 
 // Settings › Members › Teams: creating a team and renaming one in its
-// dialog, and deleting one, as the admin hears why Better Auth refused it (core's auth.ts,
-// GRA-2055): in the dialog they are in, while it stays open. Core answers
-// the reads; Better Auth's routes answer every change as `refusing` says.
+// dialog, and deleting one, as the admin hears why Better Auth refused it
+// (core's auth.ts, GRA-2055): in the dialog they are in, while it stays
+// open. Core answers the reads; Better Auth's routes answer every change as
+// `refusing` says.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 

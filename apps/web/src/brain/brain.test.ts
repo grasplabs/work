@@ -502,7 +502,7 @@ describe("a living brain", () => {
     ).toMatchObject({ date: "2026-09-23", to: "src-board-checkin" });
   });
 
-  it("keeps a statement said again later as its own highlight in its own source, and edits neither", () => {
+  it("keeps a statement said again later as its own highlight in its own source", () => {
     const invoices = noteIn(ws, "cand-invoices");
     expect(invoices.statementIds.indexOf("st-approvals")).toBeLessThan(
       invoices.statementIds.indexOf("st-approvals-still")

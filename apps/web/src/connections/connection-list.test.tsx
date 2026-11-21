@@ -236,9 +236,12 @@ const asAdmin = async (
   /** What core holds, which a test changes as the clock would. */
   holding?: Held,
   {
+    others = [],
     refusing,
     reads = { audiences: 0, teams: 0 },
   }: {
+    /** More shared connections of the same integration, each with no audience. */
+    others?: CatalogConnection[];
     refusing?: Refusing;
     /** Counted as the page reads. */
     reads?: Reads;
@@ -337,7 +340,7 @@ const asAdmin = async (
       <ConnectionsAccess
         held={undefined}
         identity={admin}
-        integration={integrationOf([shown])}
+        integration={integrationOf([shown, ...others])}
       />
     ),
   });
@@ -599,6 +602,28 @@ describe("a shared connection's Brain audience, for an admin", () => {
       afterErase,
       afterChange: document.body.textContent.includes(refusal),
     }).toStrictEqual({ afterErase: true, afterChange: true });
+  });
+
+  it("reads the audiences and the teams once for all the shared connections shown, and once again after a change", async () => {
+    const reads: Reads = { audiences: 0, teams: 0 };
+    await asAdmin(shared, { kind: "everyone" }, undefined, {
+      others: [
+        connection({ id: "c2", scope: "shared", ownerUserId: null }),
+        connection({ id: "c3", scope: "shared", ownerUserId: null }),
+      ],
+      reads,
+    });
+    const opened = { ...reads };
+    // The first card's choice: narrowing, so no question.
+    await choose("Nobody");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({ opened, changed: reads }).toStrictEqual({
+      opened: { audiences: 1, teams: 1 },
+      changed: { audiences: 2, teams: 1 },
+    });
   });
 
   it("says the audience changed meanwhile when a choice was made from an old one, shows the one held now, and asks before opening it from there", async () => {
