@@ -53,6 +53,7 @@ import {
 import type { Session } from "./seed/local.ts";
 import { boardCsv, boards } from "./seed/pages.ts";
 import type { Board } from "./seed/pages.ts";
+import { projects } from "./seed/projects.ts";
 import { seedRuns } from "./seed/runs.ts";
 import { appTriggers, ownWorkflows, triggerOf } from "./seed/workflows.ts";
 import type { OwnWorkflowSeed, TriggerSeed } from "./seed/workflows.ts";
@@ -403,13 +404,14 @@ const seedStartPermissions = async (
  * An App: created by its owner with its workflows and pages, its version
  * published by an admin, shared with its teams, its workflows' owners and
  * deciders set, and,
- * while it has none, its runs. Returns how many runs it got.
+ * while it has none, its runs. Returns its ID, null for one archived in
+ * the demo, and how many runs it got.
  */
 const seedApp = async (
   seed: AppSeed,
   sessions: ReadonlyMap<PersonKey, Session>,
   teams: ReadonlyMap<TeamName, string>
-): Promise<number> => {
+): Promise<{ id: string | null; runs: number }> => {
   const adminSession = sessionFor(sessions, admin.key);
   const owner = sessionFor(sessions, seed.owner);
   const all = await adminSession.api.apps.list();
@@ -424,7 +426,7 @@ const seedApp = async (
   // decision. The seed leaves it as it is.
   if (app.archived) {
     console.warn(`${app.name} is archived: the seed leaves it as it is.`);
-    return 0;
+    return { id: null, runs: 0 };
   }
   // The process it serves, unless someone set one already.
   if (app.process === null) {
@@ -489,7 +491,7 @@ const seedApp = async (
     // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
     const ran = await owner.api.workflowResources.runs(id);
     if (ran.length > 0) {
-      return 0;
+      return { id: app.id, runs: 0 };
     }
   }
   const runs = await seedRuns({
@@ -499,7 +501,7 @@ const seedApp = async (
     sessions,
     db: core,
   });
-  return runs;
+  return { id: app.id, runs };
 };
 
 /**
@@ -722,6 +724,88 @@ const seedChats = async (
   return created;
 };
 
+/**
+ * The demo projects (scripts/seed/projects.ts), made by an admin, with
+ * their Apps and people, and a few chats each filed by its own person.
+ * Only a project the run makes gets them: one there already, matched by
+ * name, is left as it is, so what someone removed or moved in it in the
+ * demo stays so. A seeded project renamed in the demo is made again under
+ * its seeded name; one a stopped run left half made stays so (delete it
+ * and run again). Returns how many it made.
+ */
+const seedProjects = async (
+  sessions: ReadonlyMap<PersonKey, Session>,
+  teams: ReadonlyMap<TeamName, string>,
+  appIds: ReadonlyMap<string, string>
+): Promise<number> => {
+  const adminSession = sessionFor(sessions, admin.key);
+  const listed = await adminSession.api.projects.list();
+  const existing = new Set(listed.map(({ name }) => name));
+  const missing = projects.filter(({ name }) => !existing.has(name));
+  for (const seed of missing) {
+    // oxlint-disable-next-line no-await-in-loop -- one project at a time
+    const { id } = await adminSession.api.projects.create({
+      name: seed.name,
+      description: seed.description,
+      icon: seed.icon,
+    });
+    const members = [
+      ...seed.people.map(({ person, role }) => ({
+        type: "person" as const,
+        id: sessionFor(sessions, person).userId,
+        role,
+      })),
+      ...seed.teams.map(({ team, role }) => {
+        const teamId = teams.get(team);
+        if (teamId === undefined) {
+          throw new Error(`No team ${team}`);
+        }
+        return { type: "team" as const, id: teamId, role };
+      }),
+    ];
+    for (const member of members) {
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await adminSession.api.projects.addMember(id, member);
+    }
+    for (const { app, share } of seed.apps) {
+      const appId = appIds.get(app);
+      // An App archived in the demo can't be shared, and is left out.
+      if (appId === undefined) {
+        console.info(`Filed no App ${app} in ${seed.name}: it is archived`);
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one item at a time
+      await adminSession.api.projects.file(id, {
+        item: { type: "app", id: appId },
+        share,
+      });
+    }
+    for (const { by, title } of seed.chats) {
+      const { api } = sessionFor(sessions, by);
+      // Archived or not, a chat is its person's to file.
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      const [theirs, archived] = await Promise.all([
+        api.chats.list(),
+        api.chats.list({ archived: true }),
+      ]);
+      const chat = [...theirs, ...archived].find(
+        (each) => each.title === title
+      );
+      // One its person deleted or renamed, or `seedChats` skipped, is left
+      // as it is.
+      if (chat === undefined) {
+        console.info(
+          `Filed no chat "${title}" of ${by} in ${seed.name}: they have none by that title`
+        );
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      await api.chats.setProject(chat.id, id);
+    }
+  }
+  return missing.length;
+};
+
 const main = async (): Promise<void> => {
   console.info("Signing the demo company in…");
   const { sessions, teams } = await seedPeople();
@@ -748,9 +832,13 @@ const main = async (): Promise<void> => {
       `The Brain: ${uploadsAdded} new uploads (${uploadsThere} there already), ${instructionsWritten} new instruction files`
     );
 
+    const appIds = new Map<string, string>();
     for (const seed of apps) {
       // oxlint-disable-next-line no-await-in-loop -- one App at a time
-      const runs = await seedApp(seed, sessions, teams);
+      const { id, runs } = await seedApp(seed, sessions, teams);
+      if (id !== null) {
+        appIds.set(seed.name, id);
+      }
       let ran = `${runs} runs over the last 30 days`;
       if (seed.workflows.length === 0) {
         ran = "no workflows yet";
@@ -770,6 +858,10 @@ const main = async (): Promise<void> => {
 
     const created = await seedChats(sessions, uploadsDeleted);
     console.info(`${created} new chats`);
+
+    // After the chats: a project files some of its people's own.
+    const made = await seedProjects(sessions, teams, appIds);
+    console.info(`${made} new projects`);
     console.info(
       `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as any of its members (people in scripts/seed/company.ts).`
     );
