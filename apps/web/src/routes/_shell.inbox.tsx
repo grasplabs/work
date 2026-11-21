@@ -1,6 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
 
 import { PagePanel } from "../frame/page-panel.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -70,11 +69,18 @@ const InboxPending = () => {
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
-  validateSearch: z.object({
-    item: z.string().optional(),
-    // The group in view, as the sidebar's Inbox view sets it.
-    group: z.enum(groupOrder).optional(),
-  }),
+  // The open item, and the group in view as the sidebar's Inbox view sets
+  // it. A value it doesn't know (an old link, an edited address) is left
+  // out, as every other page's address does, rather than an error page.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { item?: string; group?: (typeof groupOrder)[number] } => {
+    const group = groupOrder.find((each) => each === search.group);
+    return {
+      ...(typeof search.item === "string" ? { item: search.item } : {}),
+      ...(group === undefined ? {} : { group }),
+    };
+  },
   pendingComponent: InboxPending,
   loader: async ({ context: { core, identity } }) => {
     // Everyone's unknown outcomes too, once a visit: only this page lists
