@@ -4,7 +4,8 @@
  * stack starts it in (playwright.config.ts): Wrangler's console at
  * warnings only, its log in a folder nothing made yet.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -46,16 +47,25 @@ const wranglerConfig = (): string => {
   return config;
 };
 
-const migrate = (config: string, persistTo: string, logDir: string): string =>
-  execFileSync("node", [script, "--persist-to", persistTo, "-c", config], {
+const binaries = path.join(import.meta.dirname, "../node_modules/.bin");
+
+/** The environment the e2e stack starts the step in, Wrangler's on the path. */
+const stackEnv = (logDir: string): NodeJS.ProcessEnv => ({
+  ...process.env,
+  PATH: `${binaries}${path.delimiter}${process.env.PATH ?? ""}`,
+  WRANGLER_LOG: "warn",
+  WRANGLER_SEND_METRICS: "false",
+  WRANGLER_LOG_PATH: path.join(logDir, "missing", "wrangler.log"),
+});
+
+const migrate = (
+  config: string,
+  persistTo: string,
+  logDir: string
+): SpawnSyncReturns<string> =>
+  spawnSync("node", [script, "--persist-to", persistTo, "-c", config], {
     encoding: "utf-8",
-    env: {
-      ...process.env,
-      PATH: `${path.join(import.meta.dirname, "../node_modules/.bin")}${path.delimiter}${process.env.PATH ?? ""}`,
-      WRANGLER_LOG: "warn",
-      WRANGLER_SEND_METRICS: "false",
-      WRANGLER_LOG_PATH: path.join(logDir, "missing", "wrangler.log"),
-    },
+    env: stackEnv(logDir),
   });
 
 describe("d1-local-migrations", () => {
@@ -66,11 +76,42 @@ describe("d1-local-migrations", () => {
     const persistTo = path.join(tempDir(), "state");
     const logDir = tempDir();
 
-    expect(migrate(config, persistTo, logDir)).toBe(
-      `${config} DB: 2 migrations applied, 0 already were\n`
+    expect(migrate(config, persistTo, logDir)).toMatchObject({
+      status: 0,
+      stdout: `${config} DB: 2 migrations applied, 0 already were\n`,
+    });
+    expect(migrate(config, persistTo, logDir)).toMatchObject({
+      status: 0,
+      stdout: `${config} DB: 0 migrations applied, 2 already were\n`,
+    });
+  }, 60_000);
+
+  it("fails with the database, its config and Wrangler's reason when reading what is applied fails", () => {
+    const config = wranglerConfig();
+    const persistTo = path.join(tempDir(), "state");
+    const logDir = tempDir();
+    // A table of applied migrations that isn't Wrangler's: no `name`.
+    execFileSync(
+      path.join(binaries, "wrangler"),
+      [
+        "d1",
+        "execute",
+        "DB",
+        "--local",
+        "-c",
+        config,
+        "--persist-to",
+        persistTo,
+        "--command",
+        'CREATE TABLE "d1_migrations" (id INTEGER);',
+      ],
+      { env: stackEnv(logDir), stdio: "ignore" }
     );
-    expect(migrate(config, persistTo, logDir)).toBe(
-      `${config} DB: 0 migrations applied, 2 already were\n`
-    );
+
+    const { status, stderr } = migrate(config, persistTo, logDir);
+
+    expect(status).not.toBe(0);
+    expect(stderr).toContain(`wrangler d1 execute failed for DB (${config})`);
+    expect(stderr).toContain("no such column: name");
   }, 60_000);
 });

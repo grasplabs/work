@@ -16,7 +16,7 @@
  * the result as its own and `wrangler d1 migrations apply` still works on
  * the same state.
  */
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -77,14 +77,17 @@ const argumentsOf = (
  * (`WRANGLER_LOG_PATH`) still gets every line. Without telemetry: a local
  * step has nothing to report, and Wrangler's notice that its metrics
  * changed is a log line too, which would land before the answer.
+ *
+ * A failed command's reason is in its error: with `--json`, Wrangler
+ * prints it on stdout, as JSON, which is captured here, not shown.
  */
 const execute = (
   config: string,
   persistTo: string,
   binding: string,
   args: readonly string[]
-): string =>
-  execFileSync(
+): string => {
+  const { error, signal, status, stdout } = spawnSync(
     "wrangler",
     [
       "d1",
@@ -107,6 +110,25 @@ const execute = (
       },
     }
   );
+  if (error !== undefined) {
+    throw error;
+  }
+  if (status !== 0) {
+    throw new Error(
+      `wrangler d1 execute failed for ${binding} (${config}), exit ${status ?? signal}:\n${stdout.trim() || "(no output; see above)"}`
+    );
+  }
+  return stdout;
+};
+
+/** `--json` output as JSON, or nothing when it is none. */
+const parsedJson = (output: string): unknown => {
+  try {
+    return JSON.parse(output);
+  } catch {
+    return undefined;
+  }
+};
 
 /** The migrations a database has applied, as Wrangler's `--json` says. */
 const appliedMigrations = (
@@ -119,17 +141,16 @@ const appliedMigrations = (
     "--command",
     `${createMigrationsTable} SELECT name FROM "d1_migrations";`,
   ]);
-  if (output.trim() === "") {
+  const answer = executeAnswerSchema.safeParse(parsedJson(output));
+  if (!answer.success) {
     throw new Error(
-      `wrangler d1 execute --json printed nothing for ${binding} (${config}): see its output above`
+      `wrangler d1 execute --json printed no answer for ${binding} (${config}):\n${output.trim() || "(nothing; see above)"}`
     );
   }
   return new Set(
-    executeAnswerSchema
-      .parse(JSON.parse(output))
-      .flatMap(({ results }) =>
-        results.flatMap(({ name }) => (typeof name === "string" ? [name] : []))
-      )
+    answer.data.flatMap(({ results }) =>
+      results.flatMap(({ name }) => (typeof name === "string" ? [name] : []))
+    )
   );
 };
 
