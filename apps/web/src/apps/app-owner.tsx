@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 
 import { ErrorText } from "../error-text.tsx";

@@ -155,7 +155,7 @@ export const titles = action({
         'import { noteFields } from "../values.ts";',
         'import { noteFields } from "../values.ts";\nimport { internal } from "@server/_generated/internal";'
       ),
-      "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["src/routes/index.tsx"] ?? ""}`,
+      "src/routes/index.tsx": `import { Badge } from "@grasp-os/app-kit/components/badge";\n${notesCode["src/routes/index.tsx"] ?? ""}`,
     };
     const { chat } = await setUp(
       [

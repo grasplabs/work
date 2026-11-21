@@ -1,4 +1,4 @@
-@import "@grasp-os/ui/styles.css";
+@import "@grasp-os/app-kit/styles.css";
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*
@@ -13,7 +13,7 @@
 
 @source "../";
 /* The kit's demos and examples, shown on the local kit pages (routes/kit_.*). */
-@source "../../../packages/ui/catalog";
+@source "../../../packages/app-kit/catalog";
 
 /*
  * No scrollbars anywhere in the product. Every area still scrolls with the

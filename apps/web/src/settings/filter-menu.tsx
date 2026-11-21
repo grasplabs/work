@@ -1,5 +1,5 @@
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandEmpty,
@@ -9,13 +9,13 @@ import {
   CommandList,
   CommandSeparator,
   CommandShortcut,
-} from "@grasp-os/ui/components/command";
+} from "@grasp-os/app-kit/components/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Separator } from "@grasp-os/ui/components/separator";
+} from "@grasp-os/app-kit/components/popover";
+import { Separator } from "@grasp-os/app-kit/components/separator";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon, ListFilterIcon } from "lucide-react";
 import { Fragment } from "react";

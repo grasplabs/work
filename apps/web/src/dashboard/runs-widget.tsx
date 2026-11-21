@@ -1,9 +1,4 @@
-import type {
-  RunActivity,
-  RunActivityDay,
-  RunActivityWorkflow,
-} from "@grasp-os/shared/workflows";
-import { Stat } from "@grasp-os/ui/components/stat";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import {
   Table,
   TableBody,
@@ -12,8 +7,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/table";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type {
+  RunActivity,
+  RunActivityDay,
+  RunActivityWorkflow,
+} from "@grasp-os/shared/workflows";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";

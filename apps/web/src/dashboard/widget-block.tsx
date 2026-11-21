@@ -1,17 +1,17 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/tooltip";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Maximize2Icon } from "lucide-react";
 import { createContext, use, useRef, useState } from "react";

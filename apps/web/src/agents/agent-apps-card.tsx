@@ -1,3 +1,10 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card } from "@grasp-os/app-kit/components/card";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
 import { agentAppOf } from "@grasp-os/shared/agents";
 import type {
   Agent,
@@ -7,13 +14,6 @@ import type {
 } from "@grasp-os/shared/agents";
 import type { CatalogEntry } from "@grasp-os/shared/connect";
 import type { Member } from "@grasp-os/shared/members";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 

@@ -1,4 +1,4 @@
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Trans } from "@lingui/react/macro";
 
 import { formatList } from "../format.ts";

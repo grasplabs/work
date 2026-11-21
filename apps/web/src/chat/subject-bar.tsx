@@ -1,5 +1,4 @@
-import type { SubjectKind } from "@grasp-os/shared/subject";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,8 +6,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Shimmer } from "@grasp-os/ui/components/shimmer";
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import { Shimmer } from "@grasp-os/app-kit/components/shimmer";
+import type { SubjectKind } from "@grasp-os/shared/subject";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";

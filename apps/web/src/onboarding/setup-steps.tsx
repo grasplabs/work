@@ -1,3 +1,21 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/app-kit/components/select";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type {
@@ -31,24 +49,6 @@ import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView, KnownPart } from "@grasp-os/shared/onboarding-gate";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Switch } from "@grasp-os/ui/components/switch";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";

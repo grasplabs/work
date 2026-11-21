@@ -1,11 +1,11 @@
-import { failureText } from "@grasp-os/shared/errors";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetTitle,
-} from "@grasp-os/ui/components/sheet";
+} from "@grasp-os/app-kit/components/sheet";
+import { failureText } from "@grasp-os/shared/errors";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";

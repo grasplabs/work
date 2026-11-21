@@ -1,11 +1,11 @@
-import { chatMentionKinds } from "@grasp-os/shared/chat";
-import type { ChatMention, ChatMentionKind } from "@grasp-os/shared/chat";
 import type {
   PromptMention,
   PromptMentionKind,
   PromptSuggestion,
   PromptTrigger,
-} from "@grasp-os/ui/components/prompt-editor";
+} from "@grasp-os/app-kit/components/prompt-editor";
+import { chatMentionKinds } from "@grasp-os/shared/chat";
+import type { ChatMention, ChatMentionKind } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 import {
   AppWindowIcon,

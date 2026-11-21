@@ -1,14 +1,14 @@
-import { CONTACT_ROLES } from "@grasp-os/shared/admin/onboarding-admin";
-import type { ContactRole } from "@grasp-os/shared/admin/onboarding-admin";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
+import { CONTACT_ROLES } from "@grasp-os/shared/admin/onboarding-admin";
+import type { ContactRole } from "@grasp-os/shared/admin/onboarding-admin";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { MailIcon, UserIcon } from "lucide-react";
 

@@ -1,21 +1,17 @@
-import type { App, ViewedApp } from "@grasp-os/shared/apps";
-import type { Draft } from "@grasp-os/shared/drafts";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import {
   Alert,
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   Empty,
   EmptyContent,
@@ -23,8 +19,12 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/empty";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {

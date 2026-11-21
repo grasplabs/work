@@ -1,13 +1,5 @@
-import type { ListedConnection } from "@grasp-os/shared/connect";
-import type {
-  BindingChoices,
-  BindingState,
-  DeclaredResource,
-  ResourceBinding,
-  ResourceBindingsReview,
-} from "@grasp-os/shared/resource-bindings";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -16,12 +8,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+} from "@grasp-os/app-kit/components/native-select";
 import {
   Table,
   TableBody,
@@ -29,7 +21,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { ListedConnection } from "@grasp-os/shared/connect";
+import type {
+  BindingChoices,
+  BindingState,
+  DeclaredResource,
+  ResourceBinding,
+  ResourceBindingsReview,
+} from "@grasp-os/shared/resource-bindings";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

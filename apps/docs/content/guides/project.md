@@ -106,14 +106,14 @@ A Page is a file in `src/routes/`, a [TanStack Router](https://tanstack.com/rout
 
 ```tsx src/routes/index.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   PageHeader,
   PageHeaderActions,
   PageHeaderContent,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/page-header";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 

@@ -1,13 +1,13 @@
-import { useMutation } from "@grasp-os/sdk/react";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/card";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { useMutation } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 import { useState } from "react";
 

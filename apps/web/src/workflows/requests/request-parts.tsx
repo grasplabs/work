@@ -1,11 +1,11 @@
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { chatPlatformName } from "@grasp-os/shared/chat";
 import type {
   RequestsPage,
   RequestTool,
 } from "@grasp-os/shared/stephen-requests";
 import { brainTool, elsewhere } from "@grasp-os/shared/stephen-requests";
-import { Progress } from "@grasp-os/ui/components/progress";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import {
   BrainIcon,

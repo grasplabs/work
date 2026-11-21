@@ -1,4 +1,4 @@
-import { SiteHeader as SiteHeaderBar } from "@grasp-os/ui/components/site-header";
+import { SiteHeader as SiteHeaderBar } from "@grasp-os/app-kit/components/site-header";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";

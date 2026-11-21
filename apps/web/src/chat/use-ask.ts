@@ -1,3 +1,4 @@
+import type { PromptMention } from "@grasp-os/app-kit/components/prompt-editor";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   chatFileMaxBytes,
@@ -8,7 +9,6 @@ import type { ChatMake } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
-import type { PromptMention } from "@grasp-os/ui/components/prompt-editor";
 import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 

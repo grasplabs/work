@@ -1,7 +1,7 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { useLingui } from "@lingui/react/macro";
 
 // What the Agents pages say of an agent at a glance (agents-overview.tsx,

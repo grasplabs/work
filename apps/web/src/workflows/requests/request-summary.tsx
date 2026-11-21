@@ -1,14 +1,10 @@
-import type {
-  SummaryVia,
-  WeeklySummary,
-} from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
 import {
   Sheet,
   SheetContent,
@@ -16,11 +12,15 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@grasp-os/ui/components/sheet";
+} from "@grasp-os/app-kit/components/sheet";
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
+} from "@grasp-os/app-kit/components/toggle-group";
+import type {
+  SummaryVia,
+  WeeklySummary,
+} from "@grasp-os/shared/stephen-requests";
 import { useLingui } from "@lingui/react/macro";
 import { MailIcon } from "lucide-react";
 

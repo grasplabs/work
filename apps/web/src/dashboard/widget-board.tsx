@@ -1,3 +1,18 @@
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@grasp-os/app-kit/components/popover";
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/app-kit/components/tooltip";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { App } from "@grasp-os/shared/apps";
 import { standardWidgetIdSchema } from "@grasp-os/shared/dashboard";
 import type {
@@ -8,21 +23,6 @@ import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
 import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Stat } from "@grasp-os/ui/components/stat";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

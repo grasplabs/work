@@ -1,5 +1,5 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";

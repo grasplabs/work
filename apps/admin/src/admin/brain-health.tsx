@@ -1,3 +1,18 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/app-kit/components/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 /**
  * How a client's Brain is doing, for Grasp's staff (GRA-1733): its work
  * queue, its store's size against its limit, its erasure ledger and the
@@ -35,21 +50,6 @@ import type {
   BrainSyncPhase,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { Await, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 

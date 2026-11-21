@@ -1,5 +1,3 @@
-import type { InterviewLine } from "@grasp-os/shared/interview-links";
-import { interviewerNames } from "@grasp-os/shared/onboarding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,9 +7,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { InterviewLine } from "@grasp-os/shared/interview-links";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
 import { XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

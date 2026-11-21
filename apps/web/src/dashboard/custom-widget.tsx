@@ -1,11 +1,3 @@
-import type {
-  CustomWidget,
-  WidgetCell,
-  WidgetColumn,
-  WidgetMeasure,
-  WidgetState,
-  WidgetViewPart,
-} from "@grasp-os/shared/widgets";
 import {
   CartesianGrid,
   ChartContainer,
@@ -16,9 +8,9 @@ import {
   XAxis,
   YAxis,
   chartColor,
-} from "@grasp-os/ui/components/chart";
-import type { ChartConfig } from "@grasp-os/ui/components/chart";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "@grasp-os/app-kit/components/chart";
+import type { ChartConfig } from "@grasp-os/app-kit/components/chart";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import {
   Table,
   TableBody,
@@ -26,8 +18,16 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/table";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type {
+  CustomWidget,
+  WidgetCell,
+  WidgetColumn,
+  WidgetMeasure,
+  WidgetState,
+  WidgetViewPart,
+} from "@grasp-os/shared/widgets";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";

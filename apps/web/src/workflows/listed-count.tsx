@@ -1,8 +1,8 @@
+import { TabsCount } from "@grasp-os/app-kit/components/tabs";
 import {
   workflowOwnListed,
   workflowRunsListed,
 } from "@grasp-os/shared/workflow-resources";
-import { TabsCount } from "@grasp-os/ui/components/tabs";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 

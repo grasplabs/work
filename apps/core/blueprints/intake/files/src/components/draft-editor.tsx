@@ -1,20 +1,20 @@
-import { useMutation } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/card";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/select";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { useMutation } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 import { useState } from "react";
 

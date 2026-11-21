@@ -1,3 +1,23 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 /**
  * Keeping what was agreed before the first interview, from the organization's
  * Steps: the agreement on handling data, the company's look at the risks to
@@ -7,26 +27,6 @@
  */
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { Agreements } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { PencilIcon } from "lucide-react";
 import { useId, useState } from "react";
 

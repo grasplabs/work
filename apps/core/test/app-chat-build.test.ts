@@ -85,13 +85,13 @@ export default defineApp({ name: "Board" });
 /** The board's one page: four columns of cards. */
 const page = `import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
 import { api } from "@server/_generated/api";
 
 const columns = [

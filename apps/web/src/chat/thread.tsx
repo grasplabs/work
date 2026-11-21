@@ -1,3 +1,27 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/app-kit/components/alert";
+import { Bubble, BubbleContent } from "@grasp-os/app-kit/components/bubble";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+} from "@grasp-os/app-kit/components/message";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@grasp-os/app-kit/components/trace";
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
   ChatAgent,
@@ -9,30 +33,6 @@ import type {
   ChatToolCall,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-} from "@grasp-os/ui/components/message";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  Trace,
-  TraceCollapsible,
-  TraceCollapsibleContent,
-  TraceCollapsibleTrigger,
-  TraceDescription,
-  TraceIcon,
-  TraceLine,
-  TraceTitle,
-} from "@grasp-os/ui/components/trace";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";

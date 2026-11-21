@@ -7,7 +7,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
+} from "@grasp-os/app-kit/components/alert-dialog";
 import { Trans } from "@lingui/react/macro";
 
 /**

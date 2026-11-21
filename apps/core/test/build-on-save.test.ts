@@ -22,7 +22,7 @@ const idp = mockIdp();
 
 /** A page that says `text`, on the kit. */
 const page = (text: string): Record<string, string> => ({
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/ui/components/button";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/app-kit/components/button";
 
 function Desk() {
   return <Button>${text}</Button>;
@@ -82,7 +82,7 @@ describe("building on save", { timeout: 60_000 }, () => {
 
   it("builds a page with an unused import: an unused name is the lint's, never the build's", async () => {
     const builds = await saved({
-      "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";
+      "src/routes/index.tsx": `import { Badge } from "@grasp-os/app-kit/components/badge";
 ${page(crypto.randomUUID())["src/routes/index.tsx"] ?? ""}`,
     });
 

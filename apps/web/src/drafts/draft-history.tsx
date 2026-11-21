@@ -1,9 +1,3 @@
-import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppRelease, FileDiff } from "@grasp-os/shared/apps";
-import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
-import { failureText } from "@grasp-os/shared/errors";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { Subject } from "@grasp-os/shared/subject";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,16 +7,16 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   Item,
   ItemActions,
@@ -30,13 +24,19 @@ import {
   ItemDescription,
   ItemGroup,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
+} from "@grasp-os/app-kit/components/item";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
-} from "@grasp-os/ui/components/sheet";
+} from "@grasp-os/app-kit/components/sheet";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import type { AppRelease, FileDiff } from "@grasp-os/shared/apps";
+import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
+import { failureText } from "@grasp-os/shared/errors";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject } from "@grasp-os/shared/subject";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";

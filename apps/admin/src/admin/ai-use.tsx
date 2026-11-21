@@ -1,3 +1,33 @@
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  chartColor,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "@grasp-os/app-kit/components/chart";
+import type {
+  ChartColor,
+  ChartConfig,
+} from "@grasp-os/app-kit/components/chart";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/app-kit/components/select";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 /**
  * What one company takes in AI, and what that costs Grasp, ported from the
  * prototype (grasplabs/prototype `components/admin/org-usage.tsx`). At a
@@ -25,33 +55,6 @@ import type {
   Use,
   UsePeriod,
 } from "@grasp-os/shared/admin/admin-usage";
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  chartColor,
-  ReferenceLine,
-  XAxis,
-  YAxis,
-} from "@grasp-os/ui/components/chart";
-import type { ChartColor, ChartConfig } from "@grasp-os/ui/components/chart";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 

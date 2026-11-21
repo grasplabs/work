@@ -1,6 +1,6 @@
+import { RichText } from "@grasp-os/app-kit/components/rich-text";
 // @vitest-environment happy-dom
 import type { LinksReference } from "@grasp-os/runtime/app";
-import { RichText } from "@grasp-os/ui/components/rich-text";
 import { describe, expect, it } from "vite-plus/test";
 
 import { click, find, rendered, testHost } from "./test-host.tsx";

@@ -1,5 +1,5 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
 import { useLingui } from "@lingui/react/macro";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";

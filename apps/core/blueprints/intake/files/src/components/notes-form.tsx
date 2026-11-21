@@ -1,11 +1,11 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/card";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { useState } from "react";
 
 import { SourceFields } from "./draft-editor";

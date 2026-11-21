@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { Id } from "@grasp-os/sdk";
 import { useClient, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";

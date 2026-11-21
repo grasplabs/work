@@ -1,11 +1,4 @@
-import type {
-  ConnectionBrainAudience,
-  ConnectionBrainAudienceSetting,
-  ListedConnection,
-} from "@grasp-os/shared/connect";
-import { connectionErrors } from "@grasp-os/shared/connect";
-import { failureText } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -13,12 +6,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+} from "@grasp-os/app-kit/components/native-select";
+import type {
+  ConnectionBrainAudience,
+  ConnectionBrainAudienceSetting,
+  ListedConnection,
+} from "@grasp-os/shared/connect";
+import { connectionErrors } from "@grasp-os/shared/connect";
+import { failureText } from "@grasp-os/shared/errors";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useEffectEvent, useId, useState } from "react";
 

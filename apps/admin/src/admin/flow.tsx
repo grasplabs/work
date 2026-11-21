@@ -1,3 +1,15 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import {
+  SortableItem,
+  SortableList,
+} from "@grasp-os/app-kit/components/sortable-list";
+import type { SortableWords } from "@grasp-os/app-kit/components/sortable-list";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import {
   defaultFlow,
@@ -14,18 +26,6 @@ import type {
   FlowStep,
   OnboardingFlow,
 } from "@grasp-os/shared/onboarding-flow";
-import { Button } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  SortableItem,
-  SortableList,
-} from "@grasp-os/ui/components/sortable-list";
-import type { SortableWords } from "@grasp-os/ui/components/sortable-list";
-import { Switch } from "@grasp-os/ui/components/switch";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { useId, useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";

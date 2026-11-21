@@ -1,16 +1,16 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { DownloadIcon, FileTextIcon, PrinterIcon } from "lucide-react";
 import { useState } from "react";

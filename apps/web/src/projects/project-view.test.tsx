@@ -1,3 +1,4 @@
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 // @vitest-environment happy-dom
 import type {
   FileItem,
@@ -9,7 +10,6 @@ import type {
   ProjectItemRef,
   ProjectShareCandidates,
 } from "@grasp-os/shared/projects";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {

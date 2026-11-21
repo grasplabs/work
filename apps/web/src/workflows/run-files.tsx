@@ -1,7 +1,7 @@
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import { failureText } from "@grasp-os/shared/errors";
 import { runFileContentPath } from "@grasp-os/shared/run-files";
 import type { RunFileListing } from "@grasp-os/shared/run-files";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { DownloadIcon } from "lucide-react";
 import { useEffect, useState } from "react";

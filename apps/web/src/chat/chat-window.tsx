@@ -1,7 +1,4 @@
-import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
-import { hasEvery } from "@grasp-os/shared/chat-search";
-import { failureText } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandDialog,
@@ -10,8 +7,11 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@grasp-os/ui/components/command";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/command";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
+import { hasEvery } from "@grasp-os/shared/chat-search";
+import { failureText } from "@grasp-os/shared/errors";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

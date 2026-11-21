@@ -1,8 +1,8 @@
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import type {
   ModelMonthSpend,
   WorkflowMonthSpend,
 } from "@grasp-os/shared/models";
-import { Stat } from "@grasp-os/ui/components/stat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";

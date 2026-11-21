@@ -1,18 +1,5 @@
-import {
-  defaultMinutesSaved,
-  minutesSaved,
-  requestKinds,
-  requestRanges,
-  runningTotal,
-} from "@grasp-os/shared/stephen-requests";
-import type {
-  RequestKind,
-  RequestRange,
-  RequestsPage,
-  StephenRequestSettings,
-} from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card } from "@grasp-os/app-kit/components/card";
 import {
   Area,
   Bar,
@@ -26,22 +13,35 @@ import {
   XAxis,
   YAxis,
   chartColor,
-} from "@grasp-os/ui/components/chart";
-import type { ChartConfig } from "@grasp-os/ui/components/chart";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/chart";
+import type { ChartConfig } from "@grasp-os/app-kit/components/chart";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Popover,
   PopoverContent,
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "@grasp-os/app-kit/components/popover";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/toggle-group";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import {
+  defaultMinutesSaved,
+  minutesSaved,
+  requestKinds,
+  requestRanges,
+  runningTotal,
+} from "@grasp-os/shared/stephen-requests";
+import type {
+  RequestKind,
+  RequestRange,
+  RequestsPage,
+  StephenRequestSettings,
+} from "@grasp-os/shared/stephen-requests";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

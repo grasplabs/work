@@ -1,6 +1,6 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 

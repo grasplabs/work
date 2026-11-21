@@ -108,7 +108,7 @@ describe(
         readFileSync(path.join(out, file), "utf-8");
 
       const root = packageJsonSchema.parse(JSON.parse(read("package.json")));
-      const vendored = ["runtime", "sdk", "ui", "shared"].map((name) =>
+      const vendored = ["runtime", "sdk", "app-kit", "shared"].map((name) =>
         packageJsonSchema
           .pick({ dependencies: true })
           .parse(JSON.parse(read(`vendor/@grasp-os/${name}/package.json`)))
@@ -193,7 +193,7 @@ describe(
           "@grasp-os/shared",
           "@grasp-os/runtime",
           "@grasp-os/sdk",
-          "@grasp-os/ui",
+          "@grasp-os/app-kit",
         ],
         notExact: [],
         unnoticed: [],
@@ -204,10 +204,10 @@ describe(
         unlocked: [],
         importers: [
           ".",
+          "vendor/@grasp-os/app-kit",
           "vendor/@grasp-os/runtime",
           "vendor/@grasp-os/sdk",
           "vendor/@grasp-os/shared",
-          "vendor/@grasp-os/ui",
         ],
       });
     });
@@ -257,7 +257,7 @@ describe(
         "app/server/document.ts":
           "export const title = (): string => document.title;\n",
         "app/server/kit.ts":
-          'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
+          'import { Button } from "@grasp-os/app-kit/components/button";\n\nexport const button = Button;\n',
         // A directive below the top of a page, which TypeScript ignores
         // but the platform refuses wherever it stands.
         "app/src/components/late.tsx":

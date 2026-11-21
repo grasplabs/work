@@ -1,6 +1,6 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { cn } from "@grasp-os/ui/lib/utils";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";

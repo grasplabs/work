@@ -1,11 +1,11 @@
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
+import { typeInPrompt } from "@grasp-os/app-kit/testing";
 // @vitest-environment happy-dom
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
-import { typeInPrompt } from "@grasp-os/ui/testing";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {

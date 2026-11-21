@@ -1,6 +1,6 @@
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SignInAgainItem } from "@grasp-os/shared/waiting";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";

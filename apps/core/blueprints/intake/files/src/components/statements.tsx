@@ -1,7 +1,7 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 
 import {
   emptyStatement,

@@ -1,5 +1,5 @@
-import { PaintedField } from "@grasp-os/ui/components/painted-field";
-import { cn } from "@grasp-os/ui/lib/utils";
+import { PaintedField } from "@grasp-os/app-kit/components/painted-field";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Trans } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";

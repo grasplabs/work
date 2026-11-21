@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";

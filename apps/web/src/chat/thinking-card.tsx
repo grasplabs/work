@@ -1,6 +1,6 @@
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ThinkingGround } from "@grasp-os/shared/brain";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";

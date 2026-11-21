@@ -1,10 +1,10 @@
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import type { ReactNode } from "react";

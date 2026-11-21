@@ -1,3 +1,15 @@
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/app-kit/components/field";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/app-kit/components/radio-group";
 /**
  * The onboarding a new organization starts with, as staff choose it on
  * the create page: one of the flows staff start from
@@ -7,18 +19,6 @@
  */
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
 import { useId } from "react";
 
 /** Each flow staff start from, as staff read it, and what the company goes through in it. */

@@ -1,5 +1,5 @@
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { DotBrain } from "../brain/dot-brain.tsx";
