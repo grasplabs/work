@@ -24,9 +24,11 @@ export const useFollowLinks = (): {
       const follow = (event: MouseEvent) => {
         const link =
           event.target instanceof Element ? event.target.closest("a") : null;
+        // A right click (an auxclick too) is the browser's own menu.
         if (
           link === null ||
-          (link.protocol !== "http:" && link.protocol !== "https:")
+          (link.protocol !== "http:" && link.protocol !== "https:") ||
+          (event.type === "auxclick" && event.button !== 1)
         ) {
           return;
         }
