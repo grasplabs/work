@@ -14,34 +14,15 @@ import { apiOf, peopleIn } from "./people.ts";
 const read = { timeout: 20_000 };
 
 /**
- * Moves the item `name`, at `place`, up one place from the keyboard, as a
- * screen reader's user does: each step once it's said.
+ * Moves the item `name`, at `place`, up one place with its Move up
+ * button, as a screen reader's user does: the step is said.
  */
 const moveUp = async (page: Page, name: string, place: number) => {
-  await page.getByRole("button", { name: `Move ${name}`, exact: true }).focus();
-  await page.keyboard.press("Space");
-  // Picked up, and over its own place.
-  await expect(
-    page.getByText(`${name} is now at place ${place}.`)
-  ).toBeAttached();
-  // dnd-kit listens for the arrows a task after the pick-up, which a
-  // person never beats but a test's next key can.
-  await page.evaluate(async () => {
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        resolve(true);
-      }, 0);
-    });
-    await promise;
-  });
-  await page.keyboard.press("ArrowUp");
+  await page
+    .getByRole("button", { name: `Move ${name} up`, exact: true })
+    .click();
   await expect(
     page.getByText(`${name} is now at place ${place - 1}.`)
-  ).toBeAttached();
-  await page.keyboard.press("Space");
-  await expect(
-    page.getByText(`Put ${name} down at place ${place - 1}.`)
   ).toBeAttached();
 };
 
@@ -93,9 +74,9 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     .fill("title");
   await page.getByRole("switch", { name: "Required" }).click();
   await page.getByRole("button", { name: "Add field" }).last().click();
-  await expect(fields.getByRole("button", { name: /^title/u })).toBeVisible(
-    read
-  );
+  await expect(
+    fields.getByRole("listitem").filter({ hasText: /^title/u })
+  ).toBeVisible(read);
   await page.getByRole("button", { name: "Add field" }).first().click();
   await kindOf("Choice").click();
   await page
@@ -109,9 +90,9 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   await moveUp(page, "Done", 2);
   await expect(page.getByLabel("Option 1")).toHaveValue("Done");
   await page.getByRole("button", { name: "Add field" }).last().click();
-  await expect(fields.getByRole("button", { name: /^status/u })).toBeVisible(
-    read
-  );
+  await expect(
+    fields.getByRole("listitem").filter({ hasText: /^status/u })
+  ).toBeVisible(read);
   await moveUp(page, "status", 2);
   await expect(fields.getByRole("listitem").first()).toContainText(
     "status",
@@ -143,8 +124,8 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   ).toBeVisible(read);
   await page.getByRole("link", { name: "Code" }).click();
   await page
-    .getByRole("navigation", { name: "Files" })
-    .getByRole("button", { name: "schema.ts" })
+    .getByRole("tree", { name: "Files" })
+    .getByRole("treeitem", { name: "schema.ts" })
     .click();
   const code = page.getByRole("region", { name: "Code of server/schema.ts" });
   await expect(code).toContainText("tasks: defineTable", read);

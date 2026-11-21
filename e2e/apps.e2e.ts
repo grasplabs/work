@@ -309,6 +309,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         ...account,
         "Workspace",
         "Members and roles",
+        "Teams",
         // The organization's own AI provider keys, the models its calls
         // use and what they cost.
         "AI and spend",
