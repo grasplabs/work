@@ -15,7 +15,6 @@
  *
  * Neither ever rejects: a read that fails is a client not answering.
  */
-import { whenAborted } from "@grasp-os/shared/deadline";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { fetchClientAdmin, fetchClientAdmins } from "../clients/functions.ts";
@@ -127,7 +126,7 @@ const peek = async <T>(value: Promise<T>): Promise<T | typeof notYet> =>
  * client before asking it alone: a little past the page's own deadline
  * (3 s, `pageReadOptions`), as the frame's waits on every client.
  */
-const frameWaitMs = 4000;
+export const frameWaitMs = 4000;
 
 /**
  * What the frame's read (`admins`) answered for `clientId`, once it is in,
@@ -139,10 +138,16 @@ const framedAnswer = async (
   admins: Promise<ClientAdmin[] | null>,
   clientId: string
 ): Promise<AnsweredAdmin | undefined> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const framed = await Promise.race([
       admins,
-      whenAborted(AbortSignal.timeout(frameWaitMs)),
+      // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(null);
+        }, frameWaitMs);
+      }),
     ]);
     const found = framed?.find((admin) => admin.client.id === clientId);
     // Only an answer that is still fresh: an older one is read again.
@@ -152,6 +157,8 @@ const framedAnswer = async (
       : undefined;
   } catch {
     return undefined;
+  } finally {
+    clearTimeout(timer);
   }
 };
 
@@ -207,18 +214,20 @@ export const readOrganization = async ({
   // again, a stale answer. Coming to it takes the answer it has, or the
   // frame's read.
   const anew = onIt && !preload;
-  if (!anew) {
-    // The frame's read, once in, is kept already (`readAdmins`).
-    const framing = (await peek(admins)) === notYet;
+  // Whether a read of it under way may hold a change the answer kept
+  // doesn't: asked since a change staff made, the answer before it (the
+  // frame reads every client again after one). The frame's read, once in,
+  // is kept already (`readAdmins`).
+  const framing = (await peek(admins)) === notYet;
+  const frameOutdates = (): boolean =>
+    framing && reads.outdates(client.id, adminsAsked);
+  const ownOutdates = (): boolean => {
     const own = reads.reading(client.id);
-    // A read asked since the answer kept, still under way, answers for it:
-    // a change made since may be in it (the frame reads every client
-    // again after one).
-    const newerUnderWay =
-      (own !== undefined && reads.newer(client.id, own)) ||
-      (framing && reads.newer(client.id, adminsAsked));
+    return own !== undefined && reads.outdates(client.id, own);
+  };
+  if (!anew) {
     const fresh = reads.fresh(client.id, Date.now());
-    if (fresh !== undefined && !newerUnderWay) {
+    if (fresh !== undefined && !frameOutdates() && !ownOutdates()) {
       // Still marked stale when reading it again failed since.
       return { read: reads.settle(fresh, Date.now()) };
     }
@@ -247,13 +256,11 @@ export const readOrganization = async ({
         }
       }
       // An answer kept while the page waited is not asked for again,
-      // unless a read asked since it is under way: that one is joined.
+      // unless a read that may hold a change it doesn't is under way: its
+      // own is joined, and the frame's, past `frameWaitMs`, is not waited
+      // on further: its core is asked alone.
       const kept = reads.fresh(client.id, Date.now());
-      const pending = reads.reading(client.id);
-      if (
-        kept !== undefined &&
-        (pending === undefined || !reads.newer(client.id, pending))
-      ) {
+      if (kept !== undefined && !frameOutdates() && !ownOutdates()) {
         return reads.settle(kept, Date.now());
       }
     }

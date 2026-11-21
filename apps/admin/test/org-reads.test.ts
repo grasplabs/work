@@ -32,9 +32,11 @@ const answered = (agoMs: number): AnsweredAdmin => ({
 
 /** Lets everything already started run as far as it can. */
 const aTurn = async (): Promise<void> => {
+  // A task runs only once every microtask queued before it has: by then
+  // the page, which awaits nothing else, has decided.
   // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
   await new Promise((resolve) => {
-    setTimeout(resolve, 10);
+    setTimeout(resolve, 0);
   });
 };
 
@@ -184,24 +186,24 @@ describe("an organization's page loaded again", () => {
     });
   });
 
-  it("coming to the page while a read asked since its answer is under way waits for that read, the page's own or the frame's", async () => {
+  it("coming to the page after a change, while a read asked since is under way, waits for that read, the page's own or the frame's", async () => {
     const reads = orgReads();
-    const before = answered(1000);
-    reads.remember(before, reads.ask());
-    // A read of it asked since: the frame's alone, in a load the page wasn't in.
+    reads.remember(answered(1000), reads.ask());
+    // Staff change something; a read of it asked since: in a load the page wasn't in.
+    reads.changed();
     const own = Promise.withResolvers<null>();
     const ownRead = reads.read(client.id, async () => {
       await own.promise;
       return answered(0);
     });
     const cameToOwn = opened(reads, false);
-    // The page decides before that read answers.
     await aTurn();
     own.resolve(null);
     const ownAnswer = await ownRead;
     const shownOwn = await cameToOwn;
 
-    // The frame reading every client again after a change, still under way.
+    // Another change; the frame reading every client again after it.
+    reads.changed();
     const frame = Promise.withResolvers<ClientAdmin[] | null>();
     const frameAsked = reads.ask();
     const cameToFrame = opened(reads, false, {
@@ -219,6 +221,20 @@ describe("an organization's page loaded again", () => {
       own: shownOwn?.admin === ownAnswer,
       frame: shownFrame?.admin === frameAnswer,
     }).toStrictEqual({ own: true, frame: true });
+  });
+
+  it("coming to the page while the frame reads every client again with no change since its answer takes that answer at once", async () => {
+    const reads = orgReads();
+    const kept = answered(1000);
+    reads.remember(kept, reads.ask());
+    // The frame reading again as its minute ran out: never answering here.
+    const frame = Promise.withResolvers<ClientAdmin[] | null>();
+    const shown = await Promise.race([
+      opened(reads, false, { admins: frame.promise, asked: reads.ask() }),
+      aTurn().then(() => "waited" as const),
+    ]);
+
+    expect(shown === "waited" ? shown : shown?.admin).toBe(kept);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   until,
 } from "../../test/app.tsx";
 import { emptyAdminSnapshot } from "../../test/snapshots.ts";
+import { frameWaitMs } from "./org-loads.ts";
 import type { AnsweredAdmin } from "./org-reads.ts";
 import { freshMs } from "./org-reads.ts";
 
@@ -396,61 +397,112 @@ describe("a change on an organization's page", () => {
     });
   });
 
-  it("shows a change that came through after staff left its page, on coming back while the frame still reads it", async () => {
-    const through = Promise.withResolvers<null>();
-    const frame = Promise.withResolvers<null>();
-    const { container, router, asked, calls } = await onAcme(
-      async () => {},
-      async () => {
-        await through.promise;
-        return { refused: null, issuedAt: new Date().toISOString() };
-      },
-      // The frame's read after the change (its second) is slow.
-      { framed: { call: 2, until: frame.promise } }
-    );
-    const askedBefore = asked();
-    const open = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Change what was agreed"
-    );
-    await go(() => {
-      open?.click();
-    });
-    await act(async () => {
-      agreementsForm()?.dispatchEvent(
-        new Event("submit", { bubbles: true, cancelable: true })
+  it.each([
+    ["the frame's read answers in time", false],
+    ["the frame's read takes longer than the page waits on it", true],
+  ])(
+    "shows a change that came through after staff left its page, on coming back while the frame still reads it: %s",
+    // Room for a page that never asks to fail on what it shows, not on time.
+    { timeout: 15_000 },
+    async (_, slower) => {
+      const through = Promise.withResolvers<null>();
+      const frame = Promise.withResolvers<null>();
+      const { container, router, asked, calls } = await onAcme(
+        async () => {},
+        async () => {
+          await through.promise;
+          return { refused: null, issuedAt: new Date().toISOString() };
+        },
+        // The frame's read after the change (its second) is slow.
+        { framed: { call: 2, until: frame.promise } }
       );
-      await Promise.resolve();
-    });
-    // Staff go to another organization before the change is through.
-    await act(async () => {
-      router.history.push("/organizations/globex");
-      await Promise.resolve();
-    });
-    await until(
-      () => router.state.resolvedLocation?.pathname === "/organizations/globex"
-    );
-    through.resolve(null);
-    // Through, the change reads the frame again, every client's core.
-    await until(
-      () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
-    );
-    await act(async () => {
-      router.history.push(acmeContract);
-      await Promise.resolve();
-    });
-    frame.resolve(null);
-    await settle();
+      const askedBefore = asked();
+      const open = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Change what was agreed"
+      );
+      await go(() => {
+        open?.click();
+      });
+      await act(async () => {
+        agreementsForm()?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true })
+        );
+        await Promise.resolve();
+      });
+      // Staff go to another organization before the change is through.
+      await act(async () => {
+        router.history.push("/organizations/globex");
+        await Promise.resolve();
+      });
+      await until(
+        () =>
+          router.state.resolvedLocation?.pathname === "/organizations/globex"
+      );
+      through.resolve(null);
+      // Through, the change reads the frame again, every client's core.
+      await until(
+        () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
+      );
+      // The page's wait on the frame runs on a clock the test moves.
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout"],
+        shouldAdvanceTime: true,
+      });
+      try {
+        await act(async () => {
+          router.history.push(acmeContract);
+          await Promise.resolve();
+        });
+        if (slower) {
+          // Past the page's wait, the frame still reading: its core asked alone.
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(frameWaitMs);
+          });
+          vi.useRealTimers();
+          await until(() => asked() > askedBefore).catch(() => null);
+        }
+        // The page shows its read along with the frame's (React holds the
+        // navigation with the frame's update it was waiting on), so what
+        // it shows is told once that is in too.
+        frame.resolve(null);
+        await settle();
+        const shown = agreedOn(container);
 
-    expect({
-      on: router.state.location.pathname,
-      agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
-      // The page took the frame's read: its core asked no second time.
-      askedAgain: asked() - askedBefore,
-    }).toStrictEqual({
-      on: "/organizations/acme/details",
-      agreed: true,
-      askedAgain: 0,
-    });
+        expect({
+          on: router.state.location.pathname,
+          agreed: shown.includes("In place since 2 Sep 2026"),
+          // In time, the page takes the frame's read; past it, asks once alone.
+          askedAgain: asked() - askedBefore,
+        }).toStrictEqual({
+          on: "/organizations/acme/details",
+          agreed: true,
+          askedAgain: slower ? 1 : 0,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it("after its minute, moving to another organization reads the frame no second time: only a change, or reopening the same address, does", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { router, calls } = await onAcme(async () => {});
+      const framed = () =>
+        calls.filter(({ fn }) => fn === "fetchClientAdmins").length;
+      const before = framed();
+      vi.setSystemTime(Date.now() + freshMs + 1000);
+      await go(() => {
+        router.history.push("/organizations/globex");
+      });
+      await go(() => {
+        router.history.push(acmeContract);
+      });
+
+      expect(framed() - before).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows both of two changes given at once from two parts of the page", async () => {

@@ -47,6 +47,13 @@ export const getRouter = () => {
   router.subscribe("onBeforeLoad", () => {
     reads.loadBegan();
   });
+  // Every change staff make reloads the page with `invalidate` (so do Read
+  // again and Try again): answers asked before it may be outdated.
+  const { invalidate } = router;
+  router.invalidate = async (options) => {
+    reads.changed();
+    await invalidate(options);
+  };
   // What the page throws and never catches, reported with the route's
   // pattern (such as `/organizations/$clientId`), never its URL.
   reportUncaughtErrors(() => router.state.matches.at(-1)?.fullPath);

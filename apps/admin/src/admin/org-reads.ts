@@ -14,8 +14,9 @@
  *   change can't replace the answer asked after it, whoever asked
  *   (the page alone, or the frame for every client);
  * - an answer stays fresh `freshMs`, moving between an organization's
- *   sections, or coming back to it, asks its core nothing, unless a read
- *   asked since it is under way: then that one is waited on;
+ *   sections, or coming back to it, asks its core nothing, unless it was
+ *   asked before a change staff made and a read asked since that change
+ *   is under way: then that one is waited on;
  * - when its core doesn't answer, or not in time, the page shows the last
  *   answer it had, marked stale with why and since when, until a later
  *   read answers.
@@ -63,8 +64,18 @@ export interface OrgReads {
   ask: () => number;
   /** When the read of client `clientId` under way was asked (`ask`), if one is. */
   reading: (clientId: string) => number | undefined;
-  /** Whether a read of client `clientId` asked at `asked` is newer than the answer kept of it. */
-  newer: (clientId: string, asked: number) => boolean;
+  /**
+   * Staff may have changed something (src/router.tsx: every change
+   * reloads with `router.invalidate`): answers asked before now may be
+   * outdated.
+   */
+  changed: () => void;
+  /**
+   * Whether a read of client `clientId` asked at `asked` may hold a change
+   * the answer kept of it doesn't: none is kept, or it was asked before
+   * a change and this read after it.
+   */
+  outdates: (clientId: string, asked: number) => boolean;
   /**
    * Keeps `admin`'s answer to a read asked at `asked`, unless an answer
    * to a read asked later is kept, or the client was forgotten since; a
@@ -88,6 +99,8 @@ export const orgReads = (): OrgReads => {
   let asks = 0;
   /** How many were asked before the router's load under way began. */
   let loadFrom = 0;
+  /** How many were asked before staff last changed something. */
+  let changedFrom = 0;
   /** Each client's read under way, with when it was asked. */
   const underWay = new Map<
     string,
@@ -149,9 +162,14 @@ export const orgReads = (): OrgReads => {
     },
     ask,
     reading: (clientId) => underWay.get(clientId)?.asked,
-    newer: (clientId, asked) => {
+    changed: () => {
+      changedFrom = asks;
+    },
+    outdates: (clientId, asked) => {
       const kept = answers.get(clientId);
-      return kept === undefined || kept.asked < asked;
+      return (
+        kept === undefined || (kept.asked <= changedFrom && asked > changedFrom)
+      );
     },
     remember,
     fresh: (clientId, now) => {
