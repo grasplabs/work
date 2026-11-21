@@ -48,7 +48,17 @@ export const getRouter = () => {
     reads.loadBegan();
   });
   // Every change staff make reloads the page with `invalidate` (so do Read
-  // again and Try again): answers asked before it may be outdated.
+  // again and Try again): answers asked before it may be outdated. The
+  // router's events don't say why a load runs, so this is where a change
+  // is seen. Two limits, as designed:
+  // - only changes made in this tab are seen: one made in another tab, by
+  //   another staff member or by the company shows when the answer kept
+  //   goes stale (`freshMs`), as before;
+  // - every organization's answer counts as possibly changed, not only
+  //   the one changed: right after a change, coming to another one while
+  //   the frame reads every client again waits for that read, up to
+  //   `frameWaitMs`, then asks its core alone (a second read core's audit
+  //   log records).
   const { invalidate } = router;
   router.invalidate = async (options) => {
     reads.changed();

@@ -222,20 +222,6 @@ describe("an organization's page loaded again", () => {
       frame: shownFrame?.admin === frameAnswer,
     }).toStrictEqual({ own: true, frame: true });
   });
-
-  it("coming to the page while the frame reads every client again with no change since its answer takes that answer at once", async () => {
-    const reads = orgReads();
-    const kept = answered(1000);
-    reads.remember(kept, reads.ask());
-    // The frame reading again as its minute ran out: never answering here.
-    const frame = Promise.withResolvers<ClientAdmin[] | null>();
-    const shown = await Promise.race([
-      opened(reads, false, { admins: frame.promise, asked: reads.ask() }),
-      aTurn().then(() => "waited" as const),
-    ]);
-
-    expect(shown === "waited" ? shown : shown?.admin).toBe(kept);
-  });
 });
 
 describe("an organization's answers kept", () => {

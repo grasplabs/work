@@ -72,8 +72,9 @@ export interface OrgReads {
   changed: () => void;
   /**
    * Whether a read of client `clientId` asked at `asked` may hold a change
-   * the answer kept of it doesn't: none is kept, or it was asked before
-   * a change and this read after it.
+   * the answer kept of it doesn't: none is kept, or a change lies between
+   * when that answer was asked and when this read was, whatever changed
+   * since.
    */
   outdates: (clientId: string, asked: number) => boolean;
   /**
@@ -99,15 +100,23 @@ export const orgReads = (): OrgReads => {
   let asks = 0;
   /** How many were asked before the router's load under way began. */
   let loadFrom = 0;
-  /** How many were asked before staff last changed something. */
-  let changedFrom = 0;
+  /** How many were asked when staff last changed something. */
+  let lastChange = 0;
   /** Each client's read under way, with when it was asked. */
   const underWay = new Map<
     string,
     { asked: number; answer: Promise<ClientAdmin | null> }
   >();
-  /** Each client's answer kept, with when the read it answered was asked. */
-  const answers = new Map<string, { admin: AnsweredAdmin; asked: number }>();
+  /**
+   * Each client's answer kept, with when the read it answered was asked,
+   * and how many had been asked by the first change after that (unset
+   * while none came): all a read under way is compared with, so nothing
+   * more of the changes is kept than one number for each answer.
+   */
+  const answers = new Map<
+    string,
+    { admin: AnsweredAdmin; asked: number; changedAt?: number }
+  >();
   /** Why the last read failed and when, for a client with an answer kept, until a later one. */
   const failed = new Map<string, NonNullable<OrgRead["stale"]>>();
   /** For a client forgotten, how many reads had been asked then: none of those keeps anything. */
@@ -125,7 +134,15 @@ export const orgReads = (): OrgReads => {
     }
     const kept = answers.get(clientId);
     if (kept === undefined || kept.asked <= asked) {
-      answers.set(clientId, { admin, asked });
+      // An answer to a read asked before the last change, kept only now:
+      // a change came after it was asked, at the latest then, so it counts
+      // as changed from when it was asked.
+      answers.set(
+        clientId,
+        asked <= lastChange
+          ? { admin, asked, changedAt: asked }
+          : { admin, asked }
+      );
     }
     if (kept === undefined || kept.asked < asked) {
       failed.delete(clientId);
@@ -163,12 +180,17 @@ export const orgReads = (): OrgReads => {
     ask,
     reading: (clientId) => underWay.get(clientId)?.asked,
     changed: () => {
-      changedFrom = asks;
+      lastChange = asks;
+      // The first change after each answer kept, never moved by a later one.
+      for (const kept of answers.values()) {
+        kept.changedAt ??= asks;
+      }
     },
     outdates: (clientId, asked) => {
       const kept = answers.get(clientId);
       return (
-        kept === undefined || (kept.asked <= changedFrom && asked > changedFrom)
+        kept === undefined ||
+        (kept.changedAt !== undefined && asked > kept.changedAt)
       );
     },
     remember,
