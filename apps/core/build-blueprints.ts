@@ -29,10 +29,21 @@
  *   as its definition generates them.
  *
  * A release may ship none: then apps/core/blueprints/ holds only its
- * `.gitkeep` (git keeps no empty folder), and the build embeds none,
- * which the install takes as a release without built-ins, removing those
- * an earlier release installed. A missing folder fails the build, so
- * none is never shipped by accident.
+ * `ids.json`, and the build embeds none, which the install takes as a
+ * release without built-ins, removing those an earlier release
+ * installed. A missing folder fails the build, so none is never shipped
+ * by accident.
+ *
+ * `ids.json` names every id a release ever shipped (`checkShippedIds`):
+ * `"shipped"` while its folder is here, `"retired"` once it is gone, and
+ * the build of the release fails until both hold, so neither can be
+ * forgotten. A retired id is never shipped again: Apps created from the
+ * built-in keep its id as their origin (`app_origins`), and a deployment
+ * that skips the release that removed it (releases reach clients channel
+ * by channel) never detached them, so a new built-in under the id would
+ * be offered to them as an update of unrelated code. A list in the repo,
+ * not a record the install keeps: a rollback to a release that ships a
+ * removed built-in installs it again, as it should.
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
@@ -188,19 +199,55 @@ export const filesIn = (dir: string): Record<string, string> => {
 
 /**
  * The folders of the built-ins in `dir`, one each, by name. `dir` must be
- * there, empty but for its `.gitkeep` when the release ships none: the
+ * there, holding only the release's `ids.json` when it ships none: the
  * install removes every built-in a release doesn't ship, so a build that
  * missed the folder must fail, never ship none.
  */
 export const blueprintFolders = (dir: string): string[] => {
   if (!existsSync(dir)) {
     throw new Error(
-      `The built-in blueprints' folder ${dir} isn't there: a release that ships none keeps it, empty but for its .gitkeep`
+      `The built-in blueprints' folder ${dir} isn't there: a release that ships none keeps it, with its ids.json`
     );
   }
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map(({ name }) => name);
+};
+
+/** Every id a release ever shipped, as `ids.json` in its folder keeps them. */
+const shippedIdsSchema = z.record(idSchema, z.enum(["shipped", "retired"]));
+
+/**
+ * Checks the release's folder `dir` against its `ids.json` (above): each
+ * built-in's id listed as `"shipped"`, never `"retired"`, and each id
+ * listed as `"shipped"` a folder's. Throws, saying what to change.
+ */
+export const checkShippedIds = (dir: string): void => {
+  const file = path.join(dir, "ids.json");
+  if (!existsSync(file)) {
+    throw new Error(
+      `${file} isn't there: it names every built-in id a release shipped`
+    );
+  }
+  const ids = shippedIdsSchema.parse(JSON.parse(readFileSync(file, "utf-8")));
+  const folders = blueprintFolders(dir);
+  for (const id of folders) {
+    if (ids[id] === undefined) {
+      throw new Error(`Built-in ${id}: add "${id}": "shipped" to ${file}`);
+    }
+    if (ids[id] === "retired") {
+      throw new Error(
+        `Built-in ${id}: an earlier release removed a built-in of this id, which Apps created from it keep as their origin: name it another way`
+      );
+    }
+  }
+  for (const [id, state] of Object.entries(ids)) {
+    if (state === "shipped" && !folders.includes(id)) {
+      throw new Error(
+        `Built-in ${id} is gone: mark it "retired" in ${file}, never delete it`
+      );
+    }
+  }
 };
 
 /** The built-ins in `dir`, one per folder, checked. */
@@ -318,6 +365,7 @@ export const writeBlueprints = (
 };
 
 if (import.meta.main) {
+  checkShippedIds(blueprintsDir);
   const count = writeBlueprints([blueprintsDir]);
   console.info(`Embedded ${count} built-in blueprint(s)`);
 }

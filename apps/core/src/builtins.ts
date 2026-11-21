@@ -34,10 +34,13 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 // whole set: one an earlier release installed that this one no longer
 // ships is removed, so nobody creates from code no release vouches for
 // any more. Apps created from it keep their code and are detached from it
-// (their origins deleted), so no later built-in under its id offers them
-// an update. A rollback to a release that ships it installs it again; the
-// Apps it detached stay detached, as that release ships the code they took
-// or older. The catalog contracts it published stay: a workflow may bind
+// (their origins deleted). No release ships another built-in under a
+// removed one's id (`ids.json`, build-blueprints.ts), so a deployment
+// that skips the release that removed it, and so never detached its
+// Apps, is never offered unrelated code as their update either. A
+// rollback to a release that ships it installs it again; the Apps it
+// detached stay detached, as that release ships the code they took or
+// older. The catalog contracts it published stay: a workflow may bind
 // one, and a contract is published once and never changed.
 //
 // One object does the installing, the `Builtins` singleton. It keeps the

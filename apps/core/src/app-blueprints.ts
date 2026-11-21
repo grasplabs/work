@@ -1354,15 +1354,18 @@ export const unshippedBuiltins = async (
  * audited batch its row, and the origin (`app_origins`) of every App
  * created from it, which detaches them: they keep their code, their
  * versions and their label (`apps.blueprint`), and are offered no update
- * from it again, whatever a later release ships under the same id. The
- * event counts the Apps detached. Then its trees. A row never names a
+ * from it again. No later release ships another built-in under its id
+ * (`ids.json`, build-blueprints.ts), which also covers a deployment that
+ * skips this release and so never detaches them. The event counts the
+ * Apps detached. Then its trees. A row never names a
  * tree that is gone, so a release that ships it again (a rollback) finds
  * it whole; a failed batch leaves all of it for the next install to
  * remove. A tree whose delete fails is only logged and stays in R2,
  * holding the built-in's code as the release shipped it and no client
- * data: nothing reads it once the row is gone, and it goes only when a
- * release ships a built-in under the same id again, whose install deletes
- * every tree of the id but its own (`deleteReplacedTrees`). A create that
+ * data: nothing reads it once the row is gone. It goes only if a
+ * rollback installs the built-in again, whose install deletes every tree
+ * of the id but its own (`deleteReplacedTrees`); otherwise it stays, a
+ * few KB per failed delete. A create that
  * races the removal is refused as for any blueprint that is gone
  * (`createFromBlueprint`), and an update accepted as it lands as a
  * conflict (`acceptBlueprintUpdate`). Removing one that is gone already
