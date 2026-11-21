@@ -2,8 +2,8 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { companies } from "../../test/app.tsx";
 import { emptyAdminSnapshot } from "../../test/snapshots.ts";
-import { companies } from "../test-app.tsx";
 
 // An organization's AI use and hours, as the browser shows them from the
 // snapshot its core answers, which the Worker passes through unchanged

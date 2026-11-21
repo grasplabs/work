@@ -42,7 +42,7 @@ export const documentOf = async (
  * router of its own, as the page would show it: for a section whose words
  * come from rich records the Worker answers (an organization's Setup),
  * tested from those real answers rather than copies of them. The pages
- * themselves render in the browser (src/test-app.tsx).
+ * themselves render in the browser (test/app.tsx).
  */
 /** The admin's frame around a page: its sidebar's and tooltips' providers. */
 const framed = (children: ReactElement): ReactElement =>

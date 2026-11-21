@@ -2,11 +2,11 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
+import type { Answers } from "../../test/app.tsx";
 import { daysAgo, emptyAdminSnapshot } from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { answeredAdmin, gridRow, openAdmin } from "../test-app.tsx";
-import type { Answers } from "../test-app.tsx";
 import { orgSections, sectionTo, sectionWords } from "./sections.ts";
 import { formatDate } from "./words.ts";
 

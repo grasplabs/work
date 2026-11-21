@@ -1,7 +1,7 @@
 /**
  * What clients' cores answer the admin, as plain data: the fake Cloudflare
  * API's cores answer these (test/cloudflare-api.ts), and the component
- * tests answer the page's server functions with them (src/test-app.tsx).
+ * tests answer the page's server functions with them (test/app.tsx).
  * Nothing here reaches the Workers runtime, so both can import it.
  */
 import type { AdminKickoffView } from "@grasp-os/shared/admin-kickoff";

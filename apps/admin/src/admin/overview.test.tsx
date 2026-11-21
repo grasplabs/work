@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
+import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
+import type { Answers } from "../../test/app.tsx";
 import { daysAgo, readySnapshot, toldSnapshot } from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { answeredAdmin, gridRow, openAdmin } from "../test-app.tsx";
-import type { Answers } from "../test-app.tsx";
 
 // The admin's frame and its overview: the sidebar, the table of apps
 // asked for, the list of organizations and today's list, from the grid
