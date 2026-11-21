@@ -74,7 +74,9 @@ const argumentsOf = (
  * answer as an ordinary log line, so a quieter `WRANGLER_LOG` (the e2e
  * stack's is `warn`, playwright.config.ts) prints nothing at all.
  * Warnings and errors still reach stderr, and the log file
- * (`WRANGLER_LOG_PATH`) still gets every line.
+ * (`WRANGLER_LOG_PATH`) still gets every line. Without telemetry: a local
+ * step has nothing to report, and Wrangler's notice that its metrics
+ * changed is a log line too, which would land before the answer.
  */
 const execute = (
   config: string,
@@ -98,7 +100,11 @@ const execute = (
     {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "inherit"],
-      env: { ...process.env, WRANGLER_LOG: "log" },
+      env: {
+        ...process.env,
+        WRANGLER_LOG: "log",
+        WRANGLER_SEND_METRICS: "false",
+      },
     }
   );
 

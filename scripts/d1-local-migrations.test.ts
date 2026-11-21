@@ -53,6 +53,7 @@ const migrate = (config: string, persistTo: string, logDir: string): string =>
       ...process.env,
       PATH: `${path.join(import.meta.dirname, "../node_modules/.bin")}${path.delimiter}${process.env.PATH ?? ""}`,
       WRANGLER_LOG: "warn",
+      WRANGLER_SEND_METRICS: "false",
       WRANGLER_LOG_PATH: path.join(logDir, "missing", "wrangler.log"),
     },
   });
