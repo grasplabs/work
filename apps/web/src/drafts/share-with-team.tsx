@@ -25,6 +25,7 @@ import {
 import type { FileGroup } from "../apps/draft-changes.tsx";
 import { fixQuestion } from "../apps/fix-with-grasp.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
+import { copyText } from "../copy.ts";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
@@ -906,10 +907,11 @@ const ShareDialog = ({
             icon={LinkIcon}
             onClick={() => {
               void (async () => {
-                await navigator.clipboard.writeText(
-                  `${window.location.origin}${path}`
-                );
-                toast.success(t`Link copied`);
+                if (await copyText(`${window.location.origin}${path}`)) {
+                  toast.success(t`Link copied`);
+                  return;
+                }
+                toast.error(t`Copying didn't work`);
               })();
             }}
             variant="quiet"
