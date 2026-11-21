@@ -212,8 +212,9 @@ export const Route = createFileRoute("/_shell/brain")({
     };
   },
   // Going from note to note keeps what was read: each read is a page of
-  // the brain's records per type, every one in the audit log.
-  shouldReload: false,
+  // the brain's records per type, every one in the audit log. Coming back
+  // to the Brain reads it again, so what the chat saved meanwhile shows.
+  shouldReload: ({ cause }) => cause === "enter",
   // Every page of the brain waits for this read on the way in: the
   // skeleton is the page the address names, under its bar.
   pendingComponent: BrainPending,

@@ -743,10 +743,11 @@ export const Route = createFileRoute("/_shell/integrations/")({
     connectionError: textOf(search.connectionError),
     connection: textOf(search.connection),
   }),
-  // Read once: the search, a kind and the open app only narrow what was
-  // read, so a new one keeps the page as it is rather than reading it
-  // again. A change reads it again (use-change.ts invalidates it).
-  shouldReload: false,
+  // Read as the page is entered: the search, a kind and the open app only
+  // narrow what was read, so a new one keeps the page as it is rather than
+  // reading it again. A change reads it again (use-change.ts invalidates
+  // it), and so does coming back, when another admin may have connected.
+  shouldReload: ({ cause }) => cause === "enter",
   loader: async ({ context: { core, identity } }) => {
     const requests = loadFromCore(
       core,

@@ -246,8 +246,8 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
     return { ...read, tools };
   },
   // A tab, or a notice dropped, keeps what was read; a change reads it
-  // again (use-change.ts invalidates it).
-  shouldReload: false,
+  // again (use-change.ts invalidates it), and so does coming back.
+  shouldReload: ({ cause }) => cause === "enter",
   pendingComponent: IntegrationSkeleton,
   component: IntegrationRoute,
 });

@@ -153,9 +153,10 @@ export const Route = createFileRoute("/_shell/apps/$app")({
   validateSearch,
   loaderDeps: ({ search: { project } }) => ({ project }),
   // Moving between the App's own routes (`pages/`), or the workspace's
-  // views, reads nothing again: the frame routes them. Loading the App
-  // again (`invalidate`) still does.
-  shouldReload: false,
+  // views, reads nothing again: the frame routes them. Coming back to the
+  // App reads it again, as `false` would keep its first read (an offline
+  // one too) for the router's whole cache time; `invalidate` still does.
+  shouldReload: ({ cause }) => cause === "enter",
   loader: async ({ context: { core }, params, deps: { project } }) =>
     await loadFromCore(core, async (session) => {
       const [app, contents, inProject] = await Promise.all([
