@@ -4,19 +4,18 @@ import type {
   PlaceItem,
   PlacesSuite,
 } from "@grasp-os/shared/document-places";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
+
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import { Fragment, useEffect, useRef, useState } from "react";
-
+} from "../grasp/breadcrumb/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Checkbox } from "../grasp/checkbox/index.ts";
 import {
@@ -219,21 +218,6 @@ const MoreRow = ({
   );
 };
 
-/** A step back in the trail, as a breadcrumb's link: it opens that place or folder again. */
-const Crumb = ({
-  children,
-  onClick,
-}: {
-  children: string;
-  onClick: () => void;
-}) => (
-  <BreadcrumbLink
-    render={<button aria-label={children} onClick={onClick} type="button" />}
-  >
-    {children}
-  </BreadcrumbLink>
-);
-
 /** The search of a place: by name and content, sent with Enter; empty, its folder again. */
 const SearchPlace = ({
   name,
@@ -384,41 +368,50 @@ const PickerBody = ({
                 {spot === null ? (
                   <BreadcrumbPage>{t`Places`}</BreadcrumbPage>
                 ) : (
-                  <Crumb
-                    onClick={() => {
-                      setSearch("");
-                      void loadPlaces();
-                    }}
+                  <BreadcrumbLink
+                    render={
+                      <button
+                        aria-label={t`Places`}
+                        onClick={() => {
+                          setSearch("");
+                          void loadPlaces();
+                        }}
+                        type="button"
+                      />
+                    }
                   >
                     {t`Places`}
-                  </Crumb>
+                  </BreadcrumbLink>
                 )}
               </BreadcrumbItem>
               {spot === null
                 ? null
                 : [{ id: null, name: spot.place.name }, ...spot.trail].map(
                     (step, at, all) => (
-                      <Fragment key={step.id ?? spot.place.id}>
-                        <BreadcrumbSeparator />
-                        <BreadcrumbItem>
-                          {at === all.length - 1 && spot.query === null ? (
-                            <BreadcrumbPage>{step.name}</BreadcrumbPage>
-                          ) : (
-                            <Crumb
-                              onClick={() => {
-                                setSearch("");
-                                void loadItems({
-                                  place: spot.place,
-                                  trail: spot.trail.slice(0, at),
-                                  query: null,
-                                });
-                              }}
-                            >
-                              {step.name}
-                            </Crumb>
-                          )}
-                        </BreadcrumbItem>
-                      </Fragment>
+                      <BreadcrumbItem key={step.id ?? spot.place.id}>
+                        {at === all.length - 1 && spot.query === null ? (
+                          <BreadcrumbPage>{step.name}</BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink
+                            render={
+                              <button
+                                aria-label={step.name}
+                                onClick={() => {
+                                  setSearch("");
+                                  void loadItems({
+                                    place: spot.place,
+                                    trail: spot.trail.slice(0, at),
+                                    query: null,
+                                  });
+                                }}
+                                type="button"
+                              />
+                            }
+                          >
+                            {step.name}
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
                     )
                   )}
             </BreadcrumbList>
