@@ -83,6 +83,7 @@ const styles = stylex.create({
   picture: {
     position: "relative",
     overflow: "hidden",
+    isolation: "isolate",
     display: "block",
     width: "100%",
     aspectRatio: "16 / 9",
@@ -159,17 +160,6 @@ export interface LookTilesWords {
   patterns: Record<DitherPattern, string>;
   tones: Record<DitherTone, string>;
 }
-
-/** The looks the tiles show for `look`: every backdrop, and a dither's patterns and colours. */
-export const tileLooks = (look: Look): Look[] => [
-  ...backdrops.map((backdrop) => ({ ...look, backdrop })),
-  ...(isDithered(look.backdrop)
-    ? [
-        ...ditherPatterns.map((pattern) => ({ ...look, pattern })),
-        ...ditherTones.map((tone) => ({ ...look, tone })),
-      ]
-    : []),
-];
 
 /** The person's look, chosen by sight: a backdrop, and a dither's pattern and colour. */
 export const LookTiles = ({
