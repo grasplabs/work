@@ -295,7 +295,7 @@ const agreedInterview = (
 const started = "2026-10-05T07:00:00.000Z";
 
 /** Someone in `team`. */
-const person = (id: string, team: string) => ({
+const member = (id: string, team: string) => ({
   id,
   name: `Person ${id}`,
   email: `${id}@acme.test`,
@@ -332,10 +332,10 @@ export const heardSnapshot = (name: string): AdminSnapshot => {
         { id: "legal", name: "Legal", lead: null, does: "", off: true },
       ],
       people: [
-        person("lisa", "sales"),
-        person("tom", "sales"),
-        person("otto", "ops"),
-        person("lena", "legal"),
+        member("lisa", "sales"),
+        member("tom", "sales"),
+        member("otto", "ops"),
+        member("lena", "legal"),
       ],
     },
     plan: { start: "2026-10-05", days: 14, at: started },
@@ -352,5 +352,155 @@ export const heardSnapshot = (name: string): AdminSnapshot => {
       agreedInterview("tom", "own", 4, at),
     ],
     gate: { ...empty.gate, known: 42 },
+  };
+};
+
+// A company three days into its interviews (src/admin/interviews.test.tsx, test/admin-interviews.test.ts).
+const minute = 60_000;
+const day = 24 * 60 * minute;
+
+/** What someone said, and their link's code: what core never sends, and the admin must never show. */
+export const said = "We key every supplier invoice in by hand on Fridays";
+export const fact = "Invoices wait for the controller's second signature";
+export const linkCode = "7k3f-q2mp-secret-link-code";
+
+/** A time, as core sends one. */
+const at = (ms: number) => new Date(ms).toISOString();
+
+/**
+ * A company three days into its interviews, with one team of three: its
+ * lead Ana talked to Claire for 12 minutes and gave it a 5; Ben typed to
+ * Stephen for 7 minutes and stopped at the steps; Cleo has her link; and
+ * Dan has been talking to Stephen for 4 minutes, still at his story.
+ * Its core also answers with what a core must never send (what was said,
+ * the facts' words and a link's code), as an older or broken one might:
+ * the admin's read drops it.
+ */
+export const interviewingSnapshot = (): AdminSnapshot => {
+  const empty = emptyAdminSnapshot("Acme");
+  const now = Date.parse(empty.now);
+  const start = at(now - 3 * day);
+  const linkOf = (
+    person: string,
+    state: AdminSnapshot["links"][number]["state"]
+  ) => ({
+    person,
+    sentAt: start,
+    openedAt: state === "invited" ? null : start,
+    remindedAt: null,
+    deletedAt: null,
+    failedMail: null,
+    state,
+    code: linkCode,
+    url: `https://acme.grasp.test/i/${linkCode}`,
+  });
+  const ana = {
+    person: "p-ana",
+    kind: "lead" as const,
+    startedAt: at(now - 2 * day),
+    completedAt: at(now - 2 * day + 12 * minute),
+    updatedAt: at(now - 2 * day + 12 * minute),
+    agreed: true,
+    phase: "readback" as const,
+    stoppedAt: null,
+    minutes: 12,
+    facts: 4,
+    out: 1,
+    confirmed: 4,
+    rating: 5,
+    typed: false,
+    interviewer: "claire" as const,
+    lines: [{ who: "person", text: said }],
+    transcript: said,
+    factTexts: [fact],
+  };
+  const ben = {
+    person: "p-ben",
+    kind: "own" as const,
+    startedAt: at(now - day),
+    completedAt: null,
+    updatedAt: at(now - day + 7 * minute),
+    agreed: false,
+    phase: "steps" as const,
+    stoppedAt: "steps" as const,
+    minutes: 7,
+    facts: 2,
+    out: 0,
+    confirmed: 0,
+    rating: null,
+    typed: true,
+    interviewer: "stephen" as const,
+    transcript: said,
+  };
+  // Core sends the part a live interview is in as where it stands, the
+  // same as for one that stopped: only the link says he is talking now.
+  const dan = {
+    ...ben,
+    person: "p-dan",
+    startedAt: at(now - 4 * minute),
+    updatedAt: at(now),
+    phase: "story" as const,
+    stoppedAt: "story" as const,
+    minutes: 4,
+    facts: 1,
+    typed: false,
+  };
+  return {
+    ...empty,
+    roster: {
+      teams: [
+        {
+          id: "t-finance",
+          name: "Finance",
+          lead: "p-ana",
+          does: "",
+          off: false,
+        },
+      ],
+      people: [
+        {
+          id: "p-ana",
+          name: "Ana Smit",
+          email: "",
+          team: "t-finance",
+          title: "",
+          away: false,
+        },
+        {
+          id: "p-ben",
+          name: "Ben Vos",
+          email: "",
+          team: "t-finance",
+          title: "",
+          away: false,
+        },
+        {
+          id: "p-cleo",
+          name: "Cleo Bakker",
+          email: "",
+          team: "t-finance",
+          title: "",
+          away: false,
+        },
+        {
+          id: "p-dan",
+          name: "Dan Mol",
+          email: "",
+          team: "t-finance",
+          title: "",
+          away: false,
+        },
+      ],
+    },
+    plan: { start: start.slice(0, 10), days: 14, at: start },
+    agreed: true,
+    told: true,
+    links: [
+      linkOf("p-ana", "completed"),
+      linkOf("p-ben", "incomplete"),
+      linkOf("p-cleo", "invited"),
+      linkOf("p-dan", "progress"),
+    ],
+    interviews: [ana, ben, dan],
   };
 };

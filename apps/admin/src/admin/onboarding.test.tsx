@@ -1,31 +1,14 @@
+// @vitest-environment happy-dom
 import { adminSnapshotSchema } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { page as pageAt } from "./pages.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
-import { emptyAdminSnapshot } from "./snapshots.ts";
+import { emptyAdminSnapshot } from "../../test/snapshots.ts";
+import { companies } from "../test-app.tsx";
 
-const token = "test-deployer-token-admin-onboarding-5c1e93";
-const cloudflare = mockCloudflareApi(token);
-// After the fake API: Access's keys are served, the rest goes to the fake.
-mockAccess();
-
-/** An active client running a new release, as a deploy made it live, whose core answers `snapshot`. */
-const liveClient = async (snapshot: AdminSnapshot) => {
-  const release = await placedRelease("feat(core): onboarding");
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { core } = await livePlacedClient(cloudflare, release, {
-    id: clientId,
-    name: `Bakkerij ${clientId}`,
-    signIn: null,
-  });
-  core.admin = snapshot;
-  return `/organizations/${clientId}`;
-};
+// An organization's onboarding (its steps, and its teams under
+// Interviews), as the browser shows it from the snapshot its core answers,
+// which the Worker passes through unchanged (test/client-admins.test.ts).
 
 /**
  * A small bakery, nine days into its interviews: everything agreed and the
@@ -163,12 +146,6 @@ const bakery = (): AdminSnapshot =>
     },
   });
 
-/** The page at `path`, its text whole where React marks where one piece of it ends and the next starts. */
-const page = async (path: string) => {
-  const { status, html } = await pageAt(path);
-  return { status, html: html.replaceAll("<!-- -->", "") };
-};
-
 /** The steps' list on a page: from its start to its end. */
 const stepsOf = (html: string): string => {
   const at = html.indexOf('<nav aria-label="The steps of this onboarding"');
@@ -192,16 +169,26 @@ const teamRowOf = (html: string, name: string): string => {
 };
 
 describe("an organization's onboarding in the admin", () => {
-  useStoreSecrets({ deployer: token });
+  let shown = companies();
+  beforeEach(() => {
+    shown = companies();
+  });
+  /** A company answering `snapshot`: its page's path. */
+  const liveClient = async (snapshot: AdminSnapshot): Promise<string> =>
+    await Promise.resolve(shown.add(snapshot));
+  /** The page at `path`, its markup as the browser shows it. */
+  const page = async (path: string) => {
+    const opened = await shown.open(path);
+    return { html: opened.html() };
+  };
 
   it("lists the steps, each saying where it stands, opens the one that is next here, and sends those another section shows there", async () => {
     const base = await liveClient(bakery());
 
-    const { status, html } = await page(`${base}/steps`);
+    const { html } = await page(`${base}/steps`);
     const steps = stepsOf(html);
 
     expect({
-      status,
       // Operations's lead hasn't talked, which Interviews shows: Grasp opens is next here.
       current: stepOf(steps, "Grasp opens").includes('aria-current="page"'),
       // Only the open step is marked.
@@ -225,7 +212,6 @@ describe("an organization's onboarding in the admin", () => {
       ),
       complete: html.includes("nothing is missing"),
     }).toStrictEqual({
-      status: 200,
       current: true,
       marked: 1,
       statuses: [true, true, true],
@@ -348,13 +334,12 @@ describe("an organization's onboarding in the admin", () => {
   it("lists the company's teams where its interviews are, each with where it stands, opening the team, and short enough to need no search", async () => {
     const base = await liveClient(bakery());
 
-    const { status, html } = await page(`${base}/interviews`);
+    const { html } = await page(`${base}/interviews`);
     const sales = teamRowOf(html, "Sales");
     const operations = teamRowOf(html, "Operations");
     const logistics = teamRowOf(html, "Logistics");
 
     expect({
-      status,
       standing: html.includes("Where everyone stands"),
       // Three teams are read whole: nothing to search or narrow them with.
       search: html.includes("Find a team or a person"),
@@ -372,7 +357,6 @@ describe("an organization's onboarding in the admin", () => {
         "Ask Logistics in",
       ].map((text) => logistics.includes(text)),
     }).toStrictEqual({
-      status: 200,
       standing: true,
       search: false,
       sales: [true, true, true],
@@ -387,8 +371,6 @@ describe("an organization's onboarding in the admin", () => {
     const sales = await page(`${base}/interviews?team=sales`);
     const logistics = await page(`${base}/interviews?team=7`);
     const unknown = await page(`${base}/interviews?team=bakery`);
-    // The teams' old address leads to where they are now, its team with it.
-    const old = await pageAt(`${base}/organization?team=sales`);
 
     expect({
       sales: [
@@ -411,7 +393,6 @@ describe("an organization's onboarding in the admin", () => {
       ].map((text) => logistics.html.includes(text)),
       // A team the company doesn't have: all of them.
       unknown: unknown.html.includes('aria-label="Open Sales"'),
-      old: old.html.includes("Sales</h2>"),
       // Where a person's link stands is still read out on a phone, where it isn't shown.
       phone: [
         sales.html.includes('class="max-sm:sr-only">Talking now'),
@@ -422,7 +403,6 @@ describe("an organization's onboarding in the admin", () => {
       logistics: [true, true],
       phone: [true, false],
       unknown: true,
-      old: true,
     });
   });
 
