@@ -25,6 +25,7 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OpportunitiesRpc } from "./opportunities-rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
+import { setOwnName } from "./own-name.ts";
 import { SessionsRpc } from "./own-sessions.ts";
 import { DependenciesRpc } from "./packages/rpc.ts";
 import { PagesRpc } from "./pages-rpc.ts";
@@ -57,7 +58,10 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
  * RPC, so each keeps its env and check in private fields.
  */
 export class SessionRpc extends CoreRpcTarget implements SessionApi {
+  readonly #env: Env;
   readonly #whoami: SessionCheck;
+  /** The check for what only the client's own members do. */
+  readonly #full: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #drafts: DraftsRpc;
   readonly #versions: VersionsRpc;
@@ -108,8 +112,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     // guest-access.ts opens it to them (`openToGuests`).
     const check = membersOnly(audited);
     this.#whoami = openToGuests(audited, "whoami");
+    this.#env = env;
     // Everything but the onboarding refuses Grasp staff (session-check.ts).
     const full = fullAccess(check);
+    this.#full = full;
     this.#apps = new AppsRpc(env, full);
     this.#drafts = new DraftsRpc(env, full);
     this.#versions = new VersionsRpc(env, full);
@@ -329,5 +335,11 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   async whoami(): Promise<Identity> {
     return await withPerson(this.#whoami, (identity) => identity);
+  }
+
+  async setName(name: string): Promise<void> {
+    await withPerson(this.#full, async (person) => {
+      await setOwnName(this.#env, person, name);
+    });
   }
 }

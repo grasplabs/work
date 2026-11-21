@@ -1302,6 +1302,7 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
+        archivedAt: chats.archivedAt,
         agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
@@ -1765,6 +1766,10 @@ export class Workspace extends DurableObject<Env> {
     action:
       | "chat.created"
       | "chat.renamed"
+      | "chat.archived"
+      | "chat.unarchived"
+      | "chat.filed"
+      | "chat.unfiled"
       | "chat.answer_rated"
       | "chat.deleted"
       | "chat.moved"
@@ -4343,9 +4348,11 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * `personId`'s chats in Grasp (`shownInGrasp`), the most recently active
-   * first: at most {@link listedChats}.
+   * first: at most {@link listedChats}. Those they archived only with
+   * `archived`, and then only those; with `project`, only those they filed in
+   * it.
    */
-  chats(personId: string): ChatSummary[] {
+  chats(personId: string, archived = false, project?: string): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
@@ -4355,9 +4362,16 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
+        archivedAt: chats.archivedAt,
       })
       .from(chats)
-      .where(shownInGrasp(personId))
+      .where(
+        and(
+          shownInGrasp(personId),
+          archived ? isNotNull(chats.archivedAt) : isNull(chats.archivedAt),
+          project === undefined ? undefined : eq(chats.projectId, project)
+        )
+      )
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
@@ -4375,6 +4389,7 @@ export class Workspace extends DurableObject<Env> {
       | "lastAt"
       | "makeKind"
       | "makeProject"
+      | "archivedAt"
     >
   ): ChatSummary {
     return {
@@ -4385,6 +4400,7 @@ export class Workspace extends DurableObject<Env> {
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
       make: makeOf(chat),
+      archived: chat.archivedAt !== null,
     };
   }
 
@@ -4952,6 +4968,69 @@ export class Workspace extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(chats).set({ title }).where(eq(chats.id, id)).run();
       this.#outboxed(by, "chat.renamed", id);
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Files `personId`'s own chat in project `project`, or takes it out of
+   * the one it is in (`null`), audited as `by`'s; nothing, and no event,
+   * where it is so already. Whether they may put it in that project is
+   * the caller's to check (`ChatsRpc.setProject`).
+   */
+  setChatProject(
+    chatId: unknown,
+    personId: string,
+    project: string | null,
+    by: AuditActor
+  ): void {
+    const chat = this.#ownChat(chatId, personId);
+    if (chat.projectId === project) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ projectId: project })
+        .where(eq(chats.id, chat.id))
+        .run();
+      this.#outboxed(
+        by,
+        project === null ? "chat.unfiled" : "chat.filed",
+        chat.id,
+        { project: project ?? chat.projectId }
+      );
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Archives `personId`'s own chat, out of their list, or brings it back
+   * (`archived` false), audited as `by`'s; nothing, and no event, where it
+   * is so already. Nothing else about the chat changes: it opens and takes
+   * questions as ever.
+   */
+  archiveChat(
+    chatId: unknown,
+    personId: string,
+    archived: boolean,
+    by: AuditActor
+  ): void {
+    const chat = this.#ownChat(chatId, personId);
+    if ((chat.archivedAt !== null) === archived) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ archivedAt: archived ? new Date() : null })
+        .where(eq(chats.id, chat.id))
+        .run();
+      this.#outboxed(
+        by,
+        archived ? "chat.archived" : "chat.unarchived",
+        chat.id
+      );
     });
     this.#deliverAudit();
   }

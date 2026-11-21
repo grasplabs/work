@@ -113,6 +113,7 @@ export const rpcParamNames: ParamNames = {
     "forget": ["target"],
     "forgetPreview": ["target"],
     "goals": [],
+    "openGaps": [],
     "read": [],
     "redactGapAnswer": ["gapId"],
     "saveTeamGroups": ["groups"],
@@ -142,6 +143,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ChatsRpc": {
     "agents": [],
+    "archive": ["chatId"],
     "attachFile": ["chatId","file"],
     "build": ["chatId","build"],
     "cancel": ["chatId"],
@@ -155,7 +157,7 @@ export const rpcParamNames: ParamNames = {
     "forSubject": ["subject"],
     "grantConnection": ["chatId","id"],
     "heldCalls": ["chatId","after"],
-    "list": [],
+    "list": ["options"],
     "makeDraftedAgent": ["chatId","make"],
     "models": [],
     "names": [],
@@ -167,7 +169,9 @@ export const rpcParamNames: ParamNames = {
     "rename": ["chatId","title"],
     "search": ["query"],
     "send": ["chatId","question"],
+    "setProject": ["chatId","project"],
     "summary": ["chatId"],
+    "unarchive": ["chatId"],
     "watch": ["chatId","after","onUpdate"],
     "worked": ["chatId"],
   },
@@ -375,6 +379,8 @@ export const rpcParamNames: ParamNames = {
   },
   "OrganizationRpc": {
     "get": [],
+    "removeLogo": [],
+    "setLogo": ["image"],
     "teams": [],
     "update": ["changes"],
   },
@@ -409,6 +415,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ProjectsRpc": {
     "addMember": ["id","member"],
+    "connections": ["id"],
     "create": ["project"],
     "file": ["id","file"],
     "get": ["id"],
@@ -429,6 +436,7 @@ export const rpcParamNames: ParamNames = {
     "revoke": ["id"],
   },
   "SessionRpc": {
+    "setName": ["name"],
     "whoami": [],
   },
   "SessionsRpc": {

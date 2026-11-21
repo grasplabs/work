@@ -257,6 +257,158 @@ describe("chats", () => {
     );
   });
 
+  it("are archived by their person alone: out of the list, listed when asked, opened as ever, and back once unarchived, each recorded once", async () => {
+    const ann = await person();
+    const ben = await person();
+    const kept = await ann.chats.create("Kept");
+    const old = await ann.chats.create("Old trip");
+
+    await ann.chats.archive(old.id);
+    // Archiving it again changes nothing, and records nothing more.
+    await ann.chats.archive(old.id);
+    await expect(
+      Promise.all([
+        outcome(ben.chats.archive(old.id)),
+        outcome(ben.chats.unarchive(old.id)),
+      ])
+    ).resolves.toStrictEqual(["agent.chat_not_found", "agent.chat_not_found"]);
+    const listed = {
+      list: await ann.chats.list(),
+      archived: await ann.chats.list({ archived: true }),
+      opened: await ann.chats.summary(old.id),
+    };
+    await ann.chats.unarchive(old.id);
+
+    expect({
+      list: listed.list.map(({ id }) => id),
+      archived: listed.archived.map(({ id, archived }) => ({ id, archived })),
+      opened: listed.opened.archived,
+    }).toStrictEqual({
+      list: [kept.id],
+      archived: [{ id: old.id, archived: true }],
+      opened: true,
+    });
+    await expect(ann.chats.list()).resolves.toMatchObject([
+      { id: old.id, archived: false },
+      { id: kept.id, archived: false },
+    ]);
+    await expect(ann.chats.list({ archived: true })).resolves.toStrictEqual([]);
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(({ target }) => target?.id === old.id)
+            .map(({ action, actor }) => ({ action, actor }))
+        ).toStrictEqual([
+          {
+            action: "chat.created",
+            actor: { type: "person", userId: ann.userId },
+          },
+          {
+            action: "chat.archived",
+            actor: { type: "person", userId: ann.userId },
+          },
+          {
+            action: "chat.unarchived",
+            actor: { type: "person", userId: ann.userId },
+          },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("are filed in a project by their person alone, listed there for them only, and taken out again, each recorded once", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const ann = await person();
+    const ben = await person();
+    const cy = await person();
+    const { id: project } = await owner.api.projects.create({
+      name: "Year-end close",
+      description: "",
+      icon: "folder",
+    });
+    for (const { userId } of [ann, ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await owner.api.projects.addMember(project, {
+        type: "person",
+        id: userId,
+        role: "user",
+      });
+    }
+    const filed = await ann.chats.create("Accruals");
+    const kept = await ann.chats.create("Lunch");
+    const cys = await cy.chats.create("Elsewhere");
+
+    await ann.chats.setProject(filed.id, project);
+    // Filing it again changes nothing, and records nothing more.
+    await ann.chats.setProject(filed.id, project);
+    const refused = await Promise.all([
+      // Someone else in the project can't file, or take out, her chat.
+      outcome(ben.chats.setProject(filed.id, null)),
+      outcome(ben.chats.setProject(kept.id, project)),
+      // Someone outside it can neither file in it nor list it.
+      outcome(cy.chats.setProject(cys.id, project)),
+      outcome(cy.chats.list({ project })),
+    ]);
+    const listed = {
+      ann: await ann.chats.list({ project }),
+      ben: await ben.chats.list({ project }),
+      annAll: await ann.chats.list(),
+    };
+    await ann.chats.setProject(filed.id, null);
+    const after = await ann.chats.list({ project });
+
+    expect({
+      refused,
+      ann: listed.ann.map(({ id }) => id),
+      ben: listed.ben.map(({ id }) => id),
+      annAll: listed.annAll.map(({ id }) => id),
+      after: after.map(({ id }) => id),
+    }).toStrictEqual({
+      refused: [
+        "agent.chat_not_found",
+        "agent.chat_not_found",
+        "project.not_found",
+        "project.not_found",
+      ],
+      ann: [filed.id],
+      ben: [],
+      annAll: [kept.id, filed.id],
+      after: [],
+    });
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                target?.id === filed.id && action !== "chat.created"
+            )
+            .map(({ action, actor, detail }) => ({
+              action,
+              actor,
+              project: detail?.project,
+            }))
+        ).toStrictEqual([
+          {
+            action: "chat.filed",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+          {
+            action: "chat.unfiled",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
   it("are listed by their latest message: a chat just continued comes first", async () => {
     const ann = await person();
     const older = await ann.chats.create("Invoices");
