@@ -2,13 +2,16 @@ import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { platformCounts } from "../src/admin/platform.ts";
+import { fetchClientGrid } from "../src/clients/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { channels, clientProvisions, clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { releaseToEdge } from "./edge.ts";
-import { page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
+import { maintenancePage, platformPage } from "./platform-page.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 import { emptyAdminSnapshot } from "./snapshots.ts";
 
@@ -60,14 +63,13 @@ describe("the admin's Platform page", () => {
       .set({ status: "failed", error: "cloudflare_400_10000" })
       .where(eq(clientProvisions.clientId, failing));
 
-    const { status, html } = await page("/platform");
+    const html = await platformPage();
     const text = textOf(html);
     const at = html.indexOf('aria-label="Needs a look"');
     const needsALook =
       at === -1 ? "" : textOf(html.slice(at, html.indexOf("</section>", at)));
 
     expect({
-      status,
       edge: html.includes(`href="/platform/releases/${newest}"`),
       stableWaits: text.includes(
         "No release yet. Promote a release to Stable first"
@@ -82,7 +84,6 @@ describe("the admin's Platform page", () => {
       // Its releases have a page of their own under it.
       releases: html.includes('href="/platform/releases"'),
     }).toStrictEqual({
-      status: 200,
       edge: true,
       stableWaits: true,
       laggardFailed: true,
@@ -101,15 +102,19 @@ describe("the admin's Platform page", () => {
       .set({ status: "failed", error: "cloudflare_400_10000" })
       .where(eq(clientProvisions.clientId, failing));
 
-    const { html } = await page("/platform/maintenance");
+    const html = await maintenancePage();
     const text = textOf(html);
+    // The sidebar counts it from the grid it reads (src/admin/platform.test.tsx says it).
+    const grid = await callServerFn(fetchClientGrid, undefined, {
+      email: "staff@grasp.test",
+    });
 
     expect({
       // What staff did, as the audit log keeps it: adding a company, never a deploy's steps.
       doneHere: text
         .slice(text.indexOf("Done here"))
         .includes("staff@grasp.test added Laggard"),
-      sidebarCount: text.includes("1 company needs a look"),
-    }).toStrictEqual({ doneHere: true, sidebarCount: true });
+      sidebarCount: platformCounts(grid).needLook,
+    }).toStrictEqual({ doneHere: true, sidebarCount: 1 });
   });
 });

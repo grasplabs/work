@@ -1,9 +1,14 @@
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
   RouterProvider,
+  Outlet,
 } from "@tanstack/react-router";
+import type { AnyRoute } from "@tanstack/react-router";
 import { exports } from "cloudflare:workers";
 import { createElement } from "react";
 import type { ReactElement } from "react";
@@ -132,10 +137,52 @@ export const documentOf = async (
  * tested from those real answers rather than copies of them. The pages
  * themselves render in the browser (src/test-app.tsx).
  */
+/** The admin's frame around a page: its sidebar's and tooltips' providers. */
+const framed = (children: ReactElement): ReactElement =>
+  createElement(
+    TooltipProvider,
+    null,
+    createElement(SidebarProvider, null, children)
+  );
+
 export const rendered = async (element: ReactElement): Promise<string> => {
   const router = createRouter({
-    routeTree: createRootRoute({ component: () => element }),
+    routeTree: createRootRoute({ component: () => framed(element) }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  const { prelude } = await prerender(
+    createElement(RouterProvider, { router })
+  );
+  const html = await new Response(prelude).text();
+  return html.replaceAll(scripts, "");
+};
+
+/**
+ * The page `route` (a route of the admin's, at `pattern`, as its file
+ * names it) shows at `at` once its loader gave `loaderData`, rendered as `rendered` does: a page whose words come
+ * from rich records the Worker answers (a release, the channels), tested
+ * from those real answers. Its route reads them with the server functions
+ * the test calls through the Worker's entry.
+ */
+export const renderedPage = async (
+  route: AnyRoute,
+  pattern: string,
+  at: string,
+  loaderData: unknown
+): Promise<string> => {
+  const root = createRootRoute({
+    component: () => framed(createElement(Outlet)),
+  });
+  const pageRoute = createRoute({
+    getParentRoute: () => root,
+    path: pattern,
+    component: route.options.component,
+    loader: () => loaderData,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([pageRoute]),
+    history: createMemoryHistory({ initialEntries: [at] }),
   });
   await router.load();
   const { prelude } = await prerender(
