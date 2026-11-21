@@ -266,7 +266,9 @@ test("a person renames a chat where its name stands: in the page's bar, and in t
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" })
   ).toContainText(named);
-  await expect(page.getByRole("navigation").getByText(named)).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "Chats" }).getByRole("link", { name: named })
+  ).toBeVisible();
 
   // Beside another page, in the chat's own head.
   const renamed = `Weekly sales ${tag}`;
