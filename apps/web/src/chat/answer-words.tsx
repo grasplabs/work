@@ -104,3 +104,22 @@ export const AnswerWords = ({
     streaming={writing}
   />
 );
+
+/**
+ * An answer's thinking, smaller: its links held to the answer's rule, as
+ * a link the model wrote there is the model's as much as one in its words.
+ */
+export const ThoughtWords = ({
+  text,
+  writing,
+}: {
+  text: string;
+  writing: boolean;
+}) => (
+  <Markdown
+    renderLink={(link) => <AnswerLink link={link} />}
+    size="sm"
+    source={text}
+    streaming={writing}
+  />
+);

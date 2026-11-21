@@ -31,7 +31,6 @@ import {
   ChatMessageAction,
 } from "../grasp/chat-message/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
-import { Markdown } from "../grasp/markdown/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -44,7 +43,7 @@ import {
   useThinkingStep,
 } from "./answer-thinking.tsx";
 import { useAnswerTo } from "./answer-to.ts";
-import { AnswerWords } from "./answer-words.tsx";
+import { AnswerWords, ThoughtWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { ThreadPlan } from "./build-progress.tsx";
@@ -1025,10 +1024,9 @@ const AnswerRow = ({
         thinkingLabel={context.workingLabel}
         thoughts={
           thought.thoughts === undefined ? undefined : (
-            <Markdown
-              size="sm"
-              source={thought.thoughts}
-              streaming={status === "thinking"}
+            <ThoughtWords
+              text={thought.thoughts}
+              writing={status === "thinking"}
             />
           )
         }

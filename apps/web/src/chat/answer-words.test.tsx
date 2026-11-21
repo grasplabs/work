@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { AnswerWords } from "./answer-words.tsx";
+import { AnswerWords, ThoughtWords } from "./answer-words.tsx";
 
 // An answer as the thread draws it: its Markdown with nothing of raw HTML
 // or a picture that would load; a link out of Grasp that opens only once
@@ -29,15 +29,19 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** A stored answer, `text`. */
-const shown = async (text: string): Promise<void> => {
+/** A stored answer, `text`, or its thinking. */
+const shown = async (text: string, thinking = false): Promise<void> => {
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <AnswerWords text={text} writing={false} />
+        {thinking ? (
+          <ThoughtWords text={text} writing={false} />
+        ) : (
+          <AnswerWords text={text} writing={false} />
+        )}
       </I18nProvider>
     );
     await Promise.resolve();
@@ -105,6 +109,20 @@ describe(AnswerWords, () => {
       asked: (
         document.querySelector("[role=alertdialog]")?.textContent ?? ""
       ).includes("//forms.example/leave"),
+    }).toStrictEqual({ addressed: null, opened: [], asked: true });
+  });
+
+  it("asks before following a link in the answer's thinking too", async () => {
+    await shown("Checking [the policy](https://policy.example/leave).", true);
+    const addressed = document.querySelector("a[href]");
+    await press(button("the policy"));
+
+    expect({
+      addressed,
+      opened,
+      asked: (
+        document.querySelector("[role=alertdialog]")?.textContent ?? ""
+      ).includes("https://policy.example/leave"),
     }).toStrictEqual({ addressed: null, opened: [], asked: true });
   });
 
