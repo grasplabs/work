@@ -23,11 +23,11 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemDescription,
   ItemGrid,
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -373,6 +373,7 @@ export const Sources = ({
             const { name } = source;
             const away = folded(source, index);
             const offered = connectable(source);
+            let state: ReactNode = null;
             let action: ReactNode = (
               <Button
                 aria-label={t`Connect ${name}`}
@@ -388,25 +389,23 @@ export const Sources = ({
               </Button>
             );
             if (noted.includes(source.id) && isConnected(source)) {
-              action = <Settled>{t`Connected`}</Settled>;
+              state = <Settled>{t`Connected`}</Settled>;
+              action = null;
             } else if (noted.includes(source.id)) {
-              action = (
-                <>
-                  <Settled>{t`Noted`}</Settled>
-                  {offered === undefined ? null : (
-                    <Button
-                      aria-label={t`Sign in to connect ${name} now`}
-                      onClick={() => {
-                        setConnecting(offered);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      {t`Sign in`}
-                    </Button>
-                  )}
-                </>
-              );
+              state = <Settled>{t`Noted`}</Settled>;
+              action =
+                offered === undefined ? null : (
+                  <Button
+                    aria-label={t`Sign in to connect ${name} now`}
+                    onClick={() => {
+                      setConnecting(offered);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t`Sign in`}
+                  </Button>
+                );
             }
             return (
               <Item
@@ -420,8 +419,11 @@ export const Sources = ({
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{name}</ItemTitle>
+                  {state === null ? null : (
+                    <ItemDescription>{state}</ItemDescription>
+                  )}
                 </ItemContent>
-                <ItemActions>{action}</ItemActions>
+                {action === null ? null : <ItemActions>{action}</ItemActions>}
               </Item>
             );
           })}
@@ -432,12 +434,8 @@ export const Sources = ({
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{name}</ItemTitle>
+                <ItemDescription>{t`Asked for`}</ItemDescription>
               </ItemContent>
-              <ItemActions>
-                <Text element="span" size="sm" tone="muted">
-                  {t`Asked for`}
-                </Text>
-              </ItemActions>
             </Item>
           ))}
           <OtherItem

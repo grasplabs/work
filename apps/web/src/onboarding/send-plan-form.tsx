@@ -73,7 +73,7 @@ const styles = stylex.create({
     listStyle: "none",
   },
   folded: { display: { default: "grid", [media.belowPhone]: "none" } },
-  team: { display: "flex", alignItems: "center", gap: grasp.space3 },
+  team: { display: "flex", alignItems: "center", gap: grasp.space2 },
   name: {
     flexGrow: 1,
     minWidth: 0,
@@ -82,6 +82,8 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
   },
   count: {
+    flexShrink: 0,
+    whiteSpace: "nowrap",
     color: grasp.muted,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
