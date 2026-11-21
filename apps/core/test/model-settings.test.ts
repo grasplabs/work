@@ -55,6 +55,31 @@ const newMonth = (): string => {
 /** US dollars as whole micros, so sums compare exactly. */
 const micros = (dollars: number): number => Math.round(dollars * 1_000_000);
 
+/** The UTC month of `at`, `yyyy-mm`. */
+const monthOf = (at: Date): string =>
+  at.toISOString().slice(0, "yyyy-mm".length);
+
+/** The UTC day of `at`, `yyyy-mm-dd`. */
+const dayOf = (at: Date): string =>
+  at.toISOString().slice(0, "yyyy-mm-dd".length);
+
+/**
+ * `read`, done again until it began and ended on one UTC day, and that
+ * day: what it read is then of that day, even run across midnight.
+ */
+const onOneDay = async <T>(
+  read: () => Promise<T>
+): Promise<{ value: T; on: Date }> => {
+  for (;;) {
+    const on = new Date();
+    // oxlint-disable-next-line no-await-in-loop -- read again only across midnight
+    const value = await read();
+    if (dayOf(new Date()) === dayOf(on)) {
+      return { value, on };
+    }
+  }
+};
+
 /** The model each role gets. */
 const roleIn = (settings: ModelsNow) => ({
   quick: modelForRole(settings, "quick"),
@@ -183,6 +208,13 @@ describe("model settings", { timeout: 60_000 }, () => {
       signedInPerson("admin"),
       signedInPerson("builder"),
     ]);
+    const { session } = await signedInWithRole(idp, "admin");
+    // Before anything is spent this month: every day of it so far, today
+    // the last, each 0.
+    const unspent = await onOneDay(async () => {
+      const { core } = await openRpc(session, { coreEnv });
+      return await core.authenticate().models.spend();
+    });
     // Each of an independent workflow's two runs asks Claude in its
     // `grasp.model` task, then a person's chat turn does.
     await fakeProviderFor(
@@ -259,10 +291,19 @@ describe("model settings", { timeout: 60_000 }, () => {
     );
     const goneTotal = gone.reduce((sum, { cost }) => sum + cost, 0);
 
-    const { session } = await signedInWithRole(idp, "admin");
-    const { core } = await openRpc(session, { coreEnv });
-    const spend = await core.authenticate().models.spend();
-    const readOn = new Date().getUTCDate();
+    // Read in the month the calls were recorded in, whenever it is read:
+    // up to the day it is read on in that month, and all of it once over.
+    const { value: spend, on: readOn } = await onOneDay(async () => {
+      const { core } = await openRpc(session, {
+        coreEnv: { ...coreEnv, SPEND_MONTH: month },
+      });
+      return await core.authenticate().models.spend();
+    });
+    const [year = 0, monthNumber = 0] = month.split("-").map(Number);
+    const daysBegun =
+      monthOf(readOn) === month
+        ? readOn.getUTCDate()
+        : new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
     expect(spend.workflows).toHaveLength(modelSpendListed);
     // The UTC days the month's calls were recorded on, as they were: a run
     // that crosses midnight records on two.
@@ -279,9 +320,14 @@ describe("model settings", { timeout: 60_000 }, () => {
     // person's one turn.
     const { days, chat, ...rest } = spend;
     expect({
+      unspent: {
+        month: unspent.value.month,
+        days: unspent.value.days,
+        total: unspent.value.total,
+      },
       ...rest,
       days: {
-        soFar: days.length >= (recordedOn.at(-1) ?? 0) && days.length <= readOn,
+        length: days.length,
         sum: micros(days.reduce((sum, each) => sum + each, 0)),
         spentOn: days.flatMap((each, at) => (each > 0 ? [at + 1] : [])),
       },
@@ -292,6 +338,11 @@ describe("model settings", { timeout: 60_000 }, () => {
         amount: Math.round(amount * 1_000_000),
       })),
     }).toStrictEqual({
+      unspent: {
+        month: monthOf(unspent.on),
+        days: Array.from({ length: unspent.on.getUTCDate() }, () => 0),
+        total: 0,
+      },
       month,
       total: Math.round((0.0135 + goneTotal) * 1_000_000),
       workflows: [
@@ -314,7 +365,7 @@ describe("model settings", { timeout: 60_000 }, () => {
       ],
       more: true,
       days: {
-        soFar: true,
+        length: daysBegun,
         sum: micros(spend.total),
         spentOn: recordedOn,
       },
@@ -397,6 +448,45 @@ describe("model settings", { timeout: 60_000 }, () => {
       }),
       total: 15_000,
       chat: 11_000,
+    });
+  });
+
+  it("show every day of a month that is over, leap day too, the days adding up to the total exactly", async () => {
+    // A leap year's February, over: 29 days, spent on the 3rd alone.
+    const coreEnv: Env = { ...env, SPEND_MONTH: "2024-02" };
+    const calls = [0.001, 0.002, 0.0000007].map((cost) => ({
+      id: crypto.randomUUID(),
+      period: "2024-02",
+      personId: "someone",
+      triggerType: "person",
+      model: anthropic,
+      credential: "organization",
+      inputTokens: 1000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost,
+      estimated: false,
+      createdAt: new Date("2024-02-03T09:30:00.000Z"),
+    }));
+    // One row a statement: D1 binds at most 100 values.
+    await Promise.all(
+      calls.map(
+        async (row) => await drizzle(env.DB).insert(modelUsage).values(row)
+      )
+    );
+
+    const { session } = await signedInWithRole(idp, "admin");
+    const { core } = await openRpc(session, { coreEnv });
+    const { days, total } = await core.authenticate().models.spend();
+
+    expect({
+      days: days.map(micros),
+      // Added up from the 1st, as a reader adds them: to the last bit.
+      exact: days.reduce((sum, amount) => sum + amount, 0) === total,
+    }).toStrictEqual({
+      days: Array.from({ length: 29 }, (_, at) => (at === 2 ? 3001 : 0)),
+      exact: true,
     });
   });
 

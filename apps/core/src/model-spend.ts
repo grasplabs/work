@@ -356,7 +356,9 @@ export const monthSpend = async (
   }
   return {
     month,
-    total: byDay.reduce((sum, { amount }) => sum + amount, 0),
+    // Added up from the 1st, as a reader adds the days: the same sum to
+    // the last bit.
+    total: days.reduce((sum, amount) => sum + amount, 0),
     days,
     chat: byDay.reduce((sum, { chat }) => sum + chat, 0),
     workflows: listed.map(({ workflow, amount }) => ({
