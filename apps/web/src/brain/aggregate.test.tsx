@@ -162,9 +162,11 @@ describe("what the Brain page says of the interviews", () => {
         basisOf(claim.id).includes("How the team works, as its people told it"),
         basisOf(claim.id).includes("across the company"),
       ],
+      words: statementWords(opinion.id, opinion.text),
     }).toStrictEqual({
       opinion: true,
       claim: [true, false],
+      words: opinion.text,
     });
   });
 

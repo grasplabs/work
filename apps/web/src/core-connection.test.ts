@@ -374,21 +374,14 @@ describe("the tab's one connection to core", () => {
     expect(opened).toHaveLength(2);
   });
 
-  it("waits up to a ceiling that doubles from 1 s to 30 s between reconnects, with full jitter, however often App frames ask", async () => {
+  it("waits up to a ceiling that doubles from 1 s to 30 s between reconnects, with full jitter", async () => {
     const { core, opened } = tab([one, "down"]);
     await core.session();
     const random = vi.spyOn(Math, "random").mockReturnValue(1);
-    const frames = [frameOn(core), frameOn(core), frameOn(core)];
     opened[0]?.break();
     const attempts: number[] = [];
     const start = Date.now();
     for (let second = 0; second <= 120; second += 1) {
-      for (const frame of frames) {
-        void refusal(frame.link.session());
-        void refusal(
-          frame.link.retrying(async () => await Promise.resolve("asked"))
-        );
-      }
       const before = opened.length;
       // oxlint-disable-next-line no-await-in-loop -- one second at a time
       await vi.advanceTimersByTimeAsync(1000);
@@ -519,6 +512,31 @@ describe("the tab's one connection to core", () => {
       refused: [given.reason, given.reason],
       attempts: 2,
     });
+  });
+
+  it("makes no more reconnect attempts than its pauses allow, however often App frames ask", async () => {
+    const { core, opened } = tab([one, "down"]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    const frames = [frameOn(core), frameOn(core), frameOn(core)];
+    opened[0]?.break();
+    const attempts: number[] = [];
+    const start = Date.now();
+    for (let tick = 0; tick < 400; tick += 1) {
+      for (const frame of frames) {
+        void refusal(frame.link.session());
+        void refusal(
+          frame.link.retrying(async () => await Promise.resolve("asked"))
+        );
+      }
+      const before = opened.length;
+      // oxlint-disable-next-line no-await-in-loop -- a tenth of a second at a time
+      await vi.advanceTimersByTimeAsync(100);
+      if (opened.length > before) {
+        attempts.push(Math.round((Date.now() - start) / 100) / 10);
+      }
+    }
+    expect(attempts).toStrictEqual([1, 3, 7, 15, 31]);
   });
 });
 

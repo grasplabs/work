@@ -87,21 +87,6 @@ const styles = stylex.create({
     height: "100%",
     objectFit: "contain",
   },
-  // The default tile, dashed and without its light ground: a place for something still to add.
-  add: {
-    display: "flex",
-    flexShrink: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    boxSizing: "border-box",
-    width: `calc(${grasp.space8} + ${grasp.space1})`,
-    height: `calc(${grasp.space8} + ${grasp.space1})`,
-    borderWidth: grasp.hairline,
-    borderStyle: "dashed",
-    borderColor: grasp.line,
-    borderRadius: grasp.cornerMark,
-    color: grasp.muted,
-  },
 });
 
 type TileSize = "bare" | "lg" | "default" | "sm" | "xs" | "inline";

@@ -586,7 +586,6 @@ const cast = {
   workflowMap: { admin: "admin", reader: "user" },
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },
-  models: { admin: "admin", builder: "builder" },
   settings: { admin: "admin", member: "user" },
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },

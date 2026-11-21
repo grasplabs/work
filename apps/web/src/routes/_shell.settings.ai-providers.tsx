@@ -12,9 +12,7 @@ import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 // Settings › AI and spend, for admins: the organization's own AI provider
 // keys, the models its calls use (settings/ai-providers.tsx), and what they
 // cost this month (settings/ai-spend.tsx). Grasp staff read it; only the
-// organization's own admins change it, as core checks on every call. The
-// old Models and AI spend pages send here
-// (_shell.settings.models.tsx, _shell.settings.spend.tsx).
+// organization's own admins change it, as core checks on every call.
 
 const AiProvidersPage = () => {
   const { t } = useLingui();

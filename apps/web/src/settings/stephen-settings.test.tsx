@@ -398,7 +398,7 @@ describe("Settings › Stephen", () => {
       ),
     ];
     expect({
-      shown: controls.length > 0,
+      shown: controls.length,
       enabled: controls.filter(
         (control) =>
           !(
@@ -407,6 +407,11 @@ describe("Settings › Stephen", () => {
             control.getAttribute("aria-disabled") === "true"
           )
       ).length,
-    }).toStrictEqual({ shown: true, enabled: 0 });
+    }).toStrictEqual({
+      // Stephen's on and who, and six classes; a place's and an app's
+      // panels open from their rows.
+      shown: 8,
+      enabled: 0,
+    });
   });
 });
