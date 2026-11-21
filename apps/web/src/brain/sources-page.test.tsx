@@ -225,6 +225,10 @@ const MemoriesStandIn = () => {
   return <p>Memories page {searchStr}</p>;
 };
 
+/** A refusal core meant, with its code, as core sends one (no code: core out of reach). */
+const refusedBy = (message: string): Error =>
+  Object.assign(new Error(message), { code: "auth.forbidden" });
+
 /** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
   connections: Connection[],
@@ -259,7 +263,7 @@ const shown = async (
         `list${after === undefined ? "" : ` after ${after.source.id}`}`
       );
       if (refusal !== undefined) {
-        throw new Error(refusal);
+        throw refusedBy(refusal);
       }
       if (empty) {
         return { sources: [], next: null };
@@ -313,7 +317,7 @@ const shown = async (
         next === undefined || next === null ? "" : `#${String(next.memory)}`;
       const answer = learned[`${source.id}@${version}${after}`] ?? null;
       if (typeof answer === "string") {
-        throw new TypeError(answer);
+        throw refusedBy(answer);
       }
       return answer;
     },
@@ -398,7 +402,7 @@ const shown = async (
     uploadOf: async (uploadId: string) => {
       await Promise.resolve();
       if (uploadRefusal !== undefined) {
-        throw new Error(uploadRefusal);
+        throw refusedBy(uploadRefusal);
       }
       return uploadId === handbook.id
         ? {

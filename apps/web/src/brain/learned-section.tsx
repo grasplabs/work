@@ -7,14 +7,12 @@ import type {
   BrainLearnedMemory,
   BrainSourceRef,
 } from "@grasp-os/shared/brain-sources";
-import { failureText } from "@grasp-os/shared/errors";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -23,6 +21,8 @@ import { Item, ItemContent, ItemGroup } from "../grasp/item/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 // What the Brain learned from one version of a source (GRA-1991), on the
@@ -46,28 +46,28 @@ import { useCore } from "../use-core.ts";
  */
 type Learned =
   | { state: "loading" }
-  | { state: "refused"; message: string }
+  | { state: "failed"; page: NotReady }
   | { state: "ready"; pages: BrainLearned[] }
   | { state: "none" }
   | { state: "gone" };
 
-/** A page of it after `next`, or why not. Outside the component, as the React Compiler can't compile `try`. */
+/** A read that came back without its data. */
+type NotReady = Exclude<Loaded<unknown>, { state: "ready" }>;
+
+/** A page of it after `next`, or why not. */
 const pageOf = async (
   core: CoreConnection,
   source: BrainSourceRef,
   version: number,
-  next?: BrainLearned["next"]
-): Promise<{ page: BrainLearned | null } | { refused: string }> => {
-  try {
-    const page = await core.withSession(
-      async (session) =>
-        await session.brainSources.learned(source, version, next)
-    );
-    return { page };
-  } catch (error) {
-    return { refused: failureText(error) };
-  }
-};
+  next?: BrainLearned["next"],
+  signal?: AbortSignal
+): Promise<Loaded<BrainLearned | null>> =>
+  await loadFromCore(
+    core,
+    async (session) =>
+      await session.brainSources.learned(source, version, next),
+    signal
+  );
 
 const styles = stylex.create({
   section: { display: "flex", flexDirection: "column", gap: grasp.space2 },
@@ -252,26 +252,32 @@ export const LearnedSection = ({
   const [learned, setLearned] = useState<Learned>({ state: "loading" });
   // A further page being read, or why it was refused.
   const [more, setMore] = useState<
-    { state: "loading" } | { state: "refused"; message: string }
+    { state: "loading" } | { state: "failed"; page: NotReady }
   >();
   useEffect(() => {
-    let left = false;
+    const left = new AbortController();
     const read = async (): Promise<void> => {
-      const answer = await pageOf(core, source, version);
-      if (left) {
+      const answer = await pageOf(
+        core,
+        source,
+        version,
+        undefined,
+        left.signal
+      );
+      if (left.signal.aborted) {
         return;
       }
-      if ("refused" in answer) {
-        setLearned({ state: "refused", message: answer.refused });
-      } else if (answer.page === null) {
+      if (answer.state !== "ready") {
+        setLearned({ state: "failed", page: answer });
+      } else if (answer.data === null) {
         setLearned({ state: "none" });
       } else {
-        setLearned({ state: "ready", pages: [answer.page] });
+        setLearned({ state: "ready", pages: [answer.data] });
       }
     };
     void read();
     return () => {
-      left = true;
+      left.abort();
     };
   }, [core, source, version]);
 
@@ -306,9 +312,7 @@ export const LearnedSection = ({
         </Text>
       ) : null}
       {learned.state === "loading" ? <Spinner aria-label={t`Loading`} /> : null}
-      {learned.state === "refused" ? (
-        <ErrorText>{learned.message}</ErrorText>
-      ) : null}
+      {learned.state === "failed" ? <NotLoaded page={learned.page} /> : null}
       {learned.state === "ready" && memories.length === 0 ? (
         <Text size="sm" tone="muted">
           <Trans>
@@ -345,7 +349,7 @@ export const LearnedSection = ({
           withRivals
         />
       ) : null}
-      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
+      {more?.state === "failed" ? <NotLoaded page={more.page} /> : null}
       {next === null ? null : (
         <Button
           disabled={more?.state === "loading"}
@@ -354,12 +358,12 @@ export const LearnedSection = ({
             setMore({ state: "loading" });
             void (async () => {
               const answer = await pageOf(core, source, version, next);
-              if ("refused" in answer) {
-                setMore({ state: "refused", message: answer.refused });
+              if (answer.state !== "ready") {
+                setMore({ state: "failed", page: answer });
                 return;
               }
               setMore(undefined);
-              const { page } = answer;
+              const page = answer.data;
               // None now, after a page before: erased, or no longer theirs
               // to read, since. What was loaded goes with it, and so does
               // the cursor that would ask for it again.

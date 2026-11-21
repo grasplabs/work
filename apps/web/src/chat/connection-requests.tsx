@@ -14,6 +14,7 @@ import { Button } from "../grasp/button/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { NotLoaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useApprovalWords } from "./approval-words.ts";
 import { useChatRequests } from "./chat-requests.ts";
@@ -176,15 +177,18 @@ export const ConnectionRequests = ({
     version,
     listConnectionRequests
   );
-  if (read.state === "refused") {
-    return <ErrorText>{read.message}</ErrorText>;
+  if (read === undefined) {
+    return null;
   }
-  if (read.state === "loading" || read.requests.length === 0) {
+  if (read.state !== "ready") {
+    return <NotLoaded page={read} />;
+  }
+  if (read.data.length === 0) {
     return null;
   }
   return (
     <section aria-label={t`Connection requests`} {...stylex.props(styles.list)}>
-      {read.requests.map((request) => (
+      {read.data.map((request) => (
         <ConnectionRequest
           chatId={chatId}
           key={request.id}

@@ -10,7 +10,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import {
   ApprovalRequest,
   ApprovalRequestApprove,
@@ -19,6 +18,7 @@ import { Badge } from "../grasp/badge/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { NotLoaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useApprovalWords } from "./approval-words.ts";
 import { useChatRequests } from "./chat-requests.ts";
@@ -194,15 +194,18 @@ export const PackageRequests = ({
 }) => {
   const { t } = useLingui();
   const { read, again } = useChatRequests(chatId, version, listPackageRequests);
-  if (read.state === "refused") {
-    return <ErrorText>{read.message}</ErrorText>;
+  if (read === undefined) {
+    return null;
   }
-  if (read.state === "loading" || read.requests.length === 0) {
+  if (read.state !== "ready") {
+    return <NotLoaded page={read} />;
+  }
+  if (read.data.length === 0) {
     return null;
   }
   return (
     <section aria-label={t`Package requests`} {...stylex.props(styles.list)}>
-      {read.requests.map((request) => (
+      {read.data.map((request) => (
         <PackageRequest
           key={request.id}
           onApproved={onApproved}
