@@ -5,6 +5,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -108,7 +109,7 @@ const drawnAndPublished = async (
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // The chat docked beside the Flow draws the approval.
-  const chat = page.getByRole("region", { name: "Chat" });
+  const chat = dockedChat(page);
   await expect(chat.getByText(approvalDrawn)).toBeVisible(agentTurn);
   const diagram = page.getByRole("region", { name: "Diagram", exact: true });
   await expect(diagram.getByRole("listitem", { name: "approve" })).toBeVisible(
@@ -123,7 +124,11 @@ const drawnAndPublished = async (
     .getByRole("dialog")
     .getByRole("button", { name: "Publish", exact: true })
     .click(pageRead);
-  await expect(page.getByText(`${planned} is live`)).toBeVisible(pageRead);
+  await expect(
+    page
+      .getByRole("region", { name: "Notifications" })
+      .getByText(`${planned} is live`)
+  ).toBeVisible(pageRead);
   return { workflow, name: newName };
 };
 

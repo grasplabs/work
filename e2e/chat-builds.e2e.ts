@@ -105,7 +105,11 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       .getByRole("dialog")
       .getByRole("button", { name: "Publish", exact: true })
       .click({ timeout: 20_000 });
-    await expect(page.getByText(`${name} is live`)).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Notifications" })
+        .getByText(`${name} is live`)
+    ).toBeVisible();
 
     // Live as the App's next version; the draft starts over from it.
     await expect

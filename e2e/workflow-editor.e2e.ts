@@ -4,9 +4,11 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { modelScripts, workflowPlanned } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { goTo } from "./tabs-nav.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against grasp-workflow/2 and says what to fix at
@@ -69,19 +71,13 @@ const create = async (page: Page, person: Person): Promise<string> => {
 
 /** Opens view `name` of the workflow on `page`: Flow, Runs or Settings. */
 const view = async (page: Page, name: string): Promise<void> => {
-  await page
-    .getByRole("navigation", { name: "Workflow views" })
-    .getByRole("link", { name })
-    .click();
+  await goTo(page.getByRole("navigation", { name: "Workflow views" }), name);
 };
 
 /** Opens section `name` of the workflow's Settings on `page`. */
 const section = async (page: Page, name: string): Promise<void> => {
   await view(page, "Settings");
-  await page
-    .getByRole("navigation", { name: "Settings sections" })
-    .getByRole("link", { name })
-    .click();
+  await goTo(page.getByRole("navigation", { name: "Settings sections" }), name);
 };
 
 /** Shows the definition's JSON on `page`, in its Settings. */
@@ -135,7 +131,11 @@ const publish = async (page: Page, name: string): Promise<void> => {
     .getByRole("dialog")
     .getByRole("button", { name: "Publish", exact: true })
     .click();
-  await expect(page.getByText(`${name} is live`)).toBeVisible(pageRead);
+  await expect(
+    page
+      .getByRole("region", { name: "Notifications" })
+      .getByText(`${name} is live`)
+  ).toBeVisible(pageRead);
 };
 
 /** A version's label, `YY.MM.N`, as History names it. */
@@ -408,7 +408,7 @@ test("a builder makes something that runs on its own by saying what they want do
   // drawn: it isn't ready yet, with Try again, never an empty Flow.
   await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u);
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
-  const chat = page.getByRole("region", { name: "Chat" });
+  const chat = dockedChat(page);
   // Exactly: the recall's step ("Searched the brain for …") holds it too.
   await expect(chat.getByText(opener, { exact: true })).toBeVisible();
   await expect(chat.getByText(reply.text)).toBeVisible(pageRead);

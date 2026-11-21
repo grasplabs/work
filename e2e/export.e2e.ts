@@ -14,14 +14,13 @@ import { peopleIn } from "./people.ts";
 
 const pageRead = { timeout: 15_000 };
 
-/** Chooses `format` from the export menu named `label`. */
-const choose = async (
+/** Downloads the brain page open as `format`, from its "…" menu. */
+const downloadNote = async (
   page: Page,
-  label: string,
-  format: "Markdown (.md)" | "PDF"
+  format: "Markdown" | "PDF"
 ): Promise<void> => {
-  await page.getByRole("button", { name: label, exact: true }).click();
-  await page.getByRole("menuitem", { name: format }).click();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await page.getByRole("menuitem", { name: `Download as ${format}` }).click();
 };
 
 /** Chooses `format` from Download in the open chat's menu, in its header. */
@@ -111,7 +110,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
     page.getByRole("heading", { level: 1, name: "Vision page" })
   ).toBeVisible(pageRead);
   const note = page.waitForEvent("download");
-  await choose(page, "Export", "Markdown (.md)");
+  await downloadNote(page, "Markdown");
   const file = await note;
   expect(file.suggestedFilename()).toBe("vision-page.md");
   const exported = await textOf(file);
@@ -120,11 +119,11 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
 
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
-  // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
-  // headings in Newsreader (Markdown's serif headings), the text in Geist.
+  // own stylesheets: the title (a page's title, 32 px) and the text's
+  // headings in Geist Serif (Markdown's serif headings), the text in Geist.
   // The file's frontmatter is the file's alone: the page leaves it out.
   await countPrints(page);
-  await choose(page, "Export", "PDF");
+  await downloadNote(page, "PDF");
   await expect
     .poll(async () => await page.evaluate(() => window.printed))
     .toBe(1);
@@ -140,12 +139,12 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^28px "Newsreader Variable"/u);
+    .toMatch(/^32px "Geist Serif"/u);
   expect(
     await printed
       .getByRole("heading", { level: 2, name: "Timeline" })
       .evaluate((element) => getComputedStyle(element).fontFamily)
-  ).toMatch(/^"Newsreader Variable"/u);
+  ).toMatch(/^"Geist Serif"/u);
   expect(
     await printed
       .locator("main")
@@ -163,7 +162,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   const tag = crypto.randomUUID().slice(0, 8);
   const question = `How long is leave ${tag}?`;
   await page.goto("/");
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send" }).click();
   // It opens on its own page, named once core has said its
   // title, which the export is named after.

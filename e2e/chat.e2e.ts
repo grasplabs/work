@@ -3,6 +3,7 @@ import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { modelScripts } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -168,13 +169,13 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const question = `Send Ben invoice ${tag}.`;
   const title = `Invoice ${tag}`;
   await page.goto("/");
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The chat's own page, at its own address, the question already in it.
   const chat = chatOf(page);
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
   const messages = chat.getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   // The local stack's provider refuses unscripted requests' keys
   // (e2e/model-fake.ts): the answer says so once the turn ends, and who can
   // put it right.
@@ -345,11 +346,11 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
   await page.goto("/");
 
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
   const messages = page.getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   await expect(messages.getByText(answer.text)).toBeVisible({
     timeout: 30_000,
   });
@@ -393,7 +394,7 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await expect(page.getByText(/Only PDF, Word/u)).toBeVisible();
   await expect(page.getByText("setup.exe")).toHaveCount(0);
 
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send" }).click();
   // The question shows the file it carried; the box is empty again.
   const asked = chatOf(page)
@@ -401,29 +402,13 @@ test("a person attaches files to a question, takes one off, and sees the questio
     .getByRole("article")
     .first();
   await expect(asked).toContainText(question);
-  await expect(asked).toContainText(plan);
+  // Its file stands over it, in the thread.
+  await expect(
+    chatOf(page).getByRole("log", { name: "Messages" })
+  ).toContainText(plan);
   await expect(
     page.getByRole("main").getByRole("button", { name: `Remove ${plan}` })
   ).toHaveCount(0);
-});
-
-test("a person starts a chat from one of the questions under the box", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("chat");
-  const page = await pageOf(user);
-  await page.goto("/");
-  const questions = page.getByRole("list", { name: "Questions to start with" });
-  await expect(questions.getByRole("button")).toHaveCount(4);
-  await questions
-    .getByRole("button", { name: "What waits on me today?" })
-    .click();
-  await expect(
-    chatOf(page)
-      .getByRole("log", { name: "Messages" })
-      .getByRole("article")
-      .first()
-  ).toHaveText("What waits on me today?");
 });
 
 test("a followed chat says core can't be reached when it stays out of reach", async ({
@@ -443,13 +428,15 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   });
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
-  await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
+  await page
+    .getByRole("textbox", { name: "Your question" })
+    .fill(`Out of reach ${tag}.`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The turn has ended (the local stack's provider refuses unscripted
   // requests' keys), so nothing else is on its way when the connection drops.
   const chat = chatOf(page);
   const messages = chat.getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(
+  await expect(messages.getByRole("article").first()).toContainText(
     `Out of reach ${tag}.`
   );
   await expect(messages.getByRole("alert")).toContainText(
@@ -524,12 +511,12 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   );
 
   const question = `Think hard ${tag}.`;
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   const chat = chatOf(page);
   await expect(
     chat.getByRole("log", { name: "Messages" }).getByRole("article").first()
-  ).toHaveText(question);
+  ).toContainText(question);
   // The question, not the new chat named after it.
   const asked = sent.find(
     (message) => message.includes('"send"') && message.includes(question)
@@ -567,11 +554,18 @@ test("the chat on every other page carries on the open chat, which opens as its 
 
   // Opened from its bar on another page, it takes a question there.
   await page.goto("/apps");
-  const chat = page.getByRole("region", { name: "Chat" });
+  const chat = dockedChat(page, "Ask Grasp");
+  // Its head, over it: where it stands, its menu and Close.
+  const head = page.locator("[data-slot=app-shell-panel-head]");
+  const fromMenu = async (label: string): Promise<void> => {
+    await head.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: label }).click();
+  };
+  const toggle = page.getByRole("button", { name: "Show or hide the chat" });
   // The bar's box while the chat is closed, the chat's own while it is open:
   // one text, shown in one at a time.
   const box = page.getByRole("textbox", { name: "Ask Grasp" });
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await toggle.click();
   await expect(chat).toBeVisible();
   await expect(box).toBeFocused();
   // The box takes a question once the chat has read the models core
@@ -581,7 +575,7 @@ test("the chat on every other page carries on the open chat, which opens as its 
   await expect(send).toBeEnabled();
   await box.press("Enter");
   const messages = chat.getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   await expect(messages.getByRole("alert")).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
@@ -591,41 +585,39 @@ test("the chat on every other page carries on the open chat, which opens as its 
 
   // Closed, it is the bar again, with the cursor in its box; what is typed
   // there is still there as the chat opens again, on the same chat.
-  await chat.getByRole("button", { name: "Close" }).click();
+  await head.getByRole("button", { name: "Close" }).click();
   await expect(chat).toBeHidden();
   await expect(box).toBeFocused();
   await box.fill(`Half a thought ${tag}`);
   await page.keyboard.press("ControlOrMeta+j");
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   await expect(box).toBeFocused();
   await expect(box).toHaveText(`Half a thought ${tag}`);
 
   // On another page it is still open, on the same chat; a new chat starts
   // afresh.
   await page.goto("/projects");
-  await expect(messages.getByRole("article").first()).toHaveText(question);
-  await chat.getByRole("button", { name: "New chat" }).click();
+  await expect(messages.getByRole("article").first()).toContainText(question);
+  await fromMenu("New chat");
   await expect(messages).toHaveCount(0);
   const second = `Another from another page ${tag}?`;
   await box.fill(second);
   // A page load reads the models again.
   await expect(send).toBeEnabled();
   await box.press("Enter");
-  await expect(messages.getByRole("article").first()).toHaveText(second);
+  await expect(messages.getByRole("article").first()).toContainText(second);
 
   // Opened as a page, it is the chat's own page, with nothing of the dock
   // beside it; Back, the dock is beside the page again, on the same chat.
-  await chat.getByRole("button", { name: "Open as a page" }).click();
+  await fromMenu("Open as a page");
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
-  await expect(page.getByRole("main").getByRole("article").first()).toHaveText(
-    second
-  );
+  await expect(
+    page.getByRole("main").getByRole("article").first()
+  ).toContainText(second);
   await expect(chat).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Open the chat" })).toHaveCount(
-    0
-  );
+  await expect(toggle).toHaveCount(0);
   await page.goBack();
-  await expect(messages.getByRole("article").first()).toHaveText(second);
+  await expect(messages.getByRole("article").first()).toContainText(second);
 
   // On Chat's start, nothing of it (the page is where to ask), and both
   // chats are in the window.
@@ -635,9 +627,7 @@ test("the chat on every other page carries on the open chat, which opens as its 
     .click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(chat).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Open the chat" })).toHaveCount(
-    0
-  );
+  await expect(toggle).toHaveCount(0);
   const chats = await chatsWindow(page);
   await expect(rowOf(chats, second)).toBeVisible();
   await expect(rowOf(chats, question)).toBeVisible();

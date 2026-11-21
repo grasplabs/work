@@ -587,6 +587,7 @@ const cast = {
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },
   settings: { admin: "admin", member: "user" },
+  aiSpend: { admin: "admin", builder: "builder" },
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },

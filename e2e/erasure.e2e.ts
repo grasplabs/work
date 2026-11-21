@@ -17,6 +17,9 @@ test("an admin removes someone, erases them by typing their name, follows it to 
   await signInTo(context, admin);
   await page.goto("/settings/members");
   const who = `Person (${leaving.email})`;
+  // The table shows a page at a time: the admin finds them first.
+  const search = page.getByRole("searchbox", { name: "Search members" });
+  await search.fill(leaving.email);
 
   // Removed first: only someone removed is erased.
   await page.getByRole("button", { name: `Actions for ${who}` }).click();
@@ -61,7 +64,10 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .click();
 
   // Their row stays, by name, their address gone from it, and says they are erased.
-  await expect(people.getByText(leaving.email)).toHaveCount(0);
+  await expect(
+    people.getByRole("button", { name: `Actions for ${who}` })
+  ).toHaveCount(0);
+  await search.fill("Erased");
   const erasedRows = people
     .getByRole("row")
     .filter({ hasText: "Person" })
