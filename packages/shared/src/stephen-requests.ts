@@ -173,7 +173,12 @@ const unansweredGroups = (
       continue;
     }
     const key = `${request.topic}\u0000${request.question}`;
-    groups.set(key, [...(groups.get(key) ?? []), request]);
+    const group = groups.get(key);
+    if (group === undefined) {
+      groups.set(key, [request]);
+    } else {
+      group.push(request);
+    }
   }
   return groups;
 };

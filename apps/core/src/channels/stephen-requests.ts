@@ -8,7 +8,7 @@ import type {
   RequestRating,
   RequestToolCall,
 } from "@grasp-os/shared/stephen-requests";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -47,8 +47,8 @@ import type { Sorted } from "./request-sorting.ts";
 // - What they asked, read off its question: a question is Grasp's general
 //   wording (request-sorting.ts), and Stephen's week shows it only once
 //   five or more people asked it (stephen-requests.ts).
-// - A record outliving its use, or its person: kept thirteen months (a
-//   year's report and the month it is in), then swept; erasing a person
+// - A record outliving its use, or its person: kept thirteen months, then
+//   swept (`keptDays`); erasing a person
 //   takes theirs (person-erasure.ts), and a question no record points at
 //   any more goes with the sweep.
 // - Counting a message twice, so billing it twice: a record is kept by
@@ -65,7 +65,12 @@ import type { Sorted } from "./request-sorting.ts";
 // - Counting failing a turn: every write here is best effort, logged and
 //   dropped, never thrown at the conversation.
 
-/** How long a record is kept: a year's report and the month it is in, and more. */
+/**
+ * How long a record is kept. What reads records now goes back far less:
+ * Stephen's week about eight weeks (its people a week; thirty days for
+ * the rest), and billing the current month. Whether to shorten it is the
+ * owner's to decide.
+ */
 const keptDays = 400;
 
 /** A day in the company's time zone, `YYYY-MM-DD`; in UTC should its zone be unknown. */
@@ -129,8 +134,8 @@ const heardCall = (
     return { id: brainTool, work: {} };
   }
   if (call.method === "connections.call") {
-    // By the app it is of (`microsoft`), as the page counts an app's
-    // calls; by the connection's name only where the call didn't say.
+    // By the app it is of (`microsoft`), as Stephen's week counts an
+    // app's calls; by the connection's name only where the call didn't say.
     const connection =
       textOf(call.summary, "app") ??
       textOf(call.summary, "connection") ??
@@ -517,7 +522,8 @@ export const rateRequest = async (
  * Deletes requests past their thirteen months, the questions and topics
  * nothing points at any more that are older than a day (a name just made
  * waits for the request that made it), Grasp's proposals for, and
- * owners' statuses of, a question that is gone, and every weekly summary.
+ * owners' statuses of, a question that is gone, weekly summaries sent or
+ * failed a quarter ago, and every one still queued that no run holds.
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -538,8 +544,8 @@ export const sweepStephenRequests = async (
   // points at it, swept or erased (GRA-1923). An older topic that just lost
   // its last request and is sorted into again within the same quarter
   // hour can go before the new request is kept with its id: that one
-  // request then points at a topic that is gone, which no page names, so
-  // it is counted under "Other topics". Harmless, and never a name shown.
+  // request then points at a topic that is gone. Harmless: nothing shows a
+  // topic's name.
   await db.delete(stephenRequestTopics).where(
     sql`${stephenRequestTopics.createdAt} < ${now.getTime() - 86_400_000}
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
@@ -569,8 +575,29 @@ export const sweepStephenRequests = async (
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.id} = ${stephenRequestCards.requestId})`
   );
-  // Weekly summaries, whatever their state: nothing sends them since
-  // Workflows › Requests went, and one left queued would go out stale
-  // after a rollback to a release that still sends them.
-  await db.delete(stephenSummaries);
+  // Weekly summaries sent or failed a quarter ago. Kept until then, they
+  // are the record of what went: a rollback to a release that still sends
+  // them finds the week's row there and doesn't queue it again.
+  await db
+    .delete(stephenSummaries)
+    .where(
+      sql`${stephenSummaries.state} <> 'queued' AND ${stephenSummaries.queuedAt} < ${now.getTime() - 90 * 86_400_000}`
+    );
+  // And one still queued, as soon as no run holds it: nothing sends them
+  // since Workflows › Requests went, so left queued it would go out stale
+  // after a rollback, weeks on. Gone, it was never sent; a rolled-back
+  // sender queues the week afresh on a Monday, once. One a run still holds
+  // (an earlier release's, mid-send as this one deploys) waits for its
+  // lease to end, so a send in flight is never followed by a second.
+  await db
+    .delete(stephenSummaries)
+    .where(
+      and(
+        eq(stephenSummaries.state, "queued"),
+        or(
+          isNull(stephenSummaries.claimedUntil),
+          lt(stephenSummaries.claimedUntil, now)
+        )
+      )
+    );
 };

@@ -74,20 +74,25 @@ describe("Stephen's requests", () => {
     ]);
   });
 
-  it("count the people a week, every week of the span, a quiet one as none", () => {
+  it("count the people a week, Monday to Sunday, every week of the span, a quiet one as none", () => {
     const report = requestsReport(
       [
-        request("2026-10-05", "a"),
-        request("2026-10-06", "a"),
-        request("2026-10-07", "b"),
-        request("2026-10-20", "c"),
+        request("2026-10-07", "a"),
+        request("2026-10-08", "a"),
+        request("2026-10-09", "b"),
+        // A Sunday ends its week; the Monday after begins the next.
+        request("2026-10-11", "c"),
+        request("2026-10-12", "d"),
+        request("2026-10-26", "e"),
       ],
-      { from: "2026-10-05", to: "2026-10-25" }
+      // From a Wednesday: its week is counted from that day on.
+      { from: "2026-10-07", to: "2026-10-27" }
     );
     expect(report.weeks).toStrictEqual([
-      { week: "2026-10-05", people: 2 },
-      { week: "2026-10-12", people: 0 },
-      { week: "2026-10-19", people: 1 },
+      { week: "2026-10-05", people: 3 },
+      { week: "2026-10-12", people: 1 },
+      { week: "2026-10-19", people: 0 },
+      { week: "2026-10-26", people: 1 },
     ]);
   });
 });

@@ -469,25 +469,37 @@ describe("the sweep of what sorting named", setUpTime, () => {
 describe("the sweep of weekly summaries", setUpTime, () => {
   afterEach(cleanUp);
 
-  it("takes every one, a queued one too, since nothing sends them", async () => {
+  it("takes one still queued once no run holds it, and keeps what went until a quarter on", async () => {
     const now = Date.now();
+    const day = 86_400_000;
     await env.DB.batch(
-      [
-        ["person-queued", "queued"],
-        ["person-sent", "sent"],
-      ].map(([person, state]) =>
+      (
+        [
+          // Queued and free: nothing will send it.
+          ["queued-free", "queued", now, null],
+          // Queued and held by a run mid-send: waits for its lease.
+          ["queued-held", "queued", now, now + 60_000],
+          // Sent this week: the record that it went.
+          ["sent-recent", "sent", now, null],
+          // Sent a quarter and more ago.
+          ["sent-old", "sent", now - 91 * day, null],
+        ] as const
+      ).map(([person, state, queuedAt, claimedUntil]) =>
         env.DB.prepare(
-          "INSERT INTO stephen_summaries (week, person_id, via, state, attempts, queued_at) VALUES ('2026-10-19', ?, 'email', ?, 0, ?)"
-        ).bind(person, state, now)
+          "INSERT INTO stephen_summaries (week, person_id, via, state, attempts, queued_at, claimed_until) VALUES ('2026-10-19', ?, 'email', ?, 0, ?, ?)"
+        ).bind(person, state, queuedAt, claimedUntil)
       )
     );
 
     await sweepStephenRequests(env, new Date(now));
 
     const { results } = await env.DB.prepare(
-      "SELECT person_id FROM stephen_summaries"
-    ).all();
-    expect(results).toStrictEqual([]);
+      "SELECT person_id AS person FROM stephen_summaries ORDER BY person_id"
+    ).all<{ person: string }>();
+    expect(results.map(({ person }) => person)).toStrictEqual([
+      "queued-held",
+      "sent-recent",
+    ]);
   });
 });
 
@@ -628,7 +640,7 @@ describe("a request a card's press belongs to", setUpTime, () => {
 describe("the month billed", setUpTime, () => {
   afterEach(cleanUp);
 
-  it("counts what he finished this calendar month, in the company's time zone, for admins only", async () => {
+  it("counts what he finished this calendar month, never the day before it began, for admins only", async () => {
     const owner = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const today = await companyDay(env);
@@ -636,8 +648,8 @@ describe("the month billed", setUpTime, () => {
       ...people(5, { kind: "workflow" }),
       ...people(5, { kind: "answered", outcome: "notPossible" }),
     ]);
-    // Finished on the last day of the month before, in the company's time
-    // zone: last month's bill, not this one's.
+    // Finished on the last day of the month before (records keep the
+    // company's day): last month's bill, not this one's.
     await seed(dayFrom(`${today.slice(0, 7)}-01`, -1), people(3, {}));
 
     expect({
