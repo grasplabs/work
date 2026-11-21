@@ -69,7 +69,7 @@ import { readStephenReach } from "./stephen-reach.ts";
 const settingsKind = "stephenRequests";
 
 /** The settings as stored, defaults for what an older row lacks. */
-export const readRequestSettings = async (
+const readRequestSettings = async (
   env: Env
 ): Promise<StephenRequestSettings> => {
   const [row] = await drizzle(env.DB)
