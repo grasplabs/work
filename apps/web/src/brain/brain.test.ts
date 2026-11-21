@@ -5,7 +5,6 @@ import {
   buildBrain,
   folderTree,
   mentionParts,
-  patterns,
   sourceContents,
   splitTimeline,
 } from "./brain.ts";
@@ -337,9 +336,6 @@ describe("the inventory", () => {
     expect(words(noteIn(notYet, "company"), "Interviews")).toMatch(
       /^Stakeholders of 4 of 5 invited teams/u
     );
-    expect(patterns(notYet)).toContain(
-      "1 invited team not interviewed yet: Compliance."
-    );
   });
 
   it("keeps an interview as an article on its source, and roles on its team", () => {
@@ -433,13 +429,6 @@ describe("the inventory", () => {
       "1 Vision",
       "Goals",
     ]);
-  });
-
-  it("finds patterns in the records instead of guessing them", () => {
-    const found = patterns(ws);
-    expect(found).toContain(
-      "Mortgage advice and Client onboarding both name the same handover, each from their own side."
-    );
   });
 });
 

@@ -23,14 +23,14 @@ import type { Timing } from "./timing.ts";
 export type Tone = (typeof voiceTags)[number];
 
 /** How a line is said, apart from its words: whose voice, in what tone, and `quick` for a line only known as it is said. */
-export interface Voicing {
+interface Voicing {
   speaker?: Speaker;
   tone?: Tone;
   quick?: boolean;
 }
 
 /** The line being said: its words, how, when each character is said, and whether it is heard. */
-export interface SaidLine {
+interface SaidLine {
   id: number;
   text: string;
   voicing: Voicing;
@@ -38,7 +38,7 @@ export interface SaidLine {
   audible: boolean;
 }
 
-export interface VoiceState {
+interface VoiceState {
   on: boolean;
   /** The browser has not allowed sound yet: one press on the sound button allows it. */
   blocked: boolean;
@@ -515,14 +515,14 @@ const answerSoon = async (planned: Planned): Promise<void> => {
 };
 
 /** Fetches a line ahead, so it starts at once when it is said. */
-export const prepare = (text: string, voicing: Voicing = {}): void => {
+const prepare = (text: string, voicing: Voicing = {}): void => {
   if (state.on && text.trim() !== "") {
     void clip(text, voicing, false);
   }
 };
 
 /** What `speak` is told besides the line and its voicing. */
-export interface SpeakOptions extends Voicing {
+interface SpeakOptions extends Voicing {
   /** Waits for the line being said, rather than cutting it. */
   after?: boolean;
   /** Answers what was just done: the line being said stops at its next natural break, not mid-word. */

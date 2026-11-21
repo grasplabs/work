@@ -52,7 +52,7 @@ const fetchesAtOnce = 2;
 type Schedule = { after: number; reached: number }[];
 
 /** The line being said: whose, its words so far, when each is reached as far as that is known, and whether it is heard. */
-export interface SaidLine {
+interface SaidLine {
   id: number;
   text: string;
   speaker: Interviewer;
@@ -665,7 +665,7 @@ export const voiceLevel = (): number => {
 };
 
 /** The line being said, if any. */
-export const useSaying = (): SaidLine | null =>
+const useSaying = (): SaidLine | null =>
   useSyncExternalStore(subscribe, lineNow, lineNow);
 
 /** Tells `onReached` how far `being` is said, word by word, from when it began, until stopped. */

@@ -31,7 +31,7 @@ const styles = stylex.create({
 });
 
 /** The cards the chat proposes, by where a reply keeps each. */
-export type MakeKind = "planned" | "agentDraft" | "agentChange";
+type MakeKind = "planned" | "agentDraft" | "agentChange";
 
 /** The card waiting for the person, if one does: the latest reply's, while nothing runs and nothing was said since. */
 export const pendingCard = (
@@ -82,7 +82,7 @@ export const MakeCard = ({
 );
 
 /** What a press asks with: the person's words, and the model and effort the box names. */
-export interface Asked {
+interface Asked {
   text: string;
   model: string;
   effort?: NonNullable<ThreadBuild["effort"]>;

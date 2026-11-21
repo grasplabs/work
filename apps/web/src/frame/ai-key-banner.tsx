@@ -65,9 +65,7 @@ export interface FailingProvider {
  * while its AI runs on Grasp's AI: no call goes out on its own keys then,
  * so one that failed before keeps nothing from answering.
  */
-export const failingProviders = (
-  listing: AiProvidersListing
-): FailingProvider[] =>
+const failingProviders = (listing: AiProvidersListing): FailingProvider[] =>
   listing.providers.flatMap(({ provider, label, status }) =>
     listing.source === "grasp" ||
     status === null ||

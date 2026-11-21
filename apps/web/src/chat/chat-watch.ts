@@ -11,7 +11,7 @@ import type { ChatView } from "./follow-chat.ts";
 // the last.
 
 /** A chat as the tab follows it, and why following it stopped, if it did. */
-export interface FollowedChat {
+interface FollowedChat {
   view: ChatView;
   failure: string | undefined;
   /**

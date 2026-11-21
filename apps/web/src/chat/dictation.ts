@@ -27,7 +27,7 @@ import { resampler } from "../interview/pcm.ts";
 // and the browser's goes.
 
 /** What has been heard so far: settled, and still being heard. */
-export interface Heard {
+interface Heard {
   settled: string;
   interim: string;
 }

@@ -82,7 +82,7 @@ const HELP = { every: 1.7, swell: 1.7, near: 14 };
 const NEAR = 70;
 
 /** A connection as the banner draws it: a fibre into the brain. */
-export interface NerveLine {
+interface NerveLine {
   id: string;
   /** It needs someone to sign in again: its fibre glows whole, and leads to the app. */
   attention: boolean;

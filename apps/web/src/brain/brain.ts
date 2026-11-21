@@ -2046,7 +2046,7 @@ export const buildBrain = (read: Workspace): Brain => {
 const RECENT_EVENTS = 5;
 
 /** Older events of one month, folded away on a long timeline. */
-export interface TimelineMonth {
+interface TimelineMonth {
   /** ISO month, e.g. "2026-08". */
   month: string;
   events: NoteEvent[];
@@ -2122,21 +2122,8 @@ export const countNotes = (folder: Folder): number =>
   folder.notes.length +
   folder.folders.reduce((sum, child) => sum + countNotes(child), 0);
 
-/** The brain limited to some notes, with only the edges between them. */
-export const subBrain = (
-  brain: Brain,
-  keep: (note: Note) => boolean
-): Brain => {
-  const notes = brain.notes.filter(keep);
-  const ids = new Set(notes.map((note) => note.id));
-  return {
-    notes,
-    edges: brain.edges.filter(([a, b]) => ids.has(a) && ids.has(b)),
-  };
-};
-
 /** A run of text, or a note named in it with the words the text used. */
-export type MentionPart = string | { id: string; label: string };
+type MentionPart = string | { id: string; label: string };
 
 /**
  * Splits text where it names one of the given notes, so a page can show those names as links.
@@ -2180,76 +2167,4 @@ export const mentionParts = (
     parts.push(text.slice(from));
   }
   return parts;
-};
-
-/**
- * Connections worth pointing out, found in the records, not guessed. Facts only, never an order.
- * Two teams that name the same handover, each from their own side: two different sources describe it.
- */
-export const sameHandover = (ws: Workspace): [string, string] | undefined => {
-  const handovers = new Map<string, Set<string>>();
-  for (const statement of ws.statements.filter(
-    (candidate) =>
-      candidate.kind === "handover" && candidate.teamIds.length === 2
-  )) {
-    const key = statement.teamIds.toSorted().join("|");
-    handovers.set(
-      key,
-      (handovers.get(key) ?? new Set()).add(statement.sourceId)
-    );
-  }
-  const found = [...handovers.entries()].find(
-    ([, sources]) => sources.size > 1
-  );
-  if (!found) {
-    return undefined;
-  }
-  const [one = "", other = ""] = found[0].split("|");
-  return [one, other];
-};
-
-export const patterns = (ws: Workspace): string[] => {
-  const found: string[] = [];
-
-  const bothSides = sameHandover(ws);
-  if (bothSides) {
-    const [one, other] = bothSides;
-    const oneTeam = teamNameIn(ws, one);
-    const otherTeam = teamNameIn(ws, other);
-    found.push(
-      t`${oneTeam} and ${otherTeam} both name the same handover, each from their own side.`
-    );
-  }
-
-  // Step 2 is done when every invited team is interviewed; a team only mentioned by others is not.
-  const waiting = ws.teams.filter(
-    (team) =>
-      ws.vision.inviteTeamIds.includes(team.id) &&
-      interviewsFor(ws, team).length === 0
-  );
-  if (waiting.length > 0) {
-    const count = waiting.length;
-    const teams = joinNames(waiting.map((team) => team.name));
-    found.push(
-      plural(count, {
-        one: `# invited team not interviewed yet: ${teams}.`,
-        other: `# invited teams not interviewed yet: ${teams}.`,
-      })
-    );
-  }
-
-  const open = ws.gaps.filter((gap) => !given(gap.closedAt));
-  const [first] = open;
-  if (first) {
-    const count = open.length;
-    const { question } = first;
-    found.push(
-      plural(count, {
-        one: `# gap still open. First: ${question}`,
-        other: `# gaps still open. First: ${question}`,
-      })
-    );
-  }
-
-  return found;
 };

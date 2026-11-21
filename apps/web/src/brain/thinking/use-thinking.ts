@@ -128,7 +128,7 @@ const useBeat = (
 };
 
 /** What a beat says the brain does, in the reader's language. */
-export const beatWords = (said: BeatSay, i18n: I18n): string => {
+const beatWords = (said: BeatSay, i18n: I18n): string => {
   switch (said.kind) {
     case "reading": {
       const { name } = said;

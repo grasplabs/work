@@ -74,18 +74,8 @@ export const findFolder = (folder: Folder, key: string): Folder | undefined => {
   return undefined;
 };
 
-/** The part a note sits in, from its folders. */
-export const sectionOf = (
-  note: Pick<Note, "path">
-): BrainSection | undefined => {
-  const key = note.path.join("/");
-  return brainSections.find(
-    (section) => key === section.key || key.startsWith(`${section.key}/`)
-  );
-};
-
 /** A run of notes under one heading on a part's page; the first run has no heading. */
-export interface NoteGroup {
+interface NoteGroup {
   key: string;
   name?: string;
   /** The group's own page, such as a source folder's. */

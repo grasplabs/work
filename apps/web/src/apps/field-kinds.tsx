@@ -7,7 +7,6 @@ import {
   Attach,
   CalendarIcon,
   Code,
-  Icon,
   KindCheckbox,
   KindCurrency,
   KindNumber,
@@ -90,11 +89,6 @@ const kindDescriptions: Record<FieldKind, MessageDescriptor> = {
   money: msg`An amount in a currency`,
   other: msg`A type the App's code declares`,
 };
-
-/** A kind's icon. */
-export const KindIcon = ({ kind }: { kind: FieldKind }) => (
-  <Icon icon={kindIcons[kind]} />
-);
 
 /** The words for each kind, and the picker's options, in the page's language. */
 export const useFieldKinds = () => {

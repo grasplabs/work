@@ -106,7 +106,7 @@ export const isConflict = (error: unknown): boolean =>
   codeOf(error) === "draft.conflict";
 
 /** How a change against core went: its answer, or why it didn't go through. */
-export type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
+type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
 /**
  * Runs `action` on the signed-in person's session over `core`, with no

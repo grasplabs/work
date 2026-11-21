@@ -2,13 +2,7 @@ import type { Statement, Transcript } from "@grasp-os/shared/brain";
 import { describe, expect, it } from "vite-plus/test";
 
 import { testWorkspace } from "./test-workspace.ts";
-import {
-  chapterOfTurns,
-  highlightsOf,
-  placeLabel,
-  placeOf,
-  position,
-} from "./transcript.ts";
+import { highlightsOf, placeLabel, placeOf, position } from "./transcript.ts";
 
 // The prototype's tests of statements as highlights in their
 // transcripts, on the brain's test company where they read its records.
@@ -100,10 +94,9 @@ describe("transcripts", () => {
     expect(placeOf(statementIn("st-procedure"), sources)?.at).toBe("§ 2");
   });
 
-  it("puts each turn in the chapter whose minute it falls after", () => {
+  it("reads a minute in the transcript as seconds", () => {
     expect(position("12:26")).toBe(746);
     expect(position("37")).toBe(37);
-    expect(chapterOfTurns(transcript)).toStrictEqual([0, 0, 1, 1]);
   });
 
   it("places a statement at its minute, with the turn before and after it", () => {

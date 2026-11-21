@@ -58,14 +58,11 @@ import { useCoreAction } from "../use-core-action.ts";
 // audit log.
 
 /** The members of `kind`'s subjects, over `session`. */
-export const membersOf = (
-  session: Session,
-  kind: SubjectKind
-): SubjectMembersApi =>
+const membersOf = (session: Session, kind: SubjectKind): SubjectMembersApi =>
   kind === "app" ? session.apps.members : session.workflowResources.members;
 
 /** Whom `subject` is shared with. */
-export const readMembers = async (
+const readMembers = async (
   session: Session,
   { kind, id }: Subject
 ): Promise<SubjectMember[]> => await membersOf(session, kind).list(id);

@@ -118,7 +118,7 @@ export const auditFilterOf = ({
 });
 
 /** The first page of events that match, with the names to show. */
-export interface LogPage {
+interface LogPage {
   page: AuditPage;
   directory: Directory;
 }
@@ -150,7 +150,7 @@ export const readLog = async (
  * Where the browser downloads what `search` matches as `format`: core's
  * export route, which it writes to disk as it arrives, however long.
  */
-export const exportHref = (
+const exportHref = (
   search: LogSearch,
   format: AuditExportFormat,
   archive = false
@@ -589,20 +589,11 @@ export const actorOf = (
   return { label: "Grasp" };
 };
 
-/** The event as stored, laid out to read; the stored text if it isn't JSON. */
-export const readable = (json: string): string => {
-  try {
-    return JSON.stringify(JSON.parse(json), null, 2);
-  } catch {
-    return json;
-  }
-};
-
 /**
  * When an entry was received, short, as the page's language writes it:
  * "3 Oct, 14:05", with its year where it isn't this one.
  */
-export const entryTime = (iso: string): string => {
+const entryTime = (iso: string): string => {
   const at = new Date(iso);
   return new Intl.DateTimeFormat(i18n.locale, {
     day: "numeric",

@@ -2,7 +2,6 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { Icon, Plus } from "../grasp/icons/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // An app's tile, as the prototype draws it (`components/app-logo.tsx`): its
@@ -167,13 +166,3 @@ export const AppLogo = ({
     </Tile>
   );
 };
-
-/**
- * The tile of something still to add, beside the logos of what is there:
- * the same tile, dashed and empty, with a plus.
- */
-export const AddLogo = () => (
-  <div aria-hidden="true" {...stylex.props(styles.add)}>
-    <Icon icon={Plus} />
-  </div>
-);

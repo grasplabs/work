@@ -280,13 +280,7 @@ const Name = ({
 );
 
 /** What Grasp does now, as a tooltip is, its tail down to the shape: the one dark thing on the canvas; Grasp's working sign before it while it is at it. */
-export const ThoughtLine = ({
-  text,
-  going,
-}: {
-  text: string;
-  going: boolean;
-}) => (
+const ThoughtLine = ({ text, going }: { text: string; going: boolean }) => (
   <output {...stylex.props(styles.thought)}>
     <span aria-hidden="true" {...stylex.props(styles.tail)} />
     {going ? <Spinner /> : null}

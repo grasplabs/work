@@ -50,7 +50,7 @@ const styles = stylex.create({
 });
 
 /** How full he is printed: fuller as the interview goes on. */
-export const fillOf = (phase: (typeof interviewPhases)[number]): number =>
+const fillOf = (phase: (typeof interviewPhases)[number]): number =>
   0.35 + (0.65 * interviewPhases.indexOf(phase)) / (interviewPhases.length - 1);
 
 export const Talk = ({

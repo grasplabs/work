@@ -28,7 +28,7 @@ import { joined, resampler, transcriptionRate } from "./pcm.ts";
 // Turn-taking (GRA-383) builds on the events an ear gives (`EarEvent`).
 
 /** What an ear is opened with. */
-export interface EarOptions {
+interface EarOptions {
   /** The language spoken. */
   locale: Locale;
   /** The interview link it listens for: the live line and the recordings go by it. */

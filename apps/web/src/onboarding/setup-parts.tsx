@@ -184,7 +184,7 @@ const explainedWait = (line: string, on: boolean, heard: boolean): number => {
  * was time to read it: most of its reading time, never more than four
  * seconds.
  */
-export const useExplainedAfter = (line: string): void => {
+const useExplainedAfter = (line: string): void => {
   const { onExplained } = useContext(Explained);
   const voice = useVoice();
   const saying = voice.line?.text === line;
@@ -509,7 +509,7 @@ const connectionPages = {
   hr: "connections/hr",
 } as const;
 
-export type ConnectionPage = keyof typeof connectionPages;
+type ConnectionPage = keyof typeof connectionPages;
 
 /**
  * More about what a step connects, on Grasp's support site, in a new tab:

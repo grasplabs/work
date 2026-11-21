@@ -19,8 +19,8 @@ import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
 // big preview stays live.
 
 /** A tile's size in CSS pixels: what the stage draws at. */
-export const pictureWidth = 160;
-export const pictureHeight = 90;
+const pictureWidth = 160;
+const pictureHeight = 90;
 
 /**
  * How long a look draws before its picture is taken: a scene waits for

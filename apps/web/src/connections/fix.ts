@@ -11,7 +11,7 @@ import type { Integration } from "./integrations.ts";
  * signed in to again (a Composio toolkit), from its panel, which
  * disconnects it first; or nothing, when only an admin can.
  */
-export type Fix = "sign-in" | "reconnect" | "none";
+type Fix = "sign-in" | "reconnect" | "none";
 
 export const fixOf = (
   integration: Integration,

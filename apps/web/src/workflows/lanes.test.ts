@@ -9,7 +9,6 @@ import {
   laterDay,
   listedRuns,
   placeOf,
-  waiting,
 } from "./lanes.ts";
 
 // Today's lanes, as the page draws them from what core served: a lane a
@@ -95,12 +94,6 @@ describe(laneDay, () => {
     ).toStrictEqual([
       ["A", true, ["1 done", "2 toPerson", "3 waits"]],
       ["B", true, ["4 waitsElsewhere"]],
-    ]);
-    expect(
-      waiting(day).map(({ id, at, waitsSince }) => ({ id, at, waitsSince }))
-    ).toStrictEqual([
-      // Its wait from when it began asking, not from when the run started.
-      { id: "3", at: now - 30 * 60_000, waitsSince: now - 20 * 60_000 },
     ]);
   });
 

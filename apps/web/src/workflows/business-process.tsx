@@ -189,19 +189,6 @@ export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
   </span>
 );
 
-/** Its name over what it covers: what a process says when pointed at. */
-export const ProcessHint = ({ process }: { process: BusinessProcess }) => {
-  const { i18n } = useLingui();
-  return (
-    <span {...stylex.props(styles.hint)}>
-      <span {...stylex.props(styles.hintName)}>
-        {i18n._(processNames[process])}
-      </span>
-      <span>{i18n._(processCovers[process])}</span>
-    </span>
-  );
-};
-
 /**
  * A process as a badge, its icon and name. What it covers goes beside it,
  * behind the row's info mark (workflow-settings.tsx): the library's Badge

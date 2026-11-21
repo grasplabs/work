@@ -4,7 +4,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vite-plus/test";
 
-import { organizationRenamed, useShownName } from "./organization-name.tsx";
+import {
+  organizationRenamed,
+  useShownOrganization,
+} from "./organization-name.tsx";
 
 // The organization's name the sidebar shows, against core's answer to its
 // read of the organization, faked: the name once core says it; none when
@@ -33,7 +36,7 @@ const Shown = ({
   organization,
 }: {
   organization: () => Promise<Organization>;
-}) => <p>{useShownName(organization)}</p>;
+}) => <p>{useShownOrganization(organization).name}</p>;
 
 /**
  * The name shown once core answered `organization`'s read, and

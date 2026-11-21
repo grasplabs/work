@@ -115,11 +115,6 @@ export const useShownOrganization = (
   return { name, logo };
 };
 
-/** The organization's name alone, as `useShownOrganization` has it. */
-export const useShownName = (
-  organization: () => Promise<Organization>
-): string | undefined => useShownOrganization(organization).name;
-
 /** Reads the organization from core. */
 export const organizationOf =
   (core: CoreConnection) => async (): Promise<Organization> =>

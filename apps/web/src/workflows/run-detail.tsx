@@ -92,7 +92,7 @@ const readsAgain = (
  * How a run's status stands as a Badge: done is success, failed is
  * danger, anything else a plain fact (nobody need act on it).
  */
-export const runToneOf = (status: WorkflowRunStatus): BadgeTone => {
+const runToneOf = (status: WorkflowRunStatus): BadgeTone => {
   if (status === "completed") {
     return "success";
   }

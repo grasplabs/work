@@ -51,7 +51,7 @@ const styles = stylex.create({
 });
 
 /** A run's status, in words, in the page's language. */
-export const runStatusLabel = (status: RunStatus): string =>
+const runStatusLabel = (status: RunStatus): string =>
   i18n._(statusLabels[status]);
 
 /**
@@ -105,7 +105,7 @@ export const WaitingForAiProvider = ({ wait }: { wait: RunAiProviderWait }) => {
  * A run's status as a Badge (`toneOf`). A queued run also says since when
  * it waits for a working AI provider key.
  */
-export const RunResult = ({
+const RunResult = ({
   status,
   aiProvider,
 }: {

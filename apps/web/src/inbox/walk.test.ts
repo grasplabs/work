@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { orderOf, placeIn, skip, stepFrom, turn, untouched } from "./walk.ts";
+import { orderOf, placeIn, skip, stepFrom } from "./walk.ts";
 import type { Turned } from "./walk.ts";
 
 // Going through the dashboard's pile (pile.ts): which card is on top, and
 // where a skipped one goes.
 
 const ids = ["a", "b", "c", "d"];
+
+/** A pile nobody went through yet: its first card on top, none skipped. */
+const untouched: Turned = { at: null, skipped: [] };
 
 /** The card on top, after what the person did. */
 const topOf = (waiting: readonly string[], turned: Turned) => {
@@ -43,28 +46,18 @@ describe("the arrows", () => {
     expect(stepFrom(1, 0, 1)).toBe(0);
     expect(stepFrom(0, 0, 1)).toBe(-1);
   });
-
-  it("turn the pile without changing its order", () => {
-    const on = turn(ids, untouched, 1);
-    expect(topOf(ids, on)).toBe("b");
-    expect(topOf(ids, turn(ids, on, -1))).toBe("a");
-    expect(topOf(ids, turn(ids, untouched, -1))).toBe("d");
-    expect(orderOf(ids, on.skipped)).toStrictEqual(ids);
-  });
 });
 
 describe("skipping", () => {
   it("puts the card at the back, and the one after it comes up in its place", () => {
-    const at = turn(ids, untouched, 1);
-    const skipped = skip(ids, at);
+    const skipped = skip(ids, { at: { id: "b", index: 1 }, skipped: [] });
     expect(orderOf(ids, skipped.skipped)).toStrictEqual(["a", "c", "d", "b"]);
     expect(topOf(ids, skipped)).toBe("c");
     expect(skipped.at?.index).toBe(1);
   });
 
   it("brings the first card up when the last one is skipped", () => {
-    const last = turn(ids, untouched, -1);
-    const skipped = skip(ids, last);
+    const skipped = skip(ids, { at: { id: "d", index: 3 }, skipped: [] });
     expect(topOf(ids, skipped)).toBe("a");
     expect(orderOf(ids, skipped.skipped)).toStrictEqual(ids);
   });

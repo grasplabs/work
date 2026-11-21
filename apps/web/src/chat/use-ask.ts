@@ -38,7 +38,7 @@ import type { ModelChoice } from "./model-choice.ts";
  */
 export const sendDeadlineMs = 10_000;
 /** A new chat's title: the start of its first question. */
-export const titleOf = (question: string): string => {
+const titleOf = (question: string): string => {
   const line = question.trim().split("\n")[0] ?? "";
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 };
@@ -64,7 +64,7 @@ const problemOf = (file: File): string | undefined => {
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
 /** Where a question goes when there is no chat yet, and what follows it. */
-export interface AskOptions {
+interface AskOptions {
   /** Once a question is taken, in the chat it went into. */
   onAsked?: (chatId: string) => void;
   /**
@@ -86,7 +86,7 @@ export interface AskOptions {
 const noOptions: AskOptions = {};
 
 /** A new chat made for a question that then failed to send. */
-export interface UnsentChat {
+interface UnsentChat {
   id: string;
   question: string;
   /** The agent it was made with; none named: the company's first. */
