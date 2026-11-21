@@ -26,6 +26,7 @@ import { AgentPage } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { AgentsOverview } from "./agents-overview.tsx";
 import type { AgentsTab, ManagedAgents } from "./agents-overview.tsx";
+import { OwnAgentsCard } from "./own-agents-admin.tsx";
 
 // The Agents page and one agent's page, on what their routes read from
 // core. These start from the ways the pages can fail: someone who isn't an
@@ -487,13 +488,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("shows an admin how many agents of their own each person has and what they cost, never their names, and turns them off", async () => {
       const asked = await mounted(
-        <Overview
-          at="organization"
-          makes
-          makesOwn
-          managed={managed}
-          own={[]}
-          ownAdmin={{
+        <OwnAgentsCard
+          admin={{
             on: true,
             people: [anna],
             usage: [
@@ -515,7 +511,7 @@ describe("the company's agents, on pages of their own", () => {
               },
             ],
           }}
-          usable={[chatAgent(stephen)]}
+          editable={true}
         />
       );
       const text = document.body.textContent ?? "";
@@ -538,13 +534,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("names nobody as gone where the company's people couldn't be read", async () => {
       await mounted(
-        <Overview
-          at="organization"
-          makes
-          makesOwn
-          managed={managed}
-          own={[]}
-          ownAdmin={{
+        <OwnAgentsCard
+          admin={{
             on: true,
             people: undefined,
             usage: [
@@ -558,7 +549,7 @@ describe("the company's agents, on pages of their own", () => {
               },
             ],
           }}
-          usable={[]}
+          editable={true}
         />
       );
       const text = document.body.textContent ?? "";
@@ -570,14 +561,9 @@ describe("the company's agents, on pages of their own", () => {
 
     it("gives an admin among Grasp's staff no way to turn people's own agents off", async () => {
       const asked = await mounted(
-        <Overview
-          at="organization"
-          makes={false}
-          makesOwn={false}
-          managed={managed}
-          own={[]}
-          ownAdmin={{ on: true, people: [], usage: [] }}
-          usable={[]}
+        <OwnAgentsCard
+          admin={{ on: true, people: [], usage: [] }}
+          editable={false}
         />
       );
       const toggle = document.querySelector(

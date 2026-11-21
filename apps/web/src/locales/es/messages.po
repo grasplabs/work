@@ -13705,6 +13705,7 @@ msgid "People with access"
 msgstr "Personas con acceso"
 
 #: src/agents/own-agents-admin.tsx
+#: src/routes/_shell.settings.workspace.tsx
 msgid "People's own agents"
 msgstr "Agentes propios de las personas"
 

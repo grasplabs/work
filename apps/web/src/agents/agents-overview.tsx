@@ -40,8 +40,6 @@ import { dollars } from "../settings/money.ts";
 import { nextWakeAt, useAudienceLine, wakesOn } from "./agent-facts.tsx";
 import { OfferedAgents } from "./agent-share.tsx";
 import { lookOf } from "./figure/look.ts";
-import { OwnAgentsCard } from "./own-agents-admin.tsx";
-import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 
 // The Agents page: the agents as portraits, on the library's AgentCard: the agent's own light on the
 // page's ground, its name in the serif with its job under it, its figure (in the shape and palette
@@ -442,7 +440,6 @@ export const AgentsOverview = ({
   makes,
   makesOwn,
   offered,
-  ownAdmin,
   tab,
   onTab,
 }: {
@@ -456,8 +453,6 @@ export const AgentsOverview = ({
   makesOwn: boolean;
   /** For admins: the agents people offered the company, and who they are. */
   offered?: { agents: readonly Agent[]; people: readonly Member[] } | undefined;
-  /** What an admin reads of people's own agents; undefined for anyone else. */
-  ownAdmin?: OwnAgentsAdmin | undefined;
   /** The tab the address names; none shows the first with agents in it. */
   tab: AgentsTab | undefined;
   /** Puts the tab chosen in the address. */
@@ -494,20 +489,14 @@ export const AgentsOverview = ({
     emptyLine = t`The agents your company sets up for you show here. You can also make one of your own.`;
   }
   const none = agents.length === 0 && mine.length === 0;
-  const company = (
-    <>
-      {offered === undefined ? null : (
-        <OfferedAgents
-          editable={makes}
-          offered={offered.agents}
-          people={offered.people}
-        />
-      )}
-      {ownAdmin === undefined ? null : (
-        <OwnAgentsCard admin={ownAdmin} editable={makes} />
-      )}
-    </>
-  );
+  const company =
+    offered === undefined ? null : (
+      <OfferedAgents
+        editable={makes}
+        offered={offered.agents}
+        people={offered.people}
+      />
+    );
   return (
     <Page>
       <PageHeading action={newAgent} title={t`Agents`} />

@@ -7,6 +7,11 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import {
+  OwnAgentsCard,
+  readOwnAgentsAdmin,
+} from "../agents/own-agents-admin.tsx";
+import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -243,9 +248,32 @@ const StaffAccess = ({
   );
 };
 
+/** People's own agents, as core answered an admin. */
+const OwnAgents = ({
+  read,
+  editable,
+}: {
+  read: Loaded<OwnAgentsAdmin>;
+  editable: boolean;
+}) => {
+  const { t } = useLingui();
+  if (read.state === "ready") {
+    return <OwnAgentsCard admin={read.data} editable={editable} />;
+  }
+  return (
+    <SectionCard
+      variant="grouped"
+      density="compact"
+      title={t`People's own agents`}
+    >
+      <SectionNotLoaded page={read} />
+    </SectionCard>
+  );
+};
+
 const Workspace = () => {
   const { t } = useLingui();
-  const { page, staff } = Route.useLoaderData();
+  const { page, staff, ownAgents } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const editable = isMemberAdmin(identity);
   return (
@@ -261,6 +289,9 @@ const Workspace = () => {
           <SectionNotLoaded page={page} />
         </SectionCard>
       )}
+      {ownAgents === undefined ? null : (
+        <OwnAgents editable={editable} read={ownAgents} />
+      )}
       {staff === undefined ? null : (
         <StaffAccess editable={editable} read={staff} />
       )}
@@ -268,13 +299,13 @@ const Workspace = () => {
   );
 };
 
-/** The organization's card, the time zone and sign-in, then staff access. */
+/** The organization's card, the time zone and sign-in, people's own agents, then staff access. */
 const WorkspacePending = () => {
   const { identity } = Route.useRouteContext();
   return (
     <>
       <OrgCardLoading canChange={isMemberAdmin(identity)} />
-      <PageSkeletonSettings header={false} sections={[2, 1]} />
+      <PageSkeletonSettings header={false} sections={[2, 2, 1]} />
     </>
   );
 };
@@ -284,16 +315,24 @@ export const Route = createFileRoute("/_shell/settings/workspace")({
   errorComponent: SettingsError,
   component: Workspace,
   loader: async ({ context: { core, identity } }) => {
-    // Staff access is for admins only: nobody else is asked.
-    const [page, staff] = await Promise.all([
+    // Staff access and people's own agents are for admins only: nobody
+    // else is asked.
+    const admin = isAdmin(identity.role);
+    const [page, staff, ownAgents] = await Promise.all([
       loadFromCore(core, async (session) => await session.organization.get()),
-      isAdmin(identity.role)
+      admin
         ? loadFromCore(core, async (session) => {
             const gate = await session.onboardingGate.view();
             return gate.staff;
           })
         : undefined,
+      admin
+        ? loadFromCore(
+            core,
+            async (session) => await readOwnAgentsAdmin(session)
+          )
+        : undefined,
     ]);
-    return { page, staff };
+    return { page, staff, ownAgents };
   },
 });
