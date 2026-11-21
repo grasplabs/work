@@ -43,7 +43,7 @@ import {
   useThinkingStep,
 } from "./answer-thinking.tsx";
 import { useAnswerTo } from "./answer-to.ts";
-import { AnswerWords, ThoughtWords } from "./answer-words.tsx";
+import { AnswerWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { ThreadPlan } from "./build-progress.tsx";
@@ -1024,7 +1024,8 @@ const AnswerRow = ({
         thinkingLabel={context.workingLabel}
         thoughts={
           thought.thoughts === undefined ? undefined : (
-            <ThoughtWords
+            <AnswerWords
+              size="sm"
               text={thought.thoughts}
               writing={status === "thinking"}
             />

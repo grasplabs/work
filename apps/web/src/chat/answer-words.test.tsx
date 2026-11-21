@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { AnswerWords, ThoughtWords } from "./answer-words.tsx";
+import { AnswerWords } from "./answer-words.tsx";
 
 // An answer as the thread draws it: its Markdown with nothing of raw HTML
 // or a picture that would load; a link out of Grasp that opens only once
@@ -37,11 +37,11 @@ const shown = async (text: string, thinking = false): Promise<void> => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        {thinking ? (
-          <ThoughtWords text={text} writing={false} />
-        ) : (
-          <AnswerWords text={text} writing={false} />
-        )}
+        <AnswerWords
+          {...(thinking ? { size: "sm" as const } : {})}
+          text={text}
+          writing={false}
+        />
       </I18nProvider>
     );
     await Promise.resolve();
