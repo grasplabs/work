@@ -19,6 +19,7 @@ import { useId, useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
+import { formatDollars } from "../format.ts";
 import { Page } from "../frame/page.tsx";
 import {
   AlertDialog,
@@ -70,7 +71,6 @@ import {
 import { Switch } from "../grasp/switch/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
-import { dollars } from "../settings/money.ts";
 import {
   AudienceControl,
   appAudienceOf,
@@ -206,7 +206,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
   const { t } = useLingui();
   const monthName = useMonthName();
   const { requests, people } = usage;
-  const before = dollars(usage.spentBefore);
+  const before = formatDollars(usage.spentBefore);
   return (
     <FactRow
       info={[
@@ -219,7 +219,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
       ].join(" · ")}
       label={monthName(usage.month)}
     >
-      {dollars(usage.spent)}
+      {formatDollars(usage.spent)}
     </FactRow>
   );
 };
