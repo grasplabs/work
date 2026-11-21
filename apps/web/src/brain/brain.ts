@@ -652,18 +652,19 @@ const whoAndHow = (source: Pick<Source, "who" | "how">): string =>
 
 /** How many of each kind were said, most first: "3 time wasters, 1 handover". */
 const saidText = (statements: Statement[]): string =>
-  saidOrder
-    .map(
-      (kind) =>
-        [
-          kind,
-          statements.filter((statement) => statement.kind === kind).length,
-        ] as const
-    )
-    .filter(([, count]) => count > 0)
-    .toSorted((a, b) => b[1] - a[1])
-    .map(([kind, count]) => saidCount(kind, count))
-    .join(", ");
+  formatList(
+    saidOrder
+      .map(
+        (kind) =>
+          [
+            kind,
+            statements.filter((statement) => statement.kind === kind).length,
+          ] as const
+      )
+      .filter(([, count]) => count > 0)
+      .toSorted((a, b) => b[1] - a[1])
+      .map(([kind, count]) => saidCount(kind, count))
+  );
 
 /** One team as an import listed it: its size and roles then, and the size before when this import changed it. */
 export interface TeamRow {
@@ -1778,9 +1779,11 @@ const teamPoints = (cx: Context, team: Team): NotePoint[] => {
     ),
     point(
       t`Roles`,
-      (latest(team.counts)?.roles ?? [])
-        .map((role) => roleText(role.name, role.people))
-        .join(", ")
+      formatList(
+        (latest(team.counts)?.roles ?? []).map((role) =>
+          roleText(role.name, role.people)
+        )
+      )
     )
   );
 };

@@ -6,6 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
+import { formatList } from "../format.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -31,7 +32,7 @@ const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
   const names = new Map(
     read?.state === "ready" ? read.data.map(({ id, name }) => [id, name]) : []
   );
-  const named = teams.map((id) => names.get(id) ?? id).join(", ");
+  const named = formatList(teams.map((id) => names.get(id) ?? id));
   return <Trans>People in these teams: {named}</Trans>;
 };
 
@@ -62,14 +63,14 @@ export const AppNames = ({
         ])
       : []
   );
-  return apps
-    .map(({ source, provider, name }) => {
+  return formatList(
+    apps.map(({ source, provider, name }) => {
       const granted = named.get(`${source}:${provider}`);
       return granted === undefined || granted === name
         ? name
         : `${granted} (${name})`;
     })
-    .join(", ");
+  );
 };
 
 /** Who may ask it, as the card says it. */
@@ -187,7 +188,7 @@ const AgentDraftCard = ({
                   classes.length === 0 ? (
                     <Trans>Nothing yet: you turn it on on its page</Trans>
                   ) : (
-                    classes.map((each) => i18n._(classNames[each])).join(", ")
+                    formatList(classes.map((each) => i18n._(classNames[each])))
                   ),
               }
             : undefined,
