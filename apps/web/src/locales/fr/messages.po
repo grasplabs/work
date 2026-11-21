@@ -4117,7 +4117,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/brain/memories-page.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4129,6 +4128,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
+#: src/frame/leave-confirm.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
@@ -12937,7 +12937,7 @@ msgstr "Ouvrir le chat"
 msgid "Open Data"
 msgstr "Ouvrir Données"
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open external link?"
 msgstr "Ouvrir le lien externe ?"
 
@@ -12968,7 +12968,7 @@ msgstr "Les factures impayées dans la comptabilité, avec leurs dates d’éch�
 msgid "Open leads and deals in the CRM."
 msgstr "Les prospects et affaires en cours dans le CRM."
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open link"
 msgstr "Ouvrir le lien"
 

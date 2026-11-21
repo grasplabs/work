@@ -1,38 +1,62 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 
 /**
- * A ref for the box around text the library draws (DocumentEditor): a click on a link to another page of Grasp
- * opens it in place, as the app's own links do, instead of loading the whole app again, and a link out of
- * Grasp opens in a new tab. A new tab or window the reader asks for stays the browser's.
+ * For the box around text the library draws (DocumentEditor): a plain click
+ * on a link to another page of Grasp opens it in place, as the app's own
+ * links do, instead of loading the whole app again; a new tab or window the
+ * reader asks for there stays the browser's. Any click on a link out of
+ * Grasp, a middle click too, waits for the person's yes (`leaving`, for
+ * `LeaveConfirm`), as a link in an answer does: a note's text may come
+ * from a source or a chat.
  */
-export const useFollowLinks = () => {
+export const useFollowLinks = (): {
+  /** The box's ref. */
+  follow: (element: HTMLDivElement) => () => void;
+  /** The link out of Grasp waiting for the person's yes. */
+  leaving: string | undefined;
+  stopLeaving: () => void;
+} => {
   const navigate = useNavigate();
-  return (element: HTMLDivElement) => {
-    const follow = (event: MouseEvent) => {
-      const link =
-        event.target instanceof Element ? event.target.closest("a") : null;
-      if (
-        link === null ||
-        (link.protocol !== "http:" && link.protocol !== "https:") ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-      event.preventDefault();
-      // A link out of Grasp opens in a tab of its own, without this page as its opener.
-      if (link.origin !== window.location.origin) {
-        window.open(link.href, "_blank", "noopener,noreferrer");
-        return;
-      }
-      void navigate({ href: `${link.pathname}${link.search}${link.hash}` });
-    };
-    element.addEventListener("click", follow);
-    return () => {
-      element.removeEventListener("click", follow);
-    };
+  const [leaving, setLeaving] = useState<string>();
+  return {
+    follow: (element) => {
+      const follow = (event: MouseEvent) => {
+        const link =
+          event.target instanceof Element ? event.target.closest("a") : null;
+        if (
+          link === null ||
+          (link.protocol !== "http:" && link.protocol !== "https:")
+        ) {
+          return;
+        }
+        if (link.origin !== window.location.origin) {
+          event.preventDefault();
+          setLeaving(link.href);
+          return;
+        }
+        if (
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          return;
+        }
+        event.preventDefault();
+        void navigate({ href: `${link.pathname}${link.search}${link.hash}` });
+      };
+      element.addEventListener("click", follow);
+      element.addEventListener("auxclick", follow);
+      return () => {
+        element.removeEventListener("click", follow);
+        element.removeEventListener("auxclick", follow);
+      };
+    },
+    leaving,
+    stopLeaving: () => {
+      setLeaving(undefined);
+    },
   };
 };

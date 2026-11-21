@@ -4117,7 +4117,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/brain/memories-page.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4129,6 +4128,7 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
+#: src/frame/leave-confirm.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
@@ -12937,7 +12937,7 @@ msgstr "Chat openen"
 msgid "Open Data"
 msgstr "Gegevens openen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open external link?"
 msgstr "Externe link openen?"
 
@@ -12968,7 +12968,7 @@ msgstr "Openstaande facturen in de boekhouding, met hun vervaldatum."
 msgid "Open leads and deals in the CRM."
 msgstr "Open leads en deals in het CRM."
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open link"
 msgstr "Link openen"
 
