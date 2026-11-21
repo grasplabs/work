@@ -3,7 +3,7 @@
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*
- * Newsreader, for an export's second level of heading (.page-export below),
+ * Newsreader, for an export's second level of heading ([data-page="export"] below),
  * with its optical sizes: the cut follows the size.
  */
 @import "@fontsource-variable/newsreader/opsz.css";
@@ -81,12 +81,12 @@
   margin: 16mm 16mm 18mm;
 }
 
-.page-export {
+[data-page="export"] {
   page: export;
   print-color-adjust: exact;
 }
 
-.page-export h2 {
+[data-page="export"] h2 {
   font-family: "Newsreader Variable", serif;
   font-weight: 400;
   letter-spacing: -0.025em;
