@@ -52,9 +52,14 @@ export const getRouter = () => {
   // `invalidate`, the frame included, so its list and counts follow: from
   // then on, answers asked before it may be outdated (src/admin/org-loads.ts).
   // A reload that leaves the frame alone changes nothing a core answers:
-  // Read again and Try again on an organization, and a Setup reading
-  // itself again (its polls, and its own settings, which the admin
-  // records and a deploy applies later). The router's events don't say
+  // Read again and Try again on an organization's section, and a Setup
+  // reading itself again (its polls, and its own settings, which the
+  // admin records and a deploy applies later). Two retries reload the
+  // frame and count, though nothing changed: Try again on a route that
+  // failed, and on organizations that couldn't be read. Counting them
+  // costs at most one wait on the frame's read they start, after a
+  // failure; a way to reload without counting could be used to skip a
+  // real change. The router's events don't say
   // why a load runs, so this is where a change is seen. Two limits, as
   // designed:
   // - only changes made in this tab are seen: one made in another tab, by

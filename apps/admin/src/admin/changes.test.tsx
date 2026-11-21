@@ -90,7 +90,7 @@ const onAcme = async (
     frameMisses,
   }: {
     /** Whether the command changes what Acme's core answers. */
-    applies?: boolean;
+    applies?: boolean | { onCommand: number };
     /** Acme's core's answer to its `call`th read, what it held then, held back `until`. */
     held?: { call: number; until: Promise<unknown> };
     /** The frame's reads of every client, by which (1 is the first), held back until each promise settles. */
@@ -117,6 +117,7 @@ const onAcme = async (
   );
   let reads = 0;
   let frameReads = 0;
+  let commands = 0;
   let down = false;
   /** What Acme's core holds when asked, stamped as the Worker stamps it: when its answer came in. */
   const answerOnceIn = async (
@@ -168,8 +169,13 @@ const onAcme = async (
     },
     ...sectionReads,
     commandFn: async () => {
+      commands += 1;
+      const given = commands;
       const answer = await command();
-      if (applies) {
+      if (
+        applies === true ||
+        (typeof applies === "object" && applies.onCommand === given)
+      ) {
         core.change();
       }
       return answer;
@@ -635,6 +641,65 @@ describe("a change on an organization's page", () => {
     }
   );
 
+  it(
+    "never shows an answer from before the latest change as current: two changes in a row, a read of Acme asked between them still under way",
+    // Room for a page that never asks again to fail on what it shows, not on time.
+    { timeout: 15_000 },
+    async () => {
+      const between = Promise.withResolvers<null>();
+      const { container, router, asked } = await onAcme(
+        async () => {},
+        undefined,
+        {
+          // Only the second command changes what Acme's core answers.
+          applies: { onCommand: 2 },
+          // Acme's second read, asked between the changes, is slow.
+          held: { call: 2, until: between.promise },
+          // The frame's reads after each change leave Acme out.
+          frameMisses: { 2: "without acme", 3: "without acme" },
+        }
+      );
+      const globexContract = "/organizations/globex/details?tab=contract";
+      await go(() => {
+        router.history.push(globexContract);
+      });
+      // The first change, on Globex.
+      await agree(container);
+      // To Acme: its answer predates the change, so its core is asked alone.
+      await act(async () => {
+        router.history.push(acmeContract);
+        await Promise.resolve();
+      });
+      await until(() => asked() === 2);
+      // Back to Globex while that read runs: the second change.
+      await act(async () => {
+        router.history.push(globexContract);
+        await Promise.resolve();
+      });
+      await until(
+        () =>
+          router.state.resolvedLocation?.pathname ===
+            "/organizations/globex/details" && agreedOn(container) !== ""
+      );
+      await giveAgreements(container);
+      await until(() => router.state.status === "idle");
+      const askedBefore = asked();
+      // To Acme while the read asked between the changes still runs.
+      await act(async () => {
+        router.history.push(acmeContract);
+        await Promise.resolve();
+      });
+      await until(() => asked() > askedBefore).catch(() => null);
+      between.resolve(null);
+      await settle();
+
+      expect({
+        agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
+        askedAgain: asked() - askedBefore,
+      }).toStrictEqual({ agreed: true, askedAgain: 1 });
+    }
+  );
+
   it("never shows an answer from before a change as current when it came in after the change, nothing running", async () => {
     const slow = Promise.withResolvers<null>();
     const through = Promise.withResolvers<null>();
@@ -683,6 +748,13 @@ describe("a change on an organization's page", () => {
 
   it("a Setup reloading itself marks no change: coming to another organization after it shows its answer at once", async () => {
     const { router, calls } = await onAcme(async () => {});
+    // On Acme's Setup, as its polls and its own settings reload it.
+    await go(() => {
+      router.history.push("/organizations/acme/setup");
+    });
+    const onSetup = router.state.matches.some(
+      (match) => match.routeId === "/organizations/$clientId/setup"
+    );
     await go(async () => {
       await router.invalidate({
         filter: (match) => match.routeId === "/organizations/$clientId/setup",
@@ -692,15 +764,16 @@ describe("a change on an organization's page", () => {
       router.history.push("/organizations/globex/details?tab=contract");
     });
 
-    expect(
-      calls.filter(
+    expect({
+      onSetup,
+      globexAsked: calls.filter(
         ({ fn, data }) =>
           fn === "fetchClientAdmin" &&
           typeof data === "object" &&
           data !== null &&
           Reflect.get(data, "clientId") === "globex"
-      )
-    ).toHaveLength(0);
+      ).length,
+    }).toStrictEqual({ onSetup: true, globexAsked: 0 });
   });
 
   it("coming to another organization while the frame reads every client again, nothing changed since its answer, shows that answer at once", async () => {

@@ -155,12 +155,12 @@ const unanswered = (client: GridRow): ClientAdmin => ({
  * (undefined: asked once opened). The frame's read (`admins`) counts once
  * it is in.
  *
- * Coming to the page, an answer kept from before a change staff made
- * since (src/router.tsx) is never shown as current: the page takes a
- * read asked after that change if one is under way (the frame's, or one
- * of its own), and otherwise asks its core alone; not answering, it shows
- * the answer it had, marked stale. An answer with no change since shows
- * at once.
+ * Coming to the page, an answer kept from before the last change staff
+ * made (src/router.tsx) is never shown as current: the page takes a read
+ * asked after that change if one is under way (the frame's, or one of
+ * its own), and otherwise asks its core alone; not answering, it shows
+ * the answer it had, marked stale. An answer asked after it shows at
+ * once.
  *
  * The rule for when a fresh answer may be reused: only on coming to the
  * page. When the page loads while the tab already shows this
@@ -198,14 +198,14 @@ export const readOrganization = async ({
   // again, a stale answer. Coming to it takes the answer it has, or the
   // frame's read.
   const anew = onIt && !preload;
-  // An answer kept from before a change staff made since (src/router.tsx)
-  // is never shown as current: a read asked after that change answers
-  // for it, the frame's or its own, if one is under way, and otherwise its
-  // core is asked alone. One with no change since shows at once.
-  const since = reads.changedSince(client.id);
+  // An answer kept from before the last change staff made
+  // (src/router.tsx) is never shown as current: a read asked after that
+  // change answers for it, the frame's or its own, if one is under way,
+  // and otherwise its core is asked alone. One asked after it shows at
+  // once.
   if (!anew) {
     const fresh = reads.fresh(client.id, Date.now());
-    if (fresh !== undefined && since === undefined) {
+    if (fresh !== undefined && !reads.predates(client.id)) {
       // Still marked stale when reading it again failed since.
       return { read: reads.settle(fresh, Date.now()) };
     }
@@ -219,21 +219,21 @@ export const readOrganization = async ({
     // When the frame reads this client alone (the open one), the page
     // takes that read as soon as it answers (`readOne` joins it), never
     // waiting on other cores. Otherwise the frame's read of every client,
-    // if asked after the change its answer predates, has this one in it:
+    // if asked after the last change, has this one in it:
     // waited on, rather than asking its core, Stripe and Attio a second
     // time, unless it holds up the page past `frameWaitMs`. When neither
-    // gives an answer with no change since, its core is asked alone.
+    // gives an answer asked after the last change, its core is asked alone.
     if (!anew) {
-      // Only a read asked after the change its kept answer predates counts.
-      const after = since ?? 0;
+      // Only a read asked after the last change holds every change made.
+      const after = reads.lastChange();
       const own = reads.reading(client.id);
       if ((own === undefined || own <= after) && adminsAsked > after) {
         await frameIn(admins);
       }
-      // An answer kept by now, with no change since it, is not asked for
-      // again: the frame's, or one that came in while the page waited.
+      // An answer kept by now, asked after the last change, is not asked
+      // for again: the frame's, or one that came in while the page waited.
       const kept = reads.fresh(client.id, Date.now());
-      if (kept !== undefined && reads.changedSince(client.id) === undefined) {
+      if (kept !== undefined && !reads.predates(client.id)) {
         return reads.settle(kept, Date.now());
       }
     }
@@ -242,7 +242,7 @@ export const readOrganization = async ({
       // Not answering, the page shows the answer it had, marked stale.
       admin = await readOne(reads, client.id, {
         anew,
-        after: reads.changedSince(client.id) ?? 0,
+        after: reads.lastChange(),
       });
     } catch {
       // As a core that didn't answer.

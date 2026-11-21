@@ -15,7 +15,7 @@
  *   (the page alone, or the frame for every client);
  * - an answer stays fresh `freshMs`, moving between an organization's
  *   sections, or coming back to it, asks its core nothing, unless it was
- *   asked before a change staff made since: then a read asked after the
+ *   asked before the last change staff made: then a read asked after that
  *   change answers for it (src/admin/org-loads.ts);
  * - when its core doesn't answer, or not in time, the page shows the last
  *   answer it had, marked stale with why and since when, until a later
@@ -72,12 +72,12 @@ export interface OrgReads {
    */
   changed: () => void;
   /**
-   * How many reads had been asked by the first change after client
-   * `clientId`'s kept answer was asked: that answer may predate it, and
-   * only a read asked after that many holds it for sure. Undefined while
-   * no change came since (or none is kept).
+   * How many reads had been asked when staff last changed something: only
+   * an answer to a read asked after that many holds every change made.
    */
-  changedSince: (clientId: string) => number | undefined;
+  lastChange: () => number;
+  /** Whether client `clientId`'s kept answer was asked before the last change (`lastChange`). */
+  predates: (clientId: string) => boolean;
   /**
    * Keeps `admin`'s answer to a read asked at `asked`, unless an answer
    * to a read asked later is kept, or the client was forgotten since; a
@@ -101,7 +101,7 @@ export const orgReads = (): OrgReads => {
   let asks = 0;
   /** How many were asked before the router's load under way began. */
   let loadFrom = 0;
-  /** How many were asked when staff last changed something. */
+  /** How many were asked when staff last changed something (`changed`). */
   let lastChange = 0;
   /** Each client's read under way, with when it was asked. */
   const underWay = new Map<
@@ -109,15 +109,11 @@ export const orgReads = (): OrgReads => {
     { asked: number; answer: Promise<ClientAdmin | null> }
   >();
   /**
-   * Each client's answer kept, with when the read it answered was asked,
-   * and how many had been asked by the first change after that (unset
-   * while none came): all a read under way is compared with, so nothing
-   * more of the changes is kept than one number for each answer.
+   * Each client's answer kept, with when the read it answered was asked:
+   * compared with the last change, it says whether the answer may predate
+   * one, so nothing of the changes is kept but that one number.
    */
-  const answers = new Map<
-    string,
-    { admin: AnsweredAdmin; asked: number; changedAt?: number }
-  >();
+  const answers = new Map<string, { admin: AnsweredAdmin; asked: number }>();
   /** Why the last read failed and when, for a client with an answer kept, until a later one. */
   const failed = new Map<string, NonNullable<OrgRead["stale"]>>();
   /** For a client forgotten, how many reads had been asked then: none of those keeps anything. */
@@ -135,15 +131,7 @@ export const orgReads = (): OrgReads => {
     }
     const kept = answers.get(clientId);
     if (kept === undefined || kept.asked <= asked) {
-      // An answer to a read asked before the last change, kept only now:
-      // a change came after it was asked, at the latest then, so it counts
-      // as changed from when it was asked.
-      answers.set(
-        clientId,
-        asked <= lastChange
-          ? { admin, asked, changedAt: asked }
-          : { admin, asked }
-      );
+      answers.set(clientId, { admin, asked });
     }
     if (kept === undefined || kept.asked < asked) {
       failed.delete(clientId);
@@ -185,12 +173,12 @@ export const orgReads = (): OrgReads => {
     reading: (clientId) => underWay.get(clientId)?.asked,
     changed: () => {
       lastChange = asks;
-      // The first change after each answer kept, never moved by a later one.
-      for (const kept of answers.values()) {
-        kept.changedAt ??= asks;
-      }
     },
-    changedSince: (clientId) => answers.get(clientId)?.changedAt,
+    lastChange: () => lastChange,
+    predates: (clientId) => {
+      const kept = answers.get(clientId);
+      return kept !== undefined && kept.asked <= lastChange;
+    },
     remember,
     fresh: (clientId, now) => {
       const kept = answers.get(clientId)?.admin;
