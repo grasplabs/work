@@ -10,8 +10,8 @@ import { apiOf, peopleIn, signInAs } from "./people.ts";
 // emails are kept by core and changed here by the admin; what core has
 // nothing for yet (a plan, a card, invoices) shows the prototype's empty
 // state, and can't be changed. The devices a person is signed in on can be
-// signed out one by one. Members, Models, AI spend and the audit trail have tests
-// of their own (web, models, activity).
+// signed out one by one. Members and the audit trail have tests of their
+// own (web, activity).
 
 /** A section of the page, by its heading. */
 const sectionOf = (page: Page, name: string) =>

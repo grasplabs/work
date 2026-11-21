@@ -95,6 +95,15 @@ describe(laneDay, () => {
       ["A", true, ["1 done", "2 toPerson", "3 waits"]],
       ["B", true, ["4 waitsElsewhere"]],
     ]);
+    expect(
+      day.lanes
+        .flatMap((lane) => lane.runs)
+        .filter((each) => each.state === "waits")
+        .map(({ id, at, waitsSince }) => ({ id, at, waitsSince }))
+    ).toStrictEqual([
+      // Its wait from when it began asking, not from when the run started.
+      { id: "3", at: now - 30 * 60_000, waitsSince: now - 20 * 60_000 },
+    ]);
   });
 
   it("says a run that ended without its result failed or was cancelled, alone or with people", () => {

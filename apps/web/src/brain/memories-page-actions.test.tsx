@@ -1128,6 +1128,7 @@ describe("the Memories page's paged lists, read again", () => {
         "Status: Renewing",
         "Initech renews\\u{200B} in March",
       ].map((text) => dialogText.includes(text)),
+      raw: dialogText.includes(statement),
       options,
       // Its id is the opening's own: any text.
       share: { ...share, change: typeof share?.change },
@@ -1137,6 +1138,7 @@ describe("the Memories page's paged lists, read again", () => {
       said: document.body.textContent.includes("Shared."),
     }).toStrictEqual({
       shows: [true, true, true],
+      raw: false,
       options: [
         ["t-sales", "Team Sales"],
         ["everyone", "Everyone"],

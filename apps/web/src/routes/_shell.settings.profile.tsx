@@ -2,6 +2,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { languageOptions } from "../frame/language-options.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Flag } from "../grasp/flags/index.ts";
 import {
@@ -21,7 +22,6 @@ import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
-import { languages } from "../language-picker.tsx";
 import { ProfileName } from "../settings/profile-name.tsx";
 import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import { SettingsError } from "../settings/section.tsx";
@@ -64,14 +64,14 @@ const EmailRow = ({ email, role }: { email: string; role: string }) => {
 const LanguageRow = () => {
   const { t, i18n } = useLingui();
   const label = t`Language`;
-  const chosen = languages.find(({ code }) => code === i18n.locale);
+  const chosen = languageOptions.find(({ code }) => code === i18n.locale);
   return (
     <SettingRow help={t`The language Grasp speaks to you`} label={label}>
       {(field) => (
         // The rows' own Select at their fields' height and words, the
         // chosen language's flag before its name.
         <Select
-          items={languages.map(({ code, name }) => ({
+          items={languageOptions.map(({ code, name }) => ({
             value: code,
             label: name,
           }))}
@@ -89,7 +89,7 @@ const LanguageRow = () => {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {languages.map(({ code, name, flag }) => (
+            {languageOptions.map(({ code, name, flag }) => (
               <SelectItem key={code} label={name} value={code}>
                 <span {...stylex.props(styles.language)}>
                   <Flag flag={flag} size="sm" />

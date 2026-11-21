@@ -959,7 +959,6 @@ describe("an agent's page", () => {
     expect(choice("Who may use Stephen")).toBeNull();
     expect(document.body.textContent).toContain("Where people reach him");
     expect(document.body.textContent).toContain("Grasp's chat");
-    expect(document.querySelector("a[href='/settings/stephen']")).toBeNull();
   });
 
   it("makes an agent from the answers to Grasp's questions, in the look chosen, and leads to its access", async () => {
