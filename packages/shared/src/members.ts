@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type {
   DirectoryDeletedFailure,
   DirectoryProvider,
@@ -339,6 +341,20 @@ export interface MembersApi {
   directoryPlacement: () => Promise<DirectoryPlacement>;
 }
 
+/**
+ * A person's name as they give it themselves (`SessionApi.setName`): what
+ * Grasp calls them everywhere. Their sign-in sets it when they first come
+ * in, and never again after.
+ */
+export const personNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  // No control characters or line and paragraph separators: it is shown
+  // as one line.
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
+
 /** Why an admin's change to a member was refused or not finished. */
 export const memberErrors = defineErrorFamily({
   "member.not_found": "There's no such member.",
@@ -347,6 +363,7 @@ export const memberErrors = defineErrorFamily({
   "member.connections_pending":
     "They're removed, but not all their personal connections could be disconnected yet. This is retried automatically, or remove them again.",
   "member.role_invalid": "That isn't a role here.",
+  "member.name_invalid": "Give a name of up to 100 characters, on one line.",
   "member.role_changed":
     "Another admin changed their role at the same time. Check it, and try again.",
   "member.last_admin":
