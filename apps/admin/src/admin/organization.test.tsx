@@ -7,6 +7,7 @@ import {
   readySnapshot,
   toldSnapshot,
 } from "../../test/snapshots.ts";
+import type { Crm } from "../crm/crm.ts";
 import { answeredAdmin, gridRow, lineOf, openAdmin } from "../test-app.tsx";
 import type { Answers } from "../test-app.tsx";
 import { formatDate } from "./words.ts";
@@ -28,10 +29,14 @@ const setupAnswers: Answers = {
 };
 
 /** Acme's page at `path` (under its own), its core having answered `snapshot`. */
-const openAcme = async (path: string, snapshot: AdminSnapshot) =>
+const openAcme = async (path: string, snapshot: AdminSnapshot, crm?: Crm) =>
   await openAdmin(`/organizations/acme${path}`, {
     fetchClientGrid: [acme],
-    fetchClientAdmin: answeredAdmin({ client: acme, snapshot }),
+    fetchClientAdmin: answeredAdmin({
+      client: acme,
+      snapshot,
+      ...(crm === undefined ? {} : { crm }),
+    }),
     ...setupAnswers,
   });
 
@@ -363,27 +368,38 @@ describe("an organization's overview", () => {
 describe("an organization's details", () => {
   it("shows the company as core has it, its people counted, and every part core doesn't hold as not known yet", async () => {
     // Its list of people in: three people in two teams.
-    const { container, main } = await openAcme("/details", {
-      ...emptyAdminSnapshot("Noordkade"),
-      roster: {
-        teams: [
-          { id: "finance", name: "Finance", lead: "eva", does: "", off: false },
-          { id: "sales", name: "Sales", lead: null, does: "", off: false },
-        ],
-        people: [
-          ["eva", "Eva Bakker", "finance", "CFO"],
-          ["ruben", "Ruben de Vries", "finance", ""],
-          ["lotte", "Lotte Jansen", "sales", ""],
-        ].map(([id = "", name = "", team = "", title = ""]) => ({
-          id,
-          name,
-          email: `${id}@noordkade.test`,
-          team,
-          title,
-          away: false,
-        })),
+    const { container, main } = await openAcme(
+      "/details",
+      {
+        ...emptyAdminSnapshot("Noordkade"),
+        roster: {
+          teams: [
+            {
+              id: "finance",
+              name: "Finance",
+              lead: "eva",
+              does: "",
+              off: false,
+            },
+            { id: "sales", name: "Sales", lead: null, does: "", off: false },
+          ],
+          people: [
+            ["eva", "Eva Bakker", "finance", "CFO"],
+            ["ruben", "Ruben de Vries", "finance", ""],
+            ["lotte", "Lotte Jansen", "sales", ""],
+          ].map(([id = "", name = "", team = "", title = ""]) => ({
+            id,
+            name,
+            email: `${id}@noordkade.test`,
+            team,
+            title,
+            away: false,
+          })),
+        },
       },
-    });
+      // No Attio key in Secrets Store, as the Worker answers then.
+      { state: "not_connected", recordId: null }
+    );
     const page = main();
 
     expect({

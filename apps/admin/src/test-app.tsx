@@ -1,3 +1,4 @@
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 /**
  * The admin as the browser runs it, for the component tests
  * (vite.components.config.ts): its real router, routes, loaders and
@@ -257,5 +258,59 @@ export const openAdmin = async (
     main,
     /** The whole page, as text. */
     text: (): string => container.textContent ?? "",
+    /** The whole page's markup. */
+    html: (): string => container.innerHTML,
+  };
+};
+
+/** What an organization's sections read beside its snapshot, while nothing more is set. */
+const sectionReads: Answers = {
+  fetchClientSetup: null,
+  fetchPinChoices: { releases: [] },
+  fetchClientHosting: null,
+  fetchProvisioningProgress: null,
+  fetchClientAiStatus: null,
+  fetchOrganizationTrail: [],
+  fetchBrainReport: null,
+};
+
+/**
+ * Companies whose cores answered: `add` one with its snapshot (its path
+ * under organizations is what it answers), and `open` a page of the
+ * admin with every one of them in the frame, `more` answered besides.
+ */
+export const companies = () => {
+  const known = new Map<string, AnsweredAdmin>();
+  return {
+    add: (snapshot: AdminSnapshot): string => {
+      const id = `client-${known.size + 1}`;
+      known.set(
+        id,
+        answeredAdmin({
+          client: gridRow({
+            id,
+            name: `Acme ${id}`,
+            hostname: `${id}.grasp.test`,
+          }),
+          snapshot,
+        })
+      );
+      return `/organizations/${id}`;
+    },
+    open: async (path: string, more: Answers = {}) =>
+      await openAdmin(path, {
+        fetchClientGrid: [...known.values()].map(({ client }) => client),
+        fetchClientAdmin: (data: unknown) => {
+          const clientId: unknown =
+            typeof data === "object" && data !== null
+              ? Reflect.get(data, "clientId")
+              : undefined;
+          return typeof clientId === "string"
+            ? (known.get(clientId) ?? null)
+            : null;
+        },
+        ...sectionReads,
+        ...more,
+      }),
   };
 };
