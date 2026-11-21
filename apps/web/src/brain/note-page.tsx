@@ -1,4 +1,5 @@
 import { useFollowLinks } from "../frame/follow-links.ts";
+import { LeaveConfirm } from "../frame/leave-confirm.tsx";
 import { PageBrain } from "../grasp/blocks/page-brain/page-brain.tsx";
 import type {
   PageFact,
@@ -101,9 +102,10 @@ export const NoteBrainPage = ({
   /** The page's text, when it is not what Grasp wrote of the note, such as the company's. */
   text?: string;
 }) => {
-  const followLinks = useFollowLinks();
+  const { follow, leaving, stopLeaving } = useFollowLinks();
   return (
-    <div ref={followLinks}>
+    <div ref={follow}>
+      <LeaveConfirm href={leaving} onClose={stopLeaving} />
       <PageBrain
         facts={facts}
         onValueChange={unchanged}

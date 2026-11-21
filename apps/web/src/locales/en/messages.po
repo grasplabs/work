@@ -466,6 +466,10 @@ msgstr "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 msgstr "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 
+#: src/chat/held-writes.tsx
+msgid "{count, plural, one {Show all # line ({characters} characters)} other {Show all # lines ({characters} characters)}}"
+msgstr "{count, plural, one {Show all # line ({characters} characters)} other {Show all # lines ({characters} characters)}}"
+
 #: src/frame/part-words.tsx
 msgid "{count, plural, one {Show the # {group} tool} other {Show the # {group} tools}}"
 msgstr "{count, plural, one {Show the # {group} tool} other {Show the # {group} tools}}"
@@ -1195,10 +1199,6 @@ msgstr "{people, plural, one {for # person} other {for # people}}"
 msgid "{percent}% known now"
 msgstr "{percent}% known now"
 
-#: src/inbox/report-view.tsx
-msgid "{percentAlone}% of this week's {total} runs needed nobody."
-msgstr "{percentAlone}% of this week's {total} runs needed nobody."
-
 #: src/inbox/items.ts
 msgid "{person} · {connection}"
 msgstr "{person} · {connection}"
@@ -1526,8 +1526,16 @@ msgid "{total, plural, one {{count} of # interview} other {{count} of # intervie
 msgstr "{total, plural, one {{count} of # interview} other {{count} of # interviews}}"
 
 #: src/inbox/report-view.tsx
-msgid "{total} runs from {from} to {to}."
-msgstr "{total} runs from {from} to {to}."
+msgid "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+msgstr "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+msgstr "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
+msgstr "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
 
 #: src/settings/ai-spend.tsx
 msgid "{total} so far this month."
@@ -4109,7 +4117,6 @@ msgstr "Can't offer Run: {unread}"
 #: src/brain/memories-page.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4121,6 +4128,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
+#: src/frame/leave-confirm.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
@@ -6850,6 +6858,10 @@ msgstr "Ends the workflow"
 msgid "Enter a name for the organization."
 msgstr "Enter a name for the organization."
 
+#: src/settings/event-sources.tsx
+msgid "Enter a name for the sender."
+msgstr "Enter a name for the sender."
+
 #: src/settings/teams.tsx
 msgid "Enter a name for the team."
 msgstr "Enter a name for the team."
@@ -6857,6 +6869,10 @@ msgstr "Enter a name for the team."
 #: src/frame/part-words.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Enter an address that starts with https://."
+
+#: src/settings/event-source-activity.tsx
+msgid "Enter an event type."
+msgstr "Enter an event type."
 
 #: src/settings/erasures.tsx
 msgid "Enter the address to let in again."
@@ -7532,6 +7548,10 @@ msgstr "Files its runs wrote"
 #: src/frame/part-words.tsx
 msgid "Files to send"
 msgstr "Files to send"
+
+#: src/connections/connect-dialog.tsx
+msgid "Fill in {label}."
+msgstr "Fill in {label}."
 
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
@@ -12917,7 +12937,7 @@ msgstr "Open Chat"
 msgid "Open Data"
 msgstr "Open Data"
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open external link?"
 msgstr "Open external link?"
 
@@ -12948,7 +12968,7 @@ msgstr "Open invoices in the accounting system, with their due dates."
 msgid "Open leads and deals in the CRM."
 msgstr "Open leads and deals in the CRM."
 
-#: src/chat/answer-words.tsx
+#: src/frame/leave-confirm.tsx
 msgid "Open link"
 msgstr "Open link"
 
@@ -16091,10 +16111,6 @@ msgstr "Show again"
 #: src/frame/part-words.tsx
 msgid "Show all"
 msgstr "Show all"
-
-#: src/chat/held-writes.tsx
-msgid "Show all {count} lines ({characters} characters)"
-msgstr "Show all {count} lines ({characters} characters)"
 
 #: src/routes/_shell.settings.security.tsx
 msgid "Show all {devices}"
@@ -20534,10 +20550,6 @@ msgstr "Where the time goes"
 #: src/brain/brain-article/team-work.tsx
 msgid "Where the work passes on"
 msgstr "Where the work passes on"
-
-#: src/inbox/report-view.tsx
-msgid "Where this week's {total} runs went."
-msgstr "Where this week's {total} runs went."
 
 #: src/interview/destination.tsx
 msgid "Where your lines go"

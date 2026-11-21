@@ -5,6 +5,7 @@ import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { ErrorText } from "../error-text.tsx";
+import { formatDollars } from "../format.ts";
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -13,7 +14,6 @@ import {
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
-import { dollars } from "../settings/money.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // People's own agents, on the Agents page for the company's admins
@@ -58,7 +58,7 @@ const UsageRows = ({
   return (
     <SettingsRows>
       {usage.map((each) => {
-        const spent = dollars(each.spent);
+        const spent = formatDollars(each.spent);
         const count = each.agents;
         return (
           <FactRow

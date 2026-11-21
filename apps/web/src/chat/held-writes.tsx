@@ -218,7 +218,7 @@ const TextValue = ({
         >
           {all
             ? t`Show less`
-            : t`Show all ${count} lines (${characters} characters)`}
+            : t`${plural(count, { one: `Show all # line (${characters} characters)`, other: `Show all # lines (${characters} characters)` })}`}
         </Button>
       ) : null}
     </dd>

@@ -1,15 +1,7 @@
-import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogContent,
-  AlertDialogTitle,
-} from "../grasp/alert-dialog/index.ts";
+import { LeaveConfirm } from "../frame/leave-confirm.tsx";
 import { Link } from "../grasp/link/index.ts";
 import { Markdown } from "../grasp/markdown/index.ts";
 import type { MarkdownLink } from "../grasp/markdown/index.ts";
@@ -29,7 +21,6 @@ const LeavingLink = ({
   href: string;
   children: ReactNode;
 }) => {
-  const { t } = useLingui();
   const [asking, setAsking] = useState(false);
   return (
     <>
@@ -47,26 +38,12 @@ const LeavingLink = ({
       >
         {children}
       </Link>
-      <AlertDialog
-        onOpenChange={(open, { returnValue }) => {
-          setAsking(open);
-          if (returnValue === "open") {
-            window.open(href, "_blank", "noopener,noreferrer");
-          }
+      <LeaveConfirm
+        href={asking ? href : undefined}
+        onClose={() => {
+          setAsking(false);
         }}
-        open={asking}
-      >
-        <AlertDialogContent>
-          <AlertDialogTitle>{t`Open external link?`}</AlertDialogTitle>
-          <AlertDialogDescription>{href}</AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-            <AlertDialogAction value="open" variant="ink">
-              {t`Open link`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </>
   );
 };

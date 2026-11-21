@@ -14,6 +14,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { modelName } from "../chat/model-names.tsx";
+import { formatDollars } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { AgentCard, agentCardStyles } from "../grasp/agent-card/index.ts";
 import type { AgentCardFact } from "../grasp/agent-card/index.ts";
@@ -31,7 +32,6 @@ import { AgentPerson, Plus } from "../grasp/icons/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Tabs, TabsContent } from "../grasp/tabs/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { dollars } from "../settings/money.ts";
 import { nextWakeAt, useAudienceLine, wakesOn } from "./agent-facts.tsx";
 import { OfferedAgents } from "./agent-share.tsx";
 import { lookOf } from "./figure/look.ts";
@@ -215,7 +215,7 @@ const useFacts = (teams: StephenReach["teams"]) => {
         // Left out where core didn't say what it used.
         ...(usage === undefined
           ? []
-          : [{ key: t`This month`, value: dollars(usage.spent) }]),
+          : [{ key: t`This month`, value: formatDollars(usage.spent) }]),
       ],
       failed: failed(lastRunOf(wakes)),
     };

@@ -797,7 +797,7 @@ const AddSource = ({
               }}
               {...stylex.props(styles.form)}
             >
-              <Field invalid={failure !== undefined}>
+              <Field invalid={failure === undefined ? undefined : true}>
                 <FieldLabel>{t`Name`}</FieldLabel>
                 <Input
                   maxLength={80}
@@ -806,6 +806,9 @@ const AddSource = ({
                   required
                   value={name}
                 />
+                <FieldError match="valueMissing">
+                  {t`Enter a name for the sender.`}
+                </FieldError>
                 {failure === undefined ? null : (
                   <FieldError match>{failure}</FieldError>
                 )}

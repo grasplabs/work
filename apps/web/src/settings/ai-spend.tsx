@@ -9,6 +9,7 @@ import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
+import { formatDollars } from "../format.ts";
 import {
   Chart,
   ChartArea,
@@ -23,7 +24,7 @@ import { Stat } from "../grasp/stats/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { dollars, monthEnd } from "./money.ts";
+import { monthEnd } from "./money.ts";
 import { SectionNotLoaded } from "./section.tsx";
 
 // Settings › AI and spend, its last card: what the models cost this month
@@ -133,8 +134,8 @@ const runningTotal = (
 const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
   const { t } = useLingui();
   const end = monthEnd(spend.total, spend.month, new Date());
-  const ending = end === null ? null : dollars(end);
-  const total = dollars(spend.total);
+  const ending = end === null ? null : formatDollars(end);
+  const total = formatDollars(spend.total);
   return (
     <>
       {/* Bare: the figure at the card's start edge, as Grasp UI's spend card. */}
@@ -164,7 +165,7 @@ const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
           <ChartAxis side="x" />
           <ChartAxis format={axisDollars} side="y" width={axisWidth} />
           <ChartArea fill="plain" series="spend" />
-          <ChartTooltip format={dollars} />
+          <ChartTooltip format={formatDollars} />
         </Chart>
       )}
     </>
@@ -208,7 +209,7 @@ export const SpendCard = ({
               aria-label={t`Where it went this month`}
               config={{ spend: { label: t`This month` } }}
               data={rows}
-              format={dollars}
+              format={formatDollars}
               nameKey="name"
               summary={t`${top} spent the most this month.`}
             />
