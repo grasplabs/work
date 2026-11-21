@@ -27,6 +27,7 @@ import { formatDate } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -269,31 +270,28 @@ const Confirmed = ({
   confirm: string;
   disabled: boolean;
   onConfirm: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger disabled={disabled} size="sm" variant="quiet">
-        {label}
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogTitle>{title}</AlertDialogTitle>
-        <AlertDialogDescription>{description}</AlertDialogDescription>
-        <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-          <AlertDialogAction
-            action={() => {
-              onConfirm();
-            }}
-            variant="danger"
-          >
-            {confirm}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-};
+}) => (
+  <AlertDialog>
+    <AlertDialogTrigger disabled={disabled} size="sm" variant="quiet">
+      {label}
+    </AlertDialogTrigger>
+    <AlertDialogContent>
+      <AlertDialogTitle>{title}</AlertDialogTitle>
+      <AlertDialogDescription>{description}</AlertDialogDescription>
+      <AlertDialogFooter>
+        <AlertDialogCancel />
+        <AlertDialogAction
+          action={() => {
+            onConfirm();
+          }}
+          variant="danger"
+        >
+          {confirm}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
 
 /**
  * The person's share button for a skill: share it; or, while a share of

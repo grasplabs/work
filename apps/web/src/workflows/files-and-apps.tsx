@@ -21,6 +21,7 @@ import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -403,7 +404,7 @@ const Approved = ({
                         {t`Its next start is refused until an admin approves ${alias} again, and runs already started fail at their next call through it.`}
                       </AlertDialogDescription>
                       <AlertDialogFooter>
-                        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                        <AlertDialogCancel />
                         <AlertDialogAction
                           action={async () => {
                             await revoke(alias, approval.id);

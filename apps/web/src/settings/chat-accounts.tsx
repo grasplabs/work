@@ -15,6 +15,7 @@ import type { Session } from "../core.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -308,7 +309,7 @@ const ForgetConversations = () => {
             {t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={async () => {
                 setDeleted(undefined);

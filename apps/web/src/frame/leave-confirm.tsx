@@ -3,6 +3,7 @@ import { useLingui } from "@lingui/react/macro";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -40,7 +41,7 @@ export const LeaveConfirm = ({
         <AlertDialogTitle>{t`Open external link?`}</AlertDialogTitle>
         <AlertDialogDescription>{href}</AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction value="open" variant="ink">
             {t`Open link`}
           </AlertDialogAction>

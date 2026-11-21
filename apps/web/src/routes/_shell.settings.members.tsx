@@ -20,9 +20,10 @@ import { formatDate } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
@@ -253,7 +254,7 @@ const MemberActions = ({
                 {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
               </AlertDialogDescription>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={async () => {
                     await setRole("admin");
@@ -325,7 +326,7 @@ const MemberActions = ({
                 {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
               </AlertDialogDescription>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={remove}
                   failedLabel={t`Not removed`}

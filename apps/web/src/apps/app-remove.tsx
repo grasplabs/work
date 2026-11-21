@@ -9,6 +9,7 @@ import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -73,7 +74,7 @@ export const RemoveApp = ({
         </AlertDialogDescription>
         {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={remove}
             failedLabel={t`Could not delete`}

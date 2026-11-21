@@ -7,6 +7,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -38,26 +39,23 @@ const Confirmed = ({
   confirm: string;
   busy: boolean;
   onConfirm: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger disabled={busy} size="sm">
-        {label}
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogTitle>{title}</AlertDialogTitle>
-        <AlertDialogDescription>{description}</AlertDialogDescription>
-        <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-          <AlertDialogAction onClick={onConfirm} variant="danger">
-            {confirm}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-};
+}) => (
+  <AlertDialog>
+    <AlertDialogTrigger disabled={busy} size="sm">
+      {label}
+    </AlertDialogTrigger>
+    <AlertDialogContent>
+      <AlertDialogTitle>{title}</AlertDialogTitle>
+      <AlertDialogDescription>{description}</AlertDialogDescription>
+      <AlertDialogFooter>
+        <AlertDialogCancel />
+        <AlertDialogAction onClick={onConfirm} variant="danger">
+          {confirm}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
 
 const CloseGap = ({
   busy,

@@ -6,6 +6,7 @@ import { useApprovalWords } from "../chat/approval-words.ts";
 import { formatBytes, formatList, formatNumber } from "../format.ts";
 import { addConnectionWords } from "../grasp/add-connection/words.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
+import { alertDialogWords } from "../grasp/alert-dialog/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appBuildingWords } from "../grasp/app-building/words.ts";
 import { englishLabels as appCardWords } from "../grasp/app-card/words.ts";
@@ -147,6 +148,7 @@ const englishPartWords: GraspWordsCatalog = {
   agentActivity: agentActivityWords,
   askBar: askBarWords,
   alert: alertWords,
+  alertDialog: alertDialogWords,
   appBuilding: appBuildingWords,
   artifactViewer: artifactViewerWords,
   artifactViewerBox: artifactViewerBoxWords,
@@ -581,6 +583,7 @@ const usePartWords = (): GraspWordsCatalog => {
       close: t`Close`,
     },
     alert: { dismiss: t`Dismiss` },
+    alertDialog: { cancel: t`Cancel` },
     // The viewer shows a page (the weekly report) and nothing else here:
     // the words a person meets in that mode are translated. Comments,
     // editing, PDF, tables and images are not installed, so their words

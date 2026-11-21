@@ -7,6 +7,7 @@ import type { DragEvent, KeyboardEvent } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -554,7 +555,7 @@ const RemoveRead = ({
             {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={() => {
                 setRemoving(true);

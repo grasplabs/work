@@ -8,6 +8,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -110,7 +111,7 @@ export const ForgetTeams = ({
             {t`I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={() => {
                 void erase();

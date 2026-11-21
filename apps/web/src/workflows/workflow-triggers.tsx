@@ -24,6 +24,7 @@ import { formatDateTime } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -530,7 +531,7 @@ const TriggerRow = ({
                   {t`It starts no more runs. Runs it already started go on. This can't be undone.`}
                 </AlertDialogDescription>
                 <AlertDialogFooter>
-                  <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                  <AlertDialogCancel />
                   <AlertDialogAction
                     action={deleted}
                     failedLabel={t`Not deleted`}

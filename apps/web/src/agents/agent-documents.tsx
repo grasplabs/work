@@ -14,6 +14,7 @@ import { formatBytes } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogFooter,
   AlertDialogTitle,
@@ -204,7 +205,7 @@ export const AgentDocuments = ({
                       <AlertDialogContent>
                         <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
                         <AlertDialogFooter>
-                          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                          <AlertDialogCancel />
                           <AlertDialogAction
                             action={async () => {
                               await change(async (session) => {

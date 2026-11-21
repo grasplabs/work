@@ -6,7 +6,7 @@
 //
 //   <AlertDialog>
 //     <AlertDialogTrigger variant="danger">Delete workspace</AlertDialogTrigger>
-//     <AlertDialogPanel>
+//     <AlertDialogContent>
 //       <AlertDialogTitle>Delete Northwind?</AlertDialogTitle>
 //       <AlertDialogDescription>Its 12 projects and 340 files are deleted for everyone.</AlertDialogDescription>
 //       <AlertDialogFooter>
@@ -14,7 +14,7 @@
 //         <AlertDialogAction variant="danger" action={remove} workingLabel="Deleting"
 //           failedLabel="Could not delete">Delete</AlertDialogAction>
 //       </AlertDialogFooter>
-//     </AlertDialogPanel>
+//     </AlertDialogContent>
 //   </AlertDialog>
 //
 // A press on the shade does nothing and there is no close button: the safe answer or Escape is the way out.

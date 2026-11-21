@@ -1,4 +1,4 @@
-// AlertDialogPanel: the panel of an alert dialog (alert-dialog.tsx), with the shade behind it: UI
+// AlertDialogContent: the panel of an alert dialog (alert-dialog.tsx), with the shade behind it: UI
 // SDK's AlertDialogContent and AlertDialogBackdrop in Dialog's look (src/components/dialog/styles.ts).
 // It has no close button, and a press on the shade does nothing: the safe answer (Keep it) or Escape is the way out.
 "use client";
@@ -18,7 +18,7 @@ import { watchPanel } from "../dialog/sure-close";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
-/** Every prop an AlertDialogPanel takes: these, and the rest of UI SDK's AlertDialogContent. */
+/** Every prop an AlertDialogContent takes: these, and the rest of UI SDK's AlertDialogContent. */
 export interface AlertDialogContentProps extends Omit<
   ContentPrimitiveProps,
   "children" | "className" | "style" | "render"
@@ -72,8 +72,3 @@ export const AlertDialogContent = ({
     </>
   );
 };
-
-/** @deprecated Use `AlertDialogContent`. */
-export const AlertDialogPanel = AlertDialogContent;
-/** @deprecated Use `AlertDialogContentProps`. */
-export type AlertDialogPanelProps = AlertDialogContentProps;

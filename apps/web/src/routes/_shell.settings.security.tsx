@@ -9,6 +9,7 @@ import { formatDateTime } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogFooter,
   AlertDialogTitle,
@@ -135,7 +136,7 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
             <AlertDialogContent>
               <AlertDialogTitle>{t`Sign out this device?`}</AlertDialogTitle>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={signOut}
                   failedLabel={t`Not signed out`}

@@ -13,9 +13,10 @@ import { formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
@@ -364,7 +365,7 @@ const TeamRow = ({
               <Alert tone="danger">{failure}</Alert>
             )}
             <AlertDialogFooter>
-              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+              <AlertDialogCancel />
               <AlertDialogAction
                 action={remove}
                 failedLabel={t`Not deleted`}

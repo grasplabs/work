@@ -7,6 +7,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -88,7 +89,7 @@ export const GuestActions = ({ guest }: { guest: Guest }) => {
             {t`They are signed out everywhere and cannot sign in again.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={remove}
               failedLabel={t`Not removed`}

@@ -18,6 +18,7 @@ import type { Session } from "../core.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -363,7 +364,7 @@ const ShareWith = ({
             {t`Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={async () => {
                 if (removing === undefined) {

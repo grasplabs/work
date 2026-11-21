@@ -24,9 +24,10 @@ import { Page } from "../frame/page.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -609,7 +610,7 @@ const DeleteAgent = ({
               {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs.`}
             </AlertDialogDescription>
             <AlertDialogFooter>
-              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+              <AlertDialogCancel />
               <AlertDialogAction
                 action={remove}
                 failedLabel={t`Couldn't delete`}
