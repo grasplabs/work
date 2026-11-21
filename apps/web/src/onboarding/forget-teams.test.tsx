@@ -95,10 +95,22 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The button named `name`, by its text, if the page shows it. */
+/** What a button says aloud: its text without the layers hidden from assistive tech. */
+const spoken = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
+/** The button named `name`, by what it says, if the page shows it. */
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) => spoken(each) === name
   );
 
 const press = async (name: string): Promise<void> => {
