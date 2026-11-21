@@ -136,6 +136,7 @@ export const usePaged = <T, N, H = undefined>(
     loaded: first,
     current,
     id,
+    again,
   } = useHeldCoreRead<Page<T, N, H>>(
     key,
     async (session) => await read(session.brainMemories),
@@ -187,6 +188,7 @@ export const usePaged = <T, N, H = undefined>(
     items,
     next,
     showMore,
+    again,
     // Waiting for a further page, or for this key's own first one.
     busy: busy || !current,
     failure,

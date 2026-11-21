@@ -19036,7 +19036,6 @@ msgstr "Proberen"
 #: src/interview/sound-check.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
-#: src/settings/section.tsx
 #: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
@@ -19053,7 +19052,6 @@ msgstr "Zoek opnieuw"
 #: src/chat/builds.tsx
 #: src/frame/page-failed.tsx
 #: src/inbox/inbox-page.tsx
-#: src/settings/section.tsx
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"
 

@@ -13,6 +13,7 @@ import { LogBar, LogRecords, readLog } from "../activity/audit-log.tsx";
 import { logSearchOf } from "../activity/log-search.ts";
 import type { LogSearch } from "../activity/log-search.ts";
 import type { Directory } from "../directory.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -23,7 +24,7 @@ import {
   endedOf,
   IntegrityDialog,
 } from "../settings/audit-chain.tsx";
-import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
 // Settings › Audit trail, for admins: the events are the page. A broken
 // hash chain shows above them (settings/audit-chain.tsx); otherwise only
@@ -179,7 +180,7 @@ const AuditTrail = () => {
               />
             </>
           ) : (
-            <SectionNotLoaded page={log} />
+            <NotLoadedState heading="h3" page={log} />
           )}
         </SectionCard>
         {open === undefined || directory === undefined ? null : (

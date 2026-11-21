@@ -6,6 +6,7 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatDateTime } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,11 +36,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ChatAppsSection } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  TitleLine,
-} from "../settings/section.tsx";
+import { SettingsError, TitleLine } from "../settings/section.tsx";
 import { useCore } from "../use-core.ts";
 
 // Settings › Security, as the library's Settings pattern has it: the
@@ -162,7 +159,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   if (sessions.state !== "ready") {
     return (
       <SectionCard variant="grouped" density="compact" title={t`Devices`}>
-        <SectionNotLoaded page={sessions} />
+        <NotLoadedState heading="h3" page={sessions} />
       </SectionCard>
     );
   }

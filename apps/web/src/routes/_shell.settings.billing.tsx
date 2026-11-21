@@ -2,6 +2,7 @@ import { noBilling } from "@grasp-os/shared/org-settings";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -15,7 +16,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { BillingCard } from "../settings/billing-card.tsx";
 import { useQueuedSave } from "../settings/queued-save.ts";
 import { ReadOnlyRow } from "../settings/read-only-row.tsx";
-import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
 // Settings → Billing, for admins: the billing details as a card at its
 // head (settings/billing-card.tsx), their form in a dialog from its one
@@ -66,7 +67,7 @@ const BillingPage = () => {
   if (page.state !== "ready") {
     return (
       <SectionCard variant="grouped" density="compact" title={t`Plan`}>
-        <SectionNotLoaded page={page} />
+        <NotLoadedState heading="h3" page={page} />
       </SectionCard>
     );
   }

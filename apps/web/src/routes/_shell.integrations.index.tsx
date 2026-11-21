@@ -39,6 +39,7 @@ import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import { formatNumber } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
@@ -63,7 +64,7 @@ import { ItemGrid } from "../grasp/item/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // Integrations: what Grasp can reach. A slim band says it at a glance,
 // with the connected apps' marks at its end (integrations-band.tsx), then
@@ -576,7 +577,9 @@ const Integrations = () => {
   // stand then; the count of what shows doesn't change after.
   const first = sectionsOf(integrations, { show: "all" }, q);
   const { others, shown } = shownOf(first, listed ?? [], group, q);
-  const loaded = catalog.state === "ready" && connections.state === "ready";
+  // One of the two said once: out of reach, both say the same.
+  const failed = [catalog, connections].find((read) => read.state !== "ready");
+  const loaded = failed === undefined;
   const opened = integrations.find((integration) => integration.key === app);
   const [requesting, setRequesting] = useState(false);
   // The tile an app was opened from, so its panel grows from it.
@@ -636,8 +639,9 @@ const Integrations = () => {
             catalog.state === "ready" && catalog.data.composio === "unavailable"
           }
         />
-        <NotLoaded page={catalog} />
-        <NotLoaded page={connections} />
+        {failed === undefined ? null : (
+          <NotLoadedState heading="h2" page={failed} />
+        )}
         <output {...stylex.props(visuallyHidden)}>
           {q === undefined
             ? ""

@@ -15,6 +15,7 @@ import { useState } from "react";
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,7 +40,6 @@ import type { ShareCandidate } from "../grasp/share-access/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { PeopleApart } from "../people/people-apart.ts";
@@ -463,7 +463,15 @@ export const Sharing = ({
   const members = read?.state === "ready" ? read.data : [];
   const named = useNamed(members);
   if (read?.state !== "ready") {
-    return read === undefined ? null : <NotLoaded page={read} />;
+    return read === undefined ? null : (
+      <NotLoadedState
+        again={() => {
+          setChanges(changes + 1);
+        }}
+        heading="h3"
+        page={read}
+      />
+    );
   }
   return (
     <div {...stylex.props(styles.section)}>
