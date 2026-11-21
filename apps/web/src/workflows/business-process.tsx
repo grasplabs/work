@@ -1,23 +1,28 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
 import { businessProcesses } from "@grasp-os/shared/business-processes";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { ErrorText } from "../error-text.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import {
+  AppRecord,
+  Chart,
+  Conversation,
+  Money,
+  People,
+  Scale,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // The business process a workflow serves (GRA-511), as the prototype draws
@@ -40,6 +45,16 @@ export const processNames: Readonly<
   h2r: msg({ message: "Hire-to-Retire", context: "business process" }),
 };
 
+/** Each process's icon from the library's set, for a part that takes one (an Icon tile). */
+export const processIcons: Readonly<Record<BusinessProcess, IconData>> = {
+  o2c: Money,
+  i2r: Conversation,
+  p2p: AppRecord,
+  r2c: Scale,
+  r2r: Chart,
+  h2r: People,
+};
+
 /** What each process covers, for someone who never heard its name. */
 export const processCovers: Readonly<
   Record<BusinessProcess, MessageDescriptor>
@@ -52,11 +67,38 @@ export const processCovers: Readonly<
   h2r: msg`Everything around employees, from hiring to leaving.`,
 };
 
+const styles = stylex.create({
+  // An icon's own size, as the library's icons stand beside words.
+  glyph: {
+    flexShrink: 0,
+    width: grasp.iconMd,
+    height: grasp.iconMd,
+  },
+  // A tile the size of a small control, where a line begins.
+  tile: {
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.controlSm,
+    height: grasp.controlSm,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    color: grasp.ink,
+  },
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  picker: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+});
+
 /**
  * Each process's parts, on Lucide's grid of 24: where the process ends
  * (cash in the till, a paid receipt, a solved message, a checked shield,
- * a report's bars, a person who comes and goes). Their parts move as
- * `icon-moves.css` says, by their order here: keep the two together.
+ * a report's bars, a person who comes and goes).
  */
 const Paths = ({ process }: { process: BusinessProcess }) => {
   switch (process) {
@@ -119,18 +161,11 @@ const Paths = ({ process }: { process: BusinessProcess }) => {
   }
 };
 
-/** A process's icon alone, sized like a Lucide icon: for lines, menus and badges. */
-export const ProcessGlyph = ({
-  process,
-  className = "size-4 flex-none",
-}: {
-  process: BusinessProcess;
-  className?: string;
-}) => (
+/** A process's icon alone, at the library's icon size: for lines, menus and badges. */
+export const ProcessGlyph = ({ process }: { process: BusinessProcess }) => (
   <svg
     aria-hidden="true"
-    className={className}
-    data-moves={process}
+    {...stylex.props(styles.glyph)}
     fill="none"
     stroke="currentColor"
     strokeLinecap="round"
@@ -145,38 +180,25 @@ export const ProcessGlyph = ({
 
 /** A process's icon on a grey tile, where a line begins. */
 export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
-  <span
-    aria-hidden="true"
-    className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
-  >
+  <span aria-hidden="true" {...stylex.props(styles.tile)}>
     <ProcessGlyph process={process} />
   </span>
 );
 
-/** Its name over what it covers: what a process says when pointed at. */
-export const ProcessHint = ({ process }: { process: BusinessProcess }) => {
-  const { i18n } = useLingui();
-  return (
-    <span className="flex flex-col gap-1 py-0.5">
-      <span className="font-medium">{i18n._(processNames[process])}</span>
-      <span>{i18n._(processCovers[process])}</span>
-    </span>
-  );
-};
-
-/** A process as a badge, its icon and name, with what it covers when pointed at. */
+/**
+ * A process as a badge, its icon and name. What it covers goes beside it,
+ * behind the row's info mark (workflow-settings.tsx): the library's Badge
+ * is never a tooltip's trigger.
+ */
 export const ProcessBadge = ({ process }: { process: BusinessProcess }) => {
   const { i18n } = useLingui();
   return (
-    <Tooltip>
-      <TooltipTrigger render={<Badge variant="outline" />}>
-        <ProcessGlyph className="size-3 flex-none" process={process} />
+    <Badge>
+      <span {...stylex.props(styles.badge)}>
+        <ProcessGlyph process={process} />
         {i18n._(processNames[process])}
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64">
-        <ProcessHint process={process} />
-      </TooltipContent>
-    </Tooltip>
+      </span>
+    </Badge>
   );
 };
 
@@ -217,7 +239,7 @@ export const ProcessPicker = ({
     }
   };
   return (
-    <span className="flex flex-col gap-1">
+    <span {...stylex.props(styles.picker)}>
       <Select
         disabled={busy}
         items={items}
@@ -234,16 +256,9 @@ export const ProcessPicker = ({
           aria-label={t`The business process ${name} serves`}
           size="sm"
         >
-          {process === null ? null : <ProcessGlyph process={process} />}
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
+        <SelectContent />
       </Select>
       <ErrorText>{failure}</ErrorText>
     </span>

@@ -1,19 +1,22 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useState } from "react";
+
+import { shellStatus, signOut } from "../core-connection.ts";
+import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import {
   Item,
   ItemContent,
   ItemDescription,
   ItemGroup,
   ItemTitle,
-} from "@grasp-os/app-kit/components/item";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { Trans } from "@lingui/react/macro";
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useState } from "react";
-
-import { shellStatus, signOut } from "../core-connection.ts";
-import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+} from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // Where a guest lands (GRA-2235): someone from outside the company, who
 // reaches only the Apps shared with them (core's guest-access.ts). A plain
@@ -21,7 +24,13 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 // way to sign out: nothing of the platform is shown or reachable from
 // here, and core refuses a guest everything else anyway.
 
+const styles = stylex.create({
+  // The list as wide as the column, its rows' words from the start.
+  list: { width: "100%", textAlign: "start" },
+});
+
 const GuestHome = () => {
+  const { t } = useLingui();
   const { core } = Route.useRouteContext();
   const apps = Route.useLoaderData();
   const [busy, setBusy] = useState(false);
@@ -37,21 +46,21 @@ const GuestHome = () => {
   };
   return (
     <OnboardingFrame>
-      <PageHeaderTitle>
+      <Heading level={1}>
         <Trans>Apps shared with you</Trans>
-      </PageHeaderTitle>
-      {apps.state !== "ready" && <NotLoaded page={apps} />}
+      </Heading>
+      {apps.state !== "ready" && <NotLoadedState heading="h2" page={apps} />}
       {apps.state === "ready" && apps.data.length === 0 && (
-        <p className="text-muted-foreground">
+        <Text tone="muted">
           <Trans>Nothing is shared with you yet.</Trans>
-        </p>
+        </Text>
       )}
       {apps.state === "ready" && apps.data.length > 0 && (
-        <ItemGroup render={<ul />}>
-          {apps.data.map(({ app, name, description }) => (
-            <li key={app}>
-              {/* Full page, outside the shell, as "Open full page" links it. */}
-              <Item render={<a aria-label={name} href={`/apps/${app}/full`} />}>
+        <div {...stylex.props(styles.list)}>
+          <ItemGroup aria-label={t`Apps shared with you`} separated>
+            {apps.data.map(({ app, name, description }) => (
+              // Full page, outside the shell, as "Open full page" links it.
+              <Item href={`/apps/${app}/full`} key={app}>
                 <ItemContent>
                   <ItemTitle>{name}</ItemTitle>
                   {description === "" ? null : (
@@ -59,18 +68,18 @@ const GuestHome = () => {
                   )}
                 </ItemContent>
               </Item>
-            </li>
-          ))}
-        </ItemGroup>
+            ))}
+          </ItemGroup>
+        </div>
       )}
       <Button
         disabled={busy}
         onClick={() => {
           void leave();
         }}
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Sign out</Trans>
+        {t`Sign out`}
       </Button>
     </OnboardingFrame>
   );

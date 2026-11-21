@@ -1,29 +1,37 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/app-kit/components/card";
 import type { ChatMessage } from "@grasp-os/shared/chat";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import type { ThreadBuild } from "./build-progress.tsx";
 
 // What making something in a chat looks like, whatever it makes: an App
 // or a workflow (a plan, `proposePlan`), an agent (`draftAgent`) or a
 // change to one (`draftAgentChange`). The chat proposes it as a card in
-// the thread, and nothing is made until the person presses the card's
-// button: Build it, Make it, Change it. Each card keeps its own content
-// and its own words; the frame, the press and when it waits are the same.
+// the thread (the library's Section card), and nothing is made until the
+// person presses the card's button: Build it, Make it, Change it. Each card
+// keeps its own content and its own words; the frame, the press and when
+// it waits are the same.
+
+const styles = stylex.create({
+  stack: {
+    display: "grid",
+    gap: grasp.space2,
+  },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+  },
+});
 
 /** The cards the chat proposes, by where a reply keeps each. */
-export type MakeKind = "planned" | "agentDraft" | "agentChange";
+type MakeKind = "planned" | "agentDraft" | "agentChange";
 
 /** The card waiting for the person, if one does: the latest reply's, while nothing runs and nothing was said since. */
 export const pendingCard = (
@@ -62,20 +70,19 @@ export const MakeCard = ({
   children: ReactNode;
   actions?: ReactNode;
 }) => (
-  <Card aria-label={label} render={<section />}>
-    <CardHeader>
-      <CardTitle>
-        <h2 className="type-display">{title}</h2>
-      </CardTitle>
-      <CardDescription>{description}</CardDescription>
-    </CardHeader>
-    <CardContent>{children}</CardContent>
-    {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
-  </Card>
+  <SectionCard
+    aria-label={label}
+    description={description}
+    footer={actions}
+    headingLevel={2}
+    title={title}
+  >
+    {children}
+  </SectionCard>
 );
 
 /** What a press asks with: the person's words, and the model and effort the box names. */
-export interface Asked {
+interface Asked {
   text: string;
   model: string;
   effort?: NonNullable<ThreadBuild["effort"]>;
@@ -107,8 +114,8 @@ export const MakeActions = <T,>({
   const { busy, failure, run } = useCoreAction();
   const { model, effort } = build;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div {...stylex.props(styles.stack)}>
+      <div {...stylex.props(styles.row)}>
         <Button
           disabled={!ready || busy || model === undefined}
           onClick={() => {
@@ -129,7 +136,7 @@ export const MakeActions = <T,>({
               }
             })();
           }}
-          variant="highlight"
+          variant="ink"
         >
           {label}
         </Button>
@@ -137,12 +144,11 @@ export const MakeActions = <T,>({
           onClick={() => {
             build.onChangePlan();
           }}
-          variant="outline"
         >
           {changeLabel}
         </Button>
       </div>
-      <ErrorText>{failure}</ErrorText>
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
     </div>
   );
 };

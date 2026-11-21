@@ -1,8 +1,13 @@
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import * as stylex from "@stylexjs/stylex";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
+import { Heading } from "../grasp/heading/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import { BrandGrasp, Icon } from "../grasp/icons/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PlainMarkdown } from "../markdown.tsx";
 import { FigureTiles } from "./figure-tiles.tsx";
 import type { ExportFigure } from "./figure-tiles.tsx";
@@ -11,8 +16,8 @@ import type { ExportFigure } from "./figure-tiles.tsx";
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
 // (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
 // as in the prototype (`lib/export-file.ts`, `lib/report.ts`): the Grasp
-// mark at its head, Geist for the text, the title (PageHeaderTitle), the
-// Markdown's first two levels of heading (`page-export` in styles.css) and
+// mark at its head, Geist for the text, the title (Grasp UI's Heading), the
+// Markdown's first two levels of heading (`[data-page="export"]` in styles.css) and
 // any key figures (Stat) in Newsreader, and the light theme, which is what
 // paper takes (the theme's dark is for the screen only). No PDF is drawn
 // in the app itself.
@@ -22,6 +27,37 @@ import type { ExportFigure } from "./figure-tiles.tsx";
 // the app's own stylesheets, linked again inside it, and its text is
 // rendered by React from here, as safely as an answer in the chat
 // (`PlainMarkdown`: no raw HTML, safe links only, no images).
+
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    backgroundColor: grasp.raised,
+    color: grasp.text,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    fontWeight: grasp.weightMedium,
+    // The mark about as tall as a line of its words: it sits in the icon's square.
+    [iconVars.size]: grasp.iconMd,
+  },
+  // The frame it prints from: on the page, never seen nor pressed.
+  frame: {
+    position: "fixed",
+    insetBlockStart: 0,
+    insetInlineStart: 0,
+    width: 0,
+    height: 0,
+    opacity: 0,
+    pointerEvents: "none",
+  },
+});
 
 export type ExportFormat = "md" | "pdf";
 
@@ -106,12 +142,13 @@ const PrintPage = ({
   markdown: string;
   figures: readonly ExportFigure[];
 }) => (
-  <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
-    <header className="flex items-center gap-2 font-medium">
-      <GraspMark className="h-4 w-auto" />
+  // [data-page="export"] (styles.css): the A4 page and its headings, for print.
+  <main data-page="export" {...stylex.props(styles.page)}>
+    <header {...stylex.props(styles.head)}>
+      <Icon icon={BrandGrasp} />
       Grasp
     </header>
-    <PageHeaderTitle>{title}</PageHeaderTitle>
+    <Heading level={1}>{title}</Heading>
     <FigureTiles figures={figures} />
     <PlainMarkdown
       text={withoutTitleLine(withoutFrontmatter(markdown).trimStart(), title)}
@@ -157,10 +194,7 @@ let printing: { remove: () => void } | undefined;
  * where a browser never says so, when this page has the focus again; the
  * focus goes back to where it was.
  */
-export const printAsPdf = async (
-  file: ExportFile,
-  locale: string
-): Promise<void> => {
+const printAsPdf = async (file: ExportFile, locale: string): Promise<void> => {
   printing?.remove();
   const returnFocus =
     document.activeElement instanceof HTMLElement
@@ -170,7 +204,7 @@ export const printAsPdf = async (
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
   frame.title = file.title;
-  frame.className = "pointer-events-none fixed top-0 left-0 size-0 opacity-0";
+  frame.className = stylex.props(styles.frame).className ?? "";
   // Some browsers replace the frame's first empty page with another as it
   // loads: what is written into it waits for that.
   const loaded = eventOrTimeout(frame, "load");
@@ -213,11 +247,14 @@ export const printAsPdf = async (
   printing = { remove };
   flushSync(() => {
     root.render(
-      <PrintPage
-        figures={file.figures ?? noFigures}
-        markdown={file.markdown()}
-        title={file.title}
-      />
+      // In the page's language, as its own words are.
+      <I18nProvider i18n={i18n}>
+        <PrintPage
+          figures={file.figures ?? noFigures}
+          markdown={file.markdown()}
+          title={file.title}
+        />
+      </I18nProvider>
     );
   });
   await Promise.all(

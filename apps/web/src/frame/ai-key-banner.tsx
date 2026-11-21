@@ -1,8 +1,3 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
 import { aiProviders } from "@grasp-os/shared/ai-providers";
 import type {
   AiProvidersListing,
@@ -11,14 +6,24 @@ import type {
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatSince } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Link } from "../grasp/link/index.ts";
+import { RouterLink } from "./router-link.tsx";
+
+const styles = stylex.create({
+  // Above the page's bar (App shell's `banner`), one banner for each provider.
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+  },
+});
 
 // What the organization's own admins see over every page while one of its
 // AI providers fails its calls, worded by what was seen, by HTTP class
@@ -32,6 +37,18 @@ import { formatSince } from "../format.ts";
 
 /** How often the banner asks again how the providers fare, in ms. */
 const refreshMs = 60_000;
+
+/** The word that a provider was added, replaced or removed, or the source switched. */
+const providersChanged = "grasp-ai-providers-changed";
+
+/**
+ * Says the organization's providers changed (Settings › AI providers): the
+ * banner reads again at once, so a deleted or replaced key stops being
+ * named as refused now, not at the next minute's read.
+ */
+export const tellProvidersChanged = (): void => {
+  document.dispatchEvent(new Event(providersChanged));
+};
 
 /** A connected provider whose calls fail, as the banner names it. */
 export interface FailingProvider {
@@ -48,9 +65,7 @@ export interface FailingProvider {
  * while its AI runs on Grasp's AI: no call goes out on its own keys then,
  * so one that failed before keeps nothing from answering.
  */
-export const failingProviders = (
-  listing: AiProvidersListing
-): FailingProvider[] =>
+const failingProviders = (listing: AiProvidersListing): FailingProvider[] =>
   listing.providers.flatMap(({ provider, label, status }) =>
     listing.source === "grasp" ||
     status === null ||
@@ -69,6 +84,7 @@ export const failingProviders = (
 
 /** What to do about a provider that isn't answering. */
 const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
+  const { t } = useLingui();
   if (statusPage === undefined) {
     return <Trans>If it lasts, switch provider.</Trans>;
   }
@@ -76,9 +92,13 @@ const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
   return (
     <Trans>
       If it lasts, check{" "}
-      <a href={statusPage} rel="noreferrer" target="_blank">
+      <Link
+        external
+        words={{ external: t`opens in a new tab` }}
+        href={statusPage}
+      >
         {page}
-      </a>{" "}
+      </Link>{" "}
       or switch provider.
     </Trans>
   );
@@ -94,9 +114,9 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   if (failing.trouble === "refused") {
     title = t`${label} is refusing your key since ${since}.`;
     description = (
-      <Link to="/settings/ai-providers">
+      <RouterLink to="/settings/ai-providers">
         <Trans>Check or replace it in Settings › AI providers.</Trans>
-      </Link>
+      </RouterLink>
     );
   } else if (failing.trouble === "not_answering") {
     title = t`${label} isn't answering since ${since}.`;
@@ -110,14 +130,10 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
     );
   }
   return (
-    <Alert live="polite" variant="attention">
-      <KeyRoundIcon aria-hidden="true" />
-      <AlertTitle>{title}</AlertTitle>
-      {description === null ? null : (
-        <AlertDescription>
-          <p>{description}</p>
-        </AlertDescription>
-      )}
+    // Said when its words change, not over whatever the person is doing.
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Alert's own prop, which sets its live role; not an element's role
+    <Alert role="status" title={title} tone="attention" variant="banner">
+      {description}
     </Alert>
   );
 };
@@ -148,16 +164,8 @@ export const failingUpFront = async (
   }
 };
 
-/**
- * A banner over the page for each AI provider whose calls fail,
- * for the organization's own admins; nothing for anyone else, or while
- * every key works.
- */
-export const AiKeyBanner = ({
-  identity,
-  providers,
-  failing: readBefore,
-}: {
+/** What the banner reads: who it is for, core's listing, and what was read before the page showed. */
+export interface BannerReads {
   identity: Identity;
   /** The organization's providers as core lists them (`aiProviders.list`). */
   providers: () => Promise<AiProvidersListing>;
@@ -166,10 +174,22 @@ export const AiKeyBanner = ({
    * the banner then comes with the page, and never pushes it down under
    * the person's pointer as it arrives. Without it, read once mounted.
    * Only what it had as it mounted counts: after that it reads again
-   * itself, every minute.
+   * itself, every minute and whenever the providers change
+   * (`tellProvidersChanged`).
    */
   failing?: FailingProvider[];
-}) => {
+}
+
+/**
+ * The providers failing now, for the organization's own admins (none for
+ * anyone else): kept by the frame, which stays as pages come and go, so a
+ * new page never reads again nor waits for the banner.
+ */
+export const useFailingProviders = ({
+  identity,
+  providers,
+  failing: readBefore,
+}: BannerReads): FailingProvider[] => {
   const [failing, setFailing] = useState<FailingProvider[]>(readBefore ?? []);
   const shown = isMemberAdmin(identity);
   // As it was mounted: the shell hands it over once, as it is entered.
@@ -192,24 +212,30 @@ export const AiKeyBanner = ({
     if (!readAtMount.current) {
       void read();
     }
-    const timer = shown
-      ? setInterval(() => {
-          void read();
-        }, refreshMs)
-      : undefined;
+    const again = () => {
+      void read();
+    };
+    const timer = shown ? setInterval(again, refreshMs) : undefined;
+    document.addEventListener(providersChanged, again);
     return () => {
       live = false;
       clearInterval(timer);
+      document.removeEventListener(providersChanged, again);
     };
   }, [providers, shown]);
-  if (!shown || failing.length === 0) {
-    return null;
-  }
-  return (
-    <div className="flex flex-col gap-2 px-4 pt-4">
+  return shown ? failing : [];
+};
+
+/** The banner: a line for each provider failing; nothing while none is. */
+export const FailingBanner = ({
+  failing,
+}: {
+  failing: readonly FailingProvider[];
+}) =>
+  failing.length === 0 ? null : (
+    <div {...stylex.props(styles.lines)}>
       {failing.map((key) => (
         <FailingLine failing={key} key={key.label} />
       ))}
     </div>
   );
-};

@@ -1,18 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
-import { Card, CardContent } from "@grasp-os/app-kit/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Stat } from "@grasp-os/app-kit/components/stat";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   Opportunity,
@@ -23,12 +8,36 @@ import type {
 } from "@grasp-os/shared/opportunities";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDecimal, formatList } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Card } from "../grasp/card/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { StatsGrid } from "../grasp/stats/index.ts";
+import { Tag } from "../grasp/tag/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { draftOf, titleOf } from "./opportunity-drafts.ts";
 
@@ -41,29 +50,6 @@ import { draftOf, titleOf } from "./opportunity-drafts.ts";
 // Skills, each started with what the card shows, under the admin's own
 // name (opportunity-drafts.ts). Core holds every rule (opportunities.ts):
 // the page only asks.
-
-/** What a call to core came to. */
-type Read<T> =
-  | { state: "loading" }
-  | { state: "refused"; message: string }
-  | { state: "ready"; data: T };
-
-/**
- * Every opportunity, or why not. Outside the components, as the React
- * Compiler can't compile `try`.
- */
-const readOpportunities = async (
-  core: CoreConnection
-): Promise<Read<Opportunity[]>> => {
-  try {
-    const data = await core.withSession(
-      async (session) => await session.opportunities.list()
-    );
-    return { state: "ready", data };
-  } catch (error) {
-    return { state: "refused", message: failureText(error) };
-  }
-};
 
 /** Hides `opportunity` for every admin, or shows it again; why not, when it wasn't. */
 const acting = async (
@@ -83,8 +69,54 @@ const acting = async (
   }
 };
 
+const styles = stylex.create({
+  // A page of the brain: its own pane that scrolls, round the library's page column.
+  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  card: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  head: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+  },
+  words: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  cards: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // A routine's steps, numbered.
+  steps: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    paddingInlineStart: grasp.space5,
+    listStyleType: "decimal",
+  },
+  plain: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+});
+
 /** What Grasp proposes, as the page names it; none proposed yet, when it couldn't ask a model. */
-const FormBadge = ({ form }: { form: OpportunityForm | null }) => {
+const FormTag = ({ form }: { form: OpportunityForm | null }) => {
   const { t } = useLingui();
   const labels: Record<OpportunityForm, string> = {
     workflow: t({
@@ -109,11 +141,11 @@ const FormBadge = ({ form }: { form: OpportunityForm | null }) => {
     }),
   };
   return form === null ? (
-    <Badge variant="outline">
-      <Trans>Nothing proposed yet</Trans>
-    </Badge>
+    <Tag size="sm" variant="outline">
+      {t`Nothing proposed yet`}
+    </Tag>
   ) : (
-    <Badge variant="secondary">{labels[form]}</Badge>
+    <Tag size="sm">{labels[form]}</Tag>
   );
 };
 
@@ -150,46 +182,48 @@ const SeenStepItem = ({
   seen: SeenStep;
 }) => (
   <li>
-    <div className="flex flex-wrap items-center gap-2">
-      <span>
+    <span {...stylex.props(styles.row)}>
+      <Text element="span" size="sm">
         <Trans context="a system and a step taken in it">
           {system}: {step}
         </Trans>
-      </span>
+      </Text>
       {copied ? (
-        <Badge variant="attention">
+        <Badge size="sm" tone="attention">
           <Trans>Copied from another system</Trans>
         </Badge>
       ) : null}
-    </div>
+    </span>
     {hoursAfter === null ? null : (
-      <p className="text-muted-foreground text-xs">
+      <Text size="xs" tone="muted">
         <AfterText hours={hoursAfter} />
-      </p>
+      </Text>
     )}
   </li>
 );
 
 /** What was seen of a routine in activity: its steps, and what some do instead. */
 const SeenSection = ({ seen }: { seen: SeenRoutine }) => (
-  <section className="flex flex-col gap-2">
-    <h3 className="text-sm font-medium">
+  <section {...stylex.props(styles.words)}>
+    <Heading level={3} size="ui-sm">
       <Trans>Seen in activity</Trans>
-    </h3>
-    <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
+    </Heading>
+    <ol {...stylex.props(styles.steps)}>
       {seen.steps.map((step, at) => (
         <SeenStepItem key={`${at}:${step.system}:${step.step}`} seen={step} />
       ))}
     </ol>
     {seen.variants.length === 0 ? null : (
-      <ul className="text-muted-foreground flex flex-col gap-1 text-sm">
+      <ul {...stylex.props(styles.plain)}>
         {seen.variants.map(({ after, system, step }) => {
           const position = after + 1;
           return (
             <li key={`${after}:${system}:${step}`}>
-              <Trans>
-                After step {position}, some go to {system}: {step}
-              </Trans>
+              <Text size="sm" tone="muted">
+                <Trans>
+                  After step {position}, some go to {system}: {step}
+                </Trans>
+              </Text>
             </li>
           );
         })}
@@ -215,37 +249,28 @@ const DiffersText = ({
     toldOnlyList.length === 0
   ) {
     return (
-      <p className="text-sm">
+      <Text size="sm">
         <Trans>
           What was described and what was seen use the same systems.
         </Trans>
-      </p>
+      </Text>
     );
   }
   return (
-    <div className="flex flex-col gap-1 text-sm">
+    <div {...stylex.props(styles.words)}>
       {differs.seenOnly.length === 0 ? null : (
-        <p>
+        <Text size="sm">
           <Trans>Seen, but not described: {seenOnly}.</Trans>
-        </p>
+        </Text>
       )}
       {toldOnlyList.length === 0 ? null : (
-        <p>
+        <Text size="sm">
           <Trans>Described, but not seen: {toldOnly}.</Trans>
-        </p>
+        </Text>
       )}
     </div>
   );
 };
-
-/** One figure of an opportunity, with what it counts under it. */
-const Figure = ({ value, label }: { value: number | null; label: string }) => (
-  // The term first, as a description list reads; shown under its figure.
-  <div className="flex flex-col-reverse gap-1">
-    <dt className="text-muted-foreground text-xs">{label}</dt>
-    <Stat render={<dd />}>{value === null ? "–" : formatDecimal(value)}</Stat>
-  </div>
-);
 
 /**
  * Draft it: Make something's chat for an App or a workflow, its box
@@ -266,30 +291,32 @@ const DraftLink = ({ opportunity }: { opportunity: Opportunity }) => {
     message: `Draft it for “${title}”`,
     context: "drafts what an opportunity proposes, named for it",
   });
-  const label = (
-    <Trans context="drafts what an opportunity proposes">Draft it</Trans>
-  );
+  const label = t({
+    message: "Draft it",
+    context: "drafts what an opportunity proposes",
+  });
   const { routine } = opportunity;
-  return draft.kind === "skill" ? (
-    <Link
+  return (
+    <Button
       aria-label={named}
-      className={buttonVariants({ size: "sm" })}
-      search={{ opportunity: routine }}
-      to="/brain/skills"
+      render={
+        draft.kind === "skill" ? (
+          <Link search={{ opportunity: routine }} to="/brain/skills" />
+        ) : (
+          <Link search={{ make: draft.kind, opportunity: routine }} to="/" />
+        )
+      }
+      size="sm"
+      variant="quiet"
     >
       {label}
-    </Link>
-  ) : (
-    <Link
-      aria-label={named}
-      className={buttonVariants({ size: "sm" })}
-      search={{ make: draft.kind, opportunity: routine }}
-      to="/"
-    >
-      {label}
-    </Link>
+    </Button>
   );
 };
+
+/** A figure of an opportunity, or a dash for one not known. */
+const figure = (value: number | null): string =>
+  value === null ? "–" : formatDecimal(value);
 
 /** One opportunity, as its card shows it. */
 const OpportunityCard = ({
@@ -307,76 +334,88 @@ const OpportunityCard = ({
   const systems = formatList(setup);
   const app = covers?.name ?? "";
   return (
-    <Card>
-      <CardContent>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex flex-col gap-1">
-              <h2 className="text-base font-medium">
-                {titleOf(opportunity, i18n.locale)}
-              </h2>
-              <p className="text-muted-foreground text-sm">
-                <BasisText basis={opportunity.basis} />
-              </p>
-            </div>
-            <FormBadge form={opportunity.form} />
+    <Card element="li" padding="lg">
+      <div {...stylex.props(styles.card)}>
+        <div {...stylex.props(styles.head)}>
+          <div {...stylex.props(styles.words)}>
+            <Heading level={2} size="ui">
+              {titleOf(opportunity, i18n.locale)}
+            </Heading>
+            <Text size="sm" tone="muted">
+              <BasisText basis={opportunity.basis} />
+            </Text>
           </div>
-          <dl className="flex flex-wrap gap-8">
-            <Figure label={t`Hours a week`} value={opportunity.hoursPerWeek} />
-            <Figure label={t`Cases a week`} value={opportunity.casesPerWeek} />
-          </dl>
-          {covers === null ? null : (
-            <p className="text-sm">
-              <Trans>
-                Already covered by{" "}
-                <Link
-                  className="underline underline-offset-4"
-                  params={{ app: covers.app }}
-                  to="/apps/$app"
-                >
-                  {app}
-                </Link>
-                : a change to it, nothing new.
-              </Trans>
-            </p>
-          )}
-          {steps.length === 0 ? null : (
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
-              {steps.map((step, at) => (
-                <li key={`${at}:${step}`}>
-                  <span className="mr-2">{step}</span>
+          <FormTag form={opportunity.form} />
+        </div>
+        <StatsGrid
+          aria-label={t`What it takes now`}
+          columns={2}
+          items={[
+            {
+              title: t`Hours a week`,
+              value: figure(opportunity.hoursPerWeek),
+              bare: true,
+            },
+            {
+              title: t`Cases a week`,
+              value: figure(opportunity.casesPerWeek),
+              bare: true,
+            },
+          ]}
+        />
+        {covers === null ? null : (
+          <Text size="sm">
+            <Trans>
+              Already covered by{" "}
+              <RouterLink params={{ app: covers.app }} to="/apps/$app">
+                {app}
+              </RouterLink>
+              : a change to it, nothing new.
+            </Trans>
+          </Text>
+        )}
+        {steps.length === 0 ? null : (
+          <ol {...stylex.props(styles.steps)}>
+            {steps.map((step, at) => (
+              <li key={`${at}:${step}`}>
+                <span {...stylex.props(styles.row)}>
+                  <Text element="span" size="sm">
+                    {step}
+                  </Text>
                   {approves.has(at + 1) ? (
-                    <Badge variant="attention">
+                    <Badge size="sm" tone="attention">
                       <Trans>A person approves</Trans>
                     </Badge>
                   ) : null}
-                </li>
-              ))}
-            </ol>
-          )}
-          {setup.length === 0 ? null : (
-            <p className="text-sm">
-              <Trans>Connect first: {systems}.</Trans>
-            </p>
-          )}
-          {seen === null ? null : <SeenSection seen={seen} />}
-          {differs === null ? null : <DiffersText differs={differs} />}
-          <div className="flex flex-wrap gap-2">
-            <DraftLink opportunity={opportunity} />
-            <Button
-              disabled={busy}
-              onClick={onDismiss}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Trans context="hides an opportunity for every admin until its evidence changes">
-                Hide for every admin
-              </Trans>
-            </Button>
-          </div>
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+        {setup.length === 0 ? null : (
+          <Text size="sm">
+            <Trans>Connect first: {systems}.</Trans>
+          </Text>
+        )}
+        {seen === null ? null : <SeenSection seen={seen} />}
+        {differs === null ? null : <DiffersText differs={differs} />}
+        <div {...stylex.props(styles.row)}>
+          <DraftLink opportunity={opportunity} />
+          <Button
+            disabled={busy}
+            onClick={onDismiss}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {t({
+              message: "Hide for every admin",
+              context:
+                "hides an opportunity for every admin until its evidence changes",
+            })}
+          </Button>
         </div>
-      </CardContent>
+      </div>
     </Card>
   );
 };
@@ -391,41 +430,43 @@ const Dismissed = ({
   busy: boolean;
   onRestore: (opportunity: Opportunity) => void;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium">
+    <section {...stylex.props(styles.section)}>
+      <Heading level={2} size="ui-sm">
         <Trans context="opportunities hidden for every admin">Hidden</Trans>
-      </h2>
-      <p className="text-muted-foreground text-sm">
+      </Heading>
+      <Text size="sm" tone="muted">
         <Trans>
           Hidden for every admin until their evidence changes, or until one of
           you shows them again.
         </Trans>
-      </p>
-      <ul className="flex flex-col gap-2">
+      </Text>
+      <ItemGroup separated>
         {dismissed.map((opportunity) => (
-          <li
-            className="flex flex-wrap items-center justify-between gap-3 text-sm"
-            key={opportunity.routine}
-          >
-            <span>{titleOf(opportunity, i18n.locale)}</span>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                onRestore(opportunity);
-              }}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Trans context="shows a hidden opportunity again for every admin">
-                Show again
-              </Trans>
-            </Button>
-          </li>
+          <Item key={opportunity.routine} size="xs">
+            <ItemContent>
+              <ItemTitle>{titleOf(opportunity, i18n.locale)}</ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  onRestore(opportunity);
+                }}
+                size="sm"
+                type="button"
+                variant="quiet"
+              >
+                {t({
+                  message: "Show again",
+                  context: "shows a hidden opportunity again for every admin",
+                })}
+              </Button>
+            </ItemActions>
+          </Item>
         ))}
-      </ul>
+      </ItemGroup>
     </section>
   );
 };
@@ -433,25 +474,32 @@ const Dismissed = ({
 /** The admin's Opportunities page. */
 export const OpportunitiesPage = () => {
   const core = useCore();
-  const { i18n } = useLingui();
-  const [read, setRead] = useState<Read<Opportunity[]>>({ state: "loading" });
+  const { i18n, t } = useLingui();
+  const [read, setRead] = useState<Loaded<Opportunity[]>>();
+  // Counts the tries, so Try again reads them again.
+  const [tried, setTried] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | undefined>();
   // The one hidden last on this page, with Undo, until the page is left.
   const [hidden, setHidden] = useState<Opportunity | undefined>();
 
   useEffect(() => {
-    let current = true;
+    const left = new AbortController();
     void (async () => {
-      const answer = await readOpportunities(core);
-      if (current) {
+      const answer = await loadFromCore(
+        core,
+        async (session) => await session.opportunities.list(),
+        left.signal
+      );
+      if (!left.signal.aborted) {
         setRead(answer);
       }
     })();
     return () => {
-      current = false;
+      left.abort();
     };
-  }, [core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [core, tried]);
 
   /** Hides `opportunity` for every admin, or shows it again. */
   const act = (opportunity: Opportunity, hide: boolean) => {
@@ -466,7 +514,7 @@ export const OpportunitiesPage = () => {
       }
       setHidden(hide ? opportunity : undefined);
       setRead((now) =>
-        now.state === "ready"
+        now?.state === "ready"
           ? {
               state: "ready",
               data: now.data.map((each) =>
@@ -480,40 +528,41 @@ export const OpportunitiesPage = () => {
     })();
   };
 
-  const all = read.state === "ready" ? read.data : [];
+  const all = read?.state === "ready" ? read.data : [];
   const open = all.filter(({ dismissed }) => !dismissed);
   const dismissed = all.filter(({ dismissed: hiddenNow }) => hiddenNow);
   const hiddenTitle = hidden === undefined ? "" : titleOf(hidden, i18n.locale);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
+    // A page of the brain: the title in the serif, in the library's page column.
+    <div {...stylex.props(styles.pane)}>
+      <PageColumn measure="page">
+        <PageHeader
+          description={<Trans>What Grasp could automate, largest first.</Trans>}
+          title={
             <Trans context="the Brain's opportunities page">
               Opportunities
             </Trans>
-          </PageHeaderTitle>
-          <PageHeaderDescription>
-            <Trans>
-              What Grasp could automate or improve, from how your teams describe
-              their work and how five or more of a team were seen doing it, the
-              largest first. One hidden comes back when its evidence changes.
-            </Trans>
-          </PageHeaderDescription>
-        </PageHeader>
-        {read.state === "refused" ? (
-          <ErrorText>{read.message}</ErrorText>
-        ) : null}
+          }
+        />
+        {read === undefined || read.state === "ready" ? null : (
+          <NotLoadedState
+            again={() => {
+              setTried(tried + 1);
+            }}
+            heading="h2"
+            page={read}
+          />
+        )}
         {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
         {hidden === undefined ? null : (
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span>
+          <div {...stylex.props(styles.row)}>
+            <Text element="span" size="sm">
               <Trans>
                 {hiddenTitle} is hidden for every admin until its evidence
                 changes.
               </Trans>
-            </span>
+            </Text>
             <Button
               disabled={busy}
               onClick={() => {
@@ -521,41 +570,38 @@ export const OpportunitiesPage = () => {
               }}
               size="sm"
               type="button"
-              variant="outline"
+              variant="quiet"
             >
-              <Trans context="shows the opportunity just hidden again">
-                Undo
-              </Trans>
+              {t({
+                message: "Undo",
+                context: "shows the opportunity just hidden again",
+              })}
             </Button>
           </div>
         )}
-        {read.state === "ready" && all.length === 0 ? (
-          <Empty>
+        {read === undefined ? (
+          <PageSkeletonList header={false} rows={6} variant="items" />
+        ) : null}
+        {read?.state === "ready" && all.length === 0 ? (
+          <Empty size="section">
             <EmptyHeader>
-              <EmptyTitle>
-                <Trans>No opportunities yet</Trans>
+              <EmptyTitle headingLevel={2}>
+                <Trans>Nothing to automate yet</Trans>
               </EmptyTitle>
-              <EmptyDescription>
-                <Trans>
-                  They appear once your teams&apos; interviews describe how
-                  their work runs.
-                </Trans>
-              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
         {open.length > 0 ? (
-          <ul className="flex flex-col gap-4">
+          <ul {...stylex.props(styles.cards)}>
             {open.map((opportunity) => (
-              <li key={opportunity.routine}>
-                <OpportunityCard
-                  busy={busy}
-                  onDismiss={() => {
-                    act(opportunity, true);
-                  }}
-                  opportunity={opportunity}
-                />
-              </li>
+              <OpportunityCard
+                busy={busy}
+                key={opportunity.routine}
+                onDismiss={() => {
+                  act(opportunity, true);
+                }}
+                opportunity={opportunity}
+              />
             ))}
           </ul>
         ) : null}
@@ -568,7 +614,7 @@ export const OpportunitiesPage = () => {
             }}
           />
         ) : null}
-      </div>
+      </PageColumn>
     </div>
   );
 };

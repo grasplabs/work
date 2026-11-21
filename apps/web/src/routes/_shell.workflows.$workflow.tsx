@@ -13,13 +13,13 @@ import type {
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Link,
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { HistoryIcon, SettingsIcon, WorkflowIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
@@ -38,19 +38,22 @@ import {
   backCrumb,
   ItemBar,
   ItemShell,
-  ItemSwitch,
-  ItemSwitchLink,
   projectSearchOf,
   readItemProject,
 } from "../frame/item-shell.tsx";
 import {
-  NotLoadedState,
-  PageLoading,
-  PageNotLoaded,
-} from "../frame/page-states.tsx";
+  WORKFLOW_GENERAL,
+  Fill,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { NotLoadedState, PageNotLoaded } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
+import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
@@ -58,16 +61,14 @@ import type { Names } from "../workflows/activity-bar.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
 import { workflowVersions } from "../workflows/reads.ts";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
+import { workflowSettingsSectionOf } from "../workflows/settings-sections.ts";
+import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
 import { useWorkflowDraft } from "../workflows/use-workflow-draft.ts";
 import { WorkflowFlow } from "../workflows/workflow-flow.tsx";
-import {
-  workflowSettingsSectionOf,
-  WorkflowSettings,
-} from "../workflows/workflow-settings.tsx";
-import type { WorkflowSettingsSection } from "../workflows/workflow-settings.tsx";
+import { WorkflowSettings } from "../workflows/workflow-settings.tsx";
 import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 
 // One independent workflow (platform specification 13), in the same shell
@@ -96,6 +97,39 @@ import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 
 /** What the main area shows. */
 type WorkflowView = "flow" | "runs" | "settings";
+
+// The Flow comes in softly as it is shown again.
+const fadeIn = stylex.keyframes({
+  from: { opacity: 0 },
+  to: { opacity: 1 },
+});
+
+const styles = stylex.create({
+  // A view kept while another shows: its state stays.
+  away: { display: "none" },
+  flow: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    animationName: { default: fadeIn, [media.reduced]: "none" },
+    animationDuration: grasp.durationOpen,
+    animationTimingFunction: grasp.ease,
+  },
+  runs: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+  },
+  // As wide as the card, as every page is: the shell gives the side room.
+  column: {
+    width: "100%",
+    paddingBlockStart: grasp.space6,
+  },
+  bar: { marginBlockStart: "auto" },
+});
 
 /** A view named in an address, or none for anything else. */
 const viewOf = (value: unknown): WorkflowView | undefined =>
@@ -199,44 +233,42 @@ const ViewSwitch = ({
       ? [
           {
             view: "flow",
-            icon: WorkflowIcon,
             label: t({ message: "Flow", context: "a workflow's view" }),
           } as const,
         ]
       : []),
     {
       view: "runs",
-      icon: HistoryIcon,
       label: t({ message: "Runs", context: "a workflow's view" }),
     },
     {
       view: "settings",
-      icon: SettingsIcon,
       label: t({ message: "Settings", context: "a workflow's view" }),
     },
   ] as const;
+  const label = t`Workflow views`;
+  const links = views.map(({ view: each, label: words }) => (
+    <TabsLink
+      current={each === view}
+      key={each}
+      render={
+        <Link
+          params={{ workflow }}
+          replace
+          search={(held) => ({ project: held.project, view: each })}
+          to="/workflows/$workflow"
+        />
+      }
+    >
+      {words}
+      {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
+    </TabsLink>
+  ));
+  // TabsNav folds to one menu by itself where its links don't fit.
   return (
-    <ItemSwitch label={t`Workflow views`}>
-      {views.map(({ view: each, icon: Icon, label }) => (
-        <ItemSwitchLink
-          current={each === view}
-          icon={<Icon data-icon="inline-start" />}
-          key={each}
-          label={label}
-          renderLink={(look) => (
-            <Link
-              {...look}
-              params={{ workflow }}
-              replace
-              search={(held) => ({ project: held.project, view: each })}
-              to="/workflows/$workflow"
-            />
-          )}
-        >
-          {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
-        </ItemSwitchLink>
-      ))}
-    </ItemSwitch>
+    <TabsNav aria-label={label} variant="segmented">
+      {links}
+    </TabsNav>
   );
 };
 
@@ -253,8 +285,14 @@ const RunsView = ({
   names,
   admin,
   testable,
+  openRun,
+  onCloseRun,
 }: {
   workflow: string;
+  /** The run the address asks to open, by its ID. */
+  openRun: string | undefined;
+  /** Clears the run from the address once it is closed. */
+  onCloseRun: () => void;
   builder: boolean;
   runs: Loaded<WorkflowResourceRun[]>;
   activity: Loaded<WorkflowActivity[]>;
@@ -266,12 +304,14 @@ const RunsView = ({
   const [part, setPart] = useState<TracesPart>("runs");
   if (builder) {
     return (
-      <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+      <div {...stylex.props(styles.column)}>
         <Traces
           activity={activity}
           admin={admin}
           names={names}
+          onCloseRun={onCloseRun}
           onPartChange={setPart}
+          openRun={openRun}
           testable={testable}
           part={part}
           runs={runs}
@@ -282,11 +322,13 @@ const RunsView = ({
   }
   return (
     <>
-      <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+      <div {...stylex.props(styles.column)}>
         {runs.state === "ready" ? (
           <ResourceRuns
             admin={admin}
             names={names}
+            onCloseRun={onCloseRun}
+            openRun={openRun}
             runs={runs.data}
             workflow={workflow}
           />
@@ -294,7 +336,7 @@ const RunsView = ({
           <NotLoadedState page={runs} />
         )}
       </div>
-      <div className="mt-auto">
+      <div {...stylex.props(styles.bar)}>
         <ActivityBar activity={activity} names={names} onAll={undefined} />
       </div>
     </>
@@ -354,6 +396,7 @@ const WorkflowBar = ({
   pending,
   onChange,
   onFiles,
+  onOpenRun,
   onShared,
 }: {
   resource: WorkflowResource;
@@ -378,6 +421,8 @@ const WorkflowBar = ({
   onChange: (changed: WorkflowResource) => void;
   /** Shows what it may reach, in its Settings' Files and apps. */
   onFiles: () => void;
+  /** Opens a run Run started, beside its runs. */
+  onOpenRun: (id: string) => void;
   onShared: () => void;
 }) => {
   const live = resource.currentVersion;
@@ -386,17 +431,10 @@ const WorkflowBar = ({
     <ItemBar
       actions={
         <>
-          <ViewSwitch
-            flow={flow}
-            runs={runs}
-            view={view}
-            workflow={resource.id}
-          />
           <StartIndependentRun
-            // Read again for each version that goes live: what Run starts,
-            // and that there is one to start at all.
-            key={live ?? "none"}
+            live={live}
             onFiles={onFiles}
+            onOpenRun={onOpenRun}
             workflow={resource.id}
           />
           {pauses ? (
@@ -436,6 +474,14 @@ const WorkflowBar = ({
           />
         )
       }
+      views={
+        <ViewSwitch
+          flow={flow}
+          runs={runs}
+          view={view}
+          workflow={resource.id}
+        />
+      }
     />
   );
 };
@@ -444,6 +490,7 @@ const WorkflowResourceView = ({
   back,
   view: asked,
   section,
+  run,
   handedOver,
   ...read
 }: WorkflowPageRead & {
@@ -451,6 +498,8 @@ const WorkflowResourceView = ({
   /** The view the address asks for, if any. */
   view: WorkflowView | undefined;
   section: WorkflowSettingsSection | undefined;
+  /** On Runs, the run the address asks to open. */
+  run: string | undefined;
   /** The chat the person came from, building it in Chat. */
   handedOver: string | undefined;
 }) => {
@@ -487,6 +536,18 @@ const WorkflowResourceView = ({
       replace: true,
     });
   }, [navigate, resource.id, handedOver]);
+  /** Runs, with `id` open beside the list; none closes it. */
+  const runAt = (id?: string): void => {
+    void navigate({
+      to: "/workflows/$workflow",
+      params: { workflow: resource.id },
+      search: (held) => ({
+        project: held.project,
+        view: "runs",
+        ...(id === undefined ? {} : { run: id }),
+      }),
+    });
+  };
   const settingsAt = (at: WorkflowSettingsSection): void => {
     void navigate({
       to: "/workflows/$workflow",
@@ -524,6 +585,7 @@ const WorkflowResourceView = ({
           onFiles={() => {
             settingsAt("files");
           }}
+          onOpenRun={runAt}
           onShared={() => {
             reread();
             setShares((before) => before + 1);
@@ -547,13 +609,7 @@ const WorkflowResourceView = ({
       ) : null}
       {/* Kept while another view shows: its zoom and layout stay. */}
       {draft === undefined ? null : (
-        <div
-          className={
-            view === "flow"
-              ? "animate-in fade-in-0 flex min-h-0 flex-1 flex-col duration-300 motion-reduce:animate-none"
-              : "hidden"
-          }
-        >
+        <div {...stylex.props(view === "flow" ? styles.flow : styles.away)}>
           {draft.state === "ready" ? (
             <WorkflowFlow
               draft={latest ?? draft.data}
@@ -572,18 +628,16 @@ const WorkflowResourceView = ({
         </div>
       )}
       {/* Kept while another view shows: a test going on stays followed. */}
-      <div
-        className={
-          view === "runs"
-            ? "flex min-h-0 flex-1 flex-col overflow-y-auto"
-            : "hidden"
-        }
-      >
+      <div {...stylex.props(view === "runs" ? styles.runs : styles.away)}>
         <RunsView
           activity={activity}
           admin={admin}
           builder={builder}
           names={names}
+          onCloseRun={() => {
+            runAt();
+          }}
+          openRun={run}
           runs={runs}
           testable={testableOf(latest)}
           workflow={resource.id}
@@ -639,14 +693,14 @@ const WorkflowResourcePage = () => {
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
-  const { view, section, chat } = Route.useSearch();
+  const { view, section, run, chat } = Route.useSearch();
   const { t } = useLingui();
   const back = backCrumb({ label: t`Workflows`, to: "/workflows" }, project);
   if (resource.state !== "ready") {
     return (
       <PageNotLoaded
         crumbs={[back, { label: t`Workflow` }]}
-        icon={WorkflowIcon}
+        icon={WorkflowMark}
         notFound={t`Workflow not found`}
         page={resource}
       />
@@ -665,6 +719,7 @@ const WorkflowResourcePage = () => {
       identity={identity}
       names={{ people, me: identity.userId }}
       resource={resource.data}
+      run={run}
       section={section}
       view={view}
     />
@@ -679,6 +734,8 @@ interface WorkflowSearch {
   section?: WorkflowSettingsSection;
   /** The project it was started or opened from: the way back. */
   project?: string;
+  /** On Runs, the run open beside the list, by its ID. */
+  run?: string;
   /**
    * The chat the person came from, building it in Grasp's chat: the page
    * makes it the workflow's. Core checks it is theirs on each read.
@@ -686,10 +743,30 @@ interface WorkflowSearch {
   chat?: string;
 }
 
+/**
+ * The workflow before it is read: the bar, its name to come, and the view
+ * the address names. Its settings wait as cards; its flow and its runs
+ * draw themselves in, as no skeleton has a canvas's shape, and who sees
+ * which by default waits on the read.
+ */
+const WorkflowPending = () => {
+  const { view } = Route.useSearch();
+  return (
+    <>
+      <LoadingBar />
+      <Fill>
+        {view === "settings" ? (
+          <SettingsPending sections={WORKFLOW_GENERAL} />
+        ) : null}
+      </Fill>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   // Grasp's chat has no place here but its builders', about the workflow,
   // docked beside it (chat/chat-subject.ts).
-  staticData: { chat: chatPresence.hidden },
+  staticData: { chat: chatPresence.hidden, page: "fill" },
   validateSearch: (search: Record<string, unknown>): WorkflowSearch => {
     const view = viewOf(search.view);
     const section = workflowSettingsSectionOf(search.section);
@@ -700,9 +777,12 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       ...(section === undefined ? {} : { section }),
       ...(chat === undefined ? {} : { chat }),
       ...(project === undefined ? {} : { project }),
+      ...(typeof search.run === "string" && search.run !== ""
+        ? { run: search.run }
+        : {}),
     };
   },
-  pendingComponent: PageLoading,
+  pendingComponent: WorkflowPending,
   loaderDeps: ({ search: { project } }) => ({ project }),
   loader: async ({
     context: { core, identity },

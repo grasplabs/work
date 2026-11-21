@@ -6,7 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { everyPage, loadEveryPage } from "./outcome-pages.ts";
+import { loadEveryPage } from "./outcome-pages.ts";
 
 // Reading every page of a list of calls of unknown outcome (outcome-pages.ts):
 // none past a full page goes unlisted, none is listed twice, and a list
@@ -31,14 +31,30 @@ const listOf = (count: number) => {
   return { all, asked, read };
 };
 
+// SAFETY: the session is only handed on, never used here.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const session = {} as Session;
+// Typed as the connection's, not as a generic literal of its own:
+// checking a generic `withSession` over `Session` against the real one
+// costs the type-aware linter minutes and gigabytes.
+const core: Pick<CoreConnection, "withSession"> = {
+  withSession: async (read) => await read(session),
+};
+
+/** Every page of `list`, as the inbox loads them. */
+const listed = async (list: ReturnType<typeof listOf>) => {
+  const loaded = await loadEveryPage(
+    core,
+    async (_session, before) => await list.read(before)
+  );
+  return loaded.state === "ready" ? loaded.data : [];
+};
+
 describe("every page of calls of unknown outcome", () => {
   it("lists each once, past the first page, and stops after the last", async () => {
     const more = listOf(unknownOutcomeListLimit * 2 + 3);
     const exact = listOf(unknownOutcomeListLimit);
-    const [moreListed, exactListed] = [
-      await everyPage(more.read),
-      await everyPage(exact.read),
-    ];
+    const [moreListed, exactListed] = [await listed(more), await listed(exact)];
     expect({
       more: moreListed.length,
       morePages: more.asked.length,
@@ -54,15 +70,6 @@ describe("every page of calls of unknown outcome", () => {
 
   it("loads each page on its own, and asks for none after one that fails", async () => {
     const pages = listOf(unknownOutcomeListLimit * 3);
-    // SAFETY: the session is only handed on, never used here.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const session = {} as Session;
-    // Typed as the connection's, not as a generic literal of its own:
-    // checking a generic `withSession` over `Session` against the real one
-    // costs the type-aware linter minutes and gigabytes.
-    const core: Pick<CoreConnection, "withSession"> = {
-      withSession: async (read) => await read(session),
-    };
     let reads = 0;
     const loaded = await loadEveryPage(core, async (_session, before) => {
       reads += 1;
@@ -71,18 +78,12 @@ describe("every page of calls of unknown outcome", () => {
       }
       return await pages.read(before);
     });
-    const all = await loadEveryPage(
-      core,
-      async (_session, before) => await pages.read(before)
-    );
     expect({
       loaded: loaded.state,
       reads,
-      all: all.state === "ready" ? all.data.length : all.state,
     }).toStrictEqual({
       loaded: "refused",
       reads: 2,
-      all: unknownOutcomeListLimit * 3,
     });
   });
 });

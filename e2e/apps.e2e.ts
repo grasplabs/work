@@ -174,15 +174,15 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Apps" }).click();
-  const cards = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+  // The tab open lists its Apps, a card each: the builder's own first.
+  const cards = page.getByRole("tabpanel").getByRole("article");
   const search = page.getByRole("textbox", { name: "Search the Apps" });
 
   // A search by name finds this run's Apps, one card each whatever their
   // pages, each saying where it stands.
   await search.fill(run);
   await expect(cards).toHaveCount(7);
-  const marked = (status: string) =>
-    cards.filter({ has: page.getByText(status, { exact: true }) });
+  const marked = (status: string) => cards.filter({ hasText: status });
   await expect(marked("Your team uses it")).toHaveCount(5);
   await expect(marked("Only you see this")).toHaveCount(2);
 
@@ -220,20 +220,20 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("0");
   await counter.getByRole("button", { name: "Add one" }).click();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
+  // Its full page, from the bar's menu, and back.
   await page.getByRole("button", { name: "More", exact: true }).click();
-  await expect(
-    page.getByRole("menuitem", { name: "Open full page" })
-  ).toHaveAttribute("href", new RegExp(`^/apps/${app}/full/?$`, "u"));
-  await page.keyboard.press("Escape");
+  await page.getByRole("menuitem", { name: "Open full page" }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/?$`, "u"));
+  await page.goBack();
 
   // Its settings, beside the chat in its workspace: what it is, its
   // connections and its members.
   await page
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("navigation", { name: /s workspace$/u })
+    .getByRole("link", { name: "General" })
     .click();
   await expect(page.getByLabel("What it is for")).toHaveValue("Counts clicks");
-  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  const sections = page.getByRole("navigation", { name: /s workspace$/u });
   // A builder sees the connections it uses; this one uses none.
   await sections.getByRole("link", { name: "Connections" }).click();
   await expect(
@@ -249,53 +249,42 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const everyone = [
     "Chat",
     "Brain",
-    "Projects",
     "Apps",
     "Workflows",
     // The company's agents: the ones a person may ask, and for admins all of them.
     "Agents",
     "Integrations",
   ];
-  const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
     // Not "/": an admin just signed in there, with the company's
     // onboarding still open, lands in /setup instead (landing.ts).
     await page.goto("/workflows");
+    // Grasp's sections are the nav's first list; the Apps' own entries,
+    // which come on their own read, follow in theirs.
     const links = page
       .getByRole("navigation", { name: "Main" })
+      .getByRole("list")
+      .first()
       .getByRole("link");
     // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
-    await expect(links.filter({ hasText: /^Inbox/u })).toBeVisible();
-    // The Apps' own entries, which come on their own read, aren't Grasp's
-    // sections (app-surfaces.e2e.ts adds some on the shared deployment):
-    // every link but theirs, in one read of the page.
-    const texts = await links.evaluateAll((found) =>
-      found
-        .filter((link) => link.closest("[aria-labelledby]") === null)
-        .map((link) => link.textContent ?? "")
-    );
-    // The person menu, at the sidebar's foot, by their name; their role is
-    // said inside it.
-    await page.getByRole("button", { name: "Person", exact: true }).click();
-    await expect(
-      page.getByRole("menu").getByText(roleNames[person.role], { exact: true })
-    ).toBeVisible();
+    const texts = await links.allTextContents();
+    // The person menu, at the sidebar's foot, by their name.
+    await page.getByRole("button", { name: /^Person\b/u }).click();
     const items = page.getByRole("menuitem");
     await expect(items.filter({ hasText: "Sign out" })).toBeVisible();
     const menuTexts = await items.allTextContents();
     const menu = menuTexts.filter((text) =>
       ["Settings", "Sign out"].includes(text)
     );
-    await page.keyboard.press("Escape");
-    // Settings, in the sidebar's foot above the person.
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    // Settings, from the person menu.
+    await page.getByRole("menuitem", { name: "Settings" }).click();
     await expect(page).toHaveURL(/\/settings\/profile$/u);
     const sections = page
       .getByRole("navigation", { name: "Settings" })
       .getByRole("link");
-    await expect(sections.last()).toHaveText("Security");
+    await expect(sections.filter({ hasText: "Security" })).toBeVisible();
     return {
       // Without how many wait.
       nav: texts.map((text) =>
@@ -305,12 +294,11 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       settings: await sections.allTextContents(),
     };
   };
-  const [chat, ...rest] = everyone;
-  const nav = [chat, "Inbox", ...rest];
-  const menu = ["Sign out"];
+  const nav = everyone;
+  const menu = ["Settings", "Sign out"];
   // Each person's own instruction file is theirs to write, whatever their
   // role: in every person's Settings.
-  const account = ["Profile", "Instructions", "Security"];
+  const account = ["Profile", "Appearance", "Instructions", "Security"];
   expect({
     admin: await sidebarOf(admin),
     builder: await sidebarOf(builder),
@@ -320,24 +308,17 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       nav,
       menu,
       settings: [
+        ...account,
         "Workspace",
         "Members and roles",
-        // The organization's own AI provider keys and the models its calls use.
-        "AI providers",
-        "Models",
-        "AI spend",
-        // The company's groups of teams, the brain's regions: right after
-        // AI spend, as in the prototype.
-        "Brain",
-        // The company admin's view of the onboarding interviews.
-        "Onboarding",
+        "Teams",
+        // The organization's own AI provider keys, the models its calls
+        // use and what they cost.
+        "AI and spend",
         "Audit trail",
         // The event sources outside systems send events to, for admins.
-        "Webhooks",
-        // Every person's calls of unknown outcome, read only, for admins.
-        "Unknown outcomes",
+        "Incoming events",
         "Billing",
-        ...account,
       ],
     },
     builder: { nav, menu, settings: account },
@@ -351,7 +332,7 @@ test("a link to an app, opened signed out, leads through sign-in to the app in t
 }) => {
   await page.goto(`/apps/${app}/pages/home`);
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
   expect(returnTo).toBe(`/apps/${app}/pages/home`);
@@ -382,7 +363,9 @@ test("signing in goes back to the page asked for, and only to a page of this sit
     await page.goto(`/sign-in?returnTo=${encodeURIComponent(elsewhere)}`);
     // Chat's box.
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
-    await expect(page.getByLabel("Your question")).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Your question" })
+    ).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);
   }
 });

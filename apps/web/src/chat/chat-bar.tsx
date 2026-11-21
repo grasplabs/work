@@ -1,151 +1,124 @@
-import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import { Kbd } from "@grasp-os/app-kit/components/kbd";
-import {
-  PromptBar,
-  PromptBarAction,
-  PromptBarActions,
-  PromptBarIcon,
-} from "@grasp-os/app-kit/components/prompt-bar";
-import type { PromptEditorHandle } from "@grasp-os/app-kit/components/prompt-editor";
-import { Separator } from "@grasp-os/app-kit/components/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
-import {
-  ArrowUpIcon,
-  PanelRightOpenIcon,
-  PictureInPicture2Icon,
-} from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
+import { ComposerAction } from "../grasp/composer/index.ts";
+import { PanelToggle } from "../grasp/icons/index.ts";
 import { shortcutLabel } from "../shortcuts.ts";
+import { ChatComposer } from "./chat-composer.tsx";
 import { useOpenChat } from "./chat-presence.ts";
-import { ComposerMenu } from "./composer-menu.tsx";
-import { MentioningField } from "./composer.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
 
-// Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
-// page, centred over it, as one line to ask in, which sinks away as the chat
-// opens and rises back once it has gone. Its line mentions with `@` as the
-// chat's box does, and its + adds a file or a mention; sending opens the
-// chat where it last was, with the answer coming in, and its last button
-// opens it without asking. What is typed here, chips and files too, is the
-// chat's own box's, so it is all still there once the chat opens. Back, it
-// takes the cursor if the chat had it.
+// Grasp's chat while it waits (global-chat.tsx): the chat's one box to ask
+// in (chat-composer.tsx), in one row, at the foot of the page, as one line to ask in. It mentions with
+// `@` as the chat's box does, and its + adds a file or a mention; sending
+// opens the chat where it last was, with the answer coming in; the
+// page's own bar opens it without asking. What is typed here, mentions and
+// files too, is the chat's own box's, so it is all still there once the
+// chat opens. While Grasp answers, its light runs round it and Stop stops
+// the answer. Back, it takes the cursor if the chat had it.
 
-/** How the chat opens from the bar: docked or floating, never full screen (chat-layout.ts). */
-const OpenIcon = ({ placement }: { placement: DockablePlacement }) =>
-  placement === "floating" ? <PictureInPicture2Icon /> : <PanelRightOpenIcon />;
+/** How long the bar offers its box the cursor back as the chat closes: the dock's motion, in ms. */
+const returnWithinMs = 300;
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
   const { t } = useLingui();
-  const { placement, stage, delays, settled, composer, words, view } =
-    useGlobalChat();
+  const { presence, stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
-  const editor = useRef<PromptEditorHandle>(null);
-  const typed = composer.text.trim() !== "";
-  // Nothing to ask with (no AI provider yet): the chat opens to say so.
-  const canSend = typed && (composer.models?.length ?? 0) > 0 && !composer.busy;
-  const send = (): void => {
-    if (canSend) {
-      composer.onSend();
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Back as the chat closes: the chat had the cursor, which it loses as it
+  // goes. Only then: a menu or window closing elsewhere leaves the cursor
+  // nowhere for a moment too, and it belongs to what opens next. The cursor
+  // may still stand in the closing panel (its Close). App shell's dock
+  // rises back from hidden, so the box can take the cursor only once it is
+  // seen: it is offered it each frame until it holds it, for as long as the
+  // dock's motion lasts, and not once the cursor went somewhere else.
+  const chatWasOpen = useRef(false);
+  useEffect(() => {
+    if (stage.card) {
+      chatWasOpen.current = true;
+      return;
     }
-    openHere();
-  };
+    if (!(stage.bar && chatWasOpen.current)) {
+      return;
+    }
+    chatWasOpen.current = false;
+    let frame = 0;
+    const until = performance.now() + returnWithinMs;
+    const offer = () => {
+      const field = box.current;
+      const { activeElement } = document;
+      const lost =
+        activeElement === null ||
+        activeElement === document.body ||
+        activeElement.closest("[data-slot=app-shell-panels]") !== null;
+      if (field === null || !lost) {
+        return;
+      }
+      field.focus();
+      if (document.activeElement !== field && performance.now() < until) {
+        frame = requestAnimationFrame(offer);
+      }
+    };
+    frame = requestAnimationFrame(offer);
+    // oxlint-disable-next-line consistent-return -- the cleanup of the offer just made
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [stage.bar, stage.card]);
+  if (!stage.bar) {
+    return null;
+  }
+  // Nothing to ask with (no AI provider yet): the chat opens to say so.
+  const canSend = (composer.models?.length ?? 0) > 0 && !composer.busy;
+  // The bar ends in Send: sending opens the chat, and the page's own bar has
+  // the button that opens it without asking. Only a page whose chat is part
+  // of it (an App's workspace on a phone) has no such button, so there the
+  // bar keeps one, or the chat's history could not be reached without asking.
+  const ownChat = !presence.placements.includes("floating");
+  const shortcut = shortcutLabel(chatKey);
   const { onAttach } = composer;
-  // Files show in the chat's box, which opens to show them.
-  const attach =
-    onAttach === undefined
-      ? undefined
-      : (files: readonly File[]): void => {
-          onAttach(files);
-          openHere();
-        };
   return (
-    <PromptBar
-      delayed={delays.bar}
-      onOpenChangeComplete={(open) => {
-        // The chat closed with the cursor in it, which it lost as it went.
-        if (open && document.activeElement === document.body) {
-          editor.current?.focus();
-        }
-        settled("bar");
-      }}
-      open={stage.bar}
-    >
-      <PromptBarIcon working={view.running}>
-        <GraspMark />
-      </PromptBarIcon>
-      <MentioningField
-        describedBy={undefined}
-        editor={editor}
+    <div>
+      <ChatComposer
+        {...composer}
+        boxRef={box}
+        {...(ownChat
+          ? {
+              footer: (
+                <ComposerAction
+                  aria-label={t`Open the chat (${shortcut})`}
+                  icon={PanelToggle}
+                  onClick={() => {
+                    openHere();
+                  }}
+                />
+              ),
+            }
+          : {})}
+        compact
         label={words.title}
-        mentions={composer.mentions}
-        onBackspaceEmpty={undefined}
-        onMentions={(mentions) => {
-          composer.onMentions(mentions);
-        }}
-        onPasteFiles={attach}
-        onSubmit={send}
-        onText={(text) => {
-          composer.onText(text);
+        // Files show in the chat's box, which opens to show them.
+        onAttach={
+          onAttach === undefined
+            ? undefined
+            : (files) => {
+                onAttach(files);
+                openHere();
+              }
+        }
+        // Opens the chat once the question went: one that didn't stays
+        // here, said under the bar, to send again.
+        onSend={async () => {
+          if (canSend) {
+            await composer.onSend();
+          }
+          openHere();
         }}
         placeholder={words.placeholder}
-        size="bar"
-        text={composer.text}
+        running={view.running}
+        showWorking
       />
-      <PromptBarActions>
-        <ComposerMenu
-          disabled={composer.busy}
-          onAttach={attach}
-          onMention={(mentioned, trigger) => {
-            editor.current?.insertMention(mentioned, trigger);
-          }}
-          trigger={
-            <PromptBarAction
-              aria-label={t`Add`}
-              disabled={composer.busy}
-              variant="ghost"
-            />
-          }
-        />
-        <PromptBarAction
-          aria-label={t`Send`}
-          disabled={!typed}
-          onClick={send}
-          variant="default"
-        >
-          <ArrowUpIcon />
-        </PromptBarAction>
-        {/* As tall as the icons; as far from the filled send as the icon after it is. */}
-        <div className="ms-2 flex h-4">
-          <Separator orientation="vertical" />
-        </div>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptBarAction
-                aria-label={t`Open the chat`}
-                onClick={() => {
-                  openHere();
-                }}
-                variant="ghost"
-              />
-            }
-          >
-            <OpenIcon placement={placement} />
-          </TooltipTrigger>
-          <TooltipContent>
-            {t`Open the chat`}
-            <Kbd>{shortcutLabel(chatKey)}</Kbd>
-          </TooltipContent>
-        </Tooltip>
-      </PromptBarActions>
-    </PromptBar>
+    </div>
   );
 };

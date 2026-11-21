@@ -1,0 +1,99 @@
+// TableRow: one row of a table (table.tsx), with a hairline under it.
+"use client";
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
+import * as stylex from "@stylexjs/stylex";
+import type { ReactNode } from "react";
+
+import { useRangeLook } from "./look";
+import { useSection } from "./section-context";
+import { tableStyles as styles } from "./styles";
+
+/** Every prop a TableRow takes. */
+export interface TableRowProps {
+  /** The row's cells: TableHead in the head, TableCell everywhere else. */
+  children: ReactNode;
+  /**
+   * The row is chosen, for instance by a checkbox in its first cell: it keeps a quiet fill. Say it
+   * in the row as well; the fill alone is not enough.
+   * @default false
+   */
+  chosen?: boolean;
+  /**
+   * Shown. `false` keeps it for its widths only: not drawn, not read, not reached, while the
+   * columns keep the sizes it gives them (a Data table keeps its rows so while a search matches
+   * none, so the columns do not jump as you type).
+   * @default true
+   */
+  open?: boolean;
+  /** @deprecated Use `open`. */
+  collapsed?: boolean;
+  /**
+   * The row opens something: one link or button in it (`data-row-target`) stretches its press area
+   * over the row, and the row takes the keyboard's ring while that has focus. A Data table sets it
+   * with `rowHref` or `onRowOpen`.
+   * @default false
+   */
+  opens?: boolean;
+  /**
+   * The row open now, in a page that shows one row's panel beside the table: said as current, with
+   * the pointer's quiet fill kept. Not the selection: that is `chosen`.
+   * @default false
+   */
+  current?: boolean;
+  /**
+   * The row's state, drawn over the whole row: `pending` fades from its start to its end (someone
+   * invited, not yet here); `removed` greys it. Say the state in the row's words as well; the look
+   * alone is not enough. Controls in the row that must stay usable stand above it: give them
+   * `tableAboveStatus` as their layout.
+   */
+  status?: "pending" | "removed";
+}
+
+/** The veil a row's state lays over it. */
+const statusLook = (status: TableRowProps["status"]) => [
+  status !== undefined && styles.statusRow,
+  status === "pending" && styles.statusPending,
+  status === "removed" && styles.statusRemoved,
+];
+
+/** A row, with a hairline under it. In the body it is lit under a pointer. */
+export const TableRow = ({
+  children,
+  chosen = false,
+  open,
+  collapsed: collapsedDeprecated,
+  opens = false,
+  current = false,
+  status,
+}: TableRowProps) => {
+  // `open={false}` is the new name of `collapsed` (the breaking release's step 1); the new one wins.
+  const collapsed = open === undefined ? collapsedDeprecated === true : !open;
+  const section = useSection();
+  const range = useRangeLook();
+  return (
+    <tr
+      data-slot="table-row"
+      data-state={chosen ? "selected" : undefined}
+      data-status={status}
+      aria-current={current ? "true" : undefined}
+      aria-hidden={collapsed || undefined}
+      inert={collapsed || undefined}
+      {...stylex.props(
+        collapsed && styles.collapsed,
+        styles.row,
+        section === "body" && styles.bodyRow,
+        opens && styles.opens,
+        current && styles.current,
+        chosen && styles.chosen,
+        chosen && range === "mint" && styles.chosenMint,
+        chosen && range === "bar" && styles.chosenBar,
+        statusLook(status)
+      )}
+    >
+      {children}
+    </tr>
+  );
+};
+
+/** Layout for a control in a row with a `status` that must stay fully seen and usable: above the veil. */
+export const tableAboveStatus = styles.aboveStatus;

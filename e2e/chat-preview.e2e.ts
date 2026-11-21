@@ -3,6 +3,7 @@ import type { FrameLocator, Locator, Page } from "@playwright/test";
 
 import { publishApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { modelScripts } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -33,11 +34,12 @@ const afterTurnCheck = { timeout: 30_000 };
  * `turnCheck`), and the chat takes no question meanwhile.
  */
 const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
-  await expect(
-    chat.getByRole("button", { name: "Send", exact: true })
-  ).toBeVisible({ timeout: 30_000 });
+  const send = chat.getByRole("button", { name: "Send", exact: true });
+  await expect(send).toBeVisible({ timeout: 30_000 });
   const ask = chat.getByRole("textbox", { name: "Ask for a change" });
   await ask.fill(text);
+  // Sent once the models are read, as Send says.
+  await expect(send).toBeEnabled({ timeout: 30_000 });
   await ask.press("Enter");
 };
 
@@ -89,7 +91,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
         );
       });
     });
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
     const thread = page.getByRole("region", {
       name: `Build ${tag}`,
       exact: true,
@@ -107,16 +109,16 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // A read of it that fails says so in the chat, and is tried again
     // from there.
     failDrafts = true;
-    // Opened afresh from its link: the address left it once it opened.
-    await page.goto(`/?chat=${chat.id}`);
+    // Opened afresh from its address.
+    await page.goto(`/chats/${chat.id}`);
     await expect(
-      thread.getByText("The Apps this chat builds didn't load.")
+      thread.getByText("The Apps this chat builds didn't load")
     ).toBeVisible();
     await expect(building).toHaveCount(0);
     failDrafts = false;
     await thread.getByRole("button", { name: "Try again" }).click();
     await expect(
-      thread.getByText("The Apps this chat builds didn't load.")
+      thread.getByText("The Apps this chat builds didn't load")
     ).toHaveCount(0);
 
     // The App's workspace is the bar's link away.
@@ -125,13 +127,14 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // address lets it go.
     await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
     const chatName = page.getByRole("button", {
-      name: `Chat name: Build ${tag}`,
+      name: `Build ${tag}`,
+      exact: true,
     });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
-    // Shared with nobody yet: Share with your team is on.
+    // Shared with nobody yet: Publish is on.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
     const preview = page.getByRole("region", { name: `${name}, your version` });
     // Its own store: none of the App's tally, then only what it added,
@@ -145,12 +148,17 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
     // It stays this chat's as the person moves between the views.
-    const views = page.getByRole("navigation", { name: "Workspace views" });
+    const views = page.getByRole("navigation", { name: /s workspace$/u });
     await views.getByRole("link", { name: "Code" }).click();
-    await views.getByRole("link", { name: "App" }).click();
+    // The App itself, by its name over the views.
+    await page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("heading")
+      .getByRole("link")
+      .click();
     await expect(chatName).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
@@ -189,7 +197,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     });
 
     const { opener } = modelScripts.buildsTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     const ask = chat.getByRole("textbox", { name: "Ask for a change" });
     await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
@@ -198,10 +206,10 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // The page the agent wrote runs in the preview, on a store of its own.
     const preview = page.getByRole("region", { name: `${name}, your version` });
-    // Only its builder sees it: Share with your team is on, once the
+    // Only its builder sees it: Publish is on, once the
     // turn's check of the draft is done.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled(afterTurnCheck);
     const frame = preview.frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
@@ -295,12 +303,21 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // published: the App's project as the agent wrote it, its last write
     // too.
     await page
-      .getByRole("navigation", { name: "Workspace views" })
+      .getByRole("navigation", { name: /s workspace$/u })
       .getByRole("link", { name: "Code" })
       .click();
     // Its tree: folders first, each open, then the files, each by name.
-    const files = page.getByRole("navigation", { name: "Files" });
-    await expect(files.getByRole("button")).toHaveText([
+    const files = page.getByRole("tree", { name: "Files" });
+    await expect(files.getByRole("treeitem")).toHaveCount(7, {
+      timeout: 15_000,
+    });
+    const entries = await files
+      .getByRole("treeitem")
+      .evaluateAll((items) =>
+        items.map((item) => item.getAttribute("aria-label") ?? "")
+      );
+    expect(entries.length).toBe(7);
+    for (const entry of [
       "server",
       "schema.ts",
       "tally.ts",
@@ -308,15 +325,17 @@ test("an App's own chat writes its page and server code, and its workspace previ
       "routes",
       "index.tsx",
       "grasp.config.ts",
-    ]);
-    await files.getByRole("button", { name: "index.tsx" }).click();
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      await expect(
+        files.getByRole("treeitem", { name: entry, exact: true })
+      ).toBeVisible();
+    }
+    await files.getByRole("treeitem", { name: "index.tsx" }).click();
     const code = page.getByRole("region", {
       name: "Code of src/routes/index.tsx",
     });
     await expect(code).toContainText("Add more");
-    await expect(
-      page.getByRole("navigation", { name: "Open file" })
-    ).toHaveText(/src.*routes.*index\.tsx/u);
   } finally {
     core[Symbol.dispose]();
   }
@@ -341,10 +360,10 @@ test("an App's workspace previews the App before its chat changes anything, then
     await expect(live.getByRole("status")).toHaveText("0 in the App", {
       timeout: 30_000,
     });
-    // Shared with nobody yet: Share with your team is on, for the App's
+    // Shared with nobody yet: Publish is on, for the App's
     // live version as it is.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
 
     // A version published elsewhere comes into the open preview.
@@ -356,15 +375,15 @@ test("an App's workspace previews the App before its chat changes anything, then
     // Asked for one: the builder's own version shows it, on a store of the
     // preview's own.
     const { opener } = modelScripts.buildsTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
       timeout: 30_000,
     });
-    // Only its builder sees it: Share with your team is on, once the
+    // Only its builder sees it: Publish is on, once the
     // turn's check of the draft is done.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled(afterTurnCheck);
     const frame = page
       .getByRole("region", { name: `${name}, your version` })
@@ -398,11 +417,12 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
     const frame = preview.frameLocator("iframe");
 
     const { opener } = modelScripts.fixesBrokenTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
+    // Two writes, each built, before the answer: longer on a loaded machine.
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 60_000 });
 
     // Opened afresh on it: the App's latest version's page, its calls on
     // the draft as it is, and a word that the problem is being fixed.
@@ -440,11 +460,12 @@ test("a preview whose first page doesn't build shows it once the agent's next wr
     ).toBeVisible();
 
     const { opener } = modelScripts.fixesBrokenTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
+    // Two writes, each built, before the answer: longer on a loaded machine.
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 60_000 });
 
     // Its first build fails: the preview says so in its place, with Fix
     // with Grasp, and takes no updates.

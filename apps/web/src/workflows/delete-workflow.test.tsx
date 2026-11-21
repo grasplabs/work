@@ -102,11 +102,15 @@ const shown = async (
   return { asked, at: () => router.state.location.pathname };
 };
 
+/** A button's words, as shown: the layer a library Button shows, not the ones it keeps for its width. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent.trim();
+
 /** Presses the button whose text is `text` (the last one: a dialog's own comes last). */
 const press = async (text: string): Promise<void> => {
   await act(async () => {
     [...document.querySelectorAll("button")]
-      .findLast((each) => each.textContent.trim() === text)
+      .findLast((each) => shownWords(each) === text)
       ?.click();
     await settled();
   });

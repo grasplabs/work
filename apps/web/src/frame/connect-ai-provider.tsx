@@ -1,4 +1,7 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { useLingui } from "@lingui/react/macro";
+import { Link as RouterLink } from "@tanstack/react-router";
+
+import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -6,11 +9,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { Trans } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
-
+} from "../grasp/empty/index.ts";
+import { Lock } from "../grasp/icons/index.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 
 // What an AI feature shows while the organization has no AI provider to
@@ -20,78 +20,50 @@ import { useMemberAdmin } from "../use-member-admin.ts";
 // connect one gets the link; anyone else, Grasp staff included (who may
 // read but never change whose key pays), is told who can.
 
+/** Empty's size for each of the sizes callers ask for. */
+const emptySize = {
+  default: "section",
+  sm: "section",
+  xs: "inline",
+} as const;
+
+/** The way to Settings › AI providers. */
+const GoToAiProviders = () => {
+  const { t } = useLingui();
+  return (
+    <Button render={<RouterLink to="/settings/ai-providers" />} size="sm">
+      {t`Go to AI providers`}
+    </Button>
+  );
+};
+
 /**
  * Connect an AI provider: a link to Settings › AI providers for whoever can,
- * and who to ask for anyone else. `size` as `Empty`'s: `xs` in a thread or
- * under a box to ask in.
+ * and who to ask for anyone else. `xs` in a thread. The box to ask in says it in its own band (chat-composer.tsx).
  */
 export const ConnectAiProvider = ({
   size = "sm",
 }: {
   size?: "default" | "sm" | "xs";
 }) => {
+  const { t } = useLingui();
   const canConnect = useMemberAdmin();
   return (
-    <Empty size={size}>
+    <Empty size={emptySize[size]}>
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <KeyRoundIcon aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle>
-          <Trans>Connect an AI provider</Trans>
-        </EmptyTitle>
+        <EmptyMedia icon={Lock} />
+        <EmptyTitle>{t`Connect an AI provider`}</EmptyTitle>
         <EmptyDescription>
-          {canConnect ? (
-            <Trans>
-              Grasp&apos;s AI works with your organization&apos;s own AI
-              provider key. Connect one and choose a model to start.
-            </Trans>
-          ) : (
-            <Trans>Ask your admin to connect an AI provider.</Trans>
-          )}
+          {canConnect
+            ? t`Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start.`
+            : t`Ask your admin to connect an AI provider.`}
         </EmptyDescription>
       </EmptyHeader>
       {canConnect ? (
         <EmptyContent>
-          <Button
-            nativeButton={false}
-            render={<Link to="/settings/ai-providers" />}
-            size="sm"
-          >
-            <Trans>Go to AI providers</Trans>
-          </Button>
+          <GoToAiProviders />
         </EmptyContent>
       ) : null}
     </Empty>
-  );
-};
-
-/**
- * Over a box to ask in, while there is no AI provider: what is missing, in
- * a line, with the way to Settings › AI providers for whoever can connect
- * one, and who to ask for anyone else.
- */
-export const ConnectAiProviderCover = () => {
-  const canConnect = useMemberAdmin();
-  return (
-    <>
-      <p className="flex items-center gap-2 font-medium">
-        <KeyRoundIcon aria-hidden="true" className="size-4" />
-        <Trans>Connect an AI provider to start asking</Trans>
-      </p>
-      {canConnect ? (
-        <Button
-          nativeButton={false}
-          render={<Link to="/settings/ai-providers" />}
-          size="sm"
-        >
-          <Trans>Go to AI providers</Trans>
-        </Button>
-      ) : (
-        <p className="text-muted-foreground">
-          <Trans>Ask your admin to connect one.</Trans>
-        </p>
-      )}
-    </>
   );
 };

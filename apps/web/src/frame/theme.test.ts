@@ -3,7 +3,7 @@ import { runInNewContext } from "node:vm";
 
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { chooseTheme, readTheme } from "./theme.ts";
+import { chooseTheme, chooseThemeId, readTheme, readThemeId } from "./theme.ts";
 
 // The theme a person chooses, kept in this browser, and theme.js, which
 // paints it before the app runs. Tests run in Node: a browser here is its
@@ -50,8 +50,10 @@ const browser = ({
   localStorage = storage(blocked),
 } = {}) => {
   const classes = new Set<string>();
+  const dataset: Record<string, string> = {};
   const document = Object.assign(new EventTarget(), {
     documentElement: {
+      dataset,
       classList: {
         toggle: (name: string, on: boolean) => {
           if (on) {
@@ -72,6 +74,8 @@ const browser = ({
   return {
     localStorage,
     isDark: () => classes.has("dark"),
+    /** The colours and the mode on <html>, as Grasp UI's themes.css reads them. */
+    shown: () => ({ theme: dataset.graspTheme, mode: dataset.graspMode }),
     /** Loads the page: theme.js runs, as in <head>. */
     load: () => {
       runInNewContext(themeScript, {
@@ -150,5 +154,43 @@ describe("theme.js", () => {
     expect(tab.isDark()).toBeTruthy();
     chooseTheme("ada", "system");
     expect(tab.isDark()).toBeFalsy();
+  });
+});
+
+describe("a person's colours", () => {
+  afterEach(restoreGlobals);
+
+  it("are Evergreen until they choose, and kept for each person apart", () => {
+    const { localStorage } = browser();
+    expect(readThemeId("ada")).toBe("evergreen");
+    chooseThemeId("ada", "pine");
+    chooseThemeId("grace", "paper");
+    localStorage.setItem("grasp-theme-id:alan", "sepia");
+    expect({
+      ada: readThemeId("ada"),
+      grace: readThemeId("grace"),
+      alan: readThemeId("alan"),
+    }).toStrictEqual({ ada: "pine", grace: "paper", alan: "evergreen" });
+  });
+
+  it("are painted with the mode before the app runs, and change at once", () => {
+    const before = browser();
+    chooseThemeId("ada", "paper");
+    chooseTheme("ada", "dark");
+    const reloaded = browser({ localStorage: before.localStorage });
+    reloaded.load();
+    const painted = reloaded.shown();
+    chooseThemeId("ada", "pine");
+    expect({ painted, now: reloaded.shown() }).toStrictEqual({
+      painted: { theme: "paper", mode: "dark" },
+      now: { theme: "pine", mode: "dark" },
+    });
+  });
+
+  it("are Evergreen, with the system's mode, where nothing or nonsense is kept", () => {
+    const { localStorage, load, shown } = browser();
+    localStorage.setItem("grasp-theme-id", "sepia");
+    load();
+    expect(shown()).toStrictEqual({ theme: "evergreen", mode: "system" });
   });
 });

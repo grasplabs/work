@@ -1,15 +1,23 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Card } from "@grasp-os/app-kit/components/card";
 import type { Agent } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { SettingsSection } from "../settings/settings-parts.tsx";
-import { Row } from "../settings/stephen-settings.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { Switch } from "../grasp/switch/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A person's own agent offered to the company (core's agent-builder.ts,
@@ -19,7 +27,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // until an admin says so, and its owner no longer changes it. What it is
 // told is its instruction file, which stays in its owner's own store,
 // read by them alone: neither the offer nor taking it on carries it
-// (core's instruction-files.ts).
+// (core's instruction-files.ts). Both are Section cards, as the agent's
+// page has its other parts.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -50,29 +59,33 @@ export const ShareAgent = ({
       : new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
           new Date(agent.offeredAt)
         );
+  // A row as Settings has its settings (Ruben, 21 November: the card with
+  // a long sentence and a loose button didn't feel right): a switch, one
+  // short line, and what it means behind the info mark.
   return (
-    <SettingsSection
-      action={
-        <Button
-          disabled={!can}
-          onClick={() => {
-            void change(async (session) => {
-              await session.connections.offerOwnAgent(agent.id, !offered);
-            });
-          }}
-          size="sm"
-          variant="outline"
+    <SectionCard density="compact" flush title={t`Sharing`} variant="grouped">
+      <SettingsRows>
+        <SettingRow
+          help={
+            offered
+              ? t`Offered on ${since}`
+              : t`The company's admins may take ${name} on`
+          }
+          info={t`If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it.`}
+          label={t`Offer to the company`}
         >
-          {offered ? t`Take the offer back` : t`Offer to the company`}
-        </Button>
-      }
-      description={
-        offered
-          ? t`Offered on ${since}. Your company's admins may take ${name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it.`
-          : t`Offer ${name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it.`
-      }
-      title={t`Share with the company`}
-    />
+          <Switch
+            checked={offered}
+            disabled={!can}
+            onCheckedChange={(next) => {
+              void change(async (session) => {
+                await session.connections.offerOwnAgent(agent.id, next);
+              });
+            }}
+          />
+        </SettingRow>
+      </SettingsRows>
+    </SectionCard>
   );
 };
 
@@ -117,62 +130,55 @@ export const OfferedAgents = ({
     });
   };
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-col gap-0.5">
-        <h2 className="font-medium">
-          <Trans>Offered to the company</Trans>
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Agents people made for themselves and offered to the company. Taking
-            one on makes it the company&apos;s: it starts reaching nobody, with
-            nothing it may do, until you say so.
-          </Trans>
-        </p>
-      </div>
-      <Card variant="panel">
-        <ul className="[&>li:first-child]:border-t-0">
-          {offered.map((agent) => {
-            const { name, job } = agent;
-            const from = nameOf(agent.ownerId);
-            return (
-              <Row
-                description={
-                  job === "" ? t`From ${from}` : t`From ${from} · ${job}`
-                }
-                key={agent.id}
-                name={name}
-              >
-                {editable ? (
-                  <span className="flex gap-2">
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        decide(agent.id, false);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <Trans>Decline</Trans>
-                    </Button>
-                    <Button
-                      aria-label={t`Take ${name} on for the company`}
-                      disabled={busy}
-                      onClick={() => {
-                        decide(agent.id, true);
-                      }}
-                      size="sm"
-                    >
-                      <Trans>Take on</Trans>
-                    </Button>
-                  </span>
-                ) : null}
-              </Row>
-            );
-          })}
-        </ul>
-      </Card>
+    <SectionCard
+      density="compact"
+      description={t`Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so.`}
+      flush
+      title={t`Offered to the company`}
+      variant="grouped"
+    >
+      <ItemGroup aria-label={t`Offered to the company`} separated>
+        {offered.map((agent) => {
+          const { name, job } = agent;
+          const from = nameOf(agent.ownerId);
+          return (
+            <Item key={agent.id} size="sm">
+              <ItemContent>
+                <ItemTitle>{name}</ItemTitle>
+                <ItemDescription>
+                  {job === "" ? t`From ${from}` : t`From ${from} · ${job}`}
+                </ItemDescription>
+              </ItemContent>
+              {editable ? (
+                <ItemActions>
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      decide(agent.id, false);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t`Decline`}
+                  </Button>
+                  <Button
+                    aria-label={t`Take ${name} on for the company`}
+                    disabled={busy}
+                    onClick={() => {
+                      decide(agent.id, true);
+                    }}
+                    size="sm"
+                    variant="ink"
+                  >
+                    {t`Take on`}
+                  </Button>
+                </ItemActions>
+              ) : null}
+            </Item>
+          );
+        })}
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
-    </section>
+    </SectionCard>
   );
 };

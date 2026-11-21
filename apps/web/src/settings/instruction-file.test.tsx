@@ -239,43 +239,32 @@ describe("Settings › Instructions", () => {
     });
   });
 
-  it("saves again, as a version of its own, a text whose first save's answer was lost, once it is edited from a newer version", async () => {
-    const { session, versions, savedElsewhere } = fakeInstructions(true);
-    const { reread } = await shown(session);
+  it.each([
+    ["whose first save's answer was lost", true],
+    ["whose first save's answer came", false],
+  ])(
+    "saves again, as a version of its own, a text %s, once it is edited from a newer version",
+    async (_, lost) => {
+      const { session, versions, savedElsewhere } = fakeInstructions(lost);
+      const { reread } = await shown(session);
 
-    // Saved, its answer lost: the page shows what core holds.
-    await type("Short answers.");
-    await save();
-    // Someone saves another version; they take it up, then go back to
-    // their own words.
-    savedElsewhere("Long answers.");
-    await reread();
-    await type("Long answers.");
-    await type("Short answers.");
-    await save();
+      // Saved, its answer lost or not: the page shows what core holds.
+      await type("Short answers.");
+      await save();
+      // Someone saves another version; they take it up, then go back to
+      // their own words.
+      savedElsewhere("Long answers.");
+      await reread();
+      await type("Long answers.");
+      await type("Short answers.");
+      await save();
 
-    expect({ versions, shown: field().value }).toStrictEqual({
-      versions: ["Short answers.", "Long answers.", "Short answers."],
-      shown: "Short answers.",
-    });
-  });
-
-  it("saves a text it saved before, once someone saved another since, as a version of its own", async () => {
-    const { session, versions, savedElsewhere } = fakeInstructions();
-    const { reread } = await shown(session);
-
-    await type("Short answers.");
-    await save();
-    savedElsewhere("Long answers.");
-    await reread();
-    await type("Short answers.");
-    await save();
-
-    expect({ versions, shown: field().value }).toStrictEqual({
-      versions: ["Short answers.", "Long answers.", "Short answers."],
-      shown: "Short answers.",
-    });
-  });
+      expect({ versions, shown: field().value }).toStrictEqual({
+        versions: ["Short answers.", "Long answers.", "Short answers."],
+        shown: "Short answers.",
+      });
+    }
+  );
 
   it("never saves over a version saved since they started, and shows theirs once these changes are put aside", async () => {
     const { session, versions, savedElsewhere } = fakeInstructions();

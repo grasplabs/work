@@ -1,24 +1,15 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
+import type { AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { useLingui } from "@lingui/react/macro";
+
+import { Alert } from "../grasp/alert/index.ts";
 
 // What the Agents pages say of an agent at a glance (agents-overview.tsx,
 // agent-page.tsx): whether it is on, whom it answers, how much it may do
 // and when it next works on its own. Each is read from what core keeps
 // (`connections.agents`, `agentSettings`, `agentWakes`), never worked out
 // anew here.
-
-/** Whether an agent answers, as a badge: filled while it is on. */
-export const AgentStateBadge = ({ state }: { state: Agent["state"] }) => {
-  const { t } = useLingui();
-  return (
-    <Badge variant={state === "on" ? "default" : "outline"}>
-      {state === "on" ? t`On` : t`Paused`}
-    </Badge>
-  );
-};
 
 /** Whom an audience names, in a few words. */
 export const useAudienceLine = (teams: StephenReach["teams"]) => {
@@ -59,3 +50,7 @@ export const nextWakeAt = (wakes: readonly AgentWake[]): string | undefined =>
     .flatMap(({ nextAt }) => (nextAt === null ? [] : [nextAt]))
     .toSorted()
     .at(0);
+
+/** Why a change to an agent failed, where it was asked; nothing when it didn't. */
+export const AgentFailure = ({ children }: { children: string | undefined }) =>
+  children === undefined ? null : <Alert title={children} tone="danger" />;

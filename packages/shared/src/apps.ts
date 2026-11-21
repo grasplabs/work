@@ -154,6 +154,7 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "brain",
   "chat",
   "chat-link",
+  "chats",
   "connect-microsoft",
   "connections",
   "decisions",

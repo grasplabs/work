@@ -1,24 +1,60 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { z } from "zod";
 
-import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
+import { leaveToSignIn, signInAddress } from "../core.ts";
+import { languageOptions } from "../frame/language-options.ts";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { BrandGoogle, BrandMicrosoft, Lock } from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { LanguageSwitch } from "../grasp/language-switch/index.ts";
+import { SignIn as SignInDoor } from "../grasp/sign-in/index.ts";
+import type { SignInNotice } from "../grasp/sign-in/index.ts";
 import { GuestCodeSignIn, NothingShared } from "../guest-sign-in.tsx";
-import { signInErrorSearch } from "../sign-in-errors.ts";
-import { SignInOptions } from "../sign-in-options.tsx";
+import { chooseLocale, isLocale } from "../i18n.ts";
+import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
 
 // Where the product sends whoever isn't signed in (routes/_shell.tsx),
 // with the page to go back to. Someone already signed in goes straight
 // back there.
 
 const signInPath = "/sign-in";
+
+/** Grasp staff's own way in, as core names it. */
+const staffProvider = "grasp-staff";
+
+/** A provider's own mark, by the key core gives it; a lock for one the library has no mark for. */
+const marks: Readonly<Record<string, IconData>> = {
+  microsoft: BrandMicrosoft,
+  google: BrandGoogle,
+};
+
+/** Refusals that are no fault of the person's: said plainly, not as a refusal. */
+const plainCodes = new Set(["not_open_yet"]);
+
+/**
+ * Why someone is back on this page, as the door says it over the buttons:
+ * the fixed message for the code core sent back, or that Grasp can't be
+ * reached.
+ */
+const noticeOf = (
+  connected: boolean,
+  error: string | undefined
+): SignInNotice | undefined => {
+  if (!connected) {
+    return "unreachable";
+  }
+  if (error === undefined) {
+    return undefined;
+  }
+  return {
+    tone: plainCodes.has(error) ? "plain" : "refusal",
+    words: signInErrorMessage(error),
+  };
+};
 
 /**
  * What no path of this site holds: control characters and spaces, which
@@ -41,6 +77,23 @@ const returnPathOf = (value: unknown): string =>
   !value.startsWith(signInPath)
     ? value
     : "/";
+
+/** The language at the page's foot, chosen as it is picked. */
+const Language = () => {
+  const { i18n } = useLingui();
+  return (
+    <LanguageSwitch
+      onValueChange={(code) => {
+        if (isLocale(code)) {
+          void chooseLocale(code);
+        }
+      }}
+      options={languageOptions}
+      size="sm"
+      value={i18n.locale}
+    />
+  );
+};
 
 /**
  * A session core made that is no member's, as Better Auth tells it: for
@@ -84,76 +137,93 @@ const otherSession = async (): Promise<{
 };
 
 /**
- * The page in the onboarding's frame (frame/onboarding-frame.tsx), with
- * Grasp's buddy.
+ * The library's sign-in page, the website's log-in: a button for each way
+ * this deployment offers, Grasp staff's own way after them, why the last
+ * sign-in was refused over them, and the language at its foot. A chosen way
+ * asks core where to go at the press and leaves for its identity provider
+ * once the door has opened, coming back to `returnTo`.
  */
 const SignIn = () => {
   const { connected, signInOptions, interviewOnly, guest } =
     Route.useLoaderData();
-  const { error, returnTo } = Route.useSearch();
+  const { error, returnTo, by } = Route.useSearch();
   const { core } = Route.useRouteContext();
+  const navigate = Route.useNavigate();
   const { t } = useLingui();
-  const [byCode, setByCode] = useState(false);
+  // The way being left for, so the others are out of use meanwhile.
+  const [leaving, setLeaving] = useState<string>();
+  // Where to leave for, asked of core at the press.
+  const asked = useRef<Promise<string> | null>(null);
+  // A guest, from outside the company, is in with nothing of theirs to see
+  // yet, or signs in with an emailed code: main's own pages (guest-sign-in.tsx).
   if (guest !== null) {
     return (
       <OnboardingFrame>
-        <GraspBuddy />
         <NothingShared core={core} email={guest} />
       </OnboardingFrame>
     );
   }
-  return (
-    <OnboardingFrame>
-      <GraspBuddy />
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle>
-          <Trans>Sign in to Grasp</Trans>
-        </PageHeaderTitle>
-        {connected && !byCode ? (
-          <p className="text-muted-foreground text-balance">
-            <Trans>Use your organization’s account to go on.</Trans>
-          </p>
-        ) : null}
-      </div>
-      {connected && byCode ? (
+  if (by === "code" && connected) {
+    return (
+      <OnboardingFrame>
         <GuestCodeSignIn
           onBack={() => {
-            setByCode(false);
+            void navigate({ search: { returnTo } });
           }}
         />
-      ) : null}
-      {connected && !byCode ? (
-        <>
-          <SignInOptions
-            error={error ?? (interviewOnly ? "not_open_yet" : undefined)}
-            options={signInOptions}
-            returnTo={returnTo}
-          />
-          <Button
-            className="w-full"
-            onClick={() => {
-              setByCode(true);
-            }}
-            variant="ghost"
-          >
-            <Trans>Invited as a guest? Sign in with a code</Trans>
-          </Button>
-        </>
-      ) : null}
-      {connected ? null : (
-        <ErrorText>
-          {t`Grasp can't be reached right now. Try again in a moment.`}
-        </ErrorText>
-      )}
-    </OnboardingFrame>
+      </OnboardingFrame>
+    );
+  }
+  const ask = async (id: string): Promise<string> =>
+    await signInAddress(id === "staff" ? staffProvider : id, returnTo);
+  const ways = connected ? signInOptions : [];
+  const notice = noticeOf(
+    connected,
+    error ?? (interviewOnly ? "not_open_yet" : undefined)
+  );
+  return (
+    <SignInDoor
+      language={<Language />}
+      // The door has opened: leave as soon as core has said where to.
+      onChoose={(id) => {
+        setLeaving(id);
+        void (async () => {
+          leaveToSignIn(await (asked.current ?? ask(id)));
+        })();
+      }}
+      // Asked at the press, so core answers while the door opens.
+      onPress={(id) => {
+        asked.current = ask(id);
+      }}
+      providers={ways
+        .filter(({ providerId }) => providerId !== staffProvider)
+        .map(({ providerId, label }) => ({
+          id: providerId,
+          name: label,
+          icon: marks[providerId] ?? Lock,
+        }))}
+      staff={ways.some(({ providerId }) => providerId === staffProvider)}
+      {...(connected
+        ? {
+            footHref: `${signInPath}?by=code&returnTo=${encodeURIComponent(returnTo)}`,
+            words: {
+              foot: t`Invited as a guest?`,
+              footAction: t`Sign in with a code`,
+            },
+          }
+        : {})}
+      {...(leaving === undefined ? {} : { leaving })}
+      {...(notice === undefined ? {} : { notice })}
+    />
   );
 };
 
 export const Route = createFileRoute("/sign-in")({
   validateSearch: (
     search: Record<string, unknown>
-  ): { returnTo: string; error?: string } => ({
+  ): { returnTo: string; error?: string; by?: "code" } => ({
     returnTo: returnPathOf(search.returnTo),
+    ...(search.by === "code" ? { by: "code" as const } : {}),
     ...signInErrorSearch(search),
   }),
   loaderDeps: ({ search }) => ({ returnTo: search.returnTo }),

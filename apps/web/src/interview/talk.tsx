@@ -1,13 +1,15 @@
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
-import type { ReactNode } from "react";
+import * as stylex from "@stylexjs/stylex";
 
+import { arrive } from "../grasp/motion/arrive.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { Head, headSizes, useHead } from "./head.tsx";
 import { useInterviewer } from "./kept.ts";
+import { looks } from "./looks.ts";
 import { useLoop } from "./loop.ts";
 import { markedPieces } from "./progress.ts";
 import { useSaidOf, voiceLevel } from "./speech.ts";
@@ -20,8 +22,35 @@ import { shownAs, SpokenText } from "./spoken.tsx";
 // in place as it comes. Then he waits for what they type in the box at the
 // bottom.
 
+const styles = stylex.create({
+  // Room kept for his line, so the head doesn't move as it comes.
+  room: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space5,
+    width: "100%",
+    minHeight: "9rem",
+  },
+  line: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    maxWidth: "32rem",
+  },
+  // What he marked in their words: underlined in the colour of what is agreed.
+  mark: {
+    color: "inherit",
+    backgroundColor: "transparent",
+    textDecorationLine: "underline",
+    textDecorationColor: grasp.success,
+    textDecorationThickness: "2px",
+    textUnderlineOffset: "0.2em",
+  },
+});
+
 /** How full he is printed: fuller as the interview goes on. */
-export const fillOf = (phase: (typeof interviewPhases)[number]): number =>
+const fillOf = (phase: (typeof interviewPhases)[number]): number =>
   0.35 + (0.65 * interviewPhases.indexOf(phase)) / (interviewPhases.length - 1);
 
 export const Talk = ({
@@ -47,7 +76,7 @@ export const Talk = ({
     label = t`${who}, thinking.`;
   }
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen)}>
       <Head
         fill={fillOf(phase)}
         label={label}
@@ -56,23 +85,16 @@ export const Talk = ({
         voice={voiceLevel}
         who={interviewer}
       />
-      <div
-        aria-live="polite"
-        className="flex min-h-36 w-full flex-col items-center gap-5"
-        ref={body}
-      >
+      <div aria-live="polite" ref={body} {...stylex.props(styles.room)}>
         {loop.line === "" ? null : (
-          <div
-            className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500 motion-reduce:animate-none"
-            key={loop.saying}
-          >
-            <PageHeaderTitle render={<p />}>
+          <div key={loop.saying} {...stylex.props(styles.line, arrive.in)}>
+            <p {...stylex.props(looks.said)}>
               <SpokenText said={said} text={title} />
-            </PageHeaderTitle>
+            </p>
             {rest === "" ? null : (
-              <p className="text-muted-foreground text-balance">
+              <Text tone="muted">
                 <SpokenText from={title.length + 1} said={said} text={rest} />
-              </p>
+              </Text>
             )}
           </div>
         )}
@@ -97,39 +119,13 @@ export const Marked = ({
         <span key={piece.at}>{piece.text}</span>
       ) : (
         <mark
-          className="line-under text-inherit"
           key={piece.at}
           title={names[piece.tag]}
+          {...stylex.props(styles.mark)}
         >
           {piece.text}
         </mark>
       )
     )}
   </>
-);
-
-/**
- * Something the person said, as their side of a chat: a bubble on the
- * right with a small tail at its foot pointing to them, so it is seen at
- * once whose words these are.
- */
-export const Own = ({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) => (
-  <div className={cn("relative flex justify-end pr-2.5", className)}>
-    <div className="bg-secondary text-secondary-foreground max-w-11/12 rounded-xl rounded-br-xs px-3 py-2 text-left text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
-      {children}
-    </div>
-    <svg
-      aria-hidden="true"
-      className="fill-secondary absolute right-0 bottom-0 h-3.5 w-2.5"
-      viewBox="0 0 10 14"
-    >
-      <path d="M0 0 C0 7 3 12 10 14 L0 14 Z" />
-    </svg>
-  </div>
 );

@@ -1,124 +1,130 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import type {
   SignInProvider,
   SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { Trans, useLingui } from "@lingui/react/macro";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { LoadingLines } from "../frame/page-states.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { formatList } from "../format.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Retry } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { RowAlert, SettingRow } from "../grasp/setting-row/index.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "./settings-parts.tsx";
+import { controlStyles } from "./workspace-name.tsx";
 
 // Settings › Workspace › Sign-in, for admins: how the organization's
 // people sign in, as Grasp set it up for the deployment
-// (`orgSettings.signIn`): Microsoft 365 or Google Workspace, which tenant
-// or Workspace each is pinned to, and whether the sign-in page offers it.
-// Nothing here changes it, and core never sends a secret, only whether
-// one is set. The sign-in domains are on the Workspace section above,
-// and Grasp staff's access has a section of its own. The section reads
+// (`orgSettings.signIn`), as one row of the Organization card. Microsoft
+// 365 or Google Workspace stands in a field that only reads, whose
+// accounts it takes (the organization's own tenant or Workspace) under
+// its name, and, only when it is missing, that the sign-in page
+// doesn't offer it yet (its secret isn't set). Nothing here changes it,
+// and core never sends a secret, only whether one is set. The row reads
 // core itself, so the page's own read stays as it is.
 
 /** Whose accounts a way to sign in takes, in words; nothing when core doesn't say. */
-const usePinned = ({
+const pinnedOf = ({
   provider,
   tenantId,
   hostedDomain,
-}: SignInProvider): string | undefined => {
-  const { t } = useLingui();
+}: SignInProvider): MessageDescriptor | undefined => {
   if (provider === "microsoft" && tenantId !== undefined) {
-    return t`Only accounts of the tenant ${tenantId}.`;
+    return msg`your organization’s work accounts`;
   }
   if (provider === "google" && hostedDomain !== undefined) {
-    return t`Only accounts of the Google Workspace ${hostedDomain}.`;
+    return msg`work accounts at ${hostedDomain}`;
   }
   return undefined;
 };
 
-/** One way to sign in: who it is pinned to, and whether it is offered. */
-const ProviderRow = ({ provider }: { provider: SignInProvider }) => {
-  const pinned = usePinned(provider);
-  return (
-    <SettingsRow
-      description={pinned}
-      label={
-        provider.provider === "microsoft" ? "Microsoft 365" : "Google Workspace"
-      }
-    >
-      {provider.offered ? (
-        <Badge variant="secondary">
-          <Trans>On the sign-in page</Trans>
-        </Badge>
-      ) : (
-        <Badge variant="destructive">
-          <Trans>Not offered: its secret isn’t set</Trans>
-        </Badge>
-      )}
-    </SettingsRow>
-  );
-};
+/** A way to sign in by its product's name, as its maker names it. */
+const providerName = ({ provider }: SignInProvider): string =>
+  provider === "microsoft" ? "Microsoft 365" : "Google Workspace";
 
-/** How people sign in, as core answered an admin. */
-export const SignInView = ({
+/** How people sign in, as core answered an admin, as a row. */
+const SignInView = ({
   signIn,
+  onRetry,
 }: {
   /** Undefined while it is read. */
   signIn: Loaded<SignInSettings> | undefined;
+  /** Reads it again, once it didn't load. */
+  onRetry?: () => void;
 }) => {
-  const { t } = useLingui();
-  const body = (() => {
-    if (signIn === undefined) {
-      return (
-        <SettingsBody>
-          <LoadingLines lines={2} />
-        </SettingsBody>
-      );
-    }
-    if (signIn.state !== "ready") {
-      return (
-        <SettingsBody>
-          <NotLoaded page={signIn} />
-        </SettingsBody>
-      );
-    }
-    const { configured, providers } = signIn.data;
-    if (!configured || providers.length === 0) {
-      return (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          <Trans>
-            Sign-in isn’t set up for this workspace yet, so nobody can sign in.
-            Grasp sets it up.
-          </Trans>
-        </p>
-      );
-    }
-    return providers.map((provider) => (
-      <ProviderRow key={provider.provider} provider={provider} />
-    ));
-  })();
+  const { t, i18n } = useLingui();
+  const label = t`Sign-in`;
+  if (signIn !== undefined && signIn.state !== "ready") {
+    return (
+      <SettingRow error={notLoadedText(signIn, i18n)} label={label}>
+        <Button
+          disabled={onRetry === undefined}
+          icon={Retry}
+          onClick={onRetry}
+          size="sm"
+        >
+          {t`Try again`}
+        </Button>
+      </SettingRow>
+    );
+  }
+  const providers =
+    signIn?.data.configured === true ? signIn.data.providers : [];
+  if (signIn !== undefined && providers.length === 0) {
+    // Nobody can sign in: someone should look.
+    return (
+      <RowAlert variant="attention">
+        {t`Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up.`}
+      </RowAlert>
+    );
+  }
+  const pinned = providers.flatMap((provider) => {
+    const words = pinnedOf(provider);
+    return words === undefined ? [] : [i18n._(words)];
+  });
+  const accounts = formatList(pinned);
   return (
-    <SettingsSection
-      description={t`The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it.`}
-      title={t`Sign-in`}
-    >
-      {body}
-    </SettingsSection>
+    <>
+      <SettingRow
+        help={
+          pinned.length === 0 ? t`How your people sign in` : t`Only ${accounts}`
+        }
+        label={label}
+      >
+        {(field) => (
+          <Input
+            {...field}
+            layout={controlStyles.fill}
+            readOnly
+            size="sm"
+            value={formatList(providers.map(providerName))}
+          />
+        )}
+      </SettingRow>
+      {/* Offered is how it should be, and needs no word; missing does. */}
+      {providers
+        .filter((provider) => !provider.offered)
+        .map((provider) => {
+          const name = providerName(provider);
+          return (
+            <RowAlert key={provider.provider} variant="attention">
+              {t`${name} isn’t on the sign-in page yet.`}
+            </RowAlert>
+          );
+        })}
+    </>
   );
 };
 
-/** The sign-in section, for admins only: core is asked only for them. */
-export const SignInSection = () => {
+/** Reads how people sign in once, as it mounts; `onRetry` mounts it anew. */
+const SignInRead = ({ onRetry }: { onRetry: () => void }) => {
   const core = useCore();
-  const { identity } = useRouteContext({ from: "/_shell" });
-  const admin = isAdmin(identity.role);
   const [signIn, setSignIn] = useState<Loaded<SignInSettings>>();
   useEffect(() => {
     const left = new AbortController();
@@ -132,12 +138,25 @@ export const SignInSection = () => {
         setSignIn(loaded);
       }
     };
-    if (admin) {
-      void read();
-    }
+    void read();
     return () => {
       left.abort();
     };
-  }, [admin, core]);
-  return admin ? <SignInView signIn={signIn} /> : null;
+  }, [core]);
+  return <SignInView onRetry={onRetry} signIn={signIn} />;
+};
+
+/** The sign-in row, for admins only: core is asked only for them. */
+export const SignInRow = () => {
+  const { identity } = useRouteContext({ from: "/_shell" });
+  // Each try at reading it: Try again reads it anew.
+  const [attempt, setAttempt] = useState(0);
+  return isAdmin(identity.role) ? (
+    <SignInRead
+      key={attempt}
+      onRetry={() => {
+        setAttempt((now) => now + 1);
+      }}
+    />
+  ) : null;
 };

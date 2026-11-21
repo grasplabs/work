@@ -14,30 +14,22 @@ import { peopleIn } from "./people.ts";
 
 const pageRead = { timeout: 15_000 };
 
-/** Chooses `format` from the export menu named `label`. */
-const choose = async (
+/** Downloads the brain page open as `format`, from its "…" menu. */
+const downloadNote = async (
   page: Page,
-  label: string,
-  format: "Markdown (.md)" | "PDF"
+  format: "Markdown" | "PDF"
 ): Promise<void> => {
-  await page.getByRole("button", { name: label, exact: true }).click();
-  await page.getByRole("menuitem", { name: format }).click();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await page.getByRole("menuitem", { name: `Download as ${format}` }).click();
 };
 
-/** Chooses `format` from Download in the open chat's menu, in its header. */
+/** Downloads the open chat as `format`, from the "…" menu in its header. */
 const downloadChat = async (
   page: Page,
-  format: "Markdown (.md)" | "PDF"
+  format: "Markdown" | "PDF"
 ): Promise<void> => {
   await page.getByRole("button", { name: "More for this chat" }).click();
-  // By the keyboard: the submenu also opens as the pointer rests on its
-  // item, so a click there may close it again, and the test would race.
-  await page.getByRole("menuitem", { name: "Download" }).focus();
-  await page.keyboard.press("ArrowRight");
-  const item = page.getByRole("menuitem", { name: format });
-  await item.focus();
-  await expect(item).toBeFocused();
-  await page.keyboard.press("Enter");
+  await page.getByRole("menuitem", { name: `Download as ${format}` }).click();
 };
 
 const textOf = async (download: Download): Promise<string> =>
@@ -111,7 +103,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
     page.getByRole("heading", { level: 1, name: "Vision page" })
   ).toBeVisible(pageRead);
   const note = page.waitForEvent("download");
-  await choose(page, "Export", "Markdown (.md)");
+  await downloadNote(page, "Markdown");
   const file = await note;
   expect(file.suggestedFilename()).toBe("vision-page.md");
   const exported = await textOf(file);
@@ -120,11 +112,11 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
 
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
-  // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
+  // own stylesheets: the title (a page's title, 32 px) and the text's
   // headings in Newsreader (Markdown's serif headings), the text in Geist.
   // The file's frontmatter is the file's alone: the page leaves it out.
   await countPrints(page);
-  await choose(page, "Export", "PDF");
+  await downloadNote(page, "PDF");
   await expect
     .poll(async () => await page.evaluate(() => window.printed))
     .toBe(1);
@@ -140,7 +132,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^28px "Newsreader Variable"/u);
+    .toMatch(/^32px "Geist Serif"/u);
   expect(
     await printed
       .getByRole("heading", { level: 2, name: "Timeline" })
@@ -151,7 +143,10 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
       .locator("main")
       .evaluate((element) => getComputedStyle(element).fontFamily)
   ).toMatch(/^"Geist Variable"/u);
-  await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
+  // The page's head: the Grasp mark beside its name.
+  await expect(
+    printed.locator("header").filter({ hasText: "Grasp" }).locator("svg")
+  ).toHaveCount(1);
   // Once the dialog closes, the page to print goes.
   await closePrint(page, "Vision page");
   await expect(page.locator('iframe[title="Vision page"]')).toHaveCount(0);
@@ -160,16 +155,16 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   const tag = crypto.randomUUID().slice(0, 8);
   const question = `How long is leave ${tag}?`;
   await page.goto("/");
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send" }).click();
-  // It opens full screen in Grasp's chat, named once core has said its
+  // It opens on its own page, named once core has said its
   // title, which the export is named after.
   const messages = page
     .getByRole("region", { name: question })
-    .getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+    .getByRole("log", { name: "Messages" });
+  await expect(messages.getByRole("article").first()).toContainText(question);
   const chat = page.waitForEvent("download");
-  await downloadChat(page, "Markdown (.md)");
+  await downloadChat(page, "Markdown");
   const chatFile = await chat;
   // Named after the chat, whose title is its first question here.
   expect(chatFile.suggestedFilename()).toBe(`How-long-is-leave-${tag}.md`);

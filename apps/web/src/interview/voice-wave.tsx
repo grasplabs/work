@@ -1,8 +1,18 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import { bucketOf, DOT_MOST, dotShare, palette } from "../brain/dot-ink.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { seeded } from "../brain/reveal-motion.ts";
+
+const looks = stylex.create({
+  canvas: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+  },
+});
 
 // Sound as a wave of dots, flowing (prototype `voice-wave.tsx`): the same
 // print the interviewer is made of. It follows whoever talks, as loud as
@@ -20,7 +30,7 @@ const warmth = 0.6;
 const atRest = 0.07;
 
 /** Whose sound the wave shows: the person's, the interviewer's, or nobody's. */
-export type WaveOf = "person" | "interviewer" | "quiet";
+type WaveOf = "person" | "interviewer" | "quiet";
 
 interface Wave {
   of: WaveOf;
@@ -208,10 +218,6 @@ export const VoiceWave = ({
     return element === null ? undefined : animate(element, live);
   }, []);
   return (
-    <canvas
-      aria-hidden="true"
-      className="pointer-events-none block size-full"
-      ref={canvas}
-    />
+    <canvas aria-hidden="true" {...stylex.props(looks.canvas)} ref={canvas} />
   );
 };

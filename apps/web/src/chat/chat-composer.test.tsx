@@ -1,0 +1,815 @@
+// @vitest-environment happy-dom
+import type { Identity } from "@grasp-os/shared/rpc";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { act, useState } from "react";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+import { ChatComposer } from "./chat-composer.tsx";
+import type { ChatComposerProps } from "./chat-composer.tsx";
+import type { Mentionable } from "./mentions.tsx";
+
+// The running chat's box: what is typed goes with Send, Stop stops the
+// answer while Grasp writes it, the files a question carries show with a
+// way to take each off, a pick after `@` goes with the question for as
+// long as its `@name` stays in the text, with no AI provider to call it
+// takes nothing and says how to connect one, and what a member dictates
+// goes after what they typed, through the browser's own recognition,
+// faked here: the browser's, not the page's.
+
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+let root: Root | undefined;
+
+/** The mentions the box holds, as the page last heard them. */
+let held: readonly Mentionable[] = [];
+
+/** What the page heard from the box. */
+const heard: string[] = [];
+
+/** Where the box says Grasp is. */
+const activity = (): string | null =>
+  document.querySelector<HTMLElement>("[data-activity]")?.dataset.activity ??
+  null;
+
+/**
+ * The box, its text and mentions kept as a page keeps them; `props` over a
+ * ready box. Answering, beside it, is the page saying Grasp started or
+ * finished an answer.
+ */
+const Box = ({ props }: { props: Partial<ChatComposerProps> }) => {
+  const [text, setText] = useState("");
+  const [running, setRunning] = useState(props.running ?? false);
+  const [mentions, setMentions] = useState<readonly Mentionable[]>([]);
+  return (
+    <>
+      <button
+        aria-label="Answering"
+        onClick={() => {
+          setRunning((now) => !now);
+        }}
+        type="button"
+      >
+        Answering
+      </button>
+      <ChatComposer
+        busy={false}
+        mentions={mentions}
+        model="openai/gpt-5"
+        models={["openai/gpt-5"]}
+        onMentions={(next) => {
+          held = next;
+          setMentions(next);
+        }}
+        onSend={() => {
+          heard.push(`send ${text}`);
+        }}
+        onStop={() => {
+          heard.push("stop");
+        }}
+        onText={setText}
+        text={text}
+        {...props}
+        running={running}
+      />
+    </>
+  );
+};
+
+const core = {
+  withSession: async <T,>(
+    read: (session: {
+      apps: { list: () => Promise<{ id: string; name: string }[]> };
+      workflowResources: { list: () => Promise<[]> };
+      chats: { people: () => Promise<[]> };
+    }) => Promise<T>
+  ): Promise<T> =>
+    await read({
+      apps: {
+        list: async () =>
+          await Promise.resolve([{ id: "app-1", name: "Expenses" }]),
+      },
+      workflowResources: { list: async () => await Promise.resolve([]) },
+      chats: { people: async () => await Promise.resolve([]) },
+    }),
+};
+
+const identity: Identity = {
+  userId: "ada",
+  email: "ada@acme.test",
+  name: "Ada",
+  role: "admin",
+  teams: [],
+  staff: false,
+  expiresAt: "2026-10-23T00:00:00.000Z",
+};
+
+/** A member: the browser's recognition writes down what they say. */
+const member: Identity = { ...identity, userId: "grace", role: "user" };
+
+/** The browser's speech recognition, as the one recognition made last hears. */
+class Recognition extends EventTarget {
+  static made: Recognition | undefined;
+  lang = "";
+  continuous = false;
+  interimResults = false;
+  listening = false;
+  constructor() {
+    super();
+    Recognition.made = this;
+  }
+  /** A browser whose recognition never starts nor says why. */
+  static silent = false;
+  start(): void {
+    this.listening = true;
+    this.results = [];
+    if (Recognition.silent) {
+      return;
+    }
+    this.dispatchEvent(new Event("start"));
+  }
+  stop(): void {
+    this.listening = false;
+    this.dispatchEvent(new Event("end"));
+  }
+  abort(): void {
+    this.stop();
+  }
+  /** What this run has heard: each result settled or still being heard. */
+  results: { transcript: string; isFinal: boolean }[] = [];
+  /** It heard `words`, settled or still being heard: all of the run's results, as a browser sends them. */
+  hears(words: string, isFinal: boolean): void {
+    if (this.results.at(-1)?.isFinal === false) {
+      this.results.pop();
+    }
+    this.results.push({ transcript: words, isFinal });
+    this.dispatchEvent(
+      Object.assign(new Event("result"), {
+        results: this.results.map(({ transcript, isFinal: final }) =>
+          Object.assign([{ transcript }], { isFinal: final })
+        ),
+      })
+    );
+  }
+}
+
+/** The recognition the page made last, if any. */
+const made = (): Recognition | undefined => Recognition.made;
+
+/** The box on a page of the app's frame, as `props` set it, for `who`. */
+const shown = async (
+  props: Partial<ChatComposerProps> = {},
+  who: Identity = identity
+): Promise<void> => {
+  const rootRoute = createRootRoute();
+  const shell = createRoute({
+    getParentRoute: () => rootRoute,
+    id: "_shell",
+    beforeLoad: () => ({ identity: who }),
+  });
+  const page = createRoute({
+    getParentRoute: () => shell,
+    path: "/",
+    component: () => <Box props={props} />,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([shell.addChildren([page])]),
+    history: createMemoryHistory(),
+    context: { core },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    );
+    await router.load();
+  });
+};
+
+/** The box's text field. */
+const field = (): HTMLTextAreaElement => {
+  const found = document.querySelector("textarea");
+  if (found === null) {
+    throw new Error("No box");
+  }
+  return found;
+};
+
+/** Writes `text` into the box, as typing would, the caret at its end. */
+const type = (text: string): void => {
+  const area = field();
+  act(() => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
+    )?.set?.call(area, text);
+    area.setSelectionRange(text.length, text.length);
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+};
+
+/** The button a person knows by the name `name`. */
+const button = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (each) => each.getAttribute("aria-label") === name
+  );
+  if (found === undefined) {
+    throw new Error(`No button ${name}`);
+  }
+  return found;
+};
+
+/** Whether the box offers dictation: its microphone. */
+const offersDictation = (): boolean =>
+  [...document.querySelectorAll("button")].some(
+    (each) => each.getAttribute("aria-label") === "Dictate"
+  );
+
+/** A browser's constructor, faked: `new` gives what `make` makes. */
+const constructed = (make: () => object): object =>
+  new Proxy(Object, { construct: make });
+
+/**
+ * Core's live transcription, faked where it reaches the browser: a
+ * microphone that gives no sound once `asked` settles (the person's answer
+ * to the browser), and a line on which core says it isn't set up for this
+ * deployment and hangs up, as core does. Says whether a microphone is still
+ * recording, and how many lines were opened.
+ */
+const transcriptionNotSetUp = (
+  asked: Promise<unknown> = Promise.resolve()
+): { recording: () => boolean; lines: () => number } => {
+  const tracks: { stopped: boolean; stop: () => void }[] = [];
+  let lines = 0;
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: async () => {
+        await asked;
+        const track = {
+          stopped: false,
+          stop: () => {
+            track.stopped = true;
+          },
+        };
+        tracks.push(track);
+        return await Promise.resolve({
+          getAudioTracks: () => [track],
+          getTracks: () => [track],
+        });
+      },
+    },
+  });
+  Reflect.set(
+    globalThis,
+    "AudioContext",
+    constructed(() => ({
+      sampleRate: 48_000,
+      destination: {},
+      audioWorklet: {
+        addModule: async () => await Promise.reject(new Error("No tap")),
+      },
+      createAnalyser: () => ({
+        fftSize: 0,
+        getByteTimeDomainData: () => {
+          // No sound.
+        },
+      }),
+      createMediaStreamSource: () => ({
+        connect: () => {
+          // No tap to connect.
+        },
+      }),
+      resume: async () => {
+        await Promise.resolve();
+      },
+      close: async () => {
+        await Promise.resolve();
+      },
+    }))
+  );
+  Reflect.set(
+    globalThis,
+    "WebSocket",
+    constructed(() => {
+      lines += 1;
+      const line = new EventTarget();
+      queueMicrotask(() => {
+        line.dispatchEvent(new Event("open"));
+      });
+      return Object.assign(line, {
+        binaryType: "blob",
+        send: (data: unknown) => {
+          if (typeof data !== "string") {
+            return;
+          }
+          line.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                type: "error",
+                code: "transcription.unavailable",
+              }),
+            })
+          );
+          line.dispatchEvent(Object.assign(new Event("close"), { code: 1008 }));
+        },
+        close: () => {
+          // Hung up already.
+        },
+      });
+    })
+  );
+  return {
+    recording: () => tracks.some((track) => !track.stopped),
+    lines: () => lines,
+  };
+};
+
+/** The model and effort control's name, as a screen reader hears it. */
+const control = (): string =>
+  [...document.querySelectorAll("button")]
+    .map((each) => each.getAttribute("aria-label") ?? "")
+    .find((name) => name.startsWith("Model and effort")) ?? "none";
+
+const press = async (element: HTMLElement): Promise<void> => {
+  await act(async () => {
+    element.click();
+    await Promise.resolve();
+  });
+};
+
+describe(ChatComposer, () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    held = [];
+    heard.length = 0;
+    document.body.replaceChildren();
+  });
+
+  it("sends what is typed, and stops the answer while Grasp writes it", async () => {
+    await shown();
+    type("What is 2 + 2?");
+    await press(button("Send"));
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown({ running: true });
+    await press(button("Stop"));
+
+    expect(heard).toStrictEqual(["send What is 2 + 2?", "stop"]);
+  });
+
+  it("says a question didn't go and why, keeps it in the box, and Send sends it again", async () => {
+    let tries = 0;
+    await shown({
+      failure: "Grasp can't be reached right now.",
+      onSend: async () => {
+        tries += 1;
+        await Promise.resolve();
+        if (tries === 1) {
+          throw new Error("not sent");
+        }
+      },
+    });
+    type("What is 2 + 2?");
+    await press(button("Send"));
+    const said = await vi.waitFor(() => {
+      const alert = document.querySelector('[role="alert"]')?.textContent;
+      if (alert === undefined) {
+        throw new Error("Nothing said");
+      }
+      return `${alert} ${document.body.textContent}`;
+    });
+    const kept = field().value;
+    await press(button("Send"));
+
+    expect({
+      failed: said.includes("Could not send"),
+      why: said.includes("Grasp can't be reached right now."),
+      kept,
+      tries,
+    }).toStrictEqual({
+      failed: true,
+      why: true,
+      kept: "What is 2 + 2?",
+      tries: 2,
+    });
+  });
+
+  it("says an answer is done once Grasp finishes it, and works again with the next", async () => {
+    await shown({ running: true });
+    const working = activity();
+    await press(button("Answering"));
+    const done = activity();
+    await press(button("Answering"));
+
+    expect({ working, done, again: activity() }).toStrictEqual({
+      working: "working",
+      done: "success",
+      again: "working",
+    });
+  });
+
+  it("shows the files a question carries by name and size, none said uploaded before it is sent, each to take off", async () => {
+    const removed: string[] = [];
+    await shown({
+      files: [
+        { id: "f1", name: "notes.pdf", bytes: 2048 },
+        { id: "f2", name: "plan.docx", bytes: 1024 },
+      ],
+      onRemoveFile: (id) => {
+        removed.push(id);
+      },
+    });
+    const files = document.querySelector(
+      '[aria-label="Files to send"]'
+    )?.textContent;
+    await press(button("Remove notes.pdf"));
+
+    expect({
+      names: ["notes.pdf", "plan.docx"].map((name) => files?.includes(name)),
+      // As work's formatBytes writes a size in the page's language.
+      sizes: ["2 kB", "1 kB"].map((size) => files?.includes(size)),
+      uploaded: /upload/iu.test(files ?? ""),
+      removed,
+    }).toStrictEqual({
+      names: [true, true],
+      sizes: [true, true],
+      uploaded: false,
+      removed: ["f1"],
+    });
+  });
+
+  it("offers the model and how hard it thinks as one control, and an agent's own model as the only one", async () => {
+    await shown({
+      efforts: ["low", "medium", "high"],
+      effort: "medium",
+      models: ["openai/gpt-5", "anthropic/claude"],
+    });
+    const offered = control();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown({ agentModel: "anthropic/claude" });
+
+    const agents = control();
+
+    expect({
+      offered: /gpt-5.*Medium/u.test(offered),
+      agents: agents.includes("claude") && !agents.includes("gpt-5"),
+    }).toStrictEqual({ offered: true, agents: true });
+  });
+
+  it("takes nothing with no AI provider to call, and says how to connect one", async () => {
+    await shown({ model: "", models: [] });
+
+    expect({
+      typing: field().disabled || field().readOnly,
+      way: document.querySelector('a[href="/settings/ai-providers"]') !== null,
+    }).toStrictEqual({ typing: true, way: true });
+  });
+
+  it("writes what a member dictates after what they typed, across a pause, once they say Done", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    const recognition = made();
+    act(() => {
+      recognition?.hears("for Friday", true);
+      // A pause: the browser stops by itself, and starts a new run.
+      recognition?.dispatchEvent(new Event("end"));
+      recognition?.hears("at ten", false);
+    });
+    const heardWhile = document.body.textContent.includes("for Friday");
+    await press(button("Done"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({
+      language: recognition?.lang,
+      heardWhile,
+      text: field().value,
+      listening: recognition?.listening,
+    }).toStrictEqual({
+      language: "en",
+      heardWhile: true,
+      text: "Book the room for Friday at ten",
+      listening: false,
+    });
+  });
+
+  it("keeps what a member dictated when the browser's recognition fails mid-way", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    const recognition = made();
+    act(() => {
+      recognition?.hears("for Friday", true);
+      recognition?.hears("at ten", false);
+      recognition?.dispatchEvent(
+        Object.assign(new Event("error"), { error: "network" })
+      );
+    });
+
+    expect({
+      said: document.body.textContent.includes(
+        "Couldn't write that down. What you typed is kept."
+      ),
+      text: field().value,
+      listening: recognition?.listening,
+    }).toStrictEqual({
+      said: true,
+      text: "Book the room for Friday at ten",
+      listening: false,
+    });
+  });
+
+  it("stays cancelled when Mute is pressed while a cancelled dictation fades", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    await press(button("Cancel"));
+    // Still drawn while its words dissolve.
+    await press(button("Mute"));
+    await vi.waitFor(() => {
+      if (document.querySelector("[data-slot=composer-voice-foot]")) {
+        throw new Error("Still dictating");
+      }
+    });
+
+    expect({ dictate: offersDictation(), text: field().value }).toStrictEqual({
+      dictate: true,
+      text: "Book the room",
+    });
+  });
+
+  it("stops listening when the box goes away mid-dictation", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    await press(button("Dictate"));
+    const recognition = made();
+    const before = recognition?.listening;
+    act(() => {
+      root?.unmount();
+    });
+
+    expect({ before, after: recognition?.listening }).toStrictEqual({
+      before: true,
+      after: false,
+    });
+  });
+
+  it("says over the box that a dictation failed when the browser's recognition never starts, keeping what was typed, until it is dismissed", async () => {
+    // A browser that can't reach its maker's service: it neither starts nor says why.
+    Recognition.silent = true;
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    vi.useFakeTimers();
+    try {
+      await press(button("Dictate"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      const failed = "Couldn't write that down. What you typed is kept.";
+      const said = document.body.textContent.includes(failed);
+      const offersRetry = [...document.querySelectorAll("button")].some(
+        (each) => each.textContent === "Try again"
+      );
+      const kept = field().value;
+      await press(button("Dismiss"));
+
+      expect({
+        said,
+        offersRetry,
+        kept,
+        gone: !document.body.textContent.includes(failed),
+        after: field().value,
+      }).toStrictEqual({
+        said: true,
+        offersRetry: true,
+        kept: "Book the room",
+        gone: true,
+        after: "Book the room",
+      });
+    } finally {
+      vi.useRealTimers();
+      Recognition.silent = false;
+    }
+  });
+
+  it("offers no microphone to a member whose browser can't dictate", async () => {
+    const given = window.SpeechRecognition;
+    Reflect.deleteProperty(window, "SpeechRecognition");
+    try {
+      await shown({}, member);
+
+      expect(offersDictation()).toBeFalsy();
+    } finally {
+      window.SpeechRecognition = given;
+    }
+  });
+
+  it("tells a member, the first time they dictate, that their browser's maker writes it down, and never listens once they cancel", async () => {
+    Recognition.made = undefined;
+    window.SpeechRecognition = Recognition;
+    localStorage.removeItem("grasp-dictation-told:grace");
+    await shown({}, member);
+    vi.useFakeTimers();
+    try {
+      await press(button("Dictate"));
+      const told = document.body.textContent.includes(
+        "Your browser's maker writes down what you say."
+      );
+      const listeningWhileTold = made()?.listening ?? false;
+      await press(button("Cancel"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect({
+        told,
+        listeningWhileTold,
+        listeningAfter: made()?.listening ?? false,
+      }).toStrictEqual({
+        told: true,
+        listeningWhileTold: false,
+        listeningAfter: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("draws Grasp at work in the look the person chose in Appearance", async () => {
+    localStorage.setItem("grasp-composer:ada", "lavender:dither");
+    await shown({ running: true });
+    const edge =
+      document.querySelector<HTMLElement>("[data-edge]")?.dataset.edge;
+    localStorage.removeItem("grasp-composer:ada");
+
+    expect(edge).toBe("dither");
+  });
+
+  it("mentions what is picked after @, until its name is gone from the text", async () => {
+    await shown();
+    type("Check @");
+    type("Check @Exp");
+    const pick = await vi.waitFor(() => {
+      const option = [...document.querySelectorAll('[role="option"]')].find(
+        (each) => each.textContent?.includes("Expenses")
+      );
+      if (!(option instanceof HTMLElement)) {
+        throw new Error("Expenses is not offered");
+      }
+      return option;
+    });
+    act(() => {
+      pick.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    const picked = held.map(({ kind, id }) => `${kind}:${id}`);
+    const text = field().value;
+    type("Check @Expensesheet");
+    const longer = held.length;
+    type("Check the receipts");
+
+    expect({ picked, text, longer, after: held }).toStrictEqual({
+      picked: ["app:app-1"],
+      text: "Check @Expenses ",
+      longer: 0,
+      after: [],
+    });
+  });
+
+  it("lets the microphone go and opens no line when an admin cancels while the browser asks for it", async () => {
+    const given = {
+      mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
+      AudioContext: Reflect.get(globalThis, "AudioContext"),
+      WebSocket: Reflect.get(globalThis, "WebSocket"),
+    };
+    const answer = Promise.withResolvers<boolean>();
+    const { recording, lines } = transcriptionNotSetUp(answer.promise);
+    try {
+      await shown();
+      await press(button("Dictate"));
+      await press(button("Cancel"));
+      // Cancel plays its leaving first; the browser's answer comes after.
+      await vi.waitFor(() => {
+        if (document.querySelector("[data-slot=composer-voice-foot]")) {
+          throw new Error("Still leaving");
+        }
+      });
+      await act(async () => {
+        answer.resolve(true);
+        const { promise, resolve } = Promise.withResolvers<boolean>();
+        setTimeout(() => {
+          resolve(true);
+        }, 0);
+        await promise;
+      });
+
+      expect({
+        recording: recording(),
+        lines: lines(),
+        microphone: offersDictation(),
+      }).toStrictEqual({ recording: false, lines: 0, microphone: true });
+    } finally {
+      if (given.mediaDevices === undefined) {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      } else {
+        Object.defineProperty(navigator, "mediaDevices", given.mediaDevices);
+      }
+      Reflect.set(globalThis, "AudioContext", given.AudioContext);
+      Reflect.set(globalThis, "WebSocket", given.WebSocket);
+    }
+  });
+
+  // Last: what it notes lasts for the rest of the visit, as it should.
+  it("says once that core's dictation isn't set up, then offers no microphone in any box for the rest of the visit", async () => {
+    const given = {
+      mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
+      AudioContext: Reflect.get(globalThis, "AudioContext"),
+      WebSocket: Reflect.get(globalThis, "WebSocket"),
+    };
+    const { recording } = transcriptionNotSetUp();
+    try {
+      await shown();
+      const before = offersDictation();
+      await press(button("Dictate"));
+      await act(async () => {
+        const { promise, resolve } = Promise.withResolvers<boolean>();
+        setTimeout(() => {
+          resolve(true);
+        }, 0);
+        await promise;
+      });
+      const said = document.body.textContent.includes(
+        "Dictation isn't set up here yet. What you typed is kept."
+      );
+      const during = {
+        microphone: offersDictation(),
+        retry: [...document.querySelectorAll("button")].some(
+          (each) => each.textContent === "Try again"
+        ),
+        recording: recording(),
+      };
+      await press(button("Dismiss"));
+      const after = offersDictation();
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await shown();
+
+      expect({
+        before,
+        said,
+        during,
+        after,
+        another: offersDictation(),
+      }).toStrictEqual({
+        before: true,
+        said: true,
+        during: { microphone: false, retry: false, recording: false },
+        after: false,
+        another: false,
+      });
+    } finally {
+      if (given.mediaDevices === undefined) {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      } else {
+        Object.defineProperty(navigator, "mediaDevices", given.mediaDevices);
+      }
+      Reflect.set(globalThis, "AudioContext", given.AudioContext);
+      Reflect.set(globalThis, "WebSocket", given.WebSocket);
+    }
+  });
+});

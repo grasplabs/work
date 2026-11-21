@@ -1,21 +1,23 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@grasp-os/app-kit/components/sheet";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { onlyForAsking } from "@grasp-os/shared/interview-links";
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import { useLingui } from "@lingui/react/macro";
-import { EyeOffIcon, UsersIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
+import { Button } from "../grasp/button/index.ts";
+import { Hide, People } from "../grasp/icons/index.ts";
+import {
+  Sheet,
+  SheetAction,
+  SheetBody,
+  SheetDescription,
+  SheetFooter,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from "../grasp/sheet/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import {
   approveWhenKept,
   saveAgainNow,
@@ -34,6 +36,32 @@ import { withShares } from "./progress.ts";
 // Under each line of the read-back, and once they agreed, in "Where your
 // lines go". Approving binds where a line goes, so a line moved after
 // they agreed counts again only once it is approved where it goes now.
+
+const styles = stylex.create({
+  // The agreed lines, one under another with a hairline between them.
+  lines: { margin: 0, padding: 0, listStyle: "none", textAlign: "start" },
+  line: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+    borderBlockStartWidth: grasp.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  // What became of the change, at the foot's start.
+  note: {
+    flexGrow: 1,
+    margin: 0,
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    textWrap: "balance",
+  },
+  trouble: { color: grasp.attention },
+  wide: { width: "100%", maxWidth: "24rem" },
+});
 
 /** The other place a line can go. */
 const moved = (share: InterviewFact["share"]): InterviewFact["share"] =>
@@ -61,7 +89,9 @@ export const Destination = ({
   const kind = useKind();
   if (onlyForAsking(tag, kind)) {
     return (
-      <p className="text-muted-foreground text-xs">{t`Only used to know whom to ask`}</p>
+      <Text size="xs" tone="muted">
+        {t`Only used to know whom to ask`}
+      </Text>
     );
   }
   const team = share === "team";
@@ -69,15 +99,11 @@ export const Destination = ({
     <Button
       aria-describedby={of}
       disabled={disabled}
+      icon={team ? People : Hide}
       onClick={onMove}
       size="xs"
       variant="ghost"
     >
-      {team ? (
-        <UsersIcon data-icon="inline-start" />
-      ) : (
-        <EyeOffIcon data-icon="inline-start" />
-      )}
       {team ? t`Shared as how your team works` : t`Only counted anonymously`}
     </Button>
   );
@@ -97,7 +123,7 @@ const PlacedLine = ({
 }) => {
   const words = useId();
   return (
-    <li className="flex flex-col items-start gap-1 border-t py-2">
+    <li {...stylex.props(styles.line)}>
       <span id={words}>{fact.text}</span>
       <Destination
         disabled={disabled}
@@ -168,33 +194,30 @@ const SendFoot = ({
       {note === null ? null : (
         <p
           aria-live="polite"
-          className={
-            trouble
-              ? "text-status-attention text-xs text-balance"
-              : "text-muted-foreground text-xs"
-          }
           role={trouble ? "alert" : undefined}
+          {...stylex.props(styles.note, trouble && styles.trouble)}
         >
           {note}
         </p>
       )}
+      <SheetAction>{sending === "choosing" ? t`Cancel` : t`Close`}</SheetAction>
       {sending === "not_kept" ? (
-        <Button onClick={saveAgainNow} variant="highlight">
+        <Button onClick={saveAgainNow} variant="ink">
           {t`Try again`}
         </Button>
       ) : (
         <Button
-          disabled={!canSave || saving}
+          disabled={!canSave}
+          doneLabel={t`Saved`}
+          failedLabel={t`Not saved`}
           onClick={onSave}
-          variant="highlight"
+          status={saving ? "working" : "idle"}
+          variant="ink"
+          workingLabel={t`Saving…`}
         >
-          {saving ? <Spinner data-icon="inline-start" /> : null}
-          {saving ? t`Saving…` : t`Save where they go`}
+          {t`Save where they go`}
         </Button>
       )}
-      <SheetClose render={<Button variant="outline" />}>
-        {sending === "choosing" ? t`Cancel` : t`Close`}
-      </SheetClose>
     </SheetFooter>
   );
 };
@@ -236,31 +259,29 @@ export const WhereLinesGo = () => {
       }}
       open={open}
     >
-      <SheetTrigger
-        render={<Button className="w-full max-w-sm" variant="outline" />}
-      >
+      <SheetTrigger layout={styles.wide} variant="quiet">
         {t`Where your lines go`}
       </SheetTrigger>
-      <SheetContent closeLabel={t`Close`} side="right">
-        <SheetHeader>
-          <SheetTitle>{t`Where your lines go`}</SheetTitle>
-          <SheetDescription>{t`Choose where each line goes. A line you move counts again once you save.`}</SheetDescription>
-        </SheetHeader>
-        <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto border-b px-4 text-left">
-          {lines.map((fact) => (
-            <PlacedLine
-              disabled={sending === "saving" || sending === "not_kept"}
-              fact={fact}
-              key={fact.id}
-              onMove={() => {
-                setShares(new Map(shares).set(fact.id, moved(shareOf(fact))));
-                setSent(false);
-              }}
-              // Once sent, where core holds it: never shown moved before it is.
-              share={sending === "choosing" ? shareOf(fact) : fact.share}
-            />
-          ))}
-        </ol>
+      <SheetContent closeLabel={t`Close`}>
+        <SheetTitle>{t`Where your lines go`}</SheetTitle>
+        <SheetDescription>{t`Choose where each line goes. A line you move counts again once you save.`}</SheetDescription>
+        <SheetBody>
+          <ol {...stylex.props(styles.lines)}>
+            {lines.map((fact) => (
+              <PlacedLine
+                disabled={sending === "saving" || sending === "not_kept"}
+                fact={fact}
+                key={fact.id}
+                onMove={() => {
+                  setShares(new Map(shares).set(fact.id, moved(shareOf(fact))));
+                  setSent(false);
+                }}
+                // Once sent, where core holds it: never shown moved before it is.
+                share={sending === "choosing" ? shareOf(fact) : fact.share}
+              />
+            ))}
+          </ol>
+        </SheetBody>
         <SendFoot
           canSave={changed.length > 0}
           onSave={() => {

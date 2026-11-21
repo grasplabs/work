@@ -1,114 +1,82 @@
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import type { ReactNode } from "react";
-import Markdown from "react-markdown";
-import type { Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
+import { defaultUrlTransform } from "react-markdown";
 
-// Markdown that someone or something else wrote, such as the agent's
-// answers, rendered so that nothing in it runs or loads: raw HTML is
-// dropped (`skipHtml`), a link keeps its address only for a safe protocol
-// (http, https, mailto and a few more; react-markdown's
-// `defaultUrlTransform` empties any other, such as `javascript:`), and
-// opens in a tab of its own without this page as its opener. Images show
-// their alt text: loading one would tell its host who read the text, and
-// when.
+import { Link } from "./grasp/link/index.ts";
+import { Markdown } from "./grasp/markdown/index.ts";
+import type { MarkdownDrawn, MarkdownLink } from "./grasp/markdown/index.ts";
 
-/**
- * A link that leaves the page: in a tab of its own, without this page as
- * its opener. An address the transform emptied was unsafe: the text stays,
- * as text.
- */
-const OutsideLink = ({
-  href,
-  children,
-}: {
-  href?: string | undefined;
-  children?: ReactNode;
-}) =>
-  href === undefined || href === "" ? (
-    <span>{children}</span>
-  ) : (
-    <a
-      className="underline"
-      href={href}
-      rel="noopener noreferrer"
-      target="_blank"
-    >
-      {children}
-    </a>
-  );
+// Markdown that someone or something else wrote, such as an export's
+// text, rendered by Grasp UI's Markdown so that nothing in it runs or
+// loads: raw HTML is dropped before it is drawn, a link keeps its address
+// only for a safe protocol (http, https, mailto and a few more;
+// react-markdown's `defaultUrlTransform` empties any other, such as
+// `javascript:`), and opens in a tab of its own without this page as its
+// opener. Images show their alt text: loading one would tell its host who
+// read the text, and when (Markdown never loads one).
 
-const components: Components = {
-  h1: ({ children }) => (
-    <h1 className="font-serif text-2xl font-light tracking-tight">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => <h2 className="text-xl font-medium">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-lg font-medium">{children}</h3>,
-  h4: ({ children }) => <h4 className="font-medium">{children}</h4>,
-  h5: ({ children }) => <h5 className="font-medium">{children}</h5>,
-  h6: ({ children }) => <h6 className="font-medium">{children}</h6>,
-  ul: ({ children }) => <ul className="list-disc pl-6">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-6">{children}</ol>,
-  blockquote: ({ children }) => (
-    <blockquote className="text-muted-foreground border-l-2 pl-4">
-      {children}
-    </blockquote>
-  ),
-  pre: ({ children }) => (
-    <pre className="bg-muted overflow-x-auto rounded-md p-3 text-sm">
-      {children}
-    </pre>
-  ),
-  code: ({ children }) => <code className="font-mono text-sm">{children}</code>,
-  table: ({ children }) => <Table>{children}</Table>,
-  thead: ({ children }) => <TableHeader>{children}</TableHeader>,
-  tbody: ({ children }) => <TableBody>{children}</TableBody>,
-  tr: ({ children }) => <TableRow>{children}</TableRow>,
-  th: ({ children }) => <TableHead>{children}</TableHead>,
-  td: ({ children }) => <TableCell>{children}</TableCell>,
-  a: ({ href, children }) => <OutsideLink href={href}>{children}</OutsideLink>,
-  img: ({ alt }) =>
-    alt === undefined || alt === "" ? null : <span>{alt}</span>,
+/** The part of a Markdown syntax tree read here. */
+interface Node {
+  type: string;
+  children?: Node[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
+}
+
+/** A span of the source and what replaces it. */
+interface Edit {
+  from: number;
+  to: number;
+}
+
+/** The raw HTML in `node`, to drop: read from the syntax tree, so code keeps its words. */
+const htmlOf = (node: Node): Edit[] => {
+  const from = node.position?.start.offset;
+  const to = node.position?.end.offset;
+  if (from === undefined || to === undefined) {
+    return [];
+  }
+  if (node.type === "html") {
+    return [{ from, to }];
+  }
+  return (node.children ?? []).flatMap((child) => htmlOf(child));
 };
 
-/** How a link that leaves the page is drawn: `OutsideLink`, unless one that asks first. */
-export type LeavingLink = (props: {
-  href: string | undefined;
-  children: ReactNode;
-}) => ReactNode;
+/** `source` as it is drawn: its raw HTML dropped. */
+const prepared = (source: string): string => {
+  const tree = fromMarkdown(source, {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
+  return htmlOf(tree)
+    .toSorted((a, b) => b.from - a.from)
+    .reduce(
+      (text, edit) => text.slice(0, edit.from) + text.slice(edit.to),
+      source
+    );
+};
 
 /**
- * The components for text such as the agent's answers, every link drawn
- * by `Leaving`: `OutsideLink`, unless one that asks first.
+ * A link: in a tab of its own, without this page as its opener. An
+ * address the transform empties is unsafe: the words stay, as words. A
+ * picture is its alt words, never loaded.
  */
-export const plainComponents = (
-  Leaving: LeavingLink = OutsideLink
-): Components => ({
-  ...components,
-  a: ({ href, children }) => <Leaving href={href}>{children}</Leaving>,
-});
+const leaving = ({ href, kind, children }: MarkdownLink): MarkdownDrawn => {
+  const safe = defaultUrlTransform(href);
+  if (kind === "image" || safe === "") {
+    return <span>{children}</span>;
+  }
+  return (
+    <Link external href={safe}>
+      {children}
+    </Link>
+  );
+};
 
 /**
- * Markdown such as the agent's answers, safely: no raw HTML, safe links
- * only (react-markdown's `defaultUrlTransform`), no images.
+ * Markdown such as an export's text, safely: no raw HTML, safe links
+ * only, no images.
  */
 export const PlainMarkdown = ({ text }: { text: string }) => (
-  <div className="flex flex-col gap-3">
-    <Markdown
-      components={plainComponents()}
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-    >
-      {text}
-    </Markdown>
-  </div>
+  <Markdown renderLink={leaving} source={prepared(text)} />
 );

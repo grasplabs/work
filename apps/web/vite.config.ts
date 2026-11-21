@@ -1,12 +1,14 @@
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import linguiMacro from "@lingui/babel-plugin-lingui-macro";
 import { getConfig } from "@lingui/conf";
 import { lingui } from "@lingui/vite-plugin";
 import babel from "@rolldown/plugin-babel";
-import tailwindcss from "@tailwindcss/vite";
+import stylex from "@stylexjs/unplugin/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 
 import { localePreload } from "./locale-preload.ts";
@@ -17,6 +19,26 @@ const linguiConfigPath = fileURLToPath(
   new URL("lingui.config.ts", import.meta.url)
 );
 const linguiConfig = getConfig({ configPath: linguiConfigPath });
+
+// Grasp UI's components import UI SDK one entry at a time
+// (`@ui-sdk/react/dialog`). Vite finds an entry only when a page first
+// imports it, bundles it then and reloads the page, so every component
+// added to `src/grasp` cost a reload. All its entries are named up front
+// instead, read from the package so the list is never out of date.
+const uiSdkPackage: unknown = createRequire(import.meta.url)(
+  "@ui-sdk/react/package.json"
+);
+const uiSdkExports =
+  typeof uiSdkPackage === "object" &&
+  uiSdkPackage !== null &&
+  "exports" in uiSdkPackage &&
+  typeof uiSdkPackage.exports === "object" &&
+  uiSdkPackage.exports !== null
+    ? Object.keys(uiSdkPackage.exports)
+    : [];
+const uiSdkEntries = uiSdkExports
+  .filter((entry) => entry.startsWith("./") && entry !== "./package.json")
+  .map((entry) => `@ui-sdk/react/${entry.slice(2)}`);
 
 export default defineConfig({
   plugins: [
@@ -33,6 +55,15 @@ export default defineConfig({
       // imports only small modules of plain checks.
       codeSplittingOptions: { defaultBehavior: [["loader", "component"]] },
     }),
+    // Grasp UI's styles (src/grasp): StyleX compiles each `stylex.create`
+    // to class names before React's own transforms, and adds its CSS to
+    // the build's stylesheet. Outside any cascade layer, so it holds over
+    // the base layer (base.css) whichever stylesheet the page loads first,
+    // as in development.
+    // light-dark() is left as it is, which every browser this app supports
+    // reads: rewritten, it would lean on variables that only the build's
+    // own stylesheet sets, and fail in development.
+    stylex({ lightningcssOptions: { exclude: Features.LightDark } }),
     react(),
     babel({
       // Lingui's macros turn the English in the code into catalog lookups
@@ -49,14 +80,21 @@ export default defineConfig({
     // Compiles a `.po` catalog when the page imports it.
     lingui({ configPath: linguiConfigPath }),
     localePreload(),
-    tailwindcss(),
   ],
+  // The stylesheets outside StyleX (Grasp UI's tokens among them) keep
+  // light-dark() too: rewritten, a colour is settled once at the root, so a
+  // part that stands on its own ground (the sign-in page's night, a white
+  // button on it) drew the page's colours instead of its own.
+  css: { lightningcss: { exclude: Features.LightDark } },
   define: {
     // The build a page runs, in the error reports it sends: the commit CI
     // built it from, or `local`.
     "import.meta.env.VITE_GRASP_BUILD": JSON.stringify(
       process.env.GITHUB_SHA ?? "local"
     ),
+  },
+  optimizeDeps: {
+    include: ["@ui-sdk/core", ...uiSdkEntries],
   },
   build: {
     // Fonts are always files of their own: Vite would inline the smallest
@@ -70,6 +108,9 @@ export default defineConfig({
   server: {
     // Core (wrangler dev) serves the API and Cap'n Web.
     proxy: {
+      // Live transcription is a WebSocket under /api: without its own rule the
+      // upgrade never reaches core in dev (dictation and the interview's live line).
+      "/api/transcription": { target: "ws://localhost:8787", ws: true },
       "/api": "http://localhost:8787",
       "/rpc": { target: "ws://localhost:8787", ws: true },
       // The document pages run in, with its own policy, and the modules

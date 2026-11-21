@@ -1,78 +1,113 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { readDirectory } from "../directory.ts";
-import { PageLoading } from "../frame/page-states.tsx";
+import { PagePanel } from "../frame/page-panel.tsx";
+import { SiteHeader } from "../frame/site-header.tsx";
+import {
+  PageSkeletonDetail,
+  PageSkeletonListDetail,
+} from "../grasp/blocks/page-skeleton-list-detail/page-skeleton-list-detail.tsx";
+import { groupOrder } from "../inbox/groups.ts";
 import { InboxPage } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
-import { readActivity, readWaiting } from "../inbox/read-waiting.ts";
+import { readWaiting } from "../inbox/read-waiting.ts";
+import { ReportItem } from "../inbox/report-row.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { WeeklyReport } from "../report/weekly-report.tsx";
 
-// The inbox, as the prototype's (`routes/inbox.tsx`), at its address: what
-// waits on the person, each item with its actions; for admins, the latest
-// of the audit trail; and, while the company has a programme with Grasp,
-// its weekly report. The sidebar's Inbox leads here, with how many wait.
-
-/** How many of the trail's latest events the activity tab shows at most. */
-const activityShown = 100;
+// The Inbox at its address: what waits on the person, each item with its
+// actions (inbox-page.tsx), and the weekly report: an item at the head once
+// it is ready, a quiet row at the foot on every other day. The sidebar's Inbox view links each of its rows here (`?item=`)
+// and opens a group (`?group=`).
 
 const Inbox = () => {
-  const { waiting, readAt, activity, report } = Route.useLoaderData();
+  const { waiting, readAt, programme, report } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
+  const { item, group } = Route.useSearch();
+  const reportItem =
+    programme === null || report === undefined ? undefined : (
+      <ReportItem programme={programme} report={report} />
+    );
+  // Ready: the item at the head of the list; on other days, quiet at its foot.
+  const ready = programme?.nextReport.inDays === 0;
   return (
     <InboxPage
-      activity={activity}
+      chosen={item}
+      foot={ready ? reportItem : undefined}
+      group={group}
       items={inboxItems(waiting, identity, readAt)}
       notLoaded={unread(waiting)}
-      report={
-        report === undefined ? undefined : (
-          <WeeklyReport programme={report.programme} report={report.read} />
-        )
-      }
+      tail={ready ? undefined : reportItem}
     />
   );
 };
 
+/**
+ * The Inbox before what waits is read: the library's page-skeleton-list-detail,
+ * the list under the page's bar with no header of its own (the page has
+ * none), and the chosen item waiting in the shell's page panel, which the
+ * shell shows beside a wide page and keeps as a closed sheet on a phone, as
+ * it does the loaded one.
+ */
+const InboxPending = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Inbox` }]} />
+      <PageSkeletonListDetail
+        header={false}
+        iconLook="inline"
+        rows={8}
+        separated={false}
+        size="xs"
+        variant="items"
+      />
+      <PagePanel label={t`Inbox`}>
+        <PageSkeletonDetail />
+      </PagePanel>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/inbox")({
-  pendingComponent: PageLoading,
+  // The open item, and the group in view as the sidebar's Inbox view sets
+  // it. A value it doesn't know (an old link, an edited address) is left
+  // out, as every other page's address does, rather than an error page.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { item?: string; group?: (typeof groupOrder)[number] } => {
+    const group = groupOrder.find((each) => each === search.group);
+    return {
+      ...(typeof search.item === "string" ? { item: search.item } : {}),
+      ...(group === undefined ? {} : { group }),
+    };
+  },
+  pendingComponent: InboxPending,
   loader: async ({ context: { core, identity } }) => {
-    // Not awaited: the activity tab waits for it.
-    const activity = isAdmin(identity.role)
-      ? loadFromCore(core, async (session) => {
-          const [latest, directory] = await Promise.all([
-            readActivity(session, activityShown),
-            readDirectory(session),
-          ]);
-          return { ...latest, directory };
-        })
-      : undefined;
-    // The report's bar is known before the page shows, so nothing moves
-    // once it is there; read alongside what waits, which the page waits
-    // for too.
-    const [waiting, programme] = await Promise.all([
-      readWaiting(core, identity),
+    // Everyone's unknown outcomes too, once a visit: only this page lists
+    // them (core records each list in the audit trail).
+    const [waiting, read] = await Promise.all([
+      readWaiting(core, identity, { everyonesOutcomes: true }),
+      // The programme with Grasp, for the weekly report; none without a plan.
       loadFromCore(
         core,
         async (session) => await session.onboarding.programme()
       ),
     ]);
-    const planned = programme.state === "ready" ? programme.data : null;
+    const programme = read.state === "ready" ? read.data : null;
+    // The report on the week, ready or so far, read every day and not
+    // awaited: the report's page waits for it.
+    const report =
+      programme === null
+        ? undefined
+        : loadFromCore(
+            core,
+            async (session) => await session.boardReport.read()
+          );
     return {
       waiting,
       readAt: new Date().toISOString(),
-      activity,
-      // Not awaited: the report's dialog waits for it. None without a plan.
-      report:
-        planned === null
-          ? undefined
-          : {
-              programme: planned,
-              read: loadFromCore(
-                core,
-                async (session) => await session.boardReport.read()
-              ),
-            },
+      programme,
+      report,
     };
   },
   component: Inbox,

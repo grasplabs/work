@@ -1,3 +1,9 @@
+import type { Gap } from "@grasp-os/shared/brain";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { useLingui } from "@lingui/react/macro";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+
+import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -5,17 +11,9 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import type { Gap } from "@grasp-os/shared/brain";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouteContext, useRouter } from "@tanstack/react-router";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/alert-dialog/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useBrainData } from "./brain-data.ts";
 
@@ -43,21 +41,15 @@ const Confirmed = ({
   onConfirm: () => void;
 }) => (
   <AlertDialog>
-    <AlertDialogTrigger
-      render={<Button disabled={busy} size="sm" variant="outline" />}
-    >
+    <AlertDialogTrigger disabled={busy} size="sm">
       {label}
     </AlertDialogTrigger>
     <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>{title}</AlertDialogTitle>
-        <AlertDialogDescription>{description}</AlertDialogDescription>
-      </AlertDialogHeader>
+      <AlertDialogTitle>{title}</AlertDialogTitle>
+      <AlertDialogDescription>{description}</AlertDialogDescription>
       <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onConfirm} variant="destructive">
+        <AlertDialogCancel />
+        <AlertDialogAction onClick={onConfirm} variant="danger">
           {confirm}
         </AlertDialogAction>
       </AlertDialogFooter>
@@ -114,7 +106,7 @@ const Actions = ({ gap }: { gap: Gap }) => {
     const done = await run(action);
     if (done !== undefined) {
       // The brain is read again: the question shows as it is now.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   return (

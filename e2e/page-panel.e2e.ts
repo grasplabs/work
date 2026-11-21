@@ -19,11 +19,12 @@ test("a new page opens at its top, and what is too wide does not scroll the page
   const { member } = peopleIn("pagePanel");
   const page = await pageOf(member);
   await page.setViewportSize(short);
-  await page.goto("/brain");
+  // Apps scrolls in the panel; the Brain's atlas takes the wheel itself.
+  await page.goto("/apps");
   const nav = page.getByRole("navigation", { name: "Breadcrumb" });
-  await expect(nav).toContainText("Brain", pageRead);
+  await expect(nav).toContainText("Apps", pageRead);
 
-  const panel = page.locator('[data-slot="app-shell-content"]');
+  const panel = page.locator('[data-slot="app-shell-page"]');
   // Content taller and wider than the panel, in the panel itself so it
   // stays through the navigation below. It is set through the style
   // object, which the page's content security policy allows.
@@ -36,14 +37,15 @@ test("a new page opens at its top, and what is too wide does not scroll the page
     element.append(filler);
   });
 
-  // Where the header's bar is: its place, not its size, which a web font
-  // that finishes loading meanwhile may change by a pixel.
+  // Where the header's bar starts across: the page scrolls it up and away,
+  // never sideways. Its place, not its size, which a web font that
+  // finishes loading meanwhile may change by a pixel.
   const placeOf = async () => {
     const box = await nav.boundingBox();
     if (box === null) {
       throw new Error("The breadcrumb isn't shown.");
     }
-    return { x: box.x, y: box.y };
+    return box.x;
   };
   const barBefore = await placeOf();
   // A sideways swipe or wheel over it, then the way down.

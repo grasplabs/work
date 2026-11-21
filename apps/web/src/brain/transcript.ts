@@ -12,7 +12,7 @@ import type {
  */
 
 /** A statement where it was said: the turn, and where in that turn's text. */
-export interface Highlight {
+interface Highlight {
   statement: Statement;
   /** The index of the turn in the transcript. */
   turn: number;
@@ -25,6 +25,12 @@ export const placeLabel = (
   transcript: Pick<Transcript, "unit">,
   at: string
 ): string => (transcript.unit === "passage" ? `§ ${at}` : at);
+
+/** A place in a transcript as a number to compare: "12:26" in seconds, an answer or passage number as it is. */
+export const position = (at: string): number => {
+  const [whole = 0, rest] = at.split(":").map(Number);
+  return rest === undefined ? whole : whole * 60 + rest;
+};
 
 /**
  * Where each of a source's statements was said, in the order of the conversation. The match ignores

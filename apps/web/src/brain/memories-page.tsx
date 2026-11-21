@@ -1,42 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Card, CardContent } from "@grasp-os/app-kit/components/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-} from "@grasp-os/app-kit/components/item";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import { toast } from "@grasp-os/app-kit/components/toast";
 import type {
   BrainContestedFact,
   BrainEntityKind,
@@ -56,13 +17,55 @@ import {
 } from "@grasp-os/shared/brain-memories";
 import { shownVisibly } from "@grasp-os/shared/chat";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createContext, use, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
-import { NotLoaded } from "../load-from-core.tsx";
+import { formatDate } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Card } from "../grasp/card/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { Tag } from "../grasp/tag/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { toast } from "../grasp/toast/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useAsk, usePaged } from "./memories-asks.ts";
 
@@ -102,7 +105,7 @@ const memoryKeyOf = ({ store, id }: BrainMemoryShown): string =>
  * everything again beside it (`onChanged`).
  */
 const sayChanged = (text: string): void => {
-  toast.add({ type: "info", title: text });
+  toast.info(text);
 };
 
 /** An entity's key, for React. */
@@ -395,6 +398,55 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
   return label;
 };
 
+const styles = stylex.create({
+  // A page of the brain: its own pane that scrolls, round the library's page column.
+  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  stack: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  form: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  // What a memory says, and the dialog's copy of it: a line under another.
+  said: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    outline: "none",
+  },
+  // A row's marks and its actions, side by side, wrapping.
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  start: { alignSelf: "flex-start" },
+  // Texts are shown as text, with their own line breaks.
+  plain: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
+  // The facts sources disagree on, a card each.
+  cards: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // The list and the open entity side by side on a wide page.
+  split: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    alignItems: "start",
+    gap: grasp.space6,
+    minHeight: 0,
+  },
+  // Room for the entity beside the list only while one is open.
+  splitOpen: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.fromSidebar]: "repeat(2, minmax(0, 1fr))",
+    },
+  },
+});
+
 /**
  * Says `memory` is wrong, with what is right: the person's own word,
  * theirs alone, confirmed. One opening of it (`opening`, the page keys it
@@ -408,19 +460,16 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 const CorrectDialog = ({
   memory,
   opening,
-  returnTo,
   onClose,
   onCorrected,
 }: {
   memory: BrainMemoryShown;
   opening: string;
-  /** What opened it, where focus goes back to while it is on the page. */
-  returnTo: HTMLElement;
   onClose: () => void;
   onCorrected: () => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
+  const formId = useId();
   const [right, setRight] = useState("");
   const [change, setChange] = useState(opening);
   // The text of a save that failed: new words after it are a new
@@ -457,79 +506,74 @@ const CorrectDialog = ({
   };
   return (
     <Dialog
-      disablePointerDismissal={busy}
+      dismissible={!busy}
       onOpenChange={(open) => {
+        // The close button too does nothing while it saves.
         if (!open && !busy) {
           onClose();
         }
       }}
       open
     >
-      <DialogContent
-        closeLabel={t`Close`}
-        finalFocus={() => (returnTo.isConnected ? returnTo : null)}
-        showCloseButton={!busy}
-      >
-        <form
-          className="flex flex-col gap-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (ready && !busy) {
-              void correct();
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>What is right?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                Your correction is kept as your own word, for you alone, and
-                shown beside what the Brain holds. What others read stays as it
-                is.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-muted-foreground text-sm whitespace-pre-wrap">
-            {memory.statement}
-          </p>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-right`}>
-              <Trans>What is right</Trans>
-            </FieldLabel>
-            <Textarea
-              disabled={busy}
-              id={`${ids}-right`}
-              maxLength={brainCorrectionMaxLength}
-              onChange={(event) => {
-                const { value: typed } = event.target;
-                if (tried !== undefined && typed !== tried) {
-                  setChange(crypto.randomUUID());
-                  setTried(undefined);
-                }
-                setRight(typed);
-              }}
-              rows={3}
-              value={right}
-            />
-            <FieldDescription>
-              <Trans>In your own words, as you would tell a colleague.</Trans>
-            </FieldDescription>
-          </Field>
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter>
-            <DialogClose
-              disabled={busy}
-              render={<Button type="button" variant="outline" />}
-            >
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button disabled={!ready || busy} type="submit">
-              <Trans>Save the correction</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>
+          <Trans>What is right?</Trans>
+        </DialogTitle>
+        <DialogDescription>
+          <Trans>
+            Your correction is kept as your own word, for you alone, and shown
+            beside what the Brain holds. What others read stays as it is.
+          </Trans>
+        </DialogDescription>
+        <DialogBody>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (ready && !busy) {
+                void correct();
+              }
+            }}
+            {...stylex.props(styles.form)}
+          >
+            <Text size="sm" tone="muted">
+              <span {...stylex.props(styles.plain)}>{memory.statement}</span>
+            </Text>
+            <Field disabled={busy}>
+              <FieldLabel>
+                <Trans>What is right</Trans>
+              </FieldLabel>
+              <Textarea
+                maxLength={brainCorrectionMaxLength}
+                onValueChange={(typed) => {
+                  if (tried !== undefined && typed !== tried) {
+                    setChange(crypto.randomUUID());
+                    setTried(undefined);
+                  }
+                  setRight(typed);
+                }}
+                rows={3}
+                value={right}
+              />
+              <FieldDescription>
+                <Trans>In your own words, as you would tell a colleague.</Trans>
+              </FieldDescription>
+            </Field>
+            <ErrorText>{failure}</ErrorText>
+          </form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction disabled={busy}>{t`Cancel`}</DialogAction>
+          <Button
+            disabled={!ready || busy}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="ink"
+          >
+            {t`Save the correction`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -580,10 +624,15 @@ const MemoryTexts = ({
   if (label !== null) {
     valueLine =
       held === null ? (
-        <span className="font-medium">{label}</span>
+        <Text element="span" size="sm" weight="medium">
+          {label}
+        </Text>
       ) : (
         <Trans>
-          <span className="font-medium">{label}</span>: {held}
+          <Text element="span" size="sm" weight="medium">
+            {label}
+          </Text>
+          : {held}
         </Trans>
       );
   } else if (held !== null) {
@@ -592,14 +641,14 @@ const MemoryTexts = ({
   return (
     <>
       {valueLine === null ? null : (
-        <span className="text-sm break-words whitespace-pre-wrap">
-          {valueLine}
-        </span>
+        <Text element="span" size="sm">
+          <span {...stylex.props(styles.plain)}>{valueLine}</span>
+        </Text>
       )}
       {held !== null && statement === held ? null : (
-        <span className="text-sm break-words whitespace-pre-wrap">
-          {statement}
-        </span>
+        <Text element="span" size="sm">
+          <span {...stylex.props(styles.plain)}>{statement}</span>
+        </Text>
       )}
     </>
   );
@@ -622,33 +671,35 @@ const AudienceField = ({
   onPick: (picked: string) => void;
 }) => {
   const { t } = useLingui();
-  const fieldId = useId();
   const audiences = loaded?.state === "ready" ? loaded.data : undefined;
   return (
     <>
-      <Field>
-        <FieldLabel htmlFor={fieldId}>
+      <Field disabled={busy}>
+        <FieldLabel>
           <Trans context="a memory shared with others">Who may read it</Trans>
         </FieldLabel>
-        <NativeSelect
-          disabled={busy}
-          id={fieldId}
-          onChange={(event) => {
-            onPick(event.target.value);
+        <Select
+          items={[
+            ...(audiences?.teams ?? []).map(({ id, name }) => ({
+              value: id,
+              label: t`Team ${name}`,
+            })),
+            ...(audiences?.company === true
+              ? [{ value: "everyone", label: t`Everyone` }]
+              : []),
+          ]}
+          onValueChange={(picked) => {
+            if (picked !== null) {
+              onPick(picked);
+            }
           }}
-          value={choice ?? ""}
+          value={choice ?? null}
         >
-          {(audiences?.teams ?? []).map(({ id, name }) => (
-            <NativeSelectOption key={id} value={id}>
-              {t`Team ${name}`}
-            </NativeSelectOption>
-          ))}
-          {audiences?.company === true ? (
-            <NativeSelectOption value="everyone">
-              {t`Everyone`}
-            </NativeSelectOption>
-          ) : null}
-        </NativeSelect>
+          <SelectTrigger size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
         {audiences !== undefined && choice === undefined ? (
           <FieldDescription>
             <Trans>
@@ -659,7 +710,7 @@ const AudienceField = ({
         ) : null}
       </Field>
       {loaded === undefined || loaded.state === "ready" ? null : (
-        <NotLoaded page={loaded} />
+        <PartNotLoaded page={loaded} />
       )}
     </>
   );
@@ -676,7 +727,6 @@ const ShareDialog = ({
   memory,
   about,
   opening,
-  returnTo,
   onClose,
   onShared,
 }: {
@@ -684,11 +734,11 @@ const ShareDialog = ({
   /** The name the page showed for what it is about. */
   about: string;
   opening: string;
-  returnTo: HTMLElement;
   onClose: () => void;
   onShared: () => void;
 }) => {
   const { t } = useLingui();
+  const formId = useId();
   const attributeLabel = useAttributeLabel();
   // Whom core lets them share with: everyone and their teams, each of
   // three people or more (with fewer, the others would know who shared
@@ -722,8 +772,8 @@ const ShareDialog = ({
   const aboutShown = shownVisibly(about);
   const held = value === null ? null : shownVisibly(value);
   const said = shownVisibly(statement);
-  const from = validFrom === null ? null : formatDateTime(validFrom);
-  const until = validUntil === null ? null : formatDateTime(validUntil);
+  const from = validFrom === null ? null : formatDate(validFrom);
+  const until = validUntil === null ? null : formatDate(validUntil);
   const share = async (to: string): Promise<void> => {
     setTried(to);
     await ask(
@@ -748,7 +798,7 @@ const ShareDialog = ({
         if (shared === null) {
           sayChanged(changedText);
         } else {
-          toast.add({ type: "success", title: sharedText });
+          toast.success(sharedText);
         }
         onShared();
       }
@@ -756,83 +806,82 @@ const ShareDialog = ({
   };
   return (
     <Dialog
-      disablePointerDismissal={busy}
+      dismissible={!busy}
       onOpenChange={(open) => {
+        // The close button too does nothing while it shares.
         if (!open && !busy) {
           onClose();
         }
       }}
       open
     >
-      <DialogContent
-        closeLabel={t`Close`}
-        finalFocus={() => (returnTo.isConnected ? returnTo : null)}
-        showCloseButton={!busy}
-      >
-        <form
-          className="flex flex-col gap-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!busy && choice !== undefined) {
-              void share(choice);
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Share this memory?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                They will read exactly what is below, as someone&apos;s own
-                word, without your name. Your own memory stays yours alone, and
-                you can take the copy back.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">
-              <Trans>About {aboutShown}</Trans>
-            </span>
-            {/* Every text a share copies shows, as the page's line shows it
-                (`MemoryTexts`), escaped. */}
-            <MemoryTexts held={held} label={label} statement={said} />
-            {from === null ? null : (
-              <span>
-                <Trans>True from {from}</Trans>
-              </span>
-            )}
-            {until === null ? null : (
-              <span>
-                <Trans>True until {until}</Trans>
-              </span>
-            )}
-          </div>
-          <AudienceField
-            busy={busy}
-            choice={choice}
-            loaded={loaded}
-            onPick={(picked) => {
-              if (tried !== undefined && picked !== tried) {
-                setChange(crypto.randomUUID());
-                setTried(undefined);
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>
+          <Trans>Share this memory?</Trans>
+        </DialogTitle>
+        <DialogDescription>
+          <Trans>
+            They will read exactly what is below, as someone&apos;s own word,
+            without your name. Your own memory stays yours alone, and you can
+            take the copy back.
+          </Trans>
+        </DialogDescription>
+        <DialogBody>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!busy && choice !== undefined) {
+                void share(choice);
               }
-              setChosen(picked);
             }}
-          />
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter>
-            <DialogClose
-              disabled={busy}
-              render={<Button type="button" variant="outline" />}
-            >
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button disabled={busy || choice === undefined} type="submit">
-              <Trans>Share</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+            {...stylex.props(styles.form)}
+          >
+            <div {...stylex.props(styles.said)}>
+              <Text element="span" size="sm" weight="medium">
+                <Trans>About {aboutShown}</Trans>
+              </Text>
+              {/* Every text a share copies shows, as the page's line shows it
+                  (`MemoryTexts`), escaped. */}
+              <MemoryTexts held={held} label={label} statement={said} />
+              {from === null ? null : (
+                <Text element="span" size="sm">
+                  <Trans>True from {from}</Trans>
+                </Text>
+              )}
+              {until === null ? null : (
+                <Text element="span" size="sm">
+                  <Trans>True until {until}</Trans>
+                </Text>
+              )}
+            </div>
+            <AudienceField
+              busy={busy}
+              choice={choice}
+              loaded={loaded}
+              onPick={(picked) => {
+                if (tried !== undefined && picked !== tried) {
+                  setChange(crypto.randomUUID());
+                  setTried(undefined);
+                }
+                setChosen(picked);
+              }}
+            />
+            <ErrorText>{failure}</ErrorText>
+          </form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction disabled={busy}>{t`Cancel`}</DialogAction>
+          <Button
+            disabled={busy || choice === undefined}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="ink"
+          >
+            {t`Share`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -881,9 +930,9 @@ const TakeBackButton = ({
         }}
         size="sm"
         type="button"
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Take back</Trans>
+        {t`Take back`}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </>
@@ -931,37 +980,43 @@ const ConfirmButton = ({
         }}
         size="sm"
         type="button"
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>This one is right</Trans>
+        {t`This one is right`}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </>
   );
 };
 
+/** "Only you", for a memory or an entity nobody else may read. */
+const OnlyYou = () => {
+  const { t } = useLingui();
+  return (
+    <Tag size="sm" variant="outline">
+      {t({ message: "Only you", context: "a memory nobody else may read" })}
+    </Tag>
+  );
+};
+
 /** A memory's marks: whose it is, disagreement, confirmation, origin and its dates. */
 const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
   const { endedAt, confirmed } = memory;
-  const learned = formatDateTime(memory.learnedAt);
-  const ended = endedAt === null ? null : formatDateTime(endedAt);
+  const learned = formatDate(memory.learnedAt);
+  const ended = endedAt === null ? null : formatDate(endedAt);
   const current = endedAt === null;
   return (
-    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-      {memory.store === "own" ? (
-        <Badge variant="outline">
-          <Trans context="a memory nobody else may read">Only you</Trans>
-        </Badge>
-      ) : null}
+    <span {...stylex.props(styles.row)}>
+      {memory.store === "own" ? <OnlyYou /> : null}
       {current && memory.contested ? (
-        <Badge variant="attention">
+        <Badge size="sm" tone="attention">
           <Trans>Sources disagree</Trans>
         </Badge>
       ) : null}
       {/* A saved memory is taken as correct: a confirmation is shown only
           where it settled a disagreement. */}
       {current && memory.contested && confirmed !== null ? (
-        <Badge variant="passed">
+        <Badge size="sm" tone="success">
           {confirmed.byYou ? (
             <Trans>Confirmed by you</Trans>
           ) : (
@@ -969,16 +1024,16 @@ const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
           )}
         </Badge>
       ) : null}
-      <span>
+      <Text element="span" size="xs" tone="muted">
         <MemoryOrigin memory={memory} />
-      </span>
-      <span>
+      </Text>
+      <Text element="span" size="xs" tone="muted">
         <Trans>Learned {learned}</Trans>
-      </span>
+      </Text>
       {ended === null ? null : (
-        <span>
+        <Text element="span" size="xs" tone="muted">
           <Trans>No longer held since {ended}</Trans>
-        </span>
+        </Text>
       )}
     </span>
   );
@@ -997,7 +1052,7 @@ const ShareActions = ({
 }: {
   memory: BrainMemoryShown;
   read: number;
-  onShare?: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  onShare?: (memory: BrainMemoryShown) => void;
   onTakenBack: () => void;
 }) => {
   const { t } = useLingui();
@@ -1007,14 +1062,14 @@ const ShareActions = ({
       {onShare !== undefined && isShareable(memory) ? (
         <Button
           aria-label={t`Share with others: ${statement}`}
-          onClick={(event) => {
-            onShare(memory, event.currentTarget);
+          onClick={() => {
+            onShare(memory);
           }}
           size="sm"
           type="button"
-          variant="outline"
+          variant="quiet"
         >
-          <Trans>Share…</Trans>
+          {t`Share…`}
         </Button>
       ) : null}
       {memory.store === "shared" && memory.yours ? (
@@ -1041,10 +1096,10 @@ const MemoryLine = ({
   /** The read of the page it is on. */
   read: number;
   onChanged: () => void;
-  /** Opens the correction of `memory`, which the page holds, from `opener`. */
-  onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
-  /** Opens the share of `memory`, from `opener`: where what it is about is named. */
-  onShare?: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  /** Opens the correction of `memory`, which the page holds. */
+  onCorrect: (memory: BrainMemoryShown) => void;
+  /** Opens the share of `memory`: where what it is about is named. */
+  onShare?: (memory: BrainMemoryShown) => void;
 }) => {
   const { t } = useLingui();
   const { statement } = memory;
@@ -1076,12 +1131,12 @@ const MemoryLine = ({
         {/* What it says, focusable so focus can stay here once its
             button goes. A correction holds its words as value and
             statement alike: they show once. */}
-        <span className="flex flex-col gap-1" ref={said} tabIndex={-1}>
+        <span ref={said} tabIndex={-1} {...stylex.props(styles.said)}>
           <MemoryTexts held={held} label={label} statement={memory.statement} />
         </span>
         <MemoryMarks memory={memory} />
         {current ? (
-          <span className="flex flex-wrap items-center gap-2">
+          <span {...stylex.props(styles.row)}>
             {confirmable ? (
               <ConfirmButton
                 memory={memory}
@@ -1098,14 +1153,14 @@ const MemoryLine = ({
             {object === null ? (
               <Button
                 aria-label={t`Say this is wrong: ${statement}`}
-                onClick={(event) => {
-                  onCorrect(memory, event.currentTarget);
+                onClick={() => {
+                  onCorrect(memory);
                 }}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="quiet"
               >
-                <Trans>It&apos;s wrong</Trans>
+                {t`It's wrong`}
               </Button>
             ) : null}
             <ShareActions
@@ -1140,16 +1195,16 @@ const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
   }
   if (entity.unreadable) {
     return (
-      <span className="text-muted-foreground">
+      <Text element="span" size="sm" tone="muted" weight="medium">
         <Trans>Something you corrected, which you can no longer read</Trans>
-      </span>
+      </Text>
     );
   }
   return (
     entity.name ?? (
-      <span className="text-muted-foreground">
+      <Text element="span" size="sm" tone="muted" weight="medium">
         <Trans>Without a name</Trans>
-      </span>
+      </Text>
     )
   );
 };
@@ -1164,24 +1219,28 @@ const ShowMore = ({
     failure: string | undefined;
     showMore: () => void;
   };
-}) => (
-  <>
-    <ErrorText>{listing.failure}</ErrorText>
-    {listing.next === null ? null : (
-      <Button
-        className="self-start"
-        disabled={listing.busy}
-        onClick={() => {
-          listing.showMore();
-        }}
-        type="button"
-        variant="outline"
-      >
-        <Trans>Show more</Trans>
-      </Button>
-    )}
-  </>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <ErrorText>{listing.failure}</ErrorText>
+      {listing.next === null ? null : (
+        <Button
+          disabled={listing.busy}
+          layout={styles.start}
+          onClick={() => {
+            listing.showMore();
+          }}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {t`Show more`}
+        </Button>
+      )}
+    </>
+  );
+};
 
 /** A contested fact's key, for React and for `usePaged`. */
 const keyOfFact = ({ about, attribute }: BrainContestedFact): string =>
@@ -1200,7 +1259,7 @@ const ContestedList = ({
   read: number;
   onOpen: (entity: BrainEntityListed) => void;
   onChanged: () => void;
-  onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  onCorrect: (memory: BrainMemoryShown) => void;
 }) => {
   const attributeLabel = useAttributeLabel();
   const { first, items: facts, next } = contested;
@@ -1208,60 +1267,57 @@ const ContestedList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoaded page={first} />;
+    return <NotLoadedState again={contested.again} heading="h3" page={first} />;
   }
   // A page can hold no fact and still have more after it.
   if (facts.length === 0 && next === null) {
     return (
-      <p className="text-muted-foreground text-sm">
+      <Text size="sm" tone="muted">
         <Trans>Nothing you may read is disputed.</Trans>
-      </p>
+      </Text>
     );
   }
   return (
-    <div className="flex flex-col gap-3">
-      <ul className="flex flex-col gap-3">
+    <div {...stylex.props(styles.stack)}>
+      <ul {...stylex.props(styles.cards)}>
         {facts.map((fact) => (
-          <li key={keyOfFact(fact)}>
-            <Card size="sm">
-              <CardContent>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Button
-                    onClick={() => {
-                      onOpen(fact.about);
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="link"
-                  >
-                    <EntityName entity={fact.about} />
-                  </Button>
-                  <span className="font-medium">
-                    {attributeLabel(fact.attribute)}
-                  </span>
-                </div>
-                <ItemGroup render={<ul />} spacing="tight">
-                  {fact.sides.map((side) => (
-                    <li key={memoryKeyOf(side)}>
-                      <MemoryLine
-                        memory={side}
-                        onChanged={onChanged}
-                        onCorrect={onCorrect}
-                        read={read}
-                      />
-                    </li>
-                  ))}
-                </ItemGroup>
-                {fact.more ? (
-                  <p className="text-muted-foreground text-xs">
-                    <Trans>
-                      More sources say other things: open it to see them all.
-                    </Trans>
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
-          </li>
+          <Card element="li" key={keyOfFact(fact)} padding="md">
+            <div {...stylex.props(styles.stack)}>
+              <div {...stylex.props(styles.row)}>
+                <Button
+                  onClick={() => {
+                    onOpen(fact.about);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <EntityName entity={fact.about} />
+                </Button>
+                <Text element="span" size="sm" weight="medium">
+                  {attributeLabel(fact.attribute)}
+                </Text>
+              </div>
+              <ItemGroup>
+                {fact.sides.map((side) => (
+                  <MemoryLine
+                    key={memoryKeyOf(side)}
+                    memory={side}
+                    onChanged={onChanged}
+                    onCorrect={onCorrect}
+                    read={read}
+                  />
+                ))}
+              </ItemGroup>
+              {fact.more ? (
+                <Text size="xs" tone="muted">
+                  <Trans>
+                    More sources say other things: open it to see them all.
+                  </Trans>
+                </Text>
+              ) : null}
+            </div>
+          </Card>
         ))}
       </ul>
       <ShowMore listing={contested} />
@@ -1308,11 +1364,11 @@ const EntityList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoaded page={first} />;
+    return <NotLoadedState again={entities.again} heading="h3" page={first} />;
   }
   if (items.length === 0 && entities.next === null) {
     return (
-      <Empty>
+      <Empty size="section">
         <EmptyHeader>
           <EmptyTitle>
             <Trans>Nothing of this kind you may read yet</Trans>
@@ -1328,41 +1384,28 @@ const EntityList = ({
     );
   }
   return (
-    <div className="flex flex-col gap-3">
-      <ItemGroup render={<ul />} spacing="tight">
+    <div {...stylex.props(styles.stack)}>
+      <ItemGroup>
         {items.map((each) => (
-          <li key={keyOf(each.entity)}>
-            <Item
-              onClick={() => {
-                onPick(each);
-              }}
-              render={
-                // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the entity's name and labels are its words, as the Item's children
-                <button
-                  aria-pressed={
-                    picked !== undefined && sameEntity(picked, each.entity)
-                  }
-                  type="button"
-                />
-              }
-              size="sm"
-            >
-              <ItemContent>
-                <span className="text-sm">
-                  <EntityName entity={each} />
-                </span>
-                {each.entity.store === "own" ? (
-                  <span className="flex">
-                    <Badge variant="outline">
-                      <Trans context="a memory nobody else may read">
-                        Only you
-                      </Trans>
-                    </Badge>
-                  </span>
-                ) : null}
-              </ItemContent>
-            </Item>
-          </li>
+          <Item
+            current={picked !== undefined && sameEntity(picked, each.entity)}
+            key={keyOf(each.entity)}
+            onPress={() => {
+              onPick(each);
+            }}
+            size="sm"
+          >
+            <ItemContent>
+              <ItemTitle>
+                <EntityName entity={each} />
+              </ItemTitle>
+              {each.entity.store === "own" ? (
+                <ItemDescription>
+                  <OnlyYou />
+                </ItemDescription>
+              ) : null}
+            </ItemContent>
+          </Item>
         ))}
       </ItemGroup>
       <ShowMore listing={entities} />
@@ -1377,12 +1420,8 @@ const EntityList = ({
  */
 const shareFor = (
   entity: BrainEntityListed | null | undefined,
-  onShare: (
-    memory: BrainMemoryShown,
-    about: string,
-    opener: HTMLElement
-  ) => void
-): ((memory: BrainMemoryShown, opener: HTMLElement) => void) | undefined => {
+  onShare: (memory: BrainMemoryShown, about: string) => void
+): ((memory: BrainMemoryShown) => void) | undefined => {
   const name = entity?.name ?? null;
   // Named by a shared entity it stands for (a correction made it): a name
   // others said, never shared (core's `publishAs`).
@@ -1396,8 +1435,8 @@ const shareFor = (
   ) {
     return undefined;
   }
-  return (memory, opener) => {
-    onShare(memory, name, opener);
+  return (memory) => {
+    onShare(memory, name);
   };
 };
 
@@ -1414,13 +1453,9 @@ const EntityPanel = ({
   /** The open entity, by its store and id alone. */
   entity: BrainEntityRef;
   onChanged: () => void;
-  onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  onCorrect: (memory: BrainMemoryShown) => void;
   /** Opens the share of `memory`, about what the panel names `about`. */
-  onShare: (
-    memory: BrainMemoryShown,
-    about: string,
-    opener: HTMLElement
-  ) => void;
+  onShare: (memory: BrainMemoryShown, about: string) => void;
 }) => {
   const kindLabel = useKindLabel();
   const opened = keyOf(ref);
@@ -1436,67 +1471,62 @@ const EntityPanel = ({
   const heading = useId();
   const { first, head: entity, items } = memories;
   return (
-    <Card render={<section aria-labelledby={heading} />} size="sm">
-      <CardContent>
+    <Card aria-labelledby={heading} element="section" padding="md">
+      <div {...stylex.props(styles.stack)}>
         {/* Named by its own read, as the person may read it now: one
             they may no longer read is named as one there isn't. One whose
             every memory they may read was forgotten names nothing, and
             its memories still come as history (brain-next's
             `retiredSql`): said so. */}
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-medium" id={heading}>
+        <div {...stylex.props(styles.row)}>
+          <Heading id={heading} level={3} size="ui-sm">
             {entity === null ? (
-              <span className="text-muted-foreground">
+              <Text element="span" size="sm" tone="muted" weight="medium">
                 {items.length > 0 ? (
                   <Trans>Forgotten, kept as history</Trans>
                 ) : (
                   <Trans>Nothing you can read</Trans>
                 )}
-              </span>
+              </Text>
             ) : null}
             {entity === undefined || entity === null ? null : (
               <EntityName entity={entity} />
             )}
-          </h3>
+          </Heading>
           {entity === undefined || entity === null ? null : (
-            <Badge variant="secondary">{kindLabel(entity.kind)}</Badge>
+            <Tag size="sm">{kindLabel(entity.kind)}</Tag>
           )}
-          {ref.store === "own" ? (
-            <Badge variant="outline">
-              <Trans context="a memory nobody else may read">Only you</Trans>
-            </Badge>
-          ) : null}
+          {ref.store === "own" ? <OnlyYou /> : null}
         </div>
         {first !== undefined && first.state !== "ready" ? (
-          <NotLoaded page={first} />
+          <NotLoadedState again={memories.again} heading="h3" page={first} />
         ) : null}
         {first?.state === "ready" && items.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
+          <Text size="sm" tone="muted">
             <Trans>
               You can&apos;t read anything the Brain remembers about this.
             </Trans>
-          </p>
+          </Text>
         ) : null}
         {items.length > 0 ? (
-          <ItemGroup render={<ul />} spacing="tight">
+          <ItemGroup>
             {items.map((memory) => (
-              <li key={memoryKeyOf(memory)}>
-                <MemoryLine
-                  memory={memory}
-                  onChanged={onChanged}
-                  onCorrect={onCorrect}
-                  // Shared only as named here, by the panel's own read: one
-                  // it can't name as the person may read it now, or one
-                  // about a person, never (core's `publishAs`).
-                  onShare={shareFor(entity, onShare)}
-                  read={changes}
-                />
-              </li>
+              <MemoryLine
+                key={memoryKeyOf(memory)}
+                memory={memory}
+                onChanged={onChanged}
+                onCorrect={onCorrect}
+                // Shared only as named here, by the panel's own read: one
+                // it can't name as the person may read it now, or one
+                // about a person, never (core's `publishAs`).
+                onShare={shareFor(entity, onShare)}
+                read={changes}
+              />
             ))}
           </ItemGroup>
         ) : null}
         <ShowMore listing={memories} />
-      </CardContent>
+      </div>
     </Card>
   );
 };
@@ -1549,28 +1579,28 @@ const SharedLine = ({
   read: number;
   onChanged: () => void;
 }) => {
-  const when = formatDateTime(sharedAt);
+  const when = formatDate(sharedAt);
   return (
     <Item size="sm">
       <ItemContent>
         {memory === null ? (
-          <span className="text-muted-foreground text-sm">
+          <Text element="span" size="sm" tone="muted">
             <Trans>You can no longer read this memory.</Trans>
-          </span>
+          </Text>
         ) : (
-          <span className="text-sm whitespace-pre-wrap">
-            {memory.statement}
-          </span>
+          <Text element="span" size="sm">
+            <span {...stylex.props(styles.plain)}>{memory.statement}</span>
+          </Text>
         )}
-        <span className="text-muted-foreground flex flex-wrap gap-2 text-xs">
-          <span>
+        <span {...stylex.props(styles.row)}>
+          <Text element="span" size="xs" tone="muted">
             <AudienceLine audience={audience} teams={teams} />
-          </span>
-          <span>
+          </Text>
+          <Text element="span" size="xs" tone="muted">
             <Trans>Shared {when}</Trans>
-          </span>
+          </Text>
         </span>
-        <span className="flex">
+        <span {...stylex.props(styles.row)}>
           <TakeBackButton
             id={id}
             onTakenBack={onChanged}
@@ -1604,30 +1634,29 @@ const SharedList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoaded page={first} />;
+    return <NotLoadedState again={shared.again} heading="h3" page={first} />;
   }
   if (items.length === 0 && next === null) {
     return (
-      <p className="text-muted-foreground text-sm">
+      <Text size="sm" tone="muted">
         <Trans>You haven&apos;t shared any of your memories.</Trans>
-      </p>
+      </Text>
     );
   }
   return (
-    <div className="flex flex-col gap-3">
-      <ItemGroup render={<ul />} spacing="tight">
+    <div {...stylex.props(styles.stack)}>
+      <ItemGroup>
         {items.map(({ id, audience, sharedAt, memory }) => (
-          <li key={id}>
-            <SharedLine
-              audience={audience}
-              id={id}
-              memory={memory}
-              onChanged={onChanged}
-              read={read}
-              sharedAt={sharedAt}
-              teams={teams}
-            />
-          </li>
+          <SharedLine
+            audience={audience}
+            id={id}
+            key={id}
+            memory={memory}
+            onChanged={onChanged}
+            read={read}
+            sharedAt={sharedAt}
+            teams={teams}
+          />
         ))}
       </ItemGroup>
       <ShowMore listing={shared} />
@@ -1656,10 +1685,9 @@ export const MemoriesPage = ({
   const [correcting, setCorrecting] = useState<{
     memory: BrainMemoryShown;
     opening: string;
-    returnTo: HTMLElement;
   }>();
-  const correct = (memory: BrainMemoryShown, opener: HTMLElement) => {
-    setCorrecting({ memory, opening: crypto.randomUUID(), returnTo: opener });
+  const correct = (memory: BrainMemoryShown) => {
+    setCorrecting({ memory, opening: crypto.randomUUID() });
   };
   // The share being made, apart from the row that opened it: each opening
   // is one share (`ShareDialog`).
@@ -1667,7 +1695,6 @@ export const MemoriesPage = ({
     memory: BrainMemoryShown;
     about: string;
     opening: string;
-    returnTo: HTMLElement;
   }>();
   // Each change the person makes reads everything again, in place, so
   // what they confirmed or corrected shows where it now stands, and an
@@ -1691,35 +1718,26 @@ export const MemoriesPage = ({
   const contestedHeading = useId();
   const sharedHeading = useId();
   const entitiesHeading = useId();
-  const kindId = useId();
   return (
     <OwnEntity value={own}>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
-          <PageHeader>
-            <PageHeaderTitle>
-              <Trans context="the Brain's memories page">Memories</Trans>
-            </PageHeaderTitle>
-            <PageHeaderDescription>
+      {/* A page of the brain: the title in the serif, in the library's page column. */}
+      <div {...stylex.props(styles.pane)}>
+        <PageColumn measure="page">
+          <PageHeader
+            description={
               <Trans>
-                What the Brain remembers that you may read, where each memory
-                came from, and where sources disagree.
+                What the Brain remembers, and where sources disagree.
               </Trans>
-            </PageHeaderDescription>
-          </PageHeader>
-          <p className="text-muted-foreground text-sm">
-            <Trans>
-              Those marked Only you are yours alone: nobody else sees them,
-              admins included.
-            </Trans>
-          </p>
+            }
+            title={<Trans context="the Brain's memories page">Memories</Trans>}
+          />
           <section
             aria-labelledby={contestedHeading}
-            className="flex flex-col gap-3"
+            {...stylex.props(styles.section)}
           >
-            <h2 className="text-sm font-medium" id={contestedHeading}>
+            <Heading id={contestedHeading} level={2} size="ui-sm">
               <Trans>Where sources disagree</Trans>
-            </h2>
+            </Heading>
             <ContestedList
               contested={contested}
               onChanged={changed}
@@ -1733,20 +1751,23 @@ export const MemoriesPage = ({
           </section>
           <section
             aria-labelledby={entitiesHeading}
-            className="flex flex-col gap-3"
+            {...stylex.props(styles.section)}
           >
-            <h2 className="text-sm font-medium" id={entitiesHeading}>
+            <Heading id={entitiesHeading} level={2} size="ui-sm">
               <Trans>What the Brain remembers</Trans>
-            </h2>
-            <div className="flex flex-col gap-1.5">
-              <FieldLabel htmlFor={kindId}>
+            </Heading>
+            <Field layout={styles.start}>
+              <FieldLabel>
                 <Trans>Kind</Trans>
               </FieldLabel>
-              <NativeSelect
-                id={kindId}
-                onChange={(event) => {
+              <Select
+                items={brainEntityKinds.map((each) => ({
+                  value: each,
+                  label: kindLabel(each),
+                }))}
+                onValueChange={(value) => {
                   const picked = brainEntityKinds.find(
-                    (each) => each === event.target.value
+                    (each) => each === value
                   );
                   if (picked !== undefined) {
                     setKind(picked);
@@ -1755,14 +1776,18 @@ export const MemoriesPage = ({
                 }}
                 value={kind}
               >
-                {brainEntityKinds.map((each) => (
-                  <NativeSelectOption key={each} value={each}>
-                    {kindLabel(each)}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+            </Field>
+            <div
+              {...stylex.props(
+                styles.split,
+                opened !== undefined && styles.splitOpen
+              )}
+            >
               <EntityList
                 entities={entities}
                 onPick={(entity) => {
@@ -1777,13 +1802,8 @@ export const MemoriesPage = ({
                   key={keyOf(opened)}
                   onChanged={changed}
                   onCorrect={correct}
-                  onShare={(memory, about, opener) => {
-                    setSharing({
-                      memory,
-                      about,
-                      opening: crypto.randomUUID(),
-                      returnTo: opener,
-                    });
+                  onShare={(memory, about) => {
+                    setSharing({ memory, about, opening: crypto.randomUUID() });
                   }}
                 />
               )}
@@ -1791,11 +1811,11 @@ export const MemoriesPage = ({
           </section>
           <section
             aria-labelledby={sharedHeading}
-            className="flex flex-col gap-3"
+            {...stylex.props(styles.section)}
           >
-            <h2 className="text-sm font-medium" id={sharedHeading}>
+            <Heading id={sharedHeading} level={2} size="ui-sm">
               <Trans>What you shared</Trans>
-            </h2>
+            </Heading>
             <SharedList
               onChanged={changed}
               read={changes}
@@ -1803,7 +1823,7 @@ export const MemoriesPage = ({
               teams={teams}
             />
           </section>
-        </div>
+        </PageColumn>
         {correcting === undefined ? null : (
           <CorrectDialog
             key={correcting.opening}
@@ -1813,7 +1833,6 @@ export const MemoriesPage = ({
             }}
             onCorrected={changed}
             opening={correcting.opening}
-            returnTo={correcting.returnTo}
           />
         )}
         {sharing === undefined ? null : (
@@ -1826,7 +1845,6 @@ export const MemoriesPage = ({
             }}
             onShared={changed}
             opening={sharing.opening}
-            returnTo={sharing.returnTo}
           />
         )}
       </div>

@@ -15,7 +15,7 @@ export interface ModelChoice {
 }
 
 /** The model and effort a question names: no effort for a model that doesn't think. */
-export interface ResolvedChoice {
+interface ResolvedChoice {
   model: string;
   effort: ModelEffort | undefined;
   /** The efforts the model takes, least first; none for one that doesn't think. */

@@ -1,15 +1,25 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type { Gap } from "@grasp-os/shared/brain";
 import { brainGapTextMaxLength } from "@grasp-os/shared/brain-records";
 import { failureText } from "@grasp-os/shared/errors";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 
 // The brain's open questions in the brain's chat (GRA-531, GRA-936), as
@@ -24,8 +34,25 @@ import { useCore } from "../use-core.ts";
 // core is what refuses. An answer is the person's own act here: the
 // chat's agent only reads the questions, never answers them.
 
+const styles = stylex.create({
+  // Between the thread and the box, its own scroll.
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    maxHeight: "12rem",
+    overflowY: "auto",
+    paddingInline: grasp.space4,
+    paddingBlock: grasp.space2,
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  writing: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  row: { display: "flex", flexWrap: "wrap", gap: grasp.space1 },
+});
 /** The questions nobody has answered or closed yet, in the order the brain keeps them. */
-export const openGaps = (gaps: Gap[]): Gap[] =>
+const openGaps = (gaps: Gap[]): Gap[] =>
   gaps.filter(({ closedAt }) => closedAt === undefined);
 
 /** A question, and what can be done about it. */
@@ -58,90 +85,91 @@ const Question = ({
     }
   };
   return (
-    <li className="flex flex-col gap-1.5 py-2">
-      <p>{gap.question}</p>
-      <p className="text-muted-foreground text-xs">
-        {asked ? (
-          <Trans>For {gap.owner}, who was asked</Trans>
-        ) : (
-          <Trans>For {gap.owner}</Trans>
-        )}
-      </p>
-      {writing ? (
-        <div className="flex flex-col gap-1.5">
-          <Textarea
-            aria-label={t`Your answer`}
-            disabled={busy}
-            maxLength={brainGapTextMaxLength}
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-            rows={3}
-            value={draft}
-          />
-          <div className="flex gap-1.5">
-            <Button
-              disabled={busy || draft.trim() === ""}
-              onClick={() => {
-                void send();
-              }}
-              size="xs"
-            >
-              <Trans>Send answer</Trans>
-            </Button>
-            <Button
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>{gap.question}</ItemTitle>
+        <ItemDescription>
+          {asked ? (
+            <Trans>For {gap.owner}, who was asked</Trans>
+          ) : (
+            <Trans>For {gap.owner}</Trans>
+          )}
+        </ItemDescription>
+        {writing ? (
+          <div {...stylex.props(styles.writing)}>
+            <Textarea
+              aria-label={t`Your answer`}
               disabled={busy}
-              onClick={() => {
-                setWriting(false);
-              }}
-              size="xs"
-              variant="ghost"
-            >
-              <Trans>Cancel</Trans>
-            </Button>
+              maxLength={brainGapTextMaxLength}
+              onValueChange={setDraft}
+              rows={3}
+              value={draft}
+            />
+            <div {...stylex.props(styles.row)}>
+              <Button
+                disabled={busy || draft.trim() === ""}
+                onClick={() => {
+                  void send();
+                }}
+                size="xs"
+                variant="ink"
+              >
+                <Trans>Send answer</Trans>
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setWriting(false);
+                }}
+                size="xs"
+                variant="ghost"
+              >
+                <Trans>Cancel</Trans>
+              </Button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex gap-1.5">
-          {canAnswer ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                setWriting(true);
-              }}
-              size="xs"
-              variant="outline"
-            >
-              <Trans>Answer</Trans>
-            </Button>
-          ) : null}
-          {canAsk && !asked ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void onAsk();
-              }}
-              size="xs"
-              variant="outline"
-            >
-              <Trans>Ask {gap.owner}</Trans>
-            </Button>
-          ) : null}
-          {canAsk ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void onClose();
-              }}
-              size="xs"
-              variant="ghost"
-            >
-              <Trans>Close without an answer</Trans>
-            </Button>
-          ) : null}
-        </div>
-      )}
-    </li>
+        ) : (
+          <div {...stylex.props(styles.row)}>
+            {canAnswer ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setWriting(true);
+                }}
+                size="xs"
+                variant="quiet"
+              >
+                <Trans>Answer</Trans>
+              </Button>
+            ) : null}
+            {canAsk && !asked ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void onAsk();
+                }}
+                size="xs"
+                variant="quiet"
+              >
+                <Trans>Ask {gap.owner}</Trans>
+              </Button>
+            ) : null}
+            {canAsk ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void onClose();
+                }}
+                size="xs"
+                variant="ghost"
+              >
+                <Trans>Close without an answer</Trans>
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -184,14 +212,11 @@ export const BrainQuestions = ({
     return true;
   };
   return (
-    <section
-      aria-label={t`Open questions`}
-      className="flex max-h-48 flex-none flex-col overflow-y-auto border-t px-4 py-2"
-    >
-      <h3 className="text-muted-foreground text-xs font-medium">
+    <section aria-label={t`Open questions`} {...stylex.props(styles.section)}>
+      <Heading level={3} size="ui-sm">
         <Trans>Open questions</Trans>
-      </h3>
-      <ul className="divide-y">
+      </Heading>
+      <ItemGroup separated>
         {open.map((gap) => (
           <Question
             busy={busy}
@@ -216,7 +241,7 @@ export const BrainQuestions = ({
             }}
           />
         ))}
-      </ul>
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
     </section>
   );

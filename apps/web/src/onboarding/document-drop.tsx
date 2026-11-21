@@ -1,3 +1,9 @@
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { DragEvent, KeyboardEvent } from "react";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -5,28 +11,288 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "../grasp/alert-dialog/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import {
-  ArrowUpIcon,
-  CircleAlertIcon,
-  FileIcon,
-  FileSpreadsheetIcon,
-  FileTextIcon,
-  PresentationIcon,
-  XIcon,
-} from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { DragEvent, KeyboardEvent } from "react";
-
+  Alert,
+  ArrowUp,
+  Cross,
+  Doc,
+  File,
+  Icon,
+  Spreadsheet,
+} from "../grasp/icons/index.ts";
+import { Progress } from "../grasp/progress/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { extensionOf, filesToRead, readable } from "./document-files.ts";
-import { useEntrance } from "./setup-parts.tsx";
+import { comeIn, motion } from "./motion.ts";
+import { useArrives } from "./setup-parts.tsx";
+
+// While it waits for a file over it, the target breathes, slowly: the one long loop here.
+const breathe = stylex.keyframes({
+  "0%, 100%": { transform: "scale(1)" },
+  "50%": { transform: "scale(1.012)" },
+});
+
+// A file it can't read shakes it, settling as it goes.
+const shake = stylex.keyframes({
+  "0%, 100%": { transform: "translateX(0)" },
+  "16%": { transform: "translateX(-7px)" },
+  "33%": { transform: "translateX(6px)" },
+  "50%": { transform: "translateX(-4px)" },
+  "66%": { transform: "translateX(3px)" },
+  "83%": { transform: "translateX(-1.5px)" },
+});
+
+// A document read: the circle closes, then the tick draws through it.
+const draw = stylex.keyframes({ to: { strokeDashoffset: 0 } });
+
+// A document comes into the list from above.
+const dropIn = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(-1rem)" },
+  to: { opacity: 1, transform: "none" },
+});
+
+/** A share of the ink, for the lines and light that follow a file over the target. */
+const inkAt = (share: string): string =>
+  `color-mix(in oklch, ${grasp.ink} ${share}, transparent)`;
+
+const styles = stylex.create({
+  whole: { position: "relative", display: "grid", width: "100%", minWidth: 0 },
+  zone: {
+    position: "relative",
+    display: "grid",
+    minWidth: 0,
+    borderRadius: grasp.corner,
+    backgroundColor: {
+      default: grasp.raised,
+      ":hover": grasp.ghostFillHover,
+      ":active": grasp.ghostFillHover,
+    },
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  dragging: {
+    backgroundColor: grasp.ghostFillHover,
+    animationName: { default: breathe, [media.reduced]: "none" },
+    animationDuration: "2.2s",
+    animationTimingFunction: grasp.easeInOut,
+    animationIterationCount: "infinite",
+  },
+  shaking: {
+    animationName: { default: shake, [media.reduced]: "none" },
+    animationDuration: grasp.durationOpen,
+    animationTimingFunction: grasp.ease,
+  },
+  // Over the target, never in the pointer's way: shown while a file is over it.
+  layer: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: grasp.corner,
+    pointerEvents: "none",
+    opacity: 0,
+    transitionProperty: "opacity",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  shown: { opacity: 1 },
+  // A faint wash where the file is.
+  wash: {
+    backgroundImage: `radial-gradient(260px circle at 50% 50%, ${inkAt("5%")}, transparent 70%)`,
+  },
+  // A brighter stretch of the edge: only the ring between the padding and the edge shows.
+  glow: {
+    padding: "1.5px",
+    backgroundImage: `radial-gradient(180px circle at 50% 50%, ${inkAt("45%")}, transparent 70%)`,
+    maskImage:
+      "linear-gradient(currentColor 0 0), linear-gradient(currentColor 0 0)",
+    maskClip: "content-box, border-box",
+    maskComposite: "exclude",
+  },
+  edgeBox: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    overflow: "visible",
+    pointerEvents: "none",
+  },
+  // Drawn in dashes that close into one line under a file.
+  edge: {
+    stroke: grasp.line,
+    strokeDasharray: "3.5 3.5",
+    strokeDashoffset: 0,
+    transitionProperty: "stroke-dasharray, stroke-dashoffset, stroke",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  edgeHover: { stroke: grasp.muted },
+  edgeClosed: {
+    stroke: inkAt("40%"),
+    strokeDasharray: "7 0",
+    strokeDashoffset: 1.75,
+  },
+  // The whole target is one place to click or drop: what is in it ignores the pointer.
+  trigger: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    justifyContent: "center",
+    width: "100%",
+    margin: 0,
+    paddingInline: grasp.space5,
+    paddingBlockStart: grasp.space6,
+    paddingBlockEnd: grasp.space6,
+    borderWidth: 0,
+    borderRadius: grasp.corner,
+    backgroundColor: "transparent",
+    color: "inherit",
+    font: "inherit",
+    textAlign: "center",
+    cursor: "pointer",
+    outline: "none",
+    transitionProperty: "padding",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  triggerCompact: { paddingBlock: grasp.space4 },
+  inert: { pointerEvents: "none" },
+  sheetsBox: { display: "flex", flexDirection: "column", overflow: "hidden" },
+  prompt: {
+    position: "relative",
+    display: "block",
+    fontWeight: grasp.weightMedium,
+  },
+  promptWords: {
+    display: "inline-block",
+    maxWidth: "100%",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    verticalAlign: "top",
+  },
+  or: { marginBlockStart: grasp.space1, color: grasp.muted },
+  kinds: {
+    paddingBlockStart: grasp.space2,
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+  },
+  file: { display: "none" },
+  error: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+    margin: 0,
+    paddingBlockStart: grasp.space3,
+    color: grasp.attention,
+    textAlign: "start",
+    [iconVars.size]: "0.875rem",
+  },
+  errorMark: { display: "flex", paddingBlockStart: "0.1875rem" },
+  errorWords: { flexGrow: 1, minWidth: 0 },
+  // Rows keep their own height: four and a bit, fewer where the window is low, so the step still fits on screen.
+  list: {
+    display: "grid",
+    gridAutoRows: "max-content",
+    minWidth: 0,
+    maxHeight: "max(9rem, min(17.5rem, 100svh - 36rem))",
+    margin: 0,
+    padding: 0,
+    overflow: "auto",
+    listStyle: "none",
+    textAlign: "start",
+  },
+  listFilled: { paddingBlockStart: grasp.space1 },
+  row: { minWidth: 0, overflow: "hidden" },
+  rowArrives: {
+    animationName: { default: dropIn, [media.reduced]: "none" },
+    animationDuration: grasp.durationOpen,
+    animationTimingFunction: grasp.ease,
+    animationFillMode: "both",
+  },
+  // Its icon, its name and state, its button.
+  card: {
+    display: "grid",
+    gridTemplateColumns: "2.5rem minmax(0, 1fr) auto",
+    alignItems: "center",
+    columnGap: grasp.space3,
+    minHeight: "3.5rem",
+    marginBlockStart: grasp.space2,
+    paddingBlock: grasp.space2,
+    paddingInlineStart: grasp.space2,
+    paddingInlineEnd: grasp.space2,
+    borderRadius: grasp.corner,
+    backgroundColor: grasp.raised,
+    boxShadow: grasp.edge,
+  },
+  kind: {
+    display: "grid",
+    placeItems: "center",
+    width: "2.5rem",
+    height: "2.5rem",
+    color: grasp.muted,
+    [iconVars.size]: "1.25rem",
+  },
+  words: { display: "grid", minWidth: 0 },
+  name: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    fontWeight: grasp.weightMedium,
+  },
+  about: {
+    display: "flex",
+    alignItems: "center",
+    minWidth: 0,
+    marginBlockStart: "1px",
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    whiteSpace: "nowrap",
+    fontVariantNumeric: "tabular-nums",
+  },
+  dot: { paddingInline: grasp.space2 },
+  state: {
+    position: "relative",
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "center",
+    gap: grasp.space1,
+    minWidth: 0,
+    [iconVars.size]: "0.875rem",
+  },
+  failedMark: { display: "flex", flexShrink: 0, color: grasp.attention },
+  cut: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  numbers: { fontVariantNumeric: "tabular-nums" },
+  bar: {
+    display: "block",
+    marginBlockStart: grasp.space2,
+    marginBlockEnd: "2px",
+  },
+  // The room a row's button takes, kept while it has none.
+  noAction: { width: grasp.controlSm, height: grasp.controlSm },
+  check: {
+    flexShrink: 0,
+    width: "0.875rem",
+    height: "0.875rem",
+    color: grasp.success,
+  },
+  drawing: {
+    strokeDasharray: 1,
+    strokeDashoffset: { default: 1, [media.reduced]: 0 },
+    animationName: { default: draw, [media.reduced]: "none" },
+    animationDuration: grasp.durationOpen,
+    animationTimingFunction: grasp.ease,
+    animationFillMode: "forwards",
+  },
+  late: { animationDelay: grasp.durationStagger },
+});
 
 // Where documents are dropped in the onboarding (prototype
 // `components/onboarding/document-drop.tsx`), modelled on uiarc's file
@@ -90,32 +356,76 @@ const onListKey = (event: KeyboardEvent<HTMLUListElement>): void => {
   }
 };
 
-const sheetClass =
-  "bg-card text-muted-foreground absolute inset-0 grid origin-bottom place-items-end justify-center rounded-md border pb-1.5 shadow-xs transition-transform duration-400 ease-out";
+const sheetStyles = stylex.create({
+  // The three sheets' room, the target's one picture.
+  sheets: {
+    position: "relative",
+    display: "block",
+    width: "2.25rem",
+    height: "2.75rem",
+    marginInline: "auto",
+    marginBlockStart: "0.625rem",
+    marginBlockEnd: "0.875rem",
+  },
+  sheet: {
+    position: "absolute",
+    inset: 0,
+    display: "grid",
+    placeItems: "end center",
+    paddingBlockEnd: "0.375rem",
+    borderRadius: grasp.cornerMark,
+    backgroundColor: grasp.raised,
+    boxShadow: grasp.liftLow,
+    color: grasp.muted,
+    transformOrigin: "bottom",
+    transitionProperty: "transform",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+    [iconVars.size]: "0.875rem",
+  },
+  frontDrag: { color: grasp.ink },
+  line: {
+    position: "absolute",
+    insetInlineStart: "0.4375rem",
+    height: "0.125rem",
+    borderRadius: grasp.cornerPill,
+    backgroundColor: "currentColor",
+    opacity: 0.3,
+  },
+  lineLong: { insetBlockStart: "0.5rem", width: "1rem" },
+  lineShort: { insetBlockStart: "0.8125rem", width: "0.6875rem" },
+  arrow: {
+    display: "flex",
+    transitionProperty: "transform",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  arrowDrag: { transform: "translateY(-0.1875rem)" },
+});
 
 /** The fan of each pose: how far the back sheets turn and move out, and how far the front one lifts. */
-const fan = {
-  rest: {
-    left: "-translate-x-2.25 translate-y-0.5 -rotate-10",
-    right: "translate-x-2.25 translate-y-0.5 rotate-10",
-    front: "",
-  },
-  hover: {
-    left: "-translate-x-3.25 translate-y-0.5 -rotate-15",
-    right: "translate-x-3.25 translate-y-0.5 rotate-15",
-    front: "-translate-y-0.5",
-  },
-  drag: {
-    left: "-translate-x-5 -translate-y-0.5 -rotate-22",
-    right: "translate-x-5 -translate-y-0.5 rotate-22",
-    front: "-translate-y-2",
-  },
+const fan = stylex.create({
+  restLeft: { transform: "translate(-0.5625rem, 0.125rem) rotate(-10deg)" },
+  restRight: { transform: "translate(0.5625rem, 0.125rem) rotate(10deg)" },
+  restFront: { transform: "none" },
+  hoverLeft: { transform: "translate(-0.8125rem, 0.125rem) rotate(-15deg)" },
+  hoverRight: { transform: "translate(0.8125rem, 0.125rem) rotate(15deg)" },
+  hoverFront: { transform: "translateY(-0.125rem)" },
+  dragLeft: { transform: "translate(-1.25rem, -0.125rem) rotate(-22deg)" },
+  dragRight: { transform: "translate(1.25rem, -0.125rem) rotate(22deg)" },
+  dragFront: { transform: "translateY(-0.5rem)" },
+});
+
+const fans = {
+  rest: { left: fan.restLeft, right: fan.restRight, front: fan.restFront },
+  hover: { left: fan.hoverLeft, right: fan.hoverRight, front: fan.hoverFront },
+  drag: { left: fan.dragLeft, right: fan.dragRight, front: fan.dragFront },
 } as const;
 
 const SheetLines = () => (
   <>
-    <span className="absolute top-2 left-1.75 h-0.5 w-4 rounded-full bg-current opacity-30" />
-    <span className="absolute top-3.25 left-1.75 h-0.5 w-2.75 rounded-full bg-current opacity-30" />
+    <span {...stylex.props(sheetStyles.line, sheetStyles.lineLong)} />
+    <span {...stylex.props(sheetStyles.line, sheetStyles.lineShort)} />
   </>
 );
 
@@ -125,31 +435,28 @@ const SheetLines = () => (
  * arrow rising with it.
  */
 const Sheets = ({ pose }: { pose: "rest" | "hover" | "drag" }) => (
-  <span
-    aria-hidden="true"
-    className="relative mx-auto mt-2.5 mb-3.5 block h-11 w-9"
-  >
-    <span className={cn(sheetClass, fan[pose].left)}>
+  <span aria-hidden="true" {...stylex.props(sheetStyles.sheets)}>
+    <span {...stylex.props(sheetStyles.sheet, fans[pose].left)}>
       <SheetLines />
     </span>
-    <span className={cn(sheetClass, fan[pose].right)}>
+    <span {...stylex.props(sheetStyles.sheet, fans[pose].right)}>
       <SheetLines />
     </span>
     <span
-      className={cn(
-        sheetClass,
-        fan[pose].front,
-        pose === "drag" && "border-muted-foreground/40 text-foreground"
+      {...stylex.props(
+        sheetStyles.sheet,
+        fans[pose].front,
+        pose === "drag" && sheetStyles.frontDrag
       )}
     >
       <SheetLines />
       <span
-        className={cn(
-          "transition-transform duration-400",
-          pose === "drag" && "-translate-y-0.75"
+        {...stylex.props(
+          sheetStyles.arrow,
+          pose === "drag" && sheetStyles.arrowDrag
         )}
       >
-        <ArrowUpIcon className="size-3.5" strokeWidth={2} />
+        <Icon icon={ArrowUp} />
       </span>
     </span>
   </span>
@@ -158,44 +465,37 @@ const Sheets = ({ pose }: { pose: "rest" | "hover" | "drag" }) => (
 /** The icon for a document, by what kind of file it is. */
 const TypeIcon = ({ name }: { name: string }) => {
   const extension = extensionOf(name);
-  const props = {
-    className: "size-5",
-    strokeWidth: 1.75,
-    "aria-hidden": true,
-  } as const;
   if (["xls", "xlsx", "csv"].includes(extension)) {
-    return <FileSpreadsheetIcon {...props} />;
-  }
-  if (["ppt", "pptx"].includes(extension)) {
-    return <PresentationIcon {...props} />;
+    return <Icon icon={Spreadsheet} />;
   }
   if (["pdf", "doc", "docx", "txt", "md"].includes(extension)) {
-    return <FileTextIcon {...props} />;
+    return <Icon icon={Doc} />;
   }
-  return <FileIcon {...props} />;
+  return <Icon icon={File} />;
 };
 
 /** The circle closes, then the tick draws through it; or, `drawn` already, it is there. */
 const DrawnCheck = ({ drawn }: { drawn: boolean }) => (
   <svg
     aria-hidden="true"
-    className="text-status-agreed size-3.5 flex-none"
+    data-arrives={drawn ? undefined : ""}
     fill="none"
     stroke="currentColor"
     strokeLinecap="round"
     strokeLinejoin="round"
     strokeWidth={2.25}
     viewBox="0 0 24 24"
+    {...stylex.props(styles.check)}
   >
     <path
-      className={drawn ? undefined : "drawn-check"}
       d="M12 2.5a9.5 9.5 0 1 1 0 19a9.5 9.5 0 1 1 0-19"
       pathLength={1}
+      {...stylex.props(!drawn && styles.drawing)}
     />
     <path
-      className={drawn ? undefined : "drawn-check drawn-check-late"}
       d="m8.2 12.4 2.6 2.6 5-5.2"
       pathLength={1}
+      {...stylex.props(!drawn && styles.drawing, !drawn && styles.late)}
     />
   </svg>
 );
@@ -241,36 +541,30 @@ const RemoveRead = ({
         aria-label={t`Remove ${file}`}
         data-remove
         disabled={removing}
+        icon={Cross}
         onClick={() => {
           setOpen(true);
         }}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        <XIcon />
-      </Button>
+      />
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone.`}
+          </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
+            <AlertDialogCancel />
             <AlertDialogAction
-              onClick={() => {
-                setOpen(false);
+              action={() => {
                 setRemoving(true);
                 void (async () => {
                   await onRemove();
                   setRemoving(false);
                 })();
               }}
-              variant="destructive"
+              variant="danger"
             >
               {t`Remove`}
             </AlertDialogAction>
@@ -297,11 +591,8 @@ const Row = ({
   const file = row.name;
   const percent = useReading(row);
   // Read before, as the step opens again: in the list, read, at once.
-  const rowEntrance = useEntrance(
-    "row",
-    "animate-in fade-in slide-in-from-top-4 duration-400"
-  );
-  const stateEntrance = useEntrance(row.state, "animate-in fade-in");
+  const rowArrives = useArrives("row");
+  const stateArrives = useArrives(row.state);
   let size: string | null = null;
   if (row.size !== null) {
     size =
@@ -319,8 +610,8 @@ const Row = ({
   }
   let status = (
     <>
-      <DrawnCheck drawn={stateEntrance === ""} />
-      <span className="truncate" title={row.about}>
+      <DrawnCheck drawn={!stateArrives} />
+      <span title={row.about} {...stylex.props(styles.cut)}>
         {row.about ??
           t({ message: "Read", context: "a document, done reading" })}
       </span>
@@ -329,72 +620,72 @@ const Row = ({
   if (row.state === "reading") {
     status = (
       <span>
-        {t`Reading`} <span className="tabular-nums">{percent}%</span>
+        {t`Reading`} <span {...stylex.props(styles.numbers)}>{percent}%</span>
       </span>
     );
   } else if (row.state === "failed") {
     status = (
       <>
-        <CircleAlertIcon
-          aria-hidden="true"
-          className="text-status-attention size-3.5 flex-none"
-        />
-        <span className="truncate">{row.problem}</span>
+        <span {...stylex.props(styles.failedMark)}>
+          <Icon icon={Alert} />
+        </span>
+        <span {...stylex.props(styles.cut)}>{row.problem}</span>
       </>
     );
   }
   // A failed row goes at once; a read one, once confirmed.
-  let action = <span aria-hidden="true" className="size-8" />;
+  let action = <span aria-hidden="true" {...stylex.props(styles.noAction)} />;
   if (row.state === "failed") {
     action = (
       <Button
         aria-label={t`Remove ${file}`}
         data-remove
+        icon={Cross}
         onClick={() => {
           void onRemove();
         }}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        <XIcon />
-      </Button>
+      />
     );
   } else if (row.state === "read") {
     action = <RemoveRead file={file} onRemove={onRemove} />;
   }
   return (
-    <li className={cn("min-w-0 overflow-hidden", rowEntrance)}>
-      <div className="bg-card document-row mt-2 grid min-h-14 items-center gap-x-3 rounded-lg border py-2 pr-2 pl-2.25">
-        <span className="text-muted-foreground grid size-10 place-items-center">
+    <li {...comeIn(rowArrives, styles.rowArrives, styles.row)}>
+      <div {...stylex.props(styles.card)}>
+        <span {...stylex.props(styles.kind)}>
           <TypeIcon name={row.name} />
         </span>
-        <span className="grid min-w-0">
-          <span className="truncate font-medium" title={row.name}>
+        <span {...stylex.props(styles.words)}>
+          <span title={row.name} {...stylex.props(styles.name)}>
             {row.name}
           </span>
-          <span className="text-muted-foreground mt-px flex min-w-0 items-center text-xs whitespace-nowrap tabular-nums">
+          <span {...stylex.props(styles.about)}>
             {size === null ? null : (
               <>
                 <span>{size}</span>
-                <span aria-hidden="true" className="px-1.5">
+                <span aria-hidden="true" {...stylex.props(styles.dot)}>
                   ·
                 </span>
               </>
             )}
             <span
-              className={cn(
-                "relative flex min-w-0 flex-1 items-center gap-1.25",
-                stateEntrance
-              )}
               key={row.state}
+              {...comeIn(stateArrives, motion.fade, styles.state)}
             >
               {status}
             </span>
           </span>
           {/* The bar opens with the reading, fills, then folds away once it is read. */}
           {row.state === "reading" ? (
-            <span aria-hidden="true" className="mt-1.75 mb-0.5 block">
-              <Progress value={percent} />
+            <span aria-hidden="true" {...stylex.props(styles.bar)}>
+              <Progress
+                label={row.name}
+                showLabel={false}
+                size="sm"
+                value={percent}
+              />
             </span>
           ) : null}
         </span>
@@ -470,7 +761,7 @@ export const DocumentDrop = ({
     for (const animation of zone.current?.getAnimations() ?? []) {
       if (
         animation instanceof CSSAnimation &&
-        animation.animationName === "drop-shake"
+        animation.animationName === shake
       ) {
         animation.currentTime = 0;
         animation.play();
@@ -560,15 +851,12 @@ export const DocumentDrop = ({
     prompt = t`Let go to add them`;
   }
   const sheets = !compact || dragging;
-  const sheetsEntrance = useEntrance(String(sheets), "animate-in fade-in");
-  const promptEntrance = useEntrance(
-    prompt,
-    "animate-in fade-in slide-in-from-bottom-1 duration-300"
-  );
+  const sheetsArrive = useArrives(String(sheets));
+  const promptArrives = useArrives(prompt);
 
   return (
     <div
-      className="relative grid w-full min-w-0"
+      {...stylex.props(styles.whole)}
       onBlur={(event) => {
         if (
           !(
@@ -584,10 +872,11 @@ export const DocumentDrop = ({
       }}
     >
       <div
-        className={cn(
-          "group bg-card hover:bg-muted/50 active:bg-muted/50 has-focus-visible:ring-ring/50 relative grid min-w-0 rounded-2xl transition-colors duration-300 has-focus-visible:ring-3",
-          dragging && "drop-breathe bg-muted/30",
-          shaking > 0 && "drop-shake"
+        {...stylex.props(
+          styles.zone,
+          focus.within,
+          dragging && styles.dragging,
+          shaking > 0 && styles.shaking
         )}
         onDragEnter={(event) => {
           if (!carries(event)) {
@@ -631,70 +920,63 @@ export const DocumentDrop = ({
       >
         <span
           aria-hidden="true"
-          className={cn(
-            "drop-wash pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300",
-            dragging && "opacity-100"
-          )}
+          {...stylex.props(styles.layer, styles.wash, dragging && styles.shown)}
         />
         {/* Drawn rather than bordered, so a file over it can close the dashes into one line. */}
-        <svg
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 size-full overflow-visible"
-        >
+        <svg aria-hidden="true" {...stylex.props(styles.edgeBox)}>
           <rect
-            className={cn(
-              "drop-edge transition-colors duration-150",
-              dragging
-                ? "drop-edge-closed stroke-foreground/40"
-                : "stroke-border group-hover:stroke-muted-foreground"
-            )}
             fill="none"
             ref={edge}
             x={0.5}
             y={0.5}
+            {...stylex.props(
+              styles.edge,
+              hovered && styles.edgeHover,
+              dragging && styles.edgeClosed
+            )}
           />
         </svg>
         <span
           aria-hidden="true"
-          className={cn(
-            "drop-glow pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300",
-            dragging && "opacity-100"
-          )}
+          {...stylex.props(styles.layer, styles.glow, dragging && styles.shown)}
         />
         {/* Its parts ignore the pointer, so the whole target is one place to click or drop. */}
         <button
-          className={cn(
-            "flex w-full cursor-pointer flex-col items-stretch justify-center rounded-2xl px-5 text-center transition-all duration-300 outline-none *:pointer-events-none",
-            compact ? "py-3.5" : "pt-5.5 pb-6.5"
-          )}
           onClick={() => {
             input.current?.click();
           }}
           ref={trigger}
           type="button"
+          {...stylex.props(styles.trigger, compact && styles.triggerCompact)}
         >
           {sheets ? (
             <span
-              className={cn("flex flex-col overflow-hidden", sheetsEntrance)}
+              {...comeIn(
+                sheetsArrive,
+                motion.fade,
+                styles.sheetsBox,
+                styles.inert
+              )}
             >
               <Sheets pose={pose} />
             </span>
           ) : null}
-          <span className="relative block font-medium">
+          <span {...stylex.props(styles.prompt, styles.inert)}>
             <span
-              className={cn(
-                "inline-block max-w-full truncate align-top",
-                promptEntrance
-              )}
               key={prompt}
+              {...comeIn(promptArrives, motion.rise, styles.promptWords)}
             >
               {prompt}
             </span>
           </span>
-          <span className="text-muted-foreground mt-1">{t`or choose them from your computer`}</span>
+          <span {...stylex.props(styles.or, styles.inert)}>
+            {t`or choose them from your computer`}
+          </span>
           {compact ? null : (
-            <span className="flex flex-col overflow-hidden">
-              <span className="text-muted-foreground pt-1.5 text-xs">{t`PDF, Word, Excel, PowerPoint or text`}</span>
+            <span {...stylex.props(styles.sheetsBox, styles.inert)}>
+              <span {...stylex.props(styles.kinds)}>
+                {t`PDF, Word, Excel, PowerPoint or text`}
+              </span>
             </span>
           )}
         </button>
@@ -702,8 +984,8 @@ export const DocumentDrop = ({
       <input
         accept={readable.map((extension) => `.${extension}`).join(",")}
         aria-hidden="true"
-        className="hidden"
         multiple
+        {...stylex.props(styles.file)}
         onChange={(event) => {
           if (event.target.files !== null) {
             add(event.target.files);
@@ -715,16 +997,11 @@ export const DocumentDrop = ({
         type="file"
       />
       {error === "" ? null : (
-        <p
-          className="text-status-attention animate-in fade-in slide-in-from-bottom-1 flex items-start gap-1.5 pt-3 text-left"
-          role="alert"
-        >
-          <CircleAlertIcon
-            aria-hidden="true"
-            className="mt-0.75 size-3.5 flex-none"
-            strokeWidth={2.25}
-          />
-          <span className="min-w-0 flex-1">{error}</span>
+        <p role="alert" {...comeIn(true, motion.rise, styles.error)}>
+          <span {...stylex.props(styles.errorMark)}>
+            <Icon icon={Alert} />
+          </span>
+          <span {...stylex.props(styles.errorWords)}>{error}</span>
         </p>
       )}
       {/* Rows keep their own height and the list scrolls past four and a bit, or fewer where the window is low, rather than squeezing them or the page scrolling. */}
@@ -733,11 +1010,8 @@ export const DocumentDrop = ({
       <ul
         aria-hidden={rows.length > 0 ? undefined : true}
         aria-label={t`Documents`}
-        className={cn(
-          "setup-document-list grid min-w-0 auto-rows-max overflow-auto text-left transition-all",
-          rows.length > 0 && "pt-1"
-        )}
         onKeyDown={onListKey}
+        {...stylex.props(styles.list, rows.length > 0 && styles.listFilled)}
       >
         {rows.map((row) => (
           <Row
@@ -749,7 +1023,7 @@ export const DocumentDrop = ({
           />
         ))}
       </ul>
-      <output aria-live="polite" className="sr-only">
+      <output aria-live="polite" {...stylex.props(visuallyHidden)}>
         {announcement}
       </output>
     </div>

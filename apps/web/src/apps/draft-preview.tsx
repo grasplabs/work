@@ -1,9 +1,27 @@
 import type { Draft } from "@grasp-os/shared/drafts";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PreviewFrame } from "../pages/page-frame.tsx";
 import type { FrameFix, PageEnded } from "../pages/page-frame.tsx";
 import type { ReadOnlyShown } from "./app-workspace.tsx";
+import { previewWidths } from "./preview-controls.tsx";
+import type { PreviewWidth } from "./preview-controls.tsx";
+
+const styles = stylex.create({
+  // The page's own ground, filling what is left of the workspace.
+  preview: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    backgroundColor: grasp.paper,
+    width: "100%",
+    marginInline: "auto",
+  },
+});
 
 // The App being built, in its workspace (app-workspace.tsx): the compiled
 // pages of the App's draft, as a preview, on the test data its builders
@@ -22,6 +40,8 @@ import type { ReadOnlyShown } from "./app-workspace.tsx";
  */
 export const DraftPreview = ({
   app,
+  at,
+  width,
   draft,
   name,
   shown,
@@ -31,6 +51,10 @@ export const DraftPreview = ({
   onFix,
 }: {
   app: string;
+  /** The page it shows; its first while none was picked. */
+  at?: string | undefined;
+  /** How wide it is drawn. */
+  width?: PreviewWidth;
   /** The App's draft; none until it is read. */
   draft: Draft | undefined;
   name: string;
@@ -52,10 +76,11 @@ export const DraftPreview = ({
   return (
     <section
       aria-label={t`${name}, your version`}
-      className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden"
+      {...stylex.props(styles.preview, previewWidths[width ?? "desktop"])}
     >
       <PreviewFrame
         app={app}
+        at={at}
         key={`${app}:${point ?? ""}:${version ?? ""}`}
         point={point}
         version={version}

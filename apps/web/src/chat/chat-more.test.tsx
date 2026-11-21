@@ -1,28 +1,29 @@
 // @vitest-environment happy-dom
-
-import { Toaster } from "@grasp-os/app-kit/components/toast";
 import type { ChatSummary, ChatUpdate } from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
   RouterProvider,
-  useSearch,
+  useParams,
 } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { Toaster } from "../grasp/toast/index.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
-import { ChatTitleMenu } from "./chat-more.tsx";
+import { chatLink } from "./chat-link.ts";
+import { ChatMoreMenu, ChatPanelTitle } from "./chat-more.tsx";
 
-// The open chat's title and its menu at the head of the chat, against
+// The open chat's name and its menu at the head of the chat, against
 // core's chats as the page reaches them over RPC, faked: it copies the chat
-// as the thread shows it, renames it where it stands, and deletes it only
-// once the person confirms, leaving it for a new chat.
+// as the thread shows it, renames it where its name stands (a double-click),
+// and deletes it only once the person confirms, leaving it for a new chat.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -122,23 +123,31 @@ const opened = async (
   };
   const all = [chat, ...others];
   const Shown = () => {
-    const { chat: open } = useSearch({ strict: false });
+    const { chatId: open } = useParams({ strict: false });
     const shown = all.find(({ id }) => id === open) ?? chat;
     return (
-      <Toaster>
-        {/* Its own for each chat, as the chat's head keys it. */}
-        <ChatTitleMenu chat={shown} key={shown.id} sourceNames={new Map()} />
-      </Toaster>
+      <>
+        {/* Its own for each chat, as the chat's head keys them. */}
+        <ChatPanelTitle chat={shown} key={`title-${shown.id}`} />
+        <ChatMoreMenu
+          chat={shown}
+          key={`menu-${shown.id}`}
+          sourceNames={new Map()}
+        />
+        <Toaster />
+      </>
     );
   };
-  const rootRoute = createRootRoute({
+  // Each chat at its own page, as in the app (chat-link.ts).
+  const rootRoute = createRootRoute();
+  const chatRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/chats/$chatId",
     component: Shown,
-    validateSearch: (search: Record<string, unknown>): { chat?: string } =>
-      typeof search.chat === "string" ? { chat: search.chat } : {},
   });
   const router = createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: [`/?chat=${chat.id}`] }),
+    routeTree: rootRoute.addChildren([chatRoute]),
+    history: createMemoryHistory({ initialEntries: [`/chats/${chat.id}`] }),
     context: { core },
   });
   const host = document.createElement("div");
@@ -201,10 +210,10 @@ const choose = async (name: string, under?: string): Promise<void> => {
   await press(byRole("menuitem", name));
 };
 
-/** The chat's title, a click away from renaming it. */
+/** The chat's name at the head, which a double-click renames. */
 const titleButton = (): HTMLElement => {
   const found = document.querySelector<HTMLElement>(
-    '[data-slot="editable-title-field"]'
+    '[data-slot="app-shell-panel-title"]'
   );
   if (found === null) {
     throw new Error("No title");
@@ -212,10 +221,19 @@ const titleButton = (): HTMLElement => {
   return found;
 };
 
+/** Opens the rename popup, as a double-click on the name does. */
+const startRename = async (): Promise<void> => {
+  await act(async () => {
+    titleButton().dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
+};
+
 /** The field the chat's new name is typed in. */
 const nameField = (): HTMLInputElement => {
   const found = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Chat name"]'
+    'input[aria-label="Name"]'
   );
   if (found === null) {
     throw new Error("No name field");
@@ -240,15 +258,18 @@ const typeInto = async (field: HTMLInputElement, text: string) => {
 /** The dialog's button `name`. */
 const dialogButton = (name: string): HTMLButtonElement => {
   const found = [
-    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-  ].find((button) => button.textContent?.trim() === name);
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="dialog"] button, [role="alertdialog"] button'
+    ),
+    // A button's words, then what it says while it works, hidden till then.
+  ].find((button) => button.textContent?.trim().startsWith(name));
   if (found === undefined) {
     throw new Error(`No button ${name} in the dialog`);
   }
   return found;
 };
 
-describe("the open chat's menu", () => {
+describe("the open chat's name and menu", () => {
   afterEach(async () => {
     act(() => {
       root?.unmount();
@@ -278,19 +299,19 @@ describe("the open chat's menu", () => {
     expect(copied[0]).toMatch(/^# Leave/u);
     expect(copied[0]).toContain(question);
     expect(copied[0]).toContain(answer);
-    expect(byRole("menuitem", "Copied")).toBeDefined();
+    // The menu closes as it is chosen; a notice says it is copied.
+    await settled();
+    expect(document.body.textContent).toContain("Copied");
   });
 
   it("renames the chat where its title stands, to the name typed", async () => {
     const { writes } = await opened(leave);
-    await press(titleButton());
+    await startRename();
     const field = nameField();
     expect(field.value).toBe("Leave");
     await typeInto(field, "  Annual leave  ");
     await act(async () => {
-      field.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
-      );
+      field.form?.requestSubmit();
       await Promise.resolve();
     });
     await settled();
@@ -299,7 +320,7 @@ describe("the open chat's menu", () => {
 
   it("keeps the name as it was on Escape, and renames nothing", async () => {
     const { writes } = await opened(leave);
-    await press(titleButton());
+    await startRename();
     const field = nameField();
     await typeInto(field, "Pay");
     await act(async () => {
@@ -318,9 +339,10 @@ describe("the open chat's menu", () => {
     const { writes, router } = await opened(leave);
     await choose("Delete");
     expect(writes).toStrictEqual([]);
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-      "Delete “Leave”?"
-    );
+    // Asked in an alert dialog first.
+    expect(
+      document.querySelector('[role="alertdialog"]')?.textContent
+    ).toContain("Delete “Leave”?");
     await press(dialogButton("Delete"));
     expect(writes).toStrictEqual(["remove chat-1"]);
     expect(activeChat()).toBeUndefined();
@@ -332,31 +354,27 @@ describe("the open chat's menu", () => {
     await openMenu();
     const disabled = (name: string): string | null =>
       byRole("menuitem", name).getAttribute("aria-disabled");
-    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
-      "true",
-      "true",
-    ]);
+    const offs = (): (string | null)[] =>
+      ["Copy as Markdown", "Download as Markdown", "Download as PDF"].map(
+        disabled
+      );
+    expect(offs()).toStrictEqual(["true", "true", "true"]);
 
     await answerWatch();
-    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
-      null,
-      null,
-    ]);
+    expect(offs()).toStrictEqual([null, null, null]);
   });
 
   it("leaves the name being typed when another chat opens, renaming neither", async () => {
     const other: ChatSummary = { ...leave, id: "chat-2", title: "Pay" };
     const { writes, router } = await opened(leave, { others: [other] });
-    await press(titleButton());
-    expect(
-      document.querySelector('input[aria-label="Chat name"]')
-    ).not.toBeNull();
+    await startRename();
+    expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull();
 
     await act(async () => {
-      await router.navigate({ to: "/", search: { chat: "chat-2" } });
+      await router.navigate(chatLink("chat-2"));
     });
     await settled();
-    expect(document.querySelector('input[aria-label="Chat name"]')).toBeNull();
+    expect(document.querySelector('input[aria-label="Name"]')).toBeNull();
     expect(titleButton().textContent).toBe("Pay");
     expect(writes).toStrictEqual([]);
   });

@@ -1,20 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/app-kit/components/field";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import type {
   ConnectionBrainAudience,
   ListedConnection,
@@ -23,11 +6,33 @@ import type {
 import { failureText } from "@grasp-os/shared/errors";
 import { syncErrors } from "@grasp-os/shared/sync";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { useChange } from "./use-change.ts";
 
@@ -47,6 +52,30 @@ import { useChange } from "./use-change.ts";
 // and connect refuses it (`sync.picks_changed`) once another change
 // landed meanwhile, as the audience beside it does. The page then shows
 // what is picked now, and says so.
+
+const styles = stylex.create({
+  // The section's name in the card's flush rows, on their inset, as the
+  // card's other sections have it (connection-list.tsx).
+  head: {
+    marginInline: grasp.space4,
+    marginBlockStart: grasp.space3,
+    marginBlockEnd: grasp.space1,
+  },
+  // What the section holds, on the same inset.
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    rowGap: grasp.space2,
+    paddingInline: grasp.space4,
+    paddingBlockEnd: grasp.space4,
+  },
+  reading: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: grasp.space2,
+  },
+});
 
 /** What reading the places from core came to. */
 type PlacesRead =
@@ -225,7 +254,7 @@ const PlacesForm = ({
    */
   onSaved: (changed: boolean) => Promise<void>;
 }) => {
-  const ids = useId();
+  const { t } = useLingui();
   const { busy: saving, failure, change } = useChange();
   // From the save until the places are read again: a box ticked meanwhile
   // would be lost when the form starts again from what is picked now.
@@ -244,67 +273,55 @@ const PlacesForm = ({
   const picksMore = picked.some((place) => !places.picks.includes(place));
   const [confirmedFor, setConfirmedFor] = useState<string>();
   const confirmed = confirmedFor === keyOf(audience);
-  const confirmId = `${ids}-confirm`;
   return (
-    <FieldSet>
-      <FieldLegend variant="label">
-        <Trans>Copy into the Brain from {label}</Trans>
-      </FieldLegend>
-      <ul className="flex flex-col gap-2">
-        {places.choices.map(({ place, title, within }, index) => {
-          // By position: a place's ID is the provider's, in any alphabet.
-          const box = `${ids}-${index}`;
-          return (
-            <li key={place}>
-              <Field orientation="horizontal">
-                <Checkbox
-                  // Named by the place and its site: every site has its
-                  // own "Documents".
-                  aria-labelledby={
-                    within === null ? `${box}-title` : `${box}-title ${box}-in`
-                  }
-                  checked={picked.includes(place)}
-                  disabled={busy}
-                  id={box}
-                  onCheckedChange={(checked) => {
-                    const rest = picked.filter((one) => one !== place);
-                    setPicked(checked ? [...rest, place] : rest);
-                  }}
-                />
-                <FieldContent>
-                  <FieldLabel htmlFor={box} id={`${box}-title`}>
-                    {title}
-                  </FieldLabel>
-                  {within === null ? null : (
-                    <FieldDescription id={`${box}-in`}>
-                      {within}
-                    </FieldDescription>
-                  )}
-                </FieldContent>
-              </Field>
-            </li>
-          );
-        })}
-      </ul>
+    <>
+      <CheckboxGroup
+        aria-label={t`Copy into the Brain from ${label}`}
+        disabled={busy}
+        onValueChange={(value: string[]) => {
+          setPicked([
+            ...picked.filter((place) => value.includes(place)),
+            ...value.filter((place) => !picked.includes(place)),
+          ]);
+        }}
+        value={picked}
+      >
+        {places.choices.map(({ place, title, within }) => (
+          <Field key={place} orientation="horizontal">
+            <Checkbox value={place} />
+            <FieldContent>
+              {/* Named by the place and its site: every site has its own
+                  "Documents". */}
+              <FieldLabel>
+                {title}
+                {within === null ? null : (
+                  <span {...stylex.props(visuallyHidden)}> {within}</span>
+                )}
+              </FieldLabel>
+              {within === null ? null : (
+                <FieldDescription>{within}</FieldDescription>
+              )}
+            </FieldContent>
+          </Field>
+        ))}
+      </CheckboxGroup>
       {picksMore ? (
         <Field orientation="horizontal">
           <Checkbox
-            aria-labelledby={`${confirmId}-label`}
             checked={confirmed}
             disabled={busy}
-            id={confirmId}
             onCheckedChange={(checked) => {
-              setConfirmedFor(checked ? keyOf(audience) : undefined);
+              setConfirmedFor(checked === true ? keyOf(audience) : undefined);
             }}
-            required
           />
-          <FieldLabel htmlFor={confirmId} id={`${confirmId}-label`}>
-            <Readers audience={audience} label={label} team={team} />
-          </FieldLabel>
+          <FieldContent>
+            <FieldLabel>
+              <Readers audience={audience} label={label} team={team} />
+            </FieldLabel>
+          </FieldContent>
         </Field>
       ) : null}
       <Button
-        className="self-start"
         disabled={
           busy || samePlaces(before, picked) || (picksMore && !confirmed)
         }
@@ -333,12 +350,12 @@ const PlacesForm = ({
           })();
         }}
         size="sm"
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Save the places</Trans>
+        {t`Save the places`}
       </Button>
       <ErrorText>{failure}</ErrorText>
-    </FieldSet>
+    </>
   );
 };
 
@@ -350,7 +367,7 @@ const NothingToPick = ({
   connection: ListedConnection;
   label: string;
 }) => (
-  <Empty>
+  <Empty size="inline">
     <EmptyHeader>
       <EmptyTitle>
         <Trans>Nothing to copy into the Brain yet</Trans>
@@ -402,70 +419,85 @@ export const SyncPlaces = ({
   if (read.state === "none") {
     return null;
   }
-  if (read.state === "loading") {
+  const body = (): ReactNode => {
+    if (read.state === "loading") {
+      return (
+        <div {...stylex.props(styles.reading)}>
+          <Spinner aria-label={t`Reading the places`} />
+          <Text size="sm" tone="muted">
+            <Trans>Reading the places {label} can open…</Trans>
+          </Text>
+        </div>
+      );
+    }
+    if (read.state === "refused") {
+      return (
+        <>
+          <Alert tone="danger">{read.message}</Alert>
+          <Button
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true);
+              void (async () => {
+                await reload();
+                setRetrying(false);
+              })();
+            }}
+            size="sm"
+            variant="quiet"
+          >
+            {t`Try again`}
+          </Button>
+        </>
+      );
+    }
+    if (read.places.choices.length === 0) {
+      return <NothingToPick connection={connection} label={label} />;
+    }
+    // Read again after a save: the form starts from what core holds now.
+    const key = read.places.picks.toSorted().join(",");
     return (
-      <p className="text-muted-foreground flex items-center gap-2 text-sm">
-        <Spinner aria-label={t`Reading the places`} />
-        <Trans>Reading the places {label} can open…</Trans>
-      </p>
-    );
-  }
-  if (read.state === "refused") {
-    return (
-      <div className="flex flex-col items-start gap-2">
-        <ErrorText>{read.message}</ErrorText>
-        <Button
-          disabled={retrying}
-          onClick={() => {
-            setRetrying(true);
-            void (async () => {
-              await reload();
-              setRetrying(false);
-            })();
+      <>
+        <PlacesForm
+          audience={audience}
+          connection={connection}
+          key={key}
+          label={label}
+          onAudienceStale={onAudienceStale}
+          onSaved={async (changed) => {
+            // Said only beside what was read after it: never while the form
+            // still shows the admin's own ticks.
+            setChangedMeanwhile(false);
+            // Another change landed first: what the form shows is stale, so a
+            // failed read shows its refusal alone, to try again.
+            await reload(!changed);
+            setChangedMeanwhile(changed);
           }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Try again</Trans>
-        </Button>
-      </div>
+          places={read.places}
+          team={team}
+        />
+        {changedMeanwhile ? (
+          <Text size="sm" tone="muted">
+            <Trans>
+              The places picked from {label} were changed in the meantime. These
+              are the ones picked now: pick again if you still want to change
+              them.
+            </Trans>
+          </Text>
+        ) : null}
+        <ErrorText>{read.refused}</ErrorText>
+      </>
     );
-  }
-  if (read.places.choices.length === 0) {
-    return <NothingToPick connection={connection} label={label} />;
-  }
-  // Read again after a save: the form starts from what core holds now.
-  const key = read.places.picks.toSorted().join(",");
+  };
   return (
-    <div className="flex flex-col gap-2">
-      <PlacesForm
-        audience={audience}
-        connection={connection}
-        key={key}
-        label={label}
-        onAudienceStale={onAudienceStale}
-        onSaved={async (changed) => {
-          // Said only beside what was read after it: never while the form
-          // still shows the admin's own ticks.
-          setChangedMeanwhile(false);
-          // Another change landed first: what the form shows is stale, so a
-          // failed read shows its refusal alone, to try again.
-          await reload(!changed);
-          setChangedMeanwhile(changed);
-        }}
-        places={read.places}
-        team={team}
+    <section>
+      <SectionHeader
+        headingLevel={3}
+        layout={styles.head}
+        size="sm"
+        title={t`Copy into the Brain from ${label}`}
       />
-      {changedMeanwhile ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            The places picked from {label} were changed in the meantime. These
-            are the ones picked now: pick again if you still want to change
-            them.
-          </Trans>
-        </p>
-      ) : null}
-      <ErrorText>{read.refused}</ErrorText>
-    </div>
+      <div {...stylex.props(styles.body)}>{body()}</div>
+    </section>
   );
 };

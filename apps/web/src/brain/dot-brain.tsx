@@ -1,6 +1,7 @@
-import { cn } from "@grasp-os/app-kit/lib/utils";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import {
   ALPHAS,
   bucketOf,
@@ -36,6 +37,13 @@ import { useLessMotion } from "./less-motion.ts";
 // packages/grasp: components/onboarding/dot-brain.tsx). It draws on a
 // canvas, frame by frame, outside React: the component only hands the
 // animation its scene and where the pointer is.
+
+const looks = stylex.create({
+  // The caller's className gives the square its size only (a width or height), never one of these
+  // properties: StyleX decides between two class names by its own order, not theirs.
+  square: { position: "relative", aspectRatio: "1", maxWidth: "100%" },
+  canvas: { position: "absolute", inset: 0, width: "100%", height: "100%" },
+});
 
 /** What the brain shows: its figure, how full it is, and in the org, how far each team is. */
 export interface BrainScene {
@@ -1324,12 +1332,15 @@ export const DotBrain = ({
     return element === null ? undefined : watch(element, live, pointer);
   }, []);
 
+  const square = [stylex.props(looks.square).className, className]
+    .filter((part) => part !== undefined && part !== "")
+    .join(" ");
   return (
-    <div className={cn("relative aspect-square max-w-full", className)}>
-      <span className="sr-only">{label}</span>
+    <div className={square}>
+      <span {...stylex.props(visuallyHidden)}>{label}</span>
       <canvas
         aria-hidden="true"
-        className="absolute inset-0 size-full"
+        {...stylex.props(looks.canvas)}
         onPointerLeave={() => {
           pointer.current = { ...pointer.current, inside: false };
         }}

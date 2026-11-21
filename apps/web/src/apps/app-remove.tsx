@@ -1,3 +1,11 @@
+import type { App } from "@grasp-os/shared/apps";
+import { failureText } from "@grasp-os/shared/errors";
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { useLingui } from "@lingui/react/macro";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -5,20 +13,12 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import type { App } from "@grasp-os/shared/apps";
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Trans } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
-import { TrashIcon } from "lucide-react";
-
-import { ErrorText } from "../error-text.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Trash } from "../grasp/icons/index.ts";
+import { useCore } from "../use-core.ts";
 
 // Deleting an archived App (`apps.remove`), on its bar: for its owner or
 // an admin of the organization, never Grasp staff, and only once it is
@@ -27,7 +27,7 @@ import { useCoreAction } from "../use-core-action.ts";
 // it is gone from then on, so it asks first and then leaves for Apps.
 
 /** Whether `identity` may delete `app`: archived, and theirs or an admin's. */
-export const removesApp = (
+const removesApp = (
   app: Pick<App, "archived" | "owner">,
   identity: Pick<Identity, "userId" | "role" | "staff">
 ): boolean =>
@@ -42,61 +42,49 @@ export const RemoveApp = ({
   app: App;
   identity: Pick<Identity, "userId" | "role" | "staff">;
 }) => {
+  const { t } = useLingui();
+  const core = useCore();
   const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
+  const [failure, setFailure] = useState<string>();
   const { name } = app;
   if (!removesApp(app, identity)) {
     return null;
   }
   const remove = async (): Promise<void> => {
-    const done = await run(async (session) => {
-      await session.apps.remove(app.id);
-      return true;
-    });
-    if (done === true) {
-      await navigate({ to: "/apps", replace: true });
+    setFailure(undefined);
+    try {
+      await core.withSession(async (session) => {
+        await session.apps.remove(app.id);
+      });
+    } catch (error) {
+      setFailure(failureText(error));
+      throw error;
     }
+    await navigate({ to: "/apps", replace: true });
   };
   return (
-    <div className="flex flex-col items-end gap-1">
-      <AlertDialog>
-        <AlertDialogTrigger
-          disabled={busy}
-          render={<Button size="sm" variant="destructive" />}
-        >
-          <TrashIcon data-icon="inline-start" />
-          <Trans>Delete</Trans>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Delete {name}?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                It is gone for good: its pages, versions and members, and what
-                it was allowed. Its stores and their records stay, and so do
-                what its code remembered in the Brain and the workflows it
-                doesn’t own.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void remove();
-              }}
-              variant="destructive"
-            >
-              <Trans>Delete for good</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    <AlertDialog>
+      <AlertDialogTrigger icon={Trash} variant="danger">
+        {t`Delete`}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do what its code remembered in the Brain and the workflows it doesn’t own.`}
+        </AlertDialogDescription>
+        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+        <AlertDialogFooter>
+          <AlertDialogCancel />
+          <AlertDialogAction
+            action={remove}
+            failedLabel={t`Could not delete`}
+            variant="danger"
+            workingLabel={t`Deleting`}
+          >
+            {t`Delete for good`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };

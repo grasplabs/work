@@ -1,11 +1,19 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
-import { LayoutGridIcon } from "lucide-react";
 
-import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
-import type { AppSettingsSection } from "../apps/app-settings.tsx";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { AppSettings } from "../apps/app-settings.tsx";
+import { settingsSectionOf } from "../apps/settings-sections.ts";
+import type { AppSettingsSection } from "../apps/settings-sections.ts";
+import {
+  APP_GENERAL,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // An App's settings (apps/app-settings.tsx), for everyone who opens the
@@ -23,7 +31,7 @@ const AppSettingsPage = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
-        icon={LayoutGridIcon}
+        icon={AppWindowMark}
         notFound={t`App not found`}
         page={page}
       />
@@ -40,8 +48,8 @@ const AppSettingsPage = () => {
           { label: t`Settings` },
         ]}
       />
-      {/* The page's heading: the section's heads what is open. */}
-      <h1 className="sr-only">
+      {/* The page's heading, for a screen reader: the tabs show what is open. */}
+      <h1 {...stylex.props(visuallyHidden)}>
         <Trans>Settings of {appName}</Trans>
       </h1>
       <AppSettings
@@ -55,8 +63,16 @@ const AppSettingsPage = () => {
   );
 };
 
+/** The settings before the App is read: the bar, its name to come, and General's cards. */
+const AppSettingsPending = () => (
+  <>
+    <LoadingBar />
+    <SettingsPending sections={APP_GENERAL} />
+  </>
+);
+
 export const Route = createFileRoute("/_shell/apps/$app_/settings")({
-  pendingComponent: PageLoading,
+  pendingComponent: AppSettingsPending,
   component: AppSettingsPage,
   // The section to open; any other value (an old or hand-typed address)
   // opens General. Always set, as the address's own would otherwise pass

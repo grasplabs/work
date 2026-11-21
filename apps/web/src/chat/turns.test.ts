@@ -1,7 +1,7 @@
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { describe, expect, it } from "vite-plus/test";
 
-import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
+import { turnsOf, workedFor } from "./turns.ts";
 
 // How long Grasp worked on each question, from when it was asked to its
 // last answer (turns.ts).
@@ -81,10 +81,5 @@ describe("how long Grasp worked", () => {
       answer(2, "2026-10-08T09:00:00.600Z"),
     ];
     expect([...workedFor(turnsOf(messages))]).toStrictEqual([[2, 1]]);
-  });
-
-  it("says a time short, in minutes and the seconds over them", () => {
-    expect(minutesAndSeconds(21)).toStrictEqual({ minutes: 0, rest: 21 });
-    expect(minutesAndSeconds(261)).toStrictEqual({ minutes: 4, rest: 21 });
   });
 });

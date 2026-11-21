@@ -133,10 +133,10 @@ export const looksThinkingMs = 600;
  * starting to talk again: he holds his line while the sound is this fresh,
  * and this long at most, so a sound in the room doesn't keep him quiet.
  */
-export const stirringMs = 250;
+const stirringMs = 250;
 export const holdMs = 400;
 /** How often a held line looks again whether they are still. */
-export const stillTickMs = 50;
+const stillTickMs = 50;
 
 export const quietFloor: Floor = {
   doing: "idle",
@@ -239,7 +239,7 @@ export const stillIn = ({
 };
 
 /** What a step of the floor comes to: the floor now, and what to do. */
-export interface Step {
+interface Step {
   floor: Floor;
   acts: Act[];
 }
@@ -631,14 +631,14 @@ export const unanswered = (floor: Floor): string =>
  */
 export const retryWaits = [800, 2000];
 /** Once he said it doesn't work, he asks again by himself after each of these; then he says they can come back later. */
-export const laterWaits = [5000, 10_000, 20_000, 30_000];
+const laterWaits = [5000, 10_000, 20_000, 30_000];
 
 /** A hiccup on the way is worth asking again; a refusal, a budget used up or a voice that isn't set up is not. */
 export const hiccup = (status: number): boolean =>
   (status === 0 || status >= 500) && status !== 503;
 
 /** Which of his own lines says that something fails. */
-export type TroubleLine = "offline" | "trouble" | "stillTrouble";
+type TroubleLine = "offline" | "trouble" | "stillTrouble";
 
 /**
  * What he does when a turn couldn't be had however often it was asked

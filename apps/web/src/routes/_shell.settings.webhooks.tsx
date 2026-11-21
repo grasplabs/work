@@ -1,18 +1,28 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { EventSourcesSettings } from "../settings/event-sources.tsx";
-import { SettingsError, SettingsLoading } from "../settings/settings-parts.tsx";
+import {
+  EventSourcesSettings,
+  sourceStartsOf,
+} from "../settings/event-sources.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
-// Settings › Webhooks, for the organization's own admins: the event
-// sources outside systems send events to (settings/event-sources.tsx),
-// which stays mounted whatever the list's read came to, so a secret just
-// shown outlives a read after it that fails. Core checks the role on
-// every call.
+// Settings › Incoming events (at /settings/webhooks, kept for links), for
+// the organization's own admins: the event sources outside systems send
+// events to (settings/event-sources.tsx), which stays mounted whatever the
+// list's read came to, so a secret just shown outlives a read after it that
+// fails. Core checks the role on every call.
 
-const WebhooksPage = () => (
-  <EventSourcesSettings page={Route.useLoaderData()} />
+const IncomingEventsPage = () => {
+  const { sources, starts } = Route.useLoaderData();
+  return <EventSourcesSettings page={sources} starts={starts} />;
+};
+
+/** The sources' card, as tall as its empty state. */
+const IncomingEventsPending = () => (
+  <PageSkeletonSettings header={false} help={false} sections={[3]} />
 );
 
 export const Route = createFileRoute("/_shell/settings/webhooks")({
@@ -25,12 +35,18 @@ export const Route = createFileRoute("/_shell/settings/webhooks")({
       throw redirect({ to: "/settings/profile", replace: true });
     }
   },
-  pendingComponent: SettingsLoading,
+  pendingComponent: IncomingEventsPending,
   errorComponent: SettingsError,
-  component: WebhooksPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.workflowResources.sources.list()
-    ),
+  component: IncomingEventsPage,
+  loader: async ({ context: { core } }) => {
+    const [sources, starts] = await Promise.all([
+      loadFromCore(
+        core,
+        async (session) => await session.workflowResources.sources.list()
+      ),
+      // The workflows each source starts: read once for the page.
+      sourceStartsOf(core),
+    ]);
+    return { sources, starts };
+  },
 });

@@ -1,5 +1,5 @@
-import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {
   WaitingFeed,
@@ -10,16 +10,16 @@ import type {
 
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
-import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { readOutcomes } from "./everyones-outcomes.ts";
 import { markShownRead } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
 import type { Waiting } from "./waiting.ts";
 
-// What the inbox reads: what waits on the person, each part on its own so
-// one that fails leaves the rest, and, for admins, the latest of the audit
-// trail.
+// What waits on the person, as the Inbox and the sidebar's Inbox view read
+// it: core's feed in one read, each part on its own so one that fails
+// leaves the rest, with the names its items are shown with.
 
 /** The items of the feed of one kind. */
 const ofKind = <Kind extends WaitingKind>(
@@ -52,11 +52,19 @@ const partOf = <T>(
 /**
  * What waits on the person: core's feed of it, in one read, and the names
  * permission requests are shown with. Reading it marks the
- * notifications it lists as read.
+ * notifications it lists as read, as the inbox, which shows them, does; the sidebar's list, which only says what
+ * waits, reads them with `markShownRead: false`. Everyone's unknown
+ * outcomes are listed only with `everyonesOutcomes` (the inbox showing
+ * them): core records each such read in the audit trail, so the frame's
+ * read, every few minutes, would fill it.
  */
 export const readWaiting = async (
   core: CoreConnection,
-  identity: Identity
+  identity: Identity,
+  {
+    markShownRead: marking = true,
+    everyonesOutcomes: listOutcomes = false,
+  }: { markShownRead?: boolean; everyonesOutcomes?: boolean } = {}
 ): Promise<Waiting> => {
   const feed = await loadFromCore(
     core,
@@ -89,7 +97,7 @@ export const readWaiting = async (
     };
   });
   // Marked read as shown; one that couldn't be stays unread, and shows all the same.
-  if (notifications.state === "ready") {
+  if (marking && notifications.state === "ready") {
     await loadFromCore(core, async (session) => {
       await markShownRead(session, notifications.data.page.notifications);
     });
@@ -108,7 +116,25 @@ export const readWaiting = async (
           )
         : asked;
   }
+  // The onboarding, for the admins Settings, Onboarding was for, Grasp's staff included.
+  const interviews = isAdmin(identity.role)
+    ? await loadFromCore(core, async (session) => {
+        const [view, links, programme] = await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.links(),
+          session.onboarding.programme(),
+        ]);
+        return { view, links, stage: programme?.stage ?? null };
+      })
+    : undefined;
+  // Everyone's, for the organization's own admins, as Settings › Unknown outcomes was.
+  const everyonesOutcomes =
+    listOutcomes && decidesRequests(identity)
+      ? await readOutcomes(core)
+      : undefined;
   return {
+    ...(interviews === undefined ? {} : { interviews }),
+    ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
     held: partOf(feed, "held", (read) =>
       ofKind(read, "heldWrite").map(({ action }) => action)
     ),
@@ -134,43 +160,11 @@ export const readWaiting = async (
           skillShares: partOf(feed, "skillShares", (read) =>
             ofKind(read, "skillShare")
           ),
+          gaps: await loadFromCore(
+            core,
+            async (session) => await session.brain.openGaps()
+          ),
         }
       : {}),
   };
-};
-
-/** What was read of the trail: the latest events, and whether it stopped before the trail's end. */
-export interface LatestActivity {
-  records: AuditRecord[];
-  older: boolean;
-}
-
-/** How many pages of the trail the inbox reads at most, past the trail's own searches. */
-const activityPages = 5;
-
-/**
- * The latest events of the audit trail, without its own searches: core
- * records every search, the inbox's too, and those alone can fill a
- * page. It reads older pages until it has `enough` to show, or the trail
- * ends, or it has read as many as it reads; only a first page records a
- * search. `older` says the trail goes on past what was read.
- */
-export const readActivity = async (
-  session: Session,
-  enough: number
-): Promise<LatestActivity> => {
-  const records: AuditRecord[] = [];
-  let before: number | undefined;
-  for (let page = 0; page < activityPages; page += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- each page starts where the last ended
-    const read = await session.audit.search({}, before);
-    records.push(
-      ...read.records.filter(({ event }) => event?.action !== "audit.searched")
-    );
-    if (records.length >= enough || read.next === null) {
-      return { records, older: false };
-    }
-    before = read.next;
-  }
-  return { records, older: true };
 };

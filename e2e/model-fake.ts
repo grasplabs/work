@@ -19,7 +19,11 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { streamText } from "../apps/core/test/provider-streams.ts";
+import {
+  eventsFor,
+  sse,
+  streamText,
+} from "../apps/core/test/provider-streams.ts";
 import { scriptedAnswer } from "./model-scripts.ts";
 import { modelFakeOrigin, modelFakePort } from "./stack.ts";
 
@@ -64,6 +68,30 @@ const parsed = (body: string): unknown => {
   }
 };
 
+/** Streams `answer` as it holds: its events up to the hold, then the rest once the hold ends, unless the request was given up first. */
+const streamHeld = async (
+  path: string,
+  answer: NonNullable<ReturnType<typeof scriptedAnswer>>,
+  response: ServerResponse
+): Promise<void> => {
+  const given = Promise.withResolvers<"given up">();
+  response.on("close", () => {
+    given.resolve("given up");
+  });
+  for (const item of eventsFor(path, answer) ?? []) {
+    if ("until" in item) {
+      item.reached?.();
+      // oxlint-disable-next-line no-await-in-loop -- the stream waits here, in order
+      if ((await Promise.race([item.until, given.promise])) === "given up") {
+        return;
+      }
+      continue;
+    }
+    response.write(sse(item));
+  }
+  response.end();
+};
+
 const serve = (): void => {
   const got: FakeModelRequest[] = [];
   const answer = (request: IncomingMessage, response: ServerResponse) => {
@@ -92,7 +120,14 @@ const serve = (): void => {
           : scriptedAnswer(parsed(Buffer.concat(chunks).toString("utf-8")));
       if (api !== undefined && scripted !== undefined) {
         response.writeHead(200, { "content-type": "text/event-stream" });
-        response.end(streamText(api, scripted));
+        if (scripted.pause === undefined) {
+          response.end(streamText(api, scripted));
+          return;
+        }
+        // An answer that holds mid-way (`pause`): what comes before goes
+        // out at once, then nothing until the hold ends or the stack gives
+        // the request up (a Stop, a reload).
+        void streamHeld(path, scripted, response);
         return;
       }
       response.writeHead(401, { "content-type": "application/json" });

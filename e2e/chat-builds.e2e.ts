@@ -92,20 +92,32 @@ test("a builder publishes the draft a chat built from the App's workspace, which
 
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
-    // The changes only its builder sees, under the bar: Share changes
+    // The changes only its builder sees, under the bar: Publish
     // makes them the App's next version, for everyone it is shared with.
     await expect(page.getByText(/^\d+ changes? only you see$/u)).toBeVisible({
       timeout: 20_000,
     });
-    await page
-      .getByRole("button", { name: "Share changes" })
+    // The bar folds as the chat beside it takes its width, Publish an icon
+    // of the same name: pressed once the bar has settled.
+    const publishing = page.getByRole("dialog", { name: `Publish ${name}` });
+    await expect(async () => {
+      if ((await publishing.count()) === 0) {
+        await page
+          .getByRole("button", { name: "Publish", exact: true })
+          .filter({ visible: true })
+          .click({ timeout: 2000 });
+      }
+      await expect(publishing).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+    // Its dialog: Publish, once the changes are checked.
+    await publishing
+      .getByRole("button", { name: "Publish", exact: true })
       .click({ timeout: 20_000 });
-    // Its sheet: Share, once the changes are checked.
-    await page
-      .getByRole("dialog", { name: `Share ${name}` })
-      .getByRole("button", { name: "Share", exact: true })
-      .click({ timeout: 20_000 });
-    await expect(page.getByText("Your changes are shared")).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Notifications" })
+        .getByText(`${name} is live`)
+    ).toBeVisible();
 
     // Live as the App's next version; the draft starts over from it.
     await expect

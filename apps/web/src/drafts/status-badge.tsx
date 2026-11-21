@@ -1,7 +1,7 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Trans } from "@lingui/react/macro";
 
 import { formatList } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
 
 // Where an App or a workflow stands, in its bar and on its cards, in the
 // same plain words for both: "Only you see this" until a version is live
@@ -41,20 +41,20 @@ export const StatusBadge = ({
 }) => {
   if (archived) {
     return (
-      <Badge variant="outline">
+      <Badge>
         <Trans context="an App put away">Archived</Trans>
       </Badge>
     );
   }
   if (live === null || who?.length === 0) {
     return (
-      <Badge variant="attention">
+      <Badge tone="attention">
         <Trans>Only you see this</Trans>
       </Badge>
     );
   }
   return (
-    <Badge variant="passed">
+    <Badge tone="success">
       <UsedBy who={who} />
     </Badge>
   );

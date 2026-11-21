@@ -382,12 +382,11 @@ test("the admin settles what needs them, and once Grasp gives its go, goes in th
 
   await adminCommand({ type: "onboarding.gate.open", payload: {} });
   // The page asks again on its own, and the way in begins: the brain's
-  // dots build the inbox, then let it be.
+  // dots build the platform, then the Inbox opens.
   await expect(page.getByText("Your platform is open.")).toBeVisible({
     timeout: 30_000,
   });
   await expect(page).toHaveURL(/\/inbox$/u, { timeout: 15_000 });
-  await expect(page.getByRole("tab", { name: /^To do/u })).toBeVisible();
   await expect(page.getByText("Opening Grasp")).toHaveCount(0, {
     timeout: 15_000,
   });

@@ -1,11 +1,10 @@
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import { failureText } from "@grasp-os/shared/errors";
 import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, Link as RouterLink } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { loadCoreStatus, readWithin } from "../core-connection.ts";
@@ -18,6 +17,12 @@ import { AppFrame } from "../frame/app-frame.tsx";
 import { NotFound } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Heading } from "../grasp/heading/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import { BrandGrasp, Icon } from "../grasp/icons/index.ts";
+import { Link } from "../grasp/link/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -26,8 +31,31 @@ import { SignInOptions } from "../sign-in-options.tsx";
 // person signs in, sees what is asked, and answers with a button. Core
 // checks on every call that they may answer; this page only shows what
 // core says. Someone signed in sees it in the app's frame; anyone else
-// on a page of its own, asked to sign in. The card is the prototype's
-// decision card (grasplabs/prototype `components/decision-card.tsx`).
+// on a page of its own, asked to sign in. The card is decision-card.tsx.
+
+const styles = stylex.create({
+  // A page of its own: the mark and what it says, in the middle.
+  alone: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space4,
+    minHeight: "100svh",
+    padding: grasp.space6,
+    textAlign: "center",
+    backgroundColor: grasp.paper,
+    color: grasp.text,
+    // The mark as wide as before: the library's sits in the icon's square.
+    [iconVars.size]: grasp.avatarXs,
+  },
+  inFrame: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space4,
+  },
+});
 
 type DecisionPage =
   | { state: "offline" }
@@ -72,8 +100,8 @@ const loadDecision = async (
 
 /** A page of its own, for someone not signed in or when core is away. */
 const OnItsOwn = ({ children }: { children: ReactNode }) => (
-  <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center text-sm">
-    <GraspMark className="size-6" />
+  <main {...stylex.props(styles.alone)}>
+    <Icon icon={BrandGrasp} />
     {children}
   </main>
 );
@@ -92,9 +120,7 @@ const DecisionInFrame = ({
   return (
     <AppFrame core={core} identity={identity}>
       <SiteHeader crumbs={crumbs} />
-      <div className="pb-chat flex flex-col items-center gap-4 px-6 pt-7 text-sm">
-        {children}
-      </div>
+      <div {...stylex.props(styles.inFrame)}>{children}</div>
     </AppFrame>
   );
 };
@@ -107,9 +133,7 @@ const Decision = () => {
   if (page.state === "offline") {
     return (
       <OnItsOwn>
-        <PageHeaderTitle>
-          <Trans>Decision</Trans>
-        </PageHeaderTitle>
+        <Heading level={1}>{t`Decision`}</Heading>
         <ErrorText>
           {t`Grasp can't be reached right now. Try again in a moment.`}
         </ErrorText>
@@ -119,12 +143,10 @@ const Decision = () => {
   if (page.state === "signed-out") {
     return (
       <OnItsOwn>
-        <PageHeaderTitle>
-          <Trans>Sign in to answer</Trans>
-        </PageHeaderTitle>
-        <p className="text-muted-foreground">
-          <Trans>Only the people this decision is from can answer it.</Trans>
-        </p>
+        <Heading level={1}>{t`Sign in to answer`}</Heading>
+        <Text tone="muted">
+          {t`Only the people this decision is from can answer it.`}
+        </Text>
         <SignInOptions
           error={error}
           options={page.signInOptions}
@@ -151,15 +173,9 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <PageHeaderTitle>
-          <Trans>Decision</Trans>
-        </PageHeaderTitle>
-        <p className="text-muted-foreground">
-          <Trans>This decision is for someone else to answer.</Trans>
-        </p>
-        <Link className="underline-offset-4 hover:underline" to="/">
-          <Trans>Go to Grasp</Trans>
-        </Link>
+        <Heading level={1}>{t`Decision`}</Heading>
+        <Text tone="muted">{t`This decision is for someone else to answer.`}</Text>
+        <Link render={<RouterLink to="/" />}>{t`Go to Grasp`}</Link>
       </DecisionInFrame>
     );
   }
@@ -169,13 +185,9 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <PageHeaderTitle>
-          <Trans>Decision</Trans>
-        </PageHeaderTitle>
+        <Heading level={1}>{t`Decision`}</Heading>
         <ErrorText>{page.message}</ErrorText>
-        <Link className="underline-offset-4 hover:underline" to="/">
-          <Trans>Go to Grasp</Trans>
-        </Link>
+        <Link render={<RouterLink to="/" />}>{t`Go to Grasp`}</Link>
       </DecisionInFrame>
     );
   }

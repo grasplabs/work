@@ -3,6 +3,7 @@ import type {
   Permission,
   PermissionSubject,
 } from "@grasp-os/shared/permissions";
+import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 
@@ -15,15 +16,15 @@ import {
   teamName,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
-import { formatList } from "../format.ts";
+import { formatList, formatZone } from "../format.ts";
 import {
   kindLabels,
   triggerDescription,
 } from "../workflows/trigger-description.ts";
 
 // Pending approvals: the permissions Apps and agents asked for, which an
-// admin grants or rejects in the inbox (`inbox/item-detail.tsx`). Core
-// checks the role on every call; the inbox reads them only for those core
+// admin grants or rejects in the Inbox (`inbox/item-detail.tsx`). Core
+// checks the role on every call; the Inbox reads them only for those core
 // lets decide (the organization's own admins, never Grasp staff).
 
 /** The requests an admin decides, oldest first, with the names to show. */
@@ -207,13 +208,16 @@ const reviewedLabel = (
     : null;
 
 /** The version to review, as the row shows it. */
+/** What `reviewedVersionText` says for a request with no App version to review. */
+export const noVersion = "–";
+
 export const reviewedVersionText = (
   request: Permission,
   directory: Directory
 ): string => {
   const app = reviewedApp(request);
   if (app === undefined) {
-    return "–";
+    return noVersion;
   }
   if (!directory.apps.has(app)) {
     return i18n._(msg`Unknown`);
@@ -241,4 +245,96 @@ export const grantReviewed = async (
     }
     throw error;
   }
+};
+
+/**
+ * A schedule trigger asking to start its workflow: its workflow's name and
+ * when it next runs, from the request's own fields (the cron read by
+ * croner, through `nextScheduledRun`, skipping a time the clocks skip, as
+ * such a trigger does). Undefined for any other request, or a schedule
+ * with no time to come: then the request reads as every other one.
+ */
+const scheduleOf = (
+  { trigger, object, actions, workflowNames }: Permission,
+  now: Date
+): { workflow: string; next: Date; timeZone: string } | undefined => {
+  const schedule = trigger?.kind === "schedule" ? trigger.schedule : null;
+  const startsWorkflow =
+    object.type === "workflow" &&
+    actions.length === 1 &&
+    actions[0] === "start";
+  if (schedule === null || !startsWorkflow) {
+    return undefined;
+  }
+  const next = nextScheduledRun(schedule, now, "skip");
+  if (next === undefined) {
+    return undefined;
+  }
+  const workflow = workflowNames?.[object.workflowId] ?? object.workflowId;
+  return { workflow, next, timeZone: schedule.timeZone };
+};
+
+/**
+ * Who asks, in one line: a schedule asking to start its workflow by what
+ * it is ("Schedule for invoice-approval"), never its cron; any other as
+ * `subjectOf` names it.
+ */
+export const requestAsker = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const scheduled = scheduleOf(request, now);
+  if (scheduled === undefined) {
+    return subjectOf(request, directory);
+  }
+  const { workflow } = scheduled;
+  return i18n._(msg`Schedule for ${ph({ workflow })}`);
+};
+
+/**
+ * When a schedule asking to start its workflow next runs, in words: the
+ * time in the schedule's own zone, as the page's language writes a day and
+ * an hour (24-hour where its language is). Undefined for any other request.
+ */
+export const requestNextRun = (
+  request: Permission,
+  now: Date = new Date()
+): string | undefined => {
+  const scheduled = scheduleOf(request, now);
+  if (scheduled === undefined) {
+    return undefined;
+  }
+  const { next, timeZone } = scheduled;
+  const when = new Intl.DateTimeFormat(i18n.locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(next);
+  const zone = formatZone(timeZone);
+  return i18n._(msg`Next run ${ph({ when })} (${ph({ zone })})`);
+};
+
+/**
+ * What a request asks, in one line: who asks, for what, on what; a
+ * schedule asking to start its workflow by what it is alone, as
+ * `requestAsker` has it (its next run is `requestNextRun`'s line).
+ */
+export const requestWords = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  if (scheduleOf(request, now) !== undefined) {
+    return requestAsker(request, directory, now);
+  }
+  const subject = subjectOf(request, directory);
+  const object = objectOf(request, directory);
+  const actions = formatList(request.actions);
+  return i18n._(
+    msg`${ph({ subject })}: ${ph({ actions })} on ${ph({ object })}`
+  );
 };

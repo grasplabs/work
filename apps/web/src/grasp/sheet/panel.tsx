@@ -1,0 +1,187 @@
+// SheetPanel: the panel of a sheet (sheet.tsx), with the shade behind it and the close button in
+// its corner: UI SDK's DrawerContent, DrawerBackdrop and DrawerClose in Grasp's look.
+"use client";
+
+import * as stylex from "@stylexjs/stylex";
+import {
+  DrawerBackdrop as BackdropPrimitive,
+  DrawerClose as ClosePrimitive,
+  DrawerContent as ContentPrimitive,
+} from "@ui-sdk/react/drawer";
+import type { ComponentProps, ReactNode } from "react";
+
+import { BarClose, barActionSize } from "../bar-actions/bar-actions";
+import { Button } from "../button";
+import { drawerMarker } from "../drawer/drawer.stylex";
+import { KindContext } from "../drawer/kind-context";
+import { useStill } from "../drawer/still-context";
+import { drawerStyles as styles } from "../drawer/styles";
+import { Cross } from "../icons";
+import { useWords, withGiven } from "../words/words";
+import { useSize } from "./size-context";
+import { sheetWords } from "./words";
+import type { SheetWords } from "./words";
+
+type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
+
+/** Every prop a SheetPanel takes: these, and the rest of UI SDK's DrawerContent. */
+export interface SheetContentProps extends Omit<
+  ContentPrimitiveProps,
+  "children" | "className" | "style" | "render"
+> {
+  /** The title, the description, the body and the footer, in that order. */
+  children: ReactNode;
+  /**
+   * The name of the close button in the corner, in the page's language.
+   * @default "Close"
+   */
+  closeLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the filters" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SheetWords>;
+  /**
+   * Where its close button stands: `corner`, its own; `none`, where the content puts a SheetClose
+   * of its own (App shell's menu puts it in its sidebar's head, so the panel has one head).
+   * @default "corner"
+   */
+  close?: "corner" | "none";
+  /**
+   * Its corner: `sheet`, the system's; `shell`, App shell's card corner, round, for the shell's
+   * menu, so it reads as one of the shell's cards beside it (the page's, the peeking sidebar's).
+   * @default "sheet"
+   */
+  corner?: "sheet" | "shell";
+  /**
+   * What it and its shade keep to: `window`, the browser's window; `shell`, the box App shell writes
+   * on itself while its menu is open (where the shell stands), so the menu opens at the shell's
+   * edge and never wider than it, in a shell narrower than the window.
+   * @default "window"
+   */
+  bounds?: "window" | "shell";
+}
+
+/** Every prop a SheetClose takes. */
+export interface SheetCloseProps {
+  /**
+   * Its name, in the page's language.
+   * @default "Close"
+   */
+  label?: string;
+  /** @default "sm" */
+  size?: "xs" | "sm";
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the filters" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SheetWords>;
+}
+
+/** The sheet's close button, for content that places its own (`SheetPanel close="none"`). */
+export const SheetClose = ({ label, size = "sm", words }: SheetCloseProps) => {
+  const said = withGiven(useWords("sheet", sheetWords, words), {
+    close: label,
+  });
+  return (
+    <ClosePrimitive
+      render={(props: Record<string, unknown>) =>
+        size === barActionSize ? (
+          <BarClose label={said.close} primitive={props} />
+        ) : (
+          <Button
+            {...props}
+            variant="ghost"
+            size={size}
+            icon={Cross}
+            aria-label={said.close}
+          />
+        )
+      }
+    />
+  );
+};
+
+/** The panel, with the shade behind it and the close button in its corner. The window's height. */
+export const SheetContent = ({
+  children,
+  closeLabel: closeGiven,
+  words,
+  close = "corner",
+  corner = "sheet",
+  bounds = "window",
+  ...rest
+}: SheetContentProps) => {
+  const closeLabel = withGiven(useWords("sheet", sheetWords, words), {
+    close: closeGiven,
+  }).close;
+  const size = useSize();
+  const still = useStill();
+  if (still) {
+    // Drawn standing still for the docs (src/components/drawer/still.tsx).
+    return (
+      <KindContext.Provider value="sheet">
+        <div
+          aria-hidden="true"
+          {...stylex.props(styles.scrim, still.look.scrim)}
+        />
+        <div data-side={still.side} {...stylex.props(still.look.viewport)}>
+          <div
+            data-slot="drawer-content"
+            data-side={still.side}
+            data-state={`${still.side} ${size}`}
+            {...stylex.props(
+              styles.panel,
+              size === "wide" && styles.wide,
+              size === "full" && styles.full,
+              corner === "shell" && styles.shellCorner
+            )}
+          >
+            {children}
+            <span {...stylex.props(styles.close)}>
+              <BarClose label={closeLabel} />
+            </span>
+          </div>
+        </div>
+      </KindContext.Provider>
+    );
+  }
+  return (
+    <KindContext.Provider value="sheet">
+      <BackdropPrimitive
+        {...stylex.props(
+          styles.scrim,
+          bounds === "shell" && styles.scrimInShell
+        )}
+      />
+      <ContentPrimitive
+        {...rest}
+        {...stylex.props(
+          drawerMarker,
+          styles.panel,
+          size === "wide" && styles.wide,
+          size === "full" && styles.full,
+          bounds === "shell" && styles.inShell,
+          bounds === "shell" && size === "wide" && styles.inShellWide,
+          bounds === "shell" && size === "full" && styles.inShellFull,
+          close === "none" && styles.panelClipped,
+          corner === "shell" && styles.shellCorner
+        )}
+      >
+        {children}
+        {close === "corner" && (
+          <span {...stylex.props(styles.close)}>
+            <SheetClose label={closeLabel} />
+          </span>
+        )}
+      </ContentPrimitive>
+    </KindContext.Provider>
+  );
+};
+
+/** @deprecated Use `SheetContent`. */
+export const SheetPanel = SheetContent;
+/** @deprecated Use `SheetContentProps`. */
+export type SheetPanelProps = SheetContentProps;

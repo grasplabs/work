@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
-
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
-import { typeInPrompt } from "@grasp-os/app-kit/testing";
 import type { Blueprint } from "@grasp-os/shared/apps";
-import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
+import type {
+  ChatAgent,
+  ChatMake,
+  ChatQuestion,
+  ChatUpdate,
+} from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -20,14 +22,17 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import type { CoreReach } from "../core-connection.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import { activeChat } from "./active-chat.ts";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
+import { onChatsChanged } from "./chats-changed.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
+import { sendDeadlineMs } from "./use-ask.ts";
 
 // Chat's own page from Make something: ideas to start from in place of the
 // questions (an App's blueprints, a workflow's starting sentences), each
@@ -111,12 +116,33 @@ const shown = async (
   {
     agents = [],
     named,
+    models = Promise.resolve(["openai/gpt-5"]),
+    confirmed = Promise.resolve(true),
+    reach,
     from,
-  }: { agents?: ChatAgent[]; named?: string; from?: Opportunity } = {}
+    watch = async () => await Promise.withResolvers<never>().promise,
+  }: {
+    agents?: ChatAgent[];
+    named?: string;
+    /** The opportunity whose brief the box starts with. */
+    from?: Opportunity;
+    /** What core answers asking for the models, once it does. */
+    models?: Promise<string[]>;
+    /** When core confirms a question sent. */
+    confirmed?: Promise<unknown>;
+    /** How core answers watching a chat; by default it sends nothing yet. */
+    watch?: (
+      chatId: string,
+      after: number | null,
+      onUpdate: (update: ChatUpdate) => void
+    ) => Promise<unknown>;
+    /** Whether the tab's connection reaches core, as it says and changes it. */
+    reach?: { now: CoreReach; changed: Set<() => void> };
+  } = {}
 ) => {
   const asked: string[] = [];
   const chats = {
-    models: async () => await Promise.resolve(["openai/gpt-5"]),
+    models: async () => await models,
     efforts: async () => await Promise.resolve({}),
     list: async () => await Promise.resolve([]),
     agents: async () => await Promise.resolve(agents),
@@ -129,15 +155,28 @@ const shown = async (
       asked.push(
         `send ${chatId} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
       );
-      await Promise.resolve();
+      await confirmed;
     },
-    watch: async () => await Promise.withResolvers<never>().promise,
+    watch,
     summary: async () => await Promise.withResolvers<never>().promise,
   };
   const core = {
     withSession: async <T,>(
       action: (session: { chats: typeof chats }) => Promise<T>
     ): Promise<T> => await action({ chats }),
+    ...(reach === undefined
+      ? {}
+      : {
+          get reach(): CoreReach {
+            return reach.now;
+          },
+          watchReach: (changed: () => void) => {
+            reach.changed.add(changed);
+            return () => {
+              reach.changed.delete(changed);
+            };
+          },
+        }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const shell = createRoute({
@@ -145,11 +184,9 @@ const shown = async (
     id: "_shell",
     beforeLoad: () => ({ identity }),
     component: () => (
-      <SidebarProvider>
-        <GlobalChatProvider>
-          <Outlet />
-        </GlobalChatProvider>
-      </SidebarProvider>
+      <GlobalChatProvider>
+        <Outlet />
+      </GlobalChatProvider>
     ),
   });
   const read: Promise<Loaded<MakeIdeas>> | undefined =
@@ -189,15 +226,27 @@ const shown = async (
     await router.load();
   });
   await settled();
-  return { asked };
+  return { asked, router };
 };
 
-const box = (): HTMLElement => {
-  const found = document.querySelector<HTMLElement>('[role="textbox"]');
+const box = (): HTMLTextAreaElement => {
+  const found = document.querySelector("textarea");
   if (found === null) {
     throw new Error("No box to ask in");
   }
   return found;
+};
+
+/** Types `text` in the box as a person does: its value, then the input event React listens for. */
+const typeIn = (into: HTMLTextAreaElement, text: string): void => {
+  // Through the prototype's setter, as typing sets it, so React sees the change.
+  Reflect.set(
+    HTMLTextAreaElement.prototype,
+    "value",
+    `${into.value}${text}`,
+    into
+  );
+  into.dispatchEvent(new Event("input", { bubbles: true }));
 };
 
 /** The ideas offered: each tile's words. */
@@ -238,7 +287,7 @@ describe("Chat's page from Make something", () => {
 
     await pick("Service desk");
 
-    expect({ offered, box: box().textContent, asked }).toStrictEqual({
+    expect({ offered, box: box().value, asked }).toStrictEqual({
       offered: ["Service deskEvery client question, until it's solved."],
       box: "Make an App from the Service desk blueprint: Every client question, until it's solved.",
       asked: [],
@@ -254,7 +303,7 @@ describe("Chat's page from Make something", () => {
 
     await pick("Track the month-end close");
 
-    expect({ offered, box: box().textContent, asked }).toStrictEqual({
+    expect({ offered, box: box().value, asked }).toStrictEqual({
       offered: [
         "Track the month-end closeRecord-to-Report",
         "Approve big invoicesPurchase-to-Pay",
@@ -354,7 +403,7 @@ describe("Chat's page from Make something", () => {
     });
 
     await act(async () => {
-      typeInPrompt(box(), "Track the month-end close");
+      typeIn(box(), "Track the month-end close");
       await Promise.resolve();
     });
     await act(async () => {
@@ -377,7 +426,7 @@ describe("Chat's page from Make something", () => {
     const { asked } = await shown();
 
     await act(async () => {
-      typeInPrompt(box(), "What waits on me today?");
+      typeIn(box(), "What waits on me today?");
       await Promise.resolve();
     });
     await act(async () => {
@@ -395,15 +444,233 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("sends a question asked before core has said which models there are once it has, with no second press", async () => {
+    const models = Promise.withResolvers<string[]>();
+    const { asked } = await shown(undefined, undefined, {
+      models: models.promise,
+    });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const early = { asked: [...asked], kept: box().value };
+    await act(async () => {
+      models.resolve(["openai/gpt-5"]);
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({ early, asked }).toStrictEqual({
+      early: { asked: [], kept: "What waits on me today?" },
+      asked: [
+        "create What waits on me today? null",
+        "send chat-1 What waits on me today?",
+      ],
+    });
+  });
+
+  it("tells the chats' list as the answer starts, so its row is marked working then", async () => {
+    let heard = 0;
+    const unheard = onChatsChanged(() => {
+      heard += 1;
+    });
+    // Core's watch says the question's answer runs, and keeps the watch open.
+    await shown(undefined, undefined, {
+      watch: async (_chatId, _after, onUpdate) => {
+        onUpdate({
+          messages: [],
+          partial: null,
+          running: true,
+          stopped: null,
+          held: 0,
+          worked: 0,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+    });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    unheard();
+
+    expect(heard).toBeGreaterThan(0);
+  });
+
+  it("says a question waits while Grasp is out of reach, and no more once it went", async () => {
+    const confirmed = Promise.withResolvers<boolean>();
+    const reach: { now: CoreReach; changed: Set<() => void> } = {
+      now: "unreachable",
+      changed: new Set(),
+    };
+    await shown(undefined, undefined, { confirmed: confirmed.promise, reach });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const waiting = document.body.textContent?.includes("Waiting to send.");
+    await act(async () => {
+      reach.now = "reachable";
+      for (const changed of reach.changed) {
+        changed();
+      }
+      confirmed.resolve(true);
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      waiting,
+      after: document.body.textContent?.includes("Waiting to send."),
+    }).toStrictEqual({ waiting: true, after: false });
+  });
+
+  it("says a question waits while the browser is offline, before the connection notices", async () => {
+    const confirmed = Promise.withResolvers<boolean>();
+    await shown(undefined, undefined, { confirmed: confirmed.promise });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => false,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const waiting = document.body.textContent?.includes("Waiting to send.");
+    Reflect.deleteProperty(navigator, "onLine");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      confirmed.resolve(true);
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(waiting).toBeTruthy();
+  });
+
+  it("says in its own words that a question the connection dropped wasn't sent, never the connection's, and keeps it", async () => {
+    const raw = "WebSocket closed with code 1006";
+    const dropped = Promise.reject(new Error(raw));
+    // Awaited only when the question goes.
+    dropped.catch(() => {});
+    await shown(undefined, undefined, { confirmed: dropped });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    const said = document.body.textContent ?? "";
+    expect({
+      ours: said.includes(
+        "Grasp couldn't be reached, so your question wasn't sent."
+      ),
+      raw: said.includes(raw),
+      kept: box().value,
+    }).toStrictEqual({
+      ours: true,
+      raw: false,
+      kept: "What waits on me today?",
+    });
+  });
+
+  it("says a question core doesn't confirm in time wasn't sent, keeps it, sends it once, and goes on when core confirms late", async () => {
+    const confirmed = Promise.withResolvers<boolean>();
+    const { asked, router } = await shown(undefined, undefined, {
+      confirmed: confirmed.promise,
+    });
+    const send = async (): Promise<void> => {
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+    };
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    vi.useFakeTimers();
+    try {
+      await send();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(sendDeadlineMs);
+      });
+      const late = {
+        said: document.body.textContent.includes(
+          "Grasp hasn't confirmed your question yet."
+        ),
+        failed: document.body.textContent.includes("Could not send"),
+        kept: box().value,
+      };
+      // Send again while core is late: still the one question.
+      await send();
+      const sentOnce = [...asked];
+      await act(async () => {
+        confirmed.resolve(true);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect({
+        late,
+        sentOnce,
+        // Confirmed late, it is asked: the person is on the chat's page.
+        at: router.state.location.pathname,
+      }).toStrictEqual({
+        late: {
+          said: true,
+          failed: true,
+          kept: "What waits on me today?",
+        },
+        sentOnce: [
+          "create What waits on me today? null",
+          "send chat-1 What waits on me today?",
+        ],
+        at: "/chats/chat-1",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("mentions the agent the address names in the box, so the question goes to it, among those the person may talk to", async () => {
     const { asked } = await shown(undefined, undefined, {
       agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
       named: "agent-2",
     });
-    const prefilled = box().textContent;
+    const prefilled = box().value;
 
     await act(async () => {
-      typeInPrompt(box(), "Which invoices are late?");
+      typeIn(box(), "Which invoices are late?");
       await Promise.resolve();
     });
     await act(async () => {
@@ -413,8 +680,7 @@ describe("Chat's page from Make something", () => {
     await settled();
 
     expect({ prefilled, asked }).toStrictEqual({
-      // A chip, which shows the agent's name.
-      prefilled: "Claire ",
+      prefilled: "@Claire ",
       asked: [
         "create @Claire Which invoices are late? null with agent-2",
         'send chat-1 @Claire Which invoices are late? [{"kind":"agent","id":"agent-2"}]',
@@ -422,33 +688,11 @@ describe("Chat's page from Make something", () => {
     });
   });
 
-  it("asks a starting question of the agent the box mentions, in a chat made with it", async () => {
-    const { asked } = await shown(undefined, undefined, {
-      agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
-      named: "agent-2",
-    });
-
-    await act(async () => {
-      document
-        .querySelector<HTMLButtonElement>(
-          '[aria-label="What waits on me today?"]'
-        )
-        ?.click();
-      await Promise.resolve();
-    });
-    await settled();
-
-    expect(asked).toStrictEqual([
-      "create @Claire What waits on me today? null with agent-2",
-      'send chat-1 @Claire What waits on me today? [{"kind":"agent","id":"agent-2"}]',
-    ]);
-  });
-
   it("mentions nobody for an agent the person may not talk to", async () => {
     await shown(undefined, undefined, {
       agents: [agent("organization", "Grasp")],
       named: "agent-hidden",
     });
-    expect(box().textContent).toBe("");
+    expect(box().value).toBe("");
   });
 });

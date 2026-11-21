@@ -1,18 +1,24 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
-import { LayoutGridIcon } from "lucide-react";
 
 import { OpenedApp } from "../apps/app-page.tsx";
-import { settingsSectionOf } from "../apps/app-settings.tsx";
-import type { AppSettingsSection } from "../apps/app-settings.tsx";
 import type { ReadOnlyShown, WorkspaceView } from "../apps/app-workspace.tsx";
+import { settingsSectionOf } from "../apps/settings-sections.ts";
+import type { AppSettingsSection } from "../apps/settings-sections.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import {
   backCrumb,
   projectSearchOf,
   readItemProject,
 } from "../frame/item-shell.tsx";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import {
+  APP_GENERAL,
+  Fill,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
+import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // An App, at one address for everyone (apps/app-page.tsx): its workspace
@@ -42,7 +48,7 @@ const AppRoute = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
-        icon={LayoutGridIcon}
+        icon={AppWindowMark}
         notFound={t`App not found`}
         page={page}
       />
@@ -63,6 +69,25 @@ const AppRoute = () => {
       shown={shownOf(search)}
       view={search.view ?? "preview"}
     />
+  );
+};
+
+/**
+ * The App before it is read: the bar, its name still to come, and the
+ * view the address names. Its settings wait as cards; the preview, the
+ * code and the data draw themselves in, as no skeleton has their shape.
+ */
+const AppPending = () => {
+  const { view } = Route.useSearch();
+  return (
+    <>
+      <LoadingBar />
+      <Fill>
+        {view === "settings" ? (
+          <SettingsPending sections={APP_GENERAL} />
+        ) : null}
+      </Fill>
+    </>
   );
 };
 
@@ -96,6 +121,7 @@ const validateSearch = (
   point?: number | undefined;
   version?: number | undefined;
   project?: string | undefined;
+  width?: "tablet" | "phone" | undefined;
 } => ({
   view: viewOf(search.view),
   section: settingsSectionOf(search.section),
@@ -110,20 +136,27 @@ const validateSearch = (
   version: whole(search.version),
   // The project it was started or opened from: the way back.
   project: projectSearchOf(search),
+  // How wide the preview is drawn, chosen in the sidebar (app-section.tsx):
+  // a desktop's unless it names another.
+  width:
+    search.width === "tablet" || search.width === "phone"
+      ? search.width
+      : undefined,
 });
 
 export const Route = createFileRoute("/_shell/apps/$app")({
   // Grasp's chat is no part of the live App; for its builders, the App's
   // chat docks beside the workspace, about it (chat/chat-subject.ts).
-  staticData: { chat: chatPresence.hidden },
-  pendingComponent: PageLoading,
+  staticData: { chat: chatPresence.hidden, page: "fill" },
+  pendingComponent: AppPending,
   component: AppRoute,
   validateSearch,
   loaderDeps: ({ search: { project } }) => ({ project }),
-  // Moving between the App's own routes (`pages/`), or the workspace's
-  // views, reads nothing again: the frame routes them. Loading the App
-  // again (`invalidate`) still does.
-  shouldReload: false,
+  // No `shouldReload`: the router's own rule is the one wanted. Moving
+  // between the App's own routes (`pages/`) or the workspace's views reads
+  // nothing again (the frame routes them); opening the App, another App,
+  // or another project reads it again, in the background over what was
+  // read; so does `invalidate`.
   loader: async ({ context: { core }, params, deps: { project } }) =>
     await loadFromCore(core, async (session) => {
       const [app, contents, inProject] = await Promise.all([

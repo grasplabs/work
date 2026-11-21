@@ -28,13 +28,11 @@ import type { ChatSlot } from "./active-chat.ts";
 
 /**
  * What the chat is called and says on a subject's page: the same for an
- * App and a workflow, whose draft its builders share until they share
- * it with their team.
+ * App and a workflow.
  */
 export const subjectWords = {
   title: msg`Ask for a change`,
   placeholder: msg`Say what should change`,
-  empty: msg`Say what to change. Your team sees the changes once you share them.`,
 } satisfies Record<string, MessageDescriptor>;
 
 /** The tab's slot for `subject`'s chat. */

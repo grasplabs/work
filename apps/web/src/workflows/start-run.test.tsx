@@ -120,16 +120,20 @@ const shown = async (
   return asked;
 };
 
+/** A button's words, as shown: the layer a library Button shows, not the ones it keeps for its width. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent.trim();
+
 /** The button whose text is `text`. */
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
 /** The buttons whose text is `text`. */
 const buttonsNamed = (text: string): HTMLButtonElement[] =>
   [...document.querySelectorAll("button")].filter(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
 /** Clicks `element`, and lets what it does settle. */
@@ -153,10 +157,21 @@ const press = async (text: string): Promise<void> => {
   });
 };
 
+/** A label's words, without the mark a required field's label carries. */
+const wordsOf = (label: HTMLLabelElement): string =>
+  [...label.childNodes]
+    .filter(
+      (node) =>
+        !(node instanceof HTMLElement && node.dataset.slot === "required-mark")
+    )
+    .map((node) => node.textContent)
+    .join("")
+    .trim();
+
 /** Types `value` into the field labelled `label`. */
 const type = async (label: string, value: string): Promise<void> => {
   const labelled = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent.trim() === label
+    (each) => wordsOf(each) === label
   );
   const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     `#${CSS.escape(labelled?.htmlFor ?? "")}`
@@ -200,7 +215,7 @@ describe("starting a workflow by hand", () => {
 
   it("starts an independent workflow at core's version with exactly the input its form makes, after a field it can't send", async () => {
     const asked = await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       form
     );
     await press("Run");
@@ -233,7 +248,7 @@ describe("starting a workflow by hand", () => {
 
   it("has a person picked, never typed, for a field that takes one: a person, a team or a role", async () => {
     const asked = await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       {
         version: 3,
         args: {
@@ -296,7 +311,7 @@ describe("starting a workflow by hand", () => {
   });
 
   it("names the person picked apart from someone of the same name", async () => {
-    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+    await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: 3,
       args: {
         type: "object",
@@ -322,7 +337,7 @@ describe("starting a workflow by hand", () => {
   });
 
   it("offers no Run for a workflow core gives no version to start", async () => {
-    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+    await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: null,
       args: null,
       people: null,
@@ -333,7 +348,7 @@ describe("starting a workflow by hand", () => {
 
   it("says why it can't offer Run when core can't say how the workflow starts", async () => {
     await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       workflowResourceErrors.create("workflow.resource_unavailable")
     );
 
@@ -350,6 +365,7 @@ describe("starting a workflow by hand", () => {
     await shown(
       () => (
         <StartIndependentRun
+          live={1}
           onFiles={() => {
             shownFiles.push("files");
           }}

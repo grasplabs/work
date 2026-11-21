@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { useAppAddress } from "../pages/app-address.ts";
@@ -10,12 +11,17 @@ import { PageFrame } from "../pages/page-frame.tsx";
 // keeps the frame). Keyed by App, so moving to another starts afresh: the
 // chrome never shows the name of the App the page just left.
 
+const page = stylex.create({
+  // The frame fills the window: the App's page scrolls inside it.
+  main: { display: "flex", flexDirection: "column", height: "100svh" },
+});
+
 const FullPage = () => {
   const { app } = Route.useParams();
   const full = `/apps/${app}/full`;
   const address = useAppAddress({ root: full, sub: full });
   return (
-    <main className="flex h-svh flex-col">
+    <main {...stylex.props(page.main)}>
       <PageFrame
         app={app}
         at={address.at}

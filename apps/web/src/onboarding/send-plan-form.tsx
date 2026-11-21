@@ -1,18 +1,96 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Plural, useLingui } from "@lingui/react/macro";
-import { ChevronDownIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { formatList } from "../format.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox } from "../grasp/checkbox/index.ts";
+import { DatePicker } from "../grasp/date-picker/index.ts";
+import { ChevronDown } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { dayChoices } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
+
+const styles = stylex.create({
+  // One card, a hairline between its parts.
+  card: {
+    display: "flex",
+    flexDirection: "column",
+    borderWidth: grasp.hairline,
+    borderStyle: "solid",
+    borderColor: grasp.line,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+  },
+  part: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    minWidth: 0,
+    margin: 0,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.space4,
+    borderWidth: 0,
+    borderBlockStartWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  teamsPart: { gap: grasp.space2 },
+  words: { display: "flex", flexDirection: "column" },
+  when: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  day: { width: "10rem" },
+  hour: { width: "7rem" },
+  // The legend's words stand in the fieldset's own flow, as a row.
+  legend: { display: "contents" },
+  head: { display: "flex", alignItems: "baseline", gap: grasp.space3 },
+  grow: { flexGrow: 1 },
+  // Only on a phone, where the teams fold away, on the head's line.
+  change: {
+    display: { default: null, [media.fromPhone]: "none" },
+    marginBlock: `calc(-1 * ${grasp.space1})`,
+  },
+  // Many teams scroll in the list, so the step still fits on screen.
+  teams: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.fromPhone]: "repeat(2, minmax(0, 1fr))",
+    },
+    columnGap: grasp.space4,
+    rowGap: grasp.space2,
+    maxHeight: "9rem",
+    margin: 0,
+    padding: 0,
+    overflowY: "auto",
+    listStyle: "none",
+  },
+  folded: { display: { default: "grid", [media.belowPhone]: "none" } },
+  team: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  name: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  count: {
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontVariantNumeric: "tabular-nums",
+  },
+  at: { color: grasp.muted },
+});
 
 // When the links go out, and to whom (prototype
 // `components/onboarding/send-plan.tsx`): set by the one person who sends
@@ -23,7 +101,7 @@ import type { SendChoice } from "./send-plan.ts";
 // everyone else once their lead has talked.
 
 /** A team as the choice lists it. */
-export interface SendTeam {
+interface SendTeam {
   id: string;
   name: string;
   people: number;
@@ -45,7 +123,7 @@ const isoMonths = [
 ] as const;
 
 /** "6 Oct": an ISO day, without its year, in the page's language. */
-export const formatDay = (iso: string, locale: string): string => {
+const formatDay = (iso: string, locale: string): string => {
   const [year = 0, month = 1, day = 1] = iso.split("-").map(Number);
   if (locale === "en") {
     return `${day} ${isoMonths[month - 1] ?? ""}`;
@@ -111,15 +189,15 @@ export const SendPlanForm = ({
     context: "at an hour of the day: on Tuesday at 9:00",
   });
   return (
-    <div className="flex flex-col divide-y rounded-xl border">
-      <div className="flex flex-col gap-3 px-4 py-3">
-        <div className="flex flex-col">
+    <div {...stylex.props(styles.card)}>
+      <div {...stylex.props(styles.part)}>
+        <div {...stylex.props(styles.words)}>
           <span id={dayField}>{t`The first links go out`}</span>
-          <span className="text-muted-foreground text-xs">
+          <Text element="span" size="xs" tone="muted">
             {t`To the team leads. Everyone else follows once their lead has talked.`}
-          </span>
+          </Text>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div {...stylex.props(styles.when)}>
           <ToggleGroup
             aria-labelledby={dayField}
             onValueChange={(value: unknown[]) => {
@@ -130,52 +208,54 @@ export const SendPlanForm = ({
             }}
             size="sm"
             value={[picked]}
-            variant="outline"
           >
             {offered.map((each) => (
-              <ToggleGroupItem key={each.id} value={each.id}>
+              <Toggle key={each.id} value={each.id}>
                 {names[each.id]}
-              </ToggleGroupItem>
+              </Toggle>
             ))}
           </ToggleGroup>
-          <Input
-            aria-label={t`Another day`}
-            className="w-40"
-            min={today}
-            onChange={(event) => {
-              if (event.target.value !== "") {
-                onChange({ ...choice, day: event.target.value });
-              }
-            }}
-            type="date"
-            value={choice.day}
-          />
-          <label className="text-muted-foreground" htmlFor={timeField}>
+          <div {...stylex.props(styles.day)}>
+            <DatePicker
+              aria-label={t`Another day`}
+              min={today}
+              onValueChange={(value) => {
+                if (typeof value === "string" && value !== "") {
+                  onChange({ ...choice, day: value });
+                }
+              }}
+              size="sm"
+              value={choice.day}
+            />
+          </div>
+          <label htmlFor={timeField} {...stylex.props(styles.at)}>
             {at}
           </label>
           <Input
-            className="w-28"
             id={timeField}
-            onChange={(event) => {
-              onChange({ ...choice, time: event.target.value });
+            layout={styles.hour}
+            onValueChange={(time) => {
+              onChange({ ...choice, time });
             }}
+            size="sm"
             type="time"
             value={choice.time}
           />
         </div>
       </div>
-      <fieldset className="flex flex-col gap-2 px-4 py-3">
-        <legend className="contents">
-          <span className="flex items-baseline gap-3">
-            <span className="flex-1">{t`To these teams`}</span>
-            <span className="text-muted-foreground text-xs tabular-nums">
-              {t`${going} of ${count}`}
-            </span>
+      <fieldset {...stylex.props(styles.part, styles.teamsPart)}>
+        <legend {...stylex.props(styles.legend)}>
+          <span {...stylex.props(styles.head)}>
+            <span {...stylex.props(styles.grow)}>{t`To these teams`}</span>
+            <span
+              {...stylex.props(styles.count)}
+            >{t`${going} of ${count}`}</span>
             {choosing ? null : (
               <Button
                 aria-controls={teamsList}
                 aria-expanded={false}
-                className="-my-1 sm:hidden"
+                iconEnd={ChevronDown}
+                layout={styles.change}
                 onClick={() => {
                   setChoosing(true);
                 }}
@@ -183,38 +263,34 @@ export const SendPlanForm = ({
                 variant="ghost"
               >
                 {t({ message: "Change", context: "change which teams" })}
-                <ChevronDownIcon data-icon="inline-end" />
               </Button>
             )}
           </span>
         </legend>
         <ul
-          className={cn(
-            // Many teams scroll in the list, so the step still fits on screen.
-            "grid max-h-36 grid-cols-1 gap-x-4 gap-y-1.5 overflow-y-auto sm:grid-cols-2",
-            !choosing && "max-sm:hidden"
-          )}
           id={teamsList}
           ref={list}
+          {...stylex.props(styles.teams, !choosing && styles.folded)}
         >
           {teams.map((team) => {
             const inIt = !choice.held.includes(team.id);
             return (
               <li key={team.id}>
-                <label className="flex items-center gap-2.5">
+                <label {...stylex.props(styles.team)}>
                   <Checkbox
                     checked={inIt}
-                    onCheckedChange={(checked: boolean) => {
+                    onCheckedChange={(checked) => {
                       onChange({
                         ...choice,
-                        held: checked
-                          ? choice.held.filter((id) => id !== team.id)
-                          : [...choice.held, team.id],
+                        held:
+                          checked === true
+                            ? choice.held.filter((id) => id !== team.id)
+                            : [...choice.held, team.id],
                       });
                     }}
                   />
-                  <span className="min-w-0 flex-1 truncate">{team.name}</span>
-                  <span className="text-muted-foreground text-xs tabular-nums">
+                  <span {...stylex.props(styles.name)}>{team.name}</span>
+                  <span {...stylex.props(styles.count)}>
                     <Plural
                       one="# person"
                       other="# people"
@@ -228,8 +304,8 @@ export const SendPlanForm = ({
         </ul>
       </fieldset>
       {held.length > 0 ? (
-        <div className="flex flex-col gap-3 px-4 py-3">
-          <div className="flex flex-col">
+        <div {...stylex.props(styles.part)}>
+          <div {...stylex.props(styles.words)}>
             <span id={laterField}>
               <Plural
                 one="The team you left out"
@@ -237,11 +313,11 @@ export const SendPlanForm = ({
                 value={held.length}
               />
             </span>
-            <span className="text-muted-foreground text-xs">
+            <Text element="span" size="xs" tone="muted">
               {formatList(held.map((team) => team.name))}
-            </span>
+            </Text>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div {...stylex.props(styles.when)}>
             <ToggleGroup
               aria-labelledby={laterField}
               onValueChange={(value: unknown[]) => {
@@ -257,32 +333,33 @@ export const SendPlanForm = ({
               }}
               size="sm"
               value={[choice.heldDay === null ? "open" : "day"]}
-              variant="outline"
             >
-              <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
-              <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
+              <Toggle value="open">{t`Not planned yet`}</Toggle>
+              <Toggle value="day">{t`On a later day`}</Toggle>
             </ToggleGroup>
             {choice.heldDay === null ? null : (
               <>
-                <Input
-                  aria-label={t`The day the other teams get their links`}
-                  className="w-40"
-                  min={choice.day}
-                  onChange={(event) => {
-                    if (event.target.value !== "") {
-                      onChange({ ...choice, heldDay: event.target.value });
-                    }
-                  }}
-                  type="date"
-                  value={choice.heldDay}
-                />
-                <span className="text-muted-foreground">{at}</span>
+                <div {...stylex.props(styles.day)}>
+                  <DatePicker
+                    aria-label={t`The day the other teams get their links`}
+                    min={choice.day}
+                    onValueChange={(value) => {
+                      if (typeof value === "string" && value !== "") {
+                        onChange({ ...choice, heldDay: value });
+                      }
+                    }}
+                    size="sm"
+                    value={choice.heldDay}
+                  />
+                </div>
+                <span {...stylex.props(styles.at)}>{at}</span>
                 <Input
                   aria-label={t`The hour the other teams get their links`}
-                  className="w-28"
-                  onChange={(event) => {
-                    onChange({ ...choice, heldTime: event.target.value });
+                  layout={styles.hour}
+                  onValueChange={(heldTime) => {
+                    onChange({ ...choice, heldTime });
                   }}
+                  size="sm"
                   type="time"
                   value={choice.heldTime}
                 />

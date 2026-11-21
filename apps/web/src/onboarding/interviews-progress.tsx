@@ -1,10 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/app-kit/components/popover";
-import { Progress } from "@grasp-os/app-kit/components/progress";
 import { minTalkedShown } from "@grasp-os/shared/onboarding";
 import type {
   LinkToSend,
@@ -13,14 +6,8 @@ import type {
 } from "@grasp-os/shared/onboarding";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  CopyIcon,
-  DownloadIcon,
-  LinkIcon,
-} from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -28,12 +15,102 @@ import { copyText } from "../copy.ts";
 import { downloadCsv } from "../csv.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Copy, Download, Link, Tick } from "../grasp/icons/index.ts";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../grasp/popover/index.ts";
+import { Progress } from "../grasp/progress/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FailedMailNotice } from "./failed-mail.tsx";
 import { fullLink, linksCsv, linksOf } from "./links-to-send.ts";
 import { Callout, Figure } from "./setup-parts.tsx";
 import { closesOn, teamNumbersOf } from "./setup.ts";
 import type { Listening } from "./setup.ts";
+
+const styles = stylex.create({
+  whole: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    width: "100%",
+    textAlign: "start",
+  },
+  quiet: { color: grasp.muted },
+  line: { margin: 0 },
+  days: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  ticks: { display: "flex", gap: grasp.space1 },
+  tick: {
+    flexGrow: 1,
+    flexBasis: 0,
+    height: `calc(1.5 * ${grasp.space1})`,
+    borderRadius: grasp.cornerPill,
+    backgroundColor: grasp.line,
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  past: { backgroundColor: grasp.ink },
+  when: {
+    display: "flex",
+    justifyContent: "space-between",
+    color: grasp.muted,
+  },
+  figures: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: grasp.space3,
+  },
+  foot: { display: "flex", alignItems: "flex-start", gap: grasp.space3 },
+  grow: { flexGrow: 1, minWidth: 0 },
+  // A trigger in the foot's line stands level with the words beside it.
+  trigger: { flexShrink: 0, marginBlock: `calc(-1 * ${grasp.space1})` },
+  // A team: its name and count on one line, how far it is under them.
+  team: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+  },
+  teamHead: { display: "flex", alignItems: "baseline", gap: grasp.space3 },
+  name: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  count: {
+    flexShrink: 0,
+    color: grasp.muted,
+    fontVariantNumeric: "tabular-nums",
+  },
+  panel: { display: "flex", flexDirection: "column" },
+  note: { marginBlockStart: grasp.space2 },
+  links: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  // Many links scroll in the panel's own list.
+  linkList: {
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "18rem",
+    overflow: "auto",
+  },
+  link: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space1,
+    borderBlockStartWidth: grasp.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  person: { display: "flex", flexDirection: "column", minWidth: 0 },
+});
 
 // Where the interviews stand while Stephen talks to the team (prototype
 // `RealListening`, `QuietTeam` and `Links` in
@@ -53,9 +130,48 @@ const firstName = (name: string): string => name.split(" ")[0] ?? name;
 /** A date as the page's language writes it, from an ISO day. */
 const formatDay = (day: string): string => formatDate(`${day}T12:00:00Z`);
 
+/**
+ * The team far behind, once the days are well under way: a team of five
+ * or more with a lead, of whom fewer than `quietBelow` of those asked
+ * talked, named with its lead's first name, who can help. The onboarding's
+ * step and the inbox's Interviews item say the same.
+ */
+export const quietTeamOf = (
+  { progress, roster }: Pick<OnboardingView, "progress" | "roster">,
+  listening: Pick<Listening, "progress">
+): { team: TeamProgress; lead: string } | undefined => {
+  if (listening.progress <= quietAfter) {
+    return undefined;
+  }
+  const leadOf = (team: string) => {
+    const lead = roster?.teams.find((each) => each.id === team)?.lead ?? null;
+    // An erased lead has no name to give, and can't help: as if none.
+    return (
+      roster?.people.find(
+        (person) => person.id === lead && person.name !== ""
+      ) ?? null
+    );
+  };
+  const team = progress?.teams.find(
+    (each) =>
+      !each.off &&
+      leadOf(each.id) !== null &&
+      each.asked !== null &&
+      each.asked > 0 &&
+      (each.talked ?? 0) / each.asked < quietBelow
+  );
+  return team === undefined
+    ? undefined
+    : { team, lead: firstName(leadOf(team.id)?.name ?? "") };
+};
+
 /** A line that turns up: said by Stephen on the onboarding's step, only shown elsewhere. */
 const Line = ({ text, spoken }: { text: string; spoken: boolean }) =>
-  spoken ? <Callout text={text} /> : <p>{text}</p>;
+  spoken ? (
+    <Callout text={text} />
+  ) : (
+    <p {...stylex.props(styles.line)}>{text}</p>
+  );
 
 /** The one team far behind, named with the lead whose word usually helps. */
 const QuietTeam = ({
@@ -69,7 +185,7 @@ const QuietTeam = ({
 }) => {
   const { t } = useLingui();
   return (
-    <div className="text-muted-foreground">
+    <div {...stylex.props(styles.quiet)}>
       <Line
         spoken={spoken}
         text={t`${team} has been quiet so far. A short message from ${lead}, their lead, usually helps. I’ll remind everyone once myself.`}
@@ -141,11 +257,16 @@ const TeamRow = ({ team }: { team: TeamProgress }) => {
     count = t`Fewer than ${least} of ${of}`;
   }
   return (
-    <div className="setup-team-row grid items-center gap-3 py-1.5">
-      <span className="truncate">{team.name}</span>
+    <div {...stylex.props(styles.team)}>
+      <span {...stylex.props(styles.teamHead)}>
+        <span {...stylex.props(styles.name)}>{team.name}</span>
+        <span {...stylex.props(styles.count)}>{count}</span>
+      </span>
       {numbers.shown === "both" ? (
         <Progress
-          aria-label={team.name}
+          label={team.name}
+          showLabel={false}
+          size="sm"
           value={
             numbers.asked === 0
               ? 0
@@ -153,13 +274,10 @@ const TeamRow = ({ team }: { team: TeamProgress }) => {
           }
         />
       ) : (
-        <span className="text-muted-foreground text-xs">
+        <Text element="span" size="xs" tone="muted">
           {team.leadTalked ? t`Lead talked` : t`Lead not yet`}
-        </span>
+        </Text>
       )}
-      <span className="text-muted-foreground text-right tabular-nums">
-        {count}
-      </span>
     </div>
   );
 };
@@ -169,21 +287,18 @@ const ByTeam = ({ teams }: { teams: TeamProgress[] }) => {
   const { t } = useLingui();
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button className="-my-1 flex-none" size="sm" variant="ghost" />
-        }
-      >
+      <PopoverTrigger layout={styles.trigger} size="sm" variant="ghost">
         {t`By team`}
-        <ChevronDownIcon data-icon="inline-end" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-96">
+      <PopoverContent align="end">
         {/* One list, close together: the content's own room is between its parts. */}
-        <div className="flex flex-col">
+        <div {...stylex.props(styles.panel)}>
           {teams.map((team) => (
             <TeamRow key={team.id} team={team} />
           ))}
-          <p className="text-muted-foreground pt-2 text-xs">{t`Teams under five people show only whether their lead talked, so nobody can be singled out.`}</p>
+          <Text layout={styles.note} size="xs" tone="muted">
+            {t`Teams under five people show only whether their lead talked, so nobody can be singled out.`}
+          </Text>
         </div>
       </PopoverContent>
     </Popover>
@@ -211,20 +326,23 @@ const LinkRow = ({
     about = team;
   }
   return (
-    <div className="setup-link-row grid items-center gap-3 border-t py-1.5">
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate">{name}</span>
-        <span className="text-muted-foreground truncate text-xs">{about}</span>
+    <div {...stylex.props(styles.link)}>
+      <span {...stylex.props(styles.person)}>
+        <Text element="span" size="sm" wrap="truncate">
+          {name}
+        </Text>
+        <Text element="span" size="xs" tone="muted" wrap="truncate">
+          {about}
+        </Text>
       </span>
       <Button
         aria-label={t`Copy the link for ${name}`}
         disabled={link.path === null}
+        icon={copied ? Tick : Copy}
         onClick={onCopy}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Button>
+      />
     </div>
   );
 };
@@ -250,18 +368,18 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
     await run(async (session) => {
       await session.onboarding.linksTaken(people);
     });
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   const freshCount = fresh.length;
   const outCount = out.length;
   return (
     <Popover>
       <PopoverTrigger
-        render={
-          <Button className="-my-1 flex-none" size="sm" variant="ghost" />
-        }
+        icon={Link}
+        layout={styles.trigger}
+        size="sm"
+        variant="ghost"
       >
-        <LinkIcon data-icon="inline-start" />
         {freshCount > 0
           ? plural(freshCount, {
               one: "# new link to send",
@@ -269,11 +387,14 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
             })
           : t`Links to send`}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-md">
-        <div className="flex flex-col gap-3">
-          <p className="text-muted-foreground">{t`Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked.`}</p>
+      <PopoverContent align="end">
+        <div {...stylex.props(styles.links)}>
+          <Text size="sm" tone="muted">
+            {t`Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked.`}
+          </Text>
           <Button
             disabled={list.length === 0}
+            icon={Download}
             onClick={() => {
               downloadCsv(
                 linksCsv(list, origin, [t`Name`, t`Email`, t`Team`, t`Link`]),
@@ -282,9 +403,8 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
               void taken(list.map(({ person }) => person));
             }}
             size="sm"
-            variant="outline"
+            variant="quiet"
           >
-            <DownloadIcon data-icon="inline-start" />
             {freshCount > 0
               ? plural(freshCount, {
                   one: "The new link, as a list",
@@ -296,7 +416,7 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
                 })}
           </Button>
           <ErrorText>{failure}</ErrorText>
-          <div className="flex max-h-72 flex-col overflow-auto">
+          <div {...stylex.props(styles.linkList)}>
             {links.map((link) => (
               <LinkRow
                 copied={copied === link.person}
@@ -349,7 +469,7 @@ export const InterviewsProgress = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const { plan, progress, roster, agreed, paused } = view;
+  const { plan, progress, agreed, paused } = view;
   const closes = plan === null ? "" : formatDay(closesOn(plan));
   const { days, leadsHeard } = listening;
   const day = Math.max(
@@ -357,32 +477,13 @@ export const InterviewsProgress = ({
     plan !== null && plan.start <= today ? 1 : 0
   );
   const teams = progress?.teams.filter((team) => !team.off) ?? [];
-  const leadOf = (team: string) => {
-    const lead = roster?.teams.find((each) => each.id === team)?.lead ?? null;
-    // An erased lead has no name to give, and can't help: as if none.
-    return (
-      roster?.people.find(
-        (person) => person.id === lead && person.name !== ""
-      ) ?? null
-    );
-  };
-  // Once the days are well under way, a team of five or more far behind is named, with the lead who can help.
-  const quiet =
-    listening.progress > quietAfter
-      ? teams.find(
-          (team) =>
-            leadOf(team.id) !== null &&
-            team.asked !== null &&
-            team.asked > 0 &&
-            (team.talked ?? 0) / team.asked < quietBelow
-        )
-      : undefined;
-  const quietLead =
-    quiet === undefined ? "" : firstName(leadOf(quiet.id)?.name ?? "");
+  const quietOne = quietTeamOf(view, listening);
+  const quiet = quietOne?.team;
+  const quietLead = quietOne?.lead ?? "";
   const leads = progress?.leads ?? 0;
   const starts = plan === null ? "" : formatDay(plan.start);
   return (
-    <div className="flex w-full flex-col gap-4 text-left">
+    <div {...stylex.props(styles.whole)}>
       <Waiting
         agreed={agreed}
         fresh={linksOf(links).fresh.length}
@@ -391,20 +492,16 @@ export const InterviewsProgress = ({
       />
       <FailedMailNotice links={links} />
       {children}
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-1">
+      <div {...stylex.props(styles.days)}>
+        <div {...stylex.props(styles.ticks)}>
           {Array.from({ length: days }, (_, index) => (
             <span
-              className={
-                index < day
-                  ? "bg-foreground h-1.5 flex-1 rounded-full transition-colors duration-500"
-                  : "bg-border h-1.5 flex-1 rounded-full transition-colors duration-500"
-              }
               key={index}
+              {...stylex.props(styles.tick, index < day && styles.past)}
             />
           ))}
         </div>
-        <div className="text-muted-foreground flex justify-between">
+        <div {...stylex.props(styles.when)}>
           <span>
             {plan !== null && plan.start > today
               ? t`Starts ${starts}`
@@ -413,7 +510,7 @@ export const InterviewsProgress = ({
           {closes === "" ? null : <span>{t`Closes ${closes}`}</span>}
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2.5">
+      <div {...stylex.props(styles.figures)}>
         <Figure
           label={t`team leads talked`}
           value={t`${leadsHeard} of ${leads}`}
@@ -425,8 +522,8 @@ export const InterviewsProgress = ({
         {/* Core draws no work from the interviews yet: unknown stays unknown, never 0. */}
         <Figure label={t`pieces of work found`} value="–" />
       </div>
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
+      <div {...stylex.props(styles.foot)}>
+        <div {...stylex.props(styles.grow)}>
           {quiet === undefined ? null : (
             <QuietTeam lead={quietLead} spoken={spoken} team={quiet.name} />
           )}

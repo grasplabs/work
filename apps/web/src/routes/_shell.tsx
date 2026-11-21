@@ -1,15 +1,25 @@
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useRouter,
+} from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
-import { ChatPanel } from "../chat/chat-panel.tsx";
+import { useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
 import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
+import { useMatchLatest } from "../frame/match-latest.ts";
+import { usePageDock } from "../frame/page-fill.ts";
 import { PageError } from "../frame/page-states.tsx";
+import { ShellPending } from "../frame/shell-pending.tsx";
+import { forgetSignedIn, markSignedIn } from "../frame/signed-in-here.ts";
 import {
   landingAfterSignIn,
   onboardingBehind,
@@ -23,22 +33,82 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 // to the sign-in page, which sends them back here once they're in.
 
 /**
+ * The sidebar's pages: each is a file of its own (vite.config.ts), fetched
+ * once the frame stands, so the first press on one waits for no file. Only
+ * their code: what a page reads it reads when opened, as each read of a
+ * list is recorded in core's audit trail and a page never opened must not
+ * be.
+ */
+const sidebarPages = [
+  "/_shell/",
+  "/_shell/inbox",
+  "/_shell/brain",
+  "/_shell/brain/",
+  "/_shell/projects/",
+  "/_shell/apps/",
+  "/_shell/workflows/",
+  "/_shell/agents/",
+  "/_shell/integrations/",
+] as const;
+
+/**
+ * The Brain's atlas's dots, made between frames once the frame stands:
+ * made as the Brain opened, they held the page still for a second.
+ */
+const makeBrainCloud = async () => {
+  try {
+    const { brainCloudReady } = await import("../brain/dot-shapes.ts");
+    await brainCloudReady();
+  } catch {
+    // Made as the atlas opens instead.
+  }
+};
+
+/** Fetches the sidebar's pages and makes the Brain's dots once the frame stands. */
+const useSidebarPagesFetched = (): void => {
+  const router = useRouter();
+  useEffect(() => {
+    const fetchCode = async (id: (typeof sidebarPages)[number]) => {
+      try {
+        await router.loadRouteChunk(router.routesById[id]);
+      } catch {
+        // Fetched again as the page opens, which says so if it fails then.
+      }
+    };
+    for (const id of sidebarPages) {
+      void fetchCode(id);
+    }
+    void makeBrainCloud();
+  }, [router]);
+};
+
+/**
  * The frame, with Grasp's one chat (chat/global-chat.tsx): its idle bar over
- * the page, and the chat itself, docked beside the page or floating over it.
+ * the page, and the chat itself, docked beside the page, floating over it,
+ * or full screen.
  */
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
+  const panels = useChatPanels();
+  // The chat's idle bar stands at the card's foot only while the chat is
+  // closed: open beside the page or floating, the foot has no bar, so the
+  // page keeps no room or fade for one.
   const { stage } = useGlobalChat();
   const { failing } = Route.useLoaderData();
+  // Chat's start has no bar: its backdrop takes the whole card.
+  const chatStart = useMatchLatest()({ to: "/" }) !== false;
+  // A page that takes someone through a task of its own has no chat box.
+  const docked = usePageDock();
+  useSidebarPagesFetched();
   return (
     <AppFrame
+      bar={chatStart ? "none" : "page"}
       core={core}
-      // The chat full screen: the page's content fades out under it.
-      covered={stage.card && stage.placement === "fullscreen"}
       dock={<ChatBar />}
+      dockShown={stage.bar && docked}
       failing={failing}
       identity={identity}
-      panels={<ChatPanel />}
+      panels={panels}
     >
       <Outlet />
     </AppFrame>
@@ -61,11 +131,13 @@ const Shell = () => {
 
 /**
  * The page to come back to after signing in: its path and search, less
- * `error`, which a refused sign-in adds and the sign-in page shows itself.
+ * `error` and `error_description`, which a refused sign-in adds (OAuth's
+ * pair) and the sign-in page shows itself.
  */
 const returnPathOf = (pathname: string, searchStr: string): string => {
   const search = new URLSearchParams(searchStr);
   search.delete("error");
+  search.delete("error_description");
   const rest = search.toString();
   return rest === "" ? pathname : `${pathname}?${rest}`;
 };
@@ -91,7 +163,9 @@ const ShellError = ({ error, reset, info }: ErrorComponentProps) => {
   }
   return (
     <PageError
-      reason={t`Grasp can't be reached right now. Try again in a moment.`}
+      // The pattern's calm sentence: the dot under it says, live, whether
+      // Grasp can be reached again.
+      reason={t`Grasp could not reach its servers. Nothing you saved is lost.`}
     />
   );
 };
@@ -109,6 +183,7 @@ export const Route = createFileRoute("/_shell")({
       throw new CoreUnreachableError();
     }
     if (identity === undefined) {
+      forgetSignedIn();
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({
         to: "/sign-in",
@@ -123,6 +198,7 @@ export const Route = createFileRoute("/_shell")({
     }
     // Grasp's staff work from the admin dashboard: nothing here is theirs.
     if (identity.staff) {
+      forgetSignedIn();
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/staff", replace: true });
     }
@@ -159,6 +235,8 @@ export const Route = createFileRoute("/_shell")({
           },
         })
       : null;
+    // The next reload paints the frame at once (frame/shell-pending.tsx).
+    markSignedIn();
     if (landing !== null) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: landing, replace: true });
@@ -179,5 +257,10 @@ export const Route = createFileRoute("/_shell")({
         : undefined,
   }),
   component: Shell,
+  // On a reload, the frame at once while core says who is in, the page's
+  // skeleton in its card; moving between pages never shows it, as the
+  // shell stays read.
+  pendingComponent: ShellPending,
+  pendingMs: 0,
   errorComponent: ShellError,
 });

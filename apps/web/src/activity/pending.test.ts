@@ -9,7 +9,13 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
-import { objectOf, subjectOf } from "./pending.tsx";
+import {
+  objectOf,
+  requestAsker,
+  requestNextRun,
+  requestWords,
+  subjectOf,
+} from "./pending.tsx";
 
 const app = "11111111-1111-4111-8111-111111111111";
 
@@ -130,6 +136,56 @@ describe("a pending request that names a workflow", () => {
     }).toStrictEqual({
       named: "Workflow nightly-report",
       unnamed: `Workflow ${id}`,
+    });
+  });
+});
+
+describe("a schedule trigger asking to start its workflow", () => {
+  /** `startRequest` from a trigger of `kind`, on weekdays at 09:00 in Amsterdam where it is a schedule. */
+  const triggered = (kind: "schedule" | "email"): Permission => ({
+    ...startRequest({ [workflow]: "invoice-approval" }),
+    trigger: {
+      kind,
+      schedule:
+        kind === "schedule"
+          ? { cron: "0 9 * * 1-5", timeZone: "Europe/Amsterdam" }
+          : null,
+      event: null,
+      connection: null,
+      source: null,
+    },
+  });
+  // A Tuesday at noon in Amsterdam: the next run is Wednesday at 09:00 there.
+  const now = new Date("2026-11-17T11:00:00.000Z");
+
+  it("says what it is and when it next runs, in the schedule's own zone, and any other trigger as before", () => {
+    const scheduled = requestWords(triggered("schedule"), directory, now);
+    const other = requestWords(triggered("email"), directory, now);
+
+    const next = requestNextRun(triggered("schedule"), now) ?? "";
+
+    expect({
+      scheduled,
+      next: next.startsWith("Next run "),
+      day: next.includes("18"),
+      hour: next.includes("09:00"),
+      cron: next.includes("* *"),
+      otherNext: requestNextRun(triggered("email"), now),
+      other: other.endsWith(": start on Workflow invoice-approval"),
+      asker: requestAsker(triggered("schedule"), directory, now),
+      otherAsker:
+        requestAsker(triggered("email"), directory, now) ===
+        subjectOf(triggered("email"), directory),
+    }).toStrictEqual({
+      scheduled: "Schedule for invoice-approval",
+      next: true,
+      day: true,
+      hour: true,
+      cron: false,
+      otherNext: undefined,
+      other: true,
+      asker: "Schedule for invoice-approval",
+      otherAsker: true,
     });
   });
 });

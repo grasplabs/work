@@ -15,7 +15,7 @@ export const useCoreAction = () => {
   const [failure, setFailure] = useState<string>();
   const run = async <T>(
     action: (session: Session) => Promise<T>,
-    report: (reason: string) => void = setFailure
+    report: (reason: string, error: unknown) => void = setFailure
   ): Promise<T | undefined> => {
     setBusy(true);
     setFailure(undefined);
@@ -23,7 +23,7 @@ export const useCoreAction = () => {
     try {
       result = await core.withSession(action);
     } catch (error) {
-      report(failureText(error));
+      report(failureText(error), error);
     }
     setBusy(false);
     return result;

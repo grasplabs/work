@@ -1,50 +1,36 @@
-import { Card } from "@grasp-os/app-kit/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-} from "@grasp-os/app-kit/components/empty";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderMeta,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-// A page's body and heading, as the prototype has them
-// (`components/page.tsx`).
+import { Heading } from "../grasp/heading/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
-/**
- * The page body: centred, generous whitespace. Its foot leaves room for
- * the chat box, so the last row of a page is never under it. Its text is
- * the body's 16px, as the prototype's page: a smaller part says so itself.
- */
-export const Page = ({
-  children,
-  wide = false,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-}) => (
-  <div
-    className={
-      wide
-        ? "pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7"
-        : "pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7"
-    }
-  >
-    {children}
-  </div>
+// A page's body and heading. App shell gives the page its side room, the
+// room under its bar and the room over the chat's bar at its foot; the
+// page fills the card between those.
+
+const styles = stylex.create({
+  // As wide as the card lets it be, so every page's edges stand under the
+  // bar's and a banner's (Ruben, 17 Nov 2026: one width through the product).
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    width: "100%",
+  },
+});
+
+/** The page body: a column as wide as the card. */
+export const Page = ({ children }: { children: ReactNode }) => (
+  <div {...stylex.props(styles.page)}>{children}</div>
 );
 
 /**
- * Every page's heading, the one way to head a page: its title, one quiet
- * line under it (at most two lines with `clamp`, for a description someone
- * wrote), small marks such as a status (`meta`), and the page's actions on
- * the right. Built of the kit's `PageHeader` parts alone.
+ * Every page's heading, the one way to head a page: Grasp UI's PageHeader,
+ * with the page's title, one quiet line under it, and the page's actions
+ * at the end of the title row; `clamp` keeps a description someone wrote
+ * to two lines.
  */
 export const PageHeading = ({
   title,
@@ -52,46 +38,28 @@ export const PageHeading = ({
   clamp = false,
   meta,
   action,
-  actionAt = "end",
 }: {
   title: ReactNode;
   description?: ReactNode;
+  /** At most two lines of `description`, for a description someone wrote. */
   clamp?: boolean;
+  /** Beside the title: a mark that says where its subject stands, such as a status. */
   meta?: ReactNode;
   action?: ReactNode;
-  /** Where `action` stands: at the heading's foot, or on the title's line. */
-  actionAt?: "end" | "start";
 }) => (
-  <PageHeader align={actionAt}>
-    <PageHeaderContent>
-      <PageHeaderTitle>{title}</PageHeaderTitle>
-      {description === undefined ? null : (
-        <PageHeaderDescription lines={clamp ? "two" : "all"}>
-          {description}
-        </PageHeaderDescription>
-      )}
-      {meta === undefined ? null : <PageHeaderMeta>{meta}</PageHeaderMeta>}
-    </PageHeaderContent>
-    {action === undefined ? null : (
-      <PageHeaderActions>{action}</PageHeaderActions>
-    )}
-  </PageHeader>
-);
-
-/** A list with nothing in it: one quiet line in a card, where the list would be. */
-export const EmptyCard = ({ children }: { children: ReactNode }) => (
-  <Card>
-    <Empty size="xs">
-      <EmptyHeader>
-        <EmptyDescription>{children}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  </Card>
+  <PageHeader
+    title={title}
+    {...(description === undefined ? {} : { description })}
+    descriptionLines={clamp ? 2 : "all"}
+    {...(meta === undefined ? {} : { aside: meta })}
+    {...(action === undefined ? {} : { actions: action })}
+  />
 );
 
 /**
- * A section title inside a page; with `count`, how many it holds beside
- * it, small and quiet, as the prototype's Integrations lists have it.
+ * A section title inside a page, in Grasp UI's smallest heading; with
+ * `count`, how many it holds beside it, small and quiet, inside the
+ * heading so a list it names (`aria-labelledby`) is named with it.
  */
 export const SectionTitle = ({
   children,
@@ -101,16 +69,16 @@ export const SectionTitle = ({
   children: ReactNode;
   count?: string;
   id?: string;
-}) =>
-  count === undefined ? (
-    <h2 className="text-sm font-medium" id={id}>
-      {children}
-    </h2>
-  ) : (
-    <h2 className="flex items-baseline gap-2 text-sm font-medium" id={id}>
-      {children}
-      <span className="text-muted-foreground text-xs font-normal tabular-nums">
-        {count}
-      </span>
-    </h2>
-  );
+}) => (
+  <Heading level={2} size="ui" {...(id === undefined ? {} : { id })}>
+    {children}
+    {count === undefined ? null : (
+      <>
+        {" "}
+        <Text element="span" size="xs" tone="muted">
+          {count}
+        </Text>
+      </>
+    )}
+  </Heading>
+);

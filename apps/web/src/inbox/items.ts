@@ -1,4 +1,9 @@
-import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
+import type { Gap } from "@grasp-os/shared/brain";
+import type {
+  PendingAction,
+  UnknownOutcome,
+  UnknownOutcomeListing,
+} from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
@@ -14,14 +19,17 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { objectOf, subjectOf } from "../activity/pending.tsx";
+import { requestAsker, requestWords } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
-import { formatDateTime, formatList } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { quietTeamOf } from "../onboarding/interviews-progress.tsx";
+import { linksOf } from "../onboarding/links-to-send.ts";
+import { listeningOf } from "../onboarding/setup.ts";
 import type { NotificationsPage } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
-import type { Viewer, Waiting } from "./waiting.ts";
+import type { Interviews, Viewer, Waiting } from "./waiting.ts";
 
 // The inbox, as the prototype derives it (`lib/inbox.ts`): what waits on a
 // person to decide, each item made from what core says waits now, so an
@@ -40,6 +48,9 @@ export type InboxKind =
   | "confirmResult"
   | "conflict"
   | "openQuestion"
+  | "brainQuestion"
+  | "interviews"
+  | "everyonesOutcome"
   | "unknownAiTool"
   | "signInAgain"
   | "externalDomain"
@@ -84,6 +95,9 @@ export type InboxSource =
   | { type: "skillShare"; item: SkillShareItem }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
+  | { type: "gap"; gap: Gap }
+  | { type: "interviews"; interviews: Interviews; today: string }
+  | { type: "everyonesOutcome"; listing: UnknownOutcomeListing; person: string }
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | {
       type: "workflowChanged";
@@ -111,44 +125,58 @@ export interface InboxItem {
   about?: Target;
   /** Who it is for, as a role or a person; none means an admin. */
   forWhom?: { role: string } | { person: string };
-  /** ISO 8601, when it came in. */
+  /** ISO 8601, when it came in; empty when nothing says (a question the Brain noticed and nobody was asked). */
   date: string;
   /** Something waits or stops until this is decided. */
   urgent: boolean;
+  /** Stands at the top of the list whatever else waits: the onboarding's interviews. */
+  pinned?: boolean;
+  /** Nothing to do yet, only to follow: it isn't counted where the inbox is counted. */
+  calm?: boolean;
+  /** What the list says under its name, in place of its kind and date. */
+  summary?: string;
+  /** Who asks, by name, where the item says it: an approval's quiet line names them. */
+  asker?: string;
+  /** Whose it is, when it is someone's: their face stands for it in the list. */
+  face?: string;
   source: InboxSource;
 }
 
 /** The kinds, grouped as the filter offers them. */
-export type Group = "all" | "workflows" | "brain" | "apps";
+export type Group = "all" | "asked" | "brain" | "approvals" | "outcomes";
 
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
-  checkDrawing: "workflows",
-  checkProposal: "workflows",
-  approveChange: "workflows",
-  confirmResult: "workflows",
+  checkDrawing: "approvals",
+  checkProposal: "approvals",
+  approveChange: "approvals",
+  confirmResult: "approvals",
   conflict: "brain",
-  openQuestion: "brain",
-  unknownAiTool: "apps",
-  signInAgain: "apps",
-  externalDomain: "apps",
-  heldWrite: "apps",
-  heldStart: "workflows",
-  unknownOutcome: "apps",
-  permissionRequest: "apps",
-  stoppedSchedule: "workflows",
-  workflowChanged: "workflows",
-  packageNotice: "apps",
-  stoppedEvents: "workflows",
-  appMessage: "apps",
-  bindingApproval: "workflows",
-  skillShare: "brain",
-  decision: "workflows",
+  openQuestion: "asked",
+  brainQuestion: "brain",
+  interviews: "brain",
+  everyonesOutcome: "outcomes",
+  unknownAiTool: "approvals",
+  signInAgain: "approvals",
+  externalDomain: "approvals",
+  heldWrite: "approvals",
+  heldStart: "approvals",
+  unknownOutcome: "approvals",
+  permissionRequest: "approvals",
+  stoppedSchedule: "approvals",
+  workflowChanged: "approvals",
+  packageNotice: "approvals",
+  stoppedEvents: "approvals",
+  appMessage: "approvals",
+  bindingApproval: "approvals",
+  skillShare: "approvals",
+  decision: "approvals",
 };
 
-export type Sort = "urgent" | "newest" | "oldest";
+type Sort = "urgent" | "newest" | "oldest";
 
 /** Urgent first, then the newest, then by title: the inbox's own order. */
 const order = (a: InboxItem, b: InboxItem): number =>
+  Number(b.pinned === true) - Number(a.pinned === true) ||
   Number(b.urgent) - Number(a.urgent) ||
   b.date.localeCompare(a.date) ||
   a.title.localeCompare(b.title);
@@ -172,7 +200,7 @@ export const listed = (
     });
 
 /** A held write's name: what it does, on which connection. */
-export const heldName = (action: PendingAction): string => {
+const heldName = (action: PendingAction): string => {
   const title = action.description?.title ?? action.action;
   const connection = action.connectionName ?? action.connectionId;
   return t`${title} on ${connection}`;
@@ -249,7 +277,7 @@ const heldStartItems = (
   });
 
 /** What a call of unknown outcome did, and where: its tool's title, or its action. */
-export const outcomeName = (outcome: UnknownOutcome): string => {
+const outcomeName = (outcome: UnknownOutcome): string => {
   const title = outcome.description?.title ?? outcome.key.action;
   const connection = outcome.connectionName ?? outcome.key.connectionId;
   return t`${title} on ${connection}`;
@@ -257,7 +285,7 @@ export const outcomeName = (outcome: UnknownOutcome): string => {
 
 /**
  * A change Grasp sent for the person whose answer was lost: only they say
- * whether it happened (`item-detail.tsx`).
+ * whether it happened (`OutcomeItem` in item-detail.tsx).
  */
 const outcomeItems = (
   outcomes: readonly UnknownOutcome[],
@@ -290,21 +318,17 @@ const outcomeItems = (
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
-    const subject = subjectOf(request, directory);
-    const object = objectOf(request, directory);
-    const actions = formatList(request.actions);
-    const who = t`${subject}: ${actions} on ${object}`;
-    const { binding } = request;
+    const who = requestWords(request, directory);
     return {
+      asker: requestAsker(request, directory),
       id: `request:${request.id}`,
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
-      context: who,
-      body: [t`${subject} gets this permission once it is granted.`],
-      facts: [
-        { label: t`Binding`, value: binding },
-        { label: t`Asked`, value: formatDateTime(request.requestedAt) },
-      ],
+      // The row says who asks and, where the request says it plainly, what.
+      context: requestAsker(request, directory),
+      body: [],
+      // Who asked and when stand under the request's Details.
+      facts: [],
       about:
         request.subject.type === "app"
           ? {
@@ -382,9 +406,10 @@ const skillShareWords = (
  */
 const skillShareItems = (shares: readonly SkillShareItem[]): InboxItem[] =>
   shares.map((item) => {
-    const { name, requestedAt } = item.share;
+    const { name, requestedAt, requestedBy } = item.share;
     const { title, body } = skillShareWords(item.share);
     return {
+      asker: requestedBy.name ?? requestedBy.userId,
       id: item.id,
       kind: "skillShare",
       title,
@@ -414,9 +439,7 @@ const askedItems = (
         kind: "openQuestion",
         title: question,
         context: owner,
-        body: [
-          t`You were asked this as the ${owner}. Answer it in the brain: everyone in the company reads the answer, with your name.`,
-        ],
+        body: [t`Everyone in the company reads your answer, with your name.`],
         facts: [{ label: t`Asked`, value: formatDateTime(at) }],
         about: { kind: "brain" },
         forWhom: { person: me },
@@ -426,6 +449,159 @@ const askedItems = (
       },
     ];
   });
+
+/**
+ * The questions the Brain still has open, for an admin: each to answer,
+ * or to ask of whoever holds its role. One asked of the admin themselves
+ * is theirs already (`askedItems`), so it isn't listed twice.
+ */
+const gapItems = (
+  gaps: readonly Gap[],
+  asked: ReadonlySet<string>
+): InboxItem[] =>
+  gaps
+    .filter(({ id }) => !asked.has(id))
+    .map((gap) => {
+      const { owner, askedAt } = gap;
+      return {
+        id: `gap:${gap.id}`,
+        kind: "brainQuestion",
+        title: gap.question,
+        context: gap.question,
+        body: [],
+        facts: [
+          { label: t`For`, value: t`The ${owner}` },
+          ...(askedAt === undefined
+            ? []
+            : [{ label: t`Asked`, value: formatDate(askedAt) }]),
+        ],
+        about: { kind: "brain" },
+        date: askedAt ?? "",
+        urgent: false,
+        source: { type: "gap", gap },
+      };
+    });
+
+/**
+ * Whether the onboarding's interviews are the admin's to follow: from the
+ * moment who works where is in, until Grasp opens the gate. Then nothing
+ * of them is left for the company's admin: a new round starts from
+ * Grasp's side. Settings, Onboarding sends here while this holds.
+ */
+export const interviewsRunning = ({
+  view,
+  stage,
+}: Pick<Interviews, "view" | "stage">): boolean =>
+  stage !== "open" && (view.plan !== null || view.roster !== null);
+
+/**
+ * The onboarding's interviews as one item, pinned at the top while they
+ * run: what most wants the admin, in a few words, under its name. Counted
+ * where the inbox is counted only while it has something to do: the links
+ * to plan and send, a new link, an email that didn't reach someone, or a
+ * team gone quiet.
+ */
+const interviewsItems = (
+  interviews: Interviews | undefined,
+  readAt: string
+): InboxItem[] => {
+  if (interviews === undefined || !interviewsRunning(interviews)) {
+    return [];
+  }
+  const { view, links } = interviews;
+  const today = readAt.slice(0, 10);
+  const listening = listeningOf(view, today);
+  const planned = view.plan !== null;
+  const fresh = linksOf(links).fresh.length;
+  const failed = links.filter(({ mailFailed }) => mailFailed).length;
+  const quiet = quietTeamOf(view, listening)?.team.name;
+  const { day, days } = listening;
+  let summary = t`Day ${day} of ${days}`;
+  if (!planned) {
+    summary = t`Plan the interviews and send the links`;
+  } else if (failed > 0) {
+    summary = plural(failed, {
+      one: "An email didn’t reach someone",
+      other: "# emails didn’t reach their people",
+    });
+  } else if (fresh > 0) {
+    summary = plural(fresh, {
+      one: "# new link to send",
+      other: "# new links to send",
+    });
+  } else if (quiet !== undefined) {
+    summary = t`${quiet} is quiet`;
+  } else if (view.plan !== null && view.plan.start > today) {
+    const starts = formatDate(`${view.plan.start}T12:00:00Z`);
+    summary = t`Starts ${starts}`;
+  }
+  const title = t`Interviews`;
+  return [
+    {
+      id: "interviews",
+      kind: "interviews",
+      title,
+      context: title,
+      summary,
+      body: [],
+      facts: [],
+      date: view.plan?.start ?? "",
+      urgent: false,
+      pinned: true,
+      calm: planned && failed === 0 && fresh === 0 && quiet === undefined,
+      source: { type: "interviews", interviews, today },
+    },
+  ];
+};
+
+/** What is ready of a part of what waits; nothing of one that couldn't be read. */
+const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
+  part?.state === "ready" ? part.data : undefined;
+
+/**
+ * Everyone's open calls of unknown outcome, for the organization's own
+ * admins to follow up with each person: only that person can say what
+ * became of it, so there is nothing here to decide. The admin's own are
+ * theirs to answer already (`outcomeItems`), so they aren't listed twice.
+ * Only to follow: never counted where the inbox is counted.
+ */
+const everyonesOutcomeItems = (
+  waiting: Waiting,
+  viewer: Viewer,
+  own: readonly UnknownOutcome[]
+): InboxItem[] => {
+  // The organization's own admins alone, as `readWaiting` reads them for.
+  const everyones = decidesRequests(viewer)
+    ? readyOf(waiting.everyonesOutcomes)
+    : undefined;
+  if (everyones === undefined) {
+    return [];
+  }
+  const mine = new Set(own.map(({ cursor }) => JSON.stringify(cursor)));
+  return everyones.listed
+    .filter(({ cursor }) => !mine.has(JSON.stringify(cursor)))
+    .map((listing) => {
+      const person =
+        everyones.people.get(listing.onBehalfOf) ?? listing.onBehalfOf;
+      const change = listing.title ?? listing.action;
+      const connection = listing.connectionName ?? listing.connectionId;
+      return {
+        id: `everyonesOutcome:${listing.id}`,
+        kind: "everyonesOutcome",
+        title: change,
+        context: change,
+        summary: t`${person} · ${connection}`,
+        face: person,
+        logo: { name: connection },
+        body: [],
+        facts: [],
+        date: listing.sentAt,
+        urgent: false,
+        calm: true,
+        source: { type: "everyonesOutcome", listing, person },
+      };
+    });
+};
 
 /** What core's rescan found of an App's approved packages. */
 type PackageNotification = Extract<
@@ -673,9 +849,17 @@ const decisionItems = (
     };
   });
 
-/** What is ready of a part of what waits; nothing of one that couldn't be read. */
-const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
-  part?.state === "ready" ? part.data : undefined;
+/** What core told the person of on its own: a stopped schedule, a changed workflow, a package, stopped events, an App's message. */
+const noticeItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] => [
+  ...stoppedItems(notifications, me),
+  ...workflowChangedItems(notifications, me),
+  ...packageNoticeItems(notifications, me),
+  ...stoppedEventsItems(notifications, me),
+  ...appMessageItems(notifications, me),
+];
 
 /**
  * Every item that waits on the person, in the inbox's order: what blocks
@@ -699,6 +883,13 @@ export const inboxItems = (
   const bindings = decidesRequests(viewer)
     ? (readyOf(waiting.bindings) ?? [])
     : [];
+  const gaps = decidesRequests(viewer) ? (readyOf(waiting.gaps) ?? []) : [];
+  // A question asked of the person is theirs already, as asked of them.
+  const askedGaps = new Set(
+    (notifications?.page.notifications ?? []).flatMap((notification) =>
+      notification.type === "gap_asked" ? [notification.gap] : []
+    )
+  );
   const skillShares = decidesRequests(viewer)
     ? (readyOf(waiting.skillShares) ?? [])
     : [];
@@ -741,17 +932,10 @@ export const inboxItems = (
     ...bindingItems(bindings, readAt),
     ...skillShareItems(skillShares),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
-    ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
-    ...(notifications === undefined
-      ? []
-      : workflowChangedItems(notifications, me)),
-    ...(notifications === undefined
-      ? []
-      : packageNoticeItems(notifications, me)),
-    ...(notifications === undefined
-      ? []
-      : stoppedEventsItems(notifications, me)),
-    ...(notifications === undefined ? [] : appMessageItems(notifications, me)),
+    ...gapItems(gaps, askedGaps),
+    ...interviewsItems(readyOf(waiting.interviews), readAt),
+    ...everyonesOutcomeItems(waiting, viewer, outcomes),
+    ...(notifications === undefined ? [] : noticeItems(notifications, me)),
     ...reconnect,
   ].toSorted(order);
 };
@@ -767,6 +951,9 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.decisions,
     waiting.heldStarts,
     waiting.bindings,
+    waiting.gaps,
+    waiting.interviews,
+    waiting.everyonesOutcomes,
     waiting.skillShares,
   ];
   return parts.filter(
