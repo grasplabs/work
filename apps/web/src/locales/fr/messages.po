@@ -6858,6 +6858,14 @@ msgstr "Termine le workflow"
 msgid "Enter a name for the organization."
 msgstr "Saisissez un nom pour l'organisation."
 
+#: src/projects/project-dialog.tsx
+msgid "Enter a name for the project."
+msgstr "Saisissez un nom pour le projet."
+
+#: src/settings/event-sources.tsx
+msgid "Enter a name for the sender."
+msgstr "Saisissez un nom pour l’expéditeur."
+
 #: src/settings/teams.tsx
 msgid "Enter a name for the team."
 msgstr "Saisissez un nom pour l'équipe."
@@ -6865,6 +6873,10 @@ msgstr "Saisissez un nom pour l'équipe."
 #: src/frame/part-words.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Saisissez une adresse qui commence par https://."
+
+#: src/settings/event-source-activity.tsx
+msgid "Enter an event type."
+msgstr "Saisissez un type d’événement."
 
 #: src/settings/erasures.tsx
 msgid "Enter the address to let in again."
@@ -7540,6 +7552,10 @@ msgstr "Fichiers écrits par ses exécutions"
 #: src/frame/part-words.tsx
 msgid "Files to send"
 msgstr "Fichiers à envoyer"
+
+#: src/connections/connect-dialog.tsx
+msgid "Fill in {label}."
+msgstr "Renseignez {label}."
 
 #: src/workflows/start-run.tsx
 msgid "Fill this in."

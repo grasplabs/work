@@ -35,6 +35,7 @@ import {
   Field,
   FieldContent,
   FieldDescription,
+  FieldError,
   FieldLabel,
 } from "../grasp/field/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
@@ -575,6 +576,7 @@ const KeyFields = ({
           {description === null ? null : (
             <FieldDescription>{description}</FieldDescription>
           )}
+          <FieldError match="valueMissing">{t`Fill in ${label}.`}</FieldError>
         </Field>
       ))}
     </form>

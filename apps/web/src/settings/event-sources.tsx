@@ -806,6 +806,9 @@ const AddSource = ({
                   required
                   value={name}
                 />
+                <FieldError match="valueMissing">
+                  {t`Enter a name for the sender.`}
+                </FieldError>
                 {failure === undefined ? null : (
                   <FieldError match>{failure}</FieldError>
                 )}

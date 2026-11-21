@@ -21,7 +21,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
@@ -114,6 +114,9 @@ const ProjectForm = ({
               required
               value={name}
             />
+            <FieldError match="valueMissing">
+              {t`Enter a name for the project.`}
+            </FieldError>
           </Field>
           <Field>
             <FieldLabel>
