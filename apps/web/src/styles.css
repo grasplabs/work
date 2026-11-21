@@ -7,7 +7,7 @@
  * with its optical sizes: the cut follows the size.
  */
 @import "@fontsource-variable/newsreader/opsz.css";
-/* JetBrains Mono, for code wherever it is shown (base.css). */
+/* JetBrains Mono, for bare code, kbd, samp and pre (base.css); library parts keep their own. */
 @import "@fontsource-variable/jetbrains-mono";
 /* Grasp UI's tokens, read by the StyleX styles under grasp/. */
 @import "./grasp/grasp.css";

@@ -25,6 +25,9 @@
   * {
     min-width: 0;
   }
+  [hidden]:where(:not([hidden="until-found"])) {
+    display: none !important;
+  }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
@@ -80,7 +83,7 @@
   kbd,
   samp,
   pre {
-    font-family: var(--grasp-font-mono);
+    font-family: "JetBrains Mono Variable", ui-monospace, monospace;
     font-size: 1em;
   }
   small {
