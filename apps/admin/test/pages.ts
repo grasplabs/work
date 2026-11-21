@@ -111,8 +111,10 @@ const answerSchema = z.object({
 export interface Caller {
   /** The staff member Access vouches for; null for a request without its JWT. */
   email?: string | null;
-  /** The page's origin, as the browser sends it: the admin's own unless given. */
-  from?: string;
+  /** The page's origin, as the browser sends it: the admin's own unless given; null for none. */
+  from?: string | null;
+  /** What the browser says of where the call comes from (`Sec-Fetch-Site`); unsent unless given. */
+  fetchSite?: string;
 }
 
 /**
@@ -132,7 +134,7 @@ export const callServerFn = async <Data, Result>(
   // A function that takes no data is called without it.
   ...[
     data,
-    { email = "staff@grasp.test", from = origin } = {},
+    { email = "staff@grasp.test", from = origin, fetchSite } = {},
   ]: undefined extends Data
     ? [data?: Data, caller?: Caller]
     : [data: Data, caller?: Caller]
@@ -153,7 +155,8 @@ export const callServerFn = async <Data, Result>(
         ...(email === null
           ? {}
           : { "cf-access-jwt-assertion": await accessJwt(email) }),
-        origin: from,
+        ...(from === null ? {} : { origin: from }),
+        ...(fetchSite === undefined ? {} : { "sec-fetch-site": fetchSite }),
         "x-tsr-serverFn": "true",
         ...(get ? {} : { "content-type": "application/json" }),
         accept: "application/json",
