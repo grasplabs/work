@@ -1,4 +1,4 @@
-// The calendar button at the end of a date field, shared by DatePicker and DateRangePicker. UI SDK
+// The calendar button at the end of a date field, shared by DatePicker's one date and its range. UI SDK
 // names it Choose date with the chosen date after it; Button draws its own icon and name, so the
 // primitive's children are left out.
 "use client";

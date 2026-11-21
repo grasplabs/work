@@ -15,26 +15,18 @@ import {
   ComboboxCreate,
   ComboboxEmpty,
   ComboboxInput,
-  ComboboxItem,
-  ComboboxItemIcon,
-  ComboboxItemIndicator,
-  ComboboxItemText,
   ComboboxList,
   ComboboxValue,
 } from "@ui-sdk/react/combobox";
-import type {
-  ComboboxItemState,
-  ComboboxItemTextState,
-  ListData,
-  ListItem,
-} from "@ui-sdk/react/combobox";
+import type { ListData, ListItem } from "@ui-sdk/react/combobox";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "../avatar";
 import { Button } from "../button";
 import { listStyles } from "../combobox/list.styles";
-import { Cross, Folder, Icon, Mail, People, Tick } from "../icons";
+import { PersonOption } from "../combobox/person-option";
+import { Cross, Folder, Icon, Mail, People } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { scroll } from "../scroll/scroll";
@@ -172,13 +164,6 @@ const styles = stylex.create({
     height: grasp.iconSm,
     backgroundColor: "transparent",
   },
-  words: { display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 },
-  note: {
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    color: { default: grasp.muted, [media.forced]: "inherit" },
-    overflowWrap: "anywhere",
-  },
   row: { paddingBlock: grasp.space1 },
   icon: { display: "flex", flexShrink: 0 },
   // The list takes the box's width and edges, as Combobox's and Select's take their field's.
@@ -215,23 +200,6 @@ const Face = ({
     </Avatar>
   );
 };
-
-/** A candidate's name, the letters typing matched marked. */
-const Words = () => (
-  <ComboboxItemText {...stylex.props(listStyles.itemWords)}>
-    {(state: ComboboxItemTextState) =>
-      state.segments.map((segment, index) =>
-        segment.match ? (
-          <mark key={index} {...stylex.props(listStyles.mark)}>
-            {segment.text}
-          </mark>
-        ) : (
-          segment.text
-        )
-      )
-    }
-  </ComboboxItemText>
-);
 
 export interface PickerWords {
   find: string;
@@ -415,46 +383,22 @@ export const SharePicker = ({
                     return null;
                   }
                   const added = inList.has(candidate.id);
-                  const line = added ? words.added : candidate.note;
                   return (
-                    <ComboboxItem
+                    <PersonOption
                       key={candidate.id}
                       value={candidate.id}
-                      label={candidate.name}
+                      name={candidate.name}
+                      src={candidate.src}
+                      face={
+                        candidate.kind === "team" ||
+                        candidate.kind === "project" ? (
+                          <Face candidate={candidate} />
+                        ) : undefined
+                      }
+                      line={added ? words.added : candidate.note}
+                      lineId={`${ids}-${candidate.id}`}
                       disabled={added}
-                      aria-label={candidate.name}
-                      aria-describedby={
-                        line === undefined
-                          ? undefined
-                          : `${ids}-${candidate.id}`
-                      }
-                      className={(itemState: ComboboxItemState) =>
-                        className(
-                          listStyles.item,
-                          styles.row,
-                          itemState.highlighted && listStyles.itemHighlighted,
-                          itemState.disabled && listStyles.itemDisabled
-                        )
-                      }
-                    >
-                      <ComboboxItemIcon {...stylex.props(styles.icon)}>
-                        <Face candidate={candidate} />
-                      </ComboboxItemIcon>
-                      <span {...stylex.props(styles.words)}>
-                        <Words />
-                        {line !== undefined && (
-                          <span
-                            id={`${ids}-${candidate.id}`}
-                            {...stylex.props(styles.note)}
-                          >
-                            {line}
-                          </span>
-                        )}
-                      </span>
-                      <ComboboxItemIndicator {...stylex.props(listStyles.tick)}>
-                        <Icon icon={Tick} />
-                      </ComboboxItemIndicator>
-                    </ComboboxItem>
+                    />
                   );
                 })
               }

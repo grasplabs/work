@@ -2,28 +2,18 @@
 // server read this one file (src/intent/README.md). A line with `source` comes from that file, a
 // line with `proposed` is not yet confirmed, and any other restates the component's own page.
 export const intent = {
-  what: "A field for two dates, a start and an end, with ranges like Last 7 days.",
+  what: "Now Date picker's range with presets: a field for two dates, with ranges like Last 7 days.",
   useWhen: [
     {
-      when: "A period, with presets for the ranges the product reports on most.",
-    },
-    {
-      when: "A range of what has happened, with `max` of today so it cannot run into the future.",
+      when: "Only where it is used already, until the codemod moves it: it stays for one step so nothing breaks.",
+      source: "docs/components/date-range-picker.mdx",
     },
   ],
   notWhen: [
     {
-      when: "One date.",
+      when: "A range, with or without presets.",
       instead: ["date-picker"],
       source: "docs/components/date-picker.mdx",
-    },
-    { when: "A start and an end as two separate pickers." },
-  ],
-  variants: [
-    { name: "presets", when: "The ranges the product reports on, by name." },
-    {
-      name: "presets={false}",
-      when: "Ranges that are one-off: people choose each on the calendar.",
     },
   ],
 };

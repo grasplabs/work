@@ -26,6 +26,7 @@ import { useCopy } from "../button/copy";
 import { focus } from "../focus/focus";
 import { Copy, Failed, Icon, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
+import { Tip, withTip } from "../tooltip/tip";
 import { useWords, withGiven } from "../words/words";
 import { copyFieldMarker } from "./copy-field.stylex";
 import { styles } from "./styles";
@@ -157,6 +158,32 @@ export const CopyField = ({
   const copied =
     copy.state === "done" || copy.state === "failed" ? copy.state : undefined;
   const hasSwatch = swatch !== undefined && swatch !== "";
+  const press = async () => {
+    const result = await copy.run();
+    if ("busy" in result) {
+      return;
+    }
+    announce(result.ok ? copiedLabel : failedLabel);
+    if (!result.ok) {
+      // An agent's press fails with the same words a person hears.
+      throw new Error(failedLabel);
+    }
+    onCopy?.(value);
+  };
+  // The Copy icon shows the field's name in a tooltip, as an icon-only Button does.
+  const button = (tip: Record<string, unknown>) => (
+    <PressPrimitive
+      {...withTip({ onClick: press }, tip)}
+      aria-label={label}
+      data-copy-field-button=""
+      // Silent while it works: the result is said once, by the page's one voice.
+      pendingAnnouncement=""
+      {...stylex.props(styles.button)}
+    >
+      <span aria-hidden="true" {...stylex.props(styles.target)} />
+      <Marks />
+    </PressPrimitive>
+  );
   return (
     // A label round the button: a press anywhere on the field presses the button, once.
     <label
@@ -183,28 +210,7 @@ export const CopyField = ({
       >
         {value}
       </span>
-      <PressPrimitive
-        aria-label={label}
-        data-copy-field-button=""
-        // Silent while it works: the result is said once, by the page's one voice.
-        pendingAnnouncement=""
-        onClick={async () => {
-          const result = await copy.run();
-          if ("busy" in result) {
-            return;
-          }
-          announce(result.ok ? copiedLabel : failedLabel);
-          if (!result.ok) {
-            // An agent's press fails with the same words a person hears.
-            throw new Error(failedLabel);
-          }
-          onCopy?.(value);
-        }}
-        {...stylex.props(styles.button)}
-      >
-        <span aria-hidden="true" {...stylex.props(styles.target)} />
-        <Marks />
-      </PressPrimitive>
+      {label === "" ? button({}) : <Tip name tooltip={label} render={button} />}
     </label>
   );
 };

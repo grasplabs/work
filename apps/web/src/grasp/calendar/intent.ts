@@ -20,8 +20,8 @@ export const intent = {
     },
     {
       when: "A start and an end date, with the ranges people use most.",
-      instead: ["date-range-picker"],
-      source: "docs/components/date-range-picker.mdx",
+      instead: ["date-picker"],
+      source: "docs/components/date-picker.mdx",
     },
   ],
   variants: [

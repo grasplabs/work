@@ -1,73 +1,40 @@
-// DateRangePicker: a start and an end date, typed or chosen, with presets, after the date range
-// pickers of current analytics products (Linear's and Vercel's: presets in a column at the
-// calendar's start, two months beside them). On UI SDK's DatePicker in range mode, with Grasp's
-// Date picker field (two dates and the calendar button) and Calendar's months.
+// DateRangePicker, now Date picker's range with presets (DatePicker `mode="range"` and `presets`):
+// a thin wrapper for one step, so nothing breaks. It draws the same field, calendar and presets as
+// before, even without presets (an internal flag only it passes), and reads its own words
+// (`dateRangePicker`) as before. The codemod moves each use:
 //
-//   <DateRangePicker label="Period" name="period" />
-//   <DateRangePicker label="Stay" presets={false} min="2026-11-13" />
-//
-// A preset chooses its range and closes the calendar. The value is `[start, end]` as ISO dates.
-// Every value is a token (src/tokens).
+//   <DateRangePicker aria-label="Period" name="period" />
+//   becomes <DatePicker mode="range" months={2} presets aria-label="Period" name="period" />
 "use client";
 
-/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
-import * as stylex from "@stylexjs/stylex";
-import {
-  DatePicker as RootPrimitive,
-  DatePickerContent as ContentPrimitive,
-  DatePickerHint as HintPrimitive,
-  DatePickerInput as InputPrimitive,
-  DatePickerPreset as PresetPrimitive,
-} from "@ui-sdk/react/date-picker";
-import type { DatePickerPresetState } from "@ui-sdk/react/date-picker";
-import { useEffect, useState } from "react";
-import type { ComponentProps } from "react";
-
-import { CalendarMonths } from "../calendar/months";
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 3: Date range picker stays a wrapper over Date picker's range until step 9 removes it (handover/audit/RELEASE.md §7). */
 import { calendarWords } from "../calendar/words";
 import type { CalendarWords } from "../calendar/words";
-import {
-  datePlaceholder,
-  defaultFormatLabels,
-} from "../date-picker/placeholder";
+import type { DatePickerPreset, DatePickerProps } from "../date-picker";
+import { DatePickerField } from "../date-picker/date-picker";
 import type { DateFormatLabels } from "../date-picker/placeholder";
-import { datePickerStyles as fieldStyles } from "../date-picker/styles";
-import { DateTrigger } from "../date-picker/trigger";
-import { focus } from "../focus/focus";
-import { visuallyHidden } from "../hidden/hidden";
-import { Icon, Tick } from "../icons";
-import { iconVars } from "../icons/icon.stylex";
-import { grasp, media } from "../tokens/tokens.stylex";
-import { popup, px } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
-import { addDays, monthOf } from "./dates";
 import { dateRangePickerWords } from "./words";
 import type { DateRangePickerWords } from "./words";
 
-type RootProps = ComponentProps<typeof RootPrimitive>;
-
-/** A range people choose often, by name. */
-export interface DateRangePreset {
-  /** Its name on the button ("Last 7 days"). */
-  label: string;
-  /** The range it chooses, as ISO dates. */
-  value: [string, string];
-}
-
-/** Every prop a DateRangePicker takes: these, and the rest of UI SDK's DatePicker. */
-export interface DateRangePickerProps extends Omit<
-  RootProps,
-  | "children"
-  | "render"
-  | "className"
-  | "style"
+type RootProps = Omit<
+  DatePickerProps,
   | "mode"
   | "value"
   | "defaultValue"
   | "onValueChange"
   | "months"
-  | "presentation"
-> {
+  | "presets"
+  | "presetLabels"
+  | "presetsLabel"
+  | "words"
+>;
+
+/** @deprecated Use `DatePickerPreset`. */
+export type DateRangePreset = DatePickerPreset;
+
+/** @deprecated Use `DatePickerProps`, with `mode="range"` and `presets`. */
+export interface DateRangePickerProps extends RootProps {
   /** The field's name for a screen reader, a voice command and an agent ("Period"). */
   "aria-label"?: string;
   /** @deprecated Use `aria-label`. */
@@ -141,159 +108,6 @@ export interface DateRangePickerProps extends Omit<
   words?: Partial<DateRangePickerWords & CalendarWords>;
 }
 
-const styles = stylex.create({
-  // The field is wider than a date picker's: two dates.
-  field: {
-    maxWidth: grasp.dateRangeWidth,
-    // On a phone the dates are 16px (media.typing) and two must fit a narrow field whole: the
-    // start's inset is a step less there. Its calendar opens as a sheet there, so nothing lines up
-    // with that inset.
-    paddingInlineStart: {
-      default: grasp.dateFieldInset,
-      [media.typing]: grasp.space2,
-    },
-  },
-  // The presets beside the months; under them on a phone, the month centred under the presets.
-  inner: {
-    display: "flex",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "flex-start",
-    justifyContent: { default: null, [media.belowPhone]: "center" },
-    gap: grasp.space4,
-  },
-  // A fieldset, with the browser's own border, padding, margin and minimum width taken off. On a
-  // phone the presets stand in two equal columns over the month, so none is left alone on a line
-  // and the popup is as wide as its month, not the window.
-  presets: {
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    minWidth: 0,
-    display: { default: "flex", [media.belowPhone]: "grid" },
-    flexDirection: "column",
-    flexWrap: "wrap",
-    gridTemplateColumns: {
-      default: null,
-      [media.belowPhone]: "repeat(2, minmax(0, 1fr))",
-    },
-    gap: grasp.space1,
-    width: { default: grasp.dateRangePresets, [media.belowPhone]: "100%" },
-    flexShrink: 0,
-  },
-  // A preset: a row the height of a small control, its words at the start, the tick at the end.
-  preset: {
-    [iconVars.size]: grasp.iconSm,
-    [iconVars.stroke]: grasp.iconStroke,
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    boxSizing: "border-box",
-    minHeight: { default: grasp.controlSm, [media.coarse]: grasp.tap },
-    margin: 0,
-    paddingBlock: 0,
-    paddingInline: grasp.space2,
-    borderWidth: { default: 0, [media.forced]: 1 },
-    borderStyle: "solid",
-    borderColor: "transparent",
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
-    cornerShape: grasp.cornerShape,
-    backgroundColor: {
-      default: "transparent",
-      ":hover": { default: null, [media.hover]: grasp.ghostFillHover },
-    },
-    color: grasp.ink,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    fontWeight: grasp.weightMedium,
-    textAlign: "start",
-    cursor: "pointer",
-    WebkitTapHighlightColor: "transparent",
-    transitionProperty: "background-color",
-    transitionDuration: grasp.durationHover,
-    transitionTimingFunction: grasp.ease,
-  },
-  presetChosen: {
-    backgroundColor: {
-      default: grasp.treeFillChosen,
-      ":hover": {
-        default: grasp.treeFillChosen,
-        [media.hover]: grasp.treeFillChosen,
-      },
-      [media.forced]: "Highlight",
-    },
-    color: { default: grasp.ink, [media.forced]: "HighlightText" },
-  },
-  presetWords: {
-    flexGrow: 1,
-    minWidth: 0,
-  },
-  calendar: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space3,
-    minWidth: 0,
-  },
-});
-
-/** The default presets, counted from `today`. */
-const defaults = (
-  today: string,
-  labels: [string, string, string, string]
-): DateRangePreset[] => [
-  { label: labels[0], value: [today, today] },
-  { label: labels[1], value: [addDays(today, -6), today] },
-  { label: labels[2], value: [addDays(today, -29), today] },
-  // From the first of the month to today: a range that runs past today is refused by a `max` of today.
-  { label: labels[3], value: [monthOf(today)[0], today] },
-];
-
-/** Today in `timeZone` (the browser's when it is left out), as the calendar reads it. */
-const todayIn = (timeZone?: string) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
-
-/** Nothing to undo. */
-const noCleanup = () => {
-  // A given today starts nothing, so nothing stops.
-};
-
-/** Reads today now and each time the page comes back into view; the result stops it. */
-const watchToday = (
-  timeZone: string | undefined,
-  setToday: (today: string) => void
-) => {
-  const read = () => {
-    setToday(todayIn(timeZone));
-  };
-  read();
-  document.addEventListener("visibilitychange", read);
-  return () => {
-    document.removeEventListener("visibilitychange", read);
-  };
-};
-
-/**
- * Today, read on the client: the presets count from it, so they wait for the page to start. It is
- * read again when the page comes back into view, so a page left open overnight moves on.
- */
-const useToday = (given?: string, timeZone?: string) => {
-  const [today, setToday] = useState<string | undefined>(given);
-  useEffect(() => {
-    const fixed = given !== undefined && given !== "";
-    return fixed ? noCleanup : watchToday(timeZone, setToday);
-  }, [given, timeZone]);
-  return given ?? today;
-};
-
-/** The words for the two fields, when the page gives none. */
-const defaultRangeLabels: [string, string] = ["start", "end"];
-
-/** The default presets' names, when the page gives none. */
-
-/** No presets. */
-const none: DateRangePreset[] = [];
-
 /** UI SDK's range value, read back as two ISO dates or none. */
 const toRange = (next: unknown): [string, string] | null => {
   if (Array.isArray(next) && next.length === 2) {
@@ -306,136 +120,46 @@ const toRange = (next: unknown): [string, string] | null => {
   return null;
 };
 
-/** A sheet from the window's foot on a phone, a popup beside the field elsewhere. */
-const presentationFor = (narrow: boolean): "sheet" | "popover" =>
-  narrow ? "sheet" : "popover";
-
-/** Whether the window is under the phone breakpoint, now and as it changes. */
-const useNarrow = () => {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    // The phone breakpoint, as the tokens write it (px.phone, the media query's own width).
-    const query = window.matchMedia(`(width < ${px.phone}px)`);
-    const update = () => {
-      setNarrow(query.matches);
-    };
-    update();
-    query.addEventListener("change", update);
-    return () => {
-      query.removeEventListener("change", update);
-    };
-  }, []);
-  return narrow;
-};
-
-/** Six weeks in every month when months stand side by side, unless the page says otherwise. */
-const sixWeeks = (given: boolean | undefined, shown: number) =>
-  given ?? shown > 1;
-
-/**
- * A preset's button: start-aligned, as a list's rows are. The chosen one takes the chosen fill (a
- * Tree's chosen row) and a tick: a quiet white pill hardly showed on the popup's own white
- * (A2-date-range-picker-02).
- */
-const PresetButton = ({
-  props,
-  chosen,
-  label,
-}: {
-  props: Record<string, unknown>;
-  chosen: boolean;
-  label: string;
-}) => (
-  <button
-    type="button"
-    {...props}
-    {...stylex.props(styles.preset, chosen && styles.presetChosen, focus.ring)}
-  >
-    <span {...stylex.props(styles.presetWords)}>{label}</span>
-    {chosen && <Icon icon={Tick} />}
-  </button>
-);
-
-/** Two dates, typed or chosen on the calendar, with presets beside it. */
 /** The field's name by its new name, else its deprecated old one (the breaking release's step 1). */
 const nameOf = (named: string | undefined, label: string | undefined) =>
   named ?? label ?? "";
 
+/** @deprecated Use `DatePicker`, with `mode="range"`, `months={2}` and `presets`. */
 export const DateRangePicker = ({
   label: labelDeprecated,
   "aria-label": named,
-  value,
-  defaultValue,
   onValueChange,
   presets,
   months = 2,
-  size = "md",
-  invalid = false,
-  rangeLabels = defaultRangeLabels,
-  formatLabels = defaultFormatLabels,
+  presetLabels,
+  presetsLabel,
   triggerLabel,
-  presetLabels: presetLabelsGiven,
-  presetsLabel: presetsLabelGiven,
-  words,
   previousLabel,
   nextLabel,
-  showOutsideDays,
-  today: givenToday,
+  words,
   ...rest
 }: DateRangePickerProps) => {
-  const {
-    presets: presetsLabel,
-    today: todayLabel,
-    last7,
-    last30,
-    thisMonth,
-    trigger: triggerName,
-  } = withGiven(useWords("dateRangePicker", dateRangePickerWords, words), {
-    presets: presetsLabelGiven,
-    trigger: triggerLabel,
+  // Its own words (`dateRangePicker`), as before, handed on under Date picker's keys.
+  const own = withGiven(
+    useWords("dateRangePicker", dateRangePickerWords, words),
+    { presets: presetsLabel, trigger: triggerLabel }
+  );
+  const calendar = withGiven(useWords("calendar", calendarWords, words), {
+    previous: previousLabel,
+    next: nextLabel,
   });
-  // Its months' buttons are its calendar's words: an instance's `previous` and `next` reach them too.
-  const { previous: previousName, next: nextName } = withGiven(
-    useWords("calendar", calendarWords, words),
-    { previous: previousLabel, next: nextLabel }
-  );
-  const presetLabels = presetLabelsGiven ?? [
-    todayLabel,
-    last7,
-    last30,
-    thisMonth,
-  ];
-  const label = nameOf(named, labelDeprecated);
-  const today = useToday(givenToday, rest.timeZone);
-  const offered =
-    presets === false
-      ? none
-      : (presets ??
-        (today !== undefined && today !== ""
-          ? defaults(today, presetLabels)
-          : none));
-  const start = stylex.props(
-    fieldStyles.input,
-    fieldStyles.rangeDate,
-    focus.carrier
-  );
-  const end = stylex.props(
-    fieldStyles.input,
-    fieldStyles.rangeDate,
-    fieldStyles.rangeEnd,
-    focus.carrier
-  );
-  const placeholder = datePlaceholder(rest.locale, formatLabels);
-  // One month on a phone: two do not fit beside each other.
-  const narrow = useNarrow();
-  const shown = narrow ? 1 : months;
   return (
-    <RootPrimitive
+    <DatePickerField
       {...rest}
+      // Its own look, with presets or without: the wider field, six weeks, a sheet on a phone.
+      rangePicker
+      aria-label={nameOf(named, labelDeprecated)}
       mode="range"
-      today={givenToday}
-      value={value}
-      defaultValue={defaultValue}
+      months={months}
+      presets={presets ?? true}
+      presetLabels={
+        presetLabels ?? [own.today, own.last7, own.last30, own.thisMonth]
+      }
       onValueChange={
         onValueChange
           ? (next: unknown) => {
@@ -443,100 +167,13 @@ export const DateRangePicker = ({
             }
           : undefined
       }
-      months={shown}
-      // One month shows the days round it, as Date picker and Calendar do; months side by side
-      // leave them to the neighbour. A phone shows one month.
-      showOutsideDays={showOutsideDays ?? shown === 1}
-      // Months side by side always draw six weeks, a short month's last row left empty, so the two
-      // share one row grid and the popup keeps one height as it pages (A2-date-range-picker-01).
-      fixedWeeks={sixWeeks(rest.fixedWeeks, shown)}
-      // A sheet from the window's foot on a phone, where a month of six weeks with its presets does
-      // not fit above or below the field (A3-choice-01, decided); a popup beside it elsewhere.
-      presentation={presentationFor(narrow)}
-      render={(
-        props: Record<string, unknown>,
-        state: { invalid?: boolean; readOnly?: boolean; disabled?: boolean }
-      ) => (
-        <div
-          {...props}
-          aria-invalid={invalid || undefined}
-          {...stylex.props(
-            fieldStyles.field,
-            state.readOnly !== true &&
-              state.disabled !== true &&
-              fieldStyles.live,
-            fieldStyles[size],
-            styles.field,
-            state.readOnly === true && fieldStyles.readOnly,
-            state.disabled === true && fieldStyles.disabled,
-            (invalid || state.invalid === true) && fieldStyles.invalid,
-            focus.fieldWithin
-          )}
-        />
-      )}
-    >
-      <InputPrimitive
-        aria-label={`${label}, ${rangeLabels[0]}`}
-        aria-invalid={invalid || undefined}
-        placeholder={placeholder}
-        {...start}
-      />
-      <span aria-hidden="true" {...stylex.props(fieldStyles.between)}>
-        –
-      </span>
-      <InputPrimitive
-        end
-        aria-label={`${label}, ${rangeLabels[1]}`}
-        aria-invalid={invalid || undefined}
-        placeholder={placeholder}
-        {...end}
-      />
-      <DateTrigger
-        label={triggerLabel}
-        fallbackLabel={triggerName}
-        size={size}
-      />
-      <HintPrimitive {...stylex.props(visuallyHidden)} />
-      <ContentPrimitive
-        align="start"
-        alignOffset={-popup.dateFieldInset}
-        sideOffset={popup.popoverGap}
-        collisionPadding={popup.gutter}
-        {...stylex.props(fieldStyles.popup)}
-      >
-        <div {...stylex.props(fieldStyles.inner, styles.inner)}>
-          {offered.length > 0 && (
-            <fieldset
-              aria-label={presetsLabel}
-              {...stylex.props(styles.presets)}
-            >
-              {offered.map((preset) => (
-                <PresetPrimitive
-                  key={`${preset.value[0]}/${preset.value[1]}`}
-                  value={preset.value}
-                  render={(
-                    props: Record<string, unknown>,
-                    state: DatePickerPresetState
-                  ) => (
-                    <PresetButton
-                      props={props}
-                      chosen={state.selected}
-                      label={preset.label}
-                    />
-                  )}
-                />
-              ))}
-            </fieldset>
-          )}
-          <div {...stylex.props(styles.calendar)}>
-            <CalendarMonths
-              months={shown}
-              previousLabel={previousName}
-              nextLabel={nextName}
-            />
-          </div>
-        </div>
-      </ContentPrimitive>
-    </RootPrimitive>
+      triggerLabel={triggerLabel}
+      words={{
+        choose: own.trigger,
+        presets: own.presets,
+        previous: calendar.previous,
+        next: calendar.next,
+      }}
+    />
   );
 };
