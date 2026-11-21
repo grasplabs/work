@@ -1252,7 +1252,7 @@ describe("resources", () => {
     const skills = {
       select: await skillsOf("skills.select", { task: "leave" }),
       read: await skillsOf("skills.read", {
-        skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+        skill: { scope: "grasp", name: "file-an-expense", version: 1 },
       }),
       // Nor, declared for `recall` alone, may it read entities.
       card: await skillsOf("entities.get", {

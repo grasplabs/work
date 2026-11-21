@@ -13,28 +13,45 @@ import {
 } from "./build-harness.ts";
 import { compilerAssets } from "./src/kit.ts";
 
-// Every built-in blueprint's pages, its preview and its server code,
-// built one after another in one release's compiler, as a shared isolate
-// builds them (build-heap.ts), under Node, whose V8 is workerd's, in a
-// heap of `heapMb`; then each type-checked in the release's checker alone,
+// Every built-in blueprint's pages, its preview and its server code, and
+// those of core's tests' own (apps/core/test/fixtures/blueprints/), so
+// there is one to build while the release ships none, built one after
+// another in one release's compiler, as a shared isolate builds them
+// (build-heap.ts), under Node, whose V8 is workerd's, in a heap of
+// `heapMb`; then each type-checked in the release's checker alone,
 // as its own isolate checks them. The type chunks took what the compiler
 // needs from 289–320 MB to 193–208 MB, and moving the check to its own
-// isolate took it to 66–105 MB. The checker's memory is mostly tsrs's
-// WebAssembly memory, which `--max-heap-size` doesn't cap: it is counted
-// here beside the heap.
+// isolate took it to 66–105 MB; the same six built-ins measured
+// 36–48 MB in November 2026, so a build's heap is now mostly the compiler
+// and the kit. The checker's memory is mostly tsrs's WebAssembly memory,
+// which `--max-heap-size` doesn't cap: it is counted here beside the
+// heap.
 
 const harness = path.join(import.meta.dirname, "build-heap.ts");
-const blueprints = path.join(import.meta.dirname, "../../apps/core/blueprints");
+/** Where core's built-ins are, and its tests' own. */
+const folders = [
+  "../../apps/core/blueprints",
+  "../../apps/core/test/fixtures/blueprints",
+].map((folder) => path.join(import.meta.dirname, folder));
 
-/** The heap the compiler's builds must fit in, in MB: a Cloudflare isolate's. */
+/**
+ * The heap the compiler's builds must fit in, in MB: a Cloudflare
+ * isolate's, whatever it builds. `hello` has two routes, a form, a data
+ * grid and a page header, so a build pulls in the kit modules a real App
+ * imports. Measured in November 2026, built one after another as here:
+ * `hello` 34–47 MB; the six built-ins shipped until then 36–48 MB.
+ */
 const heapMb = 128;
 
 /**
  * What a check may take, heap and WebAssembly together, in MB: above the
  * 128 MB past which Cloudflare replaces an isolate after its call (the
  * checker keeps nothing, so a replaced one costs a start), well below the
- * about 256 MB at which it ends one mid-call. Measured 136–162 MB on the
- * blueprints, tsrs's 80 MiB shadow stack included.
+ * about 256 MB at which it ends one mid-call. Measured in November 2026:
+ * `hello` 125–155 MB, the six built-ins shipped until then 128–159 MB,
+ * nearly all of it tsrs's WebAssembly memory for the kit's types, its
+ * 80 MiB shadow stack included: past the 128 MB line, so each check of a
+ * page costs a fresh isolate.
  */
 const checkMb = 192;
 
@@ -57,14 +74,17 @@ const harnessRun = (args: string[]): string =>
     { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
   );
 
-/** Every built-in core ships: each folder of `blueprints` with its manifest, by name. */
-const builtIns = readdirSync(blueprints, { withFileTypes: true })
-  .filter(
-    (entry) =>
-      entry.isDirectory() &&
-      existsSync(path.join(blueprints, entry.name, "blueprint.json"))
+/** Every built-in core ships, and its tests' own: each folder with its manifest, by name. */
+const builtIns = folders
+  .flatMap((folder) =>
+    readdirSync(folder, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          existsSync(path.join(folder, entry.name, "blueprint.json"))
+      )
+      .map(({ name }) => name)
   )
-  .map(({ name }) => name)
   .toSorted();
 
 const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
@@ -83,7 +103,7 @@ describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
     );
     files = path.join(dir, "blueprints.json");
     answers = path.join(dir, "answers.json");
-    execFileSync(process.execPath, [harness, "files", blueprints, files], {
+    execFileSync(process.execPath, [harness, "files", files, ...folders], {
       stdio: "pipe",
     });
   }, 300_000);

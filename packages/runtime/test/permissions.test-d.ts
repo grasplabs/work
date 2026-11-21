@@ -309,7 +309,7 @@ expectTypeOf(
 ).resolves.toEqualTypeOf<{ readonly skills: readonly BrainSkill[] }>();
 expectTypeOf(
   skillsCtx.brain.skills.read({
-    skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+    skill: { scope: "grasp", name: "file-an-expense", version: 1 },
   })
 ).resolves.toEqualTypeOf<BrainSkillText>();
 // @ts-expect-error -- a skill is read at a version

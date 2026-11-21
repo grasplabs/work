@@ -139,9 +139,9 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 //
 // The brain's records are company facts with no person in them (no
 // author, no transcript), added by admins (`brain.addRecords`), so every
-// member reads them. The Intake App's statements and sources and the
-// workflow map's workflows stay in each App's own store, which only its
-// builders reach (#716): they reach the brain only as records added here.
+// member reads them. What an App keeps (its statements, sources or
+// workflows) stays in its own store, which only its builders reach
+// (#716): it reaches the brain only as records added here.
 
 /** Who works where, as the admin gave it: the source of the teams' sizes. */
 const rosterSourceId = "src-roster";

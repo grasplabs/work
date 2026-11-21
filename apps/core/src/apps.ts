@@ -829,14 +829,16 @@ export const storeBlueprintTree = async (
 /**
  * Deletes every tree stored for `blueprint` but `kept`, the one its row
  * names: the trees of its earlier releases, which nothing reads once the
- * row has moved on (Apps created from it hold their own copies).
+ * row has moved on (Apps created from it hold their own copies). Without
+ * `kept`, every one: a built-in the release no longer ships.
  */
 export const deleteOtherBlueprintTrees = async (
   env: Env,
   blueprint: BlueprintId,
-  kept: string
+  kept?: string
 ): Promise<void> => {
-  const keptKey = blueprintTreeKey(blueprint, kept);
+  const keptKey =
+    kept === undefined ? undefined : blueprintTreeKey(blueprint, kept);
   const prefix = `blueprints/${blueprint}/trees/`;
   let cursor: string | undefined = undefined;
   do {

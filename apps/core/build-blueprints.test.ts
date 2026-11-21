@@ -17,7 +17,11 @@ import {
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { writeBlueprints } from "./build-blueprints.ts";
+import {
+  blueprintsDir,
+  checkShippedIds,
+  writeBlueprints,
+} from "./build-blueprints.ts";
 
 // The build step's checks, in Node (the root config's "scripts" project):
 // each built-in that the install would refuse fails the build instead.
@@ -125,6 +129,63 @@ describe("the built-in blueprints' build", () => {
       },
     ]);
   });
+
+  it("embeds none from a release that ships none, its folder holding only its ids.json", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+    made.push(dir);
+    const folder = path.join(dir, "blueprints");
+    mkdirSync(folder);
+    writeFileSync(path.join(folder, "ids.json"), '{ "crm": "retired" }\n');
+    const out = path.join(dir, "blueprints.js");
+    expect({
+      count: writeBlueprints([folder], out),
+      embedded: embedded(out),
+    }).toStrictEqual({ count: 0, embedded: [] });
+  });
+
+  it("fails without the folder, rather than ship none", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+    made.push(dir);
+    expect(() =>
+      writeBlueprints([path.join(dir, "blueprints")], path.join(dir, "out.js"))
+    ).toThrow("isn't there");
+    expect(existsSync(path.join(dir, "out.js"))).toBeFalsy();
+  });
+
+  it("hold the release's folder to its ids.json", () => {
+    expect(() => {
+      checkShippedIds(blueprintsDir);
+    }).not.toThrow();
+  });
+
+  it.each([
+    ["isn't listed", "fine", {}, "add"],
+    [
+      "isn't listed, its name a property every object has",
+      "constructor",
+      {},
+      "add",
+    ],
+    ["is retired", "fine", { fine: "retired" }, "an earlier release removed"],
+    [
+      "is listed as shipped but gone",
+      "fine",
+      { fine: "shipped", gone: "shipped" },
+      'mark it "retired"',
+    ],
+    ["has no ids.json", "fine", null, "isn't there"],
+  ])(
+    "refuse a release whose built-in %s",
+    (_case, id, ids: Record<string, string> | null, message) => {
+      const dir = fixture(id, schema);
+      if (ids !== null) {
+        writeFileSync(path.join(dir, "ids.json"), JSON.stringify(ids));
+      }
+      expect(() => {
+        checkShippedIds(dir);
+      }).toThrow(message);
+    }
+  );
 
   it.each([
     ["no definition.json", { "definition.json": "" }, "definition"],
