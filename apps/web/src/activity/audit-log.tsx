@@ -32,7 +32,7 @@ import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { DataTable } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
-import { DateRangePicker } from "../grasp/date-range-picker/index.ts";
+import { DatePicker } from "../grasp/date-picker/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -409,7 +409,10 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
           </Field>
           <Field name="when">
             <FieldLabel>{t`When`}</FieldLabel>
-            <DateRangePicker
+            <DatePicker
+              mode="range"
+              months={2}
+              presets
               onValueChange={(range) => {
                 setShown({ ...shown, from: range?.[0], to: range?.[1] });
               }}
@@ -419,7 +422,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
                 t({ message: "mm", context: "a date's month, as typed" }),
                 t({ message: "yyyy", context: "a date's year, as typed" }),
               ]}
-              words={{ trigger: t`Choose dates` }}
+              words={{ choose: t`Choose dates` }}
               size="sm"
               value={period}
             />

@@ -1086,7 +1086,14 @@ export const usePartWords = (): GraspWordsCatalog => {
       step: (step, count) => t`${step} of ${count}`,
       failed: t`Could not send the answer`,
     },
-    datePicker: { choose: t`Choose date` },
+    datePicker: {
+      choose: t`Choose date`,
+      presets: t`Presets`,
+      today: t`Today`,
+      last7: t`Last 7 days`,
+      last30: t`Last 30 days`,
+      thisMonth: t`This month`,
+    },
     dateRangePicker: {
       trigger: t`Choose date`,
       presets: t`Presets`,
