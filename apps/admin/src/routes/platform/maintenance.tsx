@@ -9,7 +9,6 @@ import type { StaffEvent } from "../../admin/platform-reads.ts";
 import { SharedSecrets } from "../../admin/secrets-parts.tsx";
 import { EmptySection, Section } from "../../admin/section.tsx";
 import { formatDate } from "../../admin/words.ts";
-import { fetchClientGrid } from "../../clients/functions.ts";
 
 /** A day, as the admin's pages say it. */
 const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
@@ -64,12 +63,13 @@ const MaintenancePage = () => {
 };
 
 export const Route = createFileRoute("/platform/maintenance")({
-  loader: async () => {
-    const [rows, platform] = await Promise.all([
-      fetchClientGrid(),
+  loader: async ({ parentMatchPromise }) => {
+    // Every company as the frame read it: not read a second time here.
+    const [{ loaderData }, platform] = await Promise.all([
+      parentMatchPromise,
       fetchPlatform(),
     ]);
-    return { rows, platform };
+    return { rows: loaderData?.clients ?? [], platform };
   },
   head: () => ({ meta: [{ title: "Maintenance" }] }),
   component: MaintenancePage,
