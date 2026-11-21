@@ -4208,6 +4208,7 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/settings/chat-accounts.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 #: src/settings/org-card.tsx
 #: src/settings/staff-access.tsx
@@ -8522,7 +8523,6 @@ msgstr "Raster van stippen"
 
 #: src/drafts/sharing.tsx
 #: src/settings/erasures.tsx
-#: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Gast"
 
@@ -8733,10 +8733,6 @@ msgstr "Geschiedenis"
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
-
-#: src/interview/closed.tsx
-msgid "Hold for 4 seconds"
-msgstr "Houd 4 seconden vast"
 
 #: src/frame/part-words.tsx
 msgid "Hold to confirm: {words}"
@@ -9937,10 +9933,6 @@ msgstr "Verder bewerken"
 #: src/make/examples.ts
 msgid "Keep every client question in one place, and remind us when one waits too long for an answer."
 msgstr "Houd elke klantvraag op één plek bij, en herinner ons eraan als er een te lang op antwoord wacht."
-
-#: src/interview/closed.tsx
-msgid "Keep holding"
-msgstr "Blijf vasthouden"
 
 #: src/brain/forget.tsx
 #: src/frame/part-words.tsx
@@ -12189,6 +12181,7 @@ msgid "Not read: no connection"
 msgstr "Niet gelezen: geen verbinding"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Not removed"
 msgstr "Niet verwijderd"
 
@@ -12205,6 +12198,7 @@ msgid "Not revoked"
 msgstr "Niet ingetrokken"
 
 #: src/brain/goals-editor.tsx
+#: src/interview/destination.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
@@ -16386,7 +16380,6 @@ msgstr "Aanmelden"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integrations-banner.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Sign in again"

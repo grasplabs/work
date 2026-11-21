@@ -4208,6 +4208,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/settings/chat-accounts.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 #: src/settings/org-card.tsx
 #: src/settings/staff-access.tsx
@@ -8522,7 +8523,6 @@ msgstr "Cuadrícula"
 
 #: src/drafts/sharing.tsx
 #: src/settings/erasures.tsx
-#: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Invitado"
 
@@ -8733,10 +8733,6 @@ msgstr "Historial"
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Historial"
-
-#: src/interview/closed.tsx
-msgid "Hold for 4 seconds"
-msgstr "Mantén pulsado 4 segundos"
 
 #: src/frame/part-words.tsx
 msgid "Hold to confirm: {words}"
@@ -9937,10 +9933,6 @@ msgstr "Seguir editando"
 #: src/make/examples.ts
 msgid "Keep every client question in one place, and remind us when one waits too long for an answer."
 msgstr "Reúne cada pregunta de cliente en un solo sitio, y avísanos cuando una espere demasiado una respuesta."
-
-#: src/interview/closed.tsx
-msgid "Keep holding"
-msgstr "Sigue pulsando"
 
 #: src/brain/forget.tsx
 #: src/frame/part-words.tsx
@@ -12189,6 +12181,7 @@ msgid "Not read: no connection"
 msgstr "Sin leer: sin conexión"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Not removed"
 msgstr "No eliminado"
 
@@ -12205,6 +12198,7 @@ msgid "Not revoked"
 msgstr "No revocado"
 
 #: src/brain/goals-editor.tsx
+#: src/interview/destination.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
@@ -16386,7 +16380,6 @@ msgstr "Iniciar sesión"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integrations-banner.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Sign in again"
