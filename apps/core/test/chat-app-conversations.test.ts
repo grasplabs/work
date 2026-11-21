@@ -167,6 +167,9 @@ const answersFor = async (api: Api, chatId: string) => ({
   send: await outcome(api.chats.send(chatId, { text: "Hello", model })),
   cancel: await outcome(api.chats.cancel(chatId)),
   rename: await outcome(api.chats.rename(chatId, "Mine now")),
+  archive: await outcome(api.chats.archive(chatId)),
+  unarchive: await outcome(api.chats.unarchive(chatId)),
+  unfile: await outcome(api.chats.setProject(chatId, null)),
   remove: await outcome(api.chats.remove(chatId)),
   attachFile: await outcome(
     api.chats.attachFile(chatId, {
