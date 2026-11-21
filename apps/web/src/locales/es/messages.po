@@ -466,6 +466,10 @@ msgstr "{count, plural, one {Leyendo # flujo de trabajo} other {Leyendo # flujos
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 msgstr "{count, plural, one {Mostrar # línea sin cambios} other {Mostrar # líneas sin cambios}}"
 
+#: src/chat/held-writes.tsx
+msgid "{count, plural, one {Show all # line ({characters} characters)} other {Show all # lines ({characters} characters)}}"
+msgstr "{count, plural, one {Mostrar la # línea ({characters} caracteres)} other {Mostrar las # líneas ({characters} caracteres)}}"
+
 #: src/frame/part-words.tsx
 msgid "{count, plural, one {Show the # {group} tool} other {Show the # {group} tools}}"
 msgstr "{count, plural, one {Mostrar la # herramienta de {group}} other {Mostrar las # herramientas de {group}}}"
@@ -1195,10 +1199,6 @@ msgstr "{people, plural, one {para # persona} other {para # personas}}"
 msgid "{percent}% known now"
 msgstr "Ahora, {percent} % conocido"
 
-#: src/inbox/report-view.tsx
-msgid "{percentAlone}% of this week's {total} runs needed nobody."
-msgstr "El {percentAlone} % de las {total} ejecuciones de esta semana no necesitó a nadie."
-
 #: src/inbox/items.ts
 msgid "{person} · {connection}"
 msgstr "{person} · {connection}"
@@ -1526,8 +1526,16 @@ msgid "{total, plural, one {{count} of # interview} other {{count} of # intervie
 msgstr "{total, plural, one {{count} de # entrevista} other {{count} de # entrevistas}}"
 
 #: src/inbox/report-view.tsx
-msgid "{total} runs from {from} to {to}."
-msgstr "{total} ejecuciones del {from} al {to}."
+msgid "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+msgstr "{total, plural, one {El {percent} de la # ejecución de esta semana no necesitó a nadie.} other {El {percent} de las # ejecuciones de esta semana no necesitó a nadie.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+msgstr "{total, plural, one {# ejecución del {from} al {to}.} other {# ejecuciones del {from} al {to}.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
+msgstr "{total, plural, one {A dónde fue la # ejecución de esta semana.} other {A dónde fueron las # ejecuciones de esta semana.}}"
 
 #: src/settings/ai-spend.tsx
 msgid "{total} so far this month."
@@ -16092,10 +16100,6 @@ msgstr "Volver a mostrar"
 msgid "Show all"
 msgstr "Mostrar todo"
 
-#: src/chat/held-writes.tsx
-msgid "Show all {count} lines ({characters} characters)"
-msgstr "Mostrar las {count} líneas ({characters} caracteres)"
-
 #: src/routes/_shell.settings.security.tsx
 msgid "Show all {devices}"
 msgstr "Mostrar los {devices}"
@@ -20534,10 +20538,6 @@ msgstr "Adónde va el tiempo"
 #: src/brain/brain-article/team-work.tsx
 msgid "Where the work passes on"
 msgstr "Dónde pasa el trabajo"
-
-#: src/inbox/report-view.tsx
-msgid "Where this week's {total} runs went."
-msgstr "A dónde fueron las {total} ejecuciones de esta semana."
 
 #: src/interview/destination.tsx
 msgid "Where your lines go"
