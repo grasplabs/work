@@ -432,9 +432,7 @@ const WorkflowBar = ({
       actions={
         <>
           <StartIndependentRun
-            // Read again for each version that goes live: what Run starts,
-            // and that there is one to start at all.
-            key={live ?? "none"}
+            live={live}
             onFiles={onFiles}
             onOpenRun={onOpenRun}
             workflow={resource.id}

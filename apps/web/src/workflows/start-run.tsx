@@ -123,7 +123,7 @@ const FieldInput = ({
             candidates={people}
             disabled={false}
             holding={new Set(text === "" ? [] : [text])}
-            buttonId={id}
+            labelId={`${id}-label`}
             label={picked ?? (text === "" ? t`Choose…` : text)}
             onPick={(subject) => {
               onChange(subjectKey(subject));
@@ -344,7 +344,11 @@ const StartDialog = ({
                     invalid={problem !== undefined && problem.field === name}
                     key={name}
                   >
-                    <FieldLabel>
+                    <FieldLabel
+                      // A person is picked with a button, named by this label.
+                      htmlFor={field.kind === "person" ? undefined : id}
+                      id={`${id}-label`}
+                    >
                       {field.required ? name : t`${name} (optional)`}
                     </FieldLabel>
                     <FieldInput
@@ -412,10 +416,13 @@ const StartDialog = ({
  */
 export const StartIndependentRun = ({
   workflow,
+  live,
   onFiles,
   onOpenRun,
 }: {
   workflow: string;
+  /** The version live now: what Run starts is read again for each, in place, so a Run dialog already open stays open. None live, there is nothing to start. */
+  live: number | null;
   onFiles?: () => void;
   /** Opens a run beside the workflow's runs. */
   onOpenRun?: (id: string) => void;
@@ -429,6 +436,9 @@ export const StartIndependentRun = ({
   useEffect(() => {
     let stopped = false;
     const read = async (): Promise<void> => {
+      if (live === null) {
+        return;
+      }
       try {
         const given = await core.withSession(
           async (session) => await session.workflowResources.startForm(workflow)
@@ -447,8 +457,11 @@ export const StartIndependentRun = ({
     return () => {
       stopped = true;
     };
-  }, [core, workflow]);
+  }, [core, workflow, live]);
 
+  if (live === null) {
+    return null;
+  }
   if (unread !== undefined) {
     return <ErrorText>{t`Can't offer Run: ${unread}`}</ErrorText>;
   }

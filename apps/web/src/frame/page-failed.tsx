@@ -185,8 +185,9 @@ export const PageFailed = ({
   const { sentence, reference } =
     reason === undefined ? { sentence: undefined } : splitReference(reason);
   // Said once, as it appears: why it failed (the heading is read with the
-  // page), as an alert, as every failure is.
-  const said = sentence === undefined || sentence === "" ? title : sentence;
+  // page), as an alert, as every failure is. Without a reason, the title is
+  // said, from a line only a screen reader reads.
+  const bare = sentence === undefined || sentence === "";
   const retry = useAction(
     async () => {
       await onRetry();
@@ -207,8 +208,10 @@ export const PageFailed = ({
     >
       <div data-slot="page-failed" {...stylex.props(styles.words)}>
         <Heading {...stylex.props(styles.heading)}>{title}</Heading>
-        {sentence === undefined || sentence === "" ? null : (
-          <p {...stylex.props(styles.sentence)}>{sentence}</p>
+        {bare ? null : (
+          <p role="alert" {...stylex.props(styles.sentence)}>
+            {sentence}
+          </p>
         )}
         <div {...stylex.props(styles.actions)}>
           <Button variant="ink" {...retry.props}>
@@ -236,9 +239,11 @@ export const PageFailed = ({
         )}
         {children}
       </div>
-      <p role="alert" {...stylex.props(visuallyHidden)}>
-        {said}
-      </p>
+      {bare ? (
+        <p role="alert" {...stylex.props(visuallyHidden)}>
+          {title}
+        </p>
+      ) : null}
     </Backdrop>
   );
 };

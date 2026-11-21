@@ -215,7 +215,7 @@ describe("starting a workflow by hand", () => {
 
   it("starts an independent workflow at core's version with exactly the input its form makes, after a field it can't send", async () => {
     const asked = await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       form
     );
     await press("Run");
@@ -248,7 +248,7 @@ describe("starting a workflow by hand", () => {
 
   it("has a person picked, never typed, for a field that takes one: a person, a team or a role", async () => {
     const asked = await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       {
         version: 3,
         args: {
@@ -311,7 +311,7 @@ describe("starting a workflow by hand", () => {
   });
 
   it("names the person picked apart from someone of the same name", async () => {
-    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+    await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: 3,
       args: {
         type: "object",
@@ -337,7 +337,7 @@ describe("starting a workflow by hand", () => {
   });
 
   it("offers no Run for a workflow core gives no version to start", async () => {
-    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+    await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: null,
       args: null,
       people: null,
@@ -348,7 +348,7 @@ describe("starting a workflow by hand", () => {
 
   it("says why it can't offer Run when core can't say how the workflow starts", async () => {
     await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       workflowResourceErrors.create("workflow.resource_unavailable")
     );
 
@@ -365,6 +365,7 @@ describe("starting a workflow by hand", () => {
     await shown(
       () => (
         <StartIndependentRun
+          live={1}
           onFiles={() => {
             shownFiles.push("files");
           }}

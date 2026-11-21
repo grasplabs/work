@@ -23,6 +23,7 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMatchLatest } from "./match-latest.ts";
 import type { RouteTo } from "./match-latest.ts";
 import { PageLoading } from "./page-states.tsx";
+import { usePhoneMenu } from "./phone-menu.ts";
 import { wasSignedIn } from "./signed-in-here.ts";
 
 const styles = stylex.create({
@@ -52,6 +53,7 @@ const wait = (): void => undefined;
 export const ShellPending = () => {
   const { t } = useLingui();
   const matchRoute = useMatchLatest();
+  const [menuOpen, setMenuOpen] = usePhoneMenu();
   if (!wasSignedIn()) {
     return null;
   }
@@ -65,6 +67,8 @@ export const ShellPending = () => {
     <div {...stylex.props(styles.shell)}>
       <AppShell
         bar={at("/", false) ? "none" : "page"}
+        menuOpen={menuOpen}
+        onMenuOpenChange={setMenuOpen}
         dock={
           chatPage ? undefined : (
             <Composer

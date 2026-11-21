@@ -1,6 +1,6 @@
 import { roleSchema } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
@@ -101,7 +101,7 @@ const groupOf = (label: string, items: CommandEntry[]): CommandItems =>
  * they're read.
  */
 export const PeopleTeamsPicker = ({
-  buttonId,
+  labelId,
   label,
   candidates,
   holding,
@@ -110,8 +110,8 @@ export const PeopleTeamsPicker = ({
   onOpen,
   onPick,
 }: {
-  /** The button's ID, for a form's label. */
-  buttonId?: string;
+  /** The ID of a form's label naming the button: read before what the button shows. */
+  labelId?: string;
   label: ReactNode;
   candidates: PeopleAndTeams | null;
   /** The keys of everyone held now (`subjectKey`), left out of the list. */
@@ -124,6 +124,7 @@ export const PeopleTeamsPicker = ({
   onPick: (subject: PickedSubject) => void;
 }) => {
   const { t } = useLingui();
+  const shown = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const people =
@@ -206,13 +207,15 @@ export const PeopleTeamsPicker = ({
       open={open}
     >
       <PopoverTrigger
+        aria-labelledby={
+          labelId === undefined ? undefined : `${labelId} ${shown}`
+        }
         disabled={disabled}
         icon={Plus}
-        id={buttonId}
         size="sm"
         variant="quiet"
       >
-        <span>{label}</span>
+        <span id={shown}>{label}</span>
       </PopoverTrigger>
       <PopoverContent align="end">
         <Command
