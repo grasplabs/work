@@ -19,7 +19,7 @@ const flags: Record<Locale, FlagData> = {
   fr: FR,
 };
 
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
+export const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name, flag: flags[code] }] : []
 );
 

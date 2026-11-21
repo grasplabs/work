@@ -137,7 +137,7 @@ export const StartedWithout = ({ run }: { run: WorkflowResourceRun }) => {
  * An opened run's status, and, while a step of it waits for its AI
  * provider, what for: as the runs table says it (`WaitingForAiProvider`).
  */
-export const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => (
+const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => (
   <output {...stylex.props(styles.status)}>
     <RunStatusBadge status={run.status} />
     {run.aiProvider === undefined ? null : (

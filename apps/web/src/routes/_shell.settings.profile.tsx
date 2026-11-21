@@ -3,8 +3,7 @@ import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { Badge } from "../grasp/badge/index.ts";
-import { DE, ES, FR, Flag, GB, NL } from "../grasp/flags/index.ts";
-import type { FlagData } from "../grasp/flags/index.ts";
+import { Flag } from "../grasp/flags/index.ts";
 import {
   InputGroup,
   InputGroupInput,
@@ -20,9 +19,9 @@ import {
 } from "../grasp/select/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
-import type { Locale } from "../i18n.ts";
+import { chooseLocale, isLocale } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
+import { languages } from "../language-picker.tsx";
 import { ProfileName } from "../settings/profile-name.tsx";
 import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import { SettingsError } from "../settings/section.tsx";
@@ -40,19 +39,6 @@ const styles = stylex.create({
   control: { width: "100%" },
   language: { display: "flex", alignItems: "center", gap: grasp.space2 },
 });
-
-/** The flag that stands for each language Grasp speaks: its home region's. */
-const flags: Record<Locale, FlagData> = {
-  en: GB,
-  de: DE,
-  nl: NL,
-  es: ES,
-  fr: FR,
-};
-
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
-  isLocale(code) ? [{ code, name, flag: flags[code] }] : []
-);
 
 /** Their sign-in's email, which only reads, with their role at its end. */
 const EmailRow = ({ email, role }: { email: string; role: string }) => {
