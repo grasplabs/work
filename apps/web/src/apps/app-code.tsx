@@ -6,6 +6,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { LoadingLines } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import {
@@ -21,7 +22,6 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { Tree } from "../grasp/tree/index.ts";
 import type { TreeNode } from "../grasp/tree/index.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { fileIconOf } from "./file-icon.ts";
 import { useCoreRead } from "./use-core-read.ts";
@@ -323,7 +323,7 @@ const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) =>
   loaded === undefined ? (
     <LoadingLines lines={6} />
   ) : (
-    <NotLoaded page={loaded} />
+    <PartNotLoaded page={loaded} />
   );
 
 /** One version's files, read. */

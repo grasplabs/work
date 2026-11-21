@@ -12,6 +12,7 @@ import { useEffect, useId, useState } from "react";
 import { useDraft } from "../drafts/use-draft.ts";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -42,7 +43,7 @@ import {
 } from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -346,7 +347,7 @@ export const AppWorkflows = ({
     return <LoadingLines lines={2} />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    return <PartNotLoaded page={read} />;
   }
   return (
     <BindingsView

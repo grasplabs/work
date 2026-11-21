@@ -19,6 +19,7 @@ import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { formatDateTime, formatList } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
@@ -58,7 +59,7 @@ import {
   TableRow,
 } from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -190,7 +191,7 @@ const ToolChoice = ({
     return <LoadingLines lines={2} />;
   }
   if (tools.state !== "ready") {
-    return <NotLoaded page={tools} />;
+    return <PartNotLoaded page={tools} />;
   }
   const { offered } = connection;
   const choices = tools.data.filter(
@@ -496,7 +497,7 @@ export const AppAccessRequests = ({
     return <LoadingLines lines={2} />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    return <PartNotLoaded page={read} />;
   }
   return (
     <RequestsView

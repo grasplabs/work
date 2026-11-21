@@ -121,6 +121,10 @@ msgstr "{app}: ejecución de {workflowId}"
 msgid "{app}'s model can't be read, so its calls get no answer."
 msgstr "No se puede leer el modelo de {app}, así que sus llamadas no reciben respuesta."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{app}'s tools"
+msgstr "Las herramientas de {app}"
+
 #: src/projects/project-counts.tsx
 msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
@@ -5447,6 +5451,7 @@ msgstr "Copenhague"
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
@@ -10517,6 +10522,7 @@ msgid "Live, being measured"
 msgstr "En marcha, en medición"
 
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Cargado"
@@ -12108,6 +12114,7 @@ msgstr "Aún no conectada"
 #: src/activity/audit-event.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
 #: src/settings/invitations.tsx
 msgid "Not copied"
@@ -12203,6 +12210,7 @@ msgid "Not live yet"
 msgstr "Aún no activo"
 
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "No cargado"
@@ -14517,6 +14525,7 @@ msgid "Redact this answer?"
 msgstr "¿Censurar esta respuesta?"
 
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 msgid "Reference for support"
 msgstr "Referencia para soporte"
 
@@ -16778,6 +16787,7 @@ msgstr "Hay algo que corregir antes"
 msgid "Something went wrong while it opened."
 msgstr "Algo salió mal al abrirla."
 
+#: src/frame/page-failed.tsx
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Algo ha salido mal."
@@ -17876,8 +17886,8 @@ msgid "The App's tests fail, so nothing was shared. Fix them, then share."
 msgstr "Las pruebas de la App fallan, así que no se compartió nada. Corrígelas y luego compártela."
 
 #: src/chat/builds.tsx
-msgid "The Apps this chat builds didn't load."
-msgstr "Las aplicaciones que crea este chat no se cargaron."
+msgid "The Apps this chat builds didn't load"
+msgstr "Las Apps que crea este chat no se cargaron"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
@@ -18752,6 +18762,10 @@ msgstr "Este dispositivo"
 msgid "This did not load"
 msgstr "Esto no se cargó"
 
+#: src/frame/part-failed.tsx
+msgid "This didn't load"
+msgstr "Esto no se cargó"
+
 #: src/brain/sources-page.tsx
 msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
 msgstr "El texto de este archivo es demasiado largo para que el Brain lo guarde. Divídelo en archivos más pequeños y súbelos."
@@ -19209,7 +19223,6 @@ msgstr "Intentar"
 #: src/apps/app-settings.tsx
 #: src/brain/own-export.tsx
 #: src/brain/skills-page.tsx
-#: src/chat/builds.tsx
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
@@ -19217,6 +19230,7 @@ msgstr "Intentar"
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/frame/part-words.tsx
 #: src/frame/setting-up.tsx
 #: src/inbox/inbox-page.tsx
@@ -19224,7 +19238,6 @@ msgstr "Intentar"
 #: src/interview/sound-check.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
-#: src/settings/section.tsx
 #: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
@@ -19238,10 +19251,9 @@ msgstr "Vuelve a intentar preparar {name}."
 msgid "Try the search again"
 msgstr "Vuelve a buscar"
 
-#: src/chat/builds.tsx
 #: src/frame/page-failed.tsx
+#: src/frame/part-failed.tsx
 #: src/inbox/inbox-page.tsx
-#: src/settings/section.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"
 
@@ -20760,8 +20772,8 @@ msgid "Which AI should I think with?"
 msgstr "¿Con qué IA debo pensar?"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "Which Apps and agents hold permissions: {why}"
-msgstr "Qué aplicaciones y agentes tienen permisos: {why}"
+msgid "Which Apps and agents hold permissions"
+msgstr "Qué Apps y agentes tienen permisos"
 
 #: src/agents/setup/apps-step.tsx
 msgid "Which apps can {name} use?"

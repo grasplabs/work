@@ -23,6 +23,7 @@ import { readPeople } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList, formatSince } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,7 +61,7 @@ import {
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { decidesRequests } from "../inbox/waiting.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -606,7 +607,7 @@ const VersionChanges = ({
         <SheetBody>
           {read === undefined ? <LoadingLines lines={4} /> : null}
           {read !== undefined && read.state !== "ready" ? (
-            <NotLoaded page={read} />
+            <PartNotLoaded page={read} />
           ) : null}
           {read?.state === "ready" ? <FileChanges files={read.data} /> : null}
         </SheetBody>
@@ -1028,7 +1029,7 @@ const Published = (of: VersionsOf) => {
     (page) => page.state !== "ready"
   );
   if (failed !== undefined) {
-    return <NotLoaded page={failed} />;
+    return <PartNotLoaded page={failed} />;
   }
   const versions = pages.flatMap((page) =>
     page.state === "ready" ? page.data : []

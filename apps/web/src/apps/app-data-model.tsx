@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { formatCompact } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -74,7 +75,6 @@ import {
 } from "../grasp/sheet/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import { AccessView } from "./access-view.tsx";
 import { TableRecords } from "./app-data.tsx";
 import { PlanList, planLines, useModelChanges } from "./data-model-changes.tsx";
@@ -495,7 +495,7 @@ export const AppDataModel = ({
         {read === undefined ? (
           <LoadingLines lines={6} />
         ) : (
-          <NotLoaded page={read} />
+          <PartNotLoaded page={read} />
         )}
       </div>
     );

@@ -24,6 +24,7 @@ import type { ReactNode } from "react";
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
@@ -64,7 +65,6 @@ import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useAsk, usePaged } from "./memories-asks.ts";
 
@@ -709,7 +709,7 @@ const AudienceField = ({
         ) : null}
       </Field>
       {loaded === undefined || loaded.state === "ready" ? null : (
-        <NotLoaded page={loaded} />
+        <PartNotLoaded page={loaded} />
       )}
     </>
   );
@@ -1266,7 +1266,7 @@ const ContestedList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoaded page={first} />;
+    return <PartNotLoaded page={first} />;
   }
   // A page can hold no fact and still have more after it.
   if (facts.length === 0 && next === null) {
@@ -1363,7 +1363,7 @@ const EntityList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoaded page={first} />;
+    return <PartNotLoaded page={first} />;
   }
   if (items.length === 0 && entities.next === null) {
     return (
@@ -1498,7 +1498,7 @@ const EntityPanel = ({
           {ref.store === "own" ? <OnlyYou /> : null}
         </div>
         {first !== undefined && first.state !== "ready" ? (
-          <NotLoaded page={first} />
+          <PartNotLoaded page={first} />
         ) : null}
         {first?.state === "ready" && items.length === 0 ? (
           <Text size="sm" tone="muted">
@@ -1633,7 +1633,7 @@ const SharedList = ({
     return null;
   }
   if (first.state !== "ready") {
-    return <NotLoaded page={first} />;
+    return <PartNotLoaded page={first} />;
   }
   if (items.length === 0 && next === null) {
     return (

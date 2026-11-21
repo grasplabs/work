@@ -16,11 +16,12 @@ import {
 import type { Integration } from "../connections/integrations.ts";
 import { NotFound, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Cable } from "../grasp/icons/index.ts";
-import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
 // One integration, on the library's app page (connections/app-page.tsx),
@@ -48,15 +49,11 @@ const HeldNotLoaded = ({
 }: {
   held: Loaded<HeldPermissions> | undefined;
 }) => {
-  const { i18n, t } = useLingui();
-  const why = held === undefined ? undefined : notLoadedText(held, i18n);
-  if (why === undefined) {
-    return null;
-  }
-  return (
-    <Alert
-      title={t`Which Apps and agents hold permissions: ${why}`}
-      tone="danger"
+  const { t } = useLingui();
+  return held === undefined ? null : (
+    <PartNotLoaded
+      page={held}
+      what={t`Which Apps and agents hold permissions`}
     />
   );
 };
@@ -76,7 +73,7 @@ const Notices = ({
   tools: Loaded<unknown> | undefined;
 }) => {
   const { identity } = Route.useRouteContext();
-  const { i18n, t } = useLingui();
+  const { t } = useLingui();
   const whyNoConnectOf = useWhyNoConnect();
   const app = integration.name;
   const notices: string[] = [];
@@ -95,13 +92,14 @@ const Notices = ({
       t`The catalog of integrations couldn't be read, so this page shows only what your accounts say about it.`
     );
   }
-  const toolsWhy = tools === undefined ? undefined : notLoadedText(tools, i18n);
   return (
     <>
       {notices.map((notice) => (
         <Alert key={notice} title={notice} />
       ))}
-      {toolsWhy === undefined ? null : <Alert title={toolsWhy} tone="danger" />}
+      {tools === undefined ? null : (
+        <PartNotLoaded page={tools} what={t`${app}'s tools`} />
+      )}
     </>
   );
 };

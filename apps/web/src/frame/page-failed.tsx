@@ -1,3 +1,4 @@
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -106,6 +107,26 @@ const styles = stylex.create({
   reference: { width: "min(100%, 18rem)" },
 });
 
+/**
+ * Whether a failure's sentence tells the reader something: core's words
+ * for "anything nobody planned for" (`internal.unexpected`), and the
+ * page's own for a fault in its code, say only that it failed, which the
+ * title says already (Ruben, 21 November: show only what is useful).
+ */
+export const useUseful = (): ((
+  sentence: string | undefined
+) => string | undefined) => {
+  const { t } = useLingui();
+  const bare = new Set([
+    expectedMessageOf("internal.unexpected"),
+    t`Something went wrong.`,
+  ]);
+  return (sentence) => {
+    const words = sentence?.trim() ?? "";
+    return words === "" || bare.has(words) ? undefined : words;
+  };
+};
+
 /** How a reason carries its reference: `withReference` in @grasp-os/shared/errors. */
 const referenced = /^(?<sentence>[\s\S]*?)\s*Reference: (?<reference>\S+)$/u;
 
@@ -182,11 +203,15 @@ export const PageFailed = ({
   children,
 }: PageFailedProps) => {
   const { t } = useLingui();
-  const { sentence, reference } =
-    reason === undefined ? { sentence: undefined } : splitReference(reason);
+  const useful = useUseful();
+  const split: { sentence?: string; reference?: string } =
+    reason === undefined ? {} : splitReference(reason);
+  const { reference } = split;
+  // Only words that tell the reader something: never a bare "it failed".
+  const sentence = useful(split.sentence);
   // Said once, as it appears: why it failed (the heading is read with the
   // page), as an alert, as every failure is.
-  const said = sentence === undefined || sentence === "" ? title : sentence;
+  const said = sentence ?? title;
   const retry = useAction(
     async () => {
       await onRetry();
@@ -218,15 +243,10 @@ export const PageFailed = ({
           </p>
         )}
         <Heading {...stylex.props(styles.heading)}>{title}</Heading>
-        {sentence === undefined || sentence === "" ? null : (
+        {sentence === undefined ? null : (
           <p {...stylex.props(styles.sentence)}>{sentence}</p>
         )}
-        <div {...stylex.props(styles.actions)}>
-          <Button variant="ink" {...retry.props}>
-            {t`Try again`}
-          </Button>
-          {wayOn}
-        </div>
+        {/* What is useful first (why, the reference to quote), then the way on under it (Ruben, 21 November). */}
         {reference === undefined ? null : (
           <CopyField
             aria-label={t`Reference for support`}
@@ -236,6 +256,12 @@ export const PageFailed = ({
             value={reference}
           />
         )}
+        <div {...stylex.props(styles.actions)}>
+          <Button variant="ink" {...retry.props}>
+            {t`Try again`}
+          </Button>
+          {wayOn}
+        </div>
         {children}
       </div>
       <p role="alert" {...stylex.props(visuallyHidden)}>

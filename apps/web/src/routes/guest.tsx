@@ -13,7 +13,8 @@ import { useState } from "react";
 
 import { shellStatus, signOut } from "../core-connection.ts";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { PartNotLoaded } from "../frame/part-failed.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // Where a guest lands (GRA-2235): someone from outside the company, who
 // reaches only the Apps shared with them (core's guest-access.ts). A plain
@@ -40,7 +41,7 @@ const GuestHome = () => {
       <PageHeaderTitle>
         <Trans>Apps shared with you</Trans>
       </PageHeaderTitle>
-      {apps.state !== "ready" && <NotLoaded page={apps} />}
+      {apps.state !== "ready" && <PartNotLoaded page={apps} />}
       {apps.state === "ready" && apps.data.length === 0 && (
         <p className="text-muted-foreground">
           <Trans>Nothing is shared with you yet.</Trans>
