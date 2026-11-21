@@ -158,8 +158,9 @@ export const Route = createFileRoute("/_shell/agents/new")({
   // Whether the company lets people have agents of their own: on when core
   // won't say, as core still refuses what it refuses.
   // The choice of two ways needs none of it, so it stands at once: what a
-  // way offers is read once it is picked (or pointed at, new-agent-start.tsx),
-  // and only whether the company lets people have their own agents before.
+  // way offers is read once it is picked (each list read is audited, so
+  // never ahead), and only whether the company lets people have their own
+  // agents before.
   loaderDeps: ({ search: { way } }) => ({ way }),
   loader: async ({
     context: { core, identity },

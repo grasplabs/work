@@ -36,10 +36,12 @@ const sceneDrawMs = 150;
 /** Where this browser keeps the pictures, with the release that drew them. */
 const keptKey = "grasp-look-pictures";
 const build = import.meta.env.VITE_GRASP_BUILD;
+/** A build of no release (development, or built by hand) keeps nothing: its drawers change under its pictures. */
+const keeps = build !== "local";
 
-/** The pictures this release drew here before; none from another release, or in development, where the drawers change under them. */
+/** The pictures this release drew here before; none from another release. */
 const keptPictures = (): Map<string, string> => {
-  if (import.meta.env.DEV) {
+  if (!keeps) {
     return new Map();
   }
   try {
@@ -67,16 +69,27 @@ const keptPictures = (): Map<string, string> => {
 };
 
 const pictures = keptPictures();
+/**
+ * The pictures taken once their look had drawn, the only ones kept: one
+ * taken when the longest wait ran out (a tab out of sight, a picture that
+ * never came) may be blank, and is drawn again next visit.
+ */
+const whole = new Set(pictures.keys());
 
-/** Keeps the pictures in this browser, for the next visit. */
+/** Keeps the whole pictures in this browser, for the next visit. */
 const keepPictures = (): void => {
-  if (import.meta.env.DEV) {
+  if (!keeps) {
     return;
   }
   try {
     localStorage.setItem(
       keptKey,
-      JSON.stringify({ build, pictures: Object.fromEntries(pictures) })
+      JSON.stringify({
+        build,
+        pictures: Object.fromEntries(
+          [...pictures].filter(([key]) => whole.has(key))
+        ),
+      })
     );
   } catch {
     // Storage blocked or full: drawn again next visit.
@@ -196,13 +209,17 @@ export const LookPictureStage = () => {
     }
     const canvas = stage.current?.querySelector("canvas");
     let taken = false;
-    const take = (): void => {
+    const take = (drawn: boolean): void => {
       if (taken) {
         return;
       }
       taken = true;
       // Our own pictures, from this origin: a canvas that is always read.
-      pictures.set(next.key, canvas?.toDataURL() ?? "");
+      const picture = canvas?.toDataURL() ?? "";
+      pictures.set(next.key, picture);
+      if (drawn && picture !== "") {
+        whole.add(next.key);
+      }
       queue.shift();
       if (queue.length === 0) {
         keepPictures();
@@ -210,13 +227,35 @@ export const LookPictureStage = () => {
       changed();
     };
     const scene = isScene(next.look.backdrop);
-    const timers = [setTimeout(take, longestMs)];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    // Out of sight a field doesn't draw: the longest wait starts once the
+    // page is seen.
+    const waitWhenSeen = (): void => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      document.removeEventListener("visibilitychange", waitWhenSeen);
+      timers.push(
+        setTimeout(() => {
+          take(false);
+        }, longestMs)
+      );
+    };
+    document.addEventListener("visibilitychange", waitWhenSeen);
+    waitWhenSeen();
     // A scene's picture, fetched here too: once it has come, the field's
     // own copy comes from the cache at once.
     let came = !scene;
     const ready = (): void => {
       if (came && canvas?.dataset.drawn !== undefined) {
-        timers.push(setTimeout(take, scene ? sceneDrawMs : 0));
+        timers.push(
+          setTimeout(
+            () => {
+              take(true);
+            },
+            scene ? sceneDrawMs : 0
+          )
+        );
       }
     };
     const watch = new MutationObserver(ready);
@@ -242,6 +281,7 @@ export const LookPictureStage = () => {
     return () => {
       // A picture that comes after this is not this stage's to take.
       taken = true;
+      document.removeEventListener("visibilitychange", waitWhenSeen);
       watch.disconnect();
       for (const timer of timers) {
         clearTimeout(timer);

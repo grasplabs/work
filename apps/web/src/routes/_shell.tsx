@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useState } from "react";
+import type { ComponentType } from "react";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
 import { useChatPanels } from "../chat/chat-panel.tsx";
@@ -65,11 +66,21 @@ const makeBrainCloud = async () => {
 };
 
 /** The Appearance tiles' pictures, drawn by the shell (settings/look-pictures-warm.tsx). */
-const LookPicturesWarm = lazy(async () => {
-  const { LookPicturesWarm: Warm } =
-    await import("../settings/look-pictures-warm.tsx");
-  return { default: Warm };
-});
+const LookPicturesWarm = lazy(
+  async (): Promise<{
+    default: ComponentType<{ userId: string; ahead: boolean }>;
+  }> => {
+    try {
+      const { LookPicturesWarm: Warm } =
+        await import("../settings/look-pictures-warm.tsx");
+      return { default: Warm };
+    } catch {
+      // Not fetched (a deploy since this page loaded): nothing is drawn
+      // ahead, and the shell stands.
+      return { default: () => null };
+    }
+  }
+);
 
 /**
  * Fetches the sidebar's pages and makes the Brain's dots once the frame
