@@ -434,6 +434,21 @@ const runSave = async (job: {
   job.saved(url);
 };
 
+// A new picture's preview as a data: URL, read off the page's thread. Not a blob: URL: a page whose
+// policy takes pictures only from itself and data: (the product's img-src) refuses those.
+const readPreview = async (file: File) =>
+  // oxlint-disable-next-line promise/avoid-new -- FileReader has no promise of its own
+  await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    });
+    reader.addEventListener("error", () => {
+      reject(reader.error ?? new Error("unreadable"));
+    });
+    reader.readAsDataURL(file);
+  });
+
 /** The picture's state: what is kept, what is new and saving or failed, and how to change them. */
 const usePicture = (
   props: Pick<
@@ -448,6 +463,8 @@ const usePicture = (
   const [pending, setPending] = useState<Pending | null>(null);
   const [said, setSaid] = useState("");
   const running = useRef<AbortController | null>(null);
+  // The picture last picked: a preview read after another was picked, or after remove, is dropped.
+  const picked = useRef(0);
 
   const commit = (next: string | null, file: File | null) => {
     if (value === undefined) {
@@ -486,8 +503,24 @@ const usePicture = (
     });
   };
 
+  // A picked file: its preview read, then saved as any new picture is.
+  const pick = async (file: File) => {
+    picked.current += 1;
+    const turn = picked.current;
+    let preview: string;
+    try {
+      preview = await readPreview(file);
+    } catch {
+      return;
+    }
+    if (picked.current === turn) {
+      save(file, preview);
+    }
+  };
+
   // Remove: a new picture not yet kept is dropped, and the one before shows again; else the kept one goes.
   const remove = () => {
+    picked.current += 1;
     running.current?.abort();
     running.current = null;
     if (pending) {
@@ -505,7 +538,7 @@ const usePicture = (
     []
   );
 
-  return { kept, pending, said, setSaid, save, remove };
+  return { kept, pending, said, setSaid, save, pick, remove };
 };
 
 /** What the tooltip says: how to change it and its limits, or that the save failed. */
@@ -671,7 +704,7 @@ export const ImageWell = ({
 }: ImageWellProps) => {
   // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
   const words = withGiven(useWords("imageWell", imageWellWords), given ?? {});
-  const { kept, pending, said, setSaid, save, remove } = usePicture(
+  const { kept, pending, said, setSaid, save, pick, remove } = usePicture(
     picture,
     words
   );
@@ -708,7 +741,7 @@ export const ImageWell = ({
       return;
     }
     setRefusal("");
-    save(file, URL.createObjectURL(file));
+    void pick(file);
   };
   const reject = (rejected: { file: File; reasons: string[] }[]) => {
     const [first] = rejected;

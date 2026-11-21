@@ -1,9 +1,11 @@
 // The page's side of the viewer's Workers. Each item with heavy work has a lane: the core's (search,
 // a page's words, comments' anchors) and one for each renderer item that registers (Markdown, CSV,
-// code). A lane's Worker is made the first time one of its tasks is asked for. When a Worker cannot
-// start (the bundler did not ship it, or a policy forbids it), the same tasks run on the page
-// itself, loaded only then, and `where()` says so. A task no installed item can do is refused,
-// and the renderer that asked shows what it can without it.
+// code). Workers are off until the page allows them (`allowWorkers()`): the product's policy
+// forbids them (`worker-src 'none'`), and a refused Worker is a violation report on every open.
+// Allowed, a lane's Worker is made the first time one of its tasks is asked for; when a Worker
+// cannot start (the bundler did not ship it), the same tasks run on the page itself, loaded only
+// then, and `where()` says so. A task no installed item can do is refused, and the renderer that
+// asked shows what it can without it.
 "use client";
 
 import type { Found } from "../anchor";
@@ -65,6 +67,20 @@ interface Running extends Lane {
   pending: Map<number, Pending>;
 }
 
+let allowed = false;
+
+/**
+ * Lets the viewer's tasks (search, parsing, highlighting) and PDF.js run in Workers, off the page's
+ * thread. Call it once, only on a page whose Content Security Policy allows Workers from its own
+ * origin: without it every task runs on the page and no Worker is ever tried.
+ */
+export const allowWorkers = () => {
+  allowed = true;
+};
+
+/** Whether the page allowed Workers (`allowWorkers()`). */
+export const workersAllowed = () => allowed;
+
 const lanes = new Map<TaskKind, Running>();
 const byFormat = new Map<ArtifactFormat, Running>();
 
@@ -107,7 +123,7 @@ const moveToPage = async (lane: Running, job: Pending) => {
 };
 
 const start = (lane: Running) => {
-  if (lane.worker || lane.failed || typeof Worker === "undefined") {
+  if (!allowed || lane.worker || lane.failed || typeof Worker === "undefined") {
     return lane.worker;
   }
   let made: Worker;

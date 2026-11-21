@@ -39,6 +39,7 @@
     "mdast-util-from-markdown": "catalog:",
     "mdast-util-gfm": "catalog:",
     "micromark-extension-gfm": "catalog:",
+    "pdfjs-dist": "catalog:",
     "prismjs": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
