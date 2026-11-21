@@ -164,6 +164,7 @@ describe("skills in the Brain", setUpTime, () => {
       listed: listed.map(({ scope, name }) => [scope, name]),
       whole: read.map(({ name, text }) => text === shipped(name)),
       selected: [
+        await first("Book the trip to the client"),
         await first("Close the month for the accounts"),
         await first("File the expense for the client lunch"),
       ],
@@ -173,7 +174,7 @@ describe("skills in the Brain", setUpTime, () => {
     }).toStrictEqual({
       listed: shippedSkills.map(({ name }) => ["grasp", name]),
       whole: shippedSkills.map(() => true),
-      selected: ["close-the-month", "file-an-expense"],
+      selected: ["book-a-trip", "close-the-month", "file-an-expense"],
       unrelated: [],
     });
   });
@@ -282,6 +283,37 @@ describe("skills in the Brain", setUpTime, () => {
       listed: false,
       selected: false,
       read: "skills.not_found",
+    });
+  });
+
+  it("puts the company's skill of a Grasp skill's name in its place, and selects the company's own beside Grasp's", async () => {
+    const { agent } = await memberAgent();
+    const own = `quotes-${unique().toLowerCase()}`;
+    const adapted = await storeSkill(
+      "company",
+      "book-a-trip",
+      skillText(
+        "book-a-trip",
+        "Books our trips, the way our finance team allows them."
+      )
+    );
+    await storeSkill(
+      "company",
+      own,
+      skillText(own, "Writes a quote for a customer.")
+    );
+    const listed = await skillsFor(env, agent, "teams", holdsNothing);
+
+    expect({
+      trips: listed
+        .filter(({ name }) => name === "book-a-trip")
+        .map(({ scope, version }) => [scope, version]),
+      selected: await selectedFor(agent, "A quote for this customer"),
+      read: await textOf(agent, { scope: "company", name: own, version: 1 }),
+    }).toStrictEqual({
+      trips: [["company", adapted]],
+      selected: [["company", own]],
+      read: skillText(own, "Writes a quote for a customer."),
     });
   });
 
@@ -543,39 +575,6 @@ describe("skills in the Brain", setUpTime, () => {
       notATask: "skills.invalid",
       left: "permission.person_inactive",
       leftReading: "permission.person_inactive",
-    });
-  });
-
-  // Last: the company's skill it stores keeps the Grasp skill's place for
-  // the rest of the file, whose other tests read Grasp's own.
-  it("puts the company's skill of a Grasp skill's name in its place, and selects the company's own beside Grasp's", async () => {
-    const { agent } = await memberAgent();
-    const own = `quotes-${unique().toLowerCase()}`;
-    const adapted = await storeSkill(
-      "company",
-      "close-the-month",
-      skillText(
-        "close-the-month",
-        "Closes our month, the way our accountant reads it."
-      )
-    );
-    await storeSkill(
-      "company",
-      own,
-      skillText(own, "Writes a quote for a customer.")
-    );
-    const listed = await skillsFor(env, agent, "teams", holdsNothing);
-
-    expect({
-      months: listed
-        .filter(({ name }) => name === "close-the-month")
-        .map(({ scope, version }) => [scope, version]),
-      selected: await selectedFor(agent, "A quote for this customer"),
-      read: await textOf(agent, { scope: "company", name: own, version: 1 }),
-    }).toStrictEqual({
-      months: [["company", adapted]],
-      selected: [["company", own]],
-      read: skillText(own, "Writes a quote for a customer."),
     });
   });
 });
