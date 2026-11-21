@@ -654,9 +654,9 @@ const connect: ErasureStep = {
 
 /**
  * Their workspace (GRA-1181): the object that holds their chats, their
- * messages, drafts and attachments, their projects, dashboard and email
- * settings, with what the Brain captured of their chats, any connection
- * granted in them, and the stores their drafts' previews wrote to. It is
+ * messages, drafts and attachments, their projects and email settings,
+ * with what the Brain captured of their chats, any connection granted in
+ * them, and the stores their drafts' previews wrote to. It is
  * theirs alone (`personalWorkspaceId`), and empties itself
  * (`Workspace.erasePerson`); the area is complete once it did, and its
  * chats' audiences are gone.

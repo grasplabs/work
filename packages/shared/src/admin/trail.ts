@@ -8,7 +8,6 @@ import type {
   Contract,
   MemberRole,
   OrgRules,
-  PlatformPart,
   ResearchSource,
 } from "./onboarding-admin.ts";
 
@@ -66,7 +65,6 @@ export type TrailEntry = { at: number } & (
     }
   | { what: "reminded"; count: number }
   | { what: "threshold"; percent: number }
-  | { what: "part"; part: PlatformPart; on: boolean }
   | { what: "company"; field: keyof Company }
   | { what: "contract"; field: keyof Contract }
   | { what: "contact"; role: ContactRole }

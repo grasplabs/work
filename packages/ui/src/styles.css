@@ -46,7 +46,7 @@
  *     workflow, a person, a command), each its own hue, as the chip's icon
  *     and on a tint of itself.
  *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
- *     a dialog; the dashboard's, the brain's and the charts' own colours.
+ *     a dialog; the brain's and the charts' own colours.
  * And three shadows: a block resting on the page, what floats above it,
  * and the highlight's soft light.
  */
@@ -143,10 +143,6 @@
   --syntax-string: oklch(0.5 0.11 155);
   --syntax-constant: oklch(0.53 0.13 55);
   --syntax-function: oklch(0.47 0.12 250);
-  /* Time bars: what is still by hand. */
-  --bar-manual: #e0e7e2;
-  /* The dashboard's return: measured is the agreed green; expected a light tint of it, still to come. */
-  --return-expected: #d1e5d9;
   /*
    * The brain's notes are the one place with colour: one soft hue per
    * group, as a dot per note in its file tree, note pages and the atlas's
@@ -235,8 +231,6 @@
     --syntax-string: oklch(0.8 0.12 155);
     --syntax-constant: oklch(0.82 0.11 70);
     --syntax-function: oklch(0.79 0.1 245);
-    --bar-manual: #24342d;
-    --return-expected: #1f4434;
     --graph-vision: oklch(0.72 0.13 70);
     --graph-teams: oklch(0.68 0.12 150);
     --graph-tools: oklch(0.68 0.12 250);
@@ -350,8 +344,6 @@
   --color-syntax-string: var(--syntax-string);
   --color-syntax-constant: var(--syntax-constant);
   --color-syntax-function: var(--syntax-function);
-  --color-bar-manual: var(--bar-manual);
-  --color-return-expected: var(--return-expected);
   --color-row-group: var(--row-group);
   --color-row-group-foreground: var(--row-group-foreground);
   --color-brain-heat: var(--brain-heat);

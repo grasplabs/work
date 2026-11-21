@@ -24,7 +24,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
-import { ItemMark as DashboardMark } from "../dashboard/dashboard-card.tsx";
 import type { InboxItem, InboxKind } from "./items.ts";
 
 // The marks of the inbox's items, as the prototype draws them
@@ -115,10 +114,20 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   decision: ScaleIcon,
 };
 
-/** What an item is about, as a square: the app's tile, or the icon of its kind (the dashboard's mark). */
+/** The icon of an item's kind, as a square. */
+const KindMark = ({ icon: Icon }: { icon: LucideIcon }) => (
+  <span
+    aria-hidden="true"
+    className="bg-card text-muted-foreground flex size-8 flex-none items-center justify-center rounded-md border"
+  >
+    <Icon className="size-4" />
+  </span>
+);
+
+/** What an item is about, as a square: the app's tile, or the icon of its kind. */
 export const ItemMark = ({ item }: { item: InboxItem }) =>
   item.logo === undefined ? (
-    <DashboardMark icon={kindIcon[item.kind]} />
+    <KindMark icon={kindIcon[item.kind]} />
   ) : (
     <AppLogo name={item.logo.name} size="sm" />
   );

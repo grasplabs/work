@@ -1,8 +1,9 @@
 import type {
   BoardReport,
+  BoardReportApi,
   BoardReportPart,
   SignalCount,
-} from "@grasp-os/shared/dashboard";
+} from "@grasp-os/shared/board-report";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -10,18 +11,22 @@ import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { AppsRpc } from "./apps-rpc.ts";
 import type { OnboardingRpc } from "./onboarding/rpc.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
 import type { SignalsRpc } from "./signals-rpc.ts";
 import type { WorkflowsRpc } from "./workflows/rpc.ts";
 
-// The board's weekly report, read in one call (`dashboard.report()`). It
-// keeps nothing of its own: each part is read through the namespace the
-// person reaches it by anyway, with that namespace's checks, so the report
-// says nothing they couldn't read already, and a part one refuses them is
-// left out rather than failed. The week it is about is core's own count
-// (onboarding/cadence.ts), the same the dashboard's line and bar show.
+// The board's weekly report, read in one call over `/rpc`
+// (`boardReport.read()`). It keeps nothing of its own: each part is read
+// through the namespace the person reaches it by anyway, with that
+// namespace's checks, so the report says nothing they couldn't read
+// already, and a part one refuses them is left out rather than failed.
+// The week it is about is core's own count (onboarding/cadence.ts), the
+// same the inbox's report bar shows.
 
 /** The namespaces the report is read from: the session's own. */
-export interface BoardReportSources {
+interface BoardReportSources {
   onboarding: OnboardingRpc;
   workflows: WorkflowsRpc;
   signals: SignalsRpc;
@@ -101,8 +106,7 @@ const signalCounts = async (
 };
 
 /** The board's weekly report, for `person`, as it stands now. */
-
-export const boardReportOf = async (
+const boardReportOf = async (
   sources: BoardReportSources,
   person: Identity
 ): Promise<BoardReport> => {
@@ -146,3 +150,22 @@ export const boardReportOf = async (
     ...(people === undefined ? {} : { people }),
   };
 };
+
+/** The signed-in person's weekly report. */
+export class BoardReportRpc extends CoreRpcTarget implements BoardReportApi {
+  readonly #check: SessionCheck;
+  readonly #sources: BoardReportSources;
+
+  constructor(check: SessionCheck, sources: BoardReportSources) {
+    super();
+    this.#check = check;
+    this.#sources = sources;
+  }
+
+  async read(): Promise<BoardReport> {
+    return await withPerson(
+      this.#check,
+      async (person) => await boardReportOf(this.#sources, person)
+    );
+  }
+}

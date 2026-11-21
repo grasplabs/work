@@ -23,8 +23,8 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { ErrorText } from "../error-text.tsx";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 

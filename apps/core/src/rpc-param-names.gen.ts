@@ -91,6 +91,9 @@ export const rpcParamNames: ParamNames = {
     "searchArchive": ["filter","before"],
     "verify": ["after"],
   },
+  "BoardReportRpc": {
+    "read": [],
+  },
   "BrainMemoriesRpc": {
     "confirm": ["memory"],
     "contested": ["next"],
@@ -112,7 +115,6 @@ export const rpcParamNames: ParamNames = {
     "closeGap": ["gapId"],
     "forget": ["target"],
     "forgetPreview": ["target"],
-    "goals": [],
     "read": [],
     "redactGapAnswer": ["gapId"],
     "saveTeamGroups": ["groups"],
@@ -235,15 +237,6 @@ export const rpcParamNames: ParamNames = {
     "authenticate": [],
     "ping": [],
     "signInOptions": [],
-  },
-  "DashboardRpc": {
-    "changeWidget": ["id","request","onProgress"],
-    "layout": [],
-    "makeWidget": ["request","onProgress"],
-    "removeWidget": ["id"],
-    "report": [],
-    "saveLayout": ["layout"],
-    "widgets": [],
   },
   "DataPolicyRpc": {
     "classify": ["app","output","generation"],

@@ -13,13 +13,13 @@ import type { PendingRequests } from "../activity/pending.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import type { NotificationsPage } from "./notifications-page.ts";
 
-// What waits on the person, as the dashboard and the inbox read it
-// (`read-dashboard.ts`), apart from how either shows it.
+// What waits on the person, as the inbox reads it (`read-waiting.ts`),
+// apart from how it shows it.
 
 /**
- * What the dashboard read of what waits on the person (core's feed of
- * it, `session.waiting`), each part on its own: one core couldn't read
- * says so in its place.
+ * What the inbox read of what waits on the person (core's feed of it,
+ * `session.waiting`), each part on its own: one core couldn't read says
+ * so in its place.
  */
 export interface Waiting {
   held: Loaded<PendingAction[]>;

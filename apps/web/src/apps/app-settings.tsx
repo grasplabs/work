@@ -38,7 +38,6 @@ import {
 import type { HttpListed, Integration } from "../connections/integrations.ts";
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
@@ -46,6 +45,7 @@ import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";

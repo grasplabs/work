@@ -20,10 +20,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { HeldCard } from "../dashboard/pile-cards.tsx";
-import type { Waiting } from "../dashboard/waiting.ts";
 import { ItemDetail } from "./item-detail.tsx";
 import { inboxItems } from "./items.ts";
+import type { Waiting } from "./waiting.ts";
 
 // A run's held write and its call of unknown outcome in the inbox, as core
 // lists them (GRA-1999): while the run may still read what it read, their
@@ -139,7 +138,7 @@ const opened = async ({
     outcomes: { state: "ready", data: lost },
     notifications: {
       state: "ready",
-      data: { page: { notifications: [], unread: 0, more: false } },
+      data: { page: { notifications: [], unread: 0 } },
     },
     reconnect: { state: "ready", data: [] },
     requests: undefined,
@@ -205,35 +204,6 @@ describe("a run's held or lost write in the inbox", () => {
         says: true,
         actions: { Reject: false },
       },
-    });
-  });
-
-  it("shows a withheld held write on the dashboard's pile with Approve off, said why", async () => {
-    const { text, actions } = await rendered(() => (
-      <HeldCard
-        action={{ ...heldSend, input: "", inputHash: "", withheld: "revoked" }}
-        pile={{
-          answering: () => true,
-          settled: () => {},
-          deciding: false,
-          answered: () => {},
-        }}
-      />
-    ));
-    const approve = [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Approve"
-    );
-    const whyId = approve?.getAttribute("aria-describedby") ?? "";
-    const why = document.querySelector(`[id="${whyId}"]`);
-
-    expect({
-      shows: text.includes("Invoice 42"),
-      actions,
-      why: why?.textContent?.includes("may no longer read what it read"),
-    }).toStrictEqual({
-      shows: false,
-      actions: { Approve: true, Reject: false },
-      why: true,
     });
   });
 

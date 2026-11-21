@@ -267,7 +267,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       .getByRole("link");
     // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
-    await expect(links.filter({ hasText: /^Dashboard/u })).toBeVisible();
+    await expect(links.filter({ hasText: /^Inbox/u })).toBeVisible();
     // The Apps' own entries, which come on their own read, aren't Grasp's
     // sections (app-surfaces.e2e.ts adds some on the shared deployment):
     // every link but theirs, in one read of the page.
@@ -306,7 +306,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     };
   };
   const [chat, ...rest] = everyone;
-  const nav = [chat, "Dashboard", ...rest];
+  const nav = [chat, "Inbox", ...rest];
   const menu = ["Sign out"];
   // Each person's own instruction file is theirs to write, whatever their
   // role: in every person's Settings.

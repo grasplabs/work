@@ -28,7 +28,6 @@ export const familyNamespaces = [
   "connect",
   "connection",
   "contract",
-  "dashboard",
   "data",
   "decision",
   "dependency",

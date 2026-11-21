@@ -346,8 +346,6 @@ export interface OrgState {
   left: string[];
   /** How Stephen is set up at this organization, as changed here; none keeps the organization's own. */
   stephen: StephenSetup | null;
-  /** The parts of the platform as switched here; a part not here is as it starts. */
-  parts: Partial<Record<PlatformPart, boolean>>;
   /** Grasp's own notes on this organization, the newest first. */
   notes: Note[];
   /** What Grasp corrected in the company's own details, the contract and who it deals with. */
@@ -378,19 +376,6 @@ export interface StephenSetup {
   terms: string[];
 }
 
-/** The parts of the platform a company can have: the first six are on when it opens, the last is parked. */
-export const PLATFORM_PARTS = [
-  "chat",
-  "dashboard",
-  "brain",
-  "apps",
-  "workflows",
-  "integrations",
-  "inbox",
-] as const;
-export type PlatformPart = (typeof PLATFORM_PARTS)[number];
-export const PARKED_PARTS: PlatformPart[] = ["inbox"];
-
 /** Where every organization starts with what only Grasp does by hand: nothing yet. */
 /** One of Grasp's own notes on an organization: what was written, and when. */
 export interface Note {
@@ -419,7 +404,6 @@ export const NOTHING_BY_HAND: Omit<
   away: [],
   left: [],
   stephen: null,
-  parts: {},
   notes: [],
   company: {},
   contract: {},

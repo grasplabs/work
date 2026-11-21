@@ -4,11 +4,11 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { Plural, Trans } from "@lingui/react/macro";
 import { FileTextIcon } from "lucide-react";
 
-// The weekly report as one bar across the dashboard, as the prototype's
-// (`components/dashboard/report-bar.tsx`): in how many days the next
-// report is ready, or that the one on the week that closed is, shaded as
-// far as the week has come. Its one button exports the report as it
-// stands today.
+// The weekly report as one bar across the top of the inbox, as the
+// prototype's (`components/dashboard/report-bar.tsx`): the programme's
+// week and stage, in how many days the next report is ready, or that the
+// one on the week that closed is, shaded as far as the week has come. Its
+// one button exports the report as it stands today.
 
 /**
  * The shade's width for each of the week's days passed, 0 to 7: whole
@@ -27,9 +27,12 @@ const shadeWidths = [
 ] as const;
 
 export const ReportBar = ({
+  line,
   next,
   onExport,
 }: {
+  /** The programme's week and stage (`programmeLine`). */
+  line: string;
   next: NextReport;
   onExport: () => void;
 }) => {
@@ -47,17 +50,21 @@ export const ReportBar = ({
         aria-hidden="true"
         className="text-muted-foreground relative size-4 flex-none"
       />
-      <p className="relative min-w-0 flex-1 text-pretty">
-        {inDays === 0 ? (
-          <Trans>Your report on week {week} is ready</Trans>
-        ) : (
-          <Plural
-            one="Your next report is ready tomorrow"
-            other="Your next report is ready in # days"
-            value={inDays}
-          />
-        )}
-      </p>
+      {/* The week and stage beside what the report says, or over it where the bar is narrow. */}
+      <div className="relative flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
+        <span className="text-muted-foreground flex-none">{line}</span>
+        <p className="text-pretty">
+          {inDays === 0 ? (
+            <Trans>Your report on week {week} is ready</Trans>
+          ) : (
+            <Plural
+              one="Your next report is ready tomorrow"
+              other="Your next report is ready in # days"
+              value={inDays}
+            />
+          )}
+        </p>
+      </div>
       <Button
         className="relative flex-none"
         onClick={onExport}
