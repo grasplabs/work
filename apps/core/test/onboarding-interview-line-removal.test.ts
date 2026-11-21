@@ -13,7 +13,7 @@ import type {
 import { speechPath } from "@grasp-os/shared/voice";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { closesOn } from "../src/onboarding/rules.ts";
@@ -24,6 +24,7 @@ import {
   accountOf,
   approve,
   codeOf,
+  holdAlarm,
   noRegionsOwed,
   onLink,
   openedFor,
@@ -256,6 +257,46 @@ const noAlarm = async (): Promise<void> => {
     await state.storage.deleteAlarm();
   });
 };
+
+/** Lifts the hold on the store's alarm (`holdAlarm`): its own runs again. */
+const liftAlarm = async (
+  store: ReturnType<typeof onboardingStore>
+): Promise<void> => {
+  await runInDurableObject(store, (instance) => {
+    vi.spyOn(instance, "alarm").mockRestore();
+  });
+};
+
+/**
+ * Holds the store's alarm (`holdAlarm`) until the test runs it
+ * (`runHeldAlarm`), and lifts the hold when the test ends, passed or not:
+ * the staff list `takenOutFrom` saves sets it half a second on, and on a
+ * slow runner it went off by itself after the plan closed, erased before
+ * the test ran it, and left nothing to set an alarm for.
+ */
+const holdAlarmForTheTest = async (): Promise<void> => {
+  await holdAlarm();
+  onTestFinished(async () => {
+    await liftAlarm(onboardingStore(env));
+  });
+};
+
+/** Runs the store's alarm as its timer would, its hold lifted first. */
+const runHeldAlarm = async (
+  store: ReturnType<typeof onboardingStore>
+): Promise<boolean> => {
+  await liftAlarm(store);
+  return await runDurableObjectAlarm(store);
+};
+
+/** Where `theirs` is left after `taken`, while what was taken out still holds its words. */
+const unerasedOf = (taken: Awaited<ReturnType<typeof takenOutFrom>>) => ({
+  onboarding: ["interviews"],
+  core: [],
+  cached: true,
+  other: true,
+  facts: [{ ...taken.fact, out: true }, taken.other],
+});
 
 /** As the system sets things in the store. */
 const system = { type: "system" } as const;
@@ -685,6 +726,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
   });
 
   it("erases at the close of an onboarding paused across it, by the alarm, and sets no alarm after", async () => {
+    await holdAlarmForTheTest();
     const theirs = markerOf();
     const taken = await takenOutFrom(theirs, { approved: false });
     const store = onboardingStore(env);
@@ -704,12 +746,14 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     // The interviews close while it is paused.
     await store.savePlan(closedLongAgo(), system);
     await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
-    const ran = await runDurableObjectAlarm(store);
+    const before = await leftOf(theirs, taken);
+    const ran = await runHeldAlarm(store);
     const left = await leftOf(theirs, taken);
     const after = await alarmSet();
     await store.setPaused(false, system);
 
-    expect({ ran, ...left, after }).toStrictEqual({
+    expect({ before, ran, ...left, after }).toStrictEqual({
+      before: unerasedOf(taken),
       ran: true,
       onboarding: [],
       core: [],
@@ -721,6 +765,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
   });
 
   it("erases at the close of an onboarding resumed after it, by the alarm", async () => {
+    await holdAlarmForTheTest();
     const theirs = markerOf();
     const taken = await takenOutFrom(theirs, { approved: false });
     const store = onboardingStore(env);
@@ -731,9 +776,11 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
 
     await store.setPaused(false, system);
     await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
-    const ran = await runDurableObjectAlarm(store);
+    const before = await leftOf(theirs, taken);
+    const ran = await runHeldAlarm(store);
 
-    expect({ ran, ...(await leftOf(theirs, taken)) }).toStrictEqual({
+    expect({ before, ran, ...(await leftOf(theirs, taken)) }).toStrictEqual({
+      before: unerasedOf(taken),
       ran: true,
       onboarding: [],
       core: [],
