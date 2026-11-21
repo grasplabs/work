@@ -8,7 +8,7 @@ import type {
   RequestRating,
   RequestToolCall,
 } from "@grasp-os/shared/stephen-requests";
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -22,6 +22,8 @@ import {
   stephenRequestTopics,
   stephenRequests,
   stephenSummaries,
+  teamMembers,
+  teams,
 } from "../db/core/schema.ts";
 import { statementsWithin } from "../db/d1.ts";
 import { readOrganization } from "../organization.ts";
@@ -38,7 +40,7 @@ import type { Sorted } from "./request-sorting.ts";
 // each.
 //
 // - What they asked, or what he answered: never kept. A record holds a
-//   day, a place, the person, labels for what he did (its
+//   day, a place, the person and their team, labels for what he did (its
 //   kind, its outcome, the tools he called and whether each worked, what
 //   was off or missing), a topic's and a question's id from the company's
 //   lists (request-sorting.ts), and a thumb. No words, no values.
@@ -47,10 +49,10 @@ import type { Sorted } from "./request-sorting.ts";
 // - What they asked, read off its question: a question is Grasp's general
 //   wording (request-sorting.ts), and Stephen's week shows it only once
 //   five or more people asked it (stephen-requests.ts).
-// - A record outliving its use, or its person: kept thirteen months, then
-//   swept (`keptDays`); erasing a person
-//   takes theirs (person-erasure.ts), and a question no record points at
-//   any more goes with the sweep.
+// - A record outliving its use, or its person: kept thirteen months, the
+//   history a report over the past year reads (`keptDays`), then swept;
+//   erasing a person takes theirs (person-erasure.ts), and a question no
+//   record points at any more goes with the sweep.
 // - Counting a message twice, so billing it twice: a record is kept by
 //   the platform's id for the message, taken once (`takeRequest`): a
 //   resend finds it taken and writes nothing; a press or a thumb updates
@@ -66,10 +68,10 @@ import type { Sorted } from "./request-sorting.ts";
 //   dropped, never thrown at the conversation.
 
 /**
- * How long a record is kept. What reads records now goes back far less:
- * Stephen's week about eight weeks (its people a week; thirty days for
- * the rest), and billing the current month. Whether to shorten it is the
- * owner's to decide.
+ * How long a record is kept: the past year and the month it is in, and
+ * more. Today Stephen's week reads about eight weeks and billing the
+ * current month, but the history is kept for reporting over the past
+ * year, which is to come back; a record not kept can't be read back.
  */
 const keptDays = 400;
 
@@ -242,6 +244,18 @@ export const outcomeOf = (
   return "done";
 };
 
+/** The team a person is counted in: the first of theirs by name, if any. */
+const teamOf = async (env: Env, userId: string): Promise<string | null> => {
+  const [team] = await drizzle(env.DB)
+    .select({ id: teams.id })
+    .from(teamMembers)
+    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+    .where(eq(teamMembers.userId, userId))
+    .orderBy(asc(teams.name), asc(teams.id))
+    .limit(1);
+  return team?.id ?? null;
+};
+
 /**
  * Takes in the request `messageId` of `userId` in `platform`, once: its
  * id when this took it, null when it was taken before (the platform sent
@@ -259,13 +273,14 @@ export const takeRequest = async (
 ): Promise<string | null> => {
   const id = `${platform}:${messageId}`;
   try {
-    const day = await companyDay(env);
-    // No team: nothing counts requests by team since Workflows › Requests
-    // went, and the column is dropped in a later release.
+    const [day, teamId] = await Promise.all([
+      companyDay(env),
+      teamOf(env, userId),
+    ]);
     const written = await drizzle(env.DB).run(
       sql`INSERT INTO ${stephenRequests}
-        (id, day, place, person_id, kind, outcome, tools, missing)
-        SELECT ${id}, ${day}, ${platform}, ${userId}, 'answered',
+        (id, day, place, person_id, team_id, kind, outcome, tools, missing)
+        SELECT ${id}, ${day}, ${platform}, ${userId}, ${teamId}, 'answered',
           'stopped', '[]', '[]'
         WHERE ${activeMember(userId)}
         ON CONFLICT (id) DO NOTHING`
