@@ -1,6 +1,4 @@
-import drawAWorkflow from "../skills/draw-a-workflow/SKILL.md";
-import runABaseline from "../skills/run-a-baseline/SKILL.md";
-import writeBoardPage from "../skills/write-board-page/SKILL.md";
+import releaseSkills from "#shipped-skills";
 
 /** A skill as a release ships it: its name (its folder's), and its `SKILL.md`. */
 export interface ShippedSkill {
@@ -9,14 +7,11 @@ export interface ShippedSkill {
 }
 
 /**
- * Grasp's own skills this release ships, one `SKILL.md` each in
- * apps/core/skills/<name>/, the name being the folder's and the one its
- * frontmatter gives. Add a skill's folder here. The install puts each into
- * the Brain (brain-skills.ts), and only the ones listed here are selected
- * or read: a skill a release drops stays in the Brain as history.
+ * Grasp's own skills this release ships, by name (src/release-skills.ts,
+ * as `#shipped-skills`; core's tests ship fixtures of their own), which
+ * may be none. The install puts each into the Brain (brain-skills.ts), and
+ * only the ones listed here are listed, selected or read: one a release
+ * drops stays in the Brain as history, which no agent, App or workflow
+ * reaches again, and which no export holds.
  */
-export const shippedSkills: readonly ShippedSkill[] = [
-  { name: "draw-a-workflow", text: drawAWorkflow },
-  { name: "run-a-baseline", text: runABaseline },
-  { name: "write-board-page", text: writeBoardPage },
-];
+export const shippedSkills: readonly ShippedSkill[] = releaseSkills;
