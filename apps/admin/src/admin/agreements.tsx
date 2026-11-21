@@ -1,3 +1,11 @@
+/**
+ * Keeping what was agreed before the first interview, from the organization's
+ * Steps: the agreement on handling data, the company's look at the risks to
+ * its people, and the works council. Saved in the company's Grasp as a
+ * command (commands.tsx); once all three are in, the links that are due go
+ * out. Once the team is told, it stays as it was agreed.
+ */
+
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
@@ -18,13 +26,6 @@ import {
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
 import { Switch } from "@grasp-os/app-kit/components/switch";
-/**
- * Keeping what was agreed before the first interview, from the organization's
- * Steps: the agreement on handling data, the company's look at the risks to
- * its people, and the works council. Saved in the company's Grasp as a
- * command (commands.tsx); once all three are in, the links that are due go
- * out. Once the team is told, it stays as it was agreed.
- */
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { Agreements } from "@grasp-os/shared/onboarding";
 import { PencilIcon } from "lucide-react";

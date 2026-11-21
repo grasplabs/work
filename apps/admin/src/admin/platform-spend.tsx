@@ -1,11 +1,3 @@
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
 /**
  * What Grasp's own AI features cost on its keys, read only: on an
  * organization's AI use, its own this month and last, by feature and by
@@ -14,6 +6,15 @@ import {
  * used, recorded after it, at list prices, in US dollars, read from each
  * core now. Nothing caps these features: this is where staff watch them.
  */
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";

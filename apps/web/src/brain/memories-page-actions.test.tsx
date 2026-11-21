@@ -1,5 +1,6 @@
-import { Toaster } from "@grasp-os/app-kit/components/toast";
 // @vitest-environment happy-dom
+
+import { Toaster } from "@grasp-os/app-kit/components/toast";
 import type {
   BrainContestedPage,
   BrainEntityListed,

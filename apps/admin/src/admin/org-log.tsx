@@ -1,3 +1,19 @@
+/**
+ * The record of one organization, as one list, the newest first, ported
+ * from the prototype (grasplabs/prototype `components/admin/org-log.tsx`):
+ * what happened at the company (the contract and the agreements, the first
+ * conversation, the day the team was told, who talked, what was connected,
+ * who came in, each workflow going live), and what a person at Grasp did by
+ * hand in this admin. It can be narrowed by what an entry is about, who
+ * did it, a team, a day, words in it, or to what went wrong only; a chart
+ * shows how busy each day was once the log is long (`chartFrom`). The entries are the model's (`logItemsOf`,
+ * `logDays`, `logHours`).
+ *
+ * Not here, as the prototype has it: what the prototype's Worker noted with
+ * its time (each link, each interview, each drawing), which core's snapshot
+ * doesn't carry; and exporting what is shown.
+ */
+
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Bar,
@@ -29,21 +45,6 @@ import {
   InputGroupInput,
 } from "@grasp-os/app-kit/components/input-group";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-/**
- * The record of one organization, as one list, the newest first, ported
- * from the prototype (grasplabs/prototype `components/admin/org-log.tsx`):
- * what happened at the company (the contract and the agreements, the first
- * conversation, the day the team was told, who talked, what was connected,
- * who came in, each workflow going live), and what a person at Grasp did by
- * hand in this admin. It can be narrowed by what an entry is about, who
- * did it, a team, a day, words in it, or to what went wrong only; a chart
- * shows how busy each day was once the log is long (`chartFrom`). The entries are the model's (`logItemsOf`,
- * `logDays`, `logHours`).
- *
- * Not here, as the prototype has it: what the prototype's Worker noted with
- * its time (each link, each interview, each drawing), which core's snapshot
- * doesn't carry; and exporting what is shown.
- */
 import {
   LOG_ACTORS,
   LOG_TOPICS,

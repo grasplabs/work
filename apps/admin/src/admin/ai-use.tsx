@@ -1,3 +1,18 @@
+/**
+ * What one company takes in AI, and what that costs Grasp, ported from the
+ * prototype (grasplabs/prototype `components/admin/org-usage.tsx`). At a
+ * glance: this month against what the contract covers, and everything so
+ * far. Then how it went over time, and what each use cost, split by which
+ * model did it, with its tokens and minutes. One month can be looked at
+ * alone. Every figure is the model's (`usageOf`, `usageIn`): what core
+ * counted as it happened, and what the model works out from what happened
+ * before it counted.
+ *
+ * Not here yet, as the prototype has it: the numbers workflow by
+ * workflow, which need the company's live workflows, and core doesn't send
+ * those yet.
+ */
+
 import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   Bar,
@@ -28,20 +43,6 @@ import {
   ToggleGroupItem,
 } from "@grasp-os/app-kit/components/toggle-group";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-/**
- * What one company takes in AI, and what that costs Grasp, ported from the
- * prototype (grasplabs/prototype `components/admin/org-usage.tsx`). At a
- * glance: this month against what the contract covers, and everything so
- * far. Then how it went over time, and what each use cost, split by which
- * model did it, with its tokens and minutes. One month can be looked at
- * alone. Every figure is the model's (`usageOf`, `usageIn`): what core
- * counted as it happened, and what the model works out from what happened
- * before it counted.
- *
- * Not here yet, as the prototype has it: the numbers workflow by
- * workflow, which need the company's live workflows, and core doesn't send
- * those yet.
- */
 import {
   MODEL_NAMES,
   MODELS,

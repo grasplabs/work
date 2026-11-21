@@ -1,3 +1,10 @@
+/**
+ * Steering a client's onboarding from its pages in the admin: each button
+ * gives one command (src/clients/commands.ts), which the company's core
+ * applies once and audits under the staff member's name, then reads the
+ * organization again, so the page shows where it stands either way.
+ */
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,12 +21,6 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
-/**
- * Steering a client's onboarding from its pages in the admin: each button
- * gives one command (src/clients/commands.ts), which the company's core
- * applies once and audits under the staff member's name, then reads the
- * organization again, so the page shows where it stands either way.
- */
 import type { AdminCommand } from "@grasp-os/shared/admin-command";
 import { gateThresholds } from "@grasp-os/shared/onboarding-gate";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";

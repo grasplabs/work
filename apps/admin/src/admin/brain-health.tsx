@@ -1,18 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
 /**
  * How a client's Brain is doing, for Grasp's staff (GRA-1733): its work
  * queue, its store's size against its limit, its erasure ledger and the
@@ -34,6 +19,22 @@ import {
  * What is fine is said in a line or folded: the queue's one kind, upkeep
  * that got through, the erasure counters, and the engine's rebuilds.
  */
+
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/app-kit/components/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import {
   brainSearchWays,
   brainSteps,

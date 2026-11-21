@@ -1,3 +1,21 @@
+/**
+ * An organization's Setup: the company's own Grasp as the admin runs
+ * it, ported from the prototype (grasplabs/prototype
+ * `components/admin/org-setup.tsx`, `platform-parts.tsx` and
+ * `platform-words.ts`). Unlike the other sections it reads the admin's
+ * own records (src/clients/setup.ts): how it stands and what needs a
+ * look, its setting up step by step, what runs in its account, what the
+ * admin's audit log keeps of it, the releases it gets, and how its
+ * people sign in.
+ *
+ * And what someone at Grasp does to it, where it shows
+ * (src/admin/setup-actions.tsx): resume setting it up, pin it, move it to
+ * another channel, change how its people sign in, apply its settings,
+ * rotate its secrets, offboard it. Its account now (reach, drift, shared
+ * secrets) is read live once the section shows, and said only when
+ * something is off.
+ */
+
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Button } from "@grasp-os/app-kit/components/button";
 import { CardContent } from "@grasp-os/app-kit/components/card";
@@ -21,23 +39,6 @@ import {
   TabsTrigger,
 } from "@grasp-os/app-kit/components/tabs";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-/**
- * An organization's Setup: the company's own Grasp as the admin runs
- * it, ported from the prototype (grasplabs/prototype
- * `components/admin/org-setup.tsx`, `platform-parts.tsx` and
- * `platform-words.ts`). Unlike the other sections it reads the admin's
- * own records (src/clients/setup.ts): how it stands and what needs a
- * look, its setting up step by step, what runs in its account, what the
- * admin's audit log keeps of it, the releases it gets, and how its
- * people sign in.
- *
- * And what someone at Grasp does to it, where it shows
- * (src/admin/setup-actions.tsx): resume setting it up, pin it, move it to
- * another channel, change how its people sign in, apply its settings,
- * rotate its secrets, offboard it. Its account now (reach, drift, shared
- * secrets) is read live once the section shows, and said only when
- * something is off.
- */
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { ChevronDownIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";

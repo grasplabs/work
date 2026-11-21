@@ -1,3 +1,11 @@
+/**
+ * The onboarding a new organization starts with, as staff choose it on
+ * the create page: one of the flows staff start from
+ * (@grasp-os/shared/onboarding-flow), all of it unless they choose
+ * another. It is in place before anyone at the company signs in; what
+ * the company goes through after that is changed on its Flow page.
+ */
+
 import {
   Field,
   FieldContent,
@@ -10,13 +18,6 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/app-kit/components/radio-group";
-/**
- * The onboarding a new organization starts with, as staff choose it on
- * the create page: one of the flows staff start from
- * (@grasp-os/shared/onboarding-flow), all of it unless they choose
- * another. It is in place before anyone at the company signs in; what
- * the company goes through after that is changed on its Flow page.
- */
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
 import { useId } from "react";

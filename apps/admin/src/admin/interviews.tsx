@@ -1,3 +1,18 @@
+/**
+ * The interviews of one organization, by team and by name, ported from
+ * the prototype (grasplabs/prototype `components/admin/org-progress.tsx`,
+ * `org-people.tsx` and `org-transcripts.tsx`): two of the Interviews
+ * section's tabs. The teams themselves, and one team whole, are in
+ * teams.tsx; Stephen and Claire's own two tabs are in interviewers.tsx.
+ *
+ * Core sends an interview as numbers only, so what was said is nowhere
+ * here: someone's interview is its minutes and how much they agreed to,
+ * beside their name. Staff act from here as from the company's Grasp
+ * before (commands.tsx): marking the one reminder, asking a team in,
+ * sending a failed mail again and giving someone a new start. The invitation and the list of links to send aren't here: a
+ * link is a credential, which core never sends.
+ */
+
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import {
   InputGroup,
@@ -14,20 +29,6 @@ import {
   TableRow,
 } from "@grasp-os/app-kit/components/table";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-/**
- * The interviews of one organization, by team and by name, ported from
- * the prototype (grasplabs/prototype `components/admin/org-progress.tsx`,
- * `org-people.tsx` and `org-transcripts.tsx`): two of the Interviews
- * section's tabs. The teams themselves, and one team whole, are in
- * teams.tsx; Stephen and Claire's own two tabs are in interviewers.tsx.
- *
- * Core sends an interview as numbers only, so what was said is nowhere
- * here: someone's interview is its minutes and how much they agreed to,
- * beside their name. Staff act from here as from the company's Grasp
- * before (commands.tsx): marking the one reminder, asking a team in,
- * sending a failed mail again and giving someone a new start. The invitation and the list of links to send aren't here: a
- * link is a credential, which core never sends.
- */
 import type { AdminLink } from "@grasp-os/shared/admin-snapshot";
 import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
 import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";

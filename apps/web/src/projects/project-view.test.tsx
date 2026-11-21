@@ -1,5 +1,6 @@
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 // @vitest-environment happy-dom
+
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import type {
   FileItem,
   NewProjectMember,

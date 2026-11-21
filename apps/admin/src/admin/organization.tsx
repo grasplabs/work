@@ -1,3 +1,24 @@
+/**
+ * One organization in the admin, as the prototype lays it out
+ * (grasplabs/prototype `routes/admin/$orgId.tsx` and
+ * `components/admin/org-sidebar.tsx`): a column beside the page with its
+ * name, how much Grasp knows about it, and every section, grouped as the
+ * company itself, its onboarding, how it uses the platform and the record
+ * of it all; a dot marks a section where something waits for Grasp. On a
+ * phone the sections are one choice at the top of the page. Each section
+ * has its title, what it is for, and where its figures come from, and
+ * under that what the section's own route shows.
+ *
+ * A client whose core didn't answer opens the same way, its column and
+ * every section in it: its Setup shows what the admin itself recorded,
+ * and every other section, which needs what its core answers, says why
+ * it isn't read now and where to see to it.
+ *
+ * Not here yet, as the prototype has it: the day stepper at the column's
+ * foot (the admin reads a real company, whose day is core's own), and
+ * the column folded the way the reader last left it.
+ */
+
 import {
   Alert,
   AlertAction,
@@ -34,26 +55,6 @@ import {
 } from "@grasp-os/app-kit/components/select";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-/**
- * One organization in the admin, as the prototype lays it out
- * (grasplabs/prototype `routes/admin/$orgId.tsx` and
- * `components/admin/org-sidebar.tsx`): a column beside the page with its
- * name, how much Grasp knows about it, and every section, grouped as the
- * company itself, its onboarding, how it uses the platform and the record
- * of it all; a dot marks a section where something waits for Grasp. On a
- * phone the sections are one choice at the top of the page. Each section
- * has its title, what it is for, and where its figures come from, and
- * under that what the section's own route shows.
- *
- * A client whose core didn't answer opens the same way, its column and
- * every section in it: its Setup shows what the admin itself recorded,
- * and every other section, which needs what its core answers, says why
- * it isn't read now and where to see to it.
- *
- * Not here yet, as the prototype has it: the day stepper at the column's
- * foot (the admin reads a real company, whose day is core's own), and
- * the column folded the way the reader last left it.
- */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import {

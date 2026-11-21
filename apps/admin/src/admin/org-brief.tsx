@@ -1,5 +1,3 @@
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
-import { CardContent } from "@grasp-os/app-kit/components/card";
 /**
  * What to take into the next conversation with a company, ported from the
  * prototype (grasplabs/prototype `components/admin/org-brief.tsx`): where
@@ -7,6 +5,9 @@ import { CardContent } from "@grasp-os/app-kit/components/card";
  * could do more, from the brief the chat and MCP give (`briefOf`). What
  * to bring up is the list of what needs Grasp, beside it on the overview.
  */
+
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
+import { CardContent } from "@grasp-os/app-kit/components/card";
 import { briefOf } from "@grasp-os/shared/admin/admin-brief";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { Link } from "@tanstack/react-router";

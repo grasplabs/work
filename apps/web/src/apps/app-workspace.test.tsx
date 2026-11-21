@@ -1,7 +1,8 @@
+// @vitest-environment happy-dom
+
 import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { Toaster } from "@grasp-os/app-kit/components/toast";
 import { typeInPrompt } from "@grasp-os/app-kit/testing";
-// @vitest-environment happy-dom
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type {

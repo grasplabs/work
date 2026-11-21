@@ -1,3 +1,11 @@
+/**
+ * Changing how Stephen and Claire are set up for one company, from its
+ * Interviews: the languages they interview in, what they leave alone and
+ * the words they have to know. Saved in the company's Grasp as a command
+ * (commands.tsx), it holds from the next interview turn on; taking it
+ * back leaves what the first conversation suggests.
+ */
+
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
@@ -17,13 +25,6 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/app-kit/components/toggle-group";
-/**
- * Changing how Stephen and Claire are set up for one company, from its
- * Interviews: the languages they interview in, what they leave alone and
- * the words they have to know. Saved in the company's Grasp as a command
- * (commands.tsx), it holds from the next interview turn on; taking it
- * back leaves what the first conversation suggests.
- */
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";

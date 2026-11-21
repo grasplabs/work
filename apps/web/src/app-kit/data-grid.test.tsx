@@ -1,6 +1,7 @@
+// @vitest-environment happy-dom
+
 import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
 import type { DataGridState } from "@grasp-os/app-kit/components/data-grid";
-// @vitest-environment happy-dom
 import {
   paginationOptionsValidator,
   paginationResultValidator,

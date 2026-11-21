@@ -1,5 +1,6 @@
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 // @vitest-environment happy-dom
+
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import type { WaitingFeed } from "@grasp-os/shared/waiting";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";

@@ -1,6 +1,7 @@
+// @vitest-environment happy-dom
+
 import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { typeInPrompt } from "@grasp-os/app-kit/testing";
-// @vitest-environment happy-dom
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";

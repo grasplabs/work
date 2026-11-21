@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import {
   CheckboxField,
   DateField,
@@ -14,7 +16,6 @@ import {
   TextareaField,
   TextField,
 } from "@grasp-os/app-kit/form";
-// @vitest-environment happy-dom
 import { v } from "@grasp-os/runtime/app";
 import type { FilesReference, Id, InferInput } from "@grasp-os/runtime/app";
 import { useForm } from "@grasp-os/runtime/react";

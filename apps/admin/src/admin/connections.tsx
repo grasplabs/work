@@ -1,5 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
 /**
  * What a company connected, and what its workflows and chats still need,
  * as its core's snapshot says it (`integrations`), ported from the
@@ -8,6 +6,9 @@ import { Button } from "@grasp-os/app-kit/components/button";
  * core sends: an app's name as its catalog says it isn't in the snapshot,
  * so a Composio toolkit is named after its slug.
  */
+
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import type {
   AdminAppAsked,
   AdminConnection,

@@ -1,12 +1,3 @@
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
 /**
  * What Grasp keeps of the interviews at one company, ported from the
  * prototype (grasplabs/prototype `components/admin/org-data.tsx`): how much
@@ -19,6 +10,16 @@ import {
  * far that conversation is), and the way to the transcripts (core keeps
  * them back).
  */
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
 import { DELETE_DAYS, peopleOf } from "@grasp-os/shared/admin/onboarding-admin";

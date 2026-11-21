@@ -1,3 +1,13 @@
+/**
+ * The kickoff in an organization's Steps (GRA-1099): bringing in Grasp's
+ * first conversation with the sponsor, pasted or as a file, and the
+ * sponsor's answers to what it left open, as the staff page in the
+ * company's Grasp had it. Each goes to the company's own core
+ * (src/clients/kickoff.ts), which reads the transcript for the ten things
+ * Stephen needs before his first interview. The page shows which of them
+ * it brought, and the questions it left; never what was said.
+ */
+
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Field,
@@ -11,15 +21,6 @@ import {
 } from "@grasp-os/app-kit/components/native-select";
 import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Textarea } from "@grasp-os/app-kit/components/textarea";
-/**
- * The kickoff in an organization's Steps (GRA-1099): bringing in Grasp's
- * first conversation with the sponsor, pasted or as a file, and the
- * sponsor's answers to what it left open, as the staff page in the
- * company's Grasp had it. Each goes to the company's own core
- * (src/clients/kickoff.ts), which reads the transcript for the ten things
- * Stephen needs before his first interview. The page shows which of them
- * it brought, and the questions it left; never what was said.
- */
 import type {
   AdminKickoffField,
   AdminKickoffView,

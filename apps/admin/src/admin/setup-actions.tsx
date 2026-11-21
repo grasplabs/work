@@ -1,3 +1,16 @@
+/**
+ * What someone at Grasp does to a company's own Grasp, in its Setup
+ * (src/admin/setup.tsx), as the admin's own client page did before the
+ * admin took it in: pin it to a release, move it to another channel,
+ * change how its people sign in, apply its settings now, rotate its
+ * secrets. Each is the same server
+ * function, audited as the staff member Access vouches for, and each
+ * reads the Setup again after, whether it worked or not.
+ *
+ * Also what is read live of its account once the Setup shows (reach,
+ * drift, shared secrets), as the admin's grid read it.
+ */
+
 import {
   Alert,
   AlertAction,
@@ -16,18 +29,6 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
-/**
- * What someone at Grasp does to a company's own Grasp, in its Setup
- * (src/admin/setup.tsx), as the admin's own client page did before the
- * admin took it in: pin it to a release, move it to another channel,
- * change how its people sign in, apply its settings now, rotate its
- * secrets. Each is the same server
- * function, audited as the staff member Access vouches for, and each
- * reads the Setup again after, whether it worked or not.
- *
- * Also what is read live of its account once the Setup shows (reach,
- * drift, shared secrets), as the admin's grid read it.
- */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { useRouter } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";

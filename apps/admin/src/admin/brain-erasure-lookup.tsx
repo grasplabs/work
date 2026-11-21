@@ -1,3 +1,13 @@
+/**
+ * Whether a source or a person was erased from a client's Brain, for
+ * Grasp's staff answering the client's own question (GRA-1818): staff
+ * type the source's key or the person's id as the client gave it, and
+ * read yes or no, with when the ledger recorded it. Nothing else: no
+ * list, no search, no content, and "not erased" alike for something that
+ * never existed. Core writes every lookup to the company's audit log, by
+ * the staff member, before it answers; nothing of it is kept here.
+ */
+
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Field,
@@ -9,15 +19,6 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
-/**
- * Whether a source or a person was erased from a client's Brain, for
- * Grasp's staff answering the client's own question (GRA-1818): staff
- * type the source's key or the person's id as the client gave it, and
- * read yes or no, with when the ledger recorded it. Nothing else: no
- * list, no search, no content, and "not erased" alike for something that
- * never existed. Core writes every lookup to the company's audit log, by
- * the staff member, before it answers; nothing of it is kept here.
- */
 import type { BrainErasureLookup } from "@grasp-os/shared/brain-report";
 import { useId, useState } from "react";
 
