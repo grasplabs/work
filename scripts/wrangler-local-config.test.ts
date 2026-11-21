@@ -64,6 +64,19 @@ describe(localConfig, () => {
     expect(Reflect.get(missing, "secrets")).toStrictEqual(connect.secrets);
   });
 
+  it("leaves a key that is a var to the vars, as wrangler refuses one name as both", () => {
+    const local = localConfig(connect, {
+      added,
+      devMain: undefined,
+      devVars: "DURABLE_OBJECT_JURISDICTION=eu\nRUNTIME_PROFILE=workerd\n",
+    });
+    expect(Reflect.get(local, "secrets")).toStrictEqual(connect.secrets);
+    expect(Reflect.get(local, "vars")).toStrictEqual({
+      RUNTIME_PROFILE: "cloudflare",
+      DURABLE_OBJECT_JURISDICTION: "none",
+    });
+  });
+
   it("runs the dev entry instead of the Worker's own when one is named", () => {
     const local = localConfig(connect, {
       added,

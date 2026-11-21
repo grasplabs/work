@@ -16,8 +16,8 @@
  * For the same reason connect saw none of its optional secrets: a key in
  * its `.dev.vars` that the config doesn't require (COMPOSIO_API_KEY, the
  * AI providers' keys) never reached it, so Composio was never offered
- * locally. The local config requires every secret its `.dev.vars` sets.
- * Only the names go into it, never a value.
+ * locally. The local config requires every secret its `.dev.vars` sets
+ * that isn't a var. Only the names go into it, never a value.
  *
  * With `CONNECT_DEV_MAIN` set, the local config's `main` is that file
  * instead of the Worker's own: `vp run dev` (scripts/dev.ts) names
@@ -34,9 +34,14 @@ import { parseEnv } from "node:util";
 
 import { parseJsonc } from "./jsonc.ts";
 
-/** The secrets `config` requires, and every one `devVars` sets. */
+/**
+ * The secrets `config` requires, and every other key `devVars` sets that
+ * isn't one of its `vars`: wrangler loads a var's value from `.dev.vars`
+ * already, and refuses a name that is both a var and a secret.
+ */
 const requiredSecrets = (
   config: object,
+  vars: object,
   devVars: string | undefined
 ): string[] => {
   const secrets: unknown = Reflect.get(config, "secrets");
@@ -47,7 +52,12 @@ const requiredSecrets = (
   const named = Array.isArray(required)
     ? required.filter((name) => typeof name === "string")
     : [];
-  const set = devVars === undefined ? [] : Object.keys(parseEnv(devVars));
+  const set =
+    devVars === undefined
+      ? []
+      : Object.keys(parseEnv(devVars)).filter(
+          (name) => !Object.hasOwn(vars, name)
+        );
   return [...new Set([...named, ...set])];
 };
 
@@ -68,12 +78,13 @@ export const localConfig = (
     devVars: string | undefined;
   }
 ): object => {
-  const vars: unknown = Reflect.get(config, "vars");
+  const own: unknown = Reflect.get(config, "vars");
+  const vars = { ...(typeof own === "object" ? own : {}), ...added };
   return {
     ...config,
     ...(devMain === undefined ? {} : { main: devMain }),
-    vars: { ...(typeof vars === "object" ? vars : {}), ...added },
-    secrets: { required: requiredSecrets(config, devVars) },
+    vars,
+    secrets: { required: requiredSecrets(config, vars, devVars) },
   };
 };
 
