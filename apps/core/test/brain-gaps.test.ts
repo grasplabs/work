@@ -27,6 +27,9 @@ import {
 
 const idp = mockIdp();
 
+/** Longer than core keeps a read notification (30 days). */
+const monthAndADayMs = 31 * 24 * 60 * 60 * 1000;
+
 const roster: RosterInput = {
   teams: [{ id: "finance", name: "Finance", lead: null }],
   people: [{ id: "ann", name: "Ann", team: "finance", title: "Accountant" }],
@@ -598,6 +601,21 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         .filter(({ id }) => ours.has(id))
         .map(({ id, askedAt }) => ({ id, asked: askedAt !== undefined }));
     };
+
+    // The owner read the ask over a month ago, and reads their inbox
+    // again, which drops what they read that long ago: an open question
+    // stays theirs.
+    const { notifications } = await owner.api.notifications.list();
+    await owner.api.notifications.markRead(
+      notifications.map(({ id }) => id),
+      new Date().toISOString()
+    );
+    await env.DB.prepare(
+      "UPDATE notifications SET read_at = read_at - ? WHERE person_id = ?"
+    )
+      .bind(monthAndADayMs, owner.userId)
+      .run();
+    await owner.api.notifications.markRead([], new Date().toISOString());
 
     expect({
       admin: await listedBy(admin),
