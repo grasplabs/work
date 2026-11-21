@@ -15,6 +15,14 @@ import { apiOf, peopleIn, release } from "./people.ts";
 const pageRead = { timeout: 20_000 };
 
 /**
+ * A name that starts `start` and goes on with what its permission's object
+ * is for, if anything: the inbox names a request by what asks for what, on
+ * what, and that object's own description.
+ */
+const startingWith = (start: string): RegExp =>
+  new RegExp(`^${start}(?:\\. |\\?$|$)`, "u");
+
+/**
  * Opens, in the inbox on `page`, the permission request `who` asks (its
  * row among other tests' items), and gives the item.
  */
@@ -23,10 +31,16 @@ const toRequest = async (page: Page, who: string): Promise<Locator> => {
     .getByRole("region", { name: "What waits on you" })
     .getByRole("button", { name: new RegExp(`^${who}`, "u") })
     .click(pageRead);
-  const item = page.getByRole("article", { name: `Grant ${who}?` });
+  const item = page.getByRole("article", {
+    name: startingWith(`Grant ${who}`),
+  });
   await expect(item).toBeVisible();
   return item;
 };
+
+/** The item's Approve: its next step, which its bar holds too. */
+const approveOf = (item: Locator, who: string): Locator =>
+  item.getByRole("button", { name: startingWith(`Approve ${who}`) }).first();
 
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
   pageOf,
@@ -62,9 +76,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   const reading = await toRequest(page, statistics);
   await expect(reading).toContainText("as BOARD_PACK");
   await expect(reading).toContainText("Version to review: None live");
-  await reading
-    .getByRole("button", { name: `Approve ${statistics}`, exact: true })
-    .click();
+  await approveOf(reading, statistics).click();
   await expect(
     page.getByRole("status").filter({
       hasText: `Approved: ${appName}: statistics on Platform statistics.`,
@@ -75,7 +87,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   const brain = `${appName}: brain on Company Brain, read only`;
   const recalling = await toRequest(page, brain);
   await recalling
-    .getByRole("button", { name: `Reject ${brain}`, exact: true })
+    .getByRole("button", { name: startingWith(`Reject ${brain}`) })
     .click();
   await page
     .getByRole("dialog")
@@ -185,10 +197,7 @@ test("an admin approves an App's request only for the version the list shows", a
     await page.goto("/inbox");
     const brain = `${appName}: brain on Company Brain, read only`;
     const card = await toRequest(page, brain);
-    const approve = card.getByRole("button", {
-      name: `Approve ${brain}`,
-      exact: true,
-    });
+    const approve = approveOf(card, brain);
     // Versions as people know them: YY.MM.N, the first this month.
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
 
