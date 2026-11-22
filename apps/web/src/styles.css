@@ -1,4 +1,10 @@
 @import "@grasp-os/app-kit/styles.css";
+/*
+ * Damsko's tokens (packages/ui), for the components that are Damsko's: its
+ * own names (--damsko-*), beside the kit's theme. Its modes and themes
+ * (themes.css) come with the frame.
+ */
+@import "@grasp-os/ui/styles/tokens.css";
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*

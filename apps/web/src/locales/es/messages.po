@@ -4266,6 +4266,7 @@ msgstr "Copenhague"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4289,6 +4290,7 @@ msgstr "Copiado de otro sistema"
 msgid "Copies"
 msgstr "Copias"
 
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4356,6 +4358,10 @@ msgstr "Coste"
 msgctxt "what the Brain remembers about something"
 msgid "Cost"
 msgstr "Coste"
+
+#: src/frame/ui-words.tsx
+msgid "Could not finish"
+msgstr "No se pudo terminar"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
@@ -4899,6 +4905,10 @@ msgstr "Los documentos y las ejecuciones de flujos de trabajo aparecen aquí cua
 msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
 msgstr "Los documentos que esa persona u otras compartieron con un equipo o con la empresa se conservan, y su texto aún puede nombrarla."
 
+#: src/frame/ui-words.tsx
+msgid "Does something that needs your yes"
+msgstr "Hace algo que necesita tu sí"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Hace cosas por las personas aquí"
@@ -4918,6 +4928,7 @@ msgstr "No permitirlo mientras este registro lo enlace"
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/shown-once.tsx
@@ -5651,6 +5662,7 @@ msgid "failed"
 msgstr "fallida"
 
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -9130,6 +9142,10 @@ msgstr "Aún no confirmada por la dirección"
 msgid "Not connected"
 msgstr "No conectada"
 
+#: src/frame/ui-words.tsx
+msgid "Not copied"
+msgstr "No copiado"
+
 #: src/brain/brain.ts
 msgid "Not drawn yet"
 msgstr "Aún sin trazar"
@@ -10499,6 +10515,10 @@ msgstr "Preferencia"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Pulsa una línea para cambiarla, quita lo que esté mal o escribe lo que falte. Elige adónde va cada línea. Lo que dejes es lo que cuenta."
+
+#: src/frame/ui-words.tsx
+msgid "Presses \"{words}\""
+msgstr "Pulsa «{words}»"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -16592,6 +16612,10 @@ msgstr "Flujos de trabajo que inicia la aplicación"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Flujos de trabajo este mes"
+
+#: src/frame/ui-words.tsx
+msgid "Working"
+msgstr "Trabajando"
 
 #: src/chat/thread.tsx
 msgid "Working on it"
