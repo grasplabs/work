@@ -36,6 +36,11 @@ const generated = [
   // The Snowball project's own stemmers, as its release ships them
   // (scripts/brain-snowball.ts).
   "packages/brain-next/src/snowball/**",
+  // What Damsko's token generator writes, which Damsko keeps from its own
+  // formatter too: packages/ui holds them byte for byte (scripts/ui-sync.ts).
+  "packages/ui/src/styles/**",
+  "packages/ui/src/lib/tokens.stylex.ts",
+  "packages/ui/src/lib/tokens.values.ts",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
@@ -439,7 +444,42 @@ export default defineConfig({
         rules: { "unicorn/no-empty-file": "off" },
       },
       {
-        files: ["packages/app-kit/src/components/**"],
+        // Damsko's components know nothing of Grasp: no translations, no
+        // routes, none of the product's types. A product gives them words
+        // through the I18nProvider and content through props.
+        files: ["packages/ui/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                brainStoreImports,
+                {
+                  group: [
+                    "@lingui/**",
+                    "@tanstack/*router*",
+                    "@grasp-os/**",
+                    "**/apps/**",
+                  ],
+                  message:
+                    "packages/ui is Damsko's source, which imports nothing of the product.",
+                },
+              ],
+            },
+          ],
+          // Damsko's docs read two tags of their own from a props type:
+          // `@when` and `@by`.
+          "jsdoc/check-tag-names": ["error", { definedTags: ["when", "by"] }],
+        },
+      },
+      {
+        files: [
+          "packages/app-kit/src/components/**",
+          // Damsko's, installed the same way and held to these settings
+          // in its own repository.
+          "packages/ui/src/components/**",
+          "packages/ui/src/blocks/**",
+        ],
         rules: {
           "shadcn/no-arbitrary-values": "off",
           "shadcn/no-restyle": "off",

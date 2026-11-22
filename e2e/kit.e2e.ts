@@ -27,6 +27,45 @@ test("paints the system's scheme, dark from the start and following a change wit
   await expect.poll(async () => await bodyBackground(page)).not.toBe(light);
 });
 
+// Damsko's components (packages/ui) are StyleX: the build compiles their
+// styles from the package into the page's stylesheet, and their colours are
+// Damsko's tokens, which follow the scheme. Under the page's policy, as
+// every test here.
+test("a Damsko button is drawn by its own styles, in the tokens' colours, light and dark", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/kit");
+  const button = page.getByRole("button", { name: "Save changes" });
+  // The button's fill, and the fill its token gives an element of its own.
+  const fills = async (): Promise<{ button: string; token: string }> =>
+    await button.evaluate((element) => {
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--damsko-primary)";
+      element.after(probe);
+      const read = {
+        button: getComputedStyle(element).backgroundColor,
+        token: getComputedStyle(probe).backgroundColor,
+      };
+      probe.remove();
+      return read;
+    });
+
+  const light = await fills();
+  expect(light.button).not.toBe("rgba(0, 0, 0, 0)");
+  expect(light.button).toBe(light.token);
+
+  // The fill glides to the other scheme's: once it is there, it is the
+  // token's again, and another colour.
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect
+    .poll(async () => {
+      const dark = await fills();
+      return dark.button === dark.token && dark.token !== light.token;
+    })
+    .toBeTruthy();
+});
+
 test("a page sidebar folds from the keyboard and stays folded over a reload", async ({
   page,
 }) => {

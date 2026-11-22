@@ -21,6 +21,8 @@
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
     "check:vite-plus-oxc": "node scripts/check-vite-plus-oxc.ts",
     "check:snowball": "node scripts/brain-snowball.ts --check",
+    "check:ui": "node scripts/ui-sync.ts check",
+    "ui:update": "node scripts/ui-sync.ts update",
     "github:setup": "node scripts/github-setup.ts",
     "check:attribution": "node scripts/check-attribution.ts",
     "check:branch": "node scripts/check-branch-name.ts",

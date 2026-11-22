@@ -18,6 +18,7 @@
     "@grasp-os/app-kit": "workspace:*",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
+    "@grasp-os/ui": "workspace:*",
     "@lingui/core": "catalog:",
     "@lingui/react": "catalog:",
     "@pierre/diffs": "catalog:",
@@ -40,6 +41,7 @@
     "@lingui/vite-plugin": "catalog:",
     "@messageformat/parser": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
+    "@stylexjs/unplugin": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/router-plugin": "catalog:",
     "@types/react": "catalog:",
@@ -47,6 +49,7 @@
     "@vitejs/plugin-react": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
     "happy-dom": "catalog:",
+    "lightningcss": "catalog:",
     "tailwindcss": "catalog:",
     "vite-plus": "catalog:"
   }
