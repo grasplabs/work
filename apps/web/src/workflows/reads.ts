@@ -1,3 +1,4 @@
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
@@ -52,6 +53,32 @@ export const listWorkflows = async (
  * directory is an admin's alone); and each workflow by the name people see
  * (`workflowLabel`). Either read refused or slow leaves its names out.
  */
+/**
+ * Each workflow's title, by its ID, where the reader may read it
+ * (`workflows.overview`). Anything else core names by its name, its slug,
+ * for want of the title (core need 76).
+ */
+export const readWorkflowTitles = async (
+  session: Session
+): Promise<ReadonlyMap<string, string>> => {
+  const listed = await listWorkflows(session);
+  return new Map(
+    listed.map((workflow) => [workflow.workflowId, workflowLabel(workflow)])
+  );
+};
+
+/** `decision`, its workflow by the title the reader may read in `titles`. */
+export const titledDecision = (
+  decision: DecisionView,
+  titles: ReadonlyMap<string, string>
+): DecisionView => {
+  const { workflowResource } = decision;
+  const title = titles.get(workflowResource.id);
+  return title === undefined
+    ? decision
+    : { ...decision, workflowResource: { ...workflowResource, name: title } };
+};
+
 export const readWorkflowNames = async (
   session: Session
 ): Promise<{

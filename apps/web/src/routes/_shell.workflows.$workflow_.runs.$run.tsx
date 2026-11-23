@@ -8,7 +8,7 @@ import { LoadingBar } from "../frame/page-skeletons-b.tsx";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { readWorkflowNames } from "../workflows/reads.ts";
+import { readWorkflowNames, titledDecision } from "../workflows/reads.ts";
 import { RunPage } from "../workflows/run-page.tsx";
 
 // One run of an independent workflow, on its own page (workflows/run-page.tsx):
@@ -79,14 +79,17 @@ export const Route = createFileRoute("/_shell/workflows/$workflow_/runs/$run")({
       // The answer it waits for, where the reader may give it.
       loadFromCore(core, async (session) => await session.decisions.waiting()),
     ]);
+    const asked =
+      waiting.state === "ready"
+        ? waiting.data.find((decision) => decision.run === run)
+        : undefined;
+    const titles: ReadonlyMap<string, string> =
+      names.state === "ready" ? names.data.workflows : new Map();
     return {
       workflow: resource,
       run: read,
       names,
-      decision:
-        waiting.state === "ready"
-          ? waiting.data.find((decision) => decision.run === run)
-          : undefined,
+      decision: asked === undefined ? undefined : titledDecision(asked, titles),
     };
   },
   component: WorkflowRun,
