@@ -40,18 +40,24 @@
  * isn't drawn with (Lucide redrew it), and one whose move makes the whole
  * icon larger and smaller, which is no move.
  *
- * no-inline-styles: shadcn's rule of that name, except for the `style` of
- * a component imported from `@grasp-os/ui` (Damsko). That prop takes StyleX
- * styles of layout properties alone (Damsko's `LayoutStyle`), the way a
- * page places a Damsko component, and the type checker holds it there: a
- * plain object, or a colour, is a type error. shadcn's rule can't read a
- * StyleX style, so it refused every one. Everything else is its verdict.
+ * no-inline-styles: shadcn's rule of that name, except for a component's
+ * `style` given StyleX styles alone, the way a page places a Damsko
+ * component and a component of its own passes that placement on
+ * (Damsko's `LayoutStyle`, StyleX styles of layout properties). The linter
+ * reads no types, so what counts is what the file shows can be nothing
+ * else (layout-style.ts): a member of a `stylex.create` of the file, or a
+ * parameter declared `LayoutStyle`, and arrays and conditions of them.
+ * An object literal never is, nor anything on an element of the page
+ * (`div`, which takes `stylex.props`) or on a kit component (whose
+ * `style` is an inline style). Everything else is shadcn's verdict.
  */
 import path from "node:path";
 
 import shadcnLint from "@shadcn/lint";
 
 import { drawIcon, iconMovesAt } from "./icon-moves.ts";
+import { isPlacement } from "./layout-style.ts";
+import type { StyleContext } from "./layout-style.ts";
 import { findScrollbar } from "./no-scrollbars.ts";
 import { findOldProductName } from "./old-product-name.ts";
 import { durationMs, findSlowClass, LIMIT_MS } from "./slow-motion.ts";
@@ -752,8 +758,10 @@ const iconHasMove = {
   },
 };
 
-/** Where Damsko's components are imported from (packages/ui). */
+/** Where Damsko is imported from (packages/ui), and the kit. */
 const damskoImport = "@grasp-os/ui/";
+const kitImport = "@grasp-os/app-kit/";
+const stylexImport = "@stylexjs/stylex";
 
 const shadcnInlineStyles = shadcnLint.rules["no-inline-styles"];
 
@@ -767,38 +775,85 @@ const rootName = (name: Node | string | undefined): unknown => {
     : nameOf(name);
 };
 
+/** Whether a JSX element is a component, not an element of the page (`div`). */
+const isComponent = (name: Node | string | undefined): boolean => {
+  if (typeof name !== "object") {
+    return false;
+  }
+  if (name.type === "JSXMemberExpression") {
+    return true;
+  }
+  const first = rootName(name);
+  return typeof first === "string" && /^[A-Z]/u.test(first);
+};
+
 const noInlineStyles = {
-  meta: shadcnInlineStyles.meta,
-  create: (context: unknown) => {
+  meta: {
+    ...shadcnInlineStyles.meta,
+    messages: {
+      ...shadcnInlineStyles.meta.messages,
+      stylexStyle:
+        "StyleX styles reach an element through {...stylex.props(…)}, and a component only through a style prop it types as Damsko's LayoutStyle: not this one, whose style is an inline style.",
+    },
+  },
+  create: (context: StyleContext & Context) => {
     const shadcn = shadcnInlineStyles.create(context);
     // Without its JSX visitors, shadcn's rule refused its options and
     // reports that itself.
     if (!("JSXAttribute" in shadcn)) {
       return shadcn;
     }
-    const damsko = new Set<unknown>();
+    const imported = {
+      stylex: new Set<string>(),
+      create: new Set<string>(),
+      layoutStyle: new Set<string>(),
+    };
+    /** The kit's components, whose `style` is an inline style. */
+    const kit = new Set<unknown>();
     return {
       ...shadcn,
       ImportDeclaration: (node: Node): void => {
         const source = node.source?.value;
-        if (
-          typeof source !== "string" ||
-          !source.startsWith(damskoImport) ||
-          node.importKind === "type"
-        ) {
+        if (typeof source !== "string") {
           return;
         }
         for (const specifier of node.specifiers ?? []) {
-          if (specifier.importKind !== "type") {
-            damsko.add(nameOf(specifier.local));
+          const local = nameOf(specifier.local);
+          const name = nameOf(specifier.imported);
+          if (typeof local !== "string") {
+            continue;
+          }
+          if (source.startsWith(kitImport)) {
+            kit.add(local);
+          } else if (source === stylexImport) {
+            if (specifier.type === "ImportSpecifier") {
+              if (name === "create") {
+                imported.create.add(local);
+              }
+            } else {
+              imported.stylex.add(local);
+            }
+          } else if (
+            source.startsWith(damskoImport) &&
+            specifier.type === "ImportSpecifier" &&
+            name === "LayoutStyle"
+          ) {
+            imported.layoutStyle.add(local);
           }
         }
       },
       JSXAttribute: (node: Node): void => {
+        const element = node.parent?.name;
+        const { value } = node;
         if (
           rootName(node.name) === "style" &&
-          damsko.has(rootName(node.parent?.name))
+          isNode(value) &&
+          value.type === "JSXExpressionContainer" &&
+          isPlacement(value.expression, context, imported)
         ) {
+          if (!isComponent(element) || kit.has(rootName(element))) {
+            context.report({ node, messageId: "stylexStyle" });
+          }
           return;
         }
         shadcn.JSXAttribute(node);

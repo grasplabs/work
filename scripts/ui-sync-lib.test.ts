@@ -4,26 +4,69 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished } from "vite-plus/test";
 
 import {
   carry,
   differences,
   expectedOf,
+  fetchDamsko,
+  localChangesSchema,
   overdue,
   parseRegistry,
   proposal,
+  readWithin,
+  treeOf,
+  updateTree,
+  within,
+  removeWithin,
+  writeWithin,
 } from "./ui-sync-lib.ts";
-import type { LocalChange } from "./ui-sync-lib.ts";
+import type { DamskoAt, LocalChange } from "./ui-sync-lib.ts";
+
+/** A folder of the running test's own, removed after it. */
+const scratchFolder = (): string => {
+  const created = mkdtempSync(nodePath.join(tmpdir(), "ui-sync-test-"));
+  onTestFinished(() => {
+    rmSync(created, { recursive: true, force: true });
+  });
+  return created;
+};
+
+/** Writes each file under `root`, with its folders. */
+const plant = (root: string, files: Record<string, string>): void => {
+  for (const [file, content] of Object.entries(files)) {
+    mkdirSync(nodePath.dirname(nodePath.join(root, file)), { recursive: true });
+    writeFileSync(nodePath.join(root, file), content);
+  }
+};
+
+/** Every file under `root`, with its content: what a test compares before and after. */
+const snapshot = (root: string): Record<string, string> => {
+  const files: Record<string, string> = {};
+  const entries = readdirSync(root, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      const file = nodePath.join(entry.parentPath, entry.name);
+      files[nodePath.relative(root, file).split(nodePath.sep).join("/")] =
+        readFileSync(file, "utf-8");
+    }
+  }
+  return files;
+};
 
 const registry = parseRegistry(
   JSON.stringify({
@@ -96,6 +139,7 @@ const installed = (
   read: (path: string) =>
     Object.hasOwn(files, path) ? bytes(files[path] ?? "") : undefined,
   sources: Object.keys(files),
+  links: [],
   dependencies,
 });
 
@@ -224,7 +268,7 @@ describe("a change made here on purpose", () => {
     ]);
   });
 
-  it("fails once the listed file is Damsko's again, or gone", () => {
+  it("fails once the listed file is Damsko's again, and for a file that never was", () => {
     expect(
       differences(expected, damsko, installed(inStep), [
         listed("src/components/button.tsx"),
@@ -232,8 +276,31 @@ describe("a change made here on purpose", () => {
       ])
     ).toStrictEqual([
       "local-changes.json lists src/components/button.tsx, which no longer differs from Damsko's: remove the entry",
-      "local-changes.json lists src/lib/extra.ts, which no longer differs from Damsko's: remove the entry",
+      "local-changes.json lists src/lib/extra.ts, which neither Damsko's items nor packages/ui has: remove the entry",
     ]);
+  });
+
+  it("fails for an entry dated after today, which would put off its warning", () => {
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({ ...inStep, "src/components/button.tsx": "edited" }),
+        [listed("src/components/button.tsx", "2026-11-24")],
+        new Date("2026-11-23T23:00:00Z")
+      )
+    ).toStrictEqual([
+      "local-changes.json dates src/components/button.tsx 2026-11-24, after today: give the day it was listed",
+    ]);
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({ ...inStep, "src/components/button.tsx": "edited" }),
+        [listed("src/components/button.tsx", "2026-11-23")],
+        new Date("2026-11-23T23:00:00Z")
+      )
+    ).toStrictEqual([]);
   });
 
   it("is named after two weeks, and never fails for it", () => {
@@ -382,4 +449,527 @@ describe("the listed changes proposed to Damsko", () => {
       rmSync(folder, { recursive: true, force: true });
     }
   });
+});
+
+/** Paths that name somewhere else than they seem to, each a way out. */
+const escapes = [
+  "src/../../../outside.txt",
+  "src/components/../../../outside.txt",
+  "../outside.txt",
+  "/etc/passwd",
+  "~/outside.txt",
+  "src/~/outside.txt",
+  "src/%2e%2e/%2e%2e/outside.txt",
+  "src/..%2foutside.txt",
+  "src\\..\\..\\outside.txt",
+  "src/./components/button.tsx",
+  "src//components/button.tsx",
+  "src/components/",
+  "",
+];
+
+/** Why local-changes.json refuses an entry for `path`, if it does. */
+const refusal = (path: string) =>
+  localChangesSchema.safeParse([
+    { path, reason: "A reason.", since: "2026-11-20" },
+  ]).error?.issues[0]?.message;
+
+describe("a path from any input", () => {
+  it("is let through when plain, and resolved inside its root", () => {
+    const root = scratchFolder();
+    expect(within(root, "src/components/button.tsx")).toBe(
+      nodePath.join(realpathSync(root), "src", "components", "button.tsx")
+    );
+  });
+
+  it.each(escapes)("refuses %j", (path) => {
+    expect(() => within(scratchFolder(), path)).toThrow(/not a plain path/u);
+  });
+
+  it("refuses a path through a symbolic link, to a folder or to a file", () => {
+    const root = scratchFolder();
+    const outside = scratchFolder();
+    plant(outside, { "secret.txt": "secret" });
+    mkdirSync(nodePath.join(root, "src"));
+    symlinkSync(outside, nodePath.join(root, "src", "components"));
+    symlinkSync(
+      nodePath.join(outside, "secret.txt"),
+      nodePath.join(root, "src", "button.tsx")
+    );
+    expect(() => readWithin(root, "src/components/secret.txt")).toThrow(
+      /symbolic link/u
+    );
+    expect(() => readWithin(root, "src/button.tsx")).toThrow(/symbolic link/u);
+    expect(() => {
+      removeWithin(root, "src/components/secret.txt");
+    }).toThrow(/symbolic link/u);
+    expect(() => {
+      writeWithin(root, "src/button.tsx", bytes("over"));
+    }).toThrow(/symbolic link/u);
+    expect(readFileSync(nodePath.join(outside, "secret.txt"), "utf-8")).toBe(
+      "secret"
+    );
+  });
+
+  it.each(escapes)("is refused in local-changes.json: %j", (path) => {
+    expect(
+      localChangesSchema.safeParse([
+        { path, reason: "A reason.", since: "2026-11-20" },
+      ]).success
+    ).toBeFalsy();
+  });
+
+  it("is refused in local-changes.json outside src/, and for a font, with why", () => {
+    expect(refusal("package.json")).toMatch(/under packages\/ui\/src\//u);
+    expect(refusal("src/styles/fonts/geist-latin.woff2")).toMatch(
+      /can't be a font file.*SHA256SUMS.*change them in Damsko/u
+    );
+    expect(refusal("src/styles/fonts/fonts.css")).toMatch(
+      /can't be a font file/u
+    );
+    expect(refusal("src/components/button.tsx")).toBeUndefined();
+  });
+
+  it.each([
+    "~/../outside.txt",
+    "~/src/../../outside.txt",
+    "~/../../etc/passwd",
+    "/etc/passwd",
+    "~/~/outside.txt",
+    "~/src/%2e%2e/outside.txt",
+    "~/package.json",
+  ])("is refused as a registry's target: %j", (target) => {
+    expect(() =>
+      expectedOf(
+        parseRegistry(
+          JSON.stringify({
+            items: [{ name: "evil", files: [{ path: "src/evil.ts", target }] }],
+          })
+        ),
+        ["evil"]
+      )
+    ).toThrow(/not a plain path under ~\/src\//u);
+  });
+
+  it("is refused as a registry's own path", () => {
+    expect(() =>
+      expectedOf(
+        parseRegistry(
+          JSON.stringify({
+            items: [
+              {
+                name: "evil",
+                files: [{ path: "../../etc/passwd", target: "~/src/evil.ts" }],
+              },
+            ],
+          })
+        ),
+        ["evil"]
+      )
+    ).toThrow(/not a plain path in Damsko/u);
+  });
+
+  it.each(escapes.filter(Boolean))(
+    "is refused as a file of the patch, and nothing outside is written or removed: %j",
+    (path) => {
+      const root = scratchFolder();
+      const pinned = nodePath.join(root, "a", "b", "damsko");
+      checkout(pinned);
+      plant(root, { "outside.txt": "kept" });
+      expect(() => proposal(pinned, new Map([[path, bytes("over")]]))).toThrow(
+        /not a plain path/u
+      );
+      expect(() => proposal(pinned, new Map([[path, undefined]]))).toThrow(
+        /not a plain path/u
+      );
+      expect(readFileSync(nodePath.join(root, "outside.txt"), "utf-8")).toBe(
+        "kept"
+      );
+    }
+  );
+});
+
+describe("a symbolic link under src/", () => {
+  it("fails the check, listed or not, and is never followed", () => {
+    const ui = scratchFolder();
+    const outside = scratchFolder();
+    plant(outside, { "button.tsx": "src/components/button.tsx" });
+    plant(ui, {
+      "src/lib/utils.ts": "src/lib/utils.ts",
+      "src/components/spinner.tsx": "src/components/spinner.tsx",
+    });
+    symlinkSync(
+      nodePath.join(outside, "button.tsx"),
+      nodePath.join(ui, "src", "components", "button.tsx")
+    );
+    const tree = treeOf(ui);
+    expect(tree.links).toStrictEqual(["src/components/button.tsx"]);
+    const found = (local: LocalChange[]) =>
+      differences(
+        expectedOf(registry, ["button"]),
+        damsko,
+        { ...tree, dependencies: named },
+        local
+      );
+    const line =
+      "src/components/button.tsx is a symbolic link: packages/ui holds Damsko's files themselves, so a link is never followed and can't be listed";
+    expect(found([])).toStrictEqual([line]);
+    expect(found([listed("src/components/button.tsx")])).toStrictEqual([line]);
+  });
+
+  it("fails the check as a linked folder, without reading through it", () => {
+    const ui = scratchFolder();
+    const outside = scratchFolder();
+    plant(outside, {
+      "button.tsx": "src/components/button.tsx",
+      "spinner.tsx": "src/components/spinner.tsx",
+    });
+    plant(ui, { "src/lib/utils.ts": "src/lib/utils.ts" });
+    symlinkSync(outside, nodePath.join(ui, "src", "components"));
+    expect(
+      differences(expectedOf(registry, ["button"]), damsko, {
+        ...treeOf(ui),
+        dependencies: named,
+      })
+    ).toStrictEqual([
+      "src/components is a symbolic link: packages/ui holds Damsko's files themselves, so a link is never followed and can't be listed",
+    ]);
+  });
+});
+
+/** A Damsko of its own: main with two commits, an unmerged branch, a release tag off main. */
+const damskoRemote = () => {
+  const remote = scratchFolder();
+  git(remote, "init", "--quiet", "--initial-branch=main");
+  const commit = (message: string) => {
+    writeFileSync(nodePath.join(remote, "registry.json"), message);
+    git(remote, "add", "--all");
+    git(remote, "commit", "--quiet", "--message", message);
+    return git(remote, "rev-parse", "HEAD").trim();
+  };
+  const first = commit("first");
+  const merged = commit("merged");
+  git(remote, "switch", "--quiet", "--create", "pull-request");
+  const unmerged = commit("unmerged");
+  git(remote, "switch", "--quiet", "--create", "release", first);
+  const released = commit("released");
+  git(remote, "tag", "--annotate", "--message", "v0.2.0", "v0.2.0");
+  git(remote, "switch", "--quiet", "--create", "other", first);
+  const experiment = commit("experiment");
+  git(remote, "tag", "experiment");
+  // As GitHub serves a pull request's head: a ref that is no branch.
+  git(remote, "update-ref", "refs/pull/1/head", unmerged);
+  git(remote, "switch", "--quiet", "main");
+  git(remote, "branch", "--quiet", "--delete", "--force", "pull-request");
+  return { remote, first, merged, unmerged, released, experiment };
+};
+
+describe("the pin fetched", () => {
+  const fetched = (remote: string, ref: string) => {
+    const into = nodePath.join(scratchFolder(), "damsko");
+    const commit = fetchDamsko(remote, ref, into);
+    return {
+      commit,
+      registry: readFileSync(nodePath.join(into, "registry.json"), "utf-8"),
+    };
+  };
+
+  it("is a commit on Damsko's main, its head or before", () => {
+    const { remote, first, merged } = damskoRemote();
+    expect(fetched(remote, merged)).toStrictEqual({
+      commit: merged,
+      registry: "merged",
+    });
+    expect(fetched(remote, first)).toStrictEqual({
+      commit: first,
+      registry: "first",
+    });
+  });
+
+  it("is a release tag's commit, by the tag or its commit", () => {
+    const { remote, released } = damskoRemote();
+    expect(fetched(remote, "v0.2.0")).toStrictEqual({
+      commit: released,
+      registry: "released",
+    });
+    expect(fetched(remote, released)).toStrictEqual({
+      commit: released,
+      registry: "released",
+    });
+  });
+
+  it("refuses a commit neither merged nor released, and fetches none of its files", () => {
+    const { remote, unmerged, experiment } = damskoRemote();
+    for (const commit of [unmerged, experiment]) {
+      const into = nodePath.join(scratchFolder(), "damsko");
+      expect(() => fetchDamsko(remote, commit, into)).toThrow(
+        `${commit} is neither on Damsko's main nor a release tag of it`
+      );
+      expect(existsSync(nodePath.join(into, "registry.json"))).toBeFalsy();
+    }
+  });
+
+  it("refuses a tag that is no release, a short commit, a branch and a missing tag", () => {
+    const { remote, merged } = damskoRemote();
+    for (const ref of [
+      "experiment",
+      merged.slice(0, 12),
+      "main",
+      "--upload-pack=touch",
+    ]) {
+      expect(() =>
+        fetchDamsko(remote, ref, nodePath.join(scratchFolder(), "damsko"))
+      ).toThrow(/neither a commit of Damsko in full .* nor a release tag/u);
+    }
+    expect(() =>
+      fetchDamsko(remote, "v9.9.9", nodePath.join(scratchFolder(), "damsko"))
+    ).toThrow("Damsko has no tag v9.9.9.");
+  });
+});
+
+/** An install that writes Damsko's files at the new pin into the stage, as the CLI does. */
+const installs =
+  (now: DamskoAt) =>
+  async (stage: string): Promise<void> => {
+    for (const [path, source] of now.expected.files) {
+      writeWithin(stage, path, readWithin(now.root, source));
+    }
+    await Promise.resolve();
+  };
+
+describe("the update", () => {
+  /** Damsko at a pin, from its files: one item, `kit`, with what it holds. */
+  const damskoWith = (files: Record<string, string>): DamskoAt => {
+    const root = scratchFolder();
+    plant(root, files);
+    return {
+      root,
+      expected: expectedOf(
+        parseRegistry(
+          JSON.stringify({
+            items: [
+              {
+                name: "kit",
+                dependencies: ["@stylexjs/stylex"],
+                files: Object.keys(files).map((path) => ({
+                  path,
+                  target: `~/${path}`,
+                })),
+              },
+            ],
+          })
+        ),
+        ["kit"]
+      ),
+    };
+  };
+
+  /** packages/ui at the old pin, with a listed edit and a listed file in a folder of its own. */
+  const setUp = () => {
+    const ui = scratchFolder();
+    const old = {
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    };
+    plant(ui, {
+      ...old,
+      "src/components/button.tsx": "one\nTWO\nthree\nfour\nfive\n",
+      "src/features/save-bar/placement.ts": "added here\n",
+      "damsko.json": '{ "commit": "old" }\n',
+      "local-changes.json": "[]\n",
+    });
+    const local = [
+      listed("src/components/button.tsx"),
+      listed("src/features/save-bar/placement.ts"),
+    ];
+    return { ui, old: damskoWith(old), local };
+  };
+
+  it("installs the new pin, carries each listed change over, a file in a new folder too, and writes the pin", async () => {
+    const { ui, old, local } = setUp();
+    const now = damskoWith({
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nFIVE\n",
+      "src/lib/utils.ts": "utils, newer\n",
+      "src/lib/new.ts": "new in Damsko\n",
+    });
+    const updated = await updateTree({
+      ui,
+      install: installs(now),
+      was: old,
+      now,
+      local,
+      pin: '{ "commit": "new" }\n',
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+    });
+    expect(updated).toStrictEqual({ conflicts: [], dropped: [] });
+    expect(snapshot(ui)).toStrictEqual({
+      "damsko.json": '{ "commit": "new" }\n',
+      "local-changes.json": `${JSON.stringify(local, null, 2)}\n`,
+      "src/components/button.tsx": "one\nTWO\nthree\nfour\nFIVE\n",
+      "src/features/save-bar/placement.ts": "added here\n",
+      "src/lib/new.ts": "new in Damsko\n",
+      "src/lib/utils.ts": "utils, newer\n",
+    });
+    expect(readdirSync(ui).toSorted()).toStrictEqual([
+      "damsko.json",
+      "local-changes.json",
+      "src",
+    ]);
+  });
+
+  it("drops an entry once Damsko's file is the same", async () => {
+    const { ui, old, local } = setUp();
+    const now = damskoWith({
+      "src/components/button.tsx": "one\nTWO\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    });
+    const updated = await updateTree({
+      ui,
+      install: installs(now),
+      was: old,
+      now,
+      local,
+      pin: '{ "commit": "new" }\n',
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+    });
+    expect(updated.dropped).toStrictEqual(["src/components/button.tsx"]);
+    expect(
+      JSON.parse(readFileSync(nodePath.join(ui, "local-changes.json"), "utf-8"))
+    ).toStrictEqual([local[1]]);
+  });
+
+  it("leaves a conflict with git's markers, the entry kept, and says so", async () => {
+    const { ui, old, local } = setUp();
+    const now = damskoWith({
+      "src/components/button.tsx": "one\nTwo\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    });
+    const updated = await updateTree({
+      ui,
+      install: installs(now),
+      was: old,
+      now,
+      local,
+      pin: '{ "commit": "new" }\n',
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+    });
+    expect(updated.conflicts).toStrictEqual(["src/components/button.tsx"]);
+    const button = readFileSync(
+      nodePath.join(ui, "src/components/button.tsx"),
+      "utf-8"
+    );
+    expect(button).toContain("<<<<<<< here\nTWO\n");
+    expect(button).toContain(">>>>>>> Damsko\n");
+    expect(
+      readFileSync(
+        nodePath.join(ui, "src/features/save-bar/placement.ts"),
+        "utf-8"
+      )
+    ).toBe("added here\n");
+  });
+
+  it("leaves packages/ui exactly as it was when the install fails mid-way", async () => {
+    const { ui, old, local } = setUp();
+    const before = snapshot(ui);
+    const now = damskoWith({ "src/components/button.tsx": "new\n" });
+    await expect(
+      updateTree({
+        ui,
+        install: async (stage) => {
+          await installs(now)(stage);
+          throw new Error("shadcn add exited 1.");
+        },
+        was: old,
+        now,
+        local,
+        pin: '{ "commit": "new" }\n',
+        dependencies: { "@stylexjs/stylex": "catalog:" },
+      })
+    ).rejects.toThrow("shadcn add exited 1.");
+    expect(snapshot(ui)).toStrictEqual(before);
+    expect(readdirSync(ui).toSorted()).toStrictEqual([
+      "damsko.json",
+      "local-changes.json",
+      "src",
+    ]);
+  });
+
+  const noDependencies: Record<string, string> = {};
+  const newPin = {
+    "src/components/button.tsx": "one\ntwo\nthree\nfour\nFIVE\n",
+    "src/lib/utils.ts": "utils\n",
+  };
+
+  it.each([
+    {
+      name: "a file the CLI left out",
+      install: async (stage: string) => {
+        writeWithin(stage, "src/components/button.tsx", bytes("button\n"));
+        await Promise.resolve();
+      },
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+      error: /packages\/ui is left as it was:\nsrc\/lib\/utils.ts is missing/u,
+    },
+    {
+      name: "a file the CLI wrote other than Damsko's",
+      install: async (stage: string) => {
+        writeWithin(stage, "src/lib/utils.ts", bytes("rewritten\n"));
+        await Promise.resolve();
+      },
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+      error: /src\/lib\/utils.ts differs from Damsko's/u,
+    },
+    {
+      name: "a package the new pin names that isn't in the catalog",
+      install: undefined,
+      dependencies: noDependencies,
+      error: /@stylexjs\/stylex must be a dependency at "catalog:"/u,
+    },
+  ])(
+    "leaves packages/ui exactly as it was when the new install isn't Damsko's: $name",
+    async ({ install, dependencies, error }) => {
+      const { ui, old, local } = setUp();
+      const before = snapshot(ui);
+      const now = damskoWith(newPin);
+      await expect(
+        updateTree({
+          ui,
+          install: install ?? installs(now),
+          was: old,
+          now,
+          local,
+          pin: '{ "commit": "new" }\n',
+          dependencies,
+        })
+      ).rejects.toThrow(error);
+      expect(snapshot(ui)).toStrictEqual(before);
+    }
+  );
+
+  it.each(["src/../../../x.ts", "src/linked/x.ts"])(
+    "refuses a listed path that isn't plain or goes through a link, before anything moves: %s",
+    async (path) => {
+      const { ui, old } = setUp();
+      const outside = scratchFolder();
+      plant(outside, { "x.ts": "outside\n" });
+      symlinkSync(outside, nodePath.join(ui, "src", "linked"));
+      const before = snapshot(ui);
+      const now = damskoWith({ "src/lib/utils.ts": "utils\n" });
+      await expect(
+        updateTree({
+          ui,
+          install: installs(now),
+          was: old,
+          now,
+          local: [{ ...listed("src/lib/utils.ts"), path }],
+          pin: '{ "commit": "new" }\n',
+          dependencies: { "@stylexjs/stylex": "catalog:" },
+        })
+      ).rejects.toThrow(/not a plain path|symbolic link/u);
+      expect(snapshot(ui)).toStrictEqual(before);
+      expect(readFileSync(nodePath.join(outside, "x.ts"), "utf-8")).toBe(
+        "outside\n"
+      );
+    }
+  );
 });
