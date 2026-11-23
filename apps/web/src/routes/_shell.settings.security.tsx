@@ -6,7 +6,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -31,6 +30,7 @@ import {
   SettingsPending,
   SettingsStack,
   TitleLine,
+  ItemList,
 } from "../settings/section.tsx";
 import { useCore } from "../use-core.ts";
 
@@ -166,11 +166,11 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
       }
       title={t`Devices`}
     >
-      <ItemGroup aria-label={t`Devices`}>
+      <ItemList aria-label={t`Devices`}>
         {ordered.map((session) => (
           <DeviceRow key={session.id} session={session} />
         ))}
-      </ItemGroup>
+      </ItemList>
     </SettingsGroup>
   );
 };

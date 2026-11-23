@@ -38,7 +38,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -79,7 +78,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmAction } from "./confirm-action.tsx";
 import { RefusedBadge, SourceActivity } from "./event-source-activity.tsx";
-import { Failure, SettingsGroup, SettingsStack } from "./section.tsx";
+import { Failure, SettingsGroup, SettingsStack, ItemList } from "./section.tsx";
 
 // Settings › Incoming events, for the organization's own admins: the event
 // sources outside systems send events to (core's event-sources.ts), one per
@@ -552,7 +551,7 @@ const SourceDetails = ({
       )}
       <Part title={t`Workflows it starts`}>
         {starts !== undefined && starts.length > 0 ? (
-          <ItemGroup aria-label={t`Workflows it starts`}>
+          <ItemList aria-label={t`Workflows it starts`}>
             {starts.map((workflow) => (
               <Item
                 key={workflow.id}
@@ -569,7 +568,7 @@ const SourceDetails = ({
                 </ItemContent>
               </Item>
             ))}
-          </ItemGroup>
+          </ItemList>
         ) : (
           <Text color="muted" size="sm">
             {starts === undefined
@@ -580,7 +579,7 @@ const SourceDetails = ({
       </Part>
       <Part title={t`Recent runs`}>
         {runs.state === "read" && runs.runs.length > 0 ? (
-          <ItemGroup aria-label={t`Recent runs`}>
+          <ItemList aria-label={t`Recent runs`}>
             {runs.runs.map((run) => (
               <Item
                 key={`${run.workflowId}-${run.at}`}
@@ -600,7 +599,7 @@ const SourceDetails = ({
                 </ItemContent>
               </Item>
             ))}
-          </ItemGroup>
+          </ItemList>
         ) : (
           <Text color="muted" size="sm">
             {
@@ -843,7 +842,7 @@ export const EventSourcesSettings = ({
           </Empty>
         ) : null}
         {sources.length > 0 ? (
-          <ItemGroup aria-label={t`Sources`}>
+          <ItemList aria-label={t`Sources`}>
             {sources.map((source) => (
               <SourceRow
                 key={source.id}
@@ -856,7 +855,7 @@ export const EventSourcesSettings = ({
                 starts={startsOf(source.id)?.length}
               />
             ))}
-          </ItemGroup>
+          </ItemList>
         ) : null}
       </SettingsGroup>
       <Sheet

@@ -11,14 +11,15 @@ import {
   FieldTitle,
 } from "@grasp-os/ui/components/field";
 import type { FieldStatusValue } from "@grasp-os/ui/components/field";
+import { ItemGroup, ItemSeparator } from "@grasp-os/ui/components/item";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { useId } from "react";
-import type { ReactNode } from "react";
+import { Fragment, useId } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { isFileGone } from "../error-reports.ts";
 import { ErrorState } from "../frame/page-states.tsx";
@@ -160,6 +161,25 @@ export const SettingsCard = ({
       <CardContent flush={flush}>{children}</CardContent>
     </section>
   </Card>
+);
+
+/** A card's list of Items, a hairline between two, as its rows have. */
+export const ItemList = ({
+  "aria-label": label,
+  children,
+}: {
+  "aria-label": string;
+  /** The Items, as a list's `map` makes them, each with its key. */
+  children: readonly ReactElement[];
+}) => (
+  <ItemGroup aria-label={label}>
+    {children.map((item, at) => (
+      <Fragment key={item.key ?? String(at)}>
+        {at === 0 ? null : <ItemSeparator />}
+        {item}
+      </Fragment>
+    ))}
+  </ItemGroup>
 );
 
 /** A group's rows, a hairline between two. */

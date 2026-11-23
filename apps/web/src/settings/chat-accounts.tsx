@@ -14,7 +14,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -32,7 +31,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { forgetChatLink } from "./chat-link.ts";
 import { ConfirmAction } from "./confirm-action.tsx";
-import { RowNote, SettingRow, SettingsGroup } from "./section.tsx";
+import { RowNote, SettingRow, SettingsGroup, ItemList } from "./section.tsx";
 
 // Settings › Security: the person's accounts on chat platforms that are
 // linked to them, so Grasp knows it is them writing there, as quiet rows in
@@ -386,18 +385,18 @@ export const ChatAppsSection = ({
           <ForgetConversations />
         </FieldGroup>
         {ready === undefined || ready.reach.length === 0 ? null : (
-          <ItemGroup aria-label={t`Where to reach Stephen`}>
+          <ItemList aria-label={t`Where to reach Stephen`}>
             {ready.reach.map((one) => (
               <ReachRow key={one.platform} reach={one} />
             ))}
-          </ItemGroup>
+          </ItemList>
         )}
         {ready === undefined || ready.accounts.length === 0 ? null : (
-          <ItemGroup aria-label={t`Linked chat accounts`}>
+          <ItemList aria-label={t`Linked chat accounts`}>
             {ready.accounts.map((account) => (
               <AccountRow account={account} key={account.id} />
             ))}
-          </ItemGroup>
+          </ItemList>
         )}
       </SettingsGroup>
     </>

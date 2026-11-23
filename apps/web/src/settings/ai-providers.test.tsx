@@ -555,7 +555,9 @@ describe("Settings › AI providers", () => {
     await press(button("Connect"));
 
     const rows = [
-      ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
+      ...document.querySelectorAll(
+        'ul[aria-label="Connected providers"] > li:not([data-slot="item-separator"])'
+      ),
     ].map((row) => row.textContent ?? "");
     expect({
       asked,
@@ -600,7 +602,9 @@ describe("Settings › AI providers", () => {
       .map((id) => document.querySelector(`[id="${id}"]`))
       .map((each) => (each === null ? "" : wordsOf(each)));
     const rows = [
-      ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
+      ...document.querySelectorAll(
+        'ul[aria-label="Connected providers"] > li:not([data-slot="item-separator"])'
+      ),
     ].map((row) => row.textContent ?? "");
     expect({
       asked,
@@ -688,7 +692,9 @@ describe("Settings › AI providers", () => {
     });
     await shown(api);
     const rows = [
-      ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
+      ...document.querySelectorAll(
+        'ul[aria-label="Connected providers"] > li:not([data-slot="item-separator"])'
+      ),
     ].map((row) => row.textContent ?? "");
 
     expect({

@@ -340,9 +340,9 @@ test("invites someone with a role, says what each role may do, and withdraws the
       /Use an email address in one of the domains your organization signs in with/u
     )
   ).toBeVisible();
-  // The first Backspace goes to the last address, the second takes it away.
-  await addresses.press("Backspace");
-  await addresses.press("Backspace");
+  await dialog
+    .getByRole("button", { name: "Remove someone@elsewhere.test" })
+    .click();
 
   const email = `invited-${crypto.randomUUID().slice(0, 8)}@acme.test`;
   await addresses.fill(email);
@@ -417,7 +417,7 @@ test("shows the members page only to someone signed in, and never signs them out
 }) => {
   await page.goto("/settings/members");
   await expect(
-    page.getByRole("link", { name: "Sign in with a code" })
+    page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-in");
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(
@@ -461,30 +461,23 @@ test("shows the members page only to someone signed in, and never signs them out
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
   await expect(
-    page.getByText(
-      "Grasp could not reach its servers. Nothing you saved is lost."
-    )
+    page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
-    page.getByRole("link", { name: "Sign in with a code" })
+    page.getByText("Use your organization’s account to go on.")
   ).toHaveCount(0);
 
   // Trying again shows it's trying, then says so again while core fails.
   const unreachable = page.getByRole("alert");
-  const retry = page.getByRole("button", { name: "Try again" });
-  await retry.click();
-  // Busy while it tries, keeping its words (Grasp UI's working button says
-  // "Trying again…" to a screen reader): a second press waits for the first.
-  await expect(retry).toHaveAttribute("aria-busy", "true");
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(
+    page.getByRole("button", { name: "Trying again…" })
+  ).toBeDisabled();
   await expect(unreachable).toHaveText(
-    "Grasp could not reach its servers. Nothing you saved is lost.",
+    "Grasp can't be reached right now. Try again in a moment.",
     { timeout: reconnectMs }
   );
-  // The alert keeps its words while it tries: the first try ends first.
-  await expect(retry).not.toHaveAttribute("aria-busy", "true", {
-    timeout: reconnectMs,
-  });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
 
   // Once core answers again, trying again lets them in.

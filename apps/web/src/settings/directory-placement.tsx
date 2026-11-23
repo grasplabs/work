@@ -15,7 +15,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -29,12 +28,12 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { useCore } from "../use-core.ts";
-import { Failure, SettingsGroup } from "./section.tsx";
+import { Failure, SettingsGroup, ItemList } from "./section.tsx";
 import { addTeamMember, removeTeamMember } from "./team-changes.ts";
 import { useTeamChange } from "./use-team-change.ts";
 
@@ -69,10 +68,10 @@ const PlacementSection = ({
   description: string;
   aside?: ReactNode;
   label: string;
-  children: ReactNode;
+  children: readonly ReactElement[];
 }) => (
   <SettingsGroup badge={aside} description={description} title={title}>
-    <ItemGroup aria-label={label}>{children}</ItemGroup>
+    <ItemList aria-label={label}>{children}</ItemList>
   </SettingsGroup>
 );
 

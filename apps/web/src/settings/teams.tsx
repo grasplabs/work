@@ -29,7 +29,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Text } from "@grasp-os/ui/components/text";
@@ -59,6 +58,7 @@ import {
   RowNote,
   SettingsGroup,
   SettingsStack,
+  ItemList,
 } from "./section.tsx";
 import { createTeam, deleteTeam } from "./team-changes.ts";
 import { isTaken, TeamDialog } from "./team-members-dialog.tsx";
@@ -359,7 +359,7 @@ const TeamsList = ({
             <Text color="muted" size="sm">{t`No teams yet.`}</Text>
           </div>
         ) : (
-          <ItemGroup aria-label={t`Teams`}>
+          <ItemList aria-label={t`Teams`}>
             {teams.map((team) => (
               <TeamRow
                 key={team.id}
@@ -371,7 +371,7 @@ const TeamsList = ({
                 team={team}
               />
             ))}
-          </ItemGroup>
+          </ItemList>
         )}
         {/* A new dialog for each team opened, so it starts from that team's name and people. */}
         <TeamDialog

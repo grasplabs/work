@@ -49,7 +49,6 @@ import {
   ItemContent,
   ItemDescription,
   ItemDetail,
-  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -85,6 +84,7 @@ import {
   SettingRow,
   SettingsGroup,
   SettingsRows,
+  ItemList,
 } from "./section.tsx";
 
 // Settings › AI and spend, its first cards, as Damsko's settings pattern
@@ -1238,7 +1238,7 @@ export const AiProvidersSettings = ({
         >
           {failure === undefined ? null : <Failure>{failure}</Failure>}
           {providers.length > 0 ? (
-            <ItemGroup aria-label={t`Connected providers`}>
+            <ItemList aria-label={t`Connected providers`}>
               {providers.map((provider) => (
                 <ProviderRow
                   editable={editable}
@@ -1260,7 +1260,7 @@ export const AiProvidersSettings = ({
                   testModel={testModelOf(provider.provider, choice)}
                 />
               ))}
-            </ItemGroup>
+            </ItemList>
           ) : null}
         </SettingsGroup>
       )}

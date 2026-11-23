@@ -171,7 +171,10 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(page.getByLabel("From")).toHaveValue("2024-02-29");
   await expect(page.getByLabel("To", { exact: true })).toHaveValue("");
   await expect(granted).toHaveCount(1);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  // Nothing says it failed: the page's own live region stands empty.
+  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
+    0
+  );
 });
 
 test("an admin approves an App's request only for the version the list shows", async ({
