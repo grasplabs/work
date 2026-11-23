@@ -298,7 +298,7 @@ export const DeleteInterview = ({
           <AlertDialogFooter>
             <AlertDialogCancel>{t`Keep my interview`}</AlertDialogCancel>
             {onWithdraw === undefined ? null : (
-              <AlertDialogAction onClick={onWithdraw} variant="secondary">
+              <AlertDialogAction onClick={onWithdraw} variant="outline">
                 {t`Withdraw instead`}
               </AlertDialogAction>
             )}

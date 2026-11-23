@@ -171,6 +171,45 @@ test("someone has their interview by typing, carries on after stopping, and agre
   });
 });
 
+test("someone who can't hold a button deletes their interview with two presses, each asking first", async ({
+  page,
+}) => {
+  const staff = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const person = `mila-${run}`;
+  const link = await invited(staff, person, "Mila");
+  await answered(page);
+  await signedInFor(page, addressOf(person));
+  await page.goto(link);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Stephen", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Type instead, without sound" })
+    .click();
+  const answer = page.getByLabel("Your answer");
+  await answer.fill("I check it in Exact, then I send it to Sam.");
+  await answer.press("Enter");
+  await expect(page.getByText(readBack)).toBeVisible();
+  await page.getByRole("button", { name: "Yes, that’s correct" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Thank you, Mila." })
+  ).toBeVisible();
+
+  // A press, not a hold, asks whether to go on, then what would be lost.
+  await page
+    .getByRole("button", { name: "Press and hold: Delete my interview" })
+    .click();
+  const asked = page.getByRole("dialog", { name: "Delete my interview?" });
+  await asked.getByRole("button", { name: "Delete my interview" }).click();
+  await page
+    .getByRole("alertdialog", { name: "Delete your interview?" })
+    .getByRole("button", { name: "Delete it" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: /^Deleted\./u })
+  ).toBeVisible();
+});
+
 /**
  * Holds back core's answer to `page`'s next save, which core still takes:
  * `taken` once it has, and `release` lets the answer go (to a page gone

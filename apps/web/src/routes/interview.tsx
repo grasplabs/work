@@ -194,7 +194,7 @@ const SignOut = ({ core }: { core: CoreConnection }) => {
       onClick={() => {
         void signingOut();
       }}
-      variant="secondary"
+      variant="outline"
     >
       {t`Sign out`}
     </Button>

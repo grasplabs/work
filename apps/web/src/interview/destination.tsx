@@ -262,7 +262,7 @@ export const WhereLinesGo = () => {
     >
       <div {...stylex.props(styles.wide)}>
         <SheetTrigger asChild>
-          <Button variant="secondary">{t`Where your lines go`}</Button>
+          <Button variant="outline">{t`Where your lines go`}</Button>
         </SheetTrigger>
       </div>
       <SheetContent>

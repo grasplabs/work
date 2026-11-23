@@ -189,7 +189,6 @@ const styles = stylex.create({
     display: "inline-block",
     width: "0.375rem",
     height: "0.375rem",
-    marginInlineStart: space["1"],
     borderRadius: radius.circle,
     backgroundColor: voice.heat,
   },

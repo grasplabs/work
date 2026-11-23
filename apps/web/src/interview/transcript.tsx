@@ -16,7 +16,6 @@ import {
   MessageAction,
   MessageActions,
   MessageContent,
-  MessageHeader,
 } from "@grasp-os/ui/components/message";
 import {
   MessageScroller,
@@ -156,7 +155,6 @@ const Line = ({
       {...(stephen ? { "aria-label": who } : {})}
     >
       <MessageContent>
-        {stephen ? <MessageHeader>{who}</MessageHeader> : null}
         {said}
         {line.removed === true ? null : (
           <MessageActions>

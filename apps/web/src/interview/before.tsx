@@ -272,7 +272,7 @@ const Who = ({
                   choose(each);
                 }}
                 size="lg"
-                variant="secondary"
+                variant="outline"
               >
                 {interviewerNames[each]}
               </Button>
