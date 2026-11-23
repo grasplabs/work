@@ -288,6 +288,7 @@ export const IntegrityDialog = ({
               void verify();
             }}
             size="sm"
+            variant="outline"
           >
             <Trans>Check now</Trans>
           </Button>
