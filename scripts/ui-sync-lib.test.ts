@@ -280,24 +280,28 @@ describe("a change made here on purpose", () => {
     ]);
   });
 
-  it("fails for an entry dated after today, which would put off its warning", () => {
+  it("fails for an entry dated after today anywhere, which would put off its warning", () => {
     expect(
       differences(
         expected,
         damsko,
         installed({ ...inStep, "src/components/button.tsx": "edited" }),
-        [listed("src/components/button.tsx", "2026-11-24")],
+        [listed("src/components/button.tsx", "2026-11-25")],
         new Date("2026-11-23T23:00:00Z")
       )
     ).toStrictEqual([
-      "local-changes.json dates src/components/button.tsx 2026-11-24, after today: give the day it was listed",
+      "local-changes.json dates src/components/button.tsx 2026-11-25, after today: give the day it was listed",
     ]);
     expect(
       differences(
         expected,
         damsko,
         installed({ ...inStep, "src/components/button.tsx": "edited" }),
-        [listed("src/components/button.tsx", "2026-11-23")],
+        // Today, and tomorrow, as it already is east of UTC.
+        [
+          listed("src/components/button.tsx", "2026-11-23"),
+          listed("src/components/button.tsx", "2026-11-24"),
+        ],
         new Date("2026-11-23T23:00:00Z")
       )
     ).toStrictEqual([]);
