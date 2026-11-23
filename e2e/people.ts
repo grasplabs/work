@@ -604,6 +604,7 @@ const cast = {
   setupDocuments: { admin: "admin" },
   setupStory: { admin: "admin" },
   pagePanel: { member: "user" },
+  frame: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

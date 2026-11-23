@@ -51,8 +51,13 @@ test("the App's builder approves the packages its chat's agent asked for, on the
         return approved?.id;
       })
       .toBe(request.id);
+    // The page's and the chat's own: the components' live regions stand
+    // outside both.
     await expect(
-      page.getByRole("alert").filter({ hasText: /\S/u })
+      page
+        .getByRole("main")
+        .or(page.getByRole("region", { name: "Chat" }))
+        .getByRole("alert")
     ).toHaveCount(0);
   } finally {
     core[Symbol.dispose]();

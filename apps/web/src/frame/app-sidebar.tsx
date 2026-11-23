@@ -23,6 +23,7 @@ import {
   MessageCircleIcon,
   SearchIcon,
   UserSparklesIcon,
+  XIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -146,16 +147,32 @@ const SearchButton = () => {
   );
 };
 
-/** The sidebar's top: Grasp's mark, and the search and the fold at its end. */
+/**
+ * The sidebar's top: Grasp's mark, and the search and the fold at its end;
+ * in the phone's sheet, a close button in the fold's place.
+ */
 const Head = ({ searching }: { searching: boolean }) => {
   const { t } = useLingui();
+  const { isMobile, setOpenMobile } = useSidebar();
   return (
     <div {...stylex.props(styles.head)}>
       <span {...stylex.props(styles.mark)}>
         <Icon icon={GraspMark} label="Grasp" />
       </span>
       {searching ? <SearchButton /> : null}
-      <SidebarTrigger aria-label={t`Show or hide the sidebar`} />
+      {isMobile ? (
+        <SidebarMenuButton
+          aria-label={t`Close`}
+          onClick={() => {
+            setOpenMobile(false);
+          }}
+          size="icon"
+        >
+          <Icon icon={XIcon} />
+        </SidebarMenuButton>
+      ) : (
+        <SidebarTrigger aria-label={t`Show or hide the sidebar`} />
+      )}
     </div>
   );
 };
@@ -190,27 +207,27 @@ export const AppSidebar = ({
       </SidebarHeader>
       <SidebarLevels value={level}>
         <SidebarLevel value="main">
-          <SidebarContent aria-label={t`Main`}>
-            {sections ? (
-              <>
-                <SidebarGroup>
-                  <SidebarMenu>
-                    <SectionItem section={chat} />
-                    {/* With how many things wait on the person. */}
-                    <InboxNavItem />
-                    <SectionItem section={brain} />
-                    <SectionItem section={projects} />
-                    <SectionItem section={apps} />
-                    {/* With how many workflows need the person. */}
-                    <WorkflowsItem />
-                    <SectionItem section={agents} />
-                    <SectionItem section={integrations} />
-                  </SidebarMenu>
-                </SidebarGroup>
-                <SurfaceNav core={core} />
-              </>
-            ) : null}
-          </SidebarContent>
+          {/* No landmark with nothing in it: who reaches the onboarding
+              alone has no sections. */}
+          {sections ? (
+            <SidebarContent aria-label={t`Main`}>
+              <SidebarGroup>
+                <SidebarMenu>
+                  <SectionItem section={chat} />
+                  {/* With how many things wait on the person. */}
+                  <InboxNavItem />
+                  <SectionItem section={brain} />
+                  <SectionItem section={projects} />
+                  <SectionItem section={apps} />
+                  {/* With how many workflows need the person. */}
+                  <WorkflowsItem />
+                  <SectionItem section={agents} />
+                  <SectionItem section={integrations} />
+                </SidebarMenu>
+              </SidebarGroup>
+              <SurfaceNav core={core} />
+            </SidebarContent>
+          ) : null}
         </SidebarLevel>
         <SettingsLevel identity={identity} />
       </SidebarLevels>

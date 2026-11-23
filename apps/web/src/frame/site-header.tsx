@@ -175,7 +175,28 @@ export const SiteHeader = ({
   return (
     <header data-slot="site-header" {...stylex.props(styles.bar)}>
       {away ? (
-        <SidebarTrigger aria-label={t`Show or hide the sidebar`} />
+        <SidebarTrigger
+          aria-label={t`Show or hide the sidebar`}
+          onClick={(event) => {
+            if (isMobile) {
+              // The sheet takes focus itself, and gives it back on closing.
+              return;
+            }
+            // This button goes as the sidebar opens: focus goes on to the
+            // fold in the sidebar's head, once it is drawn, and never falls
+            // to the page.
+            const shell = event.currentTarget.closest(
+              '[data-slot="sidebar-wrapper"]'
+            );
+            requestAnimationFrame(() => {
+              shell
+                ?.querySelector<HTMLElement>(
+                  '[data-slot="sidebar"] [data-slot="sidebar-trigger"]'
+                )
+                ?.focus();
+            });
+          }}
+        />
       ) : null}
       <div {...stylex.props(styles.where)}>
         <Breadcrumb aria-label={t`Breadcrumb`}>

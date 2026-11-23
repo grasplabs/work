@@ -510,8 +510,8 @@ test("shows the page loading while the members list is slow, then says core can'
   await expect(
     page.getByRole("heading", { name: "This page didn't load" })
   ).toBeVisible({ timeout: 15_000 });
-  // What the page says: the components' own live region is there too, empty.
-  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveText(
+  // The page's own: the components' live regions stand outside it.
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText(
     "Grasp can't be reached right now. Try again in a moment."
   );
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();

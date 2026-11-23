@@ -59,7 +59,5 @@ test("a person with nothing waiting finds their inbox from the nav, with nothing
   );
   await page.getByRole("tab", { name: /^Done/u }).click();
   await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
-  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
-    0
-  );
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });

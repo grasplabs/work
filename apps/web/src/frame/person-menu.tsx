@@ -102,6 +102,12 @@ const styles = stylex.create({
   // Atop the menu: who is signed in, and their role.
   signedIn: { display: "grid", gap: space["1"] },
   role: { fontWeight: font.weightNormal },
+  // A submenu's choice now, quiet, at its item's end.
+  current: {
+    marginInlineStart: "auto",
+    paddingInlineStart: space["4"],
+    color: colors.mutedForeground,
+  },
 });
 
 const themeNames: Record<ThemeMode, MessageDescriptor> = {
@@ -129,6 +135,10 @@ const ThemeMenu = ({ userId }: { userId: string }) => {
     <DropdownMenuSub>
       <DropdownMenuSubTrigger icon={themeIcons[theme]}>
         {t`Theme`}
+        {/* The choice now, at the item's end. */}
+        <span {...stylex.props(styles.current)}>
+          {i18n._(themeNames[theme])}
+        </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         <DropdownMenuRadioGroup
@@ -161,6 +171,10 @@ const LanguageMenu = () => {
     <DropdownMenuSub>
       <DropdownMenuSubTrigger icon={GlobeIcon}>
         {t`Language`}
+        {/* The language now, in its own words, at the item's end. */}
+        <span lang={locale} {...stylex.props(styles.current)}>
+          {localeNames[locale]}
+        </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         <DropdownMenuRadioGroup

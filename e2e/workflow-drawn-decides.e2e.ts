@@ -215,10 +215,11 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("alertdialog", { name: "Confirm your approval" })
     .getByRole("button", { name: "Confirm" })
     .click(pageRead);
-  // What the page says: the components' own live region is there too, empty.
-  await expect(
-    asDecider.getByRole("status").filter({ hasText: /\S/u })
-  ).toHaveText(/^Approved by Person on /u, pageRead);
+  // The page's own: the components' live regions stand outside it.
+  await expect(asDecider.getByRole("main").getByRole("status")).toHaveText(
+    /^Approved by Person on /u,
+    pageRead
+  );
   // Answered, it needs them no more.
   await asDecider.reload();
   await expect(workflows).toHaveAccessibleName("Workflows", pageRead);

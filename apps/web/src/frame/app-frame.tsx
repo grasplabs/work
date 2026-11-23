@@ -13,6 +13,7 @@ import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
+import { PageWithPanel } from "./page-panel.tsx";
 
 /**
  * Where the person's sidebar choices are kept in this browser: whether it
@@ -38,7 +39,8 @@ const styles = stylex.create({
   page: {
     display: "flex",
     flexDirection: "column",
-    flexGrow: 1,
+    boxSizing: "border-box",
+    height: "100%",
     minHeight: 0,
     overflowX: "clip",
     overflowY: "auto",
@@ -75,15 +77,16 @@ const styles = stylex.create({
 });
 
 /**
- * Says where the page's card stands in the window, on the document, as the
- * sidebar folds, the chat docks beside it and the window resizes: its start
- * for the chat gone full screen over it (the kit's DockablePanel reads
- * `--app-shell-main-left`), and its end and foot for the dock.
+ * Says where the page's column stands in the window, on the document, as
+ * the sidebar folds, a panel opens beside it and the window resizes: its
+ * start, the card's, for the chat gone full screen over it (the kit's
+ * DockablePanel reads `--app-shell-main-left`), and its end and foot for
+ * the dock, which so stands in the middle of the page and not of its panel.
  */
-const usePublishedCard = () => {
-  const card = useRef<HTMLDivElement>(null);
+const usePublishedPage = () => {
+  const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const element = card.current;
+    const element = page.current;
     if (element === null) {
       return () => {
         // Nothing was watched.
@@ -113,7 +116,7 @@ const usePublishedCard = () => {
       }
     };
   }, []);
-  return card;
+  return page;
 };
 
 /**
@@ -121,9 +124,10 @@ const usePublishedCard = () => {
  * or a sheet from the start on a narrow window, folded as the person left
  * it (`storageKey`); the page as a card on the sidebar's ground
  * (SidebarInset, the main landmark), the AI providers' banner across its
- * top, the page under it with its own bar (SiteHeader), and over its foot
- * what stays at hand on every page (`dock`); beside or over the page, its
- * panels (`panels`), Grasp's chat. The shell's pages are in it, with all
+ * top, the page under it with its own bar (SiteHeader) and, when the page
+ * has one, its side panel (page-panel.tsx), and over its foot what stays
+ * at hand on every page (`dock`); beside or over the page, its panels
+ * (`panels`), Grasp's chat. The shell's pages are in it, with all
  * of them, and a page outside the shell for someone signed in, such as a
  * decision opened from a link, with none of them.
  *
@@ -154,7 +158,7 @@ export const AppFrame = ({
   covered?: boolean;
   children: ReactNode;
 }) => {
-  const card = usePublishedCard();
+  const page = usePublishedPage();
   return (
     // The kit's toasts and tooltips, for the pages still on it; Damsko's
     // toasts (below) for the frame's own, such as a sign-out core didn't
@@ -164,19 +168,22 @@ export const AppFrame = ({
         <SidebarProvider storageKey={sidebarKey}>
           <AppSidebar core={core} identity={identity} />
           <SidebarInset>
-            <div ref={card} {...stylex.props(styles.frame)}>
+            <div {...stylex.props(styles.frame)}>
               <AiKeyBanner
                 failing={failing}
                 identity={identity}
                 providers={providersOf(core)}
               />
-              <div
-                data-slot="app-shell-page"
-                inert={covered}
-                {...stylex.props(styles.page, covered && styles.covered)}
-              >
-                <InFrame value>{children}</InFrame>
-              </div>
+              <PageWithPanel>
+                <div
+                  data-slot="app-shell-page"
+                  inert={covered}
+                  ref={page}
+                  {...stylex.props(styles.page, covered && styles.covered)}
+                >
+                  <InFrame value>{children}</InFrame>
+                </div>
+              </PageWithPanel>
             </div>
           </SidebarInset>
           {dock === undefined ? null : (
