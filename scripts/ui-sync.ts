@@ -12,9 +12,13 @@
  * added by name. A new pin is a commit in full or a release tag (`v0.2.0`,
  * written down as its commit), and only one Damsko merged or released:
  * a commit on its `main` or one a release tag points at. Every command
- * checks that before it reads a file of the commit, so neither a pull
- * request's head nor a fork's commit, which GitHub serves by hash too, can
- * be installed or pass the check. Damsko's git is the durable form of a
+ * checks that of the commit it holds `packages/ui` to (`check` and
+ * `propose` the pin, `update` its new one) before it reads a file of it,
+ * so neither a pull request's head nor a fork's commit, which GitHub
+ * serves by hash too, can be installed or pass the check. `update` reads
+ * the pin it moves from unchecked, only as the base it carries each listed
+ * change from, so it can move off a pin that has left Damsko's `main`
+ * since. Damsko's git is the durable form of a
  * version: its site serves its `main` as last deployed and each released
  * tag at /r/<tag>/, never a commit between tags. So no command reads the
  * site: each fetches Damsko from GitHub.
@@ -33,11 +37,14 @@
  * once, into an empty folder of its own: what Damsko dropped goes, too.
  * There it unpacks the fonts, carries each listed change to the new
  * version (dropped once Damsko's file is the same, else applied again on
- * top, or left with git's conflict markers to resolve by hand) and checks
- * the result. Only then does the new `src/` take the place of
- * `packages/ui/src`; on any failure before, `packages/ui` is as it was.
+ * top, or left with git's conflict markers to resolve by hand; one Damsko
+ * removed stays as this repository's own, for someone to decide) and
+ * checks the result. Only then does the new `src/` take the place of
+ * `packages/ui/src`; on any failure before, `packages/ui` is as it was,
+ * and if putting it back fails too, the error names the folder that holds
+ * the old `src/`.
  * Review `git diff` after it; never `shadcn add --all`, which reads
- * shadcn's own registry.
+ * the CLI's default registry, not Damsko's.
  *
  * Owned source, by hand:
  *   1. Edit, add or remove a file under packages/ui/src (not a font).
@@ -49,8 +56,9 @@
  *      kept, applied again on top, or left in conflict (markers `here`,
  *      `pinned`, `Damsko`; resolve them and run `vp run check:ui`).
  * `check` fails for a listed file that no longer differs or never
- * existed, and for a date after today; it names an entry older than 14
- * days without failing.
+ * existed, for one that still holds a conflict marker (by line), and for
+ * a date after today; it names an entry older than 14 days without
+ * failing.
  *
  * `propose` writes the listed changes as one patch against Damsko's tree
  * at the pin and prints the commands that open the pull request there. It
@@ -66,7 +74,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -76,7 +83,7 @@ import {
   damskoPath,
   differences,
   expectedOf,
-  fetchDamsko,
+  fetchFor,
   fontsUnpack,
   namespace,
   overdue,
@@ -85,6 +92,7 @@ import {
   proposal,
   readLocalChanges,
   readWithin,
+  serveFolder,
   treeOf,
   updateTree,
 } from "./ui-sync-lib.ts";
@@ -164,13 +172,16 @@ const damskoFile =
  */
 const check = async (
   damsko: DamskoAt,
-  local: readonly LocalChange[]
+  local: readonly LocalChange[],
+  conflicted: readonly string[] = []
 ): Promise<string[]> => {
   const found = differences(
     damsko.expected,
     damskoFile(damsko),
     { ...treeOf(ui), dependencies: dependencies() },
-    local
+    local,
+    new Date(),
+    conflicted
   );
   const unpack = readWithin(ui, fontsUnpack);
   if (found.length === 0 && unpack !== undefined) {
@@ -181,37 +192,6 @@ const check = async (
     }
   }
   return found;
-};
-
-/** A folder's files over HTTP on this machine alone, as the site serves the registry. */
-const serve = async (
-  folder: string
-): Promise<{ url: string; close: () => void }> => {
-  const server = createServer((request, response) => {
-    const file = path.join(
-      folder,
-      path.normalize(new URL(request.url ?? "/", "http://localhost").pathname)
-    );
-    if (!(file.startsWith(folder + path.sep) && existsSync(file))) {
-      response.writeHead(404).end();
-      return;
-    }
-    response
-      .writeHead(200, { "content-type": "application/json" })
-      .end(readFileSync(file));
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("The registry's server has no port.");
-  }
-  return {
-    url: `http://127.0.0.1:${address.port}`,
-    close: () => {
-      server.close();
-    },
-  };
 };
 
 /**
@@ -240,7 +220,7 @@ const installInto =
     for (const file of ["package.json", "tsconfig.json"]) {
       copyFileSync(path.join(ui, file), path.join(stage, file));
     }
-    const served = await serve(site);
+    const served = await serveFolder(site);
     try {
       const components = z
         .record(z.string(), z.unknown())
@@ -326,11 +306,12 @@ const main = async (): Promise<boolean> => {
   const local = readLocalChanges(localChangesPath);
   const scratch = mkdtempSync(path.join(tmpdir(), "damsko-"));
   try {
-    const checkout = path.join(scratch, "damsko");
-    const commit = fetchDamsko(
+    const { commit, checkout, pinned } = fetchFor(
       damskoRepository,
-      command === "update" && target !== undefined ? target : kept.commit,
-      checkout
+      command,
+      kept.commit,
+      target,
+      scratch
     );
     const pin: Pin = { ...kept, commit };
     const damsko = damskoAt(checkout, pin);
@@ -340,13 +321,9 @@ const main = async (): Promise<boolean> => {
     }
     let listed = local;
     let conflicts: readonly string[] = [];
+    let removed: readonly string[] = [];
     if (command === "update") {
-      let was = damsko;
-      if (commit !== kept.commit) {
-        const pinned = path.join(scratch, "pinned");
-        fetchDamsko(damskoRepository, kept.commit, pinned);
-        was = damskoAt(pinned, kept);
-      }
+      const was = pinned === checkout ? damsko : damskoAt(pinned, kept);
       const updated = await updateTree({
         ui,
         install: async (stage) => {
@@ -365,16 +342,21 @@ const main = async (): Promise<boolean> => {
       for (const file of updated.dropped) {
         console.log(`${file}: Damsko's is now the same; its entry is dropped.`);
       }
-      ({ conflicts } = updated);
+      ({ conflicts, removed } = updated);
       listed = readLocalChanges(localChangesPath);
     }
-    const found = await check(damsko, listed);
+    const found = await check(damsko, listed, conflicts);
     for (const warning of overdue(listed, new Date())) {
       console.warn(`packages/ui: ${warning}`);
     }
     for (const file of conflicts) {
       console.error(
-        `packages/ui: ${file} is a listed change that conflicts with Damsko's at ${commit}: resolve git's markers in it by hand.`
+        `packages/ui: ${file} is a listed change that conflicts with Damsko's at ${commit}: resolve git's markers in it by hand, then run vp run check:ui.`
+      );
+    }
+    for (const file of removed) {
+      console.error(
+        `packages/ui: Damsko removed ${file} at ${commit}, which is listed here as changed: it stays as this repository's own file. Remove it and its entry if it should go as Damsko's did, or keep it and say why in its reason.`
       );
     }
     if (found.length > 0) {
@@ -385,7 +367,7 @@ const main = async (): Promise<boolean> => {
         `\npackages/ui is not Damsko's at ${commit}. List a change made here on purpose in packages/ui/local-changes.json, or restore Damsko's files with vp run ui:update.`
       );
     }
-    if (found.length > 0 || conflicts.length > 0) {
+    if (found.length > 0 || conflicts.length > 0 || removed.length > 0) {
       return false;
     }
     const changed =
