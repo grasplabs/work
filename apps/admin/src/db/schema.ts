@@ -233,6 +233,15 @@ export const clients = sqliteTable(
      * with the whole onboarding.
      */
     startingFlow: text("starting_flow", { enum: flowPresetNames }),
+    /**
+     * When it was added, where staff added it with an onboarding: its
+     * deployment then starts closed to everyone but its admins, without
+     * staff closing it first. Every deploy gives it to core as
+     * `ONBOARDING_CLOSED_FROM`, which core reads only while its gate was
+     * never moved. Null for one added before this was kept, which started
+     * open, and for one that goes through no onboarding.
+     */
+    closedFrom: timestamp("closed_from"),
     /** The release it stays on while pinned: promotions skip it. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),

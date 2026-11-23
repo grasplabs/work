@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's NavigationMenu: triggers drawn as a list's items with a chevron that turns
 // over, and each panel the list popup Select and Command share, its links a title with a quiet line
 // under it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <NavigationMenu aria-label="Main">
 //     <NavigationMenuList>
@@ -217,7 +216,7 @@ const styles = stylex.create({
     paddingInline: space[3],
     paddingBlock: 0,
     borderWidth: 0,
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",
@@ -301,7 +300,7 @@ const styles = stylex.create({
     minHeight: { default: size.controlDefault, [COARSE]: size.tapTarget },
     paddingBlock: space[2],
     paddingInline: space[3],
-    borderRadius: `min(${radius.row}, calc(${size.controlLg} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.controlLg} / 2))`,
     cornerShape: radius.shape,
     color: colors.foreground,
     textDecoration: "none",

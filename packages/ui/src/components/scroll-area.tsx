@@ -3,7 +3,6 @@
 // page and screen readers all scroll it. The browser's bar never shows (the shared scrollbarHidden);
 // in its place, a 10px bar with a pill thumb that shows while the pointer is over it
 // or it scrolls. The wheel scrolls it while it can, then passes on to the page.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <ScrollArea style={size.list}>…</ScrollArea>
 //   <ScrollArea aria-label="Release notes" style={size.notes}>…</ScrollArea>   words alone: a tab stop

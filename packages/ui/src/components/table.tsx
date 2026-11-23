@@ -1,7 +1,6 @@
 // Table: rows of facts in columns, in StyleX: small text, a hairline between rows,
 // the head in muted words, figures that line up, and a soft footer. Plain HTML table elements
 // underneath: UI SDK has no table, and a table of facts needs no behaviour.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Table caption="Reports this quarter.">
 //     <TableHeader>
@@ -619,7 +618,7 @@ const styles = stylex.create({
     paddingBlock: 0,
     paddingInline: space[1],
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",

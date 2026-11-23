@@ -612,6 +612,38 @@ describe("provisioning a placed client", () => {
     }
   );
 
+  it("leaves a company that starts closed unpublished on a release whose core starts open", async () => {
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await db
+      .update(clients)
+      .set({ closedFrom: new Date() })
+      .where(eq(clients.id, clientId));
+    cloudflare.coreOf(clientId).coreProbe = { beforeStartingClosed: true };
+
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_starts_open",
+    });
+    await expect(routed(clientId)).resolves.toBeFalsy();
+
+    delete cloudflare.coreOf(clientId).coreProbe;
+    await runClientProvision(context, held);
+    await expect(provisioned(account, clientId)).resolves.toMatchObject(
+      once(clientId)
+    );
+
+    // Published once, a core from before it changes nothing: its gate is kept.
+    cloudflare.coreOf(clientId).coreProbe = { beforeStartingClosed: true };
+    const later = await importRelease({ notes: "feat(core): later" });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: later.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      status: "done",
+    });
+  });
+
   it("delivers a secret again on retry when it was deleted after its delivery", async () => {
     const manifest = await importRelease();
     const { account, clientId, held } = await setUp(manifest);

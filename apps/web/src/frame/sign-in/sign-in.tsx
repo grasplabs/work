@@ -346,14 +346,14 @@ const SignInWays = ({
           >
             <Button
               disabled={leaving !== undefined && leaving !== way.id}
-              errorLabel={t`Did not open`}
-              loadingLabel={t`Opening ${provider}`}
+              errorText={t`Did not open`}
+              loadingText={t`Opening ${provider}`}
               onClick={(event: MouseEvent<HTMLElement>) => {
                 choose(way.id, event);
               }}
               size="lg"
               status={leaving === way.id ? "loading" : "idle"}
-              successLabel={t`Opened`}
+              successText={t`Opened`}
               // Never a second line: in a box narrower than a phone the
               // words end in an ellipsis.
               truncate

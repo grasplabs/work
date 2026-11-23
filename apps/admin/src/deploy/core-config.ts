@@ -337,6 +337,11 @@ export interface CoreConfigInputs {
    * (`clients.startingFlow`); null or absent for all of it.
    */
   startingFlow?: string | null;
+  /**
+   * When it was added, where its deployment starts closed
+   * (`clients.closedFrom`); null or absent where it starts open.
+   */
+  closedFrom?: Date | null;
 }
 
 /**
@@ -344,7 +349,8 @@ export interface CoreConfigInputs {
  * `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM` (`onboardingSender`)
  * always, `SIGN_IN` when its record has sign-in, `ONBOARDING_START` when
  * its record names the onboarding it starts with (core reads it once, as
- * its onboarding is first kept). Every model key is its connect's. `CLIENT_ID` is what core answers the provisioning probe with
+ * its onboarding is first kept), `ONBOARDING_CLOSED_FROM` when it was
+ * added with an onboarding (core reads it while its gate was never moved). Every model key is its connect's. `CLIENT_ID` is what core answers the provisioning probe with
  * (src/hosting/probe.ts).
  */
 export const derivedCoreConfig = ({
@@ -355,6 +361,7 @@ export const derivedCoreConfig = ({
   oauthRelay,
   staffWindow = null,
   startingFlow = null,
+  closedFrom = null,
 }: CoreConfigInputs): Record<string, unknown> => {
   const config = signInOf(
     clientId,
@@ -370,5 +377,8 @@ export const derivedCoreConfig = ({
     MAIL_FROM: onboardingSender(clientId, domain),
     ...(config === undefined ? {} : { SIGN_IN: config }),
     ...(startingFlow === null ? {} : { ONBOARDING_START: startingFlow }),
+    ...(closedFrom === null
+      ? {}
+      : { ONBOARDING_CLOSED_FROM: closedFrom.toISOString() }),
   };
 };

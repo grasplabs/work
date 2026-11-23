@@ -1,14 +1,14 @@
 // The life of an action: it runs async work, says that it works, then how it went ("Saved",
 // "Could not save"), once to a screen reader, holds that result for duration-hold, then returns to
-// rest. Its own `loadingLabel` is said as the work starts; with none, the catalogue's word is said
+// rest. Its own `loadingText` is said as the work starts; with none, the catalogue's word is said
 // only once the work has run for loading-delay, so quick work says only how it went. A second run while it works or shows its result does nothing.
 //
 // A Button runs it for a press whose `onClick` returns a Promise, and shows it; a page uses it for
 // work it runs itself, such as a form's submit, and gives the Button its `status`:
 //
-//   const save = useAction(saveChanges, { successLabel: saved, errorLabel: notSaved });
+//   const save = useAction(saveChanges, { successText: saved, errorText: notSaved });
 //   <form onSubmit={(event) => { event.preventDefault(); void save.run(new FormData(event.currentTarget)); }}>
-//     <Button type="submit" status={save.status} successLabel={saved}>Save changes</Button>
+//     <Button type="submit" status={save.status} successText={saved}>Save changes</Button>
 //   </form>
 //
 // The error is not swallowed: it is `save.error`, what `run()` resolves with, and what `onError`
@@ -26,13 +26,13 @@ import { announce, announceWork } from "../lib/utils";
 export type ActionStatus = "idle" | "loading" | "success" | "error";
 
 /** The words of an action's life. Each one left out is the catalogue's (`useAction`). */
-export interface ActionLabels {
+export interface ActionText {
   /** Said while it works ("Saving"). */
-  loadingLabel?: string;
+  loadingText?: string;
   /** Shown and said once it worked ("Saved"). */
-  successLabel?: string;
+  successText?: string;
   /** Shown and said when it failed, plainly ("Could not save"). */
-  errorLabel?: string;
+  errorText?: string;
 }
 
 /** How a run ended: the work's own result, the error it threw, or busy with the run before. */
@@ -56,7 +56,7 @@ export interface Action<Args extends unknown[], Result> {
   run: (...args: Args) => Promise<ActionResult<Result>>;
 }
 
-export interface ActionOptions extends ActionLabels {
+export interface ActionOptions extends ActionText {
   /** Called with the error when the work fails, after the button has said so. */
   onError?: (error: unknown) => void;
 }
@@ -74,9 +74,9 @@ export const useAction = <Args extends unknown[], Result>(
 ): Action<Args, Result> => {
   const words = useI18n().action;
   const labels: ActionStatusLabels = {
-    loading: options.loadingLabel ?? words.loading,
-    success: options.successLabel ?? words.success,
-    error: options.errorLabel ?? words.error,
+    loading: options.loadingText ?? words.loading,
+    success: options.successText ?? words.success,
+    error: options.errorText ?? words.error,
   };
   const [status, setStatus] = useState<ActionStatus>("idle");
   // The last failure, boxed, so "no error" is not a value the work could have thrown.
@@ -87,7 +87,7 @@ export const useAction = <Args extends unknown[], Result>(
   const over = useRef<(() => void) | null>(null);
   const mounted = useRef(true);
   // The newest work, words and handler, so a press always runs what the page passed last.
-  const own = options.loadingLabel !== undefined;
+  const own = options.loadingText !== undefined;
   const latest = useRef({ work, labels, own, onError: options.onError });
   useEffect(() => {
     latest.current = { work, labels, own, onError: options.onError };
