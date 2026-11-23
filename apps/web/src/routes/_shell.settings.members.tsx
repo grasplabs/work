@@ -49,7 +49,7 @@ import {
   SearchIcon,
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -99,9 +99,9 @@ import { useCore } from "../use-core.ts";
 // loses this page by accident.
 
 const styles = stylex.create({
-  // As wide as a header's search: beside the Roles mark and Invite it
-  // still fits the card's line.
-  search: { width: "14rem", maxWidth: "100%" },
+  // As wide as a header's search; on a phone narrower, so beside the Roles
+  // mark and Invite it still fits the card's line.
+  search: { width: { default: "14rem", [media.maxSm]: "8rem" } },
   // A person's face beside their name and email.
   person: {
     display: "flex",

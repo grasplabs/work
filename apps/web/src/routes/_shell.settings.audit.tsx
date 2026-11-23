@@ -1,5 +1,7 @@
 import type { AuditPage, FullVerification } from "@grasp-os/shared/audit-log";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -35,6 +37,11 @@ import {
 // Core checks the role on every call; every search of the log is itself
 // recorded in it.
 
+const styles = stylex.create({
+  // The filters in the rows' inset, over the records.
+  filters: { padding: space[4] },
+});
+
 /**
  * The records' key: their filters and the first page read, so the log read
  * again, with new filters or the same ones, starts from its own first page
@@ -63,7 +70,9 @@ const AuditTrail = () => {
         title={t`Events`}
       >
         {/* Filters and records start again from new filters. */}
-        <LogFilters key={JSON.stringify(filters)} search={filters} />
+        <div {...stylex.props(styles.filters)}>
+          <LogFilters key={JSON.stringify(filters)} search={filters} />
+        </div>
         {log.state === "ready" ? (
           <LogRecords
             directory={log.data.directory}
