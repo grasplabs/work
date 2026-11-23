@@ -26,16 +26,16 @@ import {
   expectedOf,
   fetchDamsko,
   fetchFor,
-  serveFolder,
   localChangesSchema,
   overdue,
   parseRegistry,
   proposal,
   readWithin,
+  removeWithin,
+  serveFolder,
   treeOf,
   updateTree,
   within,
-  removeWithin,
   writeWithin,
 } from "./ui-sync-lib.ts";
 import type { DamskoAt, LocalChange } from "./ui-sync-lib.ts";
@@ -294,24 +294,34 @@ describe("a change made here on purpose", () => {
         installed({
           ...inStep,
           "src/components/button.tsx": conflicted,
-          "src/lib/extra.ts": "a\r\n|||||||\r\nb\r\n",
+          "src/lib/extra.ts":
+            "a\r\n<<<<<<< here\r\nb\r\n||||||| pinned\r\nbase\r\n=======\r\nc\r\n>>>>>>> Damsko\r\n",
         }),
         [listed("src/components/button.tsx"), listed("src/lib/extra.ts")]
       )
-    ).toStrictEqual([
-      "src/components/button.tsx:2 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
-      "src/components/button.tsx:4 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
-      "src/components/button.tsx:6 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
-      "src/lib/extra.ts:2 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
-    ]);
-    // Eight of a sign, or one inside a line, is no marker.
+    ).toStrictEqual(
+      [
+        "src/components/button.tsx:2",
+        "src/components/button.tsx:4",
+        "src/components/button.tsx:6",
+        "src/lib/extra.ts:2",
+        "src/lib/extra.ts:4",
+        "src/lib/extra.ts:6",
+        "src/lib/extra.ts:8",
+      ].map(
+        (line) =>
+          `${line} holds one of git's conflict markers: resolve the conflict, keeping what the change here needs`
+      )
+    );
+    // Eight of a sign, one inside a line, a line of `=======` alone (in a
+    // template string) and markers out of git's order are none.
     expect(
       differences(
         expected,
         damsko,
         installed({
           ...inStep,
-          "src/components/button.tsx": `${resolved}========\nconst arrow = "<<<<<<< x";\n`,
+          "src/components/button.tsx": `${resolved}========\nconst arrow = "<<<<<<< x";\nconst rule = \`\n=======\n\`;\n>>>>>>> b\n=======\n<<<<<<< a\n`,
         }),
         [listed("src/components/button.tsx")]
       )
@@ -1122,6 +1132,11 @@ describe("the update", () => {
     expect(failure instanceof Error ? failure.message : failure).toContain(
       `EIO: i/o error, damsko.json\nPutting packages/ui back failed too: EIO: i/o error, ${kept}\npackages/ui/src as it was, listed changes and all, is in ${kept}: move it back`
     );
+    // Only what the update wrote: local-changes.json may hold entries not
+    // committed yet.
+    expect(failure instanceof Error ? failure.message : failure).toMatch(
+      /; git checkout packages\/ui\/damsko\.json puts back what the update wrote beside it\.$/u
+    );
     // The only copy of what src/ held, the listed edit and the added file
     // among it.
     const src = Object.fromEntries(
@@ -1130,6 +1145,38 @@ describe("the update", () => {
       )
     );
     expect(snapshot(kept)).toStrictEqual(src);
+  });
+
+  it("removes its folder once src/ is back, though putting a file back fails", async () => {
+    const { ui, before, update } = swapping({
+      write: (relative) => relative === "damsko.json",
+    });
+    const failure = await update().catch((error: unknown) => error);
+    expect(failure instanceof Error ? failure.message : failure).toMatch(
+      /Putting packages\/ui back failed too: EIO: i\/o error, damsko\.json\npackages\/ui\/src is back as it was; git checkout packages\/ui\/damsko\.json puts back what the update wrote beside it\.$/u
+    );
+    expect(snapshot(ui)).toStrictEqual(before);
+    expect(readdirSync(ui).toSorted()).toStrictEqual([
+      "damsko.json",
+      "local-changes.json",
+      "src",
+    ]);
+  });
+
+  it("tells git to put back no file the update never wrote", async () => {
+    const { ui, update } = swapping({
+      rename: (from) =>
+        from.endsWith(`${nodePath.sep}next`) ||
+        from.endsWith(`${nodePath.sep}before`),
+    });
+    const failure = await update().catch((error: unknown) => error);
+    const message = failure instanceof Error ? failure.message : "";
+    const aside = readdirSync(ui).find((name) => name.startsWith(".update-"));
+    expect(message).toContain(
+      `is in ${nodePath.join(ui, aside ?? "", "before")}: move it back to `
+    );
+    expect(message).toMatch(/\)\.$/u);
+    expect(message).not.toContain("git checkout");
   });
 
   const noDependencies: Record<string, string> = {};
