@@ -35,6 +35,7 @@ const aiKeys = [
   "MISTRAL_API_KEY",
   "OPENROUTER_API_KEY",
   "KUGELAUDIO_API_KEY",
+  "ELEVENLABS_API_KEY",
 ] as const;
 
 /** Which of Grasp's AI keys `secrets` holds, by name. */
@@ -96,9 +97,16 @@ describe("a deploy's shared secrets", () => {
         MISTRAL_API_KEY: "grasp-MISTRAL_API_KEY",
         OPENROUTER_API_KEY: "grasp-OPENROUTER_API_KEY",
         KUGELAUDIO_API_KEY: "grasp-KUGELAUDIO_API_KEY",
+        // Still delivered, for a client on a release that reads it.
+        ELEVENLABS_API_KEY: "grasp-ELEVENLABS_API_KEY",
       },
       core: [],
-      some: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "KUGELAUDIO_API_KEY"],
+      some: [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "KUGELAUDIO_API_KEY",
+        "ELEVENLABS_API_KEY",
+      ],
     });
   });
 });

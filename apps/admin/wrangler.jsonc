@@ -194,6 +194,13 @@
       "store_id": "account-secrets-store",
       "secret_name": "KUGELAUDIO_API_KEY",
     },
+    // For clients still on a release from before speech moved to
+    // KugelAudio (src/deploy/context.ts).
+    {
+      "binding": "ELEVENLABS_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ELEVENLABS_API_KEY",
+    },
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
     // (src/billing/stripe.ts). The admin's alone: never copied to a
@@ -359,6 +366,11 @@
           "binding": "KUGELAUDIO_API_KEY",
           "store_id": "account-secrets-store",
           "secret_name": "KUGELAUDIO_API_KEY_STAGING",
+        },
+        {
+          "binding": "ELEVENLABS_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ELEVENLABS_API_KEY_STAGING",
         },
         {
           "binding": "STRIPE_RESTRICTED_KEY",

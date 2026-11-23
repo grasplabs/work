@@ -85,8 +85,9 @@ export const compatibleHost = "llm.acme-ai.test";
  * One planned reply: a refusal (`status`, with its `headers`), a whole
  * stream (`sse`), a stream that sends `begin` and then nothing more until
  * its reader goes away (`hold`), no answer at all until the request is
- * dropped (`hang`), a redirect elsewhere (`redirect`), or OpenAI's own
- * answer once a test releases it by name (`release`, `releaseUrl`).
+ * dropped (`hang`), a redirect elsewhere (`redirect`), OpenAI's own
+ * answer once a test releases it by name (`release`, `releaseUrl`), or,
+ * for a line said, its first part and then the socket closed (`cut`).
  */
 export type PlannedReply =
   | { status: number; headers?: Record<string, string>; body?: unknown }
@@ -94,7 +95,8 @@ export type PlannedReply =
   | { hold: string }
   | { hang: true }
   | { redirect: string }
-  | { release: string };
+  | { release: string }
+  | { cut: true };
 
 /** Where tests release a reply held by name: POST `{ release }`. */
 export const releaseUrl = "https://ai-providers-control.test/release";
@@ -179,7 +181,8 @@ export const aiProvidersFake = () => {
       typeof value.hold === "string" ||
       value.hang === true ||
       typeof value.redirect === "string" ||
-      typeof value.release === "string");
+      typeof value.release === "string" ||
+      value.cut === true);
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: its source is embedded
   const keyOf = (request: Request): string | null => {
     const apiKey = request.headers.get("x-api-key");
@@ -417,6 +420,11 @@ export const aiProvidersFake = () => {
           text: part,
           original_text: text,
         });
+        // Cut off after its first part, as a server that failed mid-line.
+        if (reply !== undefined && "cut" in reply) {
+          server.close(1011, "");
+          return;
+        }
         from += part.length;
       }
       send({
@@ -575,6 +583,10 @@ export const aiProvidersFake = () => {
     if ("release" in reply) {
       // Never expected: a held reply is answered where it is planned for.
       return new Response("Held", { status: 500 });
+    }
+    if ("cut" in reply) {
+      // Never expected: only a line said over the speech socket is cut.
+      return new Response("Cut", { status: 500 });
     }
     return new Response(reply.sse, {
       headers: {

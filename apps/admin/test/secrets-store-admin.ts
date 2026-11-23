@@ -47,6 +47,7 @@ export const adminSecrets = (tokens: {
   // use; the other providers' empty, as a store nobody put them in reads.
   [env.OPENAI_API_KEY, "grasp-openai-key"],
   [env.KUGELAUDIO_API_KEY, "grasp-kugelaudio-key"],
+  [env.ELEVENLABS_API_KEY, ""],
   [env.ANTHROPIC_API_KEY, ""],
   [env.MISTRAL_API_KEY, ""],
   [env.OPENROUTER_API_KEY, ""],

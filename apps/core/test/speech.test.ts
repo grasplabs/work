@@ -355,6 +355,26 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await expect(carrying(line)).resolves.toHaveLength(2);
   });
 
+  it("charges what was said of a line cut off mid-way, gives no line, and doesn't ask for it again", async () => {
+    const { rulesEnv, month } = withRules();
+    const person = newPerson();
+    const line = newLine();
+    // The provider says the line's first part, "Hello ", and drops it.
+    await plan(platformKugelAudioKey, [{ cut: true }]);
+
+    await expect(
+      outcome(
+        stephen(rulesEnv, person).speak({ text: line, voice, language: "en" })
+      )
+    ).resolves.toBe("model.failed");
+    // Said, so billed: its six characters, and no second request, which
+    // would be billed again.
+    await graspSpent(month, lineMicrosOf("Hello ".length));
+    await expect(carrying(line)).resolves.toHaveLength(1);
+    const [event] = await auditedFor(person.userId, 1);
+    expect(event?.detail).toMatchObject({ outcome: "failed" });
+  });
+
   it("refuses a line longer than one request may have said", async () => {
     const { rulesEnv } = withRules();
     const line = `${newLine()}${"a".repeat(maxSpeechChars)}`;

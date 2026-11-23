@@ -19,6 +19,7 @@ export const optionalSecrets: ReadonlySet<string> = new Set([
   "MISTRAL_API_KEY",
   "OPENROUTER_API_KEY",
   "KUGELAUDIO_API_KEY",
+  "ELEVENLABS_API_KEY",
   "STRIPE_RESTRICTED_KEY",
   "ATTIO_READ_KEY",
 ]);
