@@ -478,10 +478,16 @@ export const differences = (
 export const damskoLicence = (commit: string): string =>
   `https://github.com/grasplabs/damsko/blob/${commit}/LICENSE`;
 
+/** Damsko's third-party notices at a commit, as packages/ui/LICENSE links them. */
+export const damskoNotices = (commit: string): string =>
+  `https://github.com/grasplabs/damsko/blob/${commit}/THIRD_PARTY_NOTICES.md`;
+
 /**
  * What is wrong with packages/ui/LICENSE, the notice that the files under
- * src/ stay under Damsko's licence, if anything: it must link that licence
- * at the pinned commit, which ui:update moves it to with the pin.
+ * src/ stay under Damsko's licence and the third-party work some follow
+ * under its own, if anything: it must link that licence and Damsko's
+ * third-party notices at the pinned commit, which ui:update moves them to
+ * with the pin (`movedNotice`).
  */
 export const noticeDifference = (
   notice: string | undefined,
@@ -490,10 +496,17 @@ export const noticeDifference = (
   if (notice === undefined) {
     return "LICENSE is missing: it says the files under src/ stay under Damsko's licence";
   }
-  return notice.includes(damskoLicence(commit))
+  const missing = [damskoLicence(commit), damskoNotices(commit)].filter(
+    (link) => !notice.includes(link)
+  );
+  return missing.length === 0
     ? undefined
-    : `LICENSE must link Damsko's licence at the pin, ${damskoLicence(commit)}`;
+    : `LICENSE must link Damsko's licence and third-party notices at the pin: ${missing.join(", ")}`;
 };
+
+/** packages/ui/LICENSE once the pin moves from one commit to another: its links follow it. */
+export const movedNotice = (notice: string, from: string, to: string): string =>
+  notice.replaceAll(from, to);
 
 /**
  * Listed changes older than two weeks, one line each: one with no pull

@@ -61,8 +61,9 @@
  * failing.
  *
  * `check` also holds packages/ui/LICENSE, the notice that the files under
- * src/ stay under Damsko's licence, to link that licence at the pin;
- * `update` moves the link with the pin.
+ * src/ stay under Damsko's licence and that third-party work some follow
+ * stays under its own, to link that licence and Damsko's
+ * THIRD_PARTY_NOTICES.md at the pin; `update` moves both links with the pin.
  *
  * `propose` writes the listed changes as one patch against Damsko's tree
  * at the pin and prints the commands that open the pull request there. It
@@ -89,6 +90,7 @@ import {
   expectedOf,
   fetchFor,
   fontsUnpack,
+  movedNotice,
   namespace,
   noticeDifference,
   overdue,
@@ -357,11 +359,12 @@ const main = async (): Promise<boolean> => {
         console.log(`${file}: Damsko's is now the same; its entry is dropped.`);
       }
       ({ conflicts, removed } = updated);
-      // The notice links Damsko's licence at the pin, so it moves with it.
+      // The notice links Damsko's licence and notices at the pin, so they
+      // move with it.
       if (existsSync(noticePath)) {
         writeFileSync(
           noticePath,
-          readFileSync(noticePath, "utf-8").replaceAll(kept.commit, commit)
+          movedNotice(readFileSync(noticePath, "utf-8"), kept.commit, commit)
         );
       }
       listed = readLocalChanges(localChangesPath);
