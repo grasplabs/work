@@ -11,7 +11,9 @@ import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { gateView } from "../src/onboarding/gate.ts";
+import { signInConfig } from "../src/auth/config.ts";
+import { memberFromDirectory } from "../src/auth/directory-members.ts";
+import { gateView, memberMayBeIn } from "../src/onboarding/gate.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -62,6 +64,28 @@ const signedInStill = async (cookie: string): Promise<boolean> =>
   (await refusal(whoami(cookie))) === "ok";
 
 const actionsOf = (events: AuditEvent[]) => events.map(({ action }) => action);
+
+/**
+ * A member the directory made before they ever signed in, with `role`:
+ * their user still holds the directory's placeholder address, so only
+ * their Entra object id says who they are.
+ */
+const fromDirectory = async (role: "admin" | "user") => {
+  const person = entraPerson(acmeTenant);
+  const oid = String(person.oid);
+  const member = await memberFromDirectory(env, oid, {
+    id: oid,
+    name: String(person.name),
+    email: String(person.email),
+    department: "",
+    title: "",
+    manager: null,
+  });
+  await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
+    .bind(role, member)
+    .run();
+  return { person, member };
+};
 
 /** Every test leaves the deployment open, as it found it. */
 const reopen = async () => {
@@ -154,6 +178,45 @@ describe("while the company is onboarding", () => {
       afterTheGo: true,
       nothingElse: "role.forbidden",
     });
+  });
+
+  it("lets in an admin the directory made a member before they ever signed in, by their object id, and no other member it made", async () => {
+    const promoted = await fromDirectory("admin");
+    const plain = await fromDirectory("user");
+    await adminCommands().close();
+
+    const admin = await signIn(idp, "microsoft", promoted.person);
+    const other = await signIn(idp, "microsoft", plain.person);
+    const who =
+      admin.session === undefined ? undefined : await whoami(admin.session);
+    expect({
+      asTheMember: who?.userId === promoted.member,
+      role: who?.role,
+      other: other.session,
+    }).toStrictEqual({ asTheMember: true, role: "admin", other: undefined });
+  });
+
+  it("holds a session, once someone joined, only for who they joined as: an admin while it is closed, anyone once it opens", async () => {
+    // What is asked again after a membership is made: an invitation that
+    // let someone in as an admin, withdrawn before they joined, leaves a
+    // user, whom the closed gate keeps out.
+    const config = signInConfig(env);
+    if (config === undefined) {
+      throw new Error("The tests' deployment has sign-in");
+    }
+    const joinedAsUser = await signedInWithRole(idp, "user");
+    const joinedAsAdmin = await signedInWithRole(idp, "admin");
+    await adminCommands().close();
+    const closed = [
+      await memberMayBeIn(env, config, joinedAsUser.userId),
+      await memberMayBeIn(env, config, joinedAsAdmin.userId),
+    ];
+    await adminCommands().open();
+
+    expect({
+      closed,
+      open: await memberMayBeIn(env, config, joinedAsUser.userId),
+    }).toStrictEqual({ closed: [false, true], open: true });
   });
 
   it("ends the sessions from before it closed, but staff's and the admins'", async () => {

@@ -116,6 +116,35 @@ export const mayComeIn = async (
   return admin !== undefined;
 };
 
+/**
+ * Whether the member `userId` may hold a session now, as they are once
+ * they joined: anyone while the gate is open; while it is closed, an
+ * admin the deployment's config names, or a member who is an admin now.
+ * Asked after their membership is made, so whoever came in as the admin
+ * they were about to be, and joined as less, is not let in after all.
+ */
+export const memberMayBeIn = async (
+  env: Pick<Env, "DB">,
+  config: SignInConfig,
+  userId: string
+): Promise<boolean> => {
+  const [user] = await drizzle(env.DB)
+    .select({
+      email: users.email,
+      admin: sql<number>`${isAdminMember}`,
+    })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (user === undefined) {
+    return false;
+  }
+  if (config.admins.includes(user.email.toLowerCase())) {
+    return true;
+  }
+  const { closedAt } = await stored(env);
+  return closedAt === null || user.admin === 1;
+};
+
 const part = (source: KnownPart["source"], known: number): KnownPart => ({
   source,
   weight: knownWeights[source],
