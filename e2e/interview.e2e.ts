@@ -186,6 +186,8 @@ test("someone who can't hold a button deletes their interview with two presses, 
   await page
     .getByRole("button", { name: "Type instead, without sound" })
     .click();
+  // A line typed before his first is not taken, so they answer him.
+  await expect(page.getByText(first)).toBeVisible();
   const answer = page.getByLabel("Your answer");
   await answer.fill("I check it in Exact, then I send it to Sam.");
   await answer.press("Enter");
