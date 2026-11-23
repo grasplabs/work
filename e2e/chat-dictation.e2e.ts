@@ -167,3 +167,70 @@ test("Done pressed while the browser still asks for the microphone leaves nothin
   });
   await expect(page.getByRole("group", { name: "Listening" })).toHaveCount(0);
 });
+
+test("closing the chat while it dictates stops it: no sound goes once it is out of sight, the microphone is let go of, and the bar dictates afresh", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  let sounds = 0;
+  const starts: TranscriptionStart[] = [];
+  await page.routeWebSocket("**/api/transcription", (socket) => {
+    socket.onMessage((message) => {
+      if (typeof message !== "string") {
+        sounds += 1;
+      }
+    });
+    liveLine(starts)(socket);
+  });
+  // Each stream the browser gives is kept, to read its tracks.
+  await page.addInitScript(() => {
+    const devices = navigator.mediaDevices;
+    const ask = devices.getUserMedia.bind(devices);
+    const given: MediaStream[] = [];
+    Reflect.set(window, "micGiven", given);
+    devices.getUserMedia = async (wanted) => {
+      const stream = await ask(wanted);
+      given.push(stream);
+      return stream;
+    };
+  });
+  const tracks = async (): Promise<string[]> =>
+    await page.evaluate(() => {
+      const given: unknown = Reflect.get(window, "micGiven");
+      return Array.isArray(given)
+        ? given
+            .flatMap((stream: MediaStream) => stream.getTracks())
+            .map((track) => track.readyState)
+        : [];
+    });
+  await page.goto("/apps");
+  const chat = page.getByRole("region", { name: "Chat" });
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  await expect(chat).toBeVisible();
+
+  await chat.getByRole("button", { name: "Dictate" }).click();
+  await expect(chat.getByRole("group", { name: "Listening" })).toBeVisible();
+  await expect.poll(() => sounds).toBeGreaterThan(0);
+  // Started by the pointer, the focus is on the bar, so Escape reaches it.
+  await expect(chat.getByRole("button", { name: "Done" })).toBeFocused();
+  await chat.getByRole("button", { name: "Close" }).click();
+  await expect(chat).toBeHidden();
+  await expect.poll(tracks).toStrictEqual(["ended"]);
+  const atClose = sounds;
+  // Long enough for many frames to go, were it still listening.
+  await page.waitForTimeout(3000);
+
+  expect({ after: sounds - atClose, starts: starts.length }).toStrictEqual({
+    after: 0,
+    starts: 1,
+  });
+  // The bar's box offers it again, as a new dictation on a line of its own.
+  await page.getByRole("button", { name: "Dictate" }).click();
+  await expect(page.getByRole("group", { name: "Listening" })).toBeVisible();
+  await expect.poll(() => starts.length).toBe(2);
+  await expect.poll(tracks).toStrictEqual(["ended", "live"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("group", { name: "Listening" })).toHaveCount(0);
+  await expect.poll(tracks).toStrictEqual(["ended", "ended"]);
+});
