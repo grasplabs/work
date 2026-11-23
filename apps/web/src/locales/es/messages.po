@@ -51,12 +51,6 @@ msgstr "{0, plural, one {# cosa que se dijo en ella se va con ella.} other {# co
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
 msgstr "{0, plural, one {El equipo que has dejado fuera} other {Los # equipos que has dejado fuera}}"
 
-#. placeholder {0}: formatNumber(unseen)
-#: src/projects/project-view.tsx
-msgctxt "connections the person can't see"
-msgid "{0} more"
-msgstr ""
-
 #. placeholder {0}: classes.on
 #. placeholder {1}: classes.of
 #: src/agents/agent-page.tsx
@@ -888,8 +882,13 @@ msgid "{more, plural, one {Show # more run} other {Show # more runs}}"
 msgstr "{more, plural, one {Mostrar # ejecución más} other {Mostrar # ejecuciones más}}"
 
 #: src/projects/project-view.tsx
+msgctxt "connections the person can't see"
+msgid "{more} more"
+msgstr "{more} más"
+
+#: src/projects/project-view.tsx
 msgid "{name} · {count}"
-msgstr ""
+msgstr "{name} · {count}"
 
 #: src/brain/brain-article/team-work.tsx
 msgctxt "the same pain: these teams told it too"
@@ -1064,7 +1063,7 @@ msgstr "{name} restauró un estado anterior"
 
 #: src/projects/project-view.tsx
 msgid "{name} stopped letting Grasp in"
-msgstr ""
+msgstr "{name} ya no deja entrar a Grasp"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -3474,7 +3473,7 @@ msgstr "Pregunta a {name} en cualquier chat"
 
 #: src/projects/project-view.tsx
 msgid "Ask {owner} to reconnect it."
-msgstr ""
+msgstr "Pide a {owner} que lo vuelva a conectar."
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Ask {owner} to remove Grasp at {link}."
@@ -3486,7 +3485,7 @@ msgstr "Pide a {owner} que quite el acceso de Grasp en la configuración de apli
 
 #: src/projects/project-view.tsx
 msgid "Ask {owner} to set this project up."
-msgstr ""
+msgstr "Pide a {owner} que configure este proyecto."
 
 #: src/frame/part-words.tsx
 msgid "Ask {who}: {question}"
@@ -10783,7 +10782,7 @@ msgstr "¿Crear un nuevo secreto para {name}?"
 
 #: src/projects/project-view.tsx
 msgid "Make a workflow"
-msgstr ""
+msgstr "Crear un flujo de trabajo"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Make admin"
@@ -10796,7 +10795,7 @@ msgstr "Crear agente"
 
 #: src/projects/project-view.tsx
 msgid "Make an App"
-msgstr ""
+msgstr "Crear una App"
 
 #: src/make/make-ideas.tsx
 msgid "Make an App from the {name} blueprint: {description}"
@@ -11670,7 +11669,7 @@ msgstr "Aún no hay aplicaciones"
 
 #: src/projects/project-view.tsx
 msgid "No Apps yet, such as a debtor overview."
-msgstr ""
+msgstr "Todavía no hay Apps, como un resumen de deudores."
 
 #: src/chat/chat-window.tsx
 msgid "No archived chat called “{query}”"
@@ -11950,7 +11949,7 @@ msgstr "Todavía no hay flujos de trabajo"
 
 #: src/projects/project-view.tsx
 msgid "No workflows yet, such as booking invoices."
-msgstr ""
+msgstr "Todavía no hay flujos de trabajo, como contabilizar facturas."
 
 #: src/activity/audit-event.tsx
 msgid "No: it was changed, or doesn't link to the event before it."
@@ -12051,7 +12050,7 @@ msgstr "Nada de esto es correcto"
 
 #: src/projects/project-view.tsx
 msgid "None of your chats are in this project yet."
-msgstr ""
+msgstr "Todavía no hay ninguno de tus chats en este proyecto."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "None published yet."
@@ -12934,7 +12933,7 @@ msgstr "Solo {accounts}"
 
 #: src/projects/project-view.tsx
 msgid "Only {owner} so far."
-msgstr ""
+msgstr "Por ahora solo {owner}."
 
 #: src/inbox/item-detail.tsx
 msgid "Only {person} can say whether it happened."
@@ -13096,7 +13095,7 @@ msgstr "Solo tú ves esto"
 
 #: src/projects/project-view.tsx
 msgid "Only you so far."
-msgstr ""
+msgstr "Por ahora solo tú."
 
 #: src/apps/apps-overview.tsx
 #: src/brain/activity-page.tsx
@@ -13444,7 +13443,7 @@ msgstr "En las próximas dos semanas recibirás un enlace personal breve para ha
 
 #: src/projects/project-view.tsx
 msgid "Overview"
-msgstr ""
+msgstr "Resumen"
 
 #: src/interview/words.ts
 msgid "Own list or tool"
@@ -14533,11 +14532,11 @@ msgstr "Recomendado"
 
 #: src/projects/project-view.tsx
 msgid "Reconnect"
-msgstr ""
+msgstr "Volver a conectar"
 
 #: src/projects/project-view.tsx
 msgid "Reconnect it so the Apps and workflows that use it work again."
-msgstr ""
+msgstr "Vuelve a conectarlo para que las Apps y los flujos de trabajo que lo usan funcionen de nuevo."
 
 #: src/apps/app-data.tsx
 msgid "record"
@@ -18358,11 +18357,11 @@ msgstr "El origen es https:// y un nombre de host público, sin nada detrás: ht
 
 #: src/projects/project-view.tsx
 msgid "the owner"
-msgstr ""
+msgstr "el propietario"
 
 #: src/projects/project-view.tsx
 msgid "The owner"
-msgstr ""
+msgstr "El propietario"
 
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
@@ -19916,7 +19915,7 @@ msgstr "Vista"
 
 #: src/projects/project-view.tsx
 msgid "View all"
-msgstr ""
+msgstr "Ver todo"
 
 #: src/drafts/draft-history.tsx
 msgid "View changes"

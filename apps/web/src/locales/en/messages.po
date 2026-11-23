@@ -51,12 +51,6 @@ msgstr "{0, plural, one {# thing that was said in it goes with it.} other {# thi
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
 msgstr "{0, plural, one {The team you left out} other {The # teams you left out}}"
 
-#. placeholder {0}: formatNumber(unseen)
-#: src/projects/project-view.tsx
-msgctxt "connections the person can't see"
-msgid "{0} more"
-msgstr "{0} more"
-
 #. placeholder {0}: classes.on
 #. placeholder {1}: classes.of
 #: src/agents/agent-page.tsx
@@ -886,6 +880,11 @@ msgstr "{more, plural, one {and # more} other {and # more}}"
 #: src/workflows/workflow-page.tsx
 msgid "{more, plural, one {Show # more run} other {Show # more runs}}"
 msgstr "{more, plural, one {Show # more run} other {Show # more runs}}"
+
+#: src/projects/project-view.tsx
+msgctxt "connections the person can't see"
+msgid "{more} more"
+msgstr "{more} more"
 
 #: src/projects/project-view.tsx
 msgid "{name} · {count}"

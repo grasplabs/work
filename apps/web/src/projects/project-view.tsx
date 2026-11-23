@@ -451,6 +451,7 @@ const ConnectionChips = ({
 }) => {
   const { t } = useLingui();
   const byName = Map.groupBy(connections, connectionName);
+  const more = formatNumber(unseen);
   if (byName.size === 0 && unseen === 0) {
     return null;
   }
@@ -481,7 +482,7 @@ const ConnectionChips = ({
         <li>
           <Tag variant="outline">
             {t({
-              message: `${formatNumber(unseen)} more`,
+              message: `${more} more`,
               context: "connections the person can't see",
             })}
           </Tag>

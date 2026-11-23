@@ -186,6 +186,23 @@ const fakeProjects = (
   return { session: { projects, workflowResources, chats }, asked };
 };
 
+/** A workflow as the Workflows page reads it, live and quiet. */
+const workflowRow = (id: string, name: string): OverviewRow => ({
+  id,
+  name,
+  phase: "running",
+  paused: false,
+  blocked: null,
+  role: "builder",
+  process: null,
+  owner: "Olga",
+  runs: null,
+  version: 1,
+  waiting: 0,
+  failed: 0,
+  lastRun: null,
+});
+
 let root: Root | undefined;
 
 const settled = async (): Promise<void> => {
@@ -677,6 +694,108 @@ describe("A project's page", () => {
         ["setProject", "chat-lunch", "project-1"],
         ["setProject", "chat-accruals", null],
       ],
+    });
+  });
+
+  it("shows three of each part on the overview, each workflow as it stands, with View all opening its tab", async () => {
+    const { session } = fakeProjects();
+    const items = ["one", "two", "three", "four"].map((id, at) => ({
+      type: "workflow" as const,
+      id: `wf-${id}`,
+      name: id,
+      sharedAs: null,
+      builds: true,
+      addedAt: `2026-11-0${at + 1}T10:00:00.000Z`,
+    }));
+    await shown(
+      session,
+      {
+        ...project("builder"),
+        items,
+        counts: { apps: 0, workflows: 4, connections: 0 },
+      },
+      {
+        workflows: [
+          { ...workflowRow("wf-one", "One"), paused: true },
+          { ...workflowRow("wf-two", "Two"), failed: 2 },
+          workflowRow("wf-three", "Three"),
+        ],
+      }
+    );
+
+    const rows = [
+      ...document.querySelectorAll(
+        "[aria-labelledby='project-workflows'] [data-slot=item]"
+      ),
+    ].map(words);
+
+    expect({
+      rows,
+      viewAll: link("View all")?.getAttribute("href"),
+    }).toStrictEqual({
+      rows: ["OnePaused", "Two2 failed", "ThreeNo runs yet"],
+      viewAll: "/projects/project-1?tab=workflows",
+    });
+  });
+
+  it("says which connection stopped letting Grasp in: its builders reconnect it, anyone else asks the owner", async () => {
+    const { session } = fakeProjects();
+    const connections: ProjectConnections = {
+      connections: [
+        {
+          id: "conn-1",
+          provider: "slack",
+          accountName: null,
+          status: "needs_reauth",
+        },
+      ],
+      unseen: 1,
+    };
+    await shown(session, project("builder"), { connections });
+    const builder = {
+      said: document.body.textContent?.includes(
+        "Slack stopped letting Grasp in"
+      ),
+      reconnect: link("Reconnect")?.getAttribute("href"),
+      more: document.body.textContent?.includes("1 more"),
+    };
+    cleared();
+    await shown(session, project("user"), { connections });
+
+    expect({
+      builder,
+      user: {
+        asks: document.body.textContent?.includes("Ask Olga to reconnect it."),
+        reconnect: link("Reconnect"),
+      },
+    }).toStrictEqual({
+      builder: { said: true, reconnect: "/integrations", more: true },
+      user: { asks: true, reconnect: undefined },
+    });
+  });
+
+  it("asks someone who only uses an empty project to ask its owner to set it up", async () => {
+    const { session } = fakeProjects();
+    const empty = {
+      items: [],
+      counts: { apps: 0, workflows: 0, connections: 0 },
+    };
+    await shown(session, { ...project("user"), ...empty });
+    const user = {
+      asks: document.body.textContent?.includes(
+        "Ask Olga to set this project up."
+      ),
+      make: link("Make an App"),
+    };
+    cleared();
+    await shown(session, { ...project("builder"), ...empty });
+
+    expect({
+      user,
+      builder: document.body.textContent?.includes("to set this project up"),
+    }).toStrictEqual({
+      user: { asks: true, make: undefined },
+      builder: false,
     });
   });
 });
