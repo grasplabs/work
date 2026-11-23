@@ -34,10 +34,9 @@ import { wasHeard } from "./visit.ts";
 // left, in the same row, with a way on beside it as far as you have been;
 // one centred column; where you are, bottom centre;
 // bottom right, pause and the sound, with the language before them on
-// every step after the first, where it is chosen. The steps go back
-// (the library's Stepper); so do the arrow keys and the arrows at the top,
-// and those go on as far as you have been (setup.ts `waysFrom`); Escape
-// leaves. After the wizard, a word says where things stand. The frame is
+// every step after the first, where it is chosen. The steps (the
+// library's Stepper), the arrow keys and the arrows at the top go back,
+// and on as far as you have been (setup.ts `waysFrom`); Escape leaves. After the wizard, a word says where things stand. The frame is
 // as high as the window and the page never scrolls, so the way on is
 // always in sight.
 
@@ -66,10 +65,11 @@ const styles = stylex.create({
     paddingInline: { default: space[10], [media.maxSm]: space[4] },
     backgroundColor: colors.background,
   },
-  // On a phone the steps take what the mark and the controls leave, so the controls stay whole.
+  // The steps take what the mark and the controls leave, so the controls stay whole: on a laptop
+  // the language's name stays on one line beside them.
   foot: {
     gridTemplateColumns: {
-      default: "1fr auto 1fr",
+      default: "minmax(max-content, 1fr) auto minmax(max-content, 1fr)",
       [media.maxSm]: "auto minmax(0, 1fr) auto",
     },
   },
@@ -105,10 +105,13 @@ const arrivingStyles = stylex.create({ base: { minWidth: 0 } });
 /** The steps of the wizard, each named, a way back to those done. */
 const StepDots = ({
   index,
+  reached,
   path,
   onGo,
 }: {
   index: number;
+  /** The furthest step reached: every step up to it is a way there, forward as well as back. */
+  reached: number;
   /** The screens this company's admin goes through. */
   path: SetupPath;
   onGo: (step: SetupStep) => void;
@@ -138,6 +141,7 @@ const StepDots = ({
           onGo(step);
         }
       }}
+      reached={reached}
       steps={wizard.map((step) => ({ label: names[step] }))}
       value={index}
     />
@@ -308,7 +312,7 @@ export const SetupFrame = ({
         </span>
         <div {...stylex.props(styles.where)}>
           {word === undefined ? (
-            <StepDots index={index} onGo={onGo} path={path} />
+            <StepDots index={index} onGo={onGo} path={path} reached={reached} />
           ) : (
             <span key={word} {...stylex.props(motion.rise)}>
               <Text as="span" size="sm" color="muted">
