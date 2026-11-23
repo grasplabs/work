@@ -50,12 +50,13 @@ describe("the runs log", () => {
     const rootRoute = createRootRoute({
       component: () => (
         <RunsLog
-          me="user-ada"
           more={false}
+          names={{ people: new Map(), me: "user-ada" }}
           runs={[
             runOf("run-waiting", { decision: "decision-7" }),
             runOf("run-going", {}),
           ]}
+          workflows={new Map()}
         />
       ),
     });

@@ -28,10 +28,14 @@ const run = (
 });
 
 /** The view's text, as a person reads it: tags gone, spaces collapsed. */
-const textOf = (shown: WorkflowResourceRun, seesResult = true): string =>
+const textOf = (
+  shown: WorkflowResourceRun,
+  seesResult = true,
+  builder = false
+): string =>
   renderToStaticMarkup(
     <I18nProvider i18n={i18n}>
-      <RunResultView run={shown} seesResult={seesResult} />
+      <RunResultView builder={builder} run={shown} seesResult={seesResult} />
     </I18nProvider>
   )
     .replaceAll(/<[^>]+>/gu, " ")
@@ -47,15 +51,18 @@ describe("an opened run's result", () => {
     );
   });
 
-  it("says why it failed in core's words, with the code", () => {
-    expect(
-      textOf(
-        run({
-          status: "failed",
-          error: { code: "workflow.task_failed", message: "The task failed." },
-        })
-      )
-    ).toBe("The task failed. workflow.task_failed");
+  it("says why it failed in core's words, its code only to its builders, under Details", () => {
+    const failed = run({
+      status: "failed",
+      error: { code: "workflow.task_failed", message: "The task failed." },
+    });
+    expect({
+      user: textOf(failed),
+      builder: textOf(failed, true, true),
+    }).toStrictEqual({
+      user: "The task failed.",
+      builder: "The task failed. Details workflow.task_failed",
+    });
   });
 
   it("tells a reader core keeps the result from who sees it, and says nothing more to one who may", () => {

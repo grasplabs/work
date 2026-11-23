@@ -292,7 +292,8 @@ const seedWorkflow = async (
   }
   let created: { id: string; name: string };
   try {
-    created = found ?? (await resources.create(workflow.id));
+    created =
+      found ?? (await resources.create(workflow.id, undefined, workflow.title));
   } catch (error) {
     if (isTaken(error)) {
       throw new Error(
@@ -568,7 +569,11 @@ const seedOwnWorkflow = async (
   if (listed.some(({ name }) => name === workflow.id)) {
     return "there already";
   }
-  const created = await resources.create(workflow.id);
+  const created = await resources.create(
+    workflow.id,
+    undefined,
+    workflow.title
+  );
   const draft = await resources.draft(created.id);
   const subject = { kind: "workflow", id: created.id } as const;
   const drafted = await owner.api.drafts.write(subject, draft.revision, {

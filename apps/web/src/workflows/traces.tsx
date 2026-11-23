@@ -303,6 +303,7 @@ const ActivityList = ({
 
 export const Traces = ({
   workflow,
+  name,
   runs,
   activity,
   names,
@@ -314,6 +315,8 @@ export const Traces = ({
   onCloseRun,
 }: {
   workflow: string;
+  /** The workflow's name, as people see it. */
+  name: string;
   /** The run the address asks to open, by its ID. */
   openRun?: string | undefined;
   /** Clears the run from the address once it is closed. */
@@ -375,6 +378,7 @@ export const Traces = ({
             )}
             <RunBeside
               admin={admin}
+              name={name}
               names={names}
               onClose={() => {
                 onCloseRun?.();
@@ -401,6 +405,7 @@ export const Traces = ({
               {runs.state === "ready" ? (
                 <WorkflowRunsTable
                   names={names}
+                  open={openRun}
                   runs={runs.data}
                   workflow={workflow}
                 />

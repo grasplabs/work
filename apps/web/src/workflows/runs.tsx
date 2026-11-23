@@ -6,38 +6,28 @@ import type {
   RunStatus,
 } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import { formatDateTime, formatSince } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import type { BadgeTone } from "../grasp/badge/index.ts";
 import { DataTable } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { personOf } from "./activity-bar.tsx";
+import type { Names } from "./activity-bar.tsx";
+import { runStatusLabels, runToneOf } from "./run-status.ts";
 
 // Runs as the Workflows page and a workflow's page list them, in the
 // prototype's runs log (grasplabs/prototype `components/runs-log.tsx`):
-// the workflow, when, who started it, and what happened, as a Badge: green
-// once done, the attention colour where someone is needed (a decision it
-// waits for), danger where it failed. A run waiting for a decision links
-// to where it is answered. A run says what its workflow's page lists of
-// it: what it returned or why it failed stays on the run.
-
-const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
-  queued: msg`Queued`,
-  running: msg`Running`,
-  waiting: msg`Waiting for a decision`,
-  paused: msg`Paused`,
-  completed: msg`Completed`,
-  failed: msg`Failed`,
-  cancelled: msg`Cancelled`,
-};
+// the workflow, when, who started it, and what happened, as a Badge in the
+// words every run is said in (run-status.ts). A run waiting for a decision
+// links to where it is answered. The whole row opens the run, on its
+// workflow's runs, where what it returned or why it failed is read.
 
 const styles = stylex.create({
   // A result over what it waits for, and the way to the decision.
@@ -48,30 +38,13 @@ const styles = stylex.create({
     gap: grasp.space1,
   },
   log: { display: "grid", rowGap: grasp.space2 },
+  // A link in a row that opens: over the row's press area, so it stays its own.
+  above: { position: "relative", zIndex: 1 },
 });
 
 /** A run's status, in words, in the page's language. */
 const runStatusLabel = (status: RunStatus): string =>
-  i18n._(statusLabels[status]);
-
-/**
- * How a run's status stands as a Badge: attention only where it waits on
- * someone, success once done, danger where it failed, a plain fact while it
- * goes on (queued included) or after it stopped.
- */
-const toneOf = (status: RunStatus): BadgeTone => {
-  if (status === "waiting") {
-    return "attention";
-  }
-  if (status === "completed") {
-    return "success";
-  }
-  return status === "failed" ? "danger" : "neutral";
-};
-
-/** Who started a run, in words, for the person `me`. */
-const startedByOf = ({ startedBy }: ListedRun, me: string): string =>
-  startedBy.userId === me ? i18n._(msg`You`) : i18n._(msg`Someone else`);
+  i18n._(runStatusLabels[status]);
 
 /**
  * What a run waits for when its AI provider failed a model call, in words:
@@ -114,7 +87,7 @@ const RunResult = ({
   aiProvider?: RunAiProviderWait | undefined;
 }) => (
   <span {...stylex.props(styles.outcome)}>
-    <Badge size="sm" tone={toneOf(status)}>
+    <Badge size="sm" tone={runToneOf(status)}>
       {runStatusLabel(status)}
     </Badge>
     {status === "queued" && aiProvider !== undefined ? (
@@ -135,37 +108,29 @@ const RunOutcome = ({ run }: { run: ListedRun }) => {
     <span {...stylex.props(styles.outcome)}>
       <RunResult aiProvider={run.aiProvider} status={run.status} />
       {run.decision === undefined ? null : (
-        <TextLink
-          render={
-            <Link
-              params={{ decision: run.decision }}
-              to="/decisions/$decision"
-            />
-          }
-          variant="standalone"
-        >
-          {t`Decide`}
-        </TextLink>
+        <span {...stylex.props(styles.above)}>
+          <TextLink
+            render={
+              <Link
+                params={{ decision: run.decision }}
+                to="/decisions/$decision"
+              />
+            }
+            variant="standalone"
+          >
+            {t`Decide`}
+          </TextLink>
+        </span>
       )}
     </span>
   );
 };
 
-/** A run's workflow, opening it. */
-const RunWorkflow = ({ run }: { run: ListedRun }) => (
-  <TextLink
-    render={
-      <Link params={{ workflow: run.workflowId }} to="/workflows/$workflow" />
-    }
-    variant="standalone"
-  >
-    {run.name}
-  </TextLink>
-);
-
-/** The runs log's columns, under their headers' words, for the person `me`. */
+/** The runs log's columns, under their headers' words. */
 const logColumns = (words: {
-  me: string;
+  names: Names;
+  /** Each workflow by the name people see, by its ID; its own name where missing. */
+  workflows: ReadonlyMap<string, string>;
   workflow: string;
   when: string;
   by: string;
@@ -174,8 +139,7 @@ const logColumns = (words: {
   {
     key: "workflow",
     header: words.workflow,
-    value: (run) => run.name,
-    cell: (run) => <RunWorkflow run={run} />,
+    value: (run) => words.workflows.get(run.workflowId) ?? run.name,
   },
   {
     key: "when",
@@ -183,7 +147,14 @@ const logColumns = (words: {
     value: (run) => run.createdAt,
     cell: (run) => formatDateTime(run.createdAt),
   },
-  { key: "by", header: words.by, value: (run) => startedByOf(run, words.me) },
+  {
+    key: "by",
+    header: words.by,
+    value: ({ startedBy }) =>
+      startedBy.userId === words.names.me
+        ? i18n._(msg`You`)
+        : personOf(words.names, startedBy.userId),
+  },
   {
     key: "result",
     header: words.result,
@@ -206,17 +177,21 @@ const logPageSize = 20;
 export const RunsLog = ({
   runs,
   more,
-  me,
+  names,
+  workflows,
   empty,
 }: {
   runs: ListedRun[];
   more: boolean;
-  me: string;
+  names: Names;
+  workflows: ReadonlyMap<string, string>;
   empty?: string;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const columns = logColumns({
-    me,
+    names,
+    workflows,
     workflow: t`Workflow`,
     when: t({ message: "When", context: "column: when a run happened" }),
     by: t`Started by`,
@@ -229,6 +204,13 @@ export const RunsLog = ({
         density="compact"
         empty={{ description: empty ?? t`Nothing has run yet.` }}
         label={t`Runs`}
+        onRowOpen={(run) => {
+          void navigate({
+            to: "/workflows/$workflow",
+            params: { workflow: run.workflowId },
+            search: { view: "runs", run: run.id },
+          });
+        }}
         pageSize={logPageSize}
         rowKey={(run) => run.id}
         rows={runs}

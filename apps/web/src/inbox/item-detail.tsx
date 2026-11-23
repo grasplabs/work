@@ -35,7 +35,6 @@ import {
 import type { ApprovalWords } from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { CodeBlock } from "../grasp/code-block/index.ts";
 import { External } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import {
@@ -45,6 +44,7 @@ import {
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { JsonFields } from "../json-fields.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
@@ -495,11 +495,12 @@ const HeldStartItem = ({
     <ApprovalFrame
       approveLabel={t`Start it`}
       details={
-        <CodeBlock
-          code={JSON.stringify(start.args, null, 2)}
-          fileName={t`What it starts with`}
-          language="json"
-        />
+        <>
+          <Text size="sm" tone="muted">
+            {t`What it starts with`}
+          </Text>
+          <JsonFields value={start.args} />
+        </>
       }
       frame={frame}
       onApprove={async (session) => {

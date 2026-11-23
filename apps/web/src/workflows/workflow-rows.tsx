@@ -46,6 +46,7 @@ import type {
   WorkflowState,
 } from "./overview.ts";
 import { WorkflowStateIcon } from "./state-icon.tsx";
+import { triggerBlockText } from "./trigger-block.ts";
 
 // The Workflows page's rows (Ruben's pick of 21 November, the study's
 // direction E, "Route"): one row a workflow, gathered by the phase it
@@ -59,13 +60,17 @@ import { WorkflowStateIcon } from "./state-icon.tsx";
 const phaseNames: Readonly<Record<Phase, MessageDescriptor>> = {
   needsYou: msg({ message: "Needs you", context: "workflow phase" }),
   running: msg({ message: "Running", context: "workflow phase" }),
-  building: msg({ message: "Building", context: "workflow phase" }),
+  building: msg({ message: "Not running", context: "workflow phase" }),
 };
 
 const stateNames: Readonly<Record<WorkflowState, MessageDescriptor>> = {
   failing: msg({ message: "Failing", context: "how a workflow stands" }),
   waiting: msg({ message: "Waiting on you", context: "how a workflow stands" }),
   paused: msg({ message: "Paused", context: "a workflow someone paused" }),
+  blocked: msg({
+    message: "Not starting",
+    context: "how a workflow stands: nothing can start it yet",
+  }),
   live: msg({ message: "Live", context: "how a workflow stands" }),
   building: msg({ message: "Not live yet", context: "how a workflow stands" }),
 };
@@ -222,6 +227,15 @@ const Week = ({ row, state }: { row: OverviewRow; state: WorkflowState }) => {
   const runs = formatNumber(row.runs ?? 0);
   const since = row.lastRun === null ? "" : whenOf(row.lastRun);
   const needs = state === "failing" || state === "waiting";
+  // A user of it sees their own runs alone, so its figures are theirs.
+  const own = row.role === "user";
+  let last = row.lastRun === null ? t`No runs yet` : t`Last run ${since}`;
+  if (own) {
+    last =
+      row.lastRun === null
+        ? t`You haven't run it yet`
+        : t`Your last run ${since}`;
+  }
   return (
     <span {...stylex.props(styles.end)}>
       <span {...stylex.props(styles.figure)}>
@@ -235,13 +249,13 @@ const Week = ({ row, state }: { row: OverviewRow; state: WorkflowState }) => {
           // On a phone a row that needs the reader says only that: its
           // name keeps the room.
           <span {...stylex.props(needs && styles.wide)}>
-            {t`${runs} this week`}
+            {own
+              ? t`${runs} of yours done this week`
+              : t`${runs} done this week`}
           </span>
         )}
       </span>
-      <span {...stylex.props(styles.last)}>
-        {row.lastRun === null ? t`No runs yet` : t`Last run ${since}`}
-      </span>
+      <span {...stylex.props(styles.last)}>{last}</span>
     </span>
   );
 };
@@ -264,10 +278,13 @@ const WorkflowRow = ({
   // it needs the reader, the row's end says so with its count ("3 failed"),
   // so the line leaves it out: said once.
   const needs = state === "failing" || state === "waiting";
+  // Where its triggers can't start it, why, in place of how it stands.
+  const standing =
+    row.blocked === null ? stands : triggerBlockText(row.blocked, i18n);
   const line = [
     row.owner,
     version === null ? null : t`v${version}`,
-    needs ? null : stands,
+    needs ? null : standing,
   ].filter((part): part is string => part !== null);
   return (
     <Item
@@ -296,7 +313,10 @@ export const WorkflowRows = ({
   rows,
   tools,
   triggers,
+  builds,
 }: {
+  /** Whether the reader may make a workflow; else they are told who does. */
+  builds: boolean;
   /** In the order of their phases (overview.ts). */
   rows: readonly OverviewRow[];
   tools: ToolsByWorkflow | undefined;
@@ -310,12 +330,16 @@ export const WorkflowRows = ({
           <EmptyMedia icon={Workflow} />
           <EmptyTitle>{t`No workflows yet`}</EmptyTitle>
           <EmptyDescription>
-            {t`Workflows are made in chat: describe what should run on its own, and Grasp builds it.`}
+            {builds
+              ? t`Workflows are made in chat: describe what should run on its own, and Grasp builds it.`
+              : t`A workflow does routine work on its own, such as reading the invoices that arrive by email. Your admin or Grasp sets them up; one shared with you shows here.`}
           </EmptyDescription>
         </EmptyHeader>
-        <EmptyContent>
-          <Button render={<Link search={{}} to="/" />}>{t`Open Chat`}</Button>
-        </EmptyContent>
+        {builds ? (
+          <EmptyContent>
+            <Button render={<Link search={{}} to="/" />}>{t`Open Chat`}</Button>
+          </EmptyContent>
+        ) : null}
       </Empty>
     );
   }

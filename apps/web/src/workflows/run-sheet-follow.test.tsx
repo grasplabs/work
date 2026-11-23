@@ -107,6 +107,7 @@ const OpenSheet = () => {
   return (
     <RunBeside
       admin={false}
+      name="Invoice intake"
       names={{ me: "ada", people: new Map() }}
       onClose={() => {
         // Stays open.

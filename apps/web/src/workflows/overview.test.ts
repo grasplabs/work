@@ -107,7 +107,7 @@ describe("the Workflows page's rows", () => {
     ]);
   });
 
-  it("carries what core says of each: the name people see, its owner, its process, whether it is paused, and its runs this week once it ran", async () => {
+  it("carries what core says of each: the name people see, its owner, its process, whether it is paused (and so not running), and its runs this week once it ran", async () => {
     const read = await overviewOf({
       overview: async () =>
         await Promise.resolve([
@@ -129,8 +129,10 @@ describe("the Workflows page's rows", () => {
       {
         id: "id-intake",
         name: "Intake",
-        phase: "running",
+        phase: "building",
         paused: true,
+        blocked: null,
+        role: null,
         process: "o2c",
         owner: "Ada Lovelace",
         runs: 12,
@@ -144,6 +146,8 @@ describe("the Workflows page's rows", () => {
         name: "Planned",
         phase: "building",
         paused: false,
+        blocked: null,
+        role: null,
         process: null,
         owner: null,
         runs: null,

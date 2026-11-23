@@ -26,7 +26,6 @@ import { setActiveChat } from "../chat/active-chat.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { slotOf } from "../chat/chat-subject.ts";
 import { useChatAbout } from "../chat/global-chat.tsx";
-import { readPeople } from "../directory.ts";
 import {
   ShareWithTeam,
   showsUnpublishedChanges,
@@ -59,7 +58,9 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
 import type { Names } from "../workflows/activity-bar.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
-import { workflowVersions } from "../workflows/reads.ts";
+import { workflowBlock } from "../workflows/overview.ts";
+import type { TriggerBlock } from "../workflows/overview.ts";
+import { readWorkflowNames, workflowVersions } from "../workflows/reads.ts";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { workflowSettingsSectionOf } from "../workflows/settings-sections.ts";
 import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
@@ -279,6 +280,7 @@ const ViewSwitch = ({
  */
 const RunsView = ({
   workflow,
+  name,
   builder,
   runs,
   activity,
@@ -289,6 +291,8 @@ const RunsView = ({
   onCloseRun,
 }: {
   workflow: string;
+  /** Its name, as people see it. */
+  name: string;
   /** The run the address asks to open, by its ID. */
   openRun: string | undefined;
   /** Clears the run from the address once it is closed. */
@@ -308,6 +312,7 @@ const RunsView = ({
         <Traces
           activity={activity}
           admin={admin}
+          name={name}
           names={names}
           onCloseRun={onCloseRun}
           onPartChange={setPart}
@@ -326,6 +331,7 @@ const RunsView = ({
         {runs.state === "ready" ? (
           <ResourceRuns
             admin={admin}
+            name={name}
             names={names}
             onCloseRun={onCloseRun}
             openRun={openRun}
@@ -368,6 +374,8 @@ interface WorkflowPageRead {
   runs: Loaded<WorkflowResourceRun[]>;
   askable: Loaded<boolean>;
   activity: Loaded<WorkflowActivity[]>;
+  /** Why its triggers start nothing, if they can't; null where they can or core didn't list them. */
+  blocked: TriggerBlock | null;
   names: Names;
   /** Who reads it: what its History offers them. */
   identity: Pick<Identity, "userId" | "role" | "staff">;
@@ -383,6 +391,8 @@ interface WorkflowPageRead {
  */
 const WorkflowBar = ({
   resource,
+  blocked,
+  admin,
   back,
   view,
   flow,
@@ -400,6 +410,9 @@ const WorkflowBar = ({
   onShared,
 }: {
   resource: WorkflowResource;
+  blocked: TriggerBlock | null;
+  /** Whether the reader is an admin who allows triggers: an admin of its own, not Grasp staff. */
+  admin: boolean;
   back: Crumb;
   view: WorkflowView;
   /** Whether the reader has its Flow: its draft. */
@@ -466,13 +479,14 @@ const WorkflowBar = ({
       back={back}
       name={label}
       state={
-        builder && members === undefined ? undefined : (
-          <WorkflowStatus
-            live={live}
-            paused={paused}
-            who={members === undefined ? undefined : memberNames(members)}
-          />
-        )
+        <WorkflowStatus
+          admin={admin}
+          blocked={blocked}
+          builder={builder}
+          live={live}
+          paused={paused}
+          who={members === undefined ? undefined : memberNames(members)}
+        />
       }
       views={
         <ViewSwitch
@@ -576,7 +590,9 @@ const WorkflowResourceView = ({
     <ItemShell
       bar={
         <WorkflowBar
+          admin={read.approves}
           back={back}
+          blocked={read.blocked}
           builder={builder}
           draft={shared}
           flow={draft !== undefined}
@@ -633,6 +649,7 @@ const WorkflowResourceView = ({
           activity={activity}
           admin={admin}
           builder={builder}
+          name={label}
           names={names}
           onCloseRun={() => {
             runAt();
@@ -658,16 +675,21 @@ const WorkflowResourceView = ({
   );
 };
 
+/** People's names by ID, and whether they name every member. */
+interface People {
+  people: ReadonlyMap<string, string>;
+  everyone: boolean;
+}
+
+const noPeople: People = { people: new Map(), everyone: false };
+
 /**
- * People's names by ID, for the names on activity lines: read beside the
- * page rather than before it, with IDs standing in until they come.
+ * People's names by ID, for the names on runs and activity lines: read
+ * beside the page rather than before it, "Someone else" standing in until
+ * they come.
  */
-const usePeople = (
-  read: Promise<Loaded<ReadonlyMap<string, string>>>
-): ReadonlyMap<string, string> => {
-  const [people, setPeople] = useState<ReadonlyMap<string, string>>(
-    () => new Map()
-  );
+const usePeople = (read: Promise<Loaded<People>>): People => {
+  const [people, setPeople] = useState<People>(noPeople);
   useEffect(() => {
     let left = false;
     const settle = async (): Promise<void> => {
@@ -717,7 +739,7 @@ const WorkflowResourcePage = () => {
       back={back}
       handedOver={chat}
       identity={identity}
-      names={{ people, me: identity.userId }}
+      names={{ ...people, me: identity.userId }}
       resource={resource.data}
       run={run}
       section={section}
@@ -790,7 +812,10 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
     deps: { project },
   }) => {
     // Names only, and not waited for: IDs stand in until they come.
-    const people = loadFromCore(core, readPeople);
+    const people = loadFromCore(
+      core,
+      async (session): Promise<People> => await readWorkflowNames(session)
+    );
     const resourceRead = loadFromCore(
       core,
       async (session) => await session.workflowResources.get(workflow)
@@ -828,6 +853,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       askable,
       activity,
       inProject,
+      triggers,
     ] = await Promise.all([
       resourceRead,
       draftRead(),
@@ -857,6 +883,13 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await readItemProject(session, project)
       ),
+      // What starts it, for whether anything can: none where core doesn't
+      // list them to the reader.
+      loadFromCore(
+        core,
+        async (session) =>
+          await session.workflowResources.triggers.list(workflow)
+      ),
     ]);
     return {
       resource,
@@ -867,6 +900,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       runs,
       askable,
       activity,
+      blocked: triggers.state === "ready" ? workflowBlock(triggers.data) : null,
       people,
       project: inProject.state === "ready" ? inProject.data : undefined,
     };

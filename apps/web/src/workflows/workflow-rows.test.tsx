@@ -32,6 +32,8 @@ const row = (name: string, change: Partial<OverviewRow>): OverviewRow => ({
   name,
   phase: "running",
   paused: false,
+  blocked: null,
+  role: null,
   process: null,
   owner: "Ada Lovelace",
   runs: 12,
@@ -70,8 +72,13 @@ const triggers: TriggersByWorkflow = new Map([
   [
     "wf-archive",
     [
-      { kind: "email", address: "archive", nextAt: null },
-      { kind: "schedule", address: null, nextAt: "2026-11-23T08:00:00.000Z" },
+      { kind: "email", address: "archive", nextAt: null, blocked: null },
+      {
+        kind: "schedule",
+        address: null,
+        nextAt: "2026-11-23T08:00:00.000Z",
+        blocked: null,
+      },
     ],
   ],
   ["wf-expenses", []],
@@ -87,6 +94,7 @@ const shown = async ({ unread = false }: { unread?: boolean } = {}) => {
     path: "/",
     component: () => (
       <WorkflowRows
+        builds
         rows={rows}
         tools={tools}
         triggers={unread ? undefined : triggers}
@@ -156,7 +164,7 @@ describe("the Workflows page's rows", () => {
         heading: "Running",
         workflows: ["/workflows/wf-archive", "/workflows/wf-expenses"],
       },
-      { heading: "Building", workflows: ["/workflows/wf-billing"] },
+      { heading: "Not running", workflows: ["/workflows/wf-billing"] },
     ]);
   });
 
@@ -185,7 +193,7 @@ describe("the Workflows page's rows", () => {
         .querySelector('[data-slot="brand-icon-group"]')
         ?.getAttribute("aria-label")
     ).toBe("Microsoft and Acme CRM");
-    expect(archive.textContent).toContain("12 this week");
+    expect(archive.textContent).toContain("12 done this week");
   });
 
   it("says a workflow nothing starts is started by hand, and one that never ran has no runs yet", async () => {

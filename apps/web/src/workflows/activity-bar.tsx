@@ -18,16 +18,28 @@ import { runStatusLabels } from "./run-status.ts";
 // is one line, its name and the newest thing that happened, so a look
 // says whether the workflow is alive; open, the recent lines newest first,
 // with the way to all of them in Traces. Who did something is named as
-// the directory knows them; a run's person is "you" or "someone else".
+// the page knows them, never by an ID.
 
 /** Who someone is on this page: their name where it's known. */
 export interface Names {
   people: ReadonlyMap<string, string>;
   me: string;
+  /**
+   * Whether `people` names everyone in the organization (an admin's read
+   * of its members): someone not in it has left.
+   */
+  everyone?: boolean;
 }
 
-const personOf = (names: Names, userId: string): string =>
-  names.people.get(userId) ?? userId;
+/**
+ * Someone by name: as the page knows them; once it knows everyone, one it
+ * doesn't is a former member; else "Someone else", never their ID.
+ */
+export const personOf = (names: Names, userId: string): string =>
+  names.people.get(userId) ??
+  (names.everyone === true
+    ? i18n._(msg`A former member`)
+    : i18n._(msg`Someone else`));
 
 /** One line of activity, in a whole sentence. */
 export const activityText = (row: WorkflowActivity, names: Names): string => {
