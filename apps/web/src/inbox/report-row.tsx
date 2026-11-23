@@ -1,5 +1,6 @@
 import type { BoardReport } from "@grasp-os/shared/board-report";
 import type { Programme } from "@grasp-os/shared/onboarding";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Item,
@@ -31,6 +32,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { downloadText } from "../export/export-file.tsx";
 import { formatDayMonth } from "../format.ts";
+import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { ReportView } from "./report-view.tsx";
@@ -353,7 +355,7 @@ export const ReportItem = ({
   /** The weekly report, as core reads it in one call: the sheet waits for it. */
   report: Promise<Loaded<BoardReport>>;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const { nextReport: next, today } = programme;
@@ -399,7 +401,16 @@ export const ReportItem = ({
             {(loaded) =>
               loaded.state === "ready" ? (
                 <ReportSheetBody programme={programme} report={loaded.data} />
-              ) : null
+              ) : (
+                // Never an empty sheet: why the report couldn't be read.
+                <SheetBody>
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      {notLoadedText(loaded, i18n)}
+                    </AlertDescription>
+                  </Alert>
+                </SheetBody>
+              )
             }
           </Await>
         </SheetContent>

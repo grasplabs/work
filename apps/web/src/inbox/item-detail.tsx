@@ -1,3 +1,4 @@
+import { failureText } from "@grasp-os/shared/errors";
 import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import {
@@ -42,7 +43,6 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
-import { changeThenRefresh } from "../change-then-refresh.ts";
 import {
   confirmHeld,
   declineHeld,
@@ -54,7 +54,7 @@ import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
-import { ApprovalRequest } from "./approval-request.tsx";
+import { ApprovalRequest, useArmed } from "./approval-request.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
 import { JsonBlock } from "./json-block.tsx";
@@ -210,12 +210,47 @@ const ActButton = ({
   );
 };
 
-/** What the inbox gives an item: where to say what was done. */
-interface Frame {
+/** What the inbox gives an item: where it stands, and where to say what came of an answer. */
+export interface Frame {
   item: InboxItem;
+  /** Opened in place of an item just answered: its answers wait a moment. */
+  arriving: boolean;
+  /** Kept on screen after core refused an answer, though it waits no more. */
+  gone: boolean;
   /** Says what was done, for a screen reader: the list only loses the item. */
   onSaid: (said: string) => void;
+  /** Core refused an answer: the inbox keeps the item in place until the person moves on. */
+  onRefused: () => void;
 }
+
+/**
+ * Gives an answer to core, then reads the inbox again whatever came of
+ * it. Through: `said`. Refused: `refused` with core's reason, before the
+ * inbox is read again (which may no longer list the item), and it fails
+ * as core did. Outside components, as the React Compiler can't compile
+ * `try`.
+ */
+const answerThenRefresh = async ({
+  give,
+  said,
+  refused,
+  refresh,
+}: {
+  give: () => Promise<unknown>;
+  said: () => void;
+  refused: (reason: string) => void;
+  refresh: () => Promise<void>;
+}): Promise<void> => {
+  try {
+    await give();
+  } catch (error) {
+    refused(failureText(error));
+    await refresh();
+    throw error;
+  }
+  said();
+  await refresh();
+};
 
 /** The item as it is shown: what happened, what to read, its actions, and its facts. */
 const ItemFrame = ({
@@ -234,6 +269,9 @@ const ItemFrame = ({
 }) => {
   const { t, i18n } = useLingui();
   const titleId = useId();
+  const armed = useArmed(frame.arriving);
+  // No action while the item has only just come, or waits no more.
+  const held = busy || !armed || frame.gone;
   const { item } = frame;
   // Who it is for, when it is someone in particular: an admin's by default.
   const facts: KeyValueItem[] = item.facts.map(({ label, value }) => ({
@@ -290,7 +328,7 @@ const ItemFrame = ({
                 {shown.map((act, index) => (
                   <ActButton
                     act={act}
-                    busy={busy}
+                    busy={held}
                     first={index === 0}
                     key={act.label}
                   />
@@ -312,8 +350,11 @@ const ItemFrame = ({
   );
 };
 
-/** Makes a change, says what was done, and reads the inbox again whatever came of it. */
-const useDecide = (onSaid: (said: string) => void) => {
+/**
+ * Makes a change, says what was done, and reads the inbox again whatever
+ * came of it; refused, the item is kept with core's reason.
+ */
+const useDecide = (frame: Frame) => {
   const router = useRouter();
   const action = useCoreAction();
   const decide = async (
@@ -321,16 +362,19 @@ const useDecide = (onSaid: (said: string) => void) => {
     said: string
   ): Promise<void> => {
     await action.run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await change(session);
-          onSaid(said);
+      await answerThenRefresh({
+        give: async () => await change(session),
+        said: () => {
+          frame.onSaid(said);
         },
-        async () => {
+        refused: () => {
+          frame.onRefused();
+        },
+        refresh: async () => {
           // `sync` waits for the read, so the buttons stay off until the item goes.
           await router.invalidate({ sync: true });
-        }
-      );
+        },
+      });
     });
   };
   return { ...action, decide };
@@ -364,24 +408,30 @@ const ApprovalFrame = ({
   const router = useRouter();
   const core = useCore();
   const { item } = frame;
+  // Core's reason stands under the ask, said by ApprovalRequest itself.
   const answer =
     (change: (session: Session) => Promise<unknown>, said: string) =>
     async () => {
-      await changeThenRefresh(
-        async () => {
-          await core.withSession(change);
+      await answerThenRefresh({
+        give: async () => await core.withSession(change),
+        said: () => {
           frame.onSaid(said);
         },
-        async () => {
+        refused: () => {
+          frame.onRefused();
+        },
+        refresh: async () => {
           await router.invalidate({ sync: true });
-        }
-      );
+        },
+      });
     };
   const { title } = item;
   return (
     <ApprovalRequest
       approveHeld={approveHeld}
       approveLabel={approveLabel}
+      arriving={frame.arriving}
+      gone={frame.gone}
       asker={item.asker}
       askedAt={item.date === "" ? undefined : formatDate(item.date)}
       details={details}
@@ -504,7 +554,7 @@ const OutcomeItem = ({
   const shown = useShown(outcome);
   const unresolvableId = useId();
   const removedId = useId();
-  const { busy, failure, decide } = useDecide(frame.onSaid);
+  const { busy, failure, decide } = useDecide(frame);
   const who = frame.item.context;
   const connection = outcome.connectionName ?? outcome.key.connectionId;
   const unresolvable = isUnresolvable(outcome);
@@ -650,15 +700,31 @@ const AskedItem = ({
   const { notification } = source;
   const { owner, question } = notification;
   const asked = t`Asked of you as the ${owner}`;
+  // Why core refused the answer, in its words: answered already, say
+  // (`brain.gap_closed`). The Questionnaire only says it wasn't sent.
+  const [failure, setFailure] = useState<string>();
   const answer = async (
     answers: Record<string, QuestionnaireAnswer>
   ): Promise<void> => {
     const text = answers.answer?.text.trim() ?? "";
-    await core.withSession(
-      async (session) => await session.brain.answerGap(notification.gap, text)
-    );
-    frame.onSaid(t`Answered: ${question}`);
-    await router.invalidate({ sync: true });
+    setFailure(undefined);
+    await answerThenRefresh({
+      give: async () =>
+        await core.withSession(
+          async (session) =>
+            await session.brain.answerGap(notification.gap, text)
+        ),
+      said: () => {
+        frame.onSaid(t`Answered: ${question}`);
+      },
+      refused: (reason) => {
+        setFailure(reason);
+        frame.onRefused();
+      },
+      refresh: async () => {
+        await router.invalidate({ sync: true });
+      },
+    });
   };
   return (
     <ItemFrame
@@ -676,7 +742,7 @@ const AskedItem = ({
           </QuestionnaireActions>
         </Questionnaire>
       }
-      failure={undefined}
+      failure={failure}
       frame={{ ...frame, item: { ...frame.item, title: asked } }}
     />
   );

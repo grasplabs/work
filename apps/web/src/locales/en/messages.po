@@ -2826,6 +2826,10 @@ msgstr "Areas finished"
 msgid "Article"
 msgstr "Article"
 
+#: src/inbox/request-details.tsx
+msgid "as {binding}"
+msgstr "as {binding}"
+
 #: src/settings/stephen-settings.tsx
 msgid "As for Stephen"
 msgstr "As for Stephen"
@@ -3377,6 +3381,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/frame/ui-words.tsx
+#: src/inbox/decision-confirmation.tsx
 #: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
@@ -7647,6 +7652,10 @@ msgstr "Keep what agents read through {label} in the Brain?"
 msgid "Keep what agents read through it for"
 msgstr "Keep what agents read through it for"
 
+#: src/inbox/report-view.tsx
+msgid "Keeps failing"
+msgstr "Keeps failing"
+
 #: src/apps/data-model-changes.tsx
 msgid "Keeps the records of {table}, though nothing reads them any more."
 msgstr "Keeps the records of {table}, though nothing reads them any more."
@@ -8276,6 +8285,10 @@ msgstr "Model"
 msgid "Model call"
 msgstr "Model call"
 
+#: src/inbox/report-view.tsx
+msgid "Model cost"
+msgstr "Model cost"
+
 #: src/chat/composer.tsx
 msgid "Model: {name}, set for this agent"
 msgstr "Model: {name}, set for this agent"
@@ -8814,6 +8827,10 @@ msgstr "No longer held since {ended}"
 #: src/connections/tool-permissions.tsx
 msgid "No longer offered"
 msgstr "No longer offered"
+
+#: src/inbox/inbox-page.tsx
+msgid "No longer waits for you"
+msgstr "No longer waits for you"
 
 #: src/onboarding/setup-steps.tsx
 msgid "No longer where it was"
@@ -9552,6 +9569,10 @@ msgstr "Offered to the company"
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
 msgstr "Offered to your organization"
+
+#: src/inbox/report-view.tsx
+msgid "Often corrected"
+msgstr "Often corrected"
 
 #: src/apps/app-data.tsx
 msgid "Older changes"
@@ -14452,6 +14473,10 @@ msgstr "This chat read private or restricted data: this may send it out"
 msgid "This connection needs to be connected again."
 msgstr "This connection needs to be connected again."
 
+#: src/inbox/report-view.tsx
+msgid "This couldn't be read when the report was made."
+msgstr "This couldn't be read when the report was made."
+
 #: src/inbox/decision-card.tsx
 msgid "This decision has closed."
 msgstr "This decision has closed."
@@ -15427,6 +15452,10 @@ msgstr "Waiting for {signIn}"
 msgid "Waiting for a decision"
 msgstr "Waiting for a decision"
 
+#: src/inbox/report-view.tsx
+msgid "Waiting for a person"
+msgstr "Waiting for a person"
+
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -15560,6 +15589,10 @@ msgstr "Webhooks"
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
+
+#: src/inbox/report-view.tsx
+msgid "Week {number} of {weeks}"
+msgstr "Week {number} of {weeks}"
 
 #: src/brain/brain-article/kern.tsx
 msgid "week {week}"
@@ -15821,6 +15854,10 @@ msgstr "What people call it, one line on what it is for, and its picture. All th
 #: src/workflows/workflow-settings.tsx
 msgid "What people see instead of {name}."
 msgstr "What people see instead of {name}."
+
+#: src/inbox/report-view.tsx
+msgid "What ran"
+msgstr "What ran"
 
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"

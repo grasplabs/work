@@ -18,7 +18,7 @@ import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 
 // An ask for the person's yes in the Inbox (a held change, a start an
@@ -29,8 +29,9 @@ import type { ReactNode } from "react";
 // adds round them lives here: the quiet line, Details, an Approve held back
 // with why, and the two answers as one, so the one not pressed waits while
 // the other works. Each answer works in place until core has it; one core
-// refuses says so on its own button, with core's reason under the ask, and
-// the request still waits. Once
+// refuses says so on its own button, with core's reason under the ask,
+// and the Inbox keeps the item in place until the person moves on, even
+// once it waits no more (answered elsewhere). Once
 // answered the title says what was decided, and the Inbox reads again, so
 // the item leaves.
 
@@ -72,6 +73,32 @@ const settled = async (
   }
 };
 
+/**
+ * How long the answers of an item that opened in place of one just
+ * answered stay out of use: longer than a double click, so a second press
+ * meant for the item before never answers this one.
+ */
+const arrivalPauseMs = 1000;
+
+/**
+ * Whether an item's answers may be used: at once, or, for one `arriving`
+ * in place of an item just answered, after `arrivalPauseMs`.
+ */
+export const useArmed = (arriving: boolean): boolean => {
+  const [armed, setArmed] = useState(!arriving);
+  useEffect(() => {
+    const timer = armed
+      ? undefined
+      : setTimeout(() => {
+          setArmed(true);
+        }, arrivalPauseMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [armed]);
+  return armed;
+};
+
 /** Where the request stands: waiting, or what was answered here. */
 type Answer = { state: "waiting" } | { state: "answered"; approved: boolean };
 
@@ -82,6 +109,8 @@ export const ApprovalRequest = ({
   approveLabel,
   approveHeld,
   details,
+  arriving = false,
+  gone = false,
   onApprove,
   onDecline,
 }: {
@@ -97,6 +126,10 @@ export const ApprovalRequest = ({
   approveHeld?: string | undefined;
   /** What to read before answering, under Details. */
   details?: ReactNode;
+  /** Opened in place of an item just answered: its answers wait a moment. */
+  arriving?: boolean;
+  /** Kept on screen after it waits no more: nothing to answer. */
+  gone?: boolean;
   /** Gives the yes to core: the button works until it is through, and says so when it fails. */
   onApprove: () => Promise<unknown>;
   onDecline: () => Promise<unknown>;
@@ -108,6 +141,9 @@ export const ApprovalRequest = ({
   const [giving, setGiving] = useState<boolean>();
   // Why core refused the last answer, in its words: the request still waits.
   const [failure, setFailure] = useState<string>();
+  const armed = useArmed(arriving);
+  // Neither answer, while the item has only just come or waits no more.
+  const off = !armed || gone;
   const give = (approved: boolean) => async () => {
     setGiving(approved);
     setFailure(undefined);
@@ -165,14 +201,14 @@ export const ApprovalRequest = ({
       <span {...stylex.props(styles.answers)}>
         <ConfirmationActions>
           <ConfirmationAction
-            disabled={giving === true}
+            disabled={off || giving === true}
             onClick={give(false)}
             variant="outline"
           >
             {t`Decline`}
           </ConfirmationAction>
           <ConfirmationAction
-            disabled={giving === false || approveHeld !== undefined}
+            disabled={off || giving === false || approveHeld !== undefined}
             onClick={give(true)}
           >
             {approveLabel ?? t`Approve`}

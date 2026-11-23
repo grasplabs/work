@@ -51,6 +51,7 @@ import { groupLabel, groupOrder } from "./groups.ts";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { inboxStyles } from "./inbox-styles.ts";
 import { ItemDetail } from "./item-detail.tsx";
+import type { Frame } from "./item-detail.tsx";
 import { groupOf, listed } from "./items.ts";
 import type { Group, InboxItem } from "./items.ts";
 import { orderOf, skip, stepFrom } from "./walk.ts";
@@ -83,6 +84,13 @@ const styles = stylex.create({
     gap: space["4"],
     minWidth: 0,
   },
+  // Beside the list, the panel stops clear of the chat box, which the
+  // frame centres over the page's foot, list and panel together: short by
+  // the box's height, its gap to the card's foot and a little air, so the
+  // box floats under the panel's end, never across its edge. Once the
+  // frame seats the panel itself (#2617's page panel), the box centres
+  // over the list alone and this goes.
+  besideClearOfChat: { height: `calc(100% - ${space["20"]})`, minHeight: 0 },
   // Nothing waits: the report's row stands under the Empty, at a list's width.
   emptyFoot: {
     width: "100%",
@@ -287,14 +295,16 @@ const WalkHead = ({
   onStep,
   onSkip,
 }: {
-  place: number;
+  /** Where the item stands in what waits; undefined once it waits no more. */
+  place: number | undefined;
   count: number;
   onStep: (by: 1 | -1) => void;
   onSkip: () => void;
 }) => {
   const { t } = useLingui();
-  // One alone has nowhere to go: no head.
-  if (count < 2) {
+  // One alone has nowhere to go: no head. One kept after it waits no more
+  // has the rest to go on to.
+  if (place === undefined ? count < 1 : count < 2) {
     return null;
   }
   return (
@@ -311,9 +321,13 @@ const WalkHead = ({
       </Button>
       <span {...stylex.props(styles.place)}>
         <Text as="span" color="muted" size="sm">
-          <Trans>
-            {place} of {count}
-          </Trans>
+          {place === undefined ? (
+            <Trans>No longer waits for you</Trans>
+          ) : (
+            <Trans>
+              {place} of {count}
+            </Trans>
+          )}
         </Text>
       </span>
       <Button
@@ -327,32 +341,138 @@ const WalkHead = ({
         <Icon icon={ChevronRightIcon} />
       </Button>
       {/* Skipping is no answer: it stands apart from the item's own. */}
-      <span {...stylex.props(styles.skip)}>
-        <Button onClick={onSkip} size="sm" variant="ghost">
-          <Trans context="put a to-do card at the back of the pile">Skip</Trans>
-        </Button>
-      </span>
+      {place === undefined ? null : (
+        <span {...stylex.props(styles.skip)}>
+          <Button onClick={onSkip} size="sm" variant="ghost">
+            <Trans context="put a to-do card at the back of the pile">
+              Skip
+            </Trans>
+          </Button>
+        </span>
+      )}
     </div>
   );
 };
 
 /** The panel's content: the walk's head, then the item to decide, answered in place. */
-const Inspector = ({
-  selected,
-  head,
-  onSaid,
-}: {
-  selected: InboxItem;
-  head: ReactNode;
-  onSaid: (said: string) => void;
-}) => (
+const Inspector = ({ head, ...frame }: Frame & { head: ReactNode }) => (
   <SidePanelContent>
     <div {...stylex.props(styles.inspector)}>
       {head}
-      <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
+      <ItemDetail key={frame.item.id} {...frame} />
     </div>
   </SidePanelContent>
 );
+
+/**
+ * The item the panel shows: the one whose answer core refused while it is
+ * kept, as it is now if it still waits, else as it was; otherwise the one
+ * selected. With where it stands in the list, and whether it waits no
+ * more (`gone`: kept, with nothing left to answer).
+ */
+const shownOf = (
+  list: readonly InboxItem[],
+  selected: InboxItem | undefined,
+  refused: InboxItem | undefined
+): { item: InboxItem | undefined; place: number; gone: boolean } => {
+  const item =
+    refused === undefined
+      ? selected
+      : (list.find(({ id }) => id === refused.id) ?? refused);
+  const place =
+    item === undefined ? -1 : list.findIndex(({ id }) => id === item.id);
+  return { item, place, gone: item !== undefined && place === -1 };
+};
+
+/** The panel beside a wide list; on a phone, its sheet, open once a row is chosen. */
+const Beside = ({
+  wide,
+  reading,
+  label,
+  onBack,
+  children,
+}: {
+  wide: boolean;
+  reading: boolean;
+  label: string;
+  onBack: () => void;
+  children: ReactNode;
+}) => {
+  if (wide) {
+    return (
+      // A wrapper only until #2611's lint fix lets SidePanel's own `style`
+      // prop take this.
+      <div {...stylex.props(styles.besideClearOfChat)}>
+        <SidePanel aria-label={label}>{children}</SidePanel>
+      </div>
+    );
+  }
+  return (
+    <Sheet
+      onOpenChange={(next) => {
+        if (!next) {
+          onBack();
+        }
+      }}
+      open={reading}
+    >
+      <SheetContent side="end">
+        <SheetHeader>
+          <SheetTitle>{label}</SheetTitle>
+        </SheetHeader>
+        <SidePanel aria-label={label} framed={false}>
+          {children}
+        </SidePanel>
+      </SheetContent>
+    </Sheet>
+  );
+};
+
+/**
+ * The list as the page: no card, what failed to load over it, the groups,
+ * the report's row at its head. Empty beside an item kept after it waits
+ * no more: nothing else waits.
+ */
+const ListColumn = ({
+  items,
+  list,
+  current,
+  failed,
+  selected,
+  onOpen,
+  foot,
+  tail,
+}: {
+  items: readonly InboxItem[];
+  list: readonly InboxItem[];
+  current: Group;
+  failed: readonly string[];
+  selected: InboxItem | undefined;
+  onOpen: (id: string, focus: boolean) => void;
+  foot: ReactNode;
+  tail: ReactNode;
+}) => {
+  if (list.length === 0) {
+    return (
+      <div {...stylex.props(inboxStyles.list, inboxStyles.listEmpty)}>
+        <NoItems failed={failed} foot={foot ?? tail} />
+      </div>
+    );
+  }
+  return (
+    <div {...stylex.props(inboxStyles.list)}>
+      {failed.map((text) => (
+        <Alert key={text} variant="warning">
+          <AlertDescription>{text}</AlertDescription>
+        </Alert>
+      ))}
+      <GroupViews current={current} items={items} />
+      {foot}
+      <ItemList list={list} onOpen={onOpen} selected={selected} />
+      {tail}
+    </div>
+  );
+};
 
 /**
  * The list and, beside it or in a sheet, the walk through it: the item
@@ -385,6 +505,14 @@ const ToDo = ({
   const [at, setAt] = useState(0);
   // What was skipped this visit, last skipped last: it waits at the back.
   const [skipped, setSkipped] = useState<readonly string[]>([]);
+  // An item whose answer core refused, kept in place with core's reason
+  // until the person moves on: read again, it may wait no more (answered
+  // elsewhere), and the one after it must not take its place, its answers
+  // under the pointer, before the refusal is read.
+  const [refused, setRefused] = useState<InboxItem>();
+  // The item an answer settled: the one that opens in its place holds its
+  // answers back a moment (item-detail.tsx).
+  const [answered, setAnswered] = useState<string>();
   // A group that has emptied falls back to everything.
   const current = items.some(
     (item) => group === "all" || groupOf[item.kind] === group
@@ -402,11 +530,13 @@ const ToDo = ({
   }
   const selected =
     index === -1 ? list[Math.min(at, list.length - 1)] : list[index];
+  const { item: shownItem, place, gone } = shownOf(list, selected, refused);
   // A row was chosen: on a phone its sheet opens.
-  const reading = chosen !== undefined && selected !== undefined;
-  const place = list.findIndex(({ id }) => id === selected?.id);
+  const reading = chosen !== undefined && shownItem !== undefined;
 
   const open = (id: string, focus: boolean) => {
+    setRefused(undefined);
+    setAnswered(undefined);
     void navigate({
       from: "/inbox",
       to: "/inbox",
@@ -424,18 +554,22 @@ const ToDo = ({
       });
     }
   };
+  // One on or one back, round and round, as the arrows and J and K go.
+  // From an item kept after it waits no more: on to the one that came
+  // after it, now in its place, or back to the one before.
   const step = (by: 1 | -1) => {
-    const next = list[stepFrom(list.length, place, by)];
+    const from = gone ? at - (by === 1 ? 1 : 0) : place;
+    const next = list[stepFrom(list.length, from, by)];
     if (next !== undefined) {
       open(next.id, false);
     }
   };
   const skipShown = () => {
-    if (selected === undefined) {
+    if (shownItem === undefined || gone) {
       return;
     }
     const after = skip(ids, {
-      at: { id: selected.id, index: place },
+      at: { id: shownItem.id, index: place },
       skipped,
     });
     setSkipped(after.skipped);
@@ -444,6 +578,8 @@ const ToDo = ({
     }
   };
   const back = () => {
+    setRefused(undefined);
+    setAnswered(undefined);
     void navigate({
       from: "/inbox",
       to: "/inbox",
@@ -452,23 +588,21 @@ const ToDo = ({
     });
   };
 
-  // J and K anywhere on the page, but not while something is typed.
+  // J and K anywhere on the page, but not while something is typed: the
+  // next one and the one before, as the arrows go.
   const onKey = useEffectEvent((event: globalThis.KeyboardEvent) => {
     if (
       (event.key !== "j" && event.key !== "k") ||
       event.metaKey ||
       event.ctrlKey ||
       event.altKey ||
-      typing(event.target)
+      typing(event.target) ||
+      shownItem === undefined
     ) {
       return;
     }
-    const from = list.findIndex(({ id }) => id === selected?.id);
-    const next = list[from + (event.key === "j" ? 1 : -1)];
-    if (next !== undefined) {
-      event.preventDefault();
-      open(next.id, false);
-    }
+    event.preventDefault();
+    step(event.key === "j" ? 1 : -1);
   });
   useEffect(() => {
     const listen = (event: globalThis.KeyboardEvent) => {
@@ -485,7 +619,7 @@ const ToDo = ({
   const failed = [
     ...new Set(notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? [])),
   ];
-  if (items.length === 0) {
+  if (shownItem === undefined) {
     return (
       <div {...stylex.props(inboxStyles.page)}>
         <div {...stylex.props(inboxStyles.list, inboxStyles.listEmpty)}>
@@ -494,66 +628,44 @@ const ToDo = ({
       </div>
     );
   }
-  const label = selected === undefined ? "" : i18n._(kindLabel[selected.kind]);
-  const inspector =
-    selected === undefined ? null : (
-      <Inspector
-        head={
-          <WalkHead
-            count={list.length}
-            onSkip={skipShown}
-            onStep={step}
-            place={place + 1}
-          />
-        }
-        onSaid={onSaid}
-        selected={selected}
-      />
-    );
-  // Beside a wide list, the panel; on a phone, its sheet, open once a row is chosen.
-  let beside: ReactNode = null;
-  if (!wide) {
-    beside = (
-      <Sheet
-        onOpenChange={(next) => {
-          if (!next) {
-            back();
-          }
-        }}
-        open={reading}
-      >
-        <SheetContent side="end">
-          <SheetHeader>
-            <SheetTitle>{label}</SheetTitle>
-          </SheetHeader>
-          <SidePanel aria-label={label} framed={false}>
-            {inspector}
-          </SidePanel>
-        </SheetContent>
-      </Sheet>
-    );
-  } else if (inspector !== null) {
-    beside = <SidePanel aria-label={label}>{inspector}</SidePanel>;
-  }
+  const label = i18n._(kindLabel[shownItem.kind]);
   return (
     <div {...stylex.props(inboxStyles.page, wide && inboxStyles.pageBeside)}>
-      {/* The list as the page: no card, the report's row at its head. */}
-      <div {...stylex.props(inboxStyles.list)}>
-        {failed.map((text) => (
-          <Alert key={text} variant="warning">
-            <AlertDescription>{text}</AlertDescription>
-          </Alert>
-        ))}
-        <GroupViews current={current} items={items} />
-        {foot}
-        <ItemList
-          list={list}
-          onOpen={open}
-          selected={wide || reading ? selected : undefined}
+      <ListColumn
+        current={current}
+        failed={failed}
+        foot={foot}
+        items={items}
+        list={list}
+        onOpen={open}
+        selected={wide || reading ? shownItem : undefined}
+        tail={tail}
+      />
+      <Beside label={label} onBack={back} reading={reading} wide={wide}>
+        <Inspector
+          arriving={answered !== undefined && answered !== shownItem.id}
+          gone={gone}
+          head={
+            <WalkHead
+              count={list.length}
+              onSkip={skipShown}
+              onStep={step}
+              place={gone ? undefined : place + 1}
+            />
+          }
+          item={shownItem}
+          onRefused={() => {
+            setRefused(shownItem);
+          }}
+          onSaid={(said) => {
+            // Through at last, after a refusal: kept no longer, the one
+            // after it opens in its place.
+            setRefused(undefined);
+            setAnswered(shownItem.id);
+            onSaid(said);
+          }}
         />
-        {tail}
-      </div>
-      {beside}
+      </Beside>
     </div>
   );
 };

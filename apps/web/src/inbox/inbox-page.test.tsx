@@ -1,5 +1,15 @@
 // @vitest-environment happy-dom
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { brainGapErrors } from "@grasp-os/shared/brain-records";
+import {
+  appIdSchema,
+  connectionIdSchema,
+  permissionIdSchema,
+} from "@grasp-os/shared/ids";
 import type { GapAskedNotification } from "@grasp-os/shared/notifications";
+import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { Permission } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -24,8 +34,10 @@ import type { Waiting } from "./waiting.ts";
 // The Inbox on Damsko: the item to decide stands in the side panel beside
 // the list on a wide window, and opens in a sheet on a phone once its row
 // is pressed; J and K walk what waits, Skip puts an item at the back; an
-// item that is answered leaves, and the one after it opens. Core's brain is
-// faked as the page reaches it over RPC.
+// item that is answered leaves, and the one after it opens, its answers
+// held back a moment; one whose answer core refused stays, with core's
+// reason, until the person moves on. Core's brain and permissions are
+// faked as the page reaches them over RPC.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -42,6 +54,87 @@ const askedOf = (id: string, question: string): GapAskedNotification => ({
   at: `2026-11-1${String(5 - Number(id))}T09:00:00.000Z`,
   read: false,
 });
+
+/** A permission request of App `name`'s, waiting for an admin. */
+const requestOf = (id: string, name: string): Permission => ({
+  id: permissionIdSchema.parse(id),
+  subject: { type: "app", appId: appIdSchema.parse(`app-${id}`) },
+  object: {
+    type: "connection",
+    connectionId: connectionIdSchema.parse("invoices"),
+  },
+  actions: ["read"],
+  binding: name.toUpperCase(),
+  status: "requested",
+  requestedBy: "builder",
+  requestedAt: `2026-11-1${id}T09:00:00.000Z`,
+  grantedBy: null,
+  grantedAt: null,
+  revokedBy: null,
+  revokedAt: null,
+  requestedVia: null,
+  chat: null,
+});
+
+/**
+ * How core answers a grant or a decline of request `id`: `drop` takes it
+ * off what waits, as core does once it is answered, here or elsewhere.
+ */
+type Answers = (drop: (id: string) => void) => {
+  grant: (id: string) => Promise<unknown>;
+  decline: (id: string) => Promise<unknown>;
+};
+
+/**
+ * Core refuses the first grant (another version of the App was published,
+ * say) and the request still waits; it takes every answer after that.
+ */
+const refusedOnce: Answers = (drop) => {
+  let refused = false;
+  return {
+    grant: async (id) => {
+      await Promise.resolve();
+      if (!refused) {
+        refused = true;
+        throw permissionErrors.create("permission.conflict");
+      }
+      drop(id);
+      return {};
+    },
+    decline: async (id) => {
+      await Promise.resolve();
+      drop(id);
+      return {};
+    },
+  };
+};
+
+/** Core takes every answer. */
+const taken: Answers = (drop) => ({
+  grant: async (id) => {
+    await Promise.resolve();
+    drop(id);
+    return {};
+  },
+  decline: async (id) => {
+    await Promise.resolve();
+    drop(id);
+    return {};
+  },
+});
+
+/**
+ * Someone answered every request elsewhere just before: core refuses the
+ * answer given here (`permission.not_requested`), and lists it no more.
+ */
+const answeredElsewhere: Answers = (drop) => {
+  const refuse = async (id: string) => {
+    await Promise.resolve();
+    drop(id);
+    throw permissionErrors.create("permission.not_requested");
+  };
+  return { grant: refuse, decline: refuse };
+};
 
 const three = (): GapAskedNotification[] => [
   askedOf("1", "Who approves a refund?"),
@@ -64,43 +157,83 @@ const windowOf = (width: number): void => {
 };
 
 /**
- * The Inbox at `at`, with `asked` as what waits, in a window `width` wide;
- * `notLoaded` are the reads that failed, as the page's loader hands them.
+ * The Inbox at `at`, in a window `width` wide, for an admin: `asked` and
+ * `requests` wait, core answering requests as `answers` says and Brain
+ * questions as `answerGap` does; `notLoaded` are the reads that failed,
+ * as the page's loader hands them.
  */
-const shown = async (
-  asked: GapAskedNotification[],
-  width: number,
+const shown = async ({
+  asked = [],
+  requests = [],
+  width = 1440,
   at = "/inbox",
-  notLoaded: Loaded<unknown>[] = []
-) => {
+  notLoaded = [],
+  answers = taken,
+  gapClosed = false,
+}: {
+  asked?: GapAskedNotification[];
+  requests?: Permission[];
+  width?: number;
+  at?: string;
+  notLoaded?: Loaded<unknown>[];
+  answers?: Answers;
+  /** Someone answered every Brain question just before: core refuses an answer. */
+  gapClosed?: boolean;
+}) => {
   windowOf(width);
   let open = asked;
+  let waits = requests;
   const answered: string[] = [];
   const brain = {
     answerGap: async (gap: string, answer: string) => {
       await Promise.resolve();
-      answered.push(`${gap}: ${answer}`);
       open = open.filter((each) => each.gap !== gap);
+      if (gapClosed) {
+        throw brainGapErrors.create("brain.gap_closed");
+      }
+      answered.push(`${gap}: ${answer}`);
       return {};
+    },
+  };
+  const answering = answers((id) => {
+    waits = waits.filter((each) => each.id !== id);
+  });
+  const permissions = {
+    grant: async (id: string, _reviewed: unknown) => {
+      answered.push(`grant ${id}`);
+      return await answering.grant(id);
+    },
+    decline: async (id: string) => {
+      answered.push(`decline ${id}`);
+      return await answering.decline(id);
     },
   };
   const core = {
     withSession: async <T,>(
-      action: (session: { brain: typeof brain }) => Promise<T>
-    ): Promise<T> => await action({ brain }),
+      action: (session: {
+        brain: typeof brain;
+        permissions: typeof permissions;
+      }) => Promise<T>
+    ): Promise<T> => await action({ brain, permissions }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const inbox = createRoute({
     getParentRoute: () => rootRoute,
     path: "/inbox",
     validateSearch: z.object({ item: z.string().optional() }),
-    loader: async (): Promise<{ asked: GapAskedNotification[] }> => {
+    loader: async (): Promise<{
+      asked: GapAskedNotification[];
+      requests: Permission[];
+    }> => {
       await Promise.resolve();
-      return { asked: open };
+      return { asked: open, requests: waits };
     },
   });
   const Inbox = () => {
-    const { asked: notifications }: { asked: GapAskedNotification[] } =
+    const {
+      asked: notifications,
+      requests: pending,
+    }: { asked: GapAskedNotification[]; requests: Permission[] } =
       inbox.useLoaderData();
     const { item } = inbox.useSearch();
     const waiting = {
@@ -111,7 +244,13 @@ const shown = async (
         data: { page: { notifications, unread: notifications.length } },
       },
       reconnect: { state: "ready", data: [] },
-      requests: undefined,
+      requests: {
+        state: "ready",
+        data: {
+          requests: pending,
+          directory: { people: new Map(), teams: new Map(), apps: new Map() },
+        },
+      },
       decisions: { state: "ready", data: [] },
       heldStarts: { state: "ready", data: [] },
       bindings: { state: "ready", data: [] },
@@ -121,7 +260,7 @@ const shown = async (
         chosen={item}
         items={inboxItems(
           waiting,
-          { role: "user", staff: false, name: "Ada" },
+          { role: "admin", staff: false, name: "Ada" },
           "2026-11-17T12:00:00.000Z"
         )}
         notLoaded={notLoaded}
@@ -228,6 +367,41 @@ const rows = (): string[] =>
       ) ?? ""
   );
 
+/** Two permission requests, the newer first in the list. */
+const twoRequests = (): Permission[] => [
+  requestOf("1", "Ledger"),
+  requestOf("2", "Payroll"),
+];
+
+/** Core's reason for an answer to a request answered already. */
+const stale =
+  "This request was answered already, so it can no longer be granted or declined.";
+
+/** What the side panel says. */
+const panelText = (): string =>
+  document.querySelector("aside")?.textContent ?? "";
+
+/** What the side panel's item asks. */
+const panelTitle = (): string | undefined =>
+  document.querySelector("aside [data-slot='confirmation-request']")
+    ?.textContent ?? undefined;
+
+/** Whether both of the panel's answers can be pressed. */
+const answersOn = (): boolean => {
+  const answers = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      "aside [data-slot='confirmation-action']"
+    ),
+  ];
+  return (
+    answers.length === 2 &&
+    answers.every(
+      (button) =>
+        !button.disabled && button.getAttribute("aria-disabled") !== "true"
+    )
+  );
+};
+
 describe("the inbox", () => {
   afterEach(() => {
     act(() => {
@@ -241,7 +415,7 @@ describe("the inbox", () => {
 
   it("says once why nothing loaded, however many reads failed for that reason, with Try again", async () => {
     const offline: Loaded<unknown> = { state: "offline" };
-    await shown([], 1440, "/inbox", [offline, offline, offline]);
+    await shown({ notLoaded: [offline, offline, offline] });
     const said = "Grasp can't be reached right now. Try again in a moment.";
     expect({
       // On the page once: what is said to a screen reader as it appears stands apart.
@@ -255,7 +429,7 @@ describe("the inbox", () => {
   });
 
   it("shows the first item in the side panel beside the list, and J and K walk what waits", async () => {
-    const page = await shown(three(), 1440);
+    const page = await shown({ asked: three() });
     const first = beside();
     await key("j");
     const next = { ...beside(), item: page.item() };
@@ -278,7 +452,7 @@ describe("the inbox", () => {
   });
 
   it("puts a skipped item at the back of the list, and opens the one after it", async () => {
-    await shown(three(), 1440, "/inbox?item=asked:1");
+    await shown({ asked: three(), at: "/inbox?item=asked:1" });
     await press("Skip");
 
     expect({ rows: rows(), open: beside() }).toStrictEqual({
@@ -288,7 +462,7 @@ describe("the inbox", () => {
   });
 
   it("takes an answer in the person's own words, and opens the one after once it is answered", async () => {
-    const page = await shown(three(), 1440, "/inbox?item=asked:2");
+    const page = await shown({ asked: three(), at: "/inbox?item=asked:2" });
     const box = document.querySelector("textarea");
     await act(async () => {
       if (box !== null) {
@@ -312,7 +486,7 @@ describe("the inbox", () => {
   });
 
   it("opens an item in a sheet on a phone once its row is pressed, and closing it leaves the item", async () => {
-    const page = await shown(three(), 390);
+    const page = await shown({ asked: three(), width: 390 });
     const atFirst = { sheet: sheet(), beside: beside() };
     await pressRow("asked:2");
     const opened = sheet();
@@ -325,6 +499,168 @@ describe("the inbox", () => {
     expect({ sheet: sheet(), item: page.item() }).toStrictEqual({
       sheet: undefined,
       item: undefined,
+    });
+  });
+
+  it("goes round at the ends with J and K, as the arrows do, and leaves them to what is being typed", async () => {
+    await shown({ asked: three(), at: "/inbox?item=asked:3" });
+    await key("j");
+    const pastTheEnd = beside();
+    await key("k");
+    const beforeTheFirst = beside();
+    const box = document.querySelector("textarea");
+    await act(async () => {
+      box?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "j", bubbles: true })
+      );
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      pastTheEnd,
+      beforeTheFirst,
+      typed: beside(),
+    }).toStrictEqual({
+      pastTheEnd: { question: "Who approves a refund?", place: "1 of 3" },
+      beforeTheFirst: { question: "Who signs a quote?", place: "3 of 3" },
+      typed: { question: "Who signs a quote?", place: "3 of 3" },
+    });
+  });
+
+  it("grants a request, and the one after it opens with its answers held back a moment, so a second press can't answer it", async () => {
+    const page = await shown({ requests: twoRequests() });
+    await press("Grant it");
+    const arrived = { open: panelTitle(), answers: answersOn() };
+    // Longer than the pause the arriving item's answers hold for.
+    await act(async () => {
+      await sleep(1100);
+    });
+
+    expect({
+      answered: page.answered,
+      rows: rows(),
+      arrived,
+      later: answersOn(),
+      said: document.querySelector("output")?.textContent,
+    }).toStrictEqual({
+      answered: ["grant 2"],
+      rows: ["request:1"],
+      arrived: {
+        open: "Grant app-1: read on Connection invoices?",
+        answers: false,
+      },
+      later: true,
+      said: "Approved: Grant app-2: read on Connection invoices?",
+    });
+  });
+
+  it.each(["Grant it", "Decline"])(
+    "keeps a request answered elsewhere in place with core's reason when %s is refused, until the person moves on",
+    async (answer) => {
+      const page = await shown({
+        requests: twoRequests(),
+        answers: answeredElsewhere,
+      });
+      await press(answer);
+      const kept = {
+        open: panelTitle(),
+        reason: panelText().includes(stale),
+        head: panelText().includes("No longer waits for you"),
+        answers: answersOn(),
+        rows: rows(),
+      };
+      await act(async () => {
+        document
+          .querySelector<HTMLButtonElement>("button[aria-label='The next one']")
+          ?.click();
+        await Promise.resolve();
+      });
+      await settle();
+
+      expect({
+        answered: page.answered,
+        kept,
+        movedOn: { open: panelTitle(), answers: answersOn() },
+      }).toStrictEqual({
+        answered: [`${answer === "Decline" ? "decline" : "grant"} 2`],
+        kept: {
+          open: "Grant app-2: read on Connection invoices?",
+          reason: true,
+          head: true,
+          answers: false,
+          rows: ["request:1"],
+        },
+        movedOn: {
+          open: "Grant app-1: read on Connection invoices?",
+          answers: true,
+        },
+      });
+    }
+  );
+
+  it("keeps a Brain question answered elsewhere in place, with core's reason", async () => {
+    await shown({
+      asked: three(),
+      at: "/inbox?item=asked:2",
+      gapClosed: true,
+    });
+    const box = document.querySelector("textarea");
+    await act(async () => {
+      if (box !== null) {
+        box.value = "The sales lead.";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    await press("Answer");
+    await settle();
+
+    expect({
+      open: beside()?.question,
+      reason: panelText().includes("That question is closed already."),
+      head: panelText().includes("No longer waits for you"),
+      rows: rows(),
+    }).toStrictEqual({
+      open: "Who pays the invoices?",
+      reason: true,
+      head: true,
+      rows: ["asked:1", "asked:3"],
+    });
+  });
+
+  it("keeps a request whose grant core refused while it still waits, and opens the one after it once a second grant is through", async () => {
+    const page = await shown({
+      requests: twoRequests(),
+      answers: refusedOnce,
+    });
+    await press("Grant it");
+    const refused = {
+      open: panelTitle(),
+      place: panelText().includes("1 of 2"),
+      answers: answersOn(),
+    };
+    // Past the time the button says it failed.
+    await act(async () => {
+      await sleep(1700);
+    });
+    await press("Grant it");
+
+    expect({
+      answered: page.answered,
+      refused,
+      after: { open: panelTitle(), rows: rows() },
+    }).toStrictEqual({
+      answered: ["grant 2", "grant 2"],
+      refused: {
+        open: "Grant app-2: read on Connection invoices?",
+        place: true,
+        answers: true,
+      },
+      after: {
+        open: "Grant app-1: read on Connection invoices?",
+        rows: ["request:1"],
+      },
     });
   });
 });

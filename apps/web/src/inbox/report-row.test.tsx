@@ -18,6 +18,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import type { Loaded } from "../load-from-core.tsx";
 import { ReportItem } from "./report-row.tsx";
 
 // The weekly report on the day it is ready, as the Inbox's row: pressed,
@@ -73,7 +74,8 @@ const ready = Promise.resolve({ state: "ready" as const, data: report });
 /** The report's item on a page of its own, against a fake core. */
 const shown = async (
   shownProgramme: Programme = programme,
-  company = "Acme"
+  company = "Acme",
+  read: Promise<Loaded<BoardReport>> = ready
 ) => {
   const core = {
     withSession: async <T,>(
@@ -95,7 +97,7 @@ const shown = async (
     getParentRoute: () => rootRoute,
     path: "/",
   });
-  const Shown = () => <ReportItem programme={shownProgramme} report={ready} />;
+  const Shown = () => <ReportItem programme={shownProgramme} report={read} />;
   page.update({ component: Shown });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -191,5 +193,53 @@ describe("the weekly report in the inbox", () => {
     expect(row?.closest("[data-slot='item']")?.textContent).toContain(
       "Next report in 4 days"
     );
+  });
+
+  it("says in its place what core couldn't read, never as nothing that ran, and names what could be better in the reader's words", async () => {
+    await shown(
+      programme,
+      "Acme",
+      Promise.resolve({
+        state: "ready",
+        data: {
+          ...report,
+          runs: { state: "unread", code: "workflow.unavailable" },
+          better: {
+            state: "read",
+            data: [
+              { kind: "failing_step", count: 2 },
+              { kind: "cost_per_run", count: 5 },
+            ],
+          },
+        },
+      })
+    );
+    await press("Your report on week 6 is ready");
+    await settle();
+    const sheet = document.querySelector("[role='dialog']")?.textContent ?? "";
+
+    expect({
+      unread: sheet.includes("This couldn't be read when the report was made."),
+      noughts: sheet.includes("0 runs"),
+      week: sheet.includes("Week 7 of 8"),
+      kinds: ["Model cost", "Keeps failing", "failing step"].map((kind) =>
+        sheet.includes(kind)
+      ),
+    }).toStrictEqual({
+      unread: true,
+      noughts: false,
+      week: true,
+      kinds: [true, true, false],
+    });
+  });
+
+  it("says in the sheet why a report core couldn't read failed, never an empty sheet", async () => {
+    await shown(programme, "Acme", Promise.resolve({ state: "offline" }));
+    await press("Your report on week 6 is ready");
+    await settle();
+
+    expect(
+      document.querySelector("[role='dialog'] [data-slot='alert']")?.textContent
+    ).toContain("Grasp can't be reached right now.");
   });
 });

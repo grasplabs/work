@@ -208,12 +208,48 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(
     page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
-  await asDecider.getByLabel("Comment (optional)").fill("Matches the order");
+  const comment = asDecider.getByLabel("Comment (optional)");
+  const confirmation = asDecider.getByRole("dialog", {
+    name: "Confirm your approval",
+  });
+  // On a phone, a very long comment scrolls inside Grasp's confirmation,
+  // under its title: Confirm and Cancel stay in the window, nothing runs
+  // over anything else, and the answer is confirmed from there.
+  const wide = asDecider.viewportSize();
+  await asDecider.setViewportSize({ width: 390, height: 700 });
+  await comment.fill(
+    Array.from(
+      { length: 60 },
+      (_, line) => `Line ${line + 1} of a long comment.`
+    ).join("\n")
+  );
   await asDecider.getByRole("button", { name: "Approve" }).click();
-  await asDecider
-    .getByRole("alertdialog", { name: "Confirm your approval" })
-    .getByRole("button", { name: "Confirm" })
-    .click(pageRead);
+  const confirm = confirmation.getByRole("button", { name: "Confirm" });
+  await expect(confirm).toBeEnabled(pageRead);
+  await expect(confirm).toBeInViewport({ ratio: 1 });
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" })
+  ).toBeInViewport({ ratio: 1 });
+  // The body alone scrolls, as a region named by the title.
+  const dialogBody = confirmation.getByRole("region", {
+    name: "Confirm your approval",
+  });
+  await expect(dialogBody).toContainText("Line 60 of a long comment.");
+  const [title, scrolled, answers] = await Promise.all([
+    confirmation.getByText("Confirm your approval").boundingBox(),
+    dialogBody.boundingBox(),
+    confirm.boundingBox(),
+  ]);
+  expect({
+    titleAboveBody:
+      (title?.y ?? 0) + (title?.height ?? 0) <= (scrolled?.y ?? -1),
+    bodyAboveAnswers:
+      (scrolled?.y ?? 0) + (scrolled?.height ?? 0) <= (answers?.y ?? -1),
+  }).toStrictEqual({ titleAboveBody: true, bodyAboveAnswers: true });
+  await confirm.click();
+  if (wide !== null) {
+    await asDecider.setViewportSize(wide);
+  }
   await expect(
     asDecider
       .getByRole("status")
@@ -234,7 +270,8 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await run.getByRole("button").click();
   const sheet = page.getByRole("dialog");
   await expect(sheet).toContainText('"status": "approved"', pageRead);
-  await expect(sheet).toContainText('"comment": "Matches the order"');
+  await expect(sheet).toContainText('"comment": "Line 1 of a long comment.');
+  await expect(sheet).toContainText("Line 60 of a long comment.");
   await page.keyboard.press("Escape");
 
   // A webhook: an admin adds a source, its secret shown once.

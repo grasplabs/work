@@ -174,7 +174,15 @@ const opened = async ({
   if (item === undefined) {
     throw new Error("No item");
   }
-  return await rendered(() => <ItemDetail item={item} onSaid={() => {}} />);
+  return await rendered(() => (
+    <ItemDetail
+      arriving={false}
+      gone={false}
+      item={item}
+      onRefused={() => {}}
+      onSaid={() => {}}
+    />
+  ));
 };
 
 describe("a run's held or lost write in the inbox", () => {

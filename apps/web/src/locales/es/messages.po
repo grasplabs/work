@@ -2826,6 +2826,10 @@ msgstr "Áreas terminadas"
 msgid "Article"
 msgstr "Artículo"
 
+#: src/inbox/request-details.tsx
+msgid "as {binding}"
+msgstr "como {binding}"
+
 #: src/settings/stephen-settings.tsx
 msgid "As for Stephen"
 msgstr "Como para Stephen"
@@ -3377,6 +3381,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/frame/ui-words.tsx
+#: src/inbox/decision-confirmation.tsx
 #: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
@@ -7647,6 +7652,10 @@ msgstr "¿Guardar en el Brain lo que los agentes leen a través de {label}?"
 msgid "Keep what agents read through it for"
 msgstr "Guardar lo que los agentes leen a través de ella para"
 
+#: src/inbox/report-view.tsx
+msgid "Keeps failing"
+msgstr "Falla una y otra vez"
+
 #: src/apps/data-model-changes.tsx
 msgid "Keeps the records of {table}, though nothing reads them any more."
 msgstr "Conserva los registros de {table}, aunque ya nada los lea."
@@ -8276,6 +8285,10 @@ msgstr "Modelo"
 msgid "Model call"
 msgstr "Llamada al modelo"
 
+#: src/inbox/report-view.tsx
+msgid "Model cost"
+msgstr "Coste del modelo"
+
 #: src/chat/composer.tsx
 msgid "Model: {name}, set for this agent"
 msgstr "Modelo: {name}, definido para este agente"
@@ -8814,6 +8827,10 @@ msgstr "Ya no se considera cierto desde el {ended}"
 #: src/connections/tool-permissions.tsx
 msgid "No longer offered"
 msgstr "Ya no se ofrece"
+
+#: src/inbox/inbox-page.tsx
+msgid "No longer waits for you"
+msgstr "Ya no te espera"
 
 #: src/onboarding/setup-steps.tsx
 msgid "No longer where it was"
@@ -9552,6 +9569,10 @@ msgstr "Ofrecidos a la empresa"
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
 msgstr "Ofrecido a tu organización"
+
+#: src/inbox/report-view.tsx
+msgid "Often corrected"
+msgstr "Corregido a menudo"
 
 #: src/apps/app-data.tsx
 msgid "Older changes"
@@ -14452,6 +14473,10 @@ msgstr "Este chat leyó datos privados o restringidos: esto puede enviarlos fuer
 msgid "This connection needs to be connected again."
 msgstr "Esta conexión tiene que volver a conectarse."
 
+#: src/inbox/report-view.tsx
+msgid "This couldn't be read when the report was made."
+msgstr "No se pudo leer al hacer el informe."
+
 #: src/inbox/decision-card.tsx
 msgid "This decision has closed."
 msgstr "Esta decisión está cerrada."
@@ -15427,6 +15452,10 @@ msgstr "Esperando a {signIn}"
 msgid "Waiting for a decision"
 msgstr "A la espera de una decisión"
 
+#: src/inbox/report-view.tsx
+msgid "Waiting for a person"
+msgstr "Esperando a una persona"
+
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -15560,6 +15589,10 @@ msgstr "Webhooks"
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
+
+#: src/inbox/report-view.tsx
+msgid "Week {number} of {weeks}"
+msgstr "Semana {number} de {weeks}"
 
 #: src/brain/brain-article/kern.tsx
 msgid "week {week}"
@@ -15821,6 +15854,10 @@ msgstr "Cómo lo llaman las personas, una línea sobre para qué sirve y su imag
 #: src/workflows/workflow-settings.tsx
 msgid "What people see instead of {name}."
 msgstr "Lo que ven las personas en lugar de {name}."
+
+#: src/inbox/report-view.tsx
+msgid "What ran"
+msgstr "Qué se ejecutó"
 
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"

@@ -24,11 +24,10 @@ const styles = stylex.create({
 });
 
 /**
- * What has to be read of a permission request before deciding it: when a
- * schedule next runs, the name its code asks under, the version of its App
- * the grant trusts, and who asked. A line with nothing to say is left out,
- * and a schedule's name in code ("START") with it: its title says it
- * starts the workflow.
+ * What has to be read of a permission request before deciding it: as
+ * which binding its code asks, when a schedule next runs, the version of
+ * its App the grant trusts, and who asked. A line with nothing to say is
+ * left out.
  */
 export const RequestDetails = ({
   request,
@@ -37,13 +36,16 @@ export const RequestDetails = ({
   request: Permission;
   directory: PendingRequests["directory"];
 }) => {
+  const { binding } = request;
   const nextRun = requestNextRun(request);
   const version = reviewedVersionText(request, directory);
   const requester = personName(directory, request.requestedBy);
   const date = formatTime(request.requestedAt);
   return (
     <div {...stylex.props(styles.details)}>
-      {/* A binding's name in code says nothing to a person: only a schedule's next run. */}
+      <Text size="sm" color="muted">
+        <Trans>as {binding}</Trans>
+      </Text>
       {nextRun === undefined ? null : (
         <Text size="sm" color="muted">
           {nextRun}

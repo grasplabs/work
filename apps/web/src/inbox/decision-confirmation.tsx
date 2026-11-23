@@ -4,18 +4,18 @@ import type {
   DecisionWithheld,
 } from "@grasp-os/shared/decisions";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
-import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
@@ -92,12 +92,9 @@ export type AnswerSource = "page";
 const commentAlone = z.strictObject({ comment: z.string() });
 
 const styles = stylex.create({
-  // What is asked scrolls, so the answer above it is always in view.
-  asked: { maxHeight: "24rem", overflowY: "auto", minWidth: 0 },
   answer: { fontWeight: font.weightMedium },
   // A comment as the person wrote it, its line breaks kept.
   comment: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
-  facts: { display: "grid", gap: space["4"], minWidth: 0 },
 });
 
 /**
@@ -238,8 +235,12 @@ export const DecisionConfirmDialog = ({
       </span>
     ),
   };
+  // Damsko's Dialog, built as its docs build one: the title and what to
+  // check above, then one body that holds the answer and what is asked and
+  // alone scrolls, then Cancel and Confirm, always in view however long
+  // the comment or the App's description. The answer comes first in it.
   return (
-    <AlertDialog
+    <Dialog
       onOpenChange={(open) => {
         if (!open && pending !== undefined) {
           onCancel(pending);
@@ -247,12 +248,12 @@ export const DecisionConfirmDialog = ({
       }}
       open={pending !== undefined}
     >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>
             {approved ? t`Confirm your approval` : t`Confirm your rejection`}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
+          </DialogTitle>
+          <DialogDescription>
             {t`Grasp records this answer only once you confirm it here. Check what is asked and what you answer.`}
             {decision?.withheld === undefined ? null : (
               <>
@@ -260,38 +261,36 @@ export const DecisionConfirmDialog = ({
                 <WithheldAskNote withheld={decision.withheld} />
               </>
             )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </DialogDescription>
+        </DialogHeader>
         {decision === undefined || pending === undefined ? null : (
-          <div {...stylex.props(styles.facts)}>
-            {/* What the person answers comes first, outside the scrolled
-                part: always in view, whatever the App's description. */}
+          <DialogBody>
             <KeyValueList
               items={[yourAnswer, ...payload]}
               orientation="horizontal"
             />
-            <div {...stylex.props(styles.asked)}>
-              <KeyValueList items={asked} orientation="horizontal" />
-            </div>
-          </div>
+            <KeyValueList items={asked} orientation="horizontal" />
+          </DialogBody>
         )}
-        <AlertDialogFooter>
-          <AlertDialogCancel />
-          <AlertDialogAction
+        <DialogFooter>
+          <DialogClose>{t`Cancel`}</DialogClose>
+          {/* Closing is the step this dialog is for: Confirm closes it. */}
+          <DialogClose
             disabled={ready !== pending}
             onClick={() => {
               if (pending !== undefined) {
                 onConfirm(pending);
               }
             }}
+            variant="default"
           >
             {t({
               message: "Confirm",
               context: "confirm an answer to a decision",
             })}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };

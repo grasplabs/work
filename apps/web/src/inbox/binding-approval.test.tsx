@@ -119,7 +119,10 @@ const shown = async () => {
     path: "/",
     component: () => (
       <ItemDetail
+        arriving={false}
+        gone={false}
         item={shownItem}
+        onRefused={() => {}}
         onSaid={(line) => {
           said.push(line);
         }}
