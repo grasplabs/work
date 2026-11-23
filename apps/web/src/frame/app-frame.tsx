@@ -4,10 +4,9 @@ import {
   AppShellDock,
   AppShellMain,
 } from "@grasp-os/app-kit/components/app-shell";
-import { Toaster as KitToaster } from "@grasp-os/app-kit/components/toast";
+import { Toaster } from "@grasp-os/app-kit/components/toast";
 import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -54,7 +53,7 @@ export const AppFrame = ({
   return (
     // What the frame says of an action outside any page, such as a
     // sign-out from the person menu that core didn't carry out.
-    <KitToaster>
+    <Toaster>
       <TooltipProvider>
         <AppShell
           onOpenChange={(next) => {
@@ -78,8 +77,6 @@ export const AppFrame = ({
           {panels}
         </AppShell>
       </TooltipProvider>
-      {/* Damsko's toasts, for the pages on it (the Brain's). */}
-      <Toaster />
-    </KitToaster>
+    </Toaster>
   );
 };
