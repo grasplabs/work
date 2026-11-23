@@ -28,11 +28,15 @@
  *
  * Anything else, an object literal above all, is not. Such styles go only
  * to a component that takes them (`takesStylex`): Damsko's, the feature's
- * own (by a relative path) or one the file declares; never an element of
- * the page, a component of another package (the kit's, the router's
- * `Link`) or a name holding an element's.
+ * own (by a relative path, from a module that declares it or passes it on
+ * from Damsko) or one the file declares; never an element of the page, a
+ * component of another package (the kit's, the router's `Link`, also when
+ * a relative module passes it on) or a name holding an element's.
  */
+import { readFileSync, statSync } from "node:fs";
 import nodePath from "node:path";
+
+import { parseSync } from "oxc-parser";
 
 export interface StyleNode {
   type: string;
@@ -67,6 +71,7 @@ export interface StyleNode {
   exportKind?: string;
   specifiers?: StyleNode[];
   local?: StyleNode;
+  exported?: StyleNode | null;
   declarations?: StyleNode[];
   parent?: StyleNode;
 }
@@ -428,11 +433,15 @@ const isPlacementMember = (
   );
 };
 
-/** Whether a name is `undefined`, or a parameter declared `LayoutStyle`. */
+/**
+ * Whether a name is `undefined`, or a parameter declared `LayoutStyle`.
+ * `undefined` is the global's, which a config's globals bind without a
+ * declaration: not one the file declares itself.
+ */
 const isPlacementName = (value: StyleNode, context: StyleContext): boolean => {
   const variable = variableOf(context, value);
   if (value.name === "undefined") {
-    return variable === undefined;
+    return variable === undefined || variable.defs.length === 0;
   }
   return (
     variable !== undefined &&
@@ -656,20 +665,232 @@ const isDeclaredComponent = (definition: Variable["defs"][number]): boolean => {
   );
 };
 
+/** Whether a parsed value is a node, as far as this file reads one. */
+const isNode = (value: unknown): value is StyleNode =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  typeof value.type === "string";
+
+/** The modules parsed so far, by file, as of when they last changed. */
+const parsed = new Map<string, { mtimeMs: number; body: StyleNode[] }>();
+
+/**
+ * The file a relative import names, as TypeScript finds it: as written, or
+ * with `.tsx` or `.ts`, or its folder's `index`. Undefined if none is.
+ */
+const moduleFile = (from: string, specifier: string): string | undefined => {
+  const base = nodePath.resolve(nodePath.dirname(from), specifier);
+  return [
+    base,
+    `${base}.tsx`,
+    `${base}.ts`,
+    nodePath.join(base, "index.tsx"),
+    nodePath.join(base, "index.ts"),
+  ].find(
+    (file) => statSync(file, { throwIfNoEntry: false })?.isFile() === true
+  );
+};
+
+/** A module's top-level statements, parsed again only once it changes. */
+const statementsOf = (file: string): StyleNode[] => {
+  const { mtimeMs } = statSync(file);
+  const cached = parsed.get(file);
+  if (cached?.mtimeMs === mtimeMs) {
+    return cached.body;
+  }
+  const { program } = parseSync(file, readFileSync(file, "utf-8"));
+  const body: unknown[] = program.body;
+  const statements = body.filter(isNode);
+  parsed.set(file, { mtimeMs, body: statements });
+  return statements;
+};
+
+/** The name a module-level specifier gives or takes (`B` of `export { A as B }` as `exported`). */
+const specifierName = (node: StyleNode | undefined): string | undefined =>
+  identifierName(node) ??
+  (typeof node?.value === "string" ? node.value : undefined);
+
+/** Where a module's export of a name comes from: its own, another module's (by which name), or neither. */
+type Origin =
+  | { readonly kind: "own" }
+  | { readonly kind: "module"; readonly source: string; readonly name: string }
+  | { readonly kind: "absent"; readonly everything: readonly string[] };
+
+/** The import a module-level name is bound to, if one is. */
+const importOfName = (
+  statements: readonly StyleNode[],
+  local: string
+): Origin | undefined => {
+  for (const statement of statements) {
+    const specifier =
+      statement.type === "ImportDeclaration" && statement.importKind !== "type"
+        ? statement.specifiers?.find(
+            (candidate) => identifierName(candidate.local) === local
+          )
+        : undefined;
+    const source = statement.source?.value;
+    if (specifier !== undefined && typeof source === "string") {
+      return { kind: "module", source, name: importedName(specifier) };
+    }
+  }
+  return undefined;
+};
+
+/** What a module's declaration of `name` is: an import passed on, or its own. */
+const declared = (
+  statements: readonly StyleNode[],
+  value: StyleNode | null | undefined
+): Origin => {
+  const local = identifierName(value ?? undefined);
+  return (
+    (local === undefined ? undefined : importOfName(statements, local)) ?? {
+      kind: "own",
+    }
+  );
+};
+
+/** Where an `export { … }` or `export const …` gives `name` from, if it does. */
+const namedExportOrigin = (
+  statements: readonly StyleNode[],
+  statement: StyleNode,
+  name: string
+): Origin | undefined => {
+  const source = statement.source?.value;
+  const specifier = statement.specifiers?.find(
+    (candidate) => specifierName(candidate.exported ?? undefined) === name
+  );
+  if (specifier !== undefined) {
+    const local = specifierName(specifier.local) ?? name;
+    if (typeof source === "string") {
+      return { kind: "module", source, name: local };
+    }
+    return importOfName(statements, local) ?? { kind: "own" };
+  }
+  const { declaration } = statement;
+  const declarator = declaration?.declarations?.find(
+    (candidate) => identifierName(candidate.id ?? undefined) === name
+  );
+  if (declarator !== undefined) {
+    return declared(statements, declarator.init);
+  }
+  return identifierName(declaration?.id ?? undefined) === name
+    ? { kind: "own" }
+    : undefined;
+};
+
+/** Where a module's export of `name` comes from, one step: `export { A as B } from`, an import exported, or declared there. */
+const exportOrigin = (
+  statements: readonly StyleNode[],
+  name: string
+): Origin => {
+  const everything: string[] = [];
+  for (const statement of statements) {
+    const source = statement.source?.value;
+    const typeOnly = statement.exportKind === "type";
+    if (statement.type === "ExportAllDeclaration") {
+      if (!typeOnly && typeof source === "string") {
+        everything.push(source);
+      }
+    } else if (
+      statement.type === "ExportDefaultDeclaration" &&
+      name === "default"
+    ) {
+      return declared(statements, statement.declaration);
+    } else if (statement.type === "ExportNamedDeclaration" && !typeOnly) {
+      const origin = namedExportOrigin(statements, statement, name);
+      if (origin !== undefined) {
+        return origin;
+      }
+    }
+  }
+  return { kind: "absent", everything };
+};
+
+/** Whether a module is named by a relative path. */
+const isRelative = (source: string): boolean => source.startsWith(".");
+
+/**
+ * Whether what `source`, imported from `file`, exports as `name` may be
+ * given StyleX styles: Damsko's may; another package's may not; a
+ * relative module's may if it declares it, or passes it on from one that
+ * may, followed to where it is declared (`export { Button } from
+ * "@grasp-os/app-kit/…"` is the kit's). Undefined where the files don't
+ * tell: no such module or export, or a loop.
+ */
+const moduleTakesStylex = (
+  file: string,
+  source: string,
+  name: string,
+  seen: Set<string>
+): boolean | undefined => {
+  if (source.startsWith(damskoModule)) {
+    return true;
+  }
+  if (!isRelative(source)) {
+    return false;
+  }
+  const next = moduleFile(file, source);
+  if (next === undefined || seen.has(`${next}#${name}`)) {
+    return undefined;
+  }
+  seen.add(`${next}#${name}`);
+  const origin = exportOrigin(statementsOf(next), name);
+  if (origin.kind === "own") {
+    return true;
+  }
+  if (origin.kind === "module") {
+    return moduleTakesStylex(next, origin.source, origin.name, seen);
+  }
+  // `export *`: a relative module that has it decides; else any package
+  // it passes everything on from may, so each must be Damsko.
+  for (const from of origin.everything.filter(isRelative)) {
+    const found = moduleTakesStylex(next, from, name, seen);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  const packages = origin.everything.filter((from) => !isRelative(from));
+  return packages.length === 0
+    ? undefined
+    : packages.every((from) => from.startsWith(damskoModule));
+};
+
+/**
+ * The name a component is imported by: its import's, or for a namespace's
+ * (`Parts.Save`), the member's.
+ */
+const importedComponent = (
+  specifier: StyleNode,
+  member: StyleNode | undefined
+): string => {
+  const imported = importedName(specifier);
+  if (imported !== "*") {
+    return imported;
+  }
+  return member?.type === "JSXIdentifier" && typeof member.name === "string"
+    ? member.name
+    : "";
+};
+
 /**
  * Whether a component may be given StyleX styles: one of Damsko's
  * (`@grasp-os/ui/…`), one of the feature's own (imported by a relative
- * path, typed to take Damsko's `LayoutStyle` and pass it on), or one the
- * file declares (`isDeclaredComponent`). Not one of any other package,
- * the kit's or the router's `Link`, whose `style` is an inline style, nor
- * a name that holds an element's (`Tile` of `"div"`).
+ * path, typed to take Damsko's `LayoutStyle` and pass it on; declared
+ * there or passed on from such a module or Damsko, never another
+ * package's: `moduleTakesStylex`), or one the file declares
+ * (`isDeclaredComponent`). Not one of any other package, the kit's or the
+ * router's `Link`, whose `style` is an inline style, nor a name that holds
+ * an element's (`Tile` of `"div"`).
  */
 export const takesStylex = (
   name: StyleNode | undefined,
   context: StyleContext
 ): boolean => {
   let root = name;
+  let member: StyleNode | undefined;
   while (root?.type === "JSXMemberExpression") {
+    member = root.property;
     root = root.object;
   }
   if (root?.type !== "JSXIdentifier" || typeof root.name !== "string") {
@@ -684,10 +905,19 @@ export const takesStylex = (
     return isDeclaredComponent(definition);
   }
   const source = definition.parent?.source?.value;
+  if (
+    typeof source !== "string" ||
+    definition.parent?.importKind === "type" ||
+    definition.node.importKind === "type"
+  ) {
+    return false;
+  }
   return (
-    typeof source === "string" &&
-    definition.parent?.importKind !== "type" &&
-    definition.node.importKind !== "type" &&
-    (source.startsWith(damskoModule) || source.startsWith("."))
+    moduleTakesStylex(
+      context.filename,
+      source,
+      importedComponent(definition.node, member),
+      new Set()
+    ) !== false
   );
 };
