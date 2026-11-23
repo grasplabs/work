@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { DecisionCard } from "../decision-card.tsx";
-import { formatNumber, formatSince } from "../format.ts";
+import { formatSince } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -30,6 +30,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import type { Names } from "./activity-words.ts";
+import { ListedCount } from "./listed-count.tsx";
 import { useStartedBy } from "./run-detail.tsx";
 import { useRunTitle } from "./run-page.tsx";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
@@ -303,15 +304,8 @@ export const WorkflowHome = ({
           ))}
           <section {...stylex.props(styles.section)}>
             <Heading level={2} size="ui">
-              {t({ message: "Runs", context: "a workflow's runs" })}
-              {count === undefined || count === 0 ? null : (
-                <>
-                  {" "}
-                  <Text element="span" size="xs" tone="muted">
-                    {formatNumber(count)}
-                  </Text>
-                </>
-              )}
+              {t({ message: "Runs", context: "a workflow's runs" })}{" "}
+              <ListedCount count={count} of="runs" />
             </Heading>
             <Runs
               names={names}
