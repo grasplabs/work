@@ -2275,7 +2275,7 @@ msgstr "Ajouter un fournisseur"
 
 #: src/agents/agent-overview.tsx
 msgid "Add a schedule"
-msgstr "Ajouter un planning"
+msgstr "Ajouter un horaire"
 
 #: src/settings/event-sources.tsx
 msgid "Add a source"
@@ -6836,7 +6836,7 @@ msgstr "Modifier le JSON"
 
 #: src/agents/agent-overview.tsx
 msgid "Edit schedule"
-msgstr "Modifier le planning"
+msgstr "Modifier l’horaire"
 
 #: src/settings/org-card.tsx
 msgid "Edit the name"
@@ -9506,7 +9506,7 @@ msgstr "Il répond dans un chat, chaque fois qu’on le lui demande."
 
 #: src/agents/agent-page.tsx
 msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
-msgstr "Il ne répond plus à personne, et son planning et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, mettez-le plutôt en pause."
+msgstr "Il ne répond plus à personne, et son horaire et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, mettez-le plutôt en pause."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9623,7 +9623,7 @@ msgstr "Il n’est pas proposé à votre organisation."
 
 #: src/agents/agent-overview.tsx
 msgid "It isn't set up to answer the person its schedule works for."
-msgstr "Il n'est pas configuré pour la personne pour qui son planning travaille."
+msgstr "Il n'est pas configuré pour la personne pour qui son horaire travaille."
 
 #: src/drafts/sharing.tsx
 msgid "It isn’t shared with anyone."
@@ -10345,7 +10345,7 @@ msgstr "Laisser {workflow} démarrer sur les événements de sa connexion ?"
 
 #: src/activity/pending.tsx
 msgid "Let {workflow} start on its schedule?"
-msgstr "Laisser {workflow} démarrer selon son planning ?"
+msgstr "Laisser {workflow} démarrer selon son horaire ?"
 
 #: src/activity/pending.tsx
 msgid "Let {workflow} start when an email arrives?"
@@ -14294,7 +14294,7 @@ msgstr "A exécuté un workflow"
 
 #: src/agents/agent-overview.tsx
 msgid "Ran on its schedule"
-msgstr "Exécuté selon son planning"
+msgstr "Exécuté selon son horaire"
 
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
@@ -18446,7 +18446,7 @@ msgstr "La personne dans {field}"
 
 #: src/agents/agent-overview.tsx
 msgid "The person its schedule works for is no longer in the company."
-msgstr "La personne pour qui son planning travaille ne fait plus partie de l'entreprise."
+msgstr "La personne pour qui son horaire travaille ne fait plus partie de l'entreprise."
 
 #: src/apps/access-view.tsx
 msgid "the person who added it"
@@ -20094,7 +20094,7 @@ msgstr "En attente qu’un administrateur autorise son déclencheur d’e-mail"
 
 #: src/workflows/trigger-block.ts
 msgid "Waiting for an admin to allow its schedule"
-msgstr "En attente qu’un administrateur autorise son planning"
+msgstr "En attente qu’un administrateur autorise son horaire"
 
 #: src/workflows/trigger-block.ts
 msgid "Waiting for an admin to allow its webhook"

@@ -2275,7 +2275,7 @@ msgstr "Añadir un proveedor"
 
 #: src/agents/agent-overview.tsx
 msgid "Add a schedule"
-msgstr "Añadir una programación"
+msgstr "Añadir un horario"
 
 #: src/settings/event-sources.tsx
 msgid "Add a source"
@@ -6836,7 +6836,7 @@ msgstr "Editar JSON"
 
 #: src/agents/agent-overview.tsx
 msgid "Edit schedule"
-msgstr "Editar programación"
+msgstr "Editar horario"
 
 #: src/settings/org-card.tsx
 msgid "Edit the name"
@@ -9506,7 +9506,7 @@ msgstr "Responde en un chat, siempre que se le pregunte."
 
 #: src/agents/agent-page.tsx
 msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
-msgstr "No responde a nadie, y su programación y sus ajustes se eliminan. Los chats que la gente tuvo con él siguen siendo suyos. Para pararlo un tiempo, páusalo en su lugar."
+msgstr "No responde a nadie, y su horario y sus ajustes se eliminan. Los chats que la gente tuvo con él siguen siendo suyos. Para pararlo un tiempo, páusalo en su lugar."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9623,7 +9623,7 @@ msgstr "No se ofrece a tu organización."
 
 #: src/agents/agent-overview.tsx
 msgid "It isn't set up to answer the person its schedule works for."
-msgstr "No está configurado para la persona para la que trabaja su programación."
+msgstr "No está configurado para la persona para la que trabaja su horario."
 
 #: src/drafts/sharing.tsx
 msgid "It isn’t shared with anyone."
@@ -10345,7 +10345,7 @@ msgstr "¿Dejar que {workflow} se inicie con eventos de su conexión?"
 
 #: src/activity/pending.tsx
 msgid "Let {workflow} start on its schedule?"
-msgstr "¿Dejar que {workflow} se inicie según su programación?"
+msgstr "¿Dejar que {workflow} se inicie según su horario?"
 
 #: src/activity/pending.tsx
 msgid "Let {workflow} start when an email arrives?"
@@ -14294,7 +14294,7 @@ msgstr "Ejecutó un flujo de trabajo"
 
 #: src/agents/agent-overview.tsx
 msgid "Ran on its schedule"
-msgstr "Se ejecutó según su programación"
+msgstr "Se ejecutó según su horario"
 
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
@@ -18446,7 +18446,7 @@ msgstr "La persona en {field}"
 
 #: src/agents/agent-overview.tsx
 msgid "The person its schedule works for is no longer in the company."
-msgstr "La persona para la que trabaja su programación ya no está en la empresa."
+msgstr "La persona para la que trabaja su horario ya no está en la empresa."
 
 #: src/apps/access-view.tsx
 msgid "the person who added it"
@@ -20094,7 +20094,7 @@ msgstr "Esperando a que un administrador permita su disparador de correo"
 
 #: src/workflows/trigger-block.ts
 msgid "Waiting for an admin to allow its schedule"
-msgstr "Esperando a que un administrador permita su programación"
+msgstr "Esperando a que un administrador permita su horario"
 
 #: src/workflows/trigger-block.ts
 msgid "Waiting for an admin to allow its webhook"
