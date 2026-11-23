@@ -1,42 +1,51 @@
-import {
-  AskCard,
-  AskCardBody,
-  AskCardChecks,
-  AskCardChoices,
-  AskCardFooter,
-  AskCardHeader,
-  AskCardOption,
-  AskCardProgress,
-  AskCardQuestion,
-  AskCardTopic,
-} from "@grasp-os/app-kit/components/ask-card";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import { Input } from "@grasp-os/app-kit/components/input";
-import { Kbd } from "@grasp-os/app-kit/components/kbd";
-import { RadioGroupItem } from "@grasp-os/app-kit/components/radio-group";
 import type {
   ChatAsked,
   ChatAskItem,
   ChatMessage,
 } from "@grasp-os/shared/chat";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Questionnaire,
+  QuestionnaireActions,
+  QuestionnaireChoice,
+  QuestionnaireChoiceDescription,
+  QuestionnaireChoices,
+  QuestionnaireDescription,
+  QuestionnaireError,
+  QuestionnaireInput,
+  QuestionnaireItem,
+  QuestionnaireNext,
+  QuestionnairePrevious,
+  QuestionnaireProgress,
+  QuestionnaireSubmit,
+  QuestionnaireTitle,
+} from "@grasp-os/ui/components/questionnaire";
+import type { QuestionnaireAnswer } from "@grasp-os/ui/components/questionnaire";
+import { Icon, MessageCircleIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { MessageCircleQuestionIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
-import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { Composer, lacksModel, NoModelNotice } from "./composer.tsx";
+import { FailureLine } from "./failure-line.tsx";
+
+const styles = stylex.create({
+  asked: { display: "grid", gap: space["2"] },
+  // While the person types instead: kept, with what they answered, unseen.
+  away: { display: "none" },
+});
 
 // What the chat's agent asks the person (`askQuestions`), in place of the
-// box to ask in: one question at a time, on the kit's card (ask-card.tsx),
-// each with its options, the one the agent recommends marked, and "In my
-// own words" to answer otherwise; Back, Next and Send, and "Type instead"
-// for the box itself. Keys: a number picks its option, Enter goes on, Esc
-// types instead. Everything asked is the model's plain text, shown as
+// box to ask in: one question at a time, on Damsko's Questionnaire, each
+// with its options, the one the agent recommends marked, and words of the
+// person's own to answer otherwise; Back, Next and Send, and "Type
+// instead" (or Escape) for the box itself, which keeps what was answered
+// for when the person comes back. Keys: a number picks its option, Enter
+// goes on. Everything asked is the model's plain text, shown as
 // text, never as Markdown or a link. An option is data, not a command:
 // picking one only fills in the answer, and Send sends the answers as the
 // person's own message, which is all the agent ever gets of them.
@@ -71,10 +80,6 @@ export interface AskAnswer {
 
 const unanswered: AskAnswer = { picked: [] };
 
-/** Whether `answer` answers anything yet. */
-const answers = ({ picked, own }: AskAnswer): boolean =>
-  picked.length > 0 || (own?.trim() ?? "") !== "";
-
 /**
  * One answer as the person's message says it: what they picked, as the
  * options read, and their own words.
@@ -108,356 +113,125 @@ export const answersText = (
     .join("\n");
 };
 
-/**
- * How far the person got with the questions of call `callId`: the one
- * they are on, and what they answered so far. Kept by the box's place
- * (`AskOrCompose`), so typing instead and coming back loses none of it.
- */
-interface AskProgress {
-  callId: string;
-  step: number;
-  given: AskAnswer[];
-}
-
-/** Where the person starts on `asked`: its first question, none answered. */
-const startOf = (asked: ChatAsked): AskProgress => ({
-  callId: asked.callId,
-  step: 0,
-  given: asked.questions.map(() => unanswered),
+/** The person's answer to one question, as the questionnaire gives it. */
+const answerOf = ({ values, text }: QuestionnaireAnswer): AskAnswer => ({
+  picked: values.map(Number).toSorted((one, other) => one - other),
+  ...(text === "" ? {} : { own: text }),
 });
 
-/** The value "In my own words" stands for among a question's options. */
-const own = "own";
-
-/** The options' values picked in `answer`: their indexes, and `own`. */
-const valuesOf = ({ picked, own: words }: AskAnswer): string[] => [
-  ...picked.map(String),
-  ...(words === undefined ? [] : [own]),
-];
-
 /**
- * The answer `values` stand for, keeping the words typed so far: the
- * options picked by index, and the person's own words while `own` is.
- */
-const answerOf = (values: readonly string[], before: AskAnswer): AskAnswer => {
-  const picked = values
-    .filter((value) => value !== own)
-    .map(Number)
-    .toSorted((a, b) => a - b);
-  return values.includes(own) ? { picked, own: before.own ?? "" } : { picked };
-};
-
-/**
- * A question with options: a radio each, or a checkbox each where several
- * may be picked, then "In my own words", whose field opens under them.
- */
-const ChoiceAnswer = ({
-  item,
-  labelledBy,
-  answer,
-  onAnswer,
-}: {
-  item: ChatAskItem;
-  labelledBy: string;
-  answer: AskAnswer;
-  onAnswer: (next: AskAnswer) => void;
-}) => {
-  const { t } = useLingui();
-  const several = item.multiple === true;
-  const group = useRef<HTMLDivElement>(null);
-  // The option to start on: the first picked (their own words count as
-  // the last option), or the first.
-  const start =
-    answer.picked[0] ?? (answer.own === undefined ? 0 : item.options.length);
-  // On the question as it shows (each comes anew, by its key): that
-  // option, so the keys work at once and assistive technology reads it.
-  // Never away from something else the person is in: only from nowhere
-  // (the box the card replaced is gone) or the card.
-  const focusStart = useEffectEvent(() => {
-    const element = group.current;
-    const focused = document.activeElement;
-    const card = element?.closest('[data-slot="ask-card"]');
-    if (
-      element === null ||
-      (focused !== null &&
-        focused !== document.body &&
-        card?.contains(focused) !== true)
-    ) {
-      return;
-    }
-    const controls = element.querySelectorAll<HTMLElement>(
-      '[role="radio"], [role="checkbox"]'
-    );
-    controls[start]?.focus();
-  });
-  useEffect(() => {
-    focusStart();
-  }, []);
-  const Control = several ? Checkbox : RadioGroupItem;
-  const options = [
-    ...item.options.map((option, index) => (
-      <AskCardOption
-        badge={
-          index === item.recommended ? (
-            <Badge variant="secondary">
-              <Trans context="the option the assistant would pick">
-                Recommended
-              </Trans>
-            </Badge>
-          ) : undefined
-        }
-        control={<Control value={String(index)} />}
-        description={option.description}
-        key={option.label}
-        shortcut={String(index + 1)}
-      >
-        {option.label}
-      </AskCardOption>
-    )),
-    <AskCardOption
-      control={<Control value={own} />}
-      key={own}
-      shortcut={String(item.options.length + 1)}
-    >
-      <Trans>In my own words</Trans>
-    </AskCardOption>,
-  ];
-  return (
-    <>
-      {several ? (
-        <AskCardChecks
-          aria-labelledby={labelledBy}
-          ref={group}
-          onValueChange={(values: string[]) => {
-            onAnswer(answerOf(values, answer));
-          }}
-          value={valuesOf(answer)}
-        >
-          {options}
-        </AskCardChecks>
-      ) : (
-        <AskCardChoices
-          aria-labelledby={labelledBy}
-          ref={group}
-          onValueChange={(value: unknown) => {
-            if (typeof value === "string") {
-              onAnswer(answerOf([value], answer));
-            }
-          }}
-          value={valuesOf(answer)[0] ?? null}
-        >
-          {options}
-        </AskCardChoices>
-      )}
-      {answer.own === undefined ? null : (
-        <Input
-          aria-label={t`Your answer`}
-          autoFocus
-          onChange={(event) => {
-            onAnswer({ ...answer, own: event.target.value });
-          }}
-          value={answer.own}
-        />
-      )}
-    </>
-  );
-};
-
-/** What a key does on the card: picks an option by its number, goes on, or types instead. */
-const keyed = (
-  event: KeyboardEvent<HTMLElement>,
-  {
-    item,
-    answer,
-    onAnswer,
-    onNext,
-    onType,
-  }: {
-    item: ChatAskItem;
-    answer: AskAnswer;
-    onAnswer: (next: AskAnswer) => void;
-    onNext: () => void;
-    onType: () => void;
-  }
-): void => {
-  const typing = event.target instanceof HTMLInputElement;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    onType();
-    return;
-  }
-  if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) {
-    event.preventDefault();
-    onNext();
-    return;
-  }
-  const number = Number(event.key);
-  if (typing || !Number.isInteger(number) || number < 1) {
-    return;
-  }
-  const value = number === item.options.length + 1 ? own : String(number - 1);
-  if (number > item.options.length + 1) {
-    return;
-  }
-  event.preventDefault();
-  // Focus goes with the pick, as the arrow keys take it; "In my own words"
-  // then gives it to its field as that opens.
-  event.currentTarget
-    .querySelectorAll<HTMLElement>('[role="radio"], [role="checkbox"]')
-    .item(number - 1)
-    ?.focus();
-  if (item.multiple !== true) {
-    onAnswer(answerOf([value], answer));
-    return;
-  }
-  const values = valuesOf(answer);
-  onAnswer(
-    answerOf(
-      values.includes(value)
-        ? values.filter((each) => each !== value)
-        : [...values, value],
-      answer
-    )
-  );
-};
-
-/**
- * The questions, one at a time, in place of the box: each with its
- * options and "In my own words", then Send once the last is answered.
+ * The questions the agent asked, in the box's place, on Damsko's
+ * Questionnaire: one at a time, each its choices (the recommended one
+ * marked, several where it takes several) and words of the person's own,
+ * Next and Back between them, and Send on the last; Type instead, or
+ * Escape, goes back to the box. Hidden while the person types instead,
+ * so what they answered stays for when they come back.
  */
 export const AskedQuestions = ({
   asked,
   busy,
   children,
   failure,
+  hidden,
   model,
   models,
-  progress,
-  onProgress,
   onSend,
   onType,
 }: {
   asked: ChatAsked;
   busy: boolean;
-  /** More of the place's own controls, beside Type instead. */
   children?: ReactNode;
   failure: string | undefined;
-  /**
-   * The model the answers go to and those it may be, as the box to ask
-   * in names them: with none, nothing is sent and the way to connect an
-   * AI provider shows instead.
-   */
+  hidden: boolean;
   model?: string;
   models?: readonly string[];
-  progress: AskProgress;
-  onProgress: (next: AskProgress) => void;
   onSend: (text: string, given: readonly AskAnswer[]) => void;
   onType: () => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
-  const { step, given } = progress;
-  const total = asked.questions.length;
-  const item = asked.questions[step];
-  const answer = given[step] ?? unanswered;
-  const last = step === total - 1;
-  const canSend = answers(answer) && !busy && !lacksModel(model);
-  if (item === undefined) {
-    return null;
-  }
-  const setAnswer = (next: AskAnswer): void => {
-    onProgress({
-      ...progress,
-      given: given.map((each, index) => (index === step ? next : each)),
-    });
-  };
-  const setStep = (next: number): void => {
-    onProgress({ ...progress, step: next });
-  };
-  const next = (): void => {
-    if (!answers(answer)) {
-      return;
-    }
-    if (!last) {
-      setStep(step + 1);
-    } else if (canSend) {
-      onSend(answersText(asked, given), given);
-    }
-  };
-  const number = step + 1;
-  const questionId = `${ids}-question`;
+  const canSend = !busy && !lacksModel(model);
+  const place = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = place.current;
+    // Listened to here: the Questionnaire takes its own keys, and has no
+    // way out of the questions.
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        // Not also the chat's own Escape, which closes it.
+        event.preventDefault();
+        onType();
+      }
+    };
+    element?.addEventListener("keydown", onKey);
+    return () => {
+      element?.removeEventListener("keydown", onKey);
+    };
+  }, [onType]);
   return (
-    <AskCard
-      aria-label={t`Grasp asks`}
-      // Keys work wherever focus is on the card.
-      onKeyDown={(event) => {
-        keyed(event, {
-          item,
-          answer,
-          onAnswer: setAnswer,
-          onNext: next,
-          onType,
-        });
-      }}
+    <div
+      hidden={hidden}
+      ref={place}
+      {...stylex.props(styles.asked, hidden && styles.away)}
     >
-      <AskCardHeader>
-        <MessageCircleQuestionIcon aria-hidden="true" className="size-3.5" />
-        {item.header === undefined ? (
-          <Trans>Grasp asks</Trans>
-        ) : (
-          <AskCardTopic>{item.header}</AskCardTopic>
-        )}
-        <AskCardProgress aria-live="polite" current={number} total={total}>
-          <Trans>
-            {number} of {total}
-          </Trans>
-        </AskCardProgress>
-      </AskCardHeader>
-      <AskCardBody>
-        <AskCardQuestion id={questionId}>{item.question}</AskCardQuestion>
-        <ChoiceAnswer
-          answer={answer}
-          // Another question's answer never carries over.
-          key={step}
-          labelledBy={questionId}
-          onAnswer={setAnswer}
-          item={item}
-        />
-        <NoModelNotice model={model} models={models} />
-        <ErrorText>{failure}</ErrorText>
-      </AskCardBody>
-      <AskCardFooter>
-        <Button onClick={onType} size="sm" variant="ghost">
-          <Trans>Type instead</Trans>
-          <Kbd aria-hidden="true">Esc</Kbd>
-        </Button>
-        {children}
-        <span className="ml-auto flex gap-2">
-          {step === 0 ? null : (
-            <Button
-              onClick={() => {
-                setStep(step - 1);
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              <Trans>Back</Trans>
-            </Button>
-          )}
-          <Button
-            disabled={last ? !canSend : !answers(answer)}
-            onClick={next}
-            size="sm"
+      <Questionnaire
+        aria-label={t`Grasp asks`}
+        onSubmit={(sent) => {
+          const given = asked.questions.map((_, index) => {
+            const answer = sent[String(index)];
+            return answer === undefined ? unanswered : answerOf(answer);
+          });
+          onSend(answersText(asked, given), given);
+        }}
+      >
+        {asked.questions.length > 1 ? <QuestionnaireProgress /> : null}
+        {asked.questions.map((item, index) => (
+          <QuestionnaireItem
+            key={item.question}
+            multiple={item.multiple === true}
+            name={String(index)}
+            required
           >
-            {last ? <Trans>Send</Trans> : <Trans>Next</Trans>}
+            <QuestionnaireTitle>{item.question}</QuestionnaireTitle>
+            {item.header === undefined ? null : (
+              <QuestionnaireDescription>{item.header}</QuestionnaireDescription>
+            )}
+            <QuestionnaireChoices>
+              {item.options.map((option, at) => (
+                <QuestionnaireChoice
+                  key={option.label}
+                  recommended={item.recommended === at}
+                  value={String(at)}
+                >
+                  {option.label}
+                  {option.description === undefined ? null : (
+                    <QuestionnaireChoiceDescription>
+                      {option.description}
+                    </QuestionnaireChoiceDescription>
+                  )}
+                </QuestionnaireChoice>
+              ))}
+            </QuestionnaireChoices>
+            <QuestionnaireInput />
+            <QuestionnaireError />
+          </QuestionnaireItem>
+        ))}
+        <QuestionnaireActions>
+          <Button onClick={onType} size="sm" variant="ghost">
+            <Trans>Type instead</Trans>
           </Button>
-        </span>
-      </AskCardFooter>
-    </AskCard>
+          {children}
+          <QuestionnairePrevious />
+          <QuestionnaireNext />
+          <QuestionnaireSubmit disabled={!canSend} />
+        </QuestionnaireActions>
+      </Questionnaire>
+      <NoModelNotice model={model} models={models} />
+      <FailureLine>{failure}</FailureLine>
+    </div>
   );
 };
 
-/** Back to the questions, once the person chose to type instead. */
+/** The way back to the questions, over the box, once the person chose to type instead. */
 const BackToQuestions = ({
   asked,
   onBack,
@@ -468,29 +242,12 @@ const BackToQuestions = ({
   const { t } = useLingui();
   const count = asked.questions.length;
   return (
-    <Button className="self-start" onClick={onBack} size="sm" variant="outline">
-      <MessageCircleQuestionIcon data-icon="inline-start" />
-      {t`${plural(count, { one: "Back to the question", other: "Back to the # questions" })}`}
-    </Button>
-  );
-};
-
-/**
- * Under a reply that asked: what it asked about, by the questions' topics,
- * or how many it asked where they have none.
- */
-export const AskedLine = ({ asked }: { asked: ChatAsked }) => {
-  const { t } = useLingui();
-  const topics = asked.questions.flatMap(({ header }) => header ?? []);
-  const count = asked.questions.length;
-  const list = formatList(topics);
-  return (
-    <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-      <MessageCircleQuestionIcon aria-hidden="true" className="size-3.5" />
-      {topics.length === count
-        ? t`Asked you about ${list}`
-        : t`${plural(count, { one: "Asked you a question", other: "Asked you # questions" })}`}
-    </p>
+    <div>
+      <Button onClick={onBack} size="sm" variant="outline">
+        <Icon icon={MessageCircleIcon} />
+        {t`${plural(count, { one: "Back to the question", other: "Back to the # questions" })}`}
+      </Button>
+    </div>
   );
 };
 
@@ -506,44 +263,42 @@ export const AskOrCompose = ({
   ...composer
 }: ComponentProps<typeof Composer> & {
   asking: ChatAsked | undefined;
-  /** Sends the person's answers: as their own message, and as they picked them. */
   onAnswer: (text: string, given: readonly AskAnswer[]) => void;
 }) => {
   const [typing, setTyping] = useState<string>();
-  const [progress, setProgress] = useState<AskProgress>();
-  if (asking !== undefined && typing !== asking.callId) {
-    return (
-      <AskedQuestions
-        asked={asking}
-        busy={composer.busy}
-        failure={composer.failure}
-        key={asking.callId}
-        model={composer.model}
-        models={composer.models}
-        onProgress={setProgress}
-        onSend={onAnswer}
-        onType={() => {
-          setTyping(asking.callId);
-        }}
-        progress={
-          progress?.callId === asking.callId ? progress : startOf(asking)
-        }
-      >
-        {composer.children}
-      </AskedQuestions>
-    );
-  }
+  const asked = asking !== undefined && typing !== asking.callId;
   return (
     <>
       {asking === undefined ? null : (
-        <BackToQuestions
+        <AskedQuestions
           asked={asking}
-          onBack={() => {
-            setTyping(undefined);
+          busy={composer.busy}
+          failure={composer.failure}
+          hidden={!asked}
+          key={asking.callId}
+          model={composer.model}
+          models={composer.models}
+          onSend={onAnswer}
+          onType={() => {
+            setTyping(asking.callId);
           }}
-        />
+        >
+          {asked ? composer.children : null}
+        </AskedQuestions>
       )}
-      <Composer {...composer} />
+      {asked ? null : (
+        <>
+          {asking === undefined ? null : (
+            <BackToQuestions
+              asked={asking}
+              onBack={() => {
+                setTyping(undefined);
+              }}
+            />
+          )}
+          <Composer {...composer} />
+        </>
+      )}
     </>
   );
 };

@@ -11,7 +11,6 @@ import {
 } from "@grasp-os/ui/components/attachment";
 import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import type { Ref } from "react";
 
 import { formatBytes } from "../format.ts";
 
@@ -20,8 +19,8 @@ import { formatBytes } from "../format.ts";
 // sent, and under the question once it is. Core takes the types
 // `chatFileTypes` names; the box checks the rest (use-ask.ts).
 
-/** What the file picker offers: the extensions core takes. */
-const accepted = Object.keys(chatFileTypes)
+/** What a question may carry: the extensions core takes. */
+export const acceptedFiles = Object.keys(chatFileTypes)
   .map((extension) => `.${extension}`)
   .join(",");
 
@@ -90,30 +89,3 @@ export const FileCards = ({
     </AttachmentGroup>
   );
 };
-
-/**
- * The picker for the files core takes, hidden: whatever opens it calls
- * `click()` on it through `ref` (the composer's add menu).
- */
-export const FilePicker = ({
-  onAttach,
-  ref,
-}: {
-  onAttach: (files: readonly File[]) => void;
-  ref: Ref<HTMLInputElement>;
-}) => (
-  <input
-    accept={accepted}
-    aria-hidden="true"
-    hidden
-    multiple
-    onChange={(event) => {
-      onAttach([...(event.target.files ?? [])]);
-      // The same file can be picked again once it was taken off.
-      event.target.value = "";
-    }}
-    ref={ref}
-    tabIndex={-1}
-    type="file"
-  />
-);

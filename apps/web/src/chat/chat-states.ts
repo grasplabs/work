@@ -126,3 +126,34 @@ export const chainStatuses: Readonly<
 /** Who wrote a message of the chat, as a Message stands: the person's at the end. */
 export const messageAlign = (role: "user" | "assistant"): "start" | "end" =>
   role === "user" ? "end" : "start";
+
+/** Where the box to ask in stands, as Damsko's PromptInput takes it. */
+export type PromptStatus = "ready" | "submitted" | "streaming" | "error";
+
+/**
+ * The box's status from the chat: `streaming` while Grasp answers, so
+ * Send is Stop; `submitted` while a question is on its way to core and
+ * no answer runs yet; `error` once the last question didn't go, its words
+ * kept; else `ready`. A stop on its way is still `streaming`: the answer
+ * runs until core says it stopped.
+ */
+export const promptStatusOf = ({
+  running,
+  busy,
+  failed,
+}: {
+  /** Grasp answers in the chat now. */
+  running: boolean;
+  /** A question or a stop is on its way to core. */
+  busy: boolean;
+  /** The last question didn't go. */
+  failed: boolean;
+}): PromptStatus => {
+  if (running) {
+    return "streaming";
+  }
+  if (busy) {
+    return "submitted";
+  }
+  return failed ? "error" : "ready";
+};

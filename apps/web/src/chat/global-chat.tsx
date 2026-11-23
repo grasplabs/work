@@ -1,4 +1,3 @@
-import { useIsMobile } from "@grasp-os/app-kit/hooks/use-mobile";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -42,6 +41,7 @@ import {
   useSubjectChat,
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
+import { useNarrow } from "./narrow.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
 
@@ -227,7 +227,7 @@ const useGlobalChatValue = () => {
   // next message.
   const asking = pendingAsk(view.messages, view.running);
   const layout = useChatLayout();
-  const roomBeside = !useIsMobile();
+  const roomBeside = !useNarrow();
   // About the page's subject, it stays open (chat-subject.ts), where the
   // page has it: that page is where its subject is made. Elsewhere, open
   // where it was put, where this page allows it there; elsewhere it stays

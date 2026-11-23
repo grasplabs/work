@@ -1,4 +1,5 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { SubjectKind } from "@grasp-os/shared/subject";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -6,24 +7,38 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import { Shimmer } from "@grasp-os/app-kit/components/shimmer";
-import type { SubjectKind } from "@grasp-os/shared/subject";
+} from "@grasp-os/ui/components/dropdown-menu";
+import { Link } from "@grasp-os/ui/components/link";
+import { Shimmer } from "@grasp-os/ui/components/shimmer";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import * as stylex from "@stylexjs/stylex";
+import { Link as RouterLink } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
 
 import type { NamedWork } from "./builds.tsx";
 import { useMentionKinds } from "./mentions.tsx";
 
 // What the chat is about and what it worked on, on the bar above its box
-// (`PromptInputSubjectBar`): one line, so the box stays as it is. On a
+// (in the box's header): one line, so the box stays as it is. On a
 // page about one thing (chat-subject.ts), that thing; elsewhere the App or
 // workflow the chat changed last, a way to its page, which carries this
 // chat on beside it (`?chat=`). Anything else it worked on waits behind
 // "+N", the latest first. Each says "Building…" while the running turn
 // writes its draft. Nothing worked on and no subject: no bar.
+
+const styles = stylex.create({
+  bar: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+  },
+  more: { marginInlineStart: "auto" },
+});
 
 /** One thing on the bar: of a kind, by ID and name. */
 interface Worked {
@@ -73,14 +88,14 @@ const WorkedLink = ({
   chatId: string | undefined;
 }) =>
   worked.kind === "app" ? (
-    <Link
+    <RouterLink
       {...props}
       params={{ app: worked.id }}
       search={chatId === undefined ? {} : { chat: chatId }}
       to="/apps/$app"
     />
   ) : (
-    <Link
+    <RouterLink
       {...props}
       params={{ workflow: worked.id }}
       search={chatId === undefined ? {} : { chat: chatId }}
@@ -125,56 +140,62 @@ export const SubjectBarContent = ({
     written.has(`${worked.kind}:${worked.id}`);
   const count = others.length;
   return (
-    <>
-      {kinds[lead.kind].icon}
+    <div {...stylex.props(styles.bar)}>
+      <Icon icon={kinds[lead.kind].icon} />
       {subject === undefined ? (
-        <WorkedLink chatId={chatId} worked={lead}>
-          {lead.name}
-        </WorkedLink>
+        <Link asChild variant="plain">
+          <WorkedLink chatId={chatId} worked={lead}>
+            {lead.name}
+          </WorkedLink>
+        </Link>
       ) : (
-        <span>{lead.name}</span>
+        <Text as="span" size="sm" truncate>
+          {lead.name}
+        </Text>
       )}
-      {building(lead) ? <Shimmer as="span">{t`Building…`}</Shimmer> : null}
+      {building(lead) ? <Shimmer>{t`Building…`}</Shimmer> : null}
       {count === 0 ? null : (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
+        <span {...stylex.props(styles.more)}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t`${plural(count, {
                   one: "# more thing this chat worked on",
                   other: "# more things this chat worked on",
                 })}`}
-                className="-my-1 ms-auto"
                 size="xs"
                 variant="ghost"
-              />
-            }
-          >
-            +{count}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>
-                <Trans>Also worked on</Trans>
-              </DropdownMenuLabel>
-              {others.map((worked) => (
-                <DropdownMenuItem
-                  key={`${worked.kind}:${worked.id}`}
-                  render={<WorkedLink chatId={chatId} worked={worked} />}
-                >
-                  {kinds[worked.kind].icon}
-                  <span className="truncate">{worked.name}</span>
-                  {building(worked) ? (
-                    <Shimmer as="span" className="ms-auto">
-                      {t`Building…`}
-                    </Shimmer>
-                  ) : null}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              >
+                +{count}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>
+                  <Trans>Also worked on</Trans>
+                </DropdownMenuLabel>
+                {others.map((worked) => (
+                  <DropdownMenuItem
+                    asChild
+                    icon={kinds[worked.kind].icon}
+                    key={`${worked.kind}:${worked.id}`}
+                  >
+                    <WorkedLink chatId={chatId} worked={worked}>
+                      {worked.name}
+                      {building(worked) ? (
+                        <>
+                          {" "}
+                          <Shimmer>{t`Building…`}</Shimmer>
+                        </>
+                      ) : null}
+                    </WorkedLink>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
       )}
-    </>
+    </div>
   );
 };

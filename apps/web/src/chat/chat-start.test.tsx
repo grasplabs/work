@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 
 import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
-import { typeInPrompt } from "@grasp-os/app-kit/testing";
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
@@ -28,6 +27,7 @@ import { activeChat } from "./active-chat.ts";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
 import { GlobalChatProvider } from "./global-chat.tsx";
+import { typeInPrompt } from "./test-typing.ts";
 
 // Chat's own page from Make something: ideas to start from in place of the
 // questions (an App's blueprints, a workflow's starting sentences), each
@@ -112,11 +112,18 @@ const shown = async (
     agents = [],
     named,
     from,
-  }: { agents?: ChatAgent[]; named?: string; from?: Opportunity } = {}
+    models = Promise.resolve(["openai/gpt-5"]),
+  }: {
+    agents?: ChatAgent[];
+    named?: string;
+    from?: Opportunity;
+    /** What core says the models are, once it does. */
+    models?: Promise<string[]>;
+  } = {}
 ) => {
   const asked: string[] = [];
   const chats = {
-    models: async () => await Promise.resolve(["openai/gpt-5"]),
+    models: async () => await models,
     efforts: async () => await Promise.resolve({}),
     list: async () => await Promise.resolve([]),
     agents: async () => await Promise.resolve(agents),
@@ -200,18 +207,23 @@ const box = (): HTMLElement => {
   return found;
 };
 
-/** The ideas offered: each tile's words. */
-const ideas = (): string[] =>
-  [
-    ...document.querySelectorAll('[aria-label="Ideas to start from"] button'),
-  ].map((each) => each.textContent ?? "");
+/** Each idea's press: its title, stretched over the tile. */
+const tiles = (): HTMLButtonElement[] => [
+  ...document.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="Ideas to start from"] button'
+  ),
+];
+
+/** The ideas offered: each tile's title, and the line under it. */
+const ideas = (): string[][] =>
+  tiles().map((each) => [
+    each.textContent,
+    document.querySelector(`[id="${each.getAttribute("aria-describedby")}"]`)
+      ?.textContent ?? "",
+  ]);
 
 const pick = async (title: string): Promise<void> => {
-  const tile = [
-    ...document.querySelectorAll<HTMLButtonElement>(
-      '[aria-label="Ideas to start from"] button'
-    ),
-  ].find((each) => each.getAttribute("aria-label") === title);
+  const tile = tiles().find((each) => each.textContent === title);
   await act(async () => {
     tile?.click();
     await Promise.resolve();
@@ -239,7 +251,7 @@ describe("Chat's page from Make something", () => {
     await pick("Service desk");
 
     expect({ offered, box: box().textContent, asked }).toStrictEqual({
-      offered: ["Service deskEvery client question, until it's solved."],
+      offered: [["Service desk", "Every client question, until it's solved."]],
       box: "Make an App from the Service desk blueprint: Every client question, until it's solved.",
       asked: [],
     });
@@ -256,9 +268,9 @@ describe("Chat's page from Make something", () => {
 
     expect({ offered, box: box().textContent, asked }).toStrictEqual({
       offered: [
-        "Track the month-end closeRecord-to-Report",
-        "Approve big invoicesPurchase-to-Pay",
-        "Onboard a new hireHire-to-Retire",
+        ["Track the month-end close", "Record-to-Report"],
+        ["Approve big invoices", "Purchase-to-Pay"],
+        ["Onboard a new hire", "Hire-to-Retire"],
       ],
       box: "Keep track of the month-end close: who does what, and remind people when they're late.",
       asked: [],
@@ -395,12 +407,45 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("sends a question asked before core has said which models there are once it has, with no second press", async () => {
+    const models = Promise.withResolvers<string[]>();
+    const { asked } = await shown(undefined, undefined, {
+      models: models.promise,
+    });
+
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const before = [...asked];
+    await act(async () => {
+      models.resolve(["openai/gpt-5"]);
+      await models.promise;
+    });
+    await settled();
+
+    expect({ before, asked }).toStrictEqual({
+      before: [],
+      asked: [
+        "create What waits on me today? null",
+        "send chat-1 What waits on me today?",
+      ],
+    });
+  });
+
   it("mentions the agent the address names in the box, so the question goes to it, among those the person may talk to", async () => {
     const { asked } = await shown(undefined, undefined, {
       agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
       named: "agent-2",
     });
-    const prefilled = box().textContent;
+    const prefilled = [
+      ...box().querySelectorAll('[data-slot="token-input-token"]'),
+    ].map((chip) => chip.textContent);
 
     await act(async () => {
       typeInPrompt(box(), "Which invoices are late?");
@@ -414,34 +459,12 @@ describe("Chat's page from Make something", () => {
 
     expect({ prefilled, asked }).toStrictEqual({
       // A chip, which shows the agent's name.
-      prefilled: "Claire ",
+      prefilled: ["Claire"],
       asked: [
         "create @Claire Which invoices are late? null with agent-2",
         'send chat-1 @Claire Which invoices are late? [{"kind":"agent","id":"agent-2"}]',
       ],
     });
-  });
-
-  it("asks a starting question of the agent the box mentions, in a chat made with it", async () => {
-    const { asked } = await shown(undefined, undefined, {
-      agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
-      named: "agent-2",
-    });
-
-    await act(async () => {
-      document
-        .querySelector<HTMLButtonElement>(
-          '[aria-label="What waits on me today?"]'
-        )
-        ?.click();
-      await Promise.resolve();
-    });
-    await settled();
-
-    expect(asked).toStrictEqual([
-      "create @Claire What waits on me today? null with agent-2",
-      'send chat-1 @Claire What waits on me today? [{"kind":"agent","id":"agent-2"}]',
-    ]);
   });
 
   it("mentions nobody for an agent the person may not talk to", async () => {

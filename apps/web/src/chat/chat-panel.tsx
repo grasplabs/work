@@ -1,4 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DockablePanel,
   DockablePanelHandle,
@@ -7,16 +6,21 @@ import {
 } from "@grasp-os/app-kit/components/dockable-panel";
 import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
 import { Panel } from "@grasp-os/app-kit/components/panel";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
+import { Button } from "@grasp-os/ui/components/button";
+import { Text } from "@grasp-os/ui/components/text";
 import {
+  Icon,
   Maximize2Icon,
-  Minimize2Icon,
-  SquarePenIcon,
+  PencilIcon,
+  SquareIcon,
   XIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
-import type { ReactNode } from "react";
 
 import { shortcutLabel } from "../shortcuts.ts";
 import { setActiveChat, startAfresh } from "./active-chat.ts";
@@ -51,6 +55,47 @@ import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
 // chat opens. Escape closes it to its idle bar, which takes the cursor back
 // (chat-bar.tsx).
 
+const styles = stylex.create({
+  newChat: { minWidth: 0, paddingInline: space["2"] },
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["1"],
+    marginInlineStart: "auto",
+  },
+  notice: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    paddingInline: space["1"],
+  },
+  footer: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    gap: space["1"],
+    paddingInline: space["4"],
+    paddingBlockStart: space["2"],
+    paddingBlockEnd: space["4"],
+  },
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    width: "100%",
+    minHeight: 0,
+    marginInline: "auto",
+  },
+  // Full screen, the conversation and the box read as one column in the middle.
+  fullscreen: { maxWidth: "48rem" },
+});
+
 /**
  * The open chat's title at the head of the chat, renamed where it stands,
  * with its menu; a chat not made yet is a new chat.
@@ -59,8 +104,10 @@ const ChatTitle = () => {
   const { summary, sourceNames, retitle } = useGlobalChat();
   if (summary === undefined) {
     return (
-      <span className="text-muted-foreground truncate px-2 text-sm font-medium">
-        <Trans>New chat</Trans>
+      <span {...stylex.props(styles.newChat)}>
+        <Text as="span" color="muted" size="sm" truncate weight="medium">
+          <Trans>New chat</Trans>
+        </Text>
       </span>
     );
   }
@@ -79,7 +126,7 @@ const ChatTitle = () => {
 interface Move {
   to: DockablePlacement;
   label: string;
-  icon: ReactNode;
+  icon: IconData;
 }
 
 /**
@@ -112,11 +159,9 @@ const MoveButtons = () => {
   const { presence } = useGlobalChat();
   const moves: Record<DockablePlacement, Move[]> = {
     // Undocking is the grip's: dragged out, or double-clicked (ChatGrip).
-    docked: [
-      { to: "fullscreen", label: t`Full screen`, icon: <Maximize2Icon /> },
-    ],
+    docked: [{ to: "fullscreen", label: t`Full screen`, icon: Maximize2Icon }],
     fullscreen: [
-      { to: "docked", label: t`Exit full screen`, icon: <Minimize2Icon /> },
+      { to: "docked", label: t`Exit full screen`, icon: SquareIcon },
     ],
     // Docking is the grip's: pushed into the dock, or double-clicked.
     floating: [],
@@ -131,7 +176,7 @@ const MoveButtons = () => {
           openChat(to);
         }}
       >
-        {icon}
+        <Icon icon={icon} />
       </HeaderIcon>
     ));
 };
@@ -145,7 +190,7 @@ const HeaderActions = () => {
   const { t } = useLingui();
   const { chatId, slot, keptOpen } = useGlobalChat();
   return (
-    <div className="ml-auto flex items-center gap-0.5">
+    <div {...stylex.props(styles.actions)}>
       {chatId === undefined ? null : (
         <HeaderIcon
           label={t`New chat`}
@@ -159,7 +204,7 @@ const HeaderActions = () => {
             }
           }}
         >
-          <SquarePenIcon />
+          <Icon icon={PencilIcon} />
         </HeaderIcon>
       )}
       <MoveButtons />
@@ -170,7 +215,7 @@ const HeaderActions = () => {
           onClick={closeChat}
           shortcut={shortcutLabel(chatKey)}
         >
-          <XIcon />
+          <Icon icon={XIcon} />
         </HeaderIcon>
       )}
     </div>
@@ -227,14 +272,16 @@ const ModelsUnavailableNotice = ({
     return null;
   }
   return (
-    <p className="text-muted-foreground flex items-center gap-2 px-1 text-xs">
-      {why.text}
+    <div {...stylex.props(styles.notice)}>
+      <Text color="muted" size="xs">
+        {why.text}
+      </Text>
       {onRetry === undefined ? null : (
-        <Button onClick={onRetry} size="xs" variant="link">
+        <Button onClick={onRetry} size="xs" variant="ghost">
           <Trans>Try again</Trans>
         </Button>
       )}
-    </p>
+    </div>
   );
 };
 
@@ -278,7 +325,7 @@ const Footer = () => {
       ? undefined
       : { ...subject.about, name: subject.name };
   return (
-    <div className="flex flex-none flex-col gap-1 px-4 pt-2 pb-4">
+    <div {...stylex.props(styles.footer)}>
       <BuildsFailure read={builds} />
       <ChatSources names={sourceNames} provenance={view.provenance} />
       <AskOrCompose
@@ -360,13 +407,15 @@ const Body = ({ open }: { open: boolean }) => {
     };
   }, []);
   return (
-    <div className="flex min-h-0 flex-1 flex-col" ref={body}>
+    <div ref={body} {...stylex.props(styles.body)}>
       {/* Full screen, the conversation reads as a column in the middle,
         named by its chat. */}
       <section
         aria-label={summary?.title ?? words.title}
-        className="mx-auto flex min-h-0 w-full flex-1 flex-col data-[placement=fullscreen]:max-w-3xl"
-        data-placement={placement}
+        {...stylex.props(
+          styles.column,
+          placement === "fullscreen" && styles.fullscreen
+        )}
       >
         <Thread
           focusBox={() => {
@@ -415,7 +464,6 @@ export const ChatPanel = () => {
       <DockablePanel
         defaultOffset={offset ?? undefined}
         delayed={delays.card}
-
         label={t`Chat`}
         onOffsetChange={moveChat}
         // Out of its dock, it floats, where this page allows that.

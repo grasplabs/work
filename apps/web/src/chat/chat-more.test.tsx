@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 
-import { Toaster } from "@grasp-os/app-kit/components/toast";
 import type { ChatSummary, ChatUpdate } from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -124,11 +123,9 @@ const opened = async (
   const Shown = () => {
     const { chat: open } = useSearch({ strict: false });
     const shown = all.find(({ id }) => id === open) ?? chat;
+    // Its own for each chat, as the chat's head keys it.
     return (
-      <Toaster>
-        {/* Its own for each chat, as the chat's head keys it. */}
-        <ChatTitleMenu chat={shown} key={shown.id} sourceNames={new Map()} />
-      </Toaster>
+      <ChatTitleMenu chat={shown} key={shown.id} sourceNames={new Map()} />
     );
   };
   const rootRoute = createRootRoute({
@@ -204,7 +201,7 @@ const choose = async (name: string, under?: string): Promise<void> => {
 /** The chat's title, a click away from renaming it. */
 const titleButton = (): HTMLElement => {
   const found = document.querySelector<HTMLElement>(
-    '[data-slot="editable-title-field"]'
+    '[data-slot="inline-edit"] > button'
   );
   if (found === null) {
     throw new Error("No title");
@@ -240,7 +237,9 @@ const typeInto = async (field: HTMLInputElement, text: string) => {
 /** The dialog's button `name`. */
 const dialogButton = (name: string): HTMLButtonElement => {
   const found = [
-    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
   ].find((button) => button.textContent?.trim() === name);
   if (found === undefined) {
     throw new Error(`No button ${name} in the dialog`);
@@ -318,9 +317,9 @@ describe("the open chat's menu", () => {
     const { writes, router } = await opened(leave);
     await choose("Delete");
     expect(writes).toStrictEqual([]);
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-      "Delete “Leave”?"
-    );
+    expect(
+      document.querySelector('[role="alertdialog"]')?.textContent
+    ).toContain("Delete “Leave”?");
     await press(dialogButton("Delete"));
     expect(writes).toStrictEqual(["remove chat-1"]);
     expect(activeChat()).toBeUndefined();

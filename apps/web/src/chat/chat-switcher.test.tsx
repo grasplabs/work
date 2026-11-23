@@ -11,7 +11,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatSwitcherProvider } from "./chat-switcher.tsx";
 
@@ -93,19 +93,22 @@ const dialog = (): HTMLElement | null =>
 
 /**
  * The chats the window lists, each as its title and any line found under
- * it; when it was used left out.
+ * it, under the day they were used; when it was, left out, and the
+ * window's own rows ("New chat", "Archived") too.
  */
 const rows = (): string[] =>
-  [...(dialog()?.querySelectorAll("[cmdk-item]") ?? [])].map((row) => {
-    const read = row.cloneNode(true);
-    if (!(read instanceof HTMLElement)) {
-      return "";
+  [...(dialog()?.querySelectorAll('[role="group"] [role="option"]') ?? [])].map(
+    (row) => {
+      const read = row.cloneNode(true);
+      if (!(read instanceof HTMLElement)) {
+        return "";
+      }
+      for (const time of read.querySelectorAll("time")) {
+        time.remove();
+      }
+      return (read.textContent ?? "").trim();
     }
-    for (const time of read.querySelectorAll("time")) {
-      time.remove();
-    }
-    return (read.textContent ?? "").trim();
-  });
+  );
 
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
@@ -130,7 +133,7 @@ const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
 
 /** Types `text` into the window's search, as a person would. */
 const type = async (text: string): Promise<void> => {
-  const input = dialog()?.querySelector<HTMLInputElement>("[cmdk-input]");
+  const input = dialog()?.querySelector<HTMLInputElement>('[role="combobox"]');
   if (input === undefined || input === null) {
     throw new Error("The window has no search");
   }
@@ -146,7 +149,16 @@ const type = async (text: string): Promise<void> => {
   });
 };
 
+/** How long the window's code may take to load, built the first time. */
+const loadMs = 30_000;
+
 describe("the chats window", () => {
+  // The window's code loads the first time it opens: loaded once here, so
+  // no test waits on it being built.
+  beforeAll(async () => {
+    await import("./chat-window.tsx");
+  }, loadMs);
+
   afterEach(() => {
     act(() => {
       root?.unmount();

@@ -1,4 +1,3 @@
-import type { PromptMention } from "@grasp-os/app-kit/components/prompt-editor";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   chatFileMaxBytes,
@@ -15,6 +14,7 @@ import { useRef, useState } from "react";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
 import {
   readChoice,
@@ -118,7 +118,7 @@ export const useAsk = (
   const [text, setText] = useState("");
   // What the person mentioned in the box (`@`), each once: what the
   // question names exactly, beside its words, and the chips the box shows.
-  const [mentions, setMentions] = useState<readonly PromptMention[]>([]);
+  const [mentions, setMentions] = useState<readonly BoxMention[]>([]);
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
@@ -181,7 +181,7 @@ export const useAsk = (
   const ask = async (
     question: string,
     carried: readonly BoxFile[] = [],
-    mentioned: readonly PromptMention[] = []
+    mentioned: readonly BoxMention[] = []
   ): Promise<void> => {
     if (sending.current) {
       return;

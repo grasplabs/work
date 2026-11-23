@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   answerStatusOf,
   chainStatuses,
+  promptStatusOf,
   stepStatusOf,
   toolStates,
 } from "./chat-states.ts";
@@ -119,5 +120,22 @@ describe("a step's status", () => {
         stopped: "pending",
       },
     });
+  });
+});
+
+describe("the box's status", () => {
+  it("streams while Grasp answers, even with a stop on its way", () => {
+    expect([
+      promptStatusOf({ running: true, busy: false, failed: false }),
+      promptStatusOf({ running: true, busy: true, failed: false }),
+    ]).toStrictEqual(["streaming", "streaming"]);
+  });
+
+  it("is submitted while a question is on its way, failed once it didn't go, else ready", () => {
+    expect([
+      promptStatusOf({ running: false, busy: true, failed: false }),
+      promptStatusOf({ running: false, busy: false, failed: true }),
+      promptStatusOf({ running: false, busy: false, failed: false }),
+    ]).toStrictEqual(["submitted", "error", "ready"]);
   });
 });

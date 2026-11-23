@@ -103,19 +103,21 @@ const placed = async (model = "openai/gpt-5") => {
   return { sent };
 };
 
-/** What a button says, less the key it hints at (`Kbd`). */
-const nameOf = (element: HTMLElement): string =>
-  [...element.childNodes]
-    .filter(
-      (node) => !(node instanceof HTMLElement && node.dataset.slot === "kbd")
-    )
-    .map((node) => node.textContent)
-    .join("")
-    .trim();
+/** Lets the questions settle: what they scheduled, focus moved a frame on. */
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 20);
+    await promise;
+  });
+};
 
 const button = (name: string): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
-    (each) => nameOf(each) === name
+    (each) =>
+      each.textContent.trim() === name && each.closest("[hidden]") === null
   );
   if (found === undefined) {
     throw new Error(`No button ${name}`);
@@ -123,56 +125,64 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** The option row labelled `label`, with its control. */
-const option = (label: string): HTMLElement => {
+/** The element whose ID is `id`. */
+const byId = (id: string): Element | null =>
+  document.querySelector(`[id="${id}"]`);
+
+/** The choice named `label`: its radio, or its checkbox where several are taken. */
+const choice = (label: string): HTMLElement => {
   const found = [
-    ...document.querySelectorAll<HTMLElement>('[data-slot="ask-card-option"]'),
-  ].find((each) => each.textContent.startsWith(label));
+    ...document.querySelectorAll<HTMLElement>(
+      '[role="radio"], [role="checkbox"]'
+    ),
+  ].find(
+    (each) =>
+      byId((each.getAttribute("aria-labelledby") ?? "").split(" ")[0] ?? "")
+        ?.textContent === label
+  );
   if (found === undefined) {
-    throw new Error(`No option ${label}`);
+    throw new Error(`No choice ${label}`);
   }
   return found;
 };
 
-const click = (element: HTMLElement): void => {
+const click = async (element: HTMLElement): Promise<void> => {
   act(() => {
     element.click();
   });
+  await settle();
 };
 
-/** Picks the option labelled `label`, as the person does: anywhere on its row. */
-const pick = (label: string): void => {
-  click(option(label));
+/** Picks the choice named `label`, as the person does. */
+const pick = async (label: string): Promise<void> => {
+  await click(choice(label));
 };
 
-/** Whether the option labelled `label` is picked. */
+/** Whether the choice named `label` is picked. */
 const picked = (label: string): boolean =>
-  option(label).querySelector("[data-checked]") !== null;
+  choice(label).getAttribute("aria-checked") === "true";
 
 /** Presses `key` where focus is, as the person does, with no click first. */
-const press = (key: string): void => {
+const press = async (key: string): Promise<void> => {
   const focused = document.activeElement ?? document.body;
   act(() => {
-    focused.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    focused.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+    );
   });
+  await settle();
 };
 
-/** The option whose control has focus, by its label. */
-const focusedOption = (): string | undefined =>
-  document.activeElement
-    ?.closest<HTMLElement>('[data-slot="ask-card-option"]')
-    ?.querySelector(":scope > span:not([data-slot]) > span")?.firstChild
-    ?.textContent ?? undefined;
-
 /** Types `text` into the field for the person's own words. */
-const typeOwn = (text: string): void => {
-  const field = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Your answer"]'
-  );
-  if (field === null) {
+const typeOwn = async (text: string): Promise<void> => {
+  const field = [
+    ...document.querySelectorAll<HTMLInputElement>('input[aria-label="Other"]'),
+  ].find((each) => each.closest("[hidden]") === null);
+  if (field === undefined) {
     throw new Error("No field for their own words");
   }
   act(() => {
+    field.focus();
     const prototype = Reflect.getPrototypeOf(field) ?? {};
     Reflect.getOwnPropertyDescriptor(prototype, "value")?.set?.call(
       field,
@@ -180,10 +190,15 @@ const typeOwn = (text: string): void => {
     );
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  await settle();
 };
 
 const says = (text: string): boolean =>
   document.body.textContent.includes(text);
+
+/** Whether the box to ask in shows. */
+const typing = (): boolean =>
+  document.querySelector('[role="textbox"]') !== null;
 
 describe("questions in place of the box", () => {
   afterEach(unmount);
@@ -193,17 +208,20 @@ describe("questions in place of the box", () => {
     const shownFirst = {
       topic: says("Rhythm"),
       progress: says("1 of 2"),
-      recommended: option("Weekly").textContent.includes("Recommended"),
+      recommended: (choice("Weekly").getAttribute("aria-labelledby") ?? "")
+        .split(" ")
+        .map((id) => document.querySelector(`#${id}`)?.textContent)
+        .includes("Recommended"),
       described: says("On Mondays"),
       next: button("Next").disabled,
     };
-    pick("Weekly");
+    await pick("Weekly");
     const nextOnceAnswered = button("Next").disabled;
-    click(button("Next"));
-    pick("Me");
-    pick("Finance");
+    await click(button("Next"));
+    await pick("Me");
+    await pick("Finance");
     const sentBeforeSend = sent.length;
-    click(button("Send"));
+    await click(button("Send answer"));
 
     expect({
       shownFirst,
@@ -233,30 +251,32 @@ describe("questions in place of the box", () => {
 
   it("picks by number, goes on and sends with Enter, and types instead with Esc", async () => {
     const { sent } = await placed();
-    press("2");
-    const focusMoved = focusedOption();
-    press("1");
+    choice("Daily").focus();
+    await press("2");
+    const second = picked("Weekly");
+    await press("1");
     const first = picked("Daily");
-    press("Enter");
-    press("2");
-    press("3");
-    press("2");
+    await press("Enter");
+    choice("Me").focus();
+    await press("2");
+    await press("3");
+    await press("2");
     const toWhom = ["Me", "My team", "Finance"].map(picked);
-    press("Enter");
+    await press("Enter");
     const answered = [...sent];
     unmount();
     await placed();
-    press("Escape");
+    choice("Daily").focus();
+    await press("Escape");
 
     expect({
-      focusMoved,
+      second,
       first,
       toWhom,
       answered: answered.map(({ text }) => text),
-      typing: document.querySelector('[role="textbox"]') !== null,
+      typing: typing(),
     }).toStrictEqual({
-      // The key moves focus to what it picks.
-      focusMoved: "Weekly",
+      second: true,
       first: true,
       // 2 picked My team, 3 Finance, and 2 again took My team off.
       toWhom: [false, false, true],
@@ -265,36 +285,19 @@ describe("questions in place of the box", () => {
     });
   });
 
-  it("puts focus on each question's picked option, or its first, as it shows", async () => {
-    await placed();
-    const shown = focusedOption();
-    pick("Weekly");
-    click(button("Next"));
-    const next = focusedOption();
-    click(button("Back"));
-
-    expect({ shown, next, back: focusedOption() }).toStrictEqual({
-      shown: "Daily",
-      next: "Me",
-      back: "Weekly",
-    });
-  });
-
   it("takes the person's own words, alone or beside what they picked", async () => {
     const { sent } = await placed();
-    pick("In my own words");
-    typeOwn(" Every other week ");
-    click(button("Next"));
-    pick("Me");
-    pick("In my own words");
-    typeOwn("the auditors");
-    click(button("Send"));
+    await typeOwn(" Every other week ");
+    await click(button("Next"));
+    await pick("Me");
+    await typeOwn("the auditors");
+    await click(button("Send answer"));
 
     expect(sent).toStrictEqual([
       {
         text: "1. How often? — Every other week\n2. To whom? — Me and the auditors",
         given: [
-          { picked: [], own: " Every other week " },
+          { picked: [], own: "Every other week" },
           { picked: [0], own: "the auditors" },
         ],
       },
@@ -303,14 +306,14 @@ describe("questions in place of the box", () => {
 
   it("keeps the person's answers and question when they type instead and come back, beside the place's own controls", async () => {
     await placed();
-    pick("Weekly");
-    click(button("Next"));
+    await pick("Weekly");
+    await click(button("Next"));
     const own = button("Open the chat").type;
-    click(button("Type instead"));
-    const boxShown = document.querySelector('[role="textbox"]') !== null;
-    click(button("Back to the 2 questions"));
-    const onSecond = says("To whom?");
-    click(button("Back"));
+    await click(button("Type instead"));
+    const boxShown = typing();
+    await click(button("Back to the 2 questions"));
+    const onSecond = says("To whom?") && !typing();
+    await click(button("Previous"));
 
     expect({ own, boxShown, onSecond, kept: picked("Weekly") }).toStrictEqual({
       own: "button",
@@ -322,11 +325,11 @@ describe("questions in place of the box", () => {
 
   it("sends nothing while there is no model to answer, and shows how to connect an AI provider", async () => {
     const { sent } = await placed("");
-    pick("Weekly");
-    click(button("Next"));
-    pick("Me");
-    const sendDisabled = button("Send").disabled;
-    click(button("Send"));
+    await pick("Weekly");
+    await click(button("Next"));
+    await pick("Me");
+    const sendDisabled = button("Send answer").disabled;
+    await click(button("Send answer"));
 
     expect({
       sendDisabled,

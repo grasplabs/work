@@ -49,8 +49,29 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         context: "a code block being written",
       }),
     },
+    command: {
+      dialogPlaceholder: t`Type a command or search`,
+      dialogTrigger: t({ message: "Search", context: "opens a search" }),
+      empty: t`No results`,
+      error: t({ message: "Failed", context: "a search that failed" }),
+      expand: (label) => t`More for ${label}`,
+      loading: t`Searching`,
+      moreHint: t`Right arrow for more`,
+      placeholder: t({ message: "Search", context: "a search field" }),
+    },
+    dialog: {
+      close: t`Close`,
+    },
+    dropdownMenu: {
+      expand: t`More actions`,
+    },
     empty: {
       error: t`This did not load`,
+    },
+    inlineEdit: {
+      edit: t({ message: "Edit", context: "edit a name in place" }),
+      error: t`Could not save`,
+      saved: (value) => t`Changed to ${value}`,
     },
     keyValue: {
       copy: (label) => t`Copy ${label}`,
@@ -87,6 +108,79 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Loading the conversation`,
       scrollToEnd: t`Jump to latest`,
       scrollToStart: t`Jump to start`,
+    },
+    modelSelector: {
+      empty: t`No models found`,
+      search: t`Search models`,
+      trigger: t({ message: "Model", context: "the model that answers" }),
+      triggerWith: (trigger, model) => t`${trigger}: ${model}`,
+      makers: t`Makers`,
+      favorites: t`Favourites`,
+      noFavorites: t`No favourites yet`,
+      effort: t({ message: "Thinking", context: "how hard a model thinks" }),
+      addFavorite: (model) => t`Add ${model} to favourites`,
+      removeFavorite: (model) => t`Remove ${model} from favourites`,
+      added: (model) => t`${model} added to favourites`,
+      removed: (model) => t`${model} removed from favourites`,
+      chosen: (model) => t`${model} chosen`,
+      favoriteKeys: t`At the end of the search, the arrow toward the line's end stars or unstars the highlighted model`,
+    },
+    promptInput: {
+      add: t`Add to message`,
+      addAttachments: t`Add files`,
+      attachments: t`Files to send`,
+      count: (length, max) => t`${length}/${max}`,
+      cut: (max) =>
+        max === 0
+          ? t`What was added was left out: no more can be written`
+          : t`${plural(max, { one: "What was added was cut at the limit of # character", other: "What was added was cut at the limit of # characters" })}`,
+      drop: t`Drop to add`,
+      failed: t`Could not send. Your message is kept.`,
+      mentionEmpty: t`No matches`,
+      mentionsError: t`Could not load suggestions`,
+      mentionsFound: (count) =>
+        count === 0
+          ? t`No results`
+          : t`${plural(count, { one: "# result", other: "# results" })}`,
+      mentionsLoading: t`Looking`,
+      near: (max) =>
+        max === 0
+          ? t`No room left`
+          : t`${plural(max, { one: "Close to the limit of # character", other: "Close to the limit of # characters" })}`,
+      reached: (max) =>
+        max === 0
+          ? t`No more can be written`
+          : t`${plural(max, { one: "The limit of # character is reached", other: "The limit of # characters is reached" })}`,
+      speechButton: {
+        cancel: t`Cancel dictation`,
+        done: t({ message: "Done", context: "end dictation" }),
+        label: t`Dictate`,
+        listening: t({ message: "Listening", context: "dictation" }),
+        mute: t`Mute`,
+        settling: t`Writing it down`,
+      },
+      stop: t({ message: "Stop", context: "stop an answer" }),
+      submit: t({ message: "Send", context: "send a message" }),
+      succeeded: t({ message: "Done", context: "a message sent" }),
+      voice: {
+        close: t`Close voice`,
+        label: t`Voice conversation`,
+        listening: t({ message: "Listening", context: "a voice conversation" }),
+        speaking: t`Speaking`,
+      },
+    },
+    questionnaire: {
+      error: t`Could not send the answer`,
+      next: t({ message: "Next", context: "the next question" }),
+      other: t({ message: "Other", context: "an answer in one's own words" }),
+      previous: t({ message: "Previous", context: "the question before" }),
+      progress: (current, total) => t`Question ${current} of ${total}`,
+      progressLabel: t`Progress`,
+      step: (current, total) => t`${current} of ${total}`,
+      recommended: t`Recommended`,
+      required: t`Answer this question to go on`,
+      skip: t({ message: "Skip", context: "skip a question" }),
+      submit: t`Send answer`,
     },
     reasoning: {
       done: t({ message: "Thought", context: "the model thought first" }),
