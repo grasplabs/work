@@ -16,7 +16,7 @@ import type { ReactElement, ReactNode } from "react";
 // A grave step that asks first, as Settings has many: Damsko's Alert
 // dialog, its answer a Button whose press runs the step and closes the
 // dialog once it went. A step that fails throws: the Button then says so
-// in `errorLabel` and the dialog stays, so it can be tried again.
+// in `errorText` and the dialog stays, so it can be tried again.
 
 export const ConfirmAction = ({
   trigger,
@@ -26,8 +26,8 @@ export const ConfirmAction = ({
   description,
   children,
   label,
-  errorLabel,
-  loadingLabel,
+  errorText,
+  loadingText,
   variant = "destructive",
   disabled = false,
   action,
@@ -44,8 +44,8 @@ export const ConfirmAction = ({
   /** The answer's verb ("Sign out"). */
   label: string;
   /** What the answer says when the step failed ("Not signed out"). */
-  errorLabel: string;
-  loadingLabel?: string;
+  errorText: string;
+  loadingText?: string;
   /** `destructive` when it deletes or ends something, `default` otherwise. */
   variant?: ButtonVariant;
   /** The answer can't be given yet (a name to type first). */
@@ -76,8 +76,8 @@ export const ConfirmAction = ({
           <AlertDialogCancel />
           <Button
             disabled={disabled}
-            errorLabel={errorLabel}
-            {...(loadingLabel === undefined ? {} : { loadingLabel })}
+            errorText={errorText}
+            {...(loadingText === undefined ? {} : { loadingText })}
             onClick={async () => {
               await action();
               setOpen(false);

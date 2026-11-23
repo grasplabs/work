@@ -1,9 +1,7 @@
-// Carousel: a set of slides shown a view at a time, from shadcn's (registry/bases/base/ui/
-// carousel.tsx, on Embla), converted from Tailwind to StyleX and rebuilt on UI SDK's Carousel,
-// which scrolls natively, so a swipe, a trackpad and the arrow keys all page through it. Previous
-// and Next are outline Buttons with chevrons under the slides, and a row of small marks says which
-// page you are on.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Carousel: a set of slides shown a view at a time, in StyleX on UI SDK's Carousel, which scrolls
+// natively, so a swipe, a trackpad and the arrow keys all page through it. Previous and Next are
+// outline Buttons with chevrons under the slides, and a row of small marks says which page you are
+// on.
 //
 //   <Carousel aria-label="Featured stories">
 //     <CarouselContent>
@@ -148,7 +146,7 @@ const styles = stylex.create({
     // UI SDK makes it scroll natively; the marks and buttons say where it is, not a scrollbar.
     scrollbarWidth: "none",
     // The slides' room for the focus ring, which follows the viewport's corner.
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
   },
   content: {

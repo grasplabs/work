@@ -4,7 +4,6 @@
 // `secondary`, a soft fill, and `outline`, an edge alone, a step taller with the words in the
 // text's colour. It does nothing when pressed, unless it is drawn as a link (`asChild`); with
 // `onRemove` it carries a small button that takes it away, as a filter or a chosen value does.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Badge>Draft</Badge>
 //   <Badge variant="success" icon={CheckIcon}>Ready</Badge>

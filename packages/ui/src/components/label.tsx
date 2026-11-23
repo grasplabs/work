@@ -1,7 +1,6 @@
 // Label: the name of a control you can see,
 // in StyleX, built on UI SDK's Label, which names any control by
 // `htmlFor` (an input, and also a radio group or a slider) and passes a press on to it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Label htmlFor="team-name">Team name</Label>
 //   <Label htmlFor="team-name" required>Team name</Label>      the required mark, for the eye

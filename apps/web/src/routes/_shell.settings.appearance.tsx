@@ -19,7 +19,7 @@ const Theme = ({ userId }: { userId: string }) => {
   return (
     <SettingsGroup flush={false} title={t`Theme`}>
       <ThemeToggle
-        label={t`Mode`}
+        heading={t`Mode`}
         mode={mode}
         onModeChange={(chosen) => {
           chooseTheme(userId, chosen);

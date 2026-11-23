@@ -479,7 +479,6 @@ msgid "{date} by {by}"
 msgstr "{date} door {by}"
 
 #: src/settings/audit-archive.tsx
-msgctxt "how long something is kept"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# dag} other {# dagen}}"
 
@@ -2126,6 +2125,10 @@ msgstr "Beheerders kunnen ieders rol wijzigen, sessies beëindigen en mensen ver
 msgid "Advisory"
 msgstr "Beveiligingsadvies"
 
+#: src/settings/audit-archive.tsx
+msgid "After a run ends. After this, its inputs, outputs and messages are removed."
+msgstr "Nadat een run is afgelopen. Daarna worden de invoer, uitvoer en berichten ervan verwijderd."
+
 #: src/brain/opportunities-page.tsx
 msgid "After step {position}, some go to {system}: {step}"
 msgstr "Na stap {position} gaan sommigen naar {system}: {step}"
@@ -2796,6 +2799,11 @@ msgstr "Weggehaalde apps"
 msgid "Archive"
 msgstr "Archiveren"
 
+#: src/settings/audit-archive.tsx
+msgctxt "where retention keeps older audit events"
+msgid "Archive"
+msgstr "Archief"
+
 #: src/apps/app-status.tsx
 msgid "Archive {name}?"
 msgstr "{name} archiveren?"
@@ -3063,6 +3071,8 @@ msgstr "Athene"
 msgid "Attached a file to a chat"
 msgstr "Een bestand aan een chat toegevoegd"
 
+#: src/routes/_shell.settings.audit.tsx
+#: src/settings/audit-archive.tsx
 #: src/settings/sections.ts
 msgid "Audit trail"
 msgstr "Audittrail"
@@ -3433,6 +3443,10 @@ msgstr "Gevallen per week"
 msgid "Cases a week: {cases}."
 msgstr "Gevallen per week: {cases}."
 
+#: src/settings/audit-chain.tsx
+msgid "Chain check"
+msgstr "Ketencontrole"
+
 #: src/apps/app-workflows.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.settings.outcomes.tsx
@@ -3713,10 +3727,6 @@ msgstr "Controleren en opslaan"
 msgid "Check mark"
 msgstr "Vinkje"
 
-#: src/settings/audit-chain.tsx
-msgid "Check now"
-msgstr "Nu controleren"
-
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
 msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders"
@@ -3729,6 +3739,10 @@ msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders."
 msgid "Check sound and microphone"
 msgstr "Geluid en microfoon testen"
 
+#: src/settings/audit-chain.tsx
+msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+msgstr "Controleer dat geen enkel item van de audittrail is verwijderd of gewijzigd sinds het werd geschreven, van het eerste tot het nieuwste."
+
 #: src/frame/ui-words.tsx
 msgid "Check the connection, then try again."
 msgstr "Controleer de verbinding en probeer het opnieuw."
@@ -3738,8 +3752,8 @@ msgid "Checked the audit trail's chain"
 msgstr "De keten van het auditlogboek gecontroleerd"
 
 #: src/settings/audit-chain.tsx
-msgid "Checking"
-msgstr "Bezig met controleren"
+msgid "Checked through entry {through}…"
+msgstr "Gecontroleerd tot en met item {through}…"
 
 #: src/drafts/share-with-team.tsx
 msgid "Checking it…"
@@ -5400,8 +5414,8 @@ msgid "Entries"
 msgstr "Vermeldingen"
 
 #: src/settings/audit-chain.tsx
-msgid "Entries through {purged} were removed when their retention ended; they still link up."
-msgstr "Items tot en met {purged} zijn verwijderd toen hun bewaartermijn afliep; de keten sluit nog aan."
+msgid "Entries through {purged} were removed when their retention ended: they still link up, but could not be checked."
+msgstr "De items tot en met {purged} zijn verwijderd toen hun bewaartermijn afliep: ze sluiten nog op elkaar aan, maar konden niet worden gecontroleerd."
 
 #: src/settings/erasures.tsx
 msgid "Erase"
@@ -5507,18 +5521,9 @@ msgstr "Gebeurtenistype"
 msgid "Event type of a test event"
 msgstr "Gebeurtenistype van een testgebeurtenis"
 
-#: src/routes/_shell.settings.audit.tsx
 #: src/settings/event-sources.tsx
 msgid "Events"
 msgstr "Gebeurtenissen"
-
-#: src/settings/audit-archive.tsx
-msgid "Events in the archive"
-msgstr "Gebeurtenissen in het archief"
-
-#: src/settings/audit-archive.tsx
-msgid "Events in the log"
-msgstr "Gebeurtenissen in het logboek"
 
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
@@ -5539,10 +5544,6 @@ msgstr "Elke dag om {time}"
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
 msgstr "Elke levering wordt ermee ondertekend, zodat de ontvanger weet dat die van Grasp komt."
-
-#: src/settings/audit-chain.tsx
-msgid "Every event is chained to the one before it, so an event removed or changed later shows as a break in the chain."
-msgstr "Elke gebeurtenis is gekoppeld aan de vorige, dus een gebeurtenis die later is verwijderd of gewijzigd, toont zich als een breuk in de keten."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -5692,6 +5693,10 @@ msgstr "Alles"
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
 msgstr "Alles rond medewerkers, van aanname tot vertrek."
+
+#: src/routes/_shell.settings.audit.tsx
+msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
+msgstr "Alles wat in Grasp is gedaan, door wie en wanneer, bewaard in een keten die niemand ongemerkt kan wijzigen."
 
 #: src/workflows/business-process.tsx
 msgid "Everything from a first client conversation until the money is in the bank."
@@ -6289,6 +6294,10 @@ msgstr "Uit wat mensen in het hele bedrijf zeggen, versie {version}"
 msgid "From what your team said, version {version}"
 msgstr "Uit wat je team zei, versie {version}"
 
+#: src/settings/audit-archive.tsx
+msgid "From when each event was recorded, archive included. After this, archived events are deleted."
+msgstr "Vanaf het moment dat elke gebeurtenis is vastgelegd, archief inbegrepen. Daarna worden gearchiveerde gebeurtenissen verwijderd."
+
 #: src/frame/surface-nav.tsx
 msgid "From your Apps"
 msgstr "Uit je apps"
@@ -6532,6 +6541,10 @@ msgstr "Grasp weet niet waar dit vandaan kwam, dus het kan hier niet worden afge
 msgid "Grasp has no sender for its mail yet"
 msgstr "Grasp heeft nog geen afzender voor zijn mail"
 
+#: src/routes/waiting.tsx
+msgid "Grasp is almost ready for you"
+msgstr "Grasp is bijna klaar voor je"
+
 #: src/apps/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp is aan het bouwen"
@@ -6555,6 +6568,10 @@ msgstr "Grasp is er nog mee bezig…"
 #: src/brain/own-export.tsx
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp schrijft je export. Dat duurt een minuut of twee; hij verschijnt hier zodra hij klaar is, en je kunt deze pagina intussen verlaten."
+
+#: src/sign-in-errors.ts
+msgid "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+msgstr "Grasp is nog niet voor iedereen open: de beheerders van je bedrijf zijn het nog aan het instellen, en je kunt erin zodra ze klaar zijn. Als je een interviewlink hebt, staat die in je e-mail."
 
 #: src/guest-sign-in.tsx
 msgid "Grasp isn't open yet. Try again later."
@@ -6595,10 +6612,6 @@ msgstr "Grasp onthoudt dit niet meer."
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp merkte dat het dit niet wist"
-
-#: src/sign-in-errors.ts
-msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
-msgstr "Grasp gaat binnenkort voor iedereen open, zodra Stephen met de teams heeft gesproken. Heb je een interviewlink, dan staat die in je e-mail."
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
@@ -6937,6 +6950,10 @@ msgstr "Hoe lang ben je met zo’n factuur bezig, {name}?"
 #: src/onboarding/about-story.tsx
 msgid "How long does that take you, {name}?"
 msgstr "Hoe lang ben je daarmee bezig, {name}?"
+
+#: src/settings/audit-archive.tsx
+msgid "How long Grasp keeps what it records."
+msgstr "Hoe lang Grasp bewaart wat het vastlegt."
 
 #: src/onboarding/knowledge-bar.tsx
 msgid "How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at {threshold}%, and I keep learning after that."
@@ -7318,10 +7335,6 @@ msgstr "Integratie"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Integraties"
-
-#: src/settings/audit-chain.tsx
-msgid "Integrity and archive"
-msgstr "Integriteit en archief"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
@@ -7993,10 +8006,6 @@ msgstr "Laatst gevraagd"
 #: src/agents/agent-page.tsx
 msgid "Last changed {0}"
 msgstr "Laatst gewijzigd: {0}"
-
-#: src/settings/audit-chain.tsx
-msgid "Last check"
-msgstr "Laatste controle"
 
 #: src/settings/event-source-activity.tsx
 msgid "Last event {last}."
@@ -9402,10 +9411,6 @@ msgstr "Niet gewijzigd"
 msgid "Not checked"
 msgstr "Niet gecontroleerd"
 
-#: src/settings/audit-chain.tsx
-msgid "Not checked yet"
-msgstr "Nog niet gecontroleerd"
-
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Nog niet bevestigd door het bestuur"
@@ -9760,10 +9765,6 @@ msgstr "Nu bedient niets wat de workflow mag gebruiken hem: geef de workflow wat
 msgid "Nothing this App asked for is waiting."
 msgstr "Niets wat deze app vroeg, wacht nog."
 
-#: src/settings/audit-chain.tsx
-msgid "Nothing to check yet"
-msgstr "Nog niets te controleren"
-
 #: src/connections/sync-places.tsx
 msgid "Nothing to copy into the Brain yet"
 msgstr "Nog niets om naar het Brain te kopiëren"
@@ -9935,12 +9936,8 @@ msgid "on {date} at {hour}"
 msgstr "op {date} om {hour}"
 
 #: src/settings/audit-chain.tsx
-msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
-msgstr "Op {time} brak de keten bij item {entry}: vanaf daar is niets geverifieerd. {reason}"
-
-#: src/settings/audit-chain.tsx
-msgid "On {time}, the check found a break at event {entry}: nothing from there on is verified. {reason}"
-msgstr "Op {time} vond de controle een breuk bij gebeurtenis {entry}: vanaf daar is niets geverifieerd. {reason}"
+msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
+msgstr "Op {time} brak de keten bij item {entry}: vanaf daar is niets gecontroleerd."
 
 #: src/workflows/trigger-description.ts
 msgid "On {type} events from {name}"
@@ -11749,6 +11746,10 @@ msgstr "Resultaten"
 msgid "Resume"
 msgstr "Hervatten"
 
+#: src/settings/audit-archive.tsx
+msgid "Retention"
+msgstr "Bewaartermijn"
+
 #: src/brain/skills-page.tsx
 msgid "Retire"
 msgstr "Buiten gebruik stellen"
@@ -12395,6 +12396,10 @@ msgstr "Doorzoek je chats en open er een."
 msgid "Search, to find records by the words in them"
 msgstr "Zoeken, om records te vinden op de woorden erin"
 
+#: src/settings/audit-archive.tsx
+msgid "Searched above. After this, events move to the archive."
+msgstr "Hierboven doorzocht. Daarna gaan gebeurtenissen naar het archief."
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "In kennis gezocht"
@@ -12986,6 +12991,7 @@ msgstr "Log in met het account van je organisatie."
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
+#: src/routes/waiting.tsx
 msgid "Sign out"
 msgstr "Uitloggen"
 
@@ -14129,8 +14135,8 @@ msgid "The audit trail"
 msgstr "De audittrail"
 
 #: src/settings/audit-chain.tsx
-msgid "The audit trail's chain is broken"
-msgstr "De keten van het auditlogboek is gebroken"
+msgid "The audit trail has no entries yet: there is nothing to verify."
+msgstr "De audittrail heeft nog geen items: er is niets te controleren."
 
 #: src/brain/sources-page.tsx
 msgid "The best part of its passage"
@@ -14653,6 +14659,14 @@ msgstr "Zoals sommigen het vertelden"
 msgid "The webhook's secret"
 msgstr "Het geheim van de webhook"
 
+#: src/settings/audit-chain.tsx
+msgid "The whole chain has not been verified yet."
+msgstr "De hele keten is nog niet gecontroleerd."
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain verified, through entry {entries}, on {time}."
+msgstr "De hele keten is gecontroleerd, tot en met item {entries}, op {time}."
+
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
 msgstr "de hele koppeling"
@@ -15102,10 +15116,6 @@ msgstr "Heeft {time} nagedacht"
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Via Composio, dat de toegang in zijn eigen cloud bewaart. Je workflows kunnen het gebruiken zodra het gekoppeld is, alleen voor wat je toestaat."
-
-#: src/settings/audit-chain.tsx
-msgid "Through entry {through}…"
-msgstr "Tot en met item {through}…"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
@@ -15732,8 +15742,12 @@ msgid "Verified"
 msgstr "Geverifieerd"
 
 #: src/settings/audit-chain.tsx
-msgid "Verified through {entries}"
-msgstr "Geverifieerd tot en met {entries}"
+msgid "Verify now"
+msgstr "Nu controleren"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify the chain"
+msgstr "Keten controleren"
 
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
@@ -17316,6 +17330,10 @@ msgstr "Je bedrijf wil weten hoe het werk echt gaat. Jij leidt je team, dus vraa
 #: src/agents/agents-overview.tsx
 msgid "Your company's"
 msgstr "Van je bedrijf"
+
+#: src/routes/waiting.tsx
+msgid "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
+msgstr "De beheerders van je bedrijf zijn Grasp nog aan het instellen. Je hoeft niets te doen: deze pagina opent Grasp voor je zodra ze klaar zijn."
 
 #: src/settings/chat-accounts.tsx
 msgid "Your conversations are being deleted. If any remain, try again in a moment."

@@ -321,9 +321,9 @@ const TeamRow = ({
         <ConfirmAction
           action={remove}
           description={t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
-          errorLabel={t`Not deleted`}
+          errorText={t`Not deleted`}
           label={t`Delete`}
-          loadingLabel={t`Deleting`}
+          loadingText={t`Deleting`}
           onOpenChange={setDeleting}
           open={deleting}
           title={t`Delete ${name}?`}

@@ -479,7 +479,6 @@ msgid "{date} by {by}"
 msgstr "{date} par {by}"
 
 #: src/settings/audit-archive.tsx
-msgctxt "how long something is kept"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# jour} other {# jours}}"
 
@@ -2126,6 +2125,10 @@ msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses session
 msgid "Advisory"
 msgstr "Avis de sécurité"
 
+#: src/settings/audit-archive.tsx
+msgid "After a run ends. After this, its inputs, outputs and messages are removed."
+msgstr "Après la fin d’une exécution. Ensuite, ses entrées, sorties et messages sont supprimés."
+
 #: src/brain/opportunities-page.tsx
 msgid "After step {position}, some go to {system}: {step}"
 msgstr "Après l'étape {position}, certains passent à {system} : {step}"
@@ -2796,6 +2799,11 @@ msgstr "Apps retirées"
 msgid "Archive"
 msgstr "Archiver"
 
+#: src/settings/audit-archive.tsx
+msgctxt "where retention keeps older audit events"
+msgid "Archive"
+msgstr "Archive"
+
 #: src/apps/app-status.tsx
 msgid "Archive {name}?"
 msgstr "Archiver {name} ?"
@@ -3063,6 +3071,8 @@ msgstr "Athènes"
 msgid "Attached a file to a chat"
 msgstr "A joint un fichier à une discussion"
 
+#: src/routes/_shell.settings.audit.tsx
+#: src/settings/audit-archive.tsx
 #: src/settings/sections.ts
 msgid "Audit trail"
 msgstr "Journal d’audit"
@@ -3433,6 +3443,10 @@ msgstr "Cas par semaine"
 msgid "Cases a week: {cases}."
 msgstr "Cas par semaine : {cases}."
 
+#: src/settings/audit-chain.tsx
+msgid "Chain check"
+msgstr "Vérification de la chaîne"
+
 #: src/apps/app-workflows.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.settings.outcomes.tsx
@@ -3713,10 +3727,6 @@ msgstr "Vérifier et enregistrer"
 msgid "Check mark"
 msgstr "Coche"
 
-#: src/settings/audit-chain.tsx
-msgid "Check now"
-msgstr "Vérifier maintenant"
-
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
 msgstr "Vérifiez-la ou remplacez-la dans Paramètres › Fournisseurs d'IA"
@@ -3729,6 +3739,10 @@ msgstr "Vérifiez-la ou remplacez-la dans Paramètres › Fournisseurs d'IA."
 msgid "Check sound and microphone"
 msgstr "Tester le son et le micro"
 
+#: src/settings/audit-chain.tsx
+msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+msgstr "Vérifiez qu’aucune entrée du journal d’audit n’a été supprimée ni modifiée depuis son écriture, de la première à la plus récente."
+
 #: src/frame/ui-words.tsx
 msgid "Check the connection, then try again."
 msgstr "Vérifiez la connexion, puis réessayez."
@@ -3738,8 +3752,8 @@ msgid "Checked the audit trail's chain"
 msgstr "A vérifié la chaîne du journal d’audit"
 
 #: src/settings/audit-chain.tsx
-msgid "Checking"
-msgstr "Vérification"
+msgid "Checked through entry {through}…"
+msgstr "Vérifié jusqu’à l’entrée {through}…"
 
 #: src/drafts/share-with-team.tsx
 msgid "Checking it…"
@@ -5400,8 +5414,8 @@ msgid "Entries"
 msgstr "Entrées"
 
 #: src/settings/audit-chain.tsx
-msgid "Entries through {purged} were removed when their retention ended; they still link up."
-msgstr "Les entrées jusqu'à {purged} ont été supprimées à la fin de leur conservation ; la chaîne reste liée."
+msgid "Entries through {purged} were removed when their retention ended: they still link up, but could not be checked."
+msgstr "Les entrées jusqu’à la {purged} ont été supprimées à la fin de leur conservation : elles restent liées, mais n’ont pas pu être vérifiées."
 
 #: src/settings/erasures.tsx
 msgid "Erase"
@@ -5507,18 +5521,9 @@ msgstr "Type d’événement"
 msgid "Event type of a test event"
 msgstr "Type d’événement d’un événement de test"
 
-#: src/routes/_shell.settings.audit.tsx
 #: src/settings/event-sources.tsx
 msgid "Events"
 msgstr "Événements"
-
-#: src/settings/audit-archive.tsx
-msgid "Events in the archive"
-msgstr "Événements dans les archives"
-
-#: src/settings/audit-archive.tsx
-msgid "Events in the log"
-msgstr "Événements dans le journal"
 
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
@@ -5539,10 +5544,6 @@ msgstr "Tous les jours à {time}"
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
 msgstr "Chaque livraison est signée avec, pour que le destinataire sache qu'elle vient de Grasp."
-
-#: src/settings/audit-chain.tsx
-msgid "Every event is chained to the one before it, so an event removed or changed later shows as a break in the chain."
-msgstr "Chaque événement est chaîné au précédent : un événement supprimé ou modifié après coup apparaît comme une rupture de la chaîne."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -5692,6 +5693,10 @@ msgstr "Tout"
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
 msgstr "Tout ce qui concerne les employés, de l’embauche au départ."
+
+#: src/routes/_shell.settings.audit.tsx
+msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
+msgstr "Tout ce qui est fait dans Grasp, par qui et quand, conservé dans une chaîne que personne ne peut modifier sans que cela se voie."
 
 #: src/workflows/business-process.tsx
 msgid "Everything from a first client conversation until the money is in the bank."
@@ -6289,6 +6294,10 @@ msgstr "D’après ce que disent des personnes de toute l’entreprise, version 
 msgid "From what your team said, version {version}"
 msgstr "D’après ce qu’a dit votre équipe, version {version}"
 
+#: src/settings/audit-archive.tsx
+msgid "From when each event was recorded, archive included. After this, archived events are deleted."
+msgstr "À partir de l’enregistrement de chaque événement, archive comprise. Ensuite, les événements archivés sont supprimés."
+
 #: src/frame/surface-nav.tsx
 msgid "From your Apps"
 msgstr "De vos applications"
@@ -6532,6 +6541,10 @@ msgstr "Grasp ne sait pas d'où cela vient, cela ne peut donc pas être résolu 
 msgid "Grasp has no sender for its mail yet"
 msgstr "Grasp n’a pas encore d’expéditeur pour ses e-mails"
 
+#: src/routes/waiting.tsx
+msgid "Grasp is almost ready for you"
+msgstr "Grasp est presque prêt pour vous"
+
 #: src/apps/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp construit"
@@ -6555,6 +6568,10 @@ msgstr "Grasp y travaille encore…"
 #: src/brain/own-export.tsx
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp écrit votre export. Cela prend une minute ou deux ; il s’affiche ici dès qu’il est prêt, et vous pouvez quitter cette page en attendant."
+
+#: src/sign-in-errors.ts
+msgid "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+msgstr "Grasp n’est pas encore ouvert à tous : les administrateurs de votre entreprise sont encore en train de le configurer, et vous y aurez accès dès qu’ils auront terminé. Si vous avez un lien d’entretien, il se trouve dans vos e-mails."
 
 #: src/guest-sign-in.tsx
 msgid "Grasp isn't open yet. Try again later."
@@ -6595,10 +6612,6 @@ msgstr "Grasp ne retient plus ceci."
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp a remarqué qu’il ne le savait pas"
-
-#: src/sign-in-errors.ts
-msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
-msgstr "Grasp ouvre bientôt à tout le monde, dès que Stephen aura parlé avec les équipes. Si vous avez un lien d’entretien, il se trouve dans votre e-mail."
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
@@ -6937,6 +6950,10 @@ msgstr "Combien de temps vous prend chacune, {name} ?"
 #: src/onboarding/about-story.tsx
 msgid "How long does that take you, {name}?"
 msgstr "Combien de temps cela vous prend-il, {name} ?"
+
+#: src/settings/audit-archive.tsx
+msgid "How long Grasp keeps what it records."
+msgstr "Combien de temps Grasp conserve ce qu’il enregistre."
 
 #: src/onboarding/knowledge-bar.tsx
 msgid "How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at {threshold}%, and I keep learning after that."
@@ -7318,10 +7335,6 @@ msgstr "Intégration"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Intégrations"
-
-#: src/settings/audit-chain.tsx
-msgid "Integrity and archive"
-msgstr "Intégrité et archives"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
@@ -7993,10 +8006,6 @@ msgstr "Dernière demande"
 #: src/agents/agent-page.tsx
 msgid "Last changed {0}"
 msgstr "Dernière modification : {0}"
-
-#: src/settings/audit-chain.tsx
-msgid "Last check"
-msgstr "Dernière vérification"
 
 #: src/settings/event-source-activity.tsx
 msgid "Last event {last}."
@@ -9402,10 +9411,6 @@ msgstr "Non modifié"
 msgid "Not checked"
 msgstr "Non vérifié"
 
-#: src/settings/audit-chain.tsx
-msgid "Not checked yet"
-msgstr "Pas encore vérifié"
-
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Pas encore confirmée par la direction"
@@ -9760,10 +9765,6 @@ msgstr "Rien de ce que le workflow peut utiliser ne la sert pour l'instant : acc
 msgid "Nothing this App asked for is waiting."
 msgstr "Rien de ce que cette application a demandé n’est en attente."
 
-#: src/settings/audit-chain.tsx
-msgid "Nothing to check yet"
-msgstr "Rien à vérifier pour l'instant"
-
 #: src/connections/sync-places.tsx
 msgid "Nothing to copy into the Brain yet"
 msgstr "Rien à copier dans le Brain pour l’instant"
@@ -9935,12 +9936,8 @@ msgid "on {date} at {hour}"
 msgstr "le {date} à {hour}"
 
 #: src/settings/audit-chain.tsx
-msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
-msgstr "Le {time}, la chaîne s'est rompue à l'entrée {entry} : rien n'est vérifié à partir de là. {reason}"
-
-#: src/settings/audit-chain.tsx
-msgid "On {time}, the check found a break at event {entry}: nothing from there on is verified. {reason}"
-msgstr "Le {time}, la vérification a trouvé une rupture à l’événement {entry} : rien à partir de là n’est vérifié. {reason}"
+msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
+msgstr "Le {time}, la chaîne s’est rompue à l’entrée {entry} : rien à partir de là n’est vérifié."
 
 #: src/workflows/trigger-description.ts
 msgid "On {type} events from {name}"
@@ -11749,6 +11746,10 @@ msgstr "Résultats"
 msgid "Resume"
 msgstr "Reprendre"
 
+#: src/settings/audit-archive.tsx
+msgid "Retention"
+msgstr "Conservation"
+
 #: src/brain/skills-page.tsx
 msgid "Retire"
 msgstr "Retirer"
@@ -12395,6 +12396,10 @@ msgstr "Recherchez dans vos chats et ouvrez-en un."
 msgid "Search, to find records by the words in them"
 msgstr "Une recherche, pour trouver des enregistrements par leurs mots"
 
+#: src/settings/audit-archive.tsx
+msgid "Searched above. After this, events move to the archive."
+msgstr "Recherché ci-dessus. Ensuite, les événements passent dans l’archive."
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "A cherché dans les connaissances"
@@ -12986,6 +12991,7 @@ msgstr "Connectez-vous avec le compte de votre organisation."
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
+#: src/routes/waiting.tsx
 msgid "Sign out"
 msgstr "Déconnecter"
 
@@ -14129,8 +14135,8 @@ msgid "The audit trail"
 msgstr "Le journal d’audit"
 
 #: src/settings/audit-chain.tsx
-msgid "The audit trail's chain is broken"
-msgstr "La chaîne du journal d’audit est rompue"
+msgid "The audit trail has no entries yet: there is nothing to verify."
+msgstr "Le journal d’audit n’a encore aucune entrée : il n’y a rien à vérifier."
 
 #: src/brain/sources-page.tsx
 msgid "The best part of its passage"
@@ -14653,6 +14659,14 @@ msgstr "Comme certains l’ont raconté"
 msgid "The webhook's secret"
 msgstr "Le secret du webhook"
 
+#: src/settings/audit-chain.tsx
+msgid "The whole chain has not been verified yet."
+msgstr "La chaîne entière n’a pas encore été vérifiée."
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain verified, through entry {entries}, on {time}."
+msgstr "Toute la chaîne est vérifiée, jusqu’à l’entrée {entries}, le {time}."
+
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
 msgstr "toute la connexion"
@@ -15102,10 +15116,6 @@ msgstr "A réfléchi pendant {time}"
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Via Composio, qui conserve l’accès dans son propre cloud. Vos workflows peuvent l’utiliser une fois connecté, uniquement pour ce que vous autorisez."
-
-#: src/settings/audit-chain.tsx
-msgid "Through entry {through}…"
-msgstr "Jusqu'à l'entrée {through}…"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
@@ -15732,8 +15742,12 @@ msgid "Verified"
 msgstr "Vérifié"
 
 #: src/settings/audit-chain.tsx
-msgid "Verified through {entries}"
-msgstr "Vérifié jusqu'à {entries}"
+msgid "Verify now"
+msgstr "Vérifier maintenant"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify the chain"
+msgstr "Vérifier la chaîne"
 
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
@@ -17316,6 +17330,10 @@ msgstr "Votre entreprise veut savoir comment le travail se passe vraiment. Vous 
 #: src/agents/agents-overview.tsx
 msgid "Your company's"
 msgstr "Ceux de votre entreprise"
+
+#: src/routes/waiting.tsx
+msgid "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
+msgstr "Les administrateurs de votre entreprise sont encore en train de configurer Grasp. Vous n’avez rien à faire : cette page vous ouvrira Grasp dès qu’ils auront terminé."
 
 #: src/settings/chat-accounts.tsx
 msgid "Your conversations are being deleted. If any remain, try again in a moment."

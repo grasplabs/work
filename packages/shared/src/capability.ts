@@ -464,7 +464,7 @@ export const modelGrantClaimsSchema = z.strictObject({
     "mistral",
     "openrouter",
     "openai-compatible",
-    "elevenlabs",
+    "kugelaudio",
   ]),
   /** The host the request goes to, lowercase. */
   host: z.string().min(1).max(253),

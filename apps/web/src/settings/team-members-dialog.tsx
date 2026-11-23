@@ -297,8 +297,8 @@ export const TeamDialog = ({
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            errorLabel={t`Not saved`}
-            loadingLabel={t`Saving`}
+            errorText={t`Not saved`}
+            loadingText={t`Saving`}
             onClick={save}
             size="sm"
           >

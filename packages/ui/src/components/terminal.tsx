@@ -1,7 +1,6 @@
 // Terminal: a command an assistant runs and what it prints: a
 // Trace with one TraceCollapsible, its line the command ("Ran pnpm build"), the output under it on
 // the code surface.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Terminal output={log} isStreaming={running} onClear={() => setLog("")} />
 //

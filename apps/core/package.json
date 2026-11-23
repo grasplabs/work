@@ -57,6 +57,7 @@
     "es-module-lexer": "catalog:",
     "fflate": "catalog:",
     "jose": "catalog:",
+    "parse5": "catalog:",
     "postal-mime": "catalog:",
     "semver": "catalog:",
     "typebox": "catalog:",

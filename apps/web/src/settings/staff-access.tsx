@@ -65,9 +65,9 @@ const EndStaffAccess = ({
     <ConfirmAction
       action={end}
       description={t`Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened.`}
-      errorLabel={t`Not ended`}
+      errorText={t`Not ended`}
       label={t`End access`}
-      loadingLabel={t`Ending access`}
+      loadingText={t`Ending access`}
       title={t`End Grasp staff access now?`}
       trigger={
         <Button size="xs" variant="outline">

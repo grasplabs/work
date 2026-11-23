@@ -36,7 +36,11 @@ import {
 import { Form } from "@grasp-os/ui/components/form";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Input } from "@grasp-os/ui/components/input";
-import { Progress } from "@grasp-os/ui/components/progress";
+import {
+  Progress,
+  ProgressLabel,
+  ProgressValue,
+} from "@grasp-os/ui/components/progress";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Text } from "@grasp-os/ui/components/text";
 import { EllipsisIcon, Icon, TrashIcon } from "@grasp-os/ui/lib/icons";
@@ -164,10 +168,12 @@ const ErasureAreas = ({ areas }: { areas: readonly ErasureArea[] }) => {
     <div {...stylex.props(styles.stack)}>
       <Progress
         getAriaValueText={() => t`${done} of ${total}`}
-        label={t`Areas finished`}
         max={total}
         value={done}
-      />
+      >
+        <ProgressLabel>{t`Areas finished`}</ProgressLabel>
+        <ProgressValue />
+      </Progress>
       <ul {...stylex.props(styles.areas)}>
         {areas.map(({ area, state }) => {
           const stateLabel = stateLabels[state];

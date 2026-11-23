@@ -24,7 +24,7 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
 // the endpoint, as the page asks for them: on someone's interview link, or
-// for an admin signed in. ElevenLabs, Grasp's own speech feature's
+// for an admin signed in. KugelAudio, Grasp's own speech feature's
 // provider (@grasp-os/shared/platform-ai), is the outside system: a fake
 // behind connect's fetch, which says each character in 25 ms. Connect, the
 // store, the cache, the gateway's rules and its ledger are real. The ways
@@ -36,9 +36,9 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 //   own.
 // - A line said twice paid twice, or the voice running on past its budget.
 
-/** Stephen's voice and Claire's, by their ElevenLabs IDs, the defaults. */
-const stephen = "s3TPKV1kjDlVtZbl4Ksh";
-const claire = "r1KmysJdVYZjJCm4mL3b";
+/** Stephen's voice and Claire's, by their KugelAudio IDs, the defaults. */
+const stephen = 1656;
+const claire = 1071;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -53,11 +53,12 @@ const answerSchema = z.object({
   ),
 });
 
-/** What ElevenLabs was asked, as far as these tests read it. */
+/** What KugelAudio was asked, as far as these tests read it. */
 const askedSchema = z.object({
   text: z.string(),
   model_id: z.string(),
-  language_code: z.string(),
+  voice_id: z.number(),
+  language: z.string(),
 });
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -136,13 +137,10 @@ const codeOf = async (response: Response) => {
   return [response.status, parsed.success ? parsed.data.code : null];
 };
 
-/** What ElevenLabs was asked for the lines carrying `text`: the voice, from the path, and the body. */
+/** What KugelAudio was asked for the lines carrying `text`. */
 const askedFor = async (text: string) => {
   const carried = await carrying(text);
-  return carried.map(({ path, body }) => ({
-    voice: path.split("/").at(-2),
-    ...askedSchema.parse(JSON.parse(body)),
-  }));
+  return carried.map(({ body }) => askedSchema.parse(JSON.parse(body)));
 };
 
 /** Seconds of voice the onboarding counted for `purpose`. */
@@ -175,13 +173,13 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
       ends: answer.words.at(-1)?.endMs,
     }).toStrictEqual({
       status: 200,
-      mime: "audio/mpeg",
+      mime: "audio/wav",
       words: text.split(" "),
-      ends: said,
+      ends: Math.round(said),
     });
     expect(result.again).toStrictEqual(result.first);
     await expect(carrying(text)).resolves.toHaveLength(1);
-    // Counted once, for the line said: 25 ms for each of its characters.
+    // Counted once, for the line said: 30 ms for each of its characters.
     await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );
@@ -223,38 +221,30 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     }
   );
 
-  it("leads an English line with its tone and takes it out of the timing; another language is said bare", async () => {
+  it("says a line as written whatever its tone, once for every tone", async () => {
     const { link } = await opened();
     const text = newLine();
 
-    const english = await speak({
+    const warm = await speak({
       text,
       language: "en",
       tone: "warm, relaxed",
       link,
     });
-    const dutch = await speak({
-      text,
-      language: "nl",
-      tone: "warm, relaxed",
-      link,
-    });
+    const plain = await speak({ text, language: "en", link });
     const said = [
-      answerSchema.parse(await english.json()).words,
-      answerSchema.parse(await dutch.json()).words,
+      answerSchema.parse(await warm.json()).words,
+      answerSchema.parse(await plain.json()).words,
     ];
 
+    // The voice takes no direction: only the line is sent, and a tone
+    // makes no other line of it, so the second is the first, kept.
     const asked = await askedFor(text);
-    expect(asked.map(({ text: spoken }) => spoken)).toStrictEqual([
-      `[warm, relaxed] ${text}`,
-      text,
-    ]);
-    // Only the line's words, timed as said: in English after the
-    // direction's 16 characters, in 400 ms; in Dutch at once.
+    expect(asked.map(({ text: spoken }) => spoken)).toStrictEqual([text]);
     expect(
       said.map((words) => words.map(({ text: word }) => word))
     ).toStrictEqual([text.split(" "), text.split(" ")]);
-    expect(said.map((words) => words[0]?.startMs)).toStrictEqual([400, 0]);
+    expect(said.map((words) => words[0]?.startMs)).toStrictEqual([0, 0]);
   });
 
   it.each([
@@ -276,10 +266,10 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
   });
 
   it.each([
-    ["Stephen's line in Eleven v4", {}, stephen, "eleven_v4"],
-    ["a quick line in v4 Turbo", { quick: true }, stephen, "eleven_v4_turbo"],
-    ["Claire's line in her voice", { speaker: "claire" }, claire, "eleven_v4"],
-  ])("says %s", async (_, change, voice, model) => {
+    ["Stephen's line in his voice", {}, stephen],
+    ["a quick line as any other", { quick: true }, stephen],
+    ["Claire's line in her voice", { speaker: "claire" }, claire],
+  ])("says %s, in Kugel 3.5", async (_, change, voice) => {
     const { link } = await opened();
     const text = newLine();
 
@@ -287,7 +277,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     await expect(askedFor(text)).resolves.toStrictEqual([
-      { voice, text, model_id: model, language_code: "de" },
+      { text, model_id: "kugel-3.5", voice_id: voice, language: "de" },
     ]);
   });
 
@@ -348,9 +338,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
 
     expect(result.status).toBe(200);
     expect(answerSchema.parse(result.body).words).toHaveLength(3);
-    await expect(askedFor(text)).resolves.toMatchObject([
-      { voice: "cjVigY5qzO86Huf0OWal" },
-    ]);
+    await expect(askedFor(text)).resolves.toMatchObject([{ voice_id: 1073 }]);
     await expect(voiceCounted("reading")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );

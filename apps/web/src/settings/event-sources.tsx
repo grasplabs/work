@@ -5,7 +5,14 @@ import type { EventSource } from "@grasp-os/shared/event-sources";
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { CodeBlock } from "@grasp-os/ui/components/code-block";
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@grasp-os/ui/components/code-block";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
 import {
   Dialog,
@@ -167,9 +174,16 @@ const recipeOf = (url: string, secret: string | undefined): string =>
 /** How a sender sends one event: the recipe, to copy. */
 const Recipe = ({ url, secret }: { url: string; secret?: string }) => {
   const { t } = useLingui();
+  const recipe = recipeOf(url, secret);
   return (
-    <CodeBlock language="bash" languageLabel={t`Send one event`}>
-      {recipeOf(url, secret)}
+    <CodeBlock language="bash">
+      <CodeBlockHeader>
+        <CodeBlockTitle>{t`Send one event`}</CodeBlockTitle>
+        <CodeBlockActions>
+          <CodeBlockCopyButton value={recipe} />
+        </CodeBlockActions>
+      </CodeBlockHeader>
+      <CodeBlockContent>{recipe}</CodeBlockContent>
     </CodeBlock>
   );
 };
@@ -237,7 +251,7 @@ const useSourceChanges = (
           await confirmed(asking);
         }}
         description={asked.description}
-        errorLabel={t`Failed`}
+        errorText={t`Failed`}
         label={asked.confirm}
         onOpenChange={(open) => {
           if (!open) {

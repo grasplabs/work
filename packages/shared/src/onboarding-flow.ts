@@ -266,6 +266,33 @@ export const flowScreens = (flow: OnboardingFlow): SetupStepId[] => {
 };
 
 /**
+ * Whether the company has its onboarding behind it, by its flow: at once
+ * where it has no screens; where its people are interviewed, once Grasp
+ * gave its go (`open`); and where nobody is, once its admins finished
+ * every screen it has. Until then the platform waits: its admins are
+ * taken to the onboarding, everyone else is asked to wait for them.
+ */
+export const onboardingBehind = ({
+  flow,
+  done,
+  open,
+}: {
+  flow: OnboardingFlow;
+  /** The screens the admins finished, as core keeps them. */
+  done: readonly SetupStepId[];
+  /** Whether the company's Grasp is open to its people. */
+  open: boolean;
+}): boolean => {
+  const screens = flowScreens(flow);
+  if (screens.length === 0) {
+    return true;
+  }
+  return flowInterviews(flow)
+    ? open
+    : screens.every((screen) => done.includes(screen));
+};
+
+/**
  * How the platform opens to the company in this flow: on Grasp's `go`
  * once the interviews told enough; once the admin `finished` the last
  * screen, where nobody is interviewed; or `at_once`, where there is

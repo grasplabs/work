@@ -100,7 +100,7 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
         <ItemActions>
           <ConfirmAction
             action={signOut}
-            errorLabel={t`Not signed out`}
+            errorText={t`Not signed out`}
             label={t`Sign out`}
             title={t`Sign out this device?`}
             trigger={

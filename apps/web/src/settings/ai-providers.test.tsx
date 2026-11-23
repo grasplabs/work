@@ -939,4 +939,38 @@ describe("Settings › AI providers", () => {
       )
     ).toHaveLength(0);
   });
+
+  it("says which provider handles Grasp's own AI features, on Grasp's key, with nothing to switch", async () => {
+    const openai = {
+      id: "openai",
+      label: aiProviders.openai.label,
+      whereItRuns: "OpenAI, European Union",
+    } as const;
+    const kugelAudio = {
+      id: "kugelaudio",
+      label: aiProviders.kugelaudio.label,
+      whereItRuns: "KugelAudio, European Union",
+    } as const;
+    const { api } = fakeAiProviders({
+      connected: [{ provider: "mistral" }],
+      platform: [
+        { feature: "transcription", provider: openai },
+        { feature: "speech", provider: kugelAudio },
+      ],
+    });
+    await shown(api);
+
+    const section = [...document.querySelectorAll("section")].find(
+      (each) =>
+        each.querySelector("h2")?.textContent === "Grasp's own AI features"
+    );
+    expect(text()).toContain(
+      "Grasp transcribes interviews with OpenAI, European Union, using Grasp's own key."
+    );
+    expect(text()).toContain(
+      "Grasp reads the interview's questions aloud with KugelAudio, European Union, using Grasp's own key."
+    );
+    expect(section?.querySelectorAll("input, select, button")).toHaveLength(0);
+    expect(section?.textContent).toContain("Grasp's own provider keys");
+  });
 });

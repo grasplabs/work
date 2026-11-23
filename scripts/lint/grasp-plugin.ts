@@ -39,8 +39,17 @@
  * icon the table gives no move, one whose move names a part the icon
  * isn't drawn with (Lucide redrew it), and one whose move makes the whole
  * icon larger and smaller, which is no move.
+ *
+ * no-inline-styles: shadcn's rule of that name, except for the `style` of
+ * a component imported from `@grasp-os/ui` (Damsko). That prop takes StyleX
+ * styles of layout properties alone (Damsko's `LayoutStyle`), the way a
+ * page places a Damsko component, and the type checker holds it there: a
+ * plain object, or a colour, is a type error. shadcn's rule can't read a
+ * StyleX style, so it refused every one. Everything else is its verdict.
  */
 import path from "node:path";
+
+import shadcnLint from "@shadcn/lint";
 
 import { drawIcon, iconMovesAt } from "./icon-moves.ts";
 import { findScrollbar } from "./no-scrollbars.ts";
@@ -743,9 +752,65 @@ const iconHasMove = {
   },
 };
 
+/** Where Damsko's components are imported from (packages/ui). */
+const damskoImport = "@grasp-os/ui/";
+
+const shadcnInlineStyles = shadcnLint.rules["no-inline-styles"];
+
+/** The name a JSX element's name starts with: `Sidebar` of `Sidebar.Item`. */
+const rootName = (name: Node | string | undefined): unknown => {
+  if (typeof name !== "object") {
+    return name;
+  }
+  return name.type === "JSXMemberExpression"
+    ? rootName(name.object)
+    : nameOf(name);
+};
+
+const noInlineStyles = {
+  meta: shadcnInlineStyles.meta,
+  create: (context: unknown) => {
+    const shadcn = shadcnInlineStyles.create(context);
+    // Without its JSX visitors, shadcn's rule refused its options and
+    // reports that itself.
+    if (!("JSXAttribute" in shadcn)) {
+      return shadcn;
+    }
+    const damsko = new Set<unknown>();
+    return {
+      ...shadcn,
+      ImportDeclaration: (node: Node): void => {
+        const source = node.source?.value;
+        if (
+          typeof source !== "string" ||
+          !source.startsWith(damskoImport) ||
+          node.importKind === "type"
+        ) {
+          return;
+        }
+        for (const specifier of node.specifiers ?? []) {
+          if (specifier.importKind !== "type") {
+            damsko.add(nameOf(specifier.local));
+          }
+        }
+      },
+      JSXAttribute: (node: Node): void => {
+        if (
+          rootName(node.name) === "style" &&
+          damsko.has(rootName(node.parent?.name))
+        ) {
+          return;
+        }
+        shadcn.JSXAttribute(node);
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "grasp" },
   rules: {
+    "no-inline-styles": noInlineStyles,
     "no-unbounded-rpc-target": noUnboundedRpcTarget,
     "no-scrollbars": noScrollbars,
     "no-old-product-name": noOldProductName,

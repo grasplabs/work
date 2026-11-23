@@ -323,9 +323,9 @@ const ForgetConversations = () => {
           }
         }}
         description={t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
-        errorLabel={t`Not deleted`}
+        errorText={t`Not deleted`}
         label={t`Delete for good`}
-        loadingLabel={t`Deleting`}
+        loadingText={t`Deleting`}
         title={t`Delete your conversations in chat apps?`}
         trigger={
           <Button size="sm" variant="secondary">

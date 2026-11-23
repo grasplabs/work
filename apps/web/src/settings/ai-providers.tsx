@@ -184,7 +184,7 @@ const RowNote = ({ children }: { children: ReactNode }) => (
  * marks are in (connections/brands.ts), the same in every row.
  */
 const Mark = ({ name }: { name: string }) => (
-  <BrandIcon decorative label={name} size="xs" />
+  <BrandIcon decorative name={name} size="xs" />
 );
 
 /** How a provider's calls went lately: a word for its badge, and why where they fail. */
@@ -295,7 +295,7 @@ const useTest = (
         throw new Error(testFailureText(outcome.code, i18n));
       }
     },
-    { loadingLabel: t`Testing`, successLabel: t`Works`, errorLabel: t`Failed` }
+    { loadingText: t`Testing`, successText: t`Works`, errorText: t`Failed` }
   );
 };
 
@@ -377,14 +377,14 @@ const KeyDialog = ({
               </FieldContent>
               <Button
                 disabled={testModel === null}
-                errorLabel={test.labels.error}
-                loadingLabel={test.labels.loading}
+                errorText={test.labels.error}
+                loadingText={test.labels.loading}
                 onClick={() => {
                   void test.run();
                 }}
                 size="sm"
                 status={test.status}
-                successLabel={test.labels.success}
+                successText={test.labels.success}
                 variant="outline"
               >
                 {t`Test`}
@@ -414,14 +414,14 @@ const KeyDialog = ({
         </DialogBody>
         <DialogFooter>
           <HoldButton
-            errorLabel={t`Not deleted`}
+            errorText={t`Not deleted`}
             labels={{
               holdTo: () => t`Hold to delete the key`,
               ask: () => t`Delete the ${label} key?`,
               confirm: t`Delete`,
               cancel: t`Cancel`,
             }}
-            loadingLabel={t`Deleting`}
+            loadingText={t`Deleting`}
             onConfirm={remove}
             size="sm"
             variant="destructive"

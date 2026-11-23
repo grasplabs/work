@@ -80,11 +80,11 @@
   --damsko-code-bg: light-dark(oklch(0.29 0.05 162 / 0.06), oklch(0.96 0.02 150 / 0.09));
   /* Type: families. */
   /* Everything that is not a title: interface, body, labels. */
-  --damsko-font-sans: "Geist", "Geist Variable", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --damsko-font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   /* Titles, figures and names in a list, at weight 400 only. */
   --damsko-font-serif: "Geist Serif", Georgia, serif;
   /* Code, token names and anything typed exactly. */
-  --damsko-font-mono: "Geist Mono", "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --damsko-font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   /* Type: sizes. */
   /* The smallest text there is: tags, labels, chips, code. */
   --damsko-text-xs: 0.8125rem;
@@ -165,22 +165,26 @@
   /* Around a band that stands on its own. */
   --damsko-space-24: 96px;
   /* Corners: corners. */
-  /* The one corner: buttons, cards, menus, panels. Capped at half the height. */
+  /* The base corner, which the steps are made from: lg, xl and 2xl follow it. A part takes a step, never the base. */
   --damsko-radius: 20px;
-  /* Always written after corner, so the curve meets the edge without a seam. */
-  --damsko-radius-shape: squircle;
-  /* The Prompt input's card: a button's corner at its size (16px at 32px tall) plus the footer's inset (8px), so the card nests round its buttons. */
-  --damsko-prompt-input-radius: 24px;
-  /* A row: a menu or list item, a tree or sidebar row, a trigger that runs the width. The one corner less the room a container keeps round its rows, capped at half the row's height. */
-  --damsko-radius-row: calc(var(--damsko-radius) - var(--damsko-popup-padding));
-  /* A thing too thin for the mark corner: a swatch 8px square, a highlight's edge. */
-  --damsko-radius-hairline: 2px;
-  /* Marks under 24px tall: a key, inline code. */
-  --damsko-radius-mark: 6px;
+  /* A thing too thin for sm: a swatch 8px square, a highlight's edge. */
+  --damsko-radius-xs: 2px;
+  /* Marks under 24px tall: a key, inline code, the box of a checkbox. */
+  --damsko-radius-sm: 6px;
+  /* The page's card beside an inset sidebar: a plain round corner, as the app's main surface was drawn. */
+  --damsko-radius-md: 12px;
+  /* A row: a menu or list item, a tree or sidebar row, a trigger that runs the width. The base less the 4px a container keeps round its rows, capped at half the row's height. */
+  --damsko-radius-lg: calc(var(--damsko-radius) - 4px);
+  /* Controls and containers: buttons, fields, cards, menus, panels. Capped at half the height. */
+  --damsko-radius-xl: var(--damsko-radius);
+  /* A surface that keeps 8px round its rows, so they nest in it: a floating sidebar. */
+  --damsko-radius-2xl: calc(var(--damsko-radius) + 4px);
   /* A pill: a chip, a badge, the track of a switch or a slider. Never a control that holds buttons. */
   --damsko-radius-full: 999px;
-  /* A circle: an avatar, a dot. */
+  /* A circle that follows its box, which full cannot: half of each side, so an avatar or a dot stays round as it grows, and a dot can turn into a square. */
   --damsko-radius-circle: 50%;
+  /* The shape of every corner on the scale, written as corner-shape after the radius, so the curve meets the edge without a seam. A pill and a circle leave it out. */
+  --damsko-radius-shape: squircle;
   /* Elevation: edge and lifts. */
   /* The colour of every edge: night at 6%. A control reads by its fill and lift, not by a line. */
   --damsko-border-strong-color: light-dark(oklch(0.173 0.028 169.36 / 0.06), oklch(0.96 0.02 150 / 0.1));
@@ -414,7 +418,7 @@
   /* The breath of lift under a field, beneath its hairline: lift-low's shadow without its edge. */
   --damsko-input-shadow: 0 1px 2px var(--damsko-shadow-color-faint), 0 2px 4px var(--damsko-shadow-color-faint);
   /* Checkbox: checkbox. */
-  /* The box of a checkbox: a mark under 24px, so it takes corner-mark. */
+  /* The box of a checkbox: a mark under 24px, so it takes radius-sm. */
   --damsko-checkbox-box: 16px;
   /* The tick or the dash inside a checked box. */
   --damsko-checkbox-mark: 12px;
@@ -861,6 +865,8 @@
   /* The widest the compact form's list opens: less on a window narrower than it and its gutters. */
   --damsko-table-of-contents-width: 16rem;
   /* Prompt input and attachments: prompt input and attachments. */
+  /* The Prompt input's card, and how far the bands above and under it tuck behind it: a button's corner at its size (16px at 32px tall) plus the footer's inset (8px), so the card nests round its buttons. Its own token, not 2xl: it is the same in a browser that draws no squircle, where 2xl is smaller. */
+  --damsko-prompt-input-radius: 24px;
   /* The widest a prompt input grows. */
   --damsko-prompt-input-width: 36rem;
   /* The tallest a prompt input's text grows before it scrolls inside. */
@@ -944,10 +950,6 @@
   --damsko-sidebar-icon: 16px;
   /* A button that is only an icon in the frame (the sidebar's toggle). */
   --damsko-sidebar-icon-button: var(--damsko-control-xs);
-  /* A floating sidebar's corner, in the squircle: a row's corner plus the room the sidebar keeps round its rows, so the rows nest in it. */
-  --damsko-sidebar-card-radius: calc(var(--damsko-radius-row) + var(--damsko-space-2));
-  /* The corner of the page's card beside an inset sidebar: a plain round one, as the app's main surface was drawn. It holds no sidebar rows, so it does not nest round them. */
-  --damsko-sidebar-inset-radius: 12px;
   /* The room round the page's card, on the sidebar's ground. */
   --damsko-sidebar-card-gap: 6px;
   /* The rows' letter spacing: a hair tighter than set. */
@@ -1261,7 +1263,7 @@
 @supports not (corner-shape: squircle) {
   :root {
     --damsko-radius: 9px;
-    --damsko-radius-mark: 4px;
-    --damsko-sidebar-card-radius: 11px;
+    --damsko-radius-sm: 4px;
+    --damsko-radius-2xl: 11px;
   }
 }

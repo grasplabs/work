@@ -230,8 +230,8 @@ export const InviteButton = () => {
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            errorLabel={t`Not sent`}
-            loadingLabel={t`Sending`}
+            errorText={t`Not sent`}
+            loadingText={t`Sending`}
             onClick={send}
             size="sm"
           >

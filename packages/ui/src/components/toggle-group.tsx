@@ -1,7 +1,5 @@
-// ToggleGroup: toggles on one soft track, from shadcn's (registry/bases/base/ui/toggle-group.tsx,
-// on Base UI), converted from Tailwind to StyleX and built on UI SDK's ToggleGroup: one tab stop,
-// the arrow keys between toggles. The track soft, the pressed item raised out of it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// ToggleGroup: toggles on one soft track, in StyleX on UI SDK's ToggleGroup: one tab stop, the
+// arrow keys between toggles. The track soft, the pressed item raised out of it.
 //
 //   <ToggleGroup aria-label="View" defaultValue={["list"]}>
 //     <ToggleGroupItem value="list">List</ToggleGroupItem>
@@ -164,7 +162,7 @@ const styles = stylex.create({
     minWidth: `calc(${sizes.controlLg} - 2 * ${space.toggleTrackPadding})`,
   },
   item: {
-    borderRadius: `calc(${radius.base} - ${space.toggleTrackPadding})`,
+    borderRadius: `calc(${radius.xl} - ${space.toggleTrackPadding})`,
   },
   // An icon alone: square.
   square: { paddingInline: 0 },

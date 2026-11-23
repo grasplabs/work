@@ -217,7 +217,7 @@ const MemberRole = ({ member }: { member: Member }) => {
           await setRole("admin");
         }}
         description={t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
-        errorLabel={t`Not changed`}
+        errorText={t`Not changed`}
         label={t`Make admin`}
         onOpenChange={setAsking}
         open={asking}
@@ -310,7 +310,7 @@ const MemberMenu = ({ member }: { member: Member }) => {
             {t`Copy email`}
           </DropdownMenuItem>
           <DropdownMenuItem
-            errorLabel={t`Not signed out`}
+            errorText={t`Not signed out`}
             icon={LogOutIcon}
             onSelect={signOutEverywhere}
           >
@@ -331,9 +331,9 @@ const MemberMenu = ({ member }: { member: Member }) => {
       <ConfirmAction
         action={remove}
         description={t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
-        errorLabel={t`Not removed`}
+        errorText={t`Not removed`}
         label={t`Remove`}
-        loadingLabel={t`Removing`}
+        loadingText={t`Removing`}
         onOpenChange={setAsking}
         open={asking}
         title={t`Remove ${name}?`}

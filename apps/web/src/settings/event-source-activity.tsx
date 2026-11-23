@@ -8,7 +8,14 @@ import type {
 } from "@grasp-os/shared/event-sources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { CodeBlock } from "@grasp-os/ui/components/code-block";
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@grasp-os/ui/components/code-block";
 import {
   Dialog,
   DialogBody,
@@ -525,7 +532,15 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
                 {t`This payload is no longer kept.`}
               </Text>
             ) : (
-              <CodeBlock language="json">{payload}</CodeBlock>
+              <CodeBlock language="json">
+                <CodeBlockHeader>
+                  <CodeBlockTitle />
+                  <CodeBlockActions>
+                    <CodeBlockCopyButton value={payload} />
+                  </CodeBlockActions>
+                </CodeBlockHeader>
+                <CodeBlockContent>{payload}</CodeBlockContent>
+              </CodeBlock>
             )}
           </DialogBody>
         </DialogContent>

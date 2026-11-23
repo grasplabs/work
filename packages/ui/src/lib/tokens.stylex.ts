@@ -3,7 +3,7 @@
 // Every StyleX name refers to its CSS custom property in styles/tokens.css; no value is written
 // here. Constants (not defineVars) because the variables already exist: StyleX inlines
 // `var(--damsko-…)` at build time and emits no second set of properties. Load tokens.css once
-// on the page. One object per category: `colors.primary`, `space[4]`, `radius.base`.
+// on the page. One object per category: `colors.primary`, `space[4]`, `radius.lg`.
 import * as stylex from "@stylexjs/stylex";
 
 export const colors = stylex.defineConsts({
@@ -303,16 +303,17 @@ export const space = stylex.defineConsts({
 export const radius = stylex.defineConsts({
   // Corners: corners.
   base: "var(--damsko-radius)",
-  shape: "var(--damsko-radius-shape)",
-  promptInputRadius: "var(--damsko-prompt-input-radius)",
-  row: "var(--damsko-radius-row)",
-  hairline: "var(--damsko-radius-hairline)",
-  mark: "var(--damsko-radius-mark)",
+  xs: "var(--damsko-radius-xs)",
+  sm: "var(--damsko-radius-sm)",
+  md: "var(--damsko-radius-md)",
+  lg: "var(--damsko-radius-lg)",
+  xl: "var(--damsko-radius-xl)",
+  "2xl": "var(--damsko-radius-2xl)",
   full: "var(--damsko-radius-full)",
   circle: "var(--damsko-radius-circle)",
-  // Sidebar: sidebar sizes.
-  sidebarCardRadius: "var(--damsko-sidebar-card-radius)",
-  sidebarInsetRadius: "var(--damsko-sidebar-inset-radius)",
+  shape: "var(--damsko-radius-shape)",
+  // Prompt input and attachments: prompt input and attachments.
+  promptInputRadius: "var(--damsko-prompt-input-radius)",
 });
 
 export const shadow = stylex.defineConsts({

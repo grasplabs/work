@@ -43,7 +43,12 @@ const setupOf = (overrides: Partial<ClientSetup> = {}): ClientSetup => ({
   teamsBot: null,
   teamsBotSecretDays: null,
   configPending: false,
-  staffWindow: { window: null, open: false, staffSignIn: false },
+  staffWindow: {
+    window: null,
+    open: false,
+    live: false,
+    staffSignIn: false,
+  },
   sealedSecrets: [],
   watched: null,
   workers: [],

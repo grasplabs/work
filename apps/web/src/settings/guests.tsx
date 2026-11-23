@@ -85,7 +85,7 @@ export const GuestActions = ({ guest }: { guest: Guest }) => {
       <ConfirmAction
         action={remove}
         description={t`They are signed out everywhere and cannot sign in again.`}
-        errorLabel={t`Not removed`}
+        errorText={t`Not removed`}
         label={t`Remove`}
         onOpenChange={setAsking}
         open={asking}
