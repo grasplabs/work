@@ -185,7 +185,7 @@ export const controlDemos: Demos = {
     </div>
   ),
   badge: () => <Badge variant="secondary">Draft</Badge>,
-  "brand-icon": () => <BrandIcon label="Acme" />,
+  "brand-icon": () => <BrandIcon name="Acme" />,
   button: () => <Button variant="default">Save changes</Button>,
   "button-group": () => (
     <ButtonGroup>

@@ -1,6 +1,5 @@
 // Skeleton: a placeholder in the shape of content that is still loading, in StyleX. It takes the shape of
 // what it stands for: a line of text, a rectangle, or a circle.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Skeleton />                                       one line of small text
 //   <Skeleton size="lg" />                             one line of a lead or a card title
@@ -314,7 +313,7 @@ const styles = stylex.create({
     width: "100%",
     flexShrink: 1,
     backgroundClip: "content-box",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   sm: {
@@ -335,7 +334,7 @@ const styles = stylex.create({
     width: "100%",
     flexShrink: 1,
     height: size.controlDefault,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
   },
   // An avatar: a circle as large as a default control. It keeps its size in a row.

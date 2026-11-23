@@ -120,7 +120,7 @@ export const noCondition: DataTableFilterCondition = {
   value: null,
 };
 
-const corner = `min(${radius.base}, calc(${size.dataTableFilterSegment} / 2))`;
+const corner = `min(${radius.xl}, calc(${size.dataTableFilterSegment} / 2))`;
 
 const styles = stylex.create({
   // The segments stand on the line's colour, 1px apart, so the gaps draw the dividers.

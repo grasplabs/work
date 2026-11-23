@@ -202,7 +202,7 @@ const focusStyles = stylex.create({
   },
   // The words of a focusCarrier: the ring round them, keyboard only, with the small corner.
   label: {
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     outline: {
       default: "none",
@@ -456,17 +456,17 @@ export const inputStyles = stylex.create({
   sm: {
     minHeight: size.controlSm,
     paddingBlock: `calc((${size.controlSm} - ${font.textSmLine}) / 2)`,
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
   },
   default: {
     minHeight: size.controlDefault,
     paddingBlock: `calc((${size.controlDefault} - ${font.textSmLine}) / 2)`,
-    borderRadius: `min(${radius.base}, calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
   },
   lg: {
     minHeight: size.controlLg,
     paddingBlock: `calc((${size.controlLg} - ${font.textSmLine}) / 2)`,
-    borderRadius: `min(${radius.base}, calc(${size.controlLg} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
   },
   // A finger needs 44px: an invisible area inside the control reaches past its edges.
   target: {
@@ -562,7 +562,7 @@ export const listStyles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.popover,
     boxShadow: shadow.popupShadow,
@@ -656,7 +656,7 @@ export const listStyles = stylex.create({
     boxSizing: "border-box",
     paddingBlock: `calc((${size.controlSm} - ${font.textXsLine}) / 2)`,
     paddingInline: space[2],
-    borderRadius: `min(${radius.row}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.controlSm} / 2))`,
     cornerShape: radius.shape,
     color: colors.foreground,
     fontSize: { default: font.textXs, [COARSE]: font.textSm },
@@ -673,7 +673,7 @@ export const listStyles = stylex.create({
   menuItem: {
     minHeight: { default: size.controlDefault, [COARSE]: size.tapTarget },
     paddingBlock: `calc((${size.controlDefault} - ${font.textSmLine}) / 2)`,
-    borderRadius: `min(${radius.row}, calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.controlDefault} / 2))`,
     color: colors.foreground,
     fontSize: {
       default: font.textSm,
@@ -763,7 +763,7 @@ export const listStyles = stylex.create({
 });
 
 // An item's corner nests inside the panel's, capped at half a control's height.
-const ITEM_CORNER = `min(${radius.row}, calc(${size.controlDefault} / 2))`;
+const ITEM_CORNER = `min(${radius.lg}, calc(${size.controlDefault} / 2))`;
 
 /**
  * A menu: the panel and its items, for dropdown menu, context menu and menubar. The panel carries
@@ -789,7 +789,7 @@ export const menuStyles = stylex.create({
     borderWidth: { default: 0, [FORCED]: size.hairline },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.popover,
     boxShadow: shadow.menuShadow,
@@ -1027,7 +1027,7 @@ export const disclosureStyles = stylex.create({
     },
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: `min(${radius.row}, calc(${size.collapsibleTrigger} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.collapsibleTrigger} / 2))`,
     cornerShape: radius.shape,
     fontFamily: "inherit",
     fontSize: font.textSm,
@@ -1130,7 +1130,7 @@ export const segmentedStyles = stylex.create({
   // The same room on every side, so the chosen one stands evenly inside the track.
   track: {
     padding: space.toggleTrackPadding,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.muted,
     // Forced colours drop the fill: a line keeps the track.
@@ -1177,7 +1177,7 @@ export const codeStyles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     color: colors.bodyForeground,
   },

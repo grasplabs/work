@@ -3,7 +3,6 @@
 // a server, an agent and a person. Sorting takes several columns (Shift and a column's name adds
 // it); selecting takes a range (Shift and a checkbox). The rest comes as features (features.ts),
 // each opt-in. Its words come from the I18nProvider (`dataTable`).
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <DataTable
 //     aria-label="Reports"
@@ -668,7 +667,7 @@ const styles = stylex.create({
   date: {
     fontVariantNumeric: "tabular-nums",
     whiteSpace: "nowrap",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   dateRoom: (width: string) => ({ display: "inline-block", minWidth: width }),

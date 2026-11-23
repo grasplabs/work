@@ -2,7 +2,6 @@
 // in StyleX: Hugeicons' loader (through lib/icons), turning in the colour
 // of the words around it, so it works as a Button's child. With reduced motion it stands still and
 // breathes.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Spinner aria-label="Loading the report" />            alone: a status that says its label
 //   <p role="status"><Spinner /> Loading the report</p>    beside words: they are the status
