@@ -17,6 +17,7 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 
 import { groupsFor } from "../settings/sections.ts";
 import { WayOut } from "./way-out.tsx";
+import type { Outside } from "./way-out.tsx";
 
 /**
  * Settings' own navigation, a level of the sidebar while a Settings page
@@ -24,7 +25,14 @@ import { WayOut } from "./way-out.tsx";
  * person came from, then Settings' name, then its sections in their
  * groups, the workspace's for admins and the account's for everyone.
  */
-export const SettingsLevel = ({ identity }: { identity: Identity }) => {
+export const SettingsLevel = ({
+  identity,
+  outside,
+}: {
+  identity: Identity;
+  /** Where Back leads: the last page outside every level (`useWayOut`). */
+  outside: Outside | undefined;
+}) => {
   const { t, i18n } = useLingui();
   const matchRoute = useMatchRoute();
   const groups = groupsFor({
@@ -37,7 +45,7 @@ export const SettingsLevel = ({ identity }: { identity: Identity }) => {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
-              <WayOut>
+              <WayOut outside={outside}>
                 <Icon icon={ChevronLeftIcon} />
                 {t`Back`}
               </WayOut>

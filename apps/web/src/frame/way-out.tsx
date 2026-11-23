@@ -6,29 +6,43 @@ import { levelAt } from "./levels.ts";
 
 // Back, in a level of the sidebar (Settings), leads out of every level, to
 // the last page the main level stood beside; to Chat when the person
-// landed in a level. Kept while the sidebar is, which keeps every level in
-// the page.
+// landed in a level. The frame keeps that page (`useWayOut`, in the
+// sidebar's own component, which stays as long as the frame does): the
+// levels' rows are drawn anew each time the phone's sheet opens.
 
 /** A page the main level stands beside, to go back to. */
-interface Outside {
+export interface Outside {
   pathname: string;
   search: Record<string, unknown>;
 }
 
 /**
- * The way out of a level: a link to the last page outside every level. It
- * takes what a part drawing it as its child (`asChild`) gives it.
+ * The last page outside every level, followed as the person goes; none
+ * yet when they landed in a level. Call it where it stays while the frame
+ * does.
  */
-export const WayOut = ({
-  children,
-  ...rest
-}: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href">) => {
+export const useWayOut = (): Outside | undefined => {
   const { pathname, search } = useLocation();
   const [outside, setOutside] = useState<Outside>();
   if (levelAt(pathname) === "main" && outside?.pathname !== pathname) {
     setOutside({ pathname, search });
   }
-  return outside === undefined ? (
+  return outside;
+};
+
+/**
+ * The way out of a level: a link to `outside`, the last page outside every
+ * level (`useWayOut`), or to Chat. It takes what a part drawing it as its
+ * child (`asChild`) gives it.
+ */
+export const WayOut = ({
+  outside,
+  children,
+  ...rest
+}: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
+  outside: Outside | undefined;
+}) =>
+  outside === undefined ? (
     <Link {...rest} to="/">
       {children}
     </Link>
@@ -37,4 +51,3 @@ export const WayOut = ({
       {children}
     </Link>
   );
-};

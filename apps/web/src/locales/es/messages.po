@@ -4355,10 +4355,6 @@ msgstr "¿Cerrar esta pregunta sin respuesta?"
 msgid "Close to the limit of {limit}"
 msgstr "Cerca del límite de {limit}"
 
-#: src/frame/ui-words.tsx
-msgid "Close voice"
-msgstr "Cerrar la voz"
-
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -7445,10 +7441,6 @@ msgstr "Historial"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "Mantén pulsado 4 segundos"
-
-#: src/frame/ui-words.tsx
-msgid "Hold to {words}"
-msgstr "Mantén pulsado: {words}"
 
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
@@ -11642,6 +11634,10 @@ msgstr "Rangos rápidos"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Pulsa una línea para cambiarla, quita lo que esté mal o escribe lo que falte. Elige adónde va cada línea. Lo que dejes es lo que cuenta."
+
+#: src/frame/ui-words.tsx
+msgid "Press and hold: {words}"
+msgstr "Mantén pulsado: {words}"
 
 #: src/frame/ui-words.tsx
 msgid "Press Enter to add it."
@@ -16465,6 +16461,7 @@ msgid "Type a whole number."
 msgstr "Escribe un número entero."
 
 #: src/chat/asked-questions.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Prefiero escribir"

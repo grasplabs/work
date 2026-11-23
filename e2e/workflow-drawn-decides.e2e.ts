@@ -215,7 +215,9 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("alertdialog", { name: "Confirm your approval" })
     .getByRole("button", { name: "Confirm" })
     .click(pageRead);
-  // The page's own: the components' live regions stand outside it.
+  // The page's own status, in its main: until Damsko's fix for its
+  // Toaster's empty live regions (registry gap "two sets of live regions"),
+  // whose role="status" one also holds what was last said politely.
   await expect(asDecider.getByRole("main").getByRole("status")).toHaveText(
     /^Approved by Person on /u,
     pageRead

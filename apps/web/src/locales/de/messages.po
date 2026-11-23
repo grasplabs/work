@@ -4355,10 +4355,6 @@ msgstr "Diese Frage ohne Antwort schließen?"
 msgid "Close to the limit of {limit}"
 msgstr "Nahe an der Grenze von {limit}"
 
-#: src/frame/ui-words.tsx
-msgid "Close voice"
-msgstr "Sprache schließen"
-
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -7445,10 +7441,6 @@ msgstr "Verlauf"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "4 Sekunden gedrückt halten"
-
-#: src/frame/ui-words.tsx
-msgid "Hold to {words}"
-msgstr "Gedrückt halten: {words}"
 
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
@@ -11642,6 +11634,10 @@ msgstr "Vorgaben"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Drücken Sie auf eine Zeile, um sie zu ändern, nehmen Sie heraus, was nicht stimmt, oder tippen Sie, was fehlt. Wählen Sie, wohin jede Zeile geht. Was Sie stehen lassen, zählt."
+
+#: src/frame/ui-words.tsx
+msgid "Press and hold: {words}"
+msgstr "Gedrückt halten: {words}"
 
 #: src/frame/ui-words.tsx
 msgid "Press Enter to add it."
@@ -16465,6 +16461,7 @@ msgid "Type a whole number."
 msgstr "Geben Sie eine ganze Zahl ein."
 
 #: src/chat/asked-questions.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Lieber tippen"

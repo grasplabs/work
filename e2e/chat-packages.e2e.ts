@@ -51,13 +51,10 @@ test("the App's builder approves the packages its chat's agent asked for, on the
         return approved?.id;
       })
       .toBe(request.id);
-    // The page's and the chat's own: the components' live regions stand
-    // outside both.
+    // Alerts that say something: until Damsko's fix for its Toaster's empty
+    // role="alert" region (registry gap "two sets of live regions").
     await expect(
-      page
-        .getByRole("main")
-        .or(page.getByRole("region", { name: "Chat" }))
-        .getByRole("alert")
+      page.getByRole("alert").filter({ hasText: /\S/u })
     ).toHaveCount(0);
   } finally {
     core[Symbol.dispose]();

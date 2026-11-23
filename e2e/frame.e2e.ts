@@ -108,6 +108,12 @@ test("opened from the page's bar, the sidebar takes the focus to its own fold", 
   await page.goto("/projects");
   const fold = foldOf(page);
   await fold.click();
+  await expect(page.locator('aside[data-slot="sidebar"]')).toHaveAttribute(
+    "data-state",
+    "collapsed"
+  );
+  // Well past its slide out, so the sidebar is hidden as the bar opens it.
+  await page.waitForTimeout(1000);
   const reopen = page
     .getByRole("main")
     .getByRole("button", { name: "Show or hide the sidebar" });
@@ -144,4 +150,29 @@ test("on a phone the sidebar is a sheet, which closes on its button and as the p
   await expect(
     page.getByRole("heading", { name: "Apps", exact: true })
   ).toBeVisible();
+});
+
+test("on a phone Back in Settings leads to the last page outside it, though the sheet closed between", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("frame");
+  const page = await pageOf(member);
+  await page.setViewportSize(phone);
+  await page.goto("/projects");
+  await expect(
+    page.getByRole("heading", { name: "Projects", exact: true })
+  ).toBeVisible();
+  const sheet = page.getByRole("dialog", { name: "Sidebar" });
+  const open = page
+    .getByRole("main")
+    .getByRole("button", { name: "Show or hide the sidebar" });
+  await open.click();
+  await sheet.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings/u);
+  await expect(sheet).toBeHidden();
+
+  await open.click();
+  await sheet.getByRole("link", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/projects$/u);
 });

@@ -443,7 +443,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       ask: (words) => t`${words}?`,
       cancel: t`Cancel`,
       confirm: t`Confirm`,
-      holdTo: (words) => t`Hold to ${words}`,
+      holdTo: (words) => t`Press and hold: ${words}`,
     },
     imageUpload: {
       add: t`Add a picture`,
@@ -605,8 +605,9 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       stop: t({ message: "Stop", context: "stop an answer" }),
       submit: t({ message: "Send", context: "send a message" }),
       succeeded: t({ message: "Done", context: "a message sent" }),
+      // Closing a spoken conversation gives the text back.
       voice: {
-        close: t`Close voice`,
+        close: t`Type instead`,
         label: t`Voice conversation`,
         listening: t`Listening`,
         speaking: t`Speaking`,

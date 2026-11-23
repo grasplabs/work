@@ -11,7 +11,7 @@ import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { Fragment } from "react";
+import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
@@ -172,29 +172,59 @@ export const SiteHeader = ({
   const { state, isMobile } = useSidebar();
   const away = isMobile || state === "collapsed";
   const last = crumbs.length - 1;
+  const bar = useRef<HTMLElement>(null);
+  // This bar's trigger opened the sidebar and went as it did: focus goes on
+  // to the fold in the sidebar's head, and never stays on the page. Until
+  // Damsko's SidebarProvider does this itself (the registry gap "the
+  // sidebar gives no focus back when it opens from a trigger that then
+  // goes"); then this goes.
+  const handing = useRef(false);
+  useLayoutEffect(() => {
+    if (away || !handing.current) {
+      return () => {
+        // Nothing to hand on.
+      };
+    }
+    handing.current = false;
+    const sidebar = bar.current
+      ?.closest('[data-slot="sidebar-wrapper"]')
+      ?.querySelector<HTMLElement>('[data-slot="sidebar-container"]');
+    const fold = sidebar?.querySelector<HTMLElement>(
+      '[data-slot="sidebar-trigger"]'
+    );
+    let left = false;
+    // Hidden until it has slid in (none of it with reduced motion): the
+    // fold takes focus once the sidebar's own transitions are done, unless
+    // it is folded again first.
+    const slid = Promise.all(
+      (sidebar?.getAnimations() ?? []).map(
+        async ({ finished }) => await finished
+      )
+    );
+    const handOn = async () => {
+      try {
+        await slid;
+      } catch {
+        // Folded again on the way: focus stays where it is.
+        return;
+      }
+      if (!left) {
+        fold?.focus();
+      }
+    };
+    void handOn();
+    return () => {
+      left = true;
+    };
+  }, [away]);
   return (
-    <header data-slot="site-header" {...stylex.props(styles.bar)}>
+    <header data-slot="site-header" ref={bar} {...stylex.props(styles.bar)}>
       {away ? (
         <SidebarTrigger
           aria-label={t`Show or hide the sidebar`}
-          onClick={(event) => {
-            if (isMobile) {
-              // The sheet takes focus itself, and gives it back on closing.
-              return;
-            }
-            // This button goes as the sidebar opens: focus goes on to the
-            // fold in the sidebar's head, once it is drawn, and never falls
-            // to the page.
-            const shell = event.currentTarget.closest(
-              '[data-slot="sidebar-wrapper"]'
-            );
-            requestAnimationFrame(() => {
-              shell
-                ?.querySelector<HTMLElement>(
-                  '[data-slot="sidebar"] [data-slot="sidebar-trigger"]'
-                )
-                ?.focus();
-            });
+          onClick={() => {
+            // The sheet takes focus itself, and gives it back on closing.
+            handing.current = !isMobile;
           }}
         />
       ) : null}

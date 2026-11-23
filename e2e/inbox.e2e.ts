@@ -59,5 +59,9 @@ test("a person with nothing waiting finds their inbox from the nav, with nothing
   );
   await page.getByRole("tab", { name: /^Done/u }).click();
   await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
-  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  // Alerts that say something: until Damsko's fix for its Toaster's empty
+  // role="alert" region (registry gap "two sets of live regions").
+  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
+    0
+  );
 });

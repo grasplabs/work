@@ -50,6 +50,7 @@ import { levelAt } from "./levels.ts";
 import { PersonMenu } from "./person-menu.tsx";
 import { SettingsLevel } from "./settings-level.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
+import { useWayOut } from "./way-out.tsx";
 
 // The app's sidebar, Damsko's Sidebar on its own light ground, the page a
 // card beside it: Grasp's mark at the top, with the search of the chats
@@ -190,6 +191,8 @@ export const AppSidebar = ({
   const { setOpenMobile } = useSidebar();
   // Settings' own while a Settings page is open, else the main one.
   const level = levelAt(useLocation().pathname);
+  // Kept here, not in the level: the phone's sheet draws its rows anew.
+  const outside = useWayOut();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
   useEffect(
@@ -229,7 +232,7 @@ export const AppSidebar = ({
             </SidebarContent>
           ) : null}
         </SidebarLevel>
-        <SettingsLevel identity={identity} />
+        <SettingsLevel identity={identity} outside={outside} />
       </SidebarLevels>
       <SidebarFooter>
         <PersonMenu core={core} identity={identity} />

@@ -200,8 +200,9 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   // A flow that failed comes back refused, and says what to do; a code
   // nobody knows says only the page's own words.
   await page.goto("/integrations?connectionError=connection.already_connected");
-  // The page's own: the components' live regions stand outside it.
-  const said = page.getByRole("main").getByRole("alert");
+  // Alerts that say something: until Damsko's fix for its Toaster's empty
+  // role="alert" region (registry gap "two sets of live regions").
+  const said = page.getByRole("alert").filter({ hasText: /\S/u });
   await expect(said).toHaveText(
     "That account is already connected here. Disconnect it first to connect it again."
   );

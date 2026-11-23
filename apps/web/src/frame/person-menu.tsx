@@ -102,10 +102,16 @@ const styles = stylex.create({
   // Atop the menu: who is signed in, and their role.
   signedIn: { display: "grid", gap: space["1"] },
   role: { fontWeight: font.weightNormal },
-  // A submenu's choice now, quiet, at its item's end.
+  // A submenu's words, then its choice now at the row's end, before the
+  // chevron, quiet, cut short when there is no room, as the reference's.
+  choice: { display: "flex", gap: space["4"] },
   current: {
+    flexShrink: 100,
+    minWidth: 0,
     marginInlineStart: "auto",
-    paddingInlineStart: space["4"],
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     color: colors.mutedForeground,
   },
 });
@@ -134,10 +140,11 @@ const ThemeMenu = ({ userId }: { userId: string }) => {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger icon={themeIcons[theme]}>
-        {t`Theme`}
-        {/* The choice now, at the item's end. */}
-        <span {...stylex.props(styles.current)}>
-          {i18n._(themeNames[theme])}
+        <span {...stylex.props(styles.choice)}>
+          {t`Theme`}
+          <span {...stylex.props(styles.current)}>
+            {i18n._(themeNames[theme])}
+          </span>
         </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
@@ -170,10 +177,12 @@ const LanguageMenu = () => {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger icon={GlobeIcon}>
-        {t`Language`}
-        {/* The language now, in its own words, at the item's end. */}
-        <span lang={locale} {...stylex.props(styles.current)}>
-          {localeNames[locale]}
+        <span {...stylex.props(styles.choice)}>
+          {t`Language`}
+          {/* The language now, in its own words. */}
+          <span lang={locale} {...stylex.props(styles.current)}>
+            {localeNames[locale]}
+          </span>
         </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
