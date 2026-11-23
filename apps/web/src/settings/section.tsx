@@ -62,8 +62,10 @@ const styles = stylex.create({
   // them) stand under it there. Damsko's head would keep them beside it
   // and squeeze the title down to nothing, breaking it inside its words
   // (its words' floor is zero; logged in the registry gaps).
+  // Wider, the head's own flex row: a null default would drop it, and stack
+  // the buttons under the title at every width.
   headStacked: {
-    display: { default: null, "@container settings (width < 30rem)": "grid" },
+    display: { default: "flex", "@container settings (width < 30rem)": "grid" },
   },
   titleLine: {
     display: "flex",
