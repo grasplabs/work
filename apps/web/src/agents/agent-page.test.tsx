@@ -1167,6 +1167,35 @@ describe("an agent's page", () => {
     expect(document.body.textContent).toContain("No AI provider is connected.");
   });
 
+  it("shows a person its instructions name as their name, not as plain words", async () => {
+    const fake = await withClaire();
+    await fake.instructions.save({
+      file: { scope: "agent", agentId: "agent-1" },
+      change: "told-again",
+      text: "Ask Anna de Vries before chasing.",
+      after: 1,
+    });
+    await shown(fake, { agent: "Claire" });
+    const chips = [...document.querySelectorAll("[data-slot=tag]")].map(
+      (each) => each.textContent
+    );
+    expect(chips).toContain("Anna de Vries");
+  });
+
+  it("says when a schedule first runs before it ever has, and that it hasn't yet", async () => {
+    const fake = await withClaire();
+    await fake.connections.makeAgentWake("agent-1", {
+      cron: "0 9 * * 1-5",
+      personId: "user-anna",
+      opening: "Chase invoices.",
+    });
+    await shown(fake, { agent: "Claire" });
+    expect(document.querySelector("header")?.textContent).toContain(
+      "First run"
+    );
+    expect(document.body.textContent).toContain("No runs yet; the first is");
+  });
+
   it("offers someone who isn't the company's admin nothing to change", async () => {
     const fake = await withClaire();
     const { asked } = fake;
