@@ -804,10 +804,11 @@ const MembersPending = () => {
   return (
     <SettingsGroup
       actions={
-        // Roles and Invite need no data, so they stand as they will.
+        // Roles and Invite stand where they will. Invite waits: the loaded
+        // page replaces this one, and a dialog opened here with it.
         <>
           <RolesButton />
-          <InviteButton />
+          <InviteButton disabled />
         </>
       }
       title={t`Team members`}

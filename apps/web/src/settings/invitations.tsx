@@ -111,9 +111,10 @@ const inviteEach = async (
  * they get with its line, and Send invites. When only some went, those
  * leave the field, the rest stay with why, and the dialog stays open.
  * Grasp sends no email: the one sentence says so, as a person would
- * otherwise wait for one.
+ * otherwise wait for one. `disabled` while the members are read: what is
+ * typed into a dialog opened then would be lost once they arrive.
  */
-export const InviteButton = () => {
+export const InviteButton = ({ disabled = false }: { disabled?: boolean }) => {
   const { t } = useLingui();
   const core = useCore();
   const router = useRouter();
@@ -176,7 +177,7 @@ export const InviteButton = () => {
       open={open}
     >
       <DialogTrigger asChild>
-        <Button size="xs" variant="secondary">
+        <Button disabled={disabled} size="xs" variant="secondary">
           <Icon icon={PlusIcon} />
           {t`Invite`}
         </Button>

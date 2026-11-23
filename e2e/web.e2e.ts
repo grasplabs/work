@@ -374,6 +374,12 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await page.goto("/settings/teams");
   const teams = page.getByRole("region", { name: "Teams" });
   const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
+  // This team's own row, by the name that opens it: other teams on the
+  // stack (another test's, or one an earlier try left) say "1 person" too.
+  const rowOf = (title: string) =>
+    teams
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("button", { name: title, exact: true }) });
 
   await teams.getByRole("button", { name: "New team" }).click();
   const create = page.getByRole("dialog", { name: "New team" });
@@ -389,7 +395,7 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await team.getByRole("checkbox", { name: `Person ${member.email}` }).check();
   await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
-  await expect(teams.getByText("1 person")).toBeVisible();
+  await expect(rowOf(name)).toContainText("1 person");
 
   // Untick them and rename it, in one save.
   const renamed = `${name} and legal`;
@@ -542,6 +548,11 @@ test("shows the page loading while the members list is slow, then says core can'
   await expect(
     page.getByRole("table", { name: "Members" }).getByRole("row")
   ).not.toHaveCount(0);
+  // Invite waits for them: a dialog opened now would close as they come,
+  // with whatever was typed in it.
+  await expect(
+    page.getByRole("button", { name: "Invite", exact: true })
+  ).toBeDisabled();
 
   // Then the members' section says why it didn't load, with a way to ask
   // again, still in the frame.
