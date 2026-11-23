@@ -233,6 +233,15 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   unseen: { opacity: 0 },
+  // Where the App stands gives way to its name before the name is cut:
+  // beside the views, the preview's controls, "…" and Share, the name keeps
+  // its words in a bar this wide (the docked chat's beside it at 1440).
+  state: {
+    display: {
+      default: "inline-flex",
+      "@container bar (width < 56rem)": "none",
+    },
+  },
   strip: { flexShrink: 0 },
   // Over the preview's bottom corner, fading in: nothing under the
   // person's pointer moves for it.
@@ -448,11 +457,13 @@ const WorkspaceBar = ({
       name={app.name}
       state={
         members === undefined && !archived ? undefined : (
-          <StatusBadge
-            archived={archived}
-            live={app.currentVersion}
-            who={memberNames(members ?? [])}
-          />
+          <span {...stylex.props(styles.state)}>
+            <StatusBadge
+              archived={archived}
+              live={app.currentVersion}
+              who={memberNames(members ?? [])}
+            />
+          </span>
         )
       }
     />
