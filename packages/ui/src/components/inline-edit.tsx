@@ -53,7 +53,11 @@ export interface InlineEditProps {
   validate?: (next: string) => string | undefined;
   /** Whether the field is open, when you keep it in state. Pair it with `onEditingChange`. */
   editing?: boolean;
-  /** Whether the field starts open, when you do not keep it in state. @default false */
+  /**
+   * Whether the field starts open, when you do not keep it in state. A field that starts open
+   * takes no focus; one that opens later does.
+   * @default false
+   */
   defaultEditing?: boolean;
   /** Runs when the field opens or closes. */
   onEditingChange?: (editing: boolean) => void;
@@ -144,13 +148,17 @@ export const InlineEdit = ({
   const [draft, setDraft] = useState(value);
   // Why the value was not saved: `validate`'s words, or the failure's.
   const [problem, setProblem] = useState("");
-  // Each time the field opens, from a press or from the host, it starts from the value as it is.
+  // Each time the field opens, from a press or from the host, it starts from the value as it is,
+  // and takes focus. Counted, so a field that is open from the start takes none: nobody asked for
+  // it, and focus would scroll the page to it from wherever the reader is.
   const [opened, setOpened] = useState(editing);
+  const [opens, setOpens] = useState(0);
   if (opened !== editing) {
     setOpened(editing);
     if (editing) {
       setDraft(value);
       setProblem("");
+      setOpens(opens + 1);
     }
   }
   const save = useAction(async (work: Promise<unknown>) => await work, {
@@ -194,13 +202,18 @@ export const InlineEdit = ({
   useEffect(() => {
     if (editing) {
       closing.current = false;
-      field.current?.focus();
-      field.current?.select();
     } else if (backToText.current) {
       backToText.current = false;
       text.current?.focus();
     }
   }, [editing]);
+
+  useEffect(() => {
+    if (opens > 0) {
+      field.current?.focus();
+      field.current?.select();
+    }
+  }, [opens]);
 
   const submit = async (byKey: boolean) => {
     if (closing.current || saving) {

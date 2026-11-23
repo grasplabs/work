@@ -223,8 +223,14 @@ export const CollapsibleContent = ({
   return (
     // The class only: UI SDK writes the panel's measured height as its own inline style.
     // The slot is set on the element drawn: UI SDK keeps a part's own data-slot over a prop.
+    // A head script may have shown or hidden it as the person left it before the page wakes
+    // (Sidebar's `sidebarStateScript`), so waking does not report that `hidden` differs.
     <CollapsiblePanel
-      render={slot.render ?? <div data-slot="collapsible-content" />}
+      render={
+        slot.render ?? (
+          <div data-slot="collapsible-content" suppressHydrationWarning />
+        )
+      }
       hiddenUntilFound
       className={className(
         disclosureStyles.panel,

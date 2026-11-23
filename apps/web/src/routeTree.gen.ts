@@ -24,6 +24,7 @@ import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.conne
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
+import { Route as KitDamskoRouteImport } from './routes/kit_.damsko'
 import { Route as ShellAgentsIndexRouteImport } from './routes/_shell.agents.index'
 import { Route as ShellAgentsAgentRouteImport } from './routes/_shell.agents.$agent'
 import { Route as ShellAgentsNewRouteImport } from './routes/_shell.agents.new'
@@ -140,6 +141,11 @@ const ShellSettingsRoute = ShellSettingsRouteImport.update({
 const DecisionsDecisionRoute = DecisionsDecisionRouteImport.update({
   id: '/decisions/$decision',
   path: '/decisions/$decision',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const KitDamskoRoute = KitDamskoRouteImport.update({
+  id: '/kit_/damsko',
+  path: '/kit/damsko',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ShellAgentsIndexRoute = ShellAgentsIndexRouteImport.update({
@@ -377,6 +383,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof ShellInboxRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
+  '/kit/damsko': typeof KitDamskoRoute
   '/agents/$agent': typeof ShellAgentsAgentRoute
   '/agents/new': typeof ShellAgentsNewRoute
   '/apps/$app': typeof ShellAppsAppRouteWithChildren
@@ -433,6 +440,7 @@ export interface FileRoutesByTo {
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/inbox': typeof ShellInboxRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
+  '/kit/damsko': typeof KitDamskoRoute
   '/': typeof ShellIndexRoute
   '/agents/$agent': typeof ShellAgentsAgentRoute
   '/agents/new': typeof ShellAgentsNewRoute
@@ -494,6 +502,7 @@ export interface FileRoutesById {
   '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
+  '/kit_/damsko': typeof KitDamskoRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/agents/$agent': typeof ShellAgentsAgentRoute
   '/_shell/agents/new': typeof ShellAgentsNewRoute
@@ -556,6 +565,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/settings'
     | '/decisions/$decision'
+    | '/kit/damsko'
     | '/agents/$agent'
     | '/agents/new'
     | '/apps/$app'
@@ -612,6 +622,7 @@ export interface FileRouteTypes {
     | '/connect-microsoft'
     | '/inbox'
     | '/decisions/$decision'
+    | '/kit/damsko'
     | '/'
     | '/agents/$agent'
     | '/agents/new'
@@ -672,6 +683,7 @@ export interface FileRouteTypes {
     | '/_shell/inbox'
     | '/_shell/settings'
     | '/decisions/$decision'
+    | '/kit_/damsko'
     | '/_shell/'
     | '/_shell/agents/$agent'
     | '/_shell/agents/new'
@@ -728,6 +740,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
+  KitDamskoRoute: typeof KitDamskoRoute
   AppsAppDraftRoute: typeof AppsAppDraftRouteWithChildren
   AppsAppFullRoute: typeof AppsAppFullRouteWithChildren
   KitComponentsNameRoute: typeof KitComponentsNameRoute
@@ -839,6 +852,13 @@ declare module '@tanstack/react-router' {
       path: '/decisions/$decision'
       fullPath: '/decisions/$decision'
       preLoaderRoute: typeof DecisionsDecisionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/kit_/damsko': {
+      id: '/kit_/damsko'
+      path: '/kit/damsko'
+      fullPath: '/kit/damsko'
+      preLoaderRoute: typeof KitDamskoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_shell/agents/': {
@@ -1303,6 +1323,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
+  KitDamskoRoute: KitDamskoRoute,
   AppsAppDraftRoute: AppsAppDraftRouteWithChildren,
   AppsAppFullRoute: AppsAppFullRouteWithChildren,
   KitComponentsNameRoute: KitComponentsNameRoute,
