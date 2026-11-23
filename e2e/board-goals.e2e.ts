@@ -62,8 +62,10 @@ test("an admin sets a board goal, words it again and links a workflow; a member 
   // A member reads the goal, with nothing to change it by.
   const memberPage = await pageOf(member);
   await memberPage.goto("/brain/sections/vision");
+  // Its block on the page, its name and then its sentence (the Brain's
+  // navigation beside it names the goal alone).
   await expect(
-    memberPage.getByRole("link", { name: new RegExp(worded, "u") })
+    memberPage.getByRole("link", { name: new RegExp(`^${worded} .+`, "u") })
   ).toBeVisible(pageRead);
   await expect(
     memberPage.getByRole("button", { name: "Add a goal" })

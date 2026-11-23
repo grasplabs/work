@@ -1,12 +1,12 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // The Brain, end to end: a person opens it from the sidebar on its atlas,
 // goes into a part of it there and opens a note, and finds the note on the
-// atlas again; and opens a region from the brain's navigation and the note
-// in it there. Every deployment's brain has its board in front, with its
+// atlas again; and opens a region from the brain's navigation and the
+// note in it there. Every deployment's brain has its board in front, with its
 // Vision, whatever core holds yet, so that is the way in. What the brain is built from is
 // core's test (apps/core/test/brain.test.ts); how it is built, and laid out
 // as an atlas, the brain's own (apps/web/src/brain/*.test.ts).
@@ -30,17 +30,9 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   const board = main.getByRole("button", { name: /^Board/u });
   await expect(board).toBeVisible(brainRead);
 
-  // A region of the brain, up close: its notes as neurons, and the way back
-  // on the canvas, the one trail there is.
+  // A region of the brain, up close: its notes as neurons.
   await board.click();
   await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
-  const trail = main.getByRole("navigation", {
-    name: "Where you are in the brain",
-  });
-  await expect(trail).toContainText("Board");
-  await expect(
-    page.getByRole("navigation", { name: "Breadcrumb" })
-  ).not.toContainText("Board");
 
   // The note opens on its own page, its dots building the page.
   await main.getByRole("button", { name: "Vision page" }).click();
@@ -50,18 +42,15 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   ).toBeVisible();
 
   // And back on the atlas where it sits, in hand.
-  await page.getByRole("button", { name: "Show in the brain" }).click();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await page.getByRole("menuitem", { name: "View in map" }).click();
   await expect(page).toHaveURL(/\/brain\?note=vision$/u);
-  await expect(trail).toContainText("Vision page");
 
   // Escape steps out: from the note to its region, from the region to the whole brain.
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
-  // The part is open once the note is no longer in hand on its way back.
-  await expect(trail).not.toContainText("Vision page");
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/brain$/u);
-  await expect(trail).toBeHidden();
 });
 
 test("a person opens a region from the brain's navigation, and a note in it", async ({
@@ -72,7 +61,7 @@ test("a person opens a region from the brain's navigation, and a note in it", as
   await page.goto("/brain");
 
   // The navigation lists the brain's regions: the board first.
-  const nav = page.getByRole("complementary", { name: "The brain" });
+  const nav = page.getByRole("tree", { name: "In the brain" });
   await nav.getByRole("link", { name: /^Board/u }).click(brainRead);
   await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
 
@@ -87,21 +76,22 @@ test("a person opens a region from the brain's navigation, and a note in it", as
   ).toContainText("Board");
 });
 
-test("a person folds the brain's navigation to a rail, which marks the page they are on", async ({
+test("a person goes from page to page of the brain from its navigation, which marks the page they are on", async ({
   pageOf,
 }) => {
   const { member } = peopleIn("brain");
   const page = await pageOf(member);
   await page.goto("/brain");
 
-  const nav = page.getByRole("complementary", { name: "The brain" });
-  await nav
-    .getByRole("button", { name: "Fold the navigation" })
-    .click(brainRead);
-  const here = (name: string) => nav.getByRole("link", { name, exact: true });
+  const pages = page.getByRole("tree", { name: "The Brain's pages" });
+  const here = (name: string) => pages.getByRole("link", { name, exact: true });
 
   // On the brain itself, the brain is where you are.
-  await expect(here("Brain")).toHaveAttribute("aria-current", "page");
+  await expect(here("Brain")).toHaveAttribute(
+    "aria-current",
+    "page",
+    brainRead
+  );
 
   // On its log, the log is, and the brain no longer.
   await here("Activity").click();
@@ -114,4 +104,58 @@ test("a person folds the brain's navigation to a rail, which marks the page they
   await expect(page).toHaveURL(/\/brain\/sources$/u);
   await expect(here("Sources")).toHaveAttribute("aria-current", "page");
   await expect(here("Activity")).not.toHaveAttribute("aria-current", "page");
+});
+
+test("a person opens a line of the brain's activity beside it, sees what the brain kept of it, and goes to its page", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("brainActivity");
+  const tag = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+  const title = `Expense policy ${tag}`;
+  const kept = `Expenses above 500 euros need a yes ${tag}.`;
+  const { core, api } = apiOf(admin);
+  try {
+    await api.brain.addRecords([
+      {
+        type: "source",
+        id: `src-${tag}`,
+        kind: "document",
+        title,
+        date: new Date().toISOString().slice(0, 10),
+        who: "Controller",
+        teamIds: [],
+      },
+      {
+        type: "statement",
+        id: `st-${tag}`,
+        kind: "rule",
+        text: kept,
+        sourceId: `src-${tag}`,
+        teamIds: [],
+        toolIds: [],
+      },
+    ]);
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  const page = await pageOf(admin);
+  await page.goto("/brain/activity");
+  const main = page.getByRole("main");
+  await main
+    .getByRole("button", { name: new RegExp(title, "u") })
+    .click(brainRead);
+
+  // Beside the log: what the brain kept of it.
+  const line = main.getByRole("complementary", { name: title });
+  await expect(
+    line.getByRole("region", { name: "What the brain kept" })
+  ).toContainText(kept);
+
+  // Open goes to its own page.
+  await line.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/brain/src-${tag}$`, "u"));
+  await expect(
+    page.getByRole("heading", { level: 1, name: title })
+  ).toBeVisible();
 });

@@ -82,7 +82,11 @@ export const PageProperties = ({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div {...stylex.props(styles.body)}>
-          <KeyValueList items={items} orientation="horizontal" />
+          <KeyValueList
+            items={items}
+            orientation="horizontal"
+            valueAlign="start"
+          />
         </div>
       </CollapsibleContent>
     </Collapsible>

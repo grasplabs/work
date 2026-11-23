@@ -598,6 +598,7 @@ const cast = {
   brain: { member: "user" },
   brainMeaning: { member: "user" },
   brainQuestions: { admin: "admin", member: "user" },
+  brainActivity: { admin: "admin" },
   boardGoals: { admin: "admin", member: "user" },
   setupVoice: { admin: "admin" },
   setupConnect: { admin: "admin" },

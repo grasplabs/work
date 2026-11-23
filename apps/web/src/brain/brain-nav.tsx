@@ -82,7 +82,13 @@ const partIcon = (id: RegionId): IconData => {
 const noteItem = (note: Note): TreeNode => ({
   value: note.id,
   label: note.title,
-  render: <Link params={{ noteId: note.id }} to="/brain/$noteId" />,
+  render: (
+    <Link
+      activeOptions={{ exact: true }}
+      params={{ noteId: note.id }}
+      to="/brain/$noteId"
+    />
+  ),
 });
 
 /**
@@ -115,7 +121,7 @@ const pageItem = (to: BrainPage, label: string, icon: IconData): TreeNode => ({
   value: to,
   label,
   icon,
-  render: <Link to={to} />,
+  render: <Link activeOptions={{ exact: true }} to={to} />,
 });
 
 /** The overview's item: the brain as an atlas. */
@@ -144,7 +150,12 @@ export const BrainNav = ({
       value: overview,
       label: t`Brain`,
       icon: BrainIcon,
-      render: <Link to="/brain" />,
+      render: (
+        <Link
+          activeOptions={{ exact: true, includeSearch: true }}
+          to="/brain"
+        />
+      ),
     },
     ...(company === undefined
       ? []
@@ -190,7 +201,13 @@ export const BrainNav = ({
         value: region.id,
         label: region.name,
         icon: partIcon(region.id),
-        render: <Link search={{ region: region.id }} to="/brain" />,
+        render: (
+          <Link
+            activeOptions={{ exact: true, includeSearch: true }}
+            search={{ region: region.id }}
+            to="/brain"
+          />
+        ),
         ...(open > 0
           ? {
               badge: (

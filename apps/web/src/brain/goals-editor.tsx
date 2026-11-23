@@ -422,60 +422,65 @@ export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
   const rewording = changeOf(change, "wording");
   const linking = changeOf(change, "workflows");
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>{t`Board goals`}</CardTitle>
-        <CardAction>
-          <Button
-            onClick={() => {
-              void open("new");
-            }}
-            size="sm"
-          >
-            <Icon icon={PlusIcon} />
-            {t`Add a goal`}
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent flush={goals.length > 0}>
-        {goals.length === 0 ? (
-          <Text color="muted">{t`No goals yet.`}</Text>
-        ) : (
-          <ItemGroup aria-label={t`Board goals`}>
-            {goals.map((goal, index) => (
-              <Fragment key={goal.id}>
-                {index === 0 ? null : <ItemSeparator />}
-                <GoalRow
-                  busy={busy}
-                  goal={goal}
-                  onChange={(next) => {
-                    void open(next);
-                  }}
-                />
-              </Fragment>
-            ))}
-          </ItemGroup>
-        )}
-        <ErrorText>{failure}</ErrorText>
-        {change === "new" ? <WordingDialog onOpenChange={close} open /> : null}
-        {rewording === undefined ? null : (
-          <WordingDialog
-            goal={rewording}
-            key={rewording.id}
-            onOpenChange={close}
-            open
-          />
-        )}
-        {linking === undefined || workflows === undefined ? null : (
-          <WorkflowsDialog
-            goal={linking}
-            key={linking.id}
-            onOpenChange={close}
-            open
-            workflows={workflows}
-          />
-        )}
-      </CardContent>
+    // A section, named by its title.
+    <Card asChild size="sm">
+      <section>
+        <CardHeader>
+          <CardTitle>{t`Board goals`}</CardTitle>
+          <CardAction>
+            <Button
+              onClick={() => {
+                void open("new");
+              }}
+              size="sm"
+            >
+              <Icon icon={PlusIcon} />
+              {t`Add a goal`}
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent flush={goals.length > 0}>
+          {goals.length === 0 ? (
+            <Text color="muted">{t`No goals yet.`}</Text>
+          ) : (
+            <ItemGroup aria-label={t`Board goals`}>
+              {goals.map((goal, index) => (
+                <Fragment key={goal.id}>
+                  {index === 0 ? null : <ItemSeparator />}
+                  <GoalRow
+                    busy={busy}
+                    goal={goal}
+                    onChange={(next) => {
+                      void open(next);
+                    }}
+                  />
+                </Fragment>
+              ))}
+            </ItemGroup>
+          )}
+          <ErrorText>{failure}</ErrorText>
+          {change === "new" ? (
+            <WordingDialog onOpenChange={close} open />
+          ) : null}
+          {rewording === undefined ? null : (
+            <WordingDialog
+              goal={rewording}
+              key={rewording.id}
+              onOpenChange={close}
+              open
+            />
+          )}
+          {linking === undefined || workflows === undefined ? null : (
+            <WorkflowsDialog
+              goal={linking}
+              key={linking.id}
+              onOpenChange={close}
+              open
+              workflows={workflows}
+            />
+          )}
+        </CardContent>
+      </section>
     </Card>
   );
 };
