@@ -36,6 +36,7 @@ import {
   describe,
   expect,
   it,
+  onTestFinished,
   vi,
 } from "vite-plus/test";
 import { z } from "zod";
@@ -43,10 +44,15 @@ import { z } from "zod";
 import { usableModels } from "../src/ai-model-choice.ts";
 import { modelUsage } from "../src/db/core/schema.ts";
 import { graspAiMonth, monthSpend, spendMonth } from "../src/model-spend.ts";
+import { usageRecorded } from "../src/model-usage.ts";
 import { modelFailureOf, models, modelSettings } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
+import {
+  aiProvidersControlUrl,
+  compatibleHost,
+  releaseUrl,
+} from "./ai-providers-fake.ts";
 import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformAnthropicKey } from "./connect-providers.ts";
@@ -54,9 +60,9 @@ import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
 import { teamsMade } from "./members-teams.ts";
 import type { Answer } from "./model-provider.ts";
-import { recordedUsage } from "./model-usage.ts";
+import { recordedUsage, usageRows } from "./model-usage.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
-import { streamText } from "./provider-streams.ts";
+import { streamParts, streamText } from "./provider-streams.ts";
 import {
   openRpc,
   outcome,
@@ -95,6 +101,75 @@ const carrying = async (text: string): Promise<ProviderRequest[]> => {
     `${aiProvidersControlUrl}?anywhere=${encodeURIComponent(text)}`
   );
   return await response.json();
+};
+
+/**
+ * `promise`, whether it has settled yet, and `done`, which settles with it
+ * and never rejects: awaited once the test finished, its failure is never
+ * left unhandled, whatever ended the test.
+ */
+const watched = <T>(promise: Promise<T>) => {
+  const state = { settled: false };
+  const settling = async (): Promise<T> => {
+    try {
+      return await promise;
+    } finally {
+      state.settled = true;
+    }
+  };
+  const settled = settling();
+  return {
+    promise: settled,
+    done: outcome(settled),
+    settled: () => state.settled,
+  };
+};
+
+/**
+ * Once the beginning of the held answer to `key`'s request was sent on,
+ * with `call` still waiting for the rest; failed at once, with what it
+ * ended with, should `call` end first.
+ */
+const answerBegun = async (
+  key: string,
+  call: { promise: Promise<unknown>; settled: () => boolean }
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      if (call.settled()) {
+        return;
+      }
+      const [request] = await carrying(key);
+      expect(request?.begun).toBeTruthy();
+    },
+    { timeout: 10_000, interval: 20 }
+  );
+  if (call.settled()) {
+    // Its own error, should it have failed, rather than the wait's.
+    const ended = await call.promise;
+    throw new Error(
+      `The call ended before its answer began: ${JSON.stringify(ended)}`
+    );
+  }
+};
+
+/** Once `key`'s one request was dropped by its sender. */
+const providerRequestDropped = async (key: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const requests = await carrying(key);
+      expect(requests).toMatchObject([{ dropped: true }]);
+    },
+    { timeout: 5000, interval: 50 }
+  );
+};
+
+/** Lets a reply held by `name` go on (`PlannedReply`). */
+const release = async (name: string): Promise<void> => {
+  await internet().fetch(releaseUrl, {
+    method: "POST",
+    body: JSON.stringify({ release: name }),
+  });
 };
 
 /** A key no other test uses, so what carries it is this test's. */
@@ -1667,34 +1742,62 @@ describe("AI providers", { timeout: 60_000 }, () => {
     it("streams an answer, sending the key once, to the provider's own host only", async () => {
       const key = await connected(each);
       await plan(key, [answered(each.api, "Hello, Ada.")]);
-      const streamed: string[] = [];
 
-      const answer = await models(env).call(
-        await callOf(each.model, {
-          onText: (text) => {
-            streamed.push(text);
-          },
-        })
-      );
+      const answer = await models(env).call(await callOf(each.model));
 
       expect(answer).toMatchObject({
         text: "Hello, Ada.",
         usage: { inputTokens: 1000, outputTokens: 100 },
       });
-      expect(streamed.at(-1)).toBe("Hello, Ada.");
       const [request] = await carrying(key);
       expect(request?.path).toBe(each.path);
       await expect(placesOf(key)).resolves.toStrictEqual(onlyAt(each));
     });
 
-    it("records its usage and the route in the audit log and its usage", async () => {
+    it("waits out an answer that pauses mid-stream, and records its usage, cost and route in the audit log and its usage", async () => {
       const key = await connected(each);
-      await plan(key, [answered(each.api, "Hello, Ada.")]);
+      const parts = streamParts(each.api, {
+        text: "Hello, Ada.",
+        inputTokens: 1000,
+        outputTokens: 100,
+        pause: { at: 5, until: Promise.resolve() },
+      });
+      // Split at its pause: nothing else would pause it.
+      expect(parts).toHaveLength(2);
+      const [begun = "", rest = ""] = parts;
+      const paused = crypto.randomUUID();
+      await plan(key, [{ hold: begun, resume: { release: paused, rest } }]);
       const trigger = newPerson();
 
-      await models(env).call(await callOf(each.model, { trigger }));
+      // Read whole, with nothing told of its text as it streams.
+      const call = watched(
+        models(env).call(await callOf(each.model, { trigger }))
+      );
+      // Let go of the held answer however the test ends, and wait for it:
+      // after the test's own error, never in its place.
+      onTestFinished(async () => {
+        await release(paused);
+        await call.done;
+      });
+      await answerBegun(key, call);
+      await release(paused);
 
+      const answer = await call.promise;
       const [event] = await auditedFor(trigger.userId, 1);
+      // Written in the background after its audit event: once it is, all
+      // there is.
+      await usageRecorded();
+      const rows = await usageRows(spendMonth(env), {
+        personId: trigger.userId,
+      });
+      expect({
+        text: answer.text,
+        priced: answer.cost > 0,
+      }).toStrictEqual({
+        text: "Hello, Ada.",
+        // At its list prices; a custom endpoint's model has none.
+        priced: each.provider !== "openai-compatible",
+      });
       expect(event).toMatchObject({
         action: "model.call",
         model: {
@@ -1702,6 +1805,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
           inputTokens: 1000,
           outputTokens: 100,
         },
+        cost: { amount: answer.cost },
         detail: {
           outcome: "answered",
           transport: "connect",
@@ -1709,20 +1813,18 @@ describe("AI providers", { timeout: 60_000 }, () => {
           credential: "organization",
         },
       });
-      const rows = await recordedUsage(spendMonth(env), 1, {
-        personId: trigger.userId,
-      });
       expect(rows).toMatchObject([
         {
           model: each.model,
           credential: "organization",
           inputTokens: 1000,
           outputTokens: 100,
+          cost: answer.cost,
         },
       ]);
     });
 
-    it("stops a request its caller cancels mid-answer", async () => {
+    it("stops a request its caller cancels mid-answer as it waits for the answer whole", async () => {
       const key = await connected(each);
       const begun = streamText(each.api, {
         text: "Hello",
@@ -1734,24 +1836,29 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const cancel = new AbortController();
       const trigger = newPerson();
 
-      const cancelled = await outcome(
-        models(env).call(
-          await callOf(each.model, {
-            trigger,
-            signal: cancel.signal,
-            onText: () => {
-              cancel.abort();
-            },
-          })
+      const call = watched(
+        outcome(
+          models(env).call(
+            await callOf(each.model, { trigger, signal: cancel.signal })
+          )
         )
       );
+      // Cancelled however the test ends, and waited for.
+      onTestFinished(async () => {
+        cancel.abort();
+        await call.done;
+      });
+      await answerBegun(key, call);
+      cancel.abort();
 
-      expect(cancelled).toBe("model.failed");
+      await expect(call.promise).resolves.toBe("model.failed");
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event?.detail).toMatchObject({
         outcome: "failed",
         errorType: "cancelled",
+        status: 200,
       });
+      await providerRequestDropped(key);
     });
 
     it("stops the provider's request when its caller cancels before the answer began", async () => {

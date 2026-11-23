@@ -200,7 +200,7 @@ const pageOf = (
   label: string
 ): string => `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { api } from "@server/_generated/api";
 
 function Notes() {
@@ -221,7 +221,7 @@ const sampleFiles = withFiles(appCode, {
 const plainPageOf = (
   label: string
 ): string => `import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 
 function Notes() {
   return <Button>${label}</Button>;

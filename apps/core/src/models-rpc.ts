@@ -43,7 +43,9 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
   async spend(): Promise<ModelMonthSpend> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
-      return await monthSpend(this.#env, spendMonth(this.#env));
+      // One instant for the month and the days of it that have begun.
+      const now = new Date();
+      return await monthSpend(this.#env, spendMonth(this.#env, now), now);
     });
   }
 }

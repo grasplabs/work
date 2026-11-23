@@ -1,9 +1,3 @@
-import type {
-  Project,
-  ProjectMember,
-  ProjectRole,
-  ProjectShareCandidates,
-} from "@grasp-os/shared/projects";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,8 +8,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import type {
+  Project,
+  ProjectMember,
+  ProjectRole,
+  ProjectShareCandidates,
+} from "@grasp-os/shared/projects";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";

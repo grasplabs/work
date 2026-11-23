@@ -1,4 +1,4 @@
-import { toast } from "@grasp-os/ui/components/toast";
+import { toast } from "@grasp-os/app-kit/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 

@@ -1,5 +1,5 @@
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 

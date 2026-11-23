@@ -1,7 +1,7 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

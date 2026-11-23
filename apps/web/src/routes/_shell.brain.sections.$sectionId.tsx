@@ -1,5 +1,5 @@
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouteContext } from "@tanstack/react-router";
 import { BrainIcon } from "lucide-react";

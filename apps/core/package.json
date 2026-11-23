@@ -13,6 +13,7 @@
       "types": "./src/blueprints-digest.d.ts",
       "default": "./dist/blueprints-digest.js"
     },
+    "#shipped-skills": "./src/release-skills.ts",
     "#agent-docs": {
       "types": "./src/agent-docs.d.ts",
       "default": "./dist/agent-docs.js"
@@ -67,9 +68,9 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "@grasp-os/app-kit": "workspace:*",
     "@grasp-os/connect": "workspace:*",
     "@grasp-os/docs": "workspace:*",
-    "@grasp-os/ui": "workspace:*",
     "@grasp-os/web": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",

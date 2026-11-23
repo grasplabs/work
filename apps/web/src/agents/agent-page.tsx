@@ -1,3 +1,24 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+import { Card } from "@grasp-os/app-kit/components/card";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import {
+  Tabs,
+  TabsContent,
+  TabsCount,
+  TabsList,
+  TabsTrigger,
+} from "@grasp-os/app-kit/components/tabs";
 import type {
   Agent,
   AgentSettings,
@@ -10,27 +31,6 @@ import type { InstructionFileText } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
-import { Switch } from "@grasp-os/ui/components/switch";
-import {
-  Tabs,
-  TabsContent,
-  TabsCount,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { MessageCircleIcon, TrashIcon } from "lucide-react";

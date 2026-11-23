@@ -28,7 +28,7 @@ import { origin, stateDir } from "./stack.ts";
 // end: they put the agreements in place, and the links that waited for
 // them go out; from Grasp's admin (e2e/admin-steering.ts) they read where
 // an interview stands, never a word of it, give the go, and the company's
-// people sign in, and see the programme's week on the dashboard, from the
+// people sign in, and see the programme's week in their inbox, from the
 // plan; and they ask a team in late, its lead first. Its
 // own Playwright project, after all the others: taking the go back signs
 // out everyone the other tests signed in (playwright.config.ts). The
@@ -279,13 +279,13 @@ test("staff give the go, and the company's people sign in", async ({
   expect(cspViolations).toStrictEqual([]);
 });
 
-test("the dashboard counts the programme's weeks from the plan, and exports its report", async ({
+test("the inbox counts the programme's weeks from the plan, and exports its report", async ({
   page,
   cspViolations,
 }) => {
   // The plan the first test saved starts today, and Grasp's go is given:
   // any member reads the programme's week and stage (none read it before,
-  // e2e/dashboard.e2e.ts, as no plan was saved yet).
+  // e2e/inbox.e2e.ts, as no plan was saved yet).
   const email = `person.${crypto.randomUUID()}@acme.test`;
   const cookie = await signInAs(email);
   const { core, api } = apiOf({ cookie });
@@ -297,7 +297,7 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
     core[Symbol.dispose]();
   }
   await signInTo(page.context(), member);
-  await page.goto("/dashboard");
+  await page.goto("/inbox");
 
   await expect(page.getByText("Week 1 of 8 · Under way")).toBeVisible();
   await expect(

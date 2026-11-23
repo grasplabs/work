@@ -16,7 +16,7 @@ import type { AdminDatabase } from "../db/act.ts";
 import { auditEvents } from "../db/schema.ts";
 
 /** Client `clientId`'s trail: when it was added, as the audit log recorded it. */
-export const organizationTrail = async (
+const organizationTrail = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<TrailEntry[]> => {

@@ -6,14 +6,15 @@
  * core sends: an app's name as its catalog says it isn't in the snapshot,
  * so a Composio toolkit is named after its slug.
  */
+
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import type {
   AdminAppAsked,
   AdminConnection,
   AdminIntegrations,
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
 import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 

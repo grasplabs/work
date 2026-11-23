@@ -26,6 +26,7 @@
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import handler from "@tanstack/react-start/server-entry";
 import { env as workerEnv } from "cloudflare:workers";

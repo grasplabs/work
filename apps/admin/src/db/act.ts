@@ -4,6 +4,7 @@
  * change outside the database (a run started) is recorded first, on
  * its own (`audit`).
  */
+import "@tanstack/react-start/server-only";
 import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";

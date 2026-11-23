@@ -35,6 +35,7 @@ const chat = (id: string, title: string): ChatSummary => ({
   lastAt: today,
   running: false,
   make: null,
+  archived: false,
 });
 
 const board = chat("board", "Board report");

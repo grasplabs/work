@@ -18,16 +18,15 @@
  * foot (the admin reads a real company, whose day is core's own), and
  * the column folded the way the reader last left it.
  */
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+
 import {
   Alert,
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -35,8 +34,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { PageHeader } from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/empty";
+import { PageHeader } from "@grasp-os/app-kit/components/page-header";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -44,7 +43,7 @@ import {
   PageSidebarRailButton,
   PageSidebarRailDivider,
   PageSidebarRailExpand,
-} from "@grasp-os/ui/components/page-sidebar";
+} from "@grasp-os/app-kit/components/page-sidebar";
 import {
   Select,
   SelectContent,
@@ -53,9 +52,11 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/select";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   Link,
   Outlet,
@@ -70,19 +71,12 @@ import {
   TriangleAlertIcon,
   UnplugIcon,
 } from "lucide-react";
-import {
-  createContext,
-  Fragment,
-  Suspense,
-  use,
-  useEffect,
-  useState,
-} from "react";
+import { createContext, Fragment, Suspense, use, useState } from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import type { AnsweredAdmin, OrgRead, OrgReads } from "./org-reads.ts";
+import type { AnsweredAdmin, OrgRead } from "./org-reads.ts";
 import { AdminHeader, PageBody, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
@@ -570,8 +564,8 @@ const UnreadSection = ({
   admin: Extract<ClientAdmin, { state: "unreachable" }>;
   section: OrgSection;
 }) => {
-  const { busy, readAgain } = useReadAgain();
   const { id: clientId, name } = admin.client;
+  const { busy, readAgain } = useReadAgain();
   const unset = admin.error === "not_deployed";
   return (
     <Empty data-unread={admin.error}>
@@ -732,19 +726,6 @@ const ReadNotes = ({ section }: { section: OrgSection }) => {
 };
 
 /**
- * Keeps the answer the page shows in its router's reads: one read on the
- * server, for the page this tab opened on, too; read again and not
- * answering, the page keeps it.
- */
-const KeepRead = ({ reads }: { reads: OrgReads }) => {
-  const { admin } = useOrgRead();
-  useEffect(() => {
-    reads.remember(admin);
-  }, [reads, admin]);
-  return null;
-};
-
-/**
  * One organization's page: its column of sections and the section it is
  * on, shown at once from what the admin recorded (`client`). What its
  * core answers (`read`; undefined until it is asked) fills in the parts
@@ -758,11 +739,9 @@ const KeepRead = ({ reads }: { reads: OrgReads }) => {
 export const OrganizationPage = ({
   client,
   read,
-  reads,
 }: {
   client: GridRow;
   read: Deferred<OrgRead> | undefined;
-  reads: OrgReads;
 }) => {
   const { id: clientId, name } = client;
   const { section, withoutCore } = useShownSection();
@@ -770,9 +749,6 @@ export const OrganizationPage = ({
   return (
     <OrgReadContext value={read}>
       <AdminHeader page={name} />
-      <Suspense fallback={null}>
-        <KeepRead reads={reads} />
-      </Suspense>
       <div className="flex min-h-0 flex-1 text-sm">
         <OrgColumn clientId={clientId} name={name} />
         <div className="relative min-w-0 flex-1 overflow-y-auto">

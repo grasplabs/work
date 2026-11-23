@@ -67,7 +67,7 @@ export const followUp = permissions.followUp;
 
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useWorkflow } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { useState } from "react";
 import { workflows } from "@server/_generated/api";
 

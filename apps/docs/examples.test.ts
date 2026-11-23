@@ -64,14 +64,14 @@ const otherLanguages: ReadonlySet<string> = new Set(["text", "sh", "json"]);
 type Files = Record<string, string>;
 
 /**
- * Every guide under `content`, by its path there; never the reference
- * nor the example Apps, generated from what core's tests build.
+ * Every guide under `content`, by its path there; never the reference,
+ * generated from the SDK.
  */
 const pages = (dir = content): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      return ["reference", "examples"].includes(entry.name) ? [] : pages(full);
+      return entry.name === "reference" ? [] : pages(full);
     }
     return /\.mdx?$/u.test(entry.name) ? [path.relative(content, full)] : [];
   });

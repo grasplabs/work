@@ -15,15 +15,15 @@
  * secrets) is read live once the section shows, and said only when
  * something is off.
  */
-import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
+
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { CardContent } from "@grasp-os/app-kit/components/card";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+} from "@grasp-os/app-kit/components/collapsible";
 import {
   Table,
   TableBody,
@@ -31,14 +31,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/tabs";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { ChevronDownIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { useEffect, useReducer, useState } from "react";
@@ -49,7 +50,6 @@ import type { HistoryEntry } from "../clients/queries.ts";
 import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
-import { channelIds } from "../db/schema.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import { retryProvisioningFn } from "../hosting/functions.ts";
@@ -63,6 +63,7 @@ import {
 } from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
+import { channelIds } from "../rollout/channel-ids.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift, retryClientFn } from "../rollout/functions.ts";

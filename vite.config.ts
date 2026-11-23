@@ -25,6 +25,7 @@ const generated = [
   "apps/core/blueprints/*/files/server/_generated/**",
   "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
   "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/_generated/**",
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/runtime/src/connector-catalog.gen.ts",
@@ -171,7 +172,7 @@ export default defineConfig({
     },
     settings: {
       shadcn: {
-        ui: "@grasp-os/ui/components",
+        ui: "@grasp-os/app-kit/components",
       },
     },
     overrides: [
@@ -195,27 +196,30 @@ export default defineConfig({
       {
         // Every answer of the interface is over within 300 ms (AGENTS.md,
         // Design), in the frontend, the admin and the kit alike.
-        files: ["apps/web/src/**", "apps/admin/src/**", "packages/ui/src/**"],
+        files: [
+          "apps/web/src/**",
+          "apps/admin/src/**",
+          "packages/app-kit/src/**",
+        ],
         excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
         rules: { "grasp/no-slow-motion": "error" },
       },
       {
         // Seen once per person, so they may take longer to delight: the
-        // onboarding, the interview, setup and Stephen's tour. And rare: an
+        // onboarding, the interview and setup. And rare: an
         // app connected, a few times per company, whose drawn mark is the
         // delight of it (success-mark.tsx).
         files: [
           "apps/web/src/onboarding/**",
           "apps/web/src/interview/**",
-          "apps/web/src/tour/**",
           "apps/web/src/voice/**",
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
           "apps/web/src/frame/onboarding-frame.tsx",
-          "packages/ui/src/components/success-mark.tsx",
+          "packages/app-kit/src/components/success-mark.tsx",
           // Base UI's drawer leaves as fast as it was swiped: up to 400 ms
           // for a gentle swipe, which follows the finger, not a wait.
-          "packages/ui/src/components/drawer.tsx",
+          "packages/app-kit/src/components/drawer.tsx",
         ],
         rules: { "grasp/no-slow-motion": "off" },
       },
@@ -426,7 +430,7 @@ export default defineConfig({
         // RecordGrid draws through TanStack Virtual, which the React
         // Compiler lists as incompatible: the one component is opted out
         // with "use no memo" (AGENTS.md, Architecture rules).
-        files: ["packages/ui/src/components/record-grid.tsx"],
+        files: ["packages/app-kit/src/components/record-grid.tsx"],
         rules: { "react/incompatible-library": "off" },
       },
       {
@@ -435,7 +439,7 @@ export default defineConfig({
         rules: { "unicorn/no-empty-file": "off" },
       },
       {
-        files: ["packages/ui/src/components/**"],
+        files: ["packages/app-kit/src/components/**"],
         rules: {
           "shadcn/no-arbitrary-values": "off",
           "shadcn/no-restyle": "off",
@@ -461,12 +465,13 @@ export default defineConfig({
       "apps/*",
       "!apps/admin",
       "apps/admin/vite.test.config.ts",
+      "apps/admin/vite.components.config.ts",
       "apps/core/vite.pages.config.ts",
       "apps/core/vite.on-prem.config.ts",
       "apps/core/vite.brain-meaning.config.ts",
       "apps/core/vite.stephen.config.ts",
       "packages/*",
-      "packages/ui/vite.browser.config.ts",
+      "packages/app-kit/vite.browser.config.ts",
       "packages/workerflow/vite.process.config.ts",
       "packages/workerflow/vite.conformance.config.ts",
       "packages/connectors/*",

@@ -1,5 +1,4 @@
-import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -8,7 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
+import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
@@ -24,21 +24,21 @@ import {
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
-import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
-import { RequestDetails } from "../dashboard/pile-cards.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { ItemMark, KindPill } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
+import { isUnresolvable, OutcomeDetails } from "./outcome-details.tsx";
+import { RequestDetails } from "./request-details.tsx";
 import { TargetLink } from "./target-link.tsx";
 
 // An item of the inbox, as the prototype's (`routes/inbox.tsx`): what
 // happened and what to do, its context, and a bar with its actions at the
-// bottom. Each action goes to core with the same calls the dashboard's
-// pile makes, and the inbox is read again once it is through, so a
-// settled item leaves the list. What the prototype's bar adds besides
+// bottom. Each action goes to core with the same calls the chat's held
+// writes and the approvals make, and the inbox is read again once it is
+// through, so a settled item leaves the list. What the prototype's bar adds besides
 // (dismiss with why, put away until a date, give to someone) core keeps
 // nothing of, so the bar has the item's own actions only.
 
@@ -517,9 +517,9 @@ const HeldStartItem = ({
 
 /**
  * A change whose answer was lost: "It happened" or "It didn't happen", each
- * asked once more, as on the dashboard's pile (`outcome-card.tsx`). Saying
- * it didn't happen lets it go out again, so it waits while part of what was
- * sent is cut short and unseen, or no longer kept.
+ * asked once more (`outcome-details.tsx`). Saying it didn't happen lets
+ * it go out again, so it waits while part of what was sent is cut short
+ * and unseen, or no longer kept.
  */
 const OutcomeItem = ({
   frame,

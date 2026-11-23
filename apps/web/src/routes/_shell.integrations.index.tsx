@@ -1,14 +1,9 @@
-import type { ListedConnection } from "@grasp-os/shared/connect";
-import { catalogGroups } from "@grasp-os/shared/connect-names";
-import type { CatalogGroup } from "@grasp-os/shared/connect-names";
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
 import {
   Select,
   SelectContent,
@@ -16,7 +11,12 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
+import type { ListedConnection } from "@grasp-os/shared/connect";
+import { catalogGroups } from "@grasp-os/shared/connect-names";
+import type { CatalogGroup } from "@grasp-os/shared/connect-names";
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

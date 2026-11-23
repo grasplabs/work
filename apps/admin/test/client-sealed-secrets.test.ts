@@ -6,11 +6,18 @@
  * Worker or to the wrong one of its own, pasted into the wrong field, or
  * deployed without the one staff set.
  */
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { fetchPlatform } from "../src/admin/platform-data.ts";
+import { fetchReadiness } from "../src/admin/readiness.ts";
+import { fetchOrganizationTrail } from "../src/admin/trail.ts";
 import {
+  fetchClientAdmin,
+  fetchClientAdmins,
+  fetchClientAiStatus,
+  fetchClientGrid,
   fetchClientSetup,
   setSealedSecretFn,
 } from "../src/clients/functions.ts";
@@ -23,12 +30,18 @@ import {
   clients,
   clientSealedSecrets,
 } from "../src/db/schema.ts";
+import {
+  fetchClientHosting,
+  fetchProvisioningProgress,
+} from "../src/hosting/functions.ts";
+import { fetchPlatformSpend } from "../src/platform-ai-functions.ts";
+import { fetchPinChoices } from "../src/provision/functions.ts";
 import { targetClient } from "../src/rollout/targets.ts";
-import { accessJwt, mockAccess } from "./access.ts";
+import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts } from "./grasp-account.ts";
-import { callServerFn } from "./pages.ts";
+import { callServerFn, documentOf } from "./pages.ts";
 import {
   deployPlaced,
   livePlacedClient,
@@ -149,15 +162,42 @@ const loggedBy = async (task: () => Promise<unknown>): Promise<string> => {
   return JSON.stringify(lines);
 };
 
-/** The page at `path` as a staff member's browser gets it: its scripts and the data sent along with them included. */
-const rawPage = async (path: string): Promise<string> => {
-  const response = await exports.default.fetch(
-    `https://ops.grasp.test${path}`,
-    {
-      headers: { "cf-access-jwt-assertion": await accessJwt(staff.email) },
-    }
+/**
+ * Everything a staff member's browser gets of client `clientId`'s Setup
+ * (its tabs), its Log and Platform: their documents, and the answer of
+ * each server function those pages read with.
+ */
+const sentToBrowser = async (clientId: string): Promise<string> => {
+  const caller = { email: staff.email };
+  const client = { clientId };
+  const base = `/organizations/${clientId}`;
+  const documents = await Promise.all(
+    [
+      `${base}/setup`,
+      `${base}/setup?tab=settings`,
+      `${base}/setup?tab=history`,
+      `${base}/log`,
+      "/platform",
+    ].map(async (path) => {
+      const { html } = await documentOf(path, staff.email);
+      return html;
+    })
   );
-  return await response.text();
+  const answers = [
+    await callServerFn(fetchClientGrid, undefined, caller),
+    await callServerFn(fetchClientAdmins, { except: [clientId] }, caller),
+    await callServerFn(fetchClientAdmin, client, caller),
+    await callServerFn(fetchClientSetup, client, caller),
+    await callServerFn(fetchPinChoices, undefined, caller),
+    await callServerFn(fetchClientHosting, client, caller),
+    await callServerFn(fetchProvisioningProgress, client, caller),
+    await callServerFn(fetchClientAiStatus, client, caller),
+    await callServerFn(fetchOrganizationTrail, client, caller),
+    await callServerFn(fetchPlatform, undefined, caller),
+    await callServerFn(fetchReadiness, undefined, caller),
+    await callServerFn(fetchPlatformSpend, undefined, caller),
+  ];
+  return JSON.stringify([documents, answers]);
 };
 
 describe("a client's Teams bot secret", () => {
@@ -213,7 +253,7 @@ describe("a client's Teams bot secret", () => {
     });
   });
 
-  // Slower than the default: it renders five of the admin's pages on the server.
+  // Slower than the default: it reads everything five of the admin's pages read.
   it("is never kept, logged, audited, shown on a page or sent to the browser", async () => {
     const acme = await liveClient();
     const value = botSecret();
@@ -236,20 +276,11 @@ describe("a client's Teams bot secret", () => {
       .select()
       .from(clientProvisions)
       .where(eq(clientProvisions.clientId, acme.clientId));
-    const base = `/organizations/${acme.clientId}/setup`;
-    const pages = [
-      await rawPage(base),
-      await rawPage(`${base}?tab=settings`),
-      await rawPage(`${base}?tab=history`),
-      await rawPage(`/organizations/${acme.clientId}/log`),
-      await rawPage("/platform"),
-    ].join("\n");
-    const read = JSON.stringify(
-      await callServerFn(
-        fetchClientSetup,
-        { clientId: acme.clientId },
-        { email: staff.email }
-      )
+    const sent = await sentToBrowser(acme.clientId);
+    const setupRead = await callServerFn(
+      fetchClientSetup,
+      { clientId: acme.clientId },
+      { email: staff.email }
     );
     const kept = JSON.stringify([events, operations]);
 
@@ -258,16 +289,20 @@ describe("a client's Teams bot secret", () => {
       deployed:
         liveSecretsOf(acme, "connect").get("TEAMS_BOT_SECRET") === value,
       sealedInTheClear: sealed.includes(value),
-      // The settings show who set it and when, and nothing else of it.
-      shown: pages.includes(`by ${staff.email}`),
-      leaks: [logged, kept, pages, read].map(
+      // The settings read who set it and when, and nothing else of it
+      // (src/admin/setup.test.tsx shows them).
+      shown: setupRead?.sealedSecrets.map(({ name, setBy }) => ({
+        name,
+        setBy,
+      })),
+      leaks: [logged, kept, sent].map(
         (text) => text.includes(value) || text.includes(sealed)
       ),
     }).toStrictEqual({
       deployed: true,
       sealedInTheClear: false,
-      shown: true,
-      leaks: [false, false, false, false],
+      shown: [{ name: "TEAMS_BOT_SECRET", setBy: staff.email }],
+      leaks: [false, false, false],
     });
   }, 90_000);
 
@@ -552,17 +587,28 @@ describe("a client's Slack app", () => {
       value: bot,
     });
 
-    const page = await rawPage(
-      `/organizations/${acme.clientId}/setup?tab=settings`
+    const setupRead = await callServerFn(
+      fetchClientSetup,
+      { clientId: acme.clientId },
+      { email: staff.email }
     );
 
+    // Its settings build the manifest from where its core is served, and
+    // show the token as set (src/admin/setup.test.tsx).
+    const grid = await callServerFn(fetchClientGrid, undefined, {
+      email: staff.email,
+    });
+    const row = grid.find(({ id }) => id === acme.clientId);
+    const sent = await sentToBrowser(acme.clientId);
     expect({
-      requestUrl: page.includes(
-        `https://${acme.clientId}.grasp.test/api/channels/slack`
-      ),
-      shown: page.includes("Bot token"),
-      leaked: page.includes(bot),
-    }).toStrictEqual({ requestUrl: true, shown: true, leaked: false });
+      hostname: row?.hostname,
+      set: setupRead?.sealedSecrets.map(({ name }) => name),
+      leaked: sent.includes(bot),
+    }).toStrictEqual({
+      hostname: `${acme.clientId}.grasp.test`,
+      set: ["SLACK_BOT_TOKEN"],
+      leaked: false,
+    });
   }, 60_000);
 
   it("asks Slack only for what connect lets core send and the door reads, in direct messages", () => {

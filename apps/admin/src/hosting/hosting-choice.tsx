@@ -3,7 +3,7 @@
  * page (src/hosting/organization.ts): Grasp Cloud, its data kept in the
  * EU unless unticked, or its own premises. Fixed once it is provisioned.
  */
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Field,
   FieldContent,
@@ -11,11 +11,11 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/field";
 import {
   RadioGroup,
   RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
+} from "@grasp-os/app-kit/components/radio-group";
 import { useId } from "react";
 
 import type { OrganizationHosting } from "./organization.ts";

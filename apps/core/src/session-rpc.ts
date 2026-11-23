@@ -3,13 +3,13 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 import { AiProvidersRpc } from "./ai-providers.ts";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
+import { BoardReportRpc } from "./board-report.ts";
 import { BrainMemoriesRpc } from "./brain-memories-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
 import { BrainSourcesRpc } from "./brain-sources-rpc.ts";
 import { ChannelAccountsRpc } from "./channels/accounts.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
-import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DirectoryGroupsRpc } from "./directory-groups.ts";
@@ -25,6 +25,7 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OpportunitiesRpc } from "./opportunities-rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
+import { setOwnName } from "./own-name.ts";
 import { SessionsRpc } from "./own-sessions.ts";
 import { DependenciesRpc } from "./packages/rpc.ts";
 import { PagesRpc } from "./pages-rpc.ts";
@@ -57,7 +58,10 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
  * RPC, so each keeps its env and check in private fields.
  */
 export class SessionRpc extends CoreRpcTarget implements SessionApi {
+  readonly #env: Env;
   readonly #whoami: SessionCheck;
+  /** The check for what only the client's own members do. */
+  readonly #full: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #drafts: DraftsRpc;
   readonly #versions: VersionsRpc;
@@ -90,7 +94,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #unknownOutcomes: UnknownOutcomesRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
-  readonly #dashboard: DashboardRpc;
+  readonly #boardReport: BoardReportRpc;
   readonly #sessions: SessionsRpc;
   readonly #channelAccounts: ChannelAccountsRpc;
   readonly #notifications: NotificationsRpc;
@@ -108,8 +112,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     // guest-access.ts opens it to them (`openToGuests`).
     const check = membersOnly(audited);
     this.#whoami = openToGuests(audited, "whoami");
+    this.#env = env;
     // Everything but the onboarding refuses Grasp staff (session-check.ts).
     const full = fullAccess(check);
+    this.#full = full;
     this.#apps = new AppsRpc(env, full);
     this.#drafts = new DraftsRpc(env, full);
     this.#versions = new VersionsRpc(env, full);
@@ -162,8 +168,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     });
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
-    // Its report read through the namespaces above, with their checks.
-    this.#dashboard = new DashboardRpc(env, full, {
+    // The weekly report, read through the namespaces above, with their checks.
+    this.#boardReport = new BoardReportRpc(full, {
       onboarding: this.#onboarding,
       workflows: this.#workflows,
       signals: this.#signals,
@@ -203,8 +209,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#chats;
   }
 
-  get dashboard(): DashboardRpc {
-    return this.#dashboard;
+  get boardReport(): BoardReportRpc {
+    return this.#boardReport;
   }
 
   get apps(): AppsRpc {
@@ -329,5 +335,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   async whoami(): Promise<Identity> {
     return await withPerson(this.#whoami, (identity) => identity);
+  }
+
+  async setName(name: string): Promise<void> {
+    await withPerson(this.#full, async (person) => {
+      await setOwnName(this.#env, person, name);
+    });
+    // The connection's reading of who they are holds their old name: the
+    // next `whoami` reads them again.
+    this.#full.forget?.();
   }
 }

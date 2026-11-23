@@ -1,4 +1,4 @@
-import { Item, ItemGroup } from "@grasp-os/ui/components/item";
+import { Item, ItemGroup } from "@grasp-os/app-kit/components/item";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

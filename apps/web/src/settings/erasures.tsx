@@ -1,3 +1,24 @@
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Progress, ProgressLabel } from "@grasp-os/app-kit/components/progress";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   Erasure,
@@ -7,27 +28,6 @@ import type {
   RemovedPeoplePage,
   RemovedPerson,
 } from "@grasp-os/shared/members";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Progress, ProgressLabel } from "@grasp-os/ui/components/progress";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -67,7 +67,7 @@ const areaLabels: Record<string, MessageDescriptor> = {
   identity: msg`Email and sign-ins`,
   channels: msg`Chat accounts, invitations and notifications`,
   connect: msg`Personal connections`,
-  workspace: msg`Chats, drafts and dashboard`,
+  workspace: msg`Chats and drafts`,
   apps: msg`What they sent through App forms, and usage signals of their collections`,
   brain: msg`Personal Knowledge and memories`,
   runs: msg`Unfinished runs (stopped) and decision confirmations`,

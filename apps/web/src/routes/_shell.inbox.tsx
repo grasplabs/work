@@ -1,43 +1,40 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
 
-import { readActivity, readWaiting } from "../dashboard/read-dashboard.ts";
 import { readDirectory } from "../directory.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { InboxPage } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
+import { readActivity, readWaiting } from "../inbox/read-waiting.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { WeeklyReport } from "../report/weekly-report.tsx";
 
 // The inbox, as the prototype's (`routes/inbox.tsx`), at its address: what
-// waits on the person, read as the dashboard reads it, each item with
-// its actions; and, for admins, the latest of the audit trail. Like the
-// prototype's, the sidebar doesn't list it: the dashboard holds what waits,
-// and leads here to an item (`?item=`) only the inbox settles.
+// waits on the person, each item with its actions; for admins, the latest
+// of the audit trail; and, while the company has a programme with Grasp,
+// its weekly report. The sidebar's Inbox leads here, with how many wait.
 
 /** How many of the trail's latest events the activity tab shows at most. */
 const activityShown = 100;
 
 const Inbox = () => {
-  const { waiting, readAt, activity } = Route.useLoaderData();
+  const { waiting, readAt, activity, report } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { item } = Route.useSearch();
   return (
     <InboxPage
       activity={activity}
-      chosen={item}
       items={inboxItems(waiting, identity, readAt)}
       notLoaded={unread(waiting)}
-      olderFailures={
-        waiting.notifications.state === "ready" &&
-        waiting.notifications.data.page.more
+      report={
+        report === undefined ? undefined : (
+          <WeeklyReport programme={report.programme} report={report.read} />
+        )
       }
     />
   );
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
-  validateSearch: z.object({ item: z.string().optional() }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
     // Not awaited: the activity tab waits for it.
@@ -50,8 +47,33 @@ export const Route = createFileRoute("/_shell/inbox")({
           return { ...latest, directory };
         })
       : undefined;
-    const waiting = await readWaiting(core, identity);
-    return { waiting, readAt: new Date().toISOString(), activity };
+    // The report's bar is known before the page shows, so nothing moves
+    // once it is there; read alongside what waits, which the page waits
+    // for too.
+    const [waiting, programme] = await Promise.all([
+      readWaiting(core, identity),
+      loadFromCore(
+        core,
+        async (session) => await session.onboarding.programme()
+      ),
+    ]);
+    const planned = programme.state === "ready" ? programme.data : null;
+    return {
+      waiting,
+      readAt: new Date().toISOString(),
+      activity,
+      // Not awaited: the report's dialog waits for it. None without a plan.
+      report:
+        planned === null
+          ? undefined
+          : {
+              programme: planned,
+              read: loadFromCore(
+                core,
+                async (session) => await session.boardReport.read()
+              ),
+            },
+    };
   },
   component: Inbox,
 });

@@ -1,4 +1,3 @@
-import type { AppOverview } from "@grasp-os/shared/apps";
 import {
   Empty,
   EmptyContent,
@@ -6,12 +5,13 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
+import type { AppOverview } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { LayoutGridIcon, SearchIcon } from "lucide-react";

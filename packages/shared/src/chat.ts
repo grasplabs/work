@@ -148,7 +148,28 @@ export interface ChatSummary {
   running: boolean;
   /** What "Make something" started it to make, for good; null for any other chat. */
   make: ChatMake | null;
+  /**
+   * Whether its person archived it: out of `list`, unless asked for
+   * (`ChatListOptions`), and otherwise a chat as any other.
+   */
+  archived: boolean;
 }
+
+/** Which of the person's chats `ChatsApi.list` gives. */
+export const chatListOptionsSchema = z
+  .object({
+    /** Only those the person archived (`ChatsApi.archive`); else only the rest. */
+    archived: z.boolean().optional(),
+    /**
+     * Only those the person filed in this project (`ChatsApi.setProject`).
+     * Any string: one that names no project they are in, malformed or not,
+     * is `project.not_found`, as `setProject` answers it.
+     */
+    project: z.string().optional(),
+  })
+  .strict();
+
+export type ChatListOptions = z.infer<typeof chatListOptionsSchema>;
 
 /**
  * Where a search was found in what was said in a chat: the words just
@@ -1234,12 +1255,17 @@ export interface ChatsApi {
    * OpenAI-compatible endpoint, is called what the organization named it.
    */
   names: () => Promise<Record<string, string>>;
-  /** The person's chats, the most recently active first. */
-  list: () => Promise<ChatSummary[]>;
+  /**
+   * The person's chats, the most recently active first: those in their
+   * list, or with `{ archived: true }` those they archived.
+   */
+  list: (options?: ChatListOptions) => Promise<ChatSummary[]>;
   /**
    * The person's own chats that hold every word of `query` in their title
    * or what was said in them, the most recently active first: at most a
-   * page's worth. Never anyone else's.
+   * page's worth. Never anyone else's. Archived chats are found too, each
+   * marked `archived`: archiving only takes a chat out of `list`, and
+   * search is how the person finds one to bring back.
    */
   search: (query: string) => Promise<ChatSearchHit[]>;
   /**
@@ -1282,6 +1308,20 @@ export interface ChatsApi {
   people: () => Promise<MentionablePerson[]>;
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
+  /**
+   * Archives one of the person's chats: out of `list`, kept whole, opened
+   * and asked in as ever. Nothing where it is archived already.
+   */
+  archive: (chatId: string) => Promise<void>;
+  /** Brings an archived chat of the person's back into `list`. */
+  unarchive: (chatId: string) => Promise<void>;
+  /**
+   * Files one of the person's chats in `project`, a project they are in,
+   * or takes it out of the one it is in (`null`). It stays theirs alone:
+   * only they find it there (`list({ project })`), nobody else in the
+   * project. A project they aren't in is `project.not_found`.
+   */
+  setProject: (chatId: string, project: string | null) => Promise<void>;
   /**
    * Deletes the chat and its messages, rejecting every write its agent
    * holds; refused while its agent works.

@@ -319,17 +319,9 @@ const sessionShape = {
        */
       z.strictObject({ platform: z.literal("brain_upkeep") }),
       /**
-       * Core's own making of a person's dashboard widget
-       * (dashboard-widgets.ts): it carries the names of their Apps and
-       * workflows, and is made for them, counted as theirs, by the trigger that names them. Only core's own code
-       * makes such a call.
-       */
-      z.strictObject({ platform: z.literal("dashboard_widgets") }),
-      /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
-       * answer, into the company's topics; and its proposals for what an
-       * owner could fix (stephen-requests.ts), counted for the person it is
+       * answer, into the company's topics, counted for the person it is
        * for. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("stephen_requests") }),
@@ -447,13 +439,6 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
   reauthorize?: () => Promise<void>;
   /** Cancels the call when its caller goes away: a request under way is cut off. */
   signal?: AbortSignal;
-  /**
-   * Told the answer's text so far each time it grows, as it streams in:
-   * for a caller that shows it being written (dashboard-widgets.ts). An
-   * answer asked for again starts afresh. A failure of it never fails the
-   * call.
-   */
-  onText?: (text: string) => void;
   /**
    * Whether a request the provider refused for its rate (429) is sent
    * again, after the wait it asked for (the default, `maxRetries`). False
@@ -652,8 +637,6 @@ interface Route extends Admitted {
   beforeSend?: () => void;
   /** The caller's authority, decided again (`ModelCall.reauthorize`). */
   reauthorize?: () => Promise<void>;
-  /** Told the answer's text as it streams (`ModelCall.onText`). */
-  onText?: (text: string) => void;
   /** Whether a refused request is sent again (`ModelCall.providerRetries`). */
   providerRetries?: boolean;
 }
@@ -1001,18 +984,6 @@ const send = async (request: Request): Promise<Sent> => {
     normalizeContext({ systemPrompt: system, messages }),
     { signal, endsAt }
   );
-  const { onText } = request;
-  if (onText !== undefined) {
-    for await (const event of events) {
-      if (event.type === "text_delta") {
-        try {
-          onText(answerText(event.partial));
-        } catch (error) {
-          log.warn("model.on_text_failed", errorFields(error));
-        }
-      }
-    }
-  }
   const answer = await events.result();
   return { answer, ...response };
 };
@@ -2143,7 +2114,6 @@ const callModel = async <Output>(
     askAgain,
     beforeSend,
     reauthorize,
-    onText,
     signal,
     providerRetries = true,
     ...fields
@@ -2156,7 +2126,6 @@ const callModel = async <Output>(
     ...admitted,
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
-    ...(onText === undefined ? {} : { onText }),
     providerRetries,
   };
   const { model } = route;

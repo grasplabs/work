@@ -10,8 +10,6 @@ import {
 } from "@grasp-os/shared/docs";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { exampleApps } from "./example-apps.ts";
-
 // The site the docs' build writes (build.ts), as core serves it at /docs
 // (apps/core/src/docs.ts): every inline script, style and `style`
 // attribute among the hashes core's policy allows, every link under
@@ -125,10 +123,7 @@ describe("the docs' build", () => {
     );
 
     expect(listed.map(({ route }) => route)).toStrictEqual(
-      expect.arrayContaining([
-        "/guides/project",
-        ...exampleApps.map((id) => `/examples/${id}`),
-      ])
+      expect.arrayContaining(["/guides/project"])
     );
     expect(
       listed

@@ -1,18 +1,18 @@
-import type {
-  DependencyFinding,
-  DependencyRequest,
-} from "@grasp-os/shared/dependencies";
-import { packageKey } from "@grasp-os/shared/dependencies";
-import { messageOf } from "@grasp-os/shared/errors";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
+import type {
+  DependencyFinding,
+  DependencyRequest,
+} from "@grasp-os/shared/dependencies";
+import { packageKey } from "@grasp-os/shared/dependencies";
+import { messageOf } from "@grasp-os/shared/errors";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

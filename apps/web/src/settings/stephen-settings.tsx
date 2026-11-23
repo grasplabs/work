@@ -1,3 +1,24 @@
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/app-kit/components/empty";
+import { Item } from "@grasp-os/app-kit/components/item";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@grasp-os/app-kit/components/sheet";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import { chatPlatformName as placeName } from "@grasp-os/shared/chat";
 import type {
   CompanyToolClass,
   ToolClassAudience,
@@ -5,26 +26,6 @@ import type {
 } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-} from "@grasp-os/ui/components/empty";
-import { Item } from "@grasp-os/ui/components/item";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { Switch } from "@grasp-os/ui/components/switch";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -39,7 +40,6 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { PlaceLogo, placeName } from "../workflows/requests/request-parts.tsx";
 import { SettingsSection } from "./settings-parts.tsx";
 import {
   AudienceControl,
@@ -91,6 +91,32 @@ const appNames: Readonly<Record<string, string>> = {
 
 /** Places Stephen can be added to, by their chat platform. */
 const addable = ["teams", "slack"] as const;
+
+/**
+ * The logos of the places, by their chat platform (`apps/web/public/logos`):
+ * microsoft-teams.svg and slack.svg are the gilbarbara/logos set, CC0,
+ * through `@iconify-json/logos`, as the prototype bundles them. The
+ * trademarks stay with their owners; they are shown only to name the place.
+ */
+const placeLogos: Readonly<Record<string, string>> = {
+  teams: "/logos/microsoft-teams.svg",
+  slack: "/logos/slack.svg",
+};
+
+/** A place's logo, as a tile beside its name. */
+const PlaceLogo = ({
+  place,
+  size = "xs",
+}: {
+  place: string;
+  size?: "xs" | "default";
+}) => (
+  <AppLogo
+    logo={placeLogos[place] ?? null}
+    name={placeName(place)}
+    size={size}
+  />
+);
 
 /** One setting's row: its name and what it means, then its control. */
 export const Row = ({

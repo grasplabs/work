@@ -1,15 +1,46 @@
 import { readFile } from "node:fs/promises";
 
 import { expect } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
-import { toCard } from "./pile.ts";
 
-// The Activity page: an admin approves one App's permission request and
-// rejects another, finds the approval in the audit log with its details,
-// and exports what the log's filters match. Search, export and the grant
-// themselves are core's tests.
+// The Activity page: an admin approves one App's permission request in
+// the inbox and rejects another, finds the approval in the audit log with
+// its details, and exports what the log's filters match. Search, export
+// and the grant themselves are core's tests.
+
+/** How long a page may take to show what core said. */
+const pageRead = { timeout: 20_000 };
+
+/**
+ * A name that starts `start` and goes on with what its permission's object
+ * is for, if anything: the inbox names a request by what asks for what, on
+ * what, and that object's own description.
+ */
+const startingWith = (start: string): RegExp =>
+  new RegExp(`^${start}(?:\\. |\\?$|$)`, "u");
+
+/**
+ * Opens, in the inbox on `page`, the permission request `who` asks (its
+ * row among other tests' items), and gives the item.
+ */
+const toRequest = async (page: Page, who: string): Promise<Locator> => {
+  await page
+    .getByRole("region", { name: "What waits on you" })
+    .getByRole("button", { name: new RegExp(`^${who}`, "u") })
+    .click(pageRead);
+  const item = page.getByRole("article", {
+    name: startingWith(`Grant ${who}`),
+  });
+  await expect(item).toBeVisible();
+  return item;
+};
+
+/** The item's Approve: its next step, which its bar holds too. */
+const approveOf = (item: Locator, who: string): Locator =>
+  item.getByRole("button", { name: startingWith(`Approve ${who}`) }).first();
 
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
   pageOf,
@@ -39,17 +70,13 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     core[Symbol.dispose]();
   }
   const page = await pageOf(admin);
-  // An admin's permission requests wait on the dashboard.
-  await page.goto("/dashboard");
-  // Other tests' requests wait in the pile too: it is gone through to this
-  // App's cards.
-  const reading = await toCard(
-    page,
-    new RegExp(`^${appName}: statistics on Platform statistics\\.`, "u")
-  );
+  // An admin's permission requests wait in the inbox.
+  await page.goto("/inbox");
+  const statistics = `${appName}: statistics on Platform statistics`;
+  const reading = await toRequest(page, statistics);
   await expect(reading).toContainText("as BOARD_PACK");
   await expect(reading).toContainText("Version to review: None live");
-  await reading.getByRole("button", { name: /^Approve /u }).click();
+  await approveOf(reading, statistics).click();
   await expect(
     page.getByRole("status").filter({
       hasText: `Approved: ${appName}: statistics on Platform statistics.`,
@@ -57,11 +84,11 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
-  const recalling = await toCard(
-    page,
-    new RegExp(`^${appName}: brain on Company Brain, read only\\.`, "u")
-  );
-  await recalling.getByRole("button", { name: /^Reject /u }).click();
+  const brain = `${appName}: brain on Company Brain, read only`;
+  const recalling = await toRequest(page, brain);
+  await recalling
+    .getByRole("button", { name: startingWith(`Reject ${brain}`) })
+    .click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Reject", exact: true })
@@ -167,17 +194,16 @@ test("an admin approves an App's request only for the version the list shows", a
     });
 
     const page = await pageOf(admin);
-    await page.goto("/dashboard");
-    const card = await toCard(
-      page,
-      new RegExp(`^${appName}: brain on Company Brain, read only\\.`, "u")
-    );
+    await page.goto("/inbox");
+    const brain = `${appName}: brain on Company Brain, read only`;
+    const card = await toRequest(page, brain);
+    const approve = approveOf(card, brain);
     // Versions as people know them: YY.MM.N, the first this month.
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
 
     // Another version is published while the admin looks at version 1.
     await release(builds.api, appId, { "README.md": "Two" });
-    await card.getByRole("button", { name: /^Approve /u }).click();
+    await approve.click();
     await expect(card.getByRole("alert")).toHaveText(
       "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
     );
@@ -186,7 +212,7 @@ test("an admin approves an App's request only for the version the list shows", a
       page.getByRole("status").filter({ hasText: "Approved:" })
     ).toHaveCount(0);
 
-    await card.getByRole("button", { name: /^Approve /u }).click();
+    await approve.click();
     await expect(
       page.getByRole("status").filter({
         hasText: `Approved: ${appName}: brain on Company Brain, read only.`,

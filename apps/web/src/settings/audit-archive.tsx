@@ -1,11 +1,11 @@
-import type { AuditPage, AuditRetention } from "@grasp-os/shared/audit-log";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import type { AuditPage, AuditRetention } from "@grasp-os/shared/audit-log";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useEffect, useState } from "react";

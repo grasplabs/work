@@ -5,9 +5,8 @@
  * command (commands.tsx); once all three are in, the links that are due go
  * out. Once the team is told, it stays as it was agreed.
  */
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import type { Agreements } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
+
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -15,18 +14,20 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Switch } from "@grasp-os/ui/components/switch";
+} from "@grasp-os/app-kit/components/native-select";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { Agreements } from "@grasp-os/shared/onboarding";
 import { PencilIcon } from "lucide-react";
 import { useId, useState } from "react";
 

@@ -1,11 +1,9 @@
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import type {
-  BrainReport,
-  BrainSyncConnection,
-} from "@grasp-os/shared/brain-report";
-import { env, exports } from "cloudflare:workers";
+import type { BrainSyncConnection } from "@grasp-os/shared/brain-report";
+import { env } from "cloudflare:workers";
+import { createElement } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
+import { BrainHealth } from "../src/admin/brain-health.tsx";
 import { loadBrainRead } from "../src/admin/brain-loads.ts";
 import { answerKept, answerShown } from "../src/admin/erasure-answer.ts";
 import type { LookupAnswer } from "../src/admin/erasure-answer.ts";
@@ -15,12 +13,12 @@ import {
   fetchBrainReport,
 } from "../src/clients/brain-functions.ts";
 import { readBrainReport } from "../src/clients/brain.ts";
-import { accessJwt, mockAccess } from "./access.ts";
+import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn, rendered } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { brainReport, heardSnapshot, noOwnStores } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-brain-5c2d90";
 const cloudflare = mockCloudflareApi(token);
@@ -39,207 +37,34 @@ const liveClient = async () => {
   return { clientId, name: `Acme ${clientId}`, core };
 };
 
-/** An interview `person` agreed to, with `facts` kept and none taken out. */
-const agreedInterview = (
-  person: string,
-  kind: "own" | "lead",
-  facts: number,
-  at: string
-): AdminSnapshot["interviews"][number] => ({
-  person,
-  kind,
-  startedAt: at,
-  completedAt: at,
-  updatedAt: at,
-  agreed: true,
-  phase: "readback",
-  stoppedAt: null,
-  minutes: 30,
-  facts,
-  out: 0,
-  confirmed: facts,
-  rating: null,
-  typed: false,
-  interviewer: null,
-});
-
-/** When the interviews started, and every link went out. */
-const started = "2026-10-05T07:00:00.000Z";
-
-/** Someone in `team`. */
-const person = (id: string, team: string) => ({
-  id,
-  name: `Person ${id}`,
-  email: `${id}@acme.test`,
-  team,
-  title: "",
-  away: false,
-});
-
-/** The link `id` was sent at the interviews' start, and where they stand. */
-const link = (id: string, state: "completed" | "opened") => ({
-  person: id,
-  sentAt: started,
-  openedAt: started,
-  remindedAt: null,
-  deletedAt: null,
-  failedMail: null,
-  state,
-});
-
-/**
- * A company told about its interviews, with two teams taking part and one
- * that doesn't: in Sales two people agreed to theirs (6 and 4 facts), in
- * Operations nobody has yet.
- */
-const heardSnapshot = (name: string): AdminSnapshot => {
-  const empty = emptyAdminSnapshot(name);
-  const at = "2026-10-06T09:00:00.000Z";
-  return {
-    ...empty,
-    roster: {
-      teams: [
-        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
-        { id: "ops", name: "Operations", lead: "otto", does: "", off: false },
-        { id: "legal", name: "Legal", lead: null, does: "", off: true },
-      ],
-      people: [
-        person("lisa", "sales"),
-        person("tom", "sales"),
-        person("otto", "ops"),
-        person("lena", "legal"),
-      ],
-    },
-    plan: { start: "2026-10-05", days: 14, at: started },
-    agreed: true,
-    told: true,
-    mapped: ["sales", "ops"],
-    links: [
-      link("lisa", "completed"),
-      link("tom", "completed"),
-      link("otto", "opened"),
-    ],
-    interviews: [
-      agreedInterview("lisa", "lead", 6, at),
-      agreedInterview("tom", "own", 4, at),
-    ],
-    gate: { ...empty.gate, known: 42 },
-  };
-};
-
-describe("an organization's brain", () => {
-  useStoreSecrets({ deployer: token });
-
-  it("says the brain itself isn't shared, and makes up no source's share", async () => {
-    const acme = await liveClient();
-    acme.core.admin = heardSnapshot("Acme");
-
-    const { status, html } = await page(
-      `/organizations/${acme.clientId}/brain`
-    );
-
-    expect({
-      status,
-      toCome: html.includes("This section isn’t in the admin yet."),
-      notShared: html.includes(
-        `${acme.name} doesn’t share its brain with Grasp’s staff, so only its counts show here.`
-      ),
-      // Core counts what is known as one number: no source's share is made up.
-      sources: html.includes("How much of each source is in"),
-      sourcesWhy: html.includes(
-        "The company’s own Grasp counts what is known as one number"
-      ),
-    }).toStrictEqual({
-      status: 200,
-      toCome: false,
-      notShared: true,
-      sources: false,
-      sourcesWhy: true,
-    });
-  });
-});
-
-/** The Brain as a core reports it: a parked item, a store of `bytes`, a ledger through. */
-/** Totals of people's own stores while none holds anything. */
-const noOwnStores = {
-  stores: 0,
-  waiting: 0,
-  oldestWaitingAt: null,
-  parked: 0,
-  failing: 0,
-  notRebuilt: 0,
-  nearLimit: 0,
-};
-
-const brainReport = (bytes: number): BrainReport => ({
-  now: "2026-11-12T10:00:00.000Z",
-  queue: {
-    waiting: [
-      {
-        kind: "brain.embed",
-        count: 12,
-        oldestAddedAt: "2026-11-12T09:00:00.000Z",
-      },
-    ],
-    running: 2,
-    overdue: 0,
-    paused: null,
-    parked: [
-      {
-        item: 41,
-        kind: "brain.extract",
-        attempts: 5,
-        parks: 1,
-        final: false,
-        error: "unreadable",
-        message: "What it works on can't be read.",
-        parkedAt: "2026-11-12T08:00:00.000Z",
-      },
-    ],
-    parkedCount: 1,
-  },
-  store: { bytes, limitBytes: 10_000_000_000 },
-  words: "current",
-  embedding: {
-    model: "test-model@0a1b",
-    chunks: 40,
-    embedded: 38,
-    passedOver: 2,
-    rebuilding: false,
-  },
-  ledger: {
-    replay: "through",
-    erasing: 0,
-    sourcesWithoutCurrent: 0,
-    source: { written: 4, unwritten: 0 },
-    byReason: { deleted: 3, retention: 0, person_erased: 0, withdrawn: 1 },
-  },
-  stepsFailed: {
-    ledger: null,
-    erase: null,
-    sweep: null,
-    repack: null,
-    reindex: null,
-    quotes: null,
-    embedding: null,
-  },
-  recall: {
-    since: "2026-11-12T08:00:00.000Z",
-    ways: {
-      words: { recalls: 40, failed: 0 },
-      exact: { recalls: 8, failed: 0 },
-      entities: { recalls: 0, failed: 0 },
-      meaning: { recalls: 0, failed: 0 },
-    },
-    withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
-  },
-  ownStores: noOwnStores,
-  modelSpend: { month: "2026-11", purposes: [] },
-});
-
 /** A read of a client's Brain from its core, as the section's server function makes it. */
 const read = async (clientId: string) =>
   await readBrainReport(env, { email: "grace@grasp.test" }, clientId);
+
+/**
+ * How client `clientId`'s Brain is doing, as `email` (a staff member)
+ * sees it: its report, read through the Worker's entry as the section
+ * reads it, rendered (`BrainHealth`). The rest of the section, worked out
+ * of its snapshot, is in src/admin/brain.test.tsx.
+ */
+const brainPage = async (
+  clientId: string,
+  email = "staff@grasp.test"
+): Promise<{ html: string }> => {
+  const report = await callServerFn(
+    fetchBrainReport,
+    { clientId },
+    { email }
+  ).catch(() => null);
+  return {
+    html: await rendered(
+      createElement(BrainHealth, {
+        clientId,
+        read: Promise.resolve({ state: "read" as const, report }),
+      })
+    ),
+  };
+};
 
 /** The text of `html`, its tags gone and its spaces one. */
 const textOf = (html: string): string =>
@@ -300,14 +125,10 @@ describe("how an organization's Brain is doing", () => {
     acme.core.admin = heardSnapshot("Acme");
     acme.core.brain = brainReport(1_200_000_000);
 
-    const { status, html } = await page(
-      `/organizations/${acme.clientId}/brain`,
-      "grace@grasp.test"
-    );
+    const { html } = await brainPage(acme.clientId, "grace@grasp.test");
     const text = textOf(html);
 
     expect({
-      status,
       waiting: text.includes(
         "Waiting 12 brain.embed: oldest added 1 hour ago, 2 running"
       ),
@@ -326,7 +147,6 @@ describe("how an organization's Brain is doing", () => {
       ),
       askedBy: acme.core.brainAsks.map((asked) => asked.staff.email),
     }).toStrictEqual({
-      status: 200,
       waiting: true,
       parked: true,
       requeue: true,
@@ -356,7 +176,7 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const { html } = await brainPage(acme.clientId);
     const text = textOf(html);
 
     expect({
@@ -376,7 +196,7 @@ describe("how an organization's Brain is doing", () => {
     const acme = await liveClient();
     acme.core.admin = heardSnapshot("Acme");
 
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const { html } = await brainPage(acme.clientId);
     const text = textOf(html);
 
     expect(
@@ -458,61 +278,6 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("shows the rest of the section while its core is slow, and the report once it answers", async () => {
-    const acme = await liveClient();
-    acme.core.admin = heardSnapshot("Acme");
-    acme.core.brain = brainReport(1_000_000);
-    const held = Promise.withResolvers<boolean>();
-    acme.core.brainHeld = async () => {
-      await held.promise;
-    };
-    const reading = "Reading how its Brain is doing from its core";
-
-    const response = await exports.default.fetch(
-      `https://ops.grasp.test/organizations/${acme.clientId}/brain`,
-      {
-        headers: {
-          "cf-access-jwt-assertion": await accessJwt("staff@grasp.test"),
-        },
-      }
-    );
-    const reader = response.body
-      ?.pipeThrough(new TextDecoderStream())
-      .getReader();
-    let html = "";
-    // The page streams: read until it says it is reading, its core held.
-    while (!html.includes(reading)) {
-      // oxlint-disable-next-line no-await-in-loop -- one chunk after another
-      const chunk = await reader?.read();
-      if (chunk === undefined || chunk.done) {
-        break;
-      }
-      html += chunk.value;
-    }
-    const beforeAnswer = {
-      counts: html.includes(">What it stands on</h2>"),
-      reading: html.includes(reading),
-      report: html.includes("The Brain at work"),
-    };
-    held.resolve(true);
-    for (;;) {
-      // oxlint-disable-next-line no-await-in-loop -- one chunk after another
-      const chunk = await reader?.read();
-      if (chunk === undefined || chunk.done) {
-        break;
-      }
-      html += chunk.value;
-    }
-
-    expect({
-      beforeAnswer,
-      report: html.includes('aria-label="The Brain at work"'),
-    }).toStrictEqual({
-      beforeAnswer: { counts: true, reading: true, report: false },
-      report: true,
-    });
-  });
-
   it("reads nothing of its core for a caller Access doesn't vouch for", async () => {
     const acme = await liveClient();
     acme.core.brain = brainReport(1_000_000);
@@ -541,7 +306,7 @@ describe("how an organization's Brain is doing", () => {
       embedding: { ...report.embedding, rebuilding: true },
     };
 
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const { html } = await brainPage(acme.clientId);
     const text = textOf(html);
     const button = /<button[^>]*>Re-embed<\/button>/u.exec(html)?.[0] ?? "";
 
@@ -576,7 +341,7 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const { html } = await brainPage(acme.clientId);
     const text = textOf(html);
 
     expect({
@@ -621,7 +386,7 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const { html } = await brainPage(acme.clientId);
     const label = "Putting passages on the queue to embed";
     const row = html.slice(
       html.indexOf(label),
@@ -655,12 +420,8 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { html: acmeHtml } = await page(
-      `/organizations/${acme.clientId}/brain`
-    );
-    const { html: calmHtml } = await page(
-      `/organizations/${calm.clientId}/brain`
-    );
+    const { html: acmeHtml } = await brainPage(acme.clientId);
+    const { html: calmHtml } = await brainPage(calm.clientId);
     const failing = recallPartOf(acmeHtml);
     const fine = recallPartOf(calmHtml);
     const text = textOf(failing);
@@ -716,7 +477,7 @@ describe("how an organization's Brain is doing", () => {
       { clientId: acme.clientId, lookup: { kind: "person", id: "user-17" } },
       { email: "grace@grasp.test" }
     );
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const { html } = await brainPage(acme.clientId);
 
     expect({
       refused,
@@ -842,12 +603,8 @@ describe("how an organization's Brain is doing", () => {
     none.core.admin = heardSnapshot("None");
     none.core.brain = report;
 
-    const { html: spentHtml } = await page(
-      `/organizations/${spent.clientId}/brain`
-    );
-    const { html: noneHtml } = await page(
-      `/organizations/${none.clientId}/brain`
-    );
+    const { html: spentHtml } = await brainPage(spent.clientId);
+    const { html: noneHtml } = await brainPage(none.clientId);
     const text = textOf(spendPartOf(spentHtml));
 
     expect({
@@ -894,12 +651,8 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { html: acmeHtml } = await page(
-      `/organizations/${acme.clientId}/brain`
-    );
-    const { html: calmHtml } = await page(
-      `/organizations/${calm.clientId}/brain`
-    );
+    const { html: acmeHtml } = await brainPage(acme.clientId);
+    const { html: calmHtml } = await brainPage(calm.clientId);
     const failing = ownStoresPartOf(acmeHtml);
     const fine = ownStoresPartOf(calmHtml);
     const text = textOf(failing);
@@ -944,16 +697,13 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { status, html } = await page(
-      `/organizations/${older.clientId}/brain`
-    );
+    const { html } = await brainPage(older.clientId);
     const own = textOf(ownStoresPartOf(html));
     const spend = textOf(spendPartOf(html));
 
     const upkeep = textOf(upkeepPartOf(html));
 
     expect({
-      status,
       rest: textOf(recallPartOf(html)).includes("Words 40 0"),
       failedStep: upkeep.includes(
         "Putting passages on the queue to embed Failed 5 min ago"
@@ -971,7 +721,6 @@ describe("how an organization's Brain is doing", () => {
         "This client’s release doesn’t report model spend yet."
       ),
     }).toStrictEqual({
-      status: 200,
       rest: true,
       failedStep: true,
       judging: false,
@@ -1025,19 +774,14 @@ describe("how an organization's Brain is doing", () => {
       },
     };
 
-    const { status, html } = await page(
-      `/organizations/${acme.clientId}/brain`
-    );
+    const { html } = await brainPage(acme.clientId);
     const synced = syncedPartOf(html);
     const text = textOf(synced);
-    const { html: calmHtml } = await page(
-      `/organizations/${calm.clientId}/brain`
-    );
+    const { html: calmHtml } = await brainPage(calm.clientId);
     const calmPart = syncedPartOf(calmHtml);
     const calmText = textOf(calmPart);
 
     expect({
-      status,
       needSomeone: text.includes("Need someone"),
       count: text.includes("2 of 3"),
       failing: text.includes(
@@ -1056,7 +800,6 @@ describe("how an organization's Brain is doing", () => {
         amber: calmPart.includes("text-status-attention"),
       },
     }).toStrictEqual({
-      status: 200,
       needSomeone: true,
       count: true,
       failing: true,
@@ -1076,17 +819,14 @@ describe("how an organization's Brain is doing", () => {
       sync: { overdueRelists: 2 },
     };
 
-    const { status, html } = await page(
-      `/organizations/${between.clientId}/brain`
-    );
+    const { html } = await brainPage(between.clientId);
 
     expect({
-      status,
       rest: textOf(recallPartOf(html)).includes("Words 40 0"),
       notYet: textOf(syncedPartOf(html)).includes(
         "This client’s release doesn’t report its synced connections yet."
       ),
-    }).toStrictEqual({ status: 200, rest: true, notYet: true });
+    }).toStrictEqual({ rest: true, notYet: true });
   });
 
   it("says a core on an older release doesn't report its synced connections yet", async () => {
@@ -1094,7 +834,7 @@ describe("how an organization's Brain is doing", () => {
     older.core.admin = heardSnapshot("Older");
     older.core.brain = brainReport(1_000_000);
 
-    const { html } = await page(`/organizations/${older.clientId}/brain`);
+    const { html } = await brainPage(older.clientId);
 
     expect(textOf(syncedPartOf(html))).toContain(
       "This client’s release doesn’t report its synced connections yet."
@@ -1112,16 +852,13 @@ describe("how an organization's Brain is doing", () => {
     };
     newer.core.brain = { ...report, stepsFailed };
 
-    const { status, html } = await page(
-      `/organizations/${newer.clientId}/brain`
-    );
+    const { html } = await brainPage(newer.clientId);
 
     expect({
-      status,
       rest: textOf(recallPartOf(html)).includes("Words 40 0"),
       upkeep: textOf(upkeepPartOf(html)).includes(
         "Judging memories against their sources Timed out 5 min ago"
       ),
-    }).toStrictEqual({ status: 200, rest: true, upkeep: true });
+    }).toStrictEqual({ rest: true, upkeep: true });
   });
 });

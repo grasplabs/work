@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type {
+  APIRequestContext,
+  Page,
+  Request as PlaywrightRequest,
+} from "@playwright/test";
 import { z } from "zod";
 
 /** Every section of an organization, by its path under the organization's own, and its title. */
@@ -226,7 +230,7 @@ test("a frame that can't be read says so with Try again, which brings the admin 
   await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
     waitUntil: "networkidle",
   });
-  await fault(request, "fetchPlatformSidebar");
+  await fault(request, "fetchClientGrid");
   // The frame read again, as it is once its read went stale, and failing.
   await page.evaluate(async () => {
     // The router the page made: TanStack Router keeps it on the window.
@@ -250,6 +254,75 @@ test("a frame that can't be read says so with Try again, which brings the admin 
     page.getByRole("navigation", { name: "Organizations" })
   ).toBeVisible();
 });
+
+/** Whether a request at `url` is a call of one of the admin's server functions. */
+const isCall = (url: string): boolean => url.includes("/_serverFn/");
+
+/**
+ * How many of the page's server function calls started from now on are
+ * unanswered: each tracked by its request, so a call already under way
+ * when this is called never counts.
+ */
+const unansweredCalls = (page: Page): (() => number) => {
+  const unanswered = new Set<PlaywrightRequest>();
+  page.on("request", (sent) => {
+    if (isCall(sent.url())) {
+      unanswered.add(sent);
+    }
+  });
+  const answered = (sent: PlaywrightRequest): void => {
+    unanswered.delete(sent);
+  };
+  page.on("requestfinished", answered);
+  page.on("requestfailed", answered);
+  return () => unanswered.size;
+};
+
+/**
+ * Keeps every preload the page's router starts from now on, as pointing
+ * at a link starts one, so a journey can wait on the real one.
+ */
+const watchPreloads = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const preloadRoute: unknown = Reflect.get(router, "preloadRoute");
+    if (typeof preloadRoute !== "function") {
+      throw new TypeError("The page's router can't preload");
+    }
+    const started: Promise<unknown>[] = [];
+    Reflect.set(globalThis, "__preloadsStarted", started);
+    Reflect.set(router, "preloadRoute", (...args: unknown[]): unknown => {
+      const preload: unknown = Reflect.apply(preloadRoute, router, args);
+      started.push(Promise.resolve(preload).catch(() => null));
+      return preload;
+    });
+  });
+};
+
+/**
+ * Waits until pointing at a link started its preload, that preload is
+ * done, and every server function call made since is answered.
+ */
+const preloaded = async (
+  page: Page,
+  unanswered: () => number
+): Promise<void> => {
+  const started = async (): Promise<number> =>
+    await page.evaluate(() => {
+      const preloads: unknown = Reflect.get(globalThis, "__preloadsStarted");
+      return Array.isArray(preloads) ? preloads.length : 0;
+    });
+  await expect.poll(started).toBeGreaterThan(0);
+  await page.evaluate(async () => {
+    const preloads: unknown = Reflect.get(globalThis, "__preloadsStarted");
+    await Promise.all(Array.isArray(preloads) ? preloads : []);
+  });
+  await expect.poll(unanswered).toBe(0);
+};
 
 /** What a seeded core answered so far, holding each answer `holdMs` from now on if given. */
 const core = async (
@@ -366,10 +439,12 @@ test("pointing at another organization's link asks its core nothing, and opening
   const link = page
     .getByRole("navigation", { name: "Organizations" })
     .getByRole("link", { name: "Answering Acme" });
+  const unanswered = unansweredCalls(page);
+  await watchPreloads(page);
   await link.hover();
   await link.focus();
-  // Past the router's preload delay, and any read a preload would start.
-  await page.waitForTimeout(1500);
+  // Its preload done, and any read it would have started answered.
+  await preloaded(page, unanswered);
   // Its core's audit log records a read only when staff open it.
   expect(await core(request, answered)).toBe(before);
 
@@ -418,12 +493,13 @@ const coreAsked = async (
     .asked;
 };
 
-test("opening an organization while the frame reads it again waits on that read, asking its core once", async ({
+test("opening an organization while the frame reads it again asks its core no second time", async ({
   page,
   request,
 }) => {
   const { answered, unset } = await seed(request);
   await page.goto(sectionPath(unset, "setup"), { waitUntil: "networkidle" });
+  const unanswered = unansweredCalls(page);
   // Well under the frame's deadline and the page's wait on it, past the click.
   await core(request, answered, 1500);
   const before = await core(request, answered);
@@ -460,8 +536,49 @@ test("opening an organization while the frame reads it again waits on that read,
   await expect(page.getByText("Read just now.")).toBeVisible({
     timeout: 10_000,
   });
+  // The frame's read lands, the only one: the page shows the answer it
+  // had while it was fresh, or takes the frame's, never asking alone.
+  await expect
+    .poll(async () => await core(request, answered), { timeout: 10_000 })
+    .toBe(before + 1);
+  // Every call the page made answered: no read of its own came after.
+  await expect.poll(unanswered).toBe(0);
   expect(await core(request, answered)).toBe(before + 1);
   await core(request, answered, 0);
+});
+
+test("coming back to an organization within the minute takes its answer, and Read again there asks its core", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  const failures = failuresOf(page);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  const before = await core(request, answered);
+
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Unset Acme" })
+    .click();
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("heading", { level: 1, name: "Unset Acme" })
+  ).toBeVisible();
+  await page.goBack({ waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  // Come back to: the answer it had, its core not asked.
+  expect(await core(request, answered)).toBe(before);
+
+  await page.getByRole("button", { name: "Read again" }).click();
+  // On the page the tab shows: its core asked anew, once.
+  await expect
+    .poll(async () => await core(request, answered), { timeout: 10_000 })
+    .toBe(before + 1);
+  await expect(page.getByRole("button", { name: "Read again" })).toBeEnabled();
+  expect(await core(request, answered)).toBe(before + 1);
+  expect(failures).toStrictEqual([]);
 });
 
 test("pointing at an organization's Setup asks its core nothing, and opening it does", async ({
@@ -477,10 +594,12 @@ test("pointing at an organization's Setup asks its core nothing, and opening it 
     .getByRole("navigation", { name: "Answering Acme" })
     .locator(`a[href="${sectionPath(answered, "setup")}"]`)
     .last();
+  const unanswered = unansweredCalls(page);
+  await watchPreloads(page);
   await setup.hover();
   await setup.focus();
-  // Past the router's preload delay, and any read a preload would start.
-  await page.waitForTimeout(1500);
+  // Its preload done, and any read it would have started answered.
+  await preloaded(page, unanswered);
   // Its quota policy and spend are read from its core only once it is opened.
   const pointed = await coreAsked(request, answered);
   expect(pointed.slice(before)).toStrictEqual([]);

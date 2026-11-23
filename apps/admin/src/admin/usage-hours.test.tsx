@@ -1,0 +1,220 @@
+// @vitest-environment happy-dom
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
+
+import { companies } from "../../test/app.tsx";
+import { emptyAdminSnapshot } from "../../test/snapshots.ts";
+
+// An organization's AI use and hours, as the browser shows them from the
+// snapshot its core answers, which the Worker passes through unchanged
+// (test/client-admins.test.ts).
+
+/** One model's calls on a day, as core counts them. */
+const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
+  calls: 1,
+  tokensIn,
+  kept: 0,
+  tokensOut,
+  seconds,
+});
+
+/**
+ * A company whose core counted, today: Stephen reading the first
+ * conversation with the careful model (2 million tokens read, 200
+ * thousand written: €15) and interviewing with the quick one (1 million
+ * read, 200 thousand written: €6), his voice (20 minutes: €3), and
+ * core's own default model, which has no price (500 thousand read, 100
+ * thousand written: its tokens count, not its cost). €24 in all, with
+ * its contract not known.
+ */
+const usedSnapshot = (): AdminSnapshot => {
+  const empty = emptyAdminSnapshot("Acme");
+  return {
+    ...empty,
+    usage: [
+      {
+        day: empty.now.slice(0, 10),
+        use: {
+          reading: { "claude-opus-5-5": calls(2_000_000, 200_000) },
+          interviews: {
+            "claude-sonnet-5-5": calls(1_000_000, 200_000),
+            voice: calls(0, 0, 1200),
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast": calls(500_000, 100_000),
+          },
+        },
+      },
+    ],
+  };
+};
+
+/** The month of `iso`, as the page names it: "Oct 2026". */
+const monthName = (iso: string): string =>
+  new Date(iso).toLocaleString("en", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+describe("an organization's AI use and hours", () => {
+  let shown = companies();
+  beforeEach(() => {
+    shown = companies();
+  });
+  /** A company answering `snapshot`: its page's path. */
+  const liveClient = async (snapshot: AdminSnapshot): Promise<string> =>
+    await Promise.resolve(shown.add(snapshot));
+  /** The page at `path`, its markup as the browser shows it. */
+  const page = async (path: string) => {
+    const opened = await shown.open(path);
+    return { html: opened.html() };
+  };
+
+  it("shows what core counted: this month and in all, the tokens and minutes, and each use by model", async () => {
+    const snapshot = usedSnapshot();
+    const base = await liveClient(snapshot);
+
+    const { html } = await page(`${base}/ai-use`);
+    const has = (text: string) => html.includes(text);
+
+    expect({
+      // What core counted isn't said to be worked out.
+      workedOut: has("Worked out from what happened"),
+      month: has(`${monthName(snapshot.now)}</span>`),
+      inAll: has("In all, so far"),
+      spend: html.split(">€24<").length - 1,
+      // Core doesn't send the contract yet: unknown, not unsigned.
+      contract: [
+        has("the contract isn’t known yet"),
+        has("no signed contract yet"),
+      ],
+      tokens: [
+        has(">4.0 million<"),
+        has("3.5 million read, 500 thousand written"),
+      ],
+      voice: [has(">20<"), has("20 spoken, 0 heard")],
+      // By use: reading and interviews cost; what took nothing, like chat, isn't listed.
+      byUse: [
+        has(">€15<"),
+        has(">€9.00<"),
+        has(">Chat<"),
+        // The unpriced model's tokens are among the interviews'.
+        has("1.5 million read, 300 thousand written"),
+      ],
+      toCome: has("This section isn’t in the admin yet."),
+    }).toStrictEqual({
+      workedOut: false,
+      month: true,
+      inAll: true,
+      // In all so far, and this month.
+      spend: 2,
+      contract: [true, false],
+      tokens: [true, true],
+      voice: [true, true],
+      byUse: [true, true, false, true],
+      toCome: false,
+    });
+  });
+
+  it("names this month's figure after the month core is on, even before anything is used in it", async () => {
+    const snapshot = usedSnapshot();
+    const [used] = snapshot.usage;
+    // The same use, forty days before core's day: in an earlier month.
+    const earlier = new Date(Date.parse(snapshot.now) - 40 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const base = await liveClient({
+      ...snapshot,
+      usage: used === undefined ? [] : [{ ...used, day: earlier }],
+    });
+
+    const { html } = await page(`${base}/ai-use`);
+
+    expect({
+      thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
+      // This month took nothing; everything so far is the earlier month's.
+      nothingYet: html.includes(">€0.00<"),
+      inAll: html.includes(">€24<"),
+      since: html.includes(`since ${monthName(earlier)}`),
+    }).toStrictEqual({
+      thisMonth: true,
+      nothingYet: true,
+      inAll: true,
+      since: true,
+    });
+  });
+
+  it("says nothing is used yet where core counted nothing, with the way to the first conversation", async () => {
+    const base = await liveClient(emptyAdminSnapshot("Acme"));
+
+    const { html } = await page(`${base}/ai-use`);
+
+    expect({
+      nothing: html.includes("Nothing used yet"),
+      way: html.includes(`href="${base}/steps"`),
+      figures: html.includes("In all, so far"),
+    }).toStrictEqual({ nothing: true, way: true, figures: false });
+  });
+
+  it("shows the use of a model without a price, though it cost nothing", async () => {
+    const empty = emptyAdminSnapshot("Acme");
+    const base = await liveClient({
+      ...empty,
+      usage: [
+        {
+          day: empty.now.slice(0, 10),
+          use: {
+            interviews: {
+              "@cf/meta/llama-3.3-70b-instruct-fp8-fast": calls(
+                500_000,
+                100_000
+              ),
+            },
+          },
+        },
+      ],
+    });
+
+    const { html } = await page(`${base}/ai-use`);
+
+    expect({
+      nothing: html.includes("Nothing used yet"),
+      figures: html.includes("In all, so far"),
+      // Its tokens show with the use they went to.
+      byUse: html.includes("500 thousand read, 100 thousand written"),
+    }).toStrictEqual({ nothing: false, figures: true, byUse: true });
+  });
+
+  it("knows no hours while core sends no drawn work, saying why", async () => {
+    const untold = await liveClient(emptyAdminSnapshot("Acme"));
+    const empty = emptyAdminSnapshot("Acme");
+    // Told today, with its interviews from today on.
+    const told = await liveClient({
+      ...empty,
+      told: true,
+      plan: { start: empty.now.slice(0, 10), days: 14 },
+    });
+
+    const before = await page(`${untold}/hours`);
+    const during = await page(`${told}/hours`);
+
+    expect({
+      none: [before, during].map(({ html }) =>
+        html.includes("No hours known yet")
+      ),
+      before: before.html.includes(
+        "The interviews start once the company has told its team."
+      ),
+      during: during.html.includes(
+        "The team leads go first. Their teams follow the same day."
+      ),
+      toCome: [before, during].some(({ html }) =>
+        html.includes("This section isn’t in the admin yet.")
+      ),
+    }).toStrictEqual({
+      none: [true, true],
+      before: true,
+      during: true,
+      toCome: false,
+    });
+  });
+});

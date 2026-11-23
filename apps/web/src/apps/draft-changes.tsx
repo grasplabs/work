@@ -1,3 +1,17 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/app-kit/components/collapsible";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+} from "@grasp-os/app-kit/components/item";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type {
   FileDiff,
@@ -5,20 +19,6 @@ import type {
   TableRowRules,
 } from "@grasp-os/shared/apps";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-} from "@grasp-os/ui/components/item";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

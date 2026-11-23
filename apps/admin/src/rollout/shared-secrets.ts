@@ -1,3 +1,4 @@
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 /**
  * Shared secrets as desired state, and which old ones can be revoked.

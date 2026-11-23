@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { MicIcon, MicOffIcon } from "lucide-react";
 import type { ReactNode } from "react";

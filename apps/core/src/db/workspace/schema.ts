@@ -1,15 +1,13 @@
 /**
  * Workspace Durable Object SQLite: chats, agent state, and its person's
- * dashboard and email preferences. Migrates itself on first wake-up after a release.
+ * email preferences. Migrates itself on first wake-up after a release.
  */
 import type {
   ChatChannel,
   ChatFileType,
   ChatPlanKind,
 } from "@grasp-os/shared/chat";
-import type { DashboardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
-import type { CustomWidgetId } from "@grasp-os/shared/widgets";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -90,11 +88,25 @@ export const chats = sqliteTable(
      * for a chat "Make something" started in one; null otherwise.
      */
     makeProject: text("make_project"),
+    /**
+     * When its person archived it: out of their list (`ChatsApi.list`),
+     * kept whole, and opened, asked in and brought back as ever; null for
+     * a chat in the list.
+     */
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    /**
+     * The project its person filed it in (`ChatsApi.setProject`), for them
+     * alone to find it there; null for a chat in none. Kept here, in the
+     * person's own object, so nobody else in the project sees it. A project
+     * deleted since leaves it pointing at nothing, which lists nowhere.
+     */
+    projectId: text("project_id"),
   },
   // A person's list, most recently active first.
   (table) => [
     index("chats_person").on(table.personId, table.lastAt),
     index("chats_app").on(table.personId, table.appId),
+    index("chats_project").on(table.personId, table.projectId),
   ]
 );
 
@@ -685,6 +697,10 @@ export const chatBuildJobs = sqliteTable(
   ]
 );
 
+// Unused since the dashboard was removed: nothing reads or writes these.
+// Kept so a roll back to the release before still has them; dropped in a
+// later release (expand, then contract).
+
 /**
  * A person's own dashboard, once they changed it: a row for each person
  * who saved one, so a board they took every widget off reads as empty,
@@ -707,23 +723,21 @@ export const dashboardWidgets = sqliteTable(
       .notNull()
       .references(() => dashboards.personId),
     position: integer().notNull(),
-    widgetId: text("widget_id").$type<DashboardWidgetId>().notNull(),
+    widgetId: text("widget_id").notNull(),
   },
   (table) => [primaryKey({ columns: [table.personId, table.position] })]
 );
 
 /**
- * The widgets Grasp made for a person from what they asked (the shared
- * package's widgets.ts): its spec as JSON, checked as one when it was kept and
- * again when it is read, and what they asked of it last. Its numbers are
- * never kept: they are worked out each time it is shown. Kept in their own
- * Workspace object, as their dashboard is.
+ * The widgets Grasp made for a person from what they asked: its spec as
+ * JSON, and what they asked of it last. Kept in their own Workspace
+ * object, as their dashboard is.
  */
 export const customWidgets = sqliteTable(
   "custom_widgets",
   {
     personId: text("person_id").notNull(),
-    id: text().$type<CustomWidgetId>().notNull(),
+    id: text().notNull(),
     spec: text().notNull(),
     asked: text().notNull(),
     madeAt: integer("made_at", { mode: "timestamp_ms" }).notNull(),

@@ -108,7 +108,7 @@ const blueprintFailed = (
 ): string =>
   logged(
     "error",
-    `{\n  event: 'builtins.blueprint_failed',\n  blueprint: 'intake',\n  errorName: 'TypeError',\n  errorMessage: ${JSON.stringify(errorMessage)},\n  errorStack: ${JSON.stringify(`TypeError: ${errorMessage}\\n`)} +\n    '    at ${thrownIn} (index.js:183943:20)\\n' +\n    '    at async installBlueprints (index.js:192662:7)'\n}`
+    `{\n  event: 'builtins.blueprint_failed',\n  blueprint: 'hello',\n  errorName: 'TypeError',\n  errorMessage: ${JSON.stringify(errorMessage)},\n  errorStack: ${JSON.stringify(`TypeError: ${errorMessage}\\n`)} +\n    '    at ${thrownIn} (index.js:183943:20)\\n' +\n    '    at async installBlueprints (index.js:192662:7)'\n}`
   );
 
 const filesGap: KnownGap = {

@@ -7,7 +7,7 @@
  * connection (apps/connect/test/dev-entry.ts). The page
  * compiler is built again when the kit or the compiler changes
  * (packages/compiler/watch.ts), into the assets core serves, so App pages
- * follow `@grasp-os/ui` as the frontend does. When one of them stops, or
+ * follow `@grasp-os/app-kit` as the frontend does. When one of them stops, or
  * this script is stopped, all of them stop. `vp run seed` (scripts/seed.ts)
  * fills the stack with a demo company.
  */

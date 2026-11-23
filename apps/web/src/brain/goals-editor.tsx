@@ -1,9 +1,5 @@
-import type { Goal } from "@grasp-os/shared/brain";
-import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -11,15 +7,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import type { Goal } from "@grasp-os/shared/brain";
+import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";

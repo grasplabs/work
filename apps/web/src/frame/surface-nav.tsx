@@ -1,4 +1,3 @@
-import type { SidebarApp } from "@grasp-os/shared/pages";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -8,7 +7,8 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from "@grasp-os/ui/components/sidebar";
+} from "@grasp-os/app-kit/components/sidebar";
+import type { SidebarApp } from "@grasp-os/shared/pages";
 import { Trans } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { AppWindowIcon } from "lucide-react";

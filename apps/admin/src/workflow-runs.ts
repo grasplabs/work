@@ -10,6 +10,7 @@
  * has no jurisdictions (tests, local runs), which pass
  * `DURABLE_OBJECT_JURISDICTION=none` (src/env.d.ts).
  */
+import "@tanstack/react-start/server-only";
 import { Workflow } from "@grasp-os/workerflow/binding";
 
 import type { AdminRuns } from "./run-object.ts";

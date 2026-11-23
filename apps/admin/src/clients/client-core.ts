@@ -3,6 +3,7 @@
  * route with the router secret, signing with that client's auth secret
  * for one purpose (src/clients/kickoff.ts, src/clients/commands.ts).
  */
+import "@tanstack/react-start/server-only";
 import { deploySecrets, ifStored } from "../deploy/context.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";

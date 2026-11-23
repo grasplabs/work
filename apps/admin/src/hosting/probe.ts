@@ -8,6 +8,7 @@
  * names the first thing that doesn't, as a code; the hostname stays
  * unpublished until it checks out.
  */
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";

@@ -10,25 +10,26 @@
  * Also what is read live of its account once the Setup shows (reach,
  * drift, shared secrets), as the admin's grid read it.
  */
-import { fromBase64Url } from "@grasp-os/shared/encoding";
+
 import {
   Alert,
   AlertAction,
   AlertDescription,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/alert";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { CardContent } from "@grasp-os/app-kit/components/card";
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+} from "@grasp-os/app-kit/components/native-select";
+import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { useRouter } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -48,14 +49,15 @@ import {
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { StaffWindowSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
+import type { ClientSignInRecord } from "../clients/sign-in-schema.ts";
 import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
-import { channelIds } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
-import type { ClientSignInRecord, StaffWindow } from "../deploy/core-config.ts";
+import type { StaffWindow } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { formatTime } from "../releases/format.ts";
 import { releaseName } from "../releases/version.ts";
+import { channelIds } from "../rollout/channel-ids.ts";
+import type { Channel } from "../rollout/channel-ids.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { pinClientFn, setChannelFn } from "../rollout/functions.ts";

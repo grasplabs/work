@@ -3,8 +3,8 @@
  * moves through four stages, and its page (`src/routes/index.tsx`) counts
  * the records in each stage and lists them, a record's stage changed in
  * place. Written as an App's builder would, with the public SDK and
- * `@grasp-os/ui` only, as the example Apps in apps/docs/content/examples
- * are. The seed adds each table's records through the App's data import.
+ * `@grasp-os/app-kit` only. The seed adds each table's records through the
+ * App's data import.
  */
 import type { DefinitionOperation } from "@grasp-os/runtime/definition";
 
@@ -243,16 +243,16 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { DataGrid } from "@grasp-os/ui/components/data-grid";
-import { Grid } from "@grasp-os/ui/components/grid";
+} from "@grasp-os/app-kit/components/card";
+import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import { Grid } from "@grasp-os/app-kit/components/grid";
 import {
   PageHeader,
   PageHeaderContent,
   PageHeaderDescription,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "@grasp-os/app-kit/components/page-header";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 

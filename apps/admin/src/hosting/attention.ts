@@ -6,6 +6,7 @@
  * nothing to drift: a staff member starting, resuming or switching the
  * client starts a new episode, which clears it.
  */
+import "@tanstack/react-start/server-only";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 

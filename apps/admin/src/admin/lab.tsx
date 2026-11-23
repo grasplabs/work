@@ -1,3 +1,12 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
 import type { StephenStats } from "@grasp-os/shared/admin/onboarding-admin-record";
 /**
@@ -40,15 +49,6 @@ import { meansOf, shown } from "@grasp-os/shared/lab-compare";
 import type { Verdict } from "@grasp-os/shared/lab-compare";
 import type { Result, Scores } from "@grasp-os/shared/lab-runs";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
-import { Badge } from "@grasp-os/ui/components/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { Link } from "@tanstack/react-router";
 
 import { labResults, labScores } from "./lab-runs.ts";

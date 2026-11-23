@@ -16,7 +16,6 @@ import {
   clientWorkers,
   releases,
 } from "../src/db/schema.ts";
-import type { Channel } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import { placeClient } from "../src/hosting/inventory.ts";
 import {
@@ -28,6 +27,7 @@ import {
   ensureStageDestination,
   stageDestinationId,
 } from "../src/hosting/placement.ts";
+import type { Channel } from "../src/rollout/channel-ids.ts";
 import { claimRun } from "../src/runners.ts";
 import type { AccountState, CoreState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";

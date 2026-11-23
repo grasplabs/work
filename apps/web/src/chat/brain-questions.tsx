@@ -1,10 +1,10 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type { Gap } from "@grasp-os/shared/brain";
 import { brainGapTextMaxLength } from "@grasp-os/shared/brain-records";
 import { failureText } from "@grasp-os/shared/errors";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 

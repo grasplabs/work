@@ -2,8 +2,8 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
+} from "@grasp-os/app-kit/components/popover";
+import { PromptInputButton } from "@grasp-os/app-kit/components/prompt-input";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { HistoryIcon } from "lucide-react";
 import { useState } from "react";

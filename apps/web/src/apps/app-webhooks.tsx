@@ -1,20 +1,20 @@
-import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
-import type {
-  AppWebhook,
-  AppWebhookEvent,
-} from "@grasp-os/shared/app-webhooks";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Field,
   FieldDescription,
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
+import type {
+  AppWebhook,
+  AppWebhookEvent,
+} from "@grasp-os/shared/app-webhooks";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
@@ -23,8 +23,8 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { ErrorText } from "../error-text.tsx";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 

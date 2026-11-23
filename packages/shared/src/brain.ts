@@ -449,12 +449,6 @@ export interface BrainApi {
    */
   thinking: () => Promise<ThinkingGround>;
   /**
-   * The board's goals (`Workspace.goals`) alone, for the dashboard, as
-   * `read` gives them: every member reads them, each with the workflows
-   * that serve it they may see.
-   */
-  goals: () => Promise<Goal[]>;
-  /**
    * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
    */

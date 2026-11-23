@@ -1,4 +1,18 @@
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
+import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+  Outlet,
+} from "@tanstack/react-router";
+import type { AnyRoute } from "@tanstack/react-router";
 import { exports } from "cloudflare:workers";
+import { createElement } from "react";
+import type { ReactElement } from "react";
+import { prerender } from "react-dom/static";
 import { fromCrossJSON, toJSONAsync } from "seroval";
 import { z } from "zod";
 
@@ -6,99 +20,83 @@ import { accessJwt } from "./access.ts";
 
 const origin = "https://ops.grasp.test";
 
+/** A page's scripts: not what it shows. */
 const scripts = /<script\b[^>]*>[\s\S]*?<\/script>/gu;
 
-/** A part of a page streamed in after the rest, and the placeholder it replaces: React's `$RC("B:n","S:n")`. */
-const streamedPart = /\$RC\("(?<boundary>B:[^"]+)","(?<segment>S:[^"]+)"\)/u;
-/** Where a streamed placeholder opens or closes: React's Suspense boundary comments. */
-const boundaryMarks = /<!--\$[?!]?-->|<!--\/\$-->/gu;
-
 /**
- * `html` as the browser ends up showing it: each part a page streamed in
- * after the rest (a read it didn't wait for) put in place of what held
- * its place, as React's own script does once it arrives.
+ * The document the Worker answers `path` with, as `email`'s browser gets
+ * it: the admin's shell, which its scripts fill in the browser.
  */
-const settled = (html: string): string => {
-  let page = html;
-  let part = streamedPart.exec(page);
-  while (part !== null) {
-    const { boundary = "", segment = "" } = part.groups ?? {};
-    const script = page.lastIndexOf("<script", part.index);
-    const segmentOpen = `<div hidden id="${segment}">`;
-    const segmentStart = page.indexOf(segmentOpen);
-    const segmentEnd = page.lastIndexOf("</div>", script);
-    const content = page.slice(segmentStart + segmentOpen.length, segmentEnd);
-    const scriptEnd =
-      page.indexOf("</script>", part.index) + "</script>".length;
-    // The streamed part and its script leave; its content takes the placeholder's place.
-    page = page.slice(0, segmentStart) + page.slice(scriptEnd);
-    const template = `<template id="${boundary}"></template>`;
-    const placeholder = page.indexOf(template);
-    let depth = 1;
-    let close = -1;
-    for (const mark of page.slice(placeholder).matchAll(boundaryMarks)) {
-      depth += mark[0] === "<!--/$-->" ? -1 : 1;
-      if (depth === 0) {
-        close = placeholder + mark.index;
-        break;
-      }
-    }
-    const open = page.lastIndexOf("<!--$?-->", placeholder);
-    page = `${page.slice(0, open)}<!--$-->${content}${page.slice(close)}`;
-    part = streamedPart.exec(page);
-  }
-  return page;
-};
-
-interface Page {
-  status: number;
-  html: string;
-}
-
-/** The page most recently asked for, rendered or not. */
-let previous: Promise<unknown> = Promise.resolve();
-
-/** The page at `path` as `email` sees it, once `earlier` has settled. */
-const renderAfter = async (
-  earlier: Promise<unknown>,
-  path: string,
-  email: string
-): Promise<Page> => {
-  try {
-    await earlier;
-  } catch {
-    // The test that asked for it sees why it failed.
-  }
-  const response = await exports.default.fetch(`${origin}${path}`, {
-    headers: {
-      "cf-access-jwt-assertion": await accessJwt(email),
-    },
-  });
-  const html = settled(await response.text());
-  return { status: response.status, html: html.replaceAll(scripts, "") };
-};
-
-/**
- * The page at `path`, as `email` (a staff member) sees it once everything
- * it reads is in (`settled`): its markup without its scripts, so the data
- * sent along for hydration doesn't count as shown.
- *
- * Pages render one at a time, even when a test asks for several at once. In
- * the test pool, the Worker loads the app's modules on demand, over I/O owned
- * by the request that first needs each one, and a second request needing the
- * same module waits on that I/O. Once the pool has loaded a few hundred
- * modules more than the admin alone (as the Select's icon library would,
- * were it not pre-bundled in vite.test.config.ts), workerd cancels that
- * second request as hung. Built and dev Workers load modules differently and
- * render Selects concurrently fine.
- */
-export const page = async (
+export const documentOf = async (
   path: string,
   email = "staff@grasp.test"
-): Promise<Page> => {
-  const rendered = renderAfter(previous, path, email);
-  previous = rendered;
-  return await rendered;
+): Promise<{ status: number; html: string }> => {
+  const response = await exports.default.fetch(`${origin}${path}`, {
+    headers: { "cf-access-jwt-assertion": await accessJwt(email) },
+  });
+  return { status: response.status, html: await response.text() };
+};
+
+/**
+ * `element`'s markup once everything it waits on is in, rendered inside a
+ * router of its own, as the page would show it: for a section whose words
+ * come from rich records the Worker answers (an organization's Setup),
+ * tested from those real answers rather than copies of them. The pages
+ * themselves render in the browser (test/app.tsx).
+ */
+/** The admin's frame around a page: its sidebar's and tooltips' providers. */
+const framed = (children: ReactElement): ReactElement =>
+  createElement(
+    TooltipProvider,
+    null,
+    createElement(SidebarProvider, null, children)
+  );
+
+export const rendered = async (element: ReactElement): Promise<string> => {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => framed(element) }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  const { prelude } = await prerender(
+    createElement(RouterProvider, { router })
+  );
+  const html = await new Response(prelude).text();
+  return html.replaceAll(scripts, "");
+};
+
+/**
+ * The page `route` (a route of the admin's, at `pattern`, as its file
+ * names it) shows at `at` once its loader gave `loaderData`, rendered as `rendered` does: a page whose words come
+ * from rich records the Worker answers (a release, the channels), tested
+ * from those real answers. Its route reads them with the server functions
+ * the test calls through the Worker's entry.
+ */
+export const renderedPage = async (
+  route: AnyRoute,
+  pattern: string,
+  at: string,
+  loaderData: unknown
+): Promise<string> => {
+  const root = createRootRoute({
+    component: () => framed(createElement(Outlet)),
+  });
+  const pageRoute = createRoute({
+    getParentRoute: () => root,
+    path: pattern,
+    component: route.options.component,
+    loader: () => loaderData,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([pageRoute]),
+    history: createMemoryHistory({ initialEntries: [at] }),
+  });
+  await router.load();
+  const { prelude } = await prerender(
+    createElement(RouterProvider, { router })
+  );
+  const html = await new Response(prelude).text();
+  return html.replaceAll(scripts, "");
 };
 
 /** What TanStack Start's route for server functions answers, deserialized. */
@@ -111,8 +109,10 @@ const answerSchema = z.object({
 export interface Caller {
   /** The staff member Access vouches for; null for a request without its JWT. */
   email?: string | null;
-  /** The page's origin, as the browser sends it: the admin's own unless given. */
-  from?: string;
+  /** The page's origin, as the browser sends it: the admin's own unless given; null for none. */
+  from?: string | null;
+  /** What the browser says of where the call comes from (`Sec-Fetch-Site`); unsent unless given. */
+  fetchSite?: string;
 }
 
 /**
@@ -132,7 +132,7 @@ export const callServerFn = async <Data, Result>(
   // A function that takes no data is called without it.
   ...[
     data,
-    { email = "staff@grasp.test", from = origin } = {},
+    { email = "staff@grasp.test", from = origin, fetchSite } = {},
   ]: undefined extends Data
     ? [data?: Data, caller?: Caller]
     : [data: Data, caller?: Caller]
@@ -153,7 +153,8 @@ export const callServerFn = async <Data, Result>(
         ...(email === null
           ? {}
           : { "cf-access-jwt-assertion": await accessJwt(email) }),
-        origin: from,
+        ...(from === null ? {} : { origin: from }),
+        ...(fetchSite === undefined ? {} : { "sec-fetch-site": fetchSite }),
         "x-tsr-serverFn": "true",
         ...(get ? {} : { "content-type": "application/json" }),
         accept: "application/json",

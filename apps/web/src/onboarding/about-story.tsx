@@ -1,6 +1,6 @@
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ContextWords } from "@grasp-os/shared/onboarding-context";
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import {
   useContext,

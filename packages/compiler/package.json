@@ -31,10 +31,10 @@
     "build": "node build.ts"
   },
   "dependencies": {
+    "@grasp-os/app-kit": "workspace:*",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
-    "@grasp-os/ui": "workspace:*",
     "@tanstack/react-router": "catalog:",
     "@tanstack/router-generator": "catalog:",
     "@tsrs/wasm": "catalog:",

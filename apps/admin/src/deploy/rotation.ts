@@ -6,6 +6,7 @@
  * rotation is refused until the last one is live and its window has
  * closed: the previous values would be the ones still in use.
  */
+import "@tanstack/react-start/server-only";
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";

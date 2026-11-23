@@ -4,12 +4,13 @@ import type {
   StephenTurn,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   answering,
   codeOf,
   countedFor,
+  holdAlarm,
   modelOf,
   onLink,
   opened,
@@ -64,6 +65,12 @@ const notes = (body: unknown): ProviderReply => ({
 });
 
 describe("an interview turn", { timeout: 60_000 }, () => {
+  // The onboarding store's own alarm, set half a second on by every save
+  // of the staff list, agreement or drawing, would otherwise draw or
+  // arrange what a test saved, outside its fake provider or with a reply
+  // queued for the test's own call (`holdAlarm`).
+  beforeEach(holdAlarm);
+
   it("holds an interview over the endpoint: his line and what he wrote down from the organization's model, and who he talks with from the store", async () => {
     const link = await opened();
     const said = "I check the invoice in Exact and then I send it on.";

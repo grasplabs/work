@@ -821,7 +821,7 @@ describe("writing and sharing skills", setUpTime, () => {
     );
     // Grasp ships a skill of this name: a company skill of it takes its
     // place for everyone, so the admin is told.
-    const grasps = "draw-a-workflow";
+    const grasps = "file-an-expense";
     const planted = await author.api.skills.save(skillText(grasps, "Mine"));
     const overGrasp = await author.api.skills.share(
       grasps,

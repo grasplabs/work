@@ -3,7 +3,7 @@
  * Setup draws its own (src/admin/setup.tsx): facts as rows, and a quiet
  * line when there is nothing.
  */
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ReactNode } from "react";
 
 /** A line in a panel saying there is nothing to show. */

@@ -47,6 +47,7 @@
  *   about, never free text beyond the organization asked for. Each core
  *   records its own `admin.snapshot.read` naming the same person.
  */
+import "@tanstack/react-start/server-only";
 import { Validator } from "@cfworker/json-schema";
 import type { Schema } from "@cfworker/json-schema";
 import type { AskedApp } from "@grasp-os/shared/admin/admin-integrations";

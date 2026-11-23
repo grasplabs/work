@@ -373,7 +373,7 @@ export const platformModules = [
   "@grasp-os/sdk/src/index.ts",
   "@grasp-os/sdk/",
   "@grasp-os/runtime",
-  "@grasp-os/ui/../runtime/host",
+  "@grasp-os/app-kit/../runtime/host",
   "@grasp-os/shared/json",
 ] as const;
 

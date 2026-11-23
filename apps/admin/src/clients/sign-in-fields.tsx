@@ -6,12 +6,12 @@ import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 
-import { signInProblem } from "../deploy/core-config.ts";
-import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { InvalidFieldError } from "../use-action.ts";
+import { signInProblem } from "./sign-in-schema.ts";
+import type { ClientSignInRecord } from "./sign-in-schema.ts";
 
 /** The form's text field `name`, trimmed. */
 export const textOf = (form: FormData, name: string): string => {

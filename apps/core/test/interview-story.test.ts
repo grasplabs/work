@@ -9,7 +9,7 @@ import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import type { StorySentence } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
@@ -17,6 +17,7 @@ import {
   approve,
   codeOf,
   countedFor,
+  holdAlarm,
   modelOf,
   onLink,
   opened,
@@ -132,6 +133,12 @@ describe(
   "a part of the read-back, told as a story",
   { timeout: 60_000 },
   () => {
+    // The onboarding store's own alarm, set half a second on by every save
+    // of the staff list, agreement or drawing, would otherwise draw or
+    // arrange what a test saved, outside its fake provider or with a reply
+    // queued for the test's own call (`holdAlarm`).
+    beforeEach(holdAlarm);
+
     it("tells the lines back in his sentences, from the quick model, and counts it", async () => {
       const link = await opened();
       const before = await countedFor(quick);
@@ -218,6 +225,9 @@ describe(
 );
 
 describe("what counts of an interview", { timeout: 60_000 }, () => {
+  // As above: the store's alarm stays out of each test's provider.
+  beforeEach(holdAlarm);
+
   it("is what its person agreed to: a line put right, and what they add later once they agree to it too", async () => {
     const { link, person } = await openedFor();
     const store = onboardingStore(env);

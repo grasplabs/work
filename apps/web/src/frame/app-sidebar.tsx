@@ -1,6 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Kbd } from "@grasp-os/ui/components/kbd";
+import { Kbd } from "@grasp-os/app-kit/components/kbd";
 import {
   Sidebar,
   SidebarContent,
@@ -11,7 +9,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@grasp-os/ui/components/sidebar";
+} from "@grasp-os/app-kit/components/sidebar";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -30,7 +29,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
 import type { CoreConnection } from "../core-connection.ts";
-import { DashboardItem } from "../dashboard/nav-item.tsx";
+import { InboxNavItem } from "../inbox/nav-item.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
 import { WorkflowsItem } from "../workflows/nav-item.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
@@ -166,12 +165,13 @@ export const AppSidebar = ({
               <nav aria-label={t`Main`}>
                 <SidebarMenu>
                   <SectionItem section={chat} />
-                  <DashboardItem />
+                  {/* With how many things wait on the person. */}
+                  <InboxNavItem />
                   <SectionItem section={brain} />
                   <SectionItem section={projects} />
                   <SectionItem section={apps} />
                   {/* With how many workflows need the person. */}
-                  <WorkflowsItem requests={isAdmin(identity.role)} />
+                  <WorkflowsItem />
                   <SectionItem section={agents} />
                   <SectionItem section={integrations} />
                 </SidebarMenu>

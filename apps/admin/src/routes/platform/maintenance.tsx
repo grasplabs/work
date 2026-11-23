@@ -3,9 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
-import type { StaffEvent } from "../../admin/platform-data.ts";
 import { platformCrumb, PlatformNav } from "../../admin/platform-nav.tsx";
 import { eventWords } from "../../admin/platform-parts.tsx";
+import type { StaffEvent } from "../../admin/platform-reads.ts";
 import { SharedSecrets } from "../../admin/secrets-parts.tsx";
 import { EmptySection, Section } from "../../admin/section.tsx";
 import { formatDate } from "../../admin/words.ts";
@@ -65,6 +65,7 @@ const MaintenancePage = () => {
 
 export const Route = createFileRoute("/platform/maintenance")({
   loader: async () => {
+    // Every company read anew on entering: staff act on them here.
     const [rows, platform] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),

@@ -1,3 +1,16 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
 import { expectedMessageOf, failureText } from "@grasp-os/shared/errors";
 import type {
   TraceState,
@@ -8,19 +21,6 @@ import type {
   WorkflowActivity,
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useEffectEvent, useId, useState } from "react";
 

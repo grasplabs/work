@@ -1,8 +1,8 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent } from "@grasp-os/app-kit/components/card";
+import { Label } from "@grasp-os/app-kit/components/label";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type { DecisionView } from "@grasp-os/shared/decisions";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent } from "@grasp-os/ui/components/card";
-import { Label } from "@grasp-os/ui/components/label";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

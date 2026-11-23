@@ -7,18 +7,14 @@ import {
   DELETE_DAYS,
   factsSaid,
   listenDays,
-  PARKED_PARTS,
-  PLATFORM_PARTS,
   tellingOf,
   timelinesOf,
 } from "./onboarding-admin.ts";
 import type {
   Interview,
   MistakeKind,
-  OrgState,
   OrgTeam,
   OrgView,
-  PlatformPart,
   Telling,
   Work,
   WorkEvidence,
@@ -642,14 +638,3 @@ export const logOf = (view: OrgView): LogEvent[] => {
     .toSorted((a, b) => b.on.localeCompare(a.on) || b.order - a.order)
     .map(({ order: _order, ...event }) => event);
 };
-
-/** Which parts of the platform the company has: what Grasp switched, and otherwise everything but what is parked. */
-export const partsOf = (state: OrgState): Record<PlatformPart, boolean> =>
-  // SAFETY: one entry for every part of the platform.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  Object.fromEntries(
-    PLATFORM_PARTS.map((part) => [
-      part,
-      state.parts[part] ?? !PARKED_PARTS.includes(part),
-    ])
-  ) as Record<PlatformPart, boolean>;

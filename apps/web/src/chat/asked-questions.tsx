@@ -1,8 +1,3 @@
-import type {
-  ChatAsked,
-  ChatAskItem,
-  ChatMessage,
-} from "@grasp-os/shared/chat";
 import {
   AskCard,
   AskCardBody,
@@ -14,13 +9,18 @@ import {
   AskCardProgress,
   AskCardQuestion,
   AskCardTopic,
-} from "@grasp-os/ui/components/ask-card";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Input } from "@grasp-os/ui/components/input";
-import { Kbd } from "@grasp-os/ui/components/kbd";
-import { RadioGroupItem } from "@grasp-os/ui/components/radio-group";
+} from "@grasp-os/app-kit/components/ask-card";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Kbd } from "@grasp-os/app-kit/components/kbd";
+import { RadioGroupItem } from "@grasp-os/app-kit/components/radio-group";
+import type {
+  ChatAsked,
+  ChatAskItem,
+  ChatMessage,
+} from "@grasp-os/shared/chat";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { MessageCircleQuestionIcon } from "lucide-react";

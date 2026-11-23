@@ -1,12 +1,3 @@
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
-import type {
-  MemberRole,
-  ShareCandidates,
-  SubjectMember,
-  SubjectMemberRef,
-  SubjectMembersApi,
-} from "@grasp-os/shared/subject-members";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,8 +8,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Table,
   TableBody,
@@ -26,7 +17,16 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
+import type {
+  MemberRole,
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+  SubjectMembersApi,
+} from "@grasp-os/shared/subject-members";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";

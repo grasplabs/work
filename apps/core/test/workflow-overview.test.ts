@@ -278,7 +278,7 @@ describe("the Workflows page", buildTime, () => {
       "SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'"
     ).all();
     const { api } = owner;
-    // The Workflows page and the dashboard read the overview; the Runs tab
+    // The Workflows page and the weekly report read the overview; the Runs tab
     // lists every run, or the waiting ones.
     const calls = {
       overview: async () => await api.workflows.overview(),

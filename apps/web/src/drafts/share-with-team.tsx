@@ -1,20 +1,11 @@
-import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppReview } from "@grasp-os/shared/app-review";
-import type { Draft, DraftProblem } from "@grasp-os/shared/drafts";
-import type { Subject } from "@grasp-os/shared/subject";
-import type {
-  ShareCandidates,
-  SubjectMember,
-  SubjectMemberRef,
-} from "@grasp-os/shared/subject-members";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/collapsible";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   Sheet,
   SheetClose,
@@ -24,9 +15,18 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@grasp-os/ui/components/sheet";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { toast } from "@grasp-os/ui/components/toast";
+} from "@grasp-os/app-kit/components/sheet";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { toast } from "@grasp-os/app-kit/components/toast";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import type { AppReview } from "@grasp-os/shared/app-review";
+import type { Draft, DraftProblem } from "@grasp-os/shared/drafts";
+import type { Subject } from "@grasp-os/shared/subject";
+import type {
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { i18n as pageI18n } from "@lingui/core";
 import type { I18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";

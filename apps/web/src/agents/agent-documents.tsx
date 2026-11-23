@@ -1,3 +1,4 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { Agent, AgentDocument } from "@grasp-os/shared/agents";
 import {
@@ -5,7 +6,6 @@ import {
   chatFileTypeOf,
   chatFileTypes,
 } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRef } from "react";
 

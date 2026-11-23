@@ -19,8 +19,9 @@
     "logs": { "invocation_logs": false },
     "traces": { "enabled": true },
   },
-  // Every secret connect needs: deploys fail while one is unset, and local
-  // dev loads only these from .dev.vars. CAPABILITY_SIGNING_KEY is shared
+  // Every secret connect needs: deploys fail while one is unset. Local dev
+  // loads these and every other key .dev.vars sets
+  // (scripts/wrangler-local-config.ts). CAPABILITY_SIGNING_KEY is shared
   // with core, which signs a capability for every call connect gets.
   // TOKEN_ENCRYPTION_KEY seals what connect keeps (src/vault.ts): OAuth
   // tokens, and the organization's AI provider keys, without which no model

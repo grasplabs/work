@@ -46,9 +46,9 @@ describe(
       // classes Tailwind's sorter would reorder, which neither sorts; and
       // a GraphQL template, whose query both leave as written.
       const written = tidy({
-        ...blueprintFiles("workflow-map"),
+        ...blueprintFiles(),
         "src/components/count.tsx": `import type { ReactNode } from "react";
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import { api } from "@server/_generated/api";
 
 export const Count = ({ children }: { children: ReactNode }) => (
@@ -179,7 +179,7 @@ export const later = (): number => {
       // And the pages' own rules, as Grasp's lint runs them
       // (apps/core/test/page-checks.test.ts, on the same files): a plain
       // form, an inline style, WebRTC, and its cases (design-cases.ts).
-      const off = `import { Button } from "@grasp-os/ui/components/button";
+      const off = `import { Button } from "@grasp-os/app-kit/components/button";
 
 export const Off = () => (
   <form>

@@ -256,7 +256,8 @@ export const coreProject = (
     },
     // The built-ins the global setup embeds, the tests' own included, in a
     // module of their own: core's build ships dist/blueprints.js. The
-    // version of the compiler it builds into the tests' assets likewise.
+    // version of the compiler it builds into the tests' assets likewise,
+    // and the tests' own shipped skills (core ships src/release-skills.ts).
     resolve: {
       alias: [
         { find: /^#blueprints$/u, replacement: testBlueprintsModule },
@@ -265,6 +266,10 @@ export const coreProject = (
           replacement: digestModuleOf(testBlueprintsModule),
         },
         { find: /^#version$/u, replacement: testVersionModule },
+        {
+          find: /^#shipped-skills$/u,
+          replacement: `${import.meta.dirname}/test/fixtures/skills/skills.ts`,
+        },
         ...oxcParseTestConfig.alias,
       ],
     },

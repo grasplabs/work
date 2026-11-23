@@ -5,6 +5,7 @@
  * is provisioned: every database, bucket and Durable Object is created in
  * its jurisdiction and can't move, and an on-prem install is its own.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -53,17 +54,4 @@ export const clientHostingOf = async (
     throw new Error(`No client ${clientId}`);
   }
   return row;
-};
-
-/** Where an organization runs, in a few plain words. */
-export const hostingWords = ({
-  hosting,
-  jurisdiction,
-}: OrganizationHosting): string => {
-  if (hosting === "on_prem") {
-    return "On-premises: on the organization's own servers";
-  }
-  return jurisdiction === "eu"
-    ? "Grasp Cloud, data kept in the EU"
-    : "Grasp Cloud, data stored anywhere in Cloudflare's network";
 };

@@ -1,9 +1,3 @@
-import type {
-  BrainForgetPreview,
-  BrainForgetTarget,
-} from "@grasp-os/shared/brain";
-import { failureText } from "@grasp-os/shared/errors";
-import { isAdmin } from "@grasp-os/shared/roles";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,10 +7,16 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Progress } from "@grasp-os/ui/components/progress";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import type {
+  BrainForgetPreview,
+  BrainForgetTarget,
+} from "@grasp-os/shared/brain";
+import { failureText } from "@grasp-os/shared/errors";
+import { isAdmin } from "@grasp-os/shared/roles";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouteContext, useRouter } from "@tanstack/react-router";

@@ -1,3 +1,19 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/app-kit/components/radio-group";
 import {
   compatibleModelNamePattern,
   featuredModels,
@@ -9,22 +25,6 @@ import type {
   GraspAiListed,
   OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { CheckIcon } from "lucide-react";

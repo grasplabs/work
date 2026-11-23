@@ -25,7 +25,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     // long as the build takes: removed whatever happens here, though a run
     // that is killed outright leaves them, untracked, to delete by hand.
     const added = ["probe.test.tsx", "probe.d.ts"].map((file) =>
-      path.join(import.meta.dirname, "../ui/src/components", file)
+      path.join(import.meta.dirname, "../app-kit/src/components", file)
     );
     try {
       for (const file of added) {

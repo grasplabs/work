@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { WorkflowActivity } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

@@ -6,6 +6,7 @@
  * way nothing a step returns or throws carries a token or a response body:
  * a run's journal keeps both (threat model R17, CO3).
  */
+import "@tanstack/react-start/server-only";
 import { NonRetryableError } from "@grasp-os/workerflow/errors";
 
 import { CloudflareApiError, isRefused } from "./cloudflare/api.ts";

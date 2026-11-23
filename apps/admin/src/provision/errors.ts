@@ -1,4 +1,6 @@
 /** Why staff's action on a client's provisioning was refused, as the page shows it. */
+import "@tanstack/react-start/server-only";
+
 export const provisionErrorCodes = [
   /** The admin has no CLIENT_DOMAIN, so no client can get a hostname. */
   "domain_not_set",

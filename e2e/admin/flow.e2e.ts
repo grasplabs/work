@@ -12,11 +12,10 @@ test("staff set a company's flow from a preset, are told why one can't work, sav
 }) => {
   const response = await request.post("/__e2e/seed-organizations");
   const { answered } = seededSchema.parse(await response.json());
-  // The Flow is a tab of the Steps, and its old address still leads there.
-  await page.goto(`/organizations/${answered}/flow`, {
+  // The Flow is a tab of the Steps.
+  await page.goto(`/organizations/${answered}/steps?tab=flow`, {
     waitUntil: "networkidle",
   });
-  await expect(page).toHaveURL(/\/steps\?tab=flow$/u);
   const main = page.getByRole("main");
   await expect(main.getByRole("tab", { name: "Flow" })).toHaveAttribute(
     "aria-selected",

@@ -1,8 +1,4 @@
-import type { BusinessProcess } from "@grasp-os/shared/business-processes";
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
-import { failedRunDays } from "@grasp-os/shared/workflows";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -10,8 +6,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "@grasp-os/app-kit/components/empty";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import {
   Table,
   TableBody,
@@ -19,12 +15,16 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
+import { failedRunDays } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";

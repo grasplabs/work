@@ -6,6 +6,7 @@ import react from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";
 
 import { accessTeam } from "./test/access-config.ts";
+import { adminDefine } from "./vite.config.ts";
 
 const migrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/migrations`
@@ -31,6 +32,7 @@ const coreMigrationFiles = readdirSync(coreMigrationsDir)
  * go through the real entry (src/server.ts), app included.
  */
 export default defineProject({
+  define: adminDefine,
   test: {
     name: "admin",
     include: ["test/**/*.test.ts"],
@@ -49,7 +51,7 @@ export default defineProject({
       optimizer: {
         ssr: {
           enabled: true,
-          include: ["@grasp-os/ui > lucide-react"],
+          include: ["@grasp-os/app-kit > lucide-react"],
         },
       },
     },

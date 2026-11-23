@@ -1,9 +1,4 @@
-import type {
-  DirectoryPlacement,
-  Member,
-  OrganizationTeam,
-} from "@grasp-os/shared/members";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogClose,
@@ -12,16 +7,25 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Field, FieldError, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import {
+  Field,
+  FieldError,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import type {
+  DirectoryPlacement,
+  Member,
+  OrganizationTeam,
+} from "@grasp-os/shared/members";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
   EllipsisIcon,

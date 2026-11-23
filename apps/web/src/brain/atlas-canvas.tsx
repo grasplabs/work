@@ -1,4 +1,4 @@
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { ArrowUpRightIcon } from "lucide-react";
 import {
@@ -943,7 +943,6 @@ export const BrainAtlas = ({
   return (
     <div
       className="bg-muted/30 relative min-h-0 flex-1 overflow-hidden text-sm"
-      data-tour="brain"
       ref={box}
     >
       <canvas

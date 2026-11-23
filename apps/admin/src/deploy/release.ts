@@ -4,6 +4,7 @@
  * against the manifest again as it's read, so a deploy runs exactly the
  * bytes CI built even if the bucket changed since the import.
  */
+import "@tanstack/react-start/server-only";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
   assetKey,

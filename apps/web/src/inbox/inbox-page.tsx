@@ -1,41 +1,41 @@
-import type { AuditRecord } from "@grasp-os/shared/audit-log";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
+} from "@grasp-os/app-kit/components/toggle-group";
+import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { ArrowDownUpIcon, InboxIcon, ListFilterIcon } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { actorOf } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
 import { typeLabels } from "../activity/type-labels.ts";
-import type { LatestActivity } from "../dashboard/activity.tsx";
 import type { Directory } from "../directory.ts";
 import { formatDateTime, formatDayMonth } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -46,12 +46,14 @@ import { KindPill, ItemMark } from "./inbox-kind.tsx";
 import { ItemDetail } from "./item-detail.tsx";
 import { listed } from "./items.ts";
 import type { Group, InboxItem, Sort } from "./items.ts";
+import type { LatestActivity } from "./read-waiting.ts";
 
 // The inbox, as the prototype's (`routes/inbox.tsx`): what waits on the
 // person, what was done with it, and what Grasp and people did. A wide
 // list of one-line items, the item beside it, and its actions in a bar at
-// the bottom. Items come from items.ts; each action goes through the same
-// calls as the dashboard's pile, so it lands in the audit trail too.
+// the bottom. Items come from items.ts; each action goes through core's
+// own calls, so it lands in the audit trail too. Above them, while the
+// company has a programme with Grasp, the bar of its weekly report.
 
 const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "Everything", context: "inbox filter" }),
@@ -230,27 +232,20 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
 /** The list and the item beside it, or on a narrow screen one at a time. */
 const ToDoTab = ({
   items,
-  chosen,
   group,
   sort,
-  olderFailures,
   onSaid,
 }: {
   items: readonly InboxItem[];
-  chosen: string | undefined;
   group: Group;
   sort: Sort;
-  olderFailures: boolean;
   onSaid: (said: string) => void;
 }) => {
   const { t } = useLingui();
   const list = listed(items, group, sort);
-  // One the page was opened on, as the dashboard leads to it, is open from the start.
-  const [selectedId, setSelectedId] = useState(chosen);
+  const [selectedId, setSelectedId] = useState<string>();
   // On a narrow screen the item takes the list's place once one is chosen, with a way back.
-  const [reading, setReading] = useState(
-    chosen !== undefined && list.some(({ id }) => id === chosen)
-  );
+  const [reading, setReading] = useState(false);
   const selected = list.find((item) => item.id === selectedId) ?? list[0];
   // Once nothing is left to read (the last one decided, or a filter that keeps none), the list comes back.
   if (reading && selected === undefined) {
@@ -284,17 +279,6 @@ const ToDoTab = ({
             />
           ))
         )}
-        {olderFailures ? (
-          <p className="text-muted-foreground px-5 py-4">
-            <Trans>
-              Older workflows that failed are on the{" "}
-              <Link className="text-foreground underline" to="/dashboard">
-                dashboard
-              </Link>
-              .
-            </Trans>
-          </p>
-        ) : null}
       </section>
       <div
         className={
@@ -337,22 +321,19 @@ const ToDoTab = ({
 /**
  * The inbox. `notLoaded` are the parts of what waits that couldn't be
  * read, said above the list rather than left to look like nothing waits.
- * `activity` is the latest of the audit trail, for admins only.
+ * `activity` is the latest of the audit trail, for admins only. `report`
+ * is the weekly report's bar, while there is a programme.
  */
 export const InboxPage = ({
   items,
-  chosen,
   notLoaded,
-  olderFailures,
   activity,
+  report,
 }: {
   items: readonly InboxItem[];
-  /** The item opened first, by its ID: the list's first when none is, or it waits no more. */
-  chosen?: string;
   notLoaded: readonly Loaded<unknown>[];
-  /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
-  olderFailures: boolean;
   activity: Promise<Loaded<InboxActivity>> | undefined;
+  report?: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
   const [tab, setTab] = useState("todo");
@@ -364,6 +345,9 @@ export const InboxPage = ({
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
       {/* As high as the window under the header, so the list and the item each scroll on their own. */}
       <div className="h-inbox flex min-h-0 flex-col text-sm">
+        {report === undefined ? null : (
+          <div className="border-b px-4 py-3">{report}</div>
+        )}
         <Tabs
           className="min-h-0 flex-1"
           onValueChange={(value: string) => {
@@ -461,14 +445,7 @@ export const InboxPage = ({
             className="@container/inbox flex min-h-0 flex-1"
             value="todo"
           >
-            <ToDoTab
-              chosen={chosen}
-              group={group}
-              items={items}
-              olderFailures={olderFailures}
-              onSaid={setSaid}
-              sort={sort}
-            />
+            <ToDoTab group={group} items={items} onSaid={setSaid} sort={sort} />
           </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-y-auto" value="done">
