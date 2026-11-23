@@ -675,13 +675,12 @@ const WorkflowResourceView = ({
   );
 };
 
-/** People's names by ID, and whether they name every member. */
+/** People's names by ID. */
 interface People {
   people: ReadonlyMap<string, string>;
-  everyone: boolean;
 }
 
-const noPeople: People = { people: new Map(), everyone: false };
+const noPeople: People = { people: new Map() };
 
 /**
  * People's names by ID, for the names on runs and activity lines: read
@@ -739,7 +738,7 @@ const WorkflowResourcePage = () => {
       back={back}
       handedOver={chat}
       identity={identity}
-      names={{ ...people, me: identity.userId }}
+      names={{ people: people.people, me: identity.userId }}
       resource={resource.data}
       run={run}
       section={section}

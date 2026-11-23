@@ -168,7 +168,6 @@ type WorkflowNames = Awaited<ReturnType<typeof readWorkflowNames>>;
 
 const noNames: WorkflowNames = {
   people: new Map(),
-  everyone: false,
   workflows: new Map(),
 };
 
@@ -241,7 +240,6 @@ const RunsLogRead = ({
           more={read.runs.data.more}
           names={{
             people: named.people,
-            everyone: named.everyone,
             me: identity.userId,
           }}
           runs={read.runs.data.runs}

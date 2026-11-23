@@ -56,8 +56,6 @@ export const readWorkflowNames = async (
   session: Session
 ): Promise<{
   people: ReadonlyMap<string, string>;
-  /** Whether the directory answered: `people` then names every member. */
-  everyone: boolean;
   workflows: ReadonlyMap<string, string>;
 }> => {
   const [people, workflows] = await Promise.all([
@@ -72,7 +70,6 @@ export const readWorkflowNames = async (
   }
   return {
     people: named,
-    everyone: people.size > 0,
     workflows: new Map(
       workflows.map((workflow) => [
         workflow.workflowId,

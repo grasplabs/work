@@ -1801,7 +1801,6 @@ msgid "A form is sent"
 msgstr "Er een formulier wordt verstuurd"
 
 #: src/connections/request-app-dialog.tsx
-#: src/workflows/activity-bar.tsx
 msgid "A former member"
 msgstr "Een voormalig lid"
 

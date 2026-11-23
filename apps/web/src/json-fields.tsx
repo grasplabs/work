@@ -1,7 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { useLingui } from "@lingui/react/macro";
 
-import { formatList, formatNumber } from "./format.ts";
+import { formatList } from "./format.ts";
 import { KeyValueList } from "./grasp/key-value/index.ts";
 import { Text } from "./grasp/text/index.ts";
 
@@ -20,7 +20,10 @@ export const fieldLabel = (key: string): string => {
     .replaceAll(camelBreak, "$<before> $<after>")
     .replaceAll(separators, " ")
     .trim()
-    .toLowerCase();
+    .split(" ")
+    // An acronym ("IBAN", "VAT") keeps its capitals.
+    .map((word) => (word === word.toUpperCase() ? word : word.toLowerCase()))
+    .join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
@@ -45,8 +48,10 @@ const useValueText = () => {
     if (typeof value === "string") {
       return value;
     }
+    // Exactly as passed: an amount, a rate or a year someone approves
+    // is never rounded or grouped.
     if (typeof value === "number") {
-      return formatNumber(value);
+      return String(value);
     }
     if (typeof value === "boolean") {
       return value ? t`Yes` : t`No`;
