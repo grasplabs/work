@@ -7,7 +7,7 @@ import { colors, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import type { ComponentProps, ReactNode, RefObject } from "react";
 
 import { SpokenText } from "../voice/spoken-text.tsx";
 import { narrationOf } from "../voice/timing.ts";
@@ -445,14 +445,14 @@ export const Primary = ({
   ready?: boolean;
   onClick: () => void;
 }) => {
-  // A plain button until it works or is done: only then does it show a spinner or a tick.
+  // A plain button until it works or is done: only then does it show a spinner or a tick, its words kept.
   const life =
     busy || done
-      ? {
-          status: busy ? ("loading" as const) : ("success" as const),
-          successLabel: children,
-          errorLabel: children,
-        }
+      ? ({
+          status: busy ? "loading" : "success",
+          successText: children,
+          errorText: children,
+        } satisfies Partial<ComponentProps<typeof Button>>)
       : {};
   return (
     <Onward ready={ready}>
