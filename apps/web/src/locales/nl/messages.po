@@ -2966,7 +2966,6 @@ msgid "Ask an admin"
 msgstr "Een beheerder vragen"
 
 #: src/chat/chat-start.tsx
-#: src/chat/global-chat.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
 
@@ -4461,6 +4460,22 @@ msgstr "Uit {label} naar het Brain kopiëren"
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
 
+#: src/chat/answer-table-actions.tsx
+msgid "Copy table"
+msgstr "Tabel kopiëren"
+
+#: src/chat/answer-table-actions.tsx
+msgid "Copy table as CSV"
+msgstr "Tabel kopiëren als CSV"
+
+#: src/chat/answer-table-actions.tsx
+msgid "Copy table as Markdown"
+msgstr "Tabel kopiëren als Markdown"
+
+#: src/chat/answer-table-actions.tsx
+msgid "Copy table as TSV"
+msgstr "Tabel kopiëren als TSV"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Antwoord kopiëren"
@@ -5181,6 +5196,18 @@ msgstr "{path} downloaden"
 #: src/report/report-dialog.tsx
 msgid "Download Markdown"
 msgstr "Markdown downloaden"
+
+#: src/chat/answer-table-actions.tsx
+msgid "Download table"
+msgstr "Tabel downloaden"
+
+#: src/chat/answer-table-actions.tsx
+msgid "Download table as CSV"
+msgstr "Tabel downloaden als CSV"
+
+#: src/chat/answer-table-actions.tsx
+msgid "Download table as Markdown"
+msgstr "Tabel downloaden als Markdown"
 
 #: src/workflows/workflow-settings.tsx
 #: src/workflows/workflows-table.tsx
@@ -9442,6 +9469,7 @@ msgstr "Nog niet bevestigd door het bestuur"
 msgid "Not connected"
 msgstr "Niet verbonden"
 
+#: src/chat/answer-table-actions.tsx
 #: src/frame/ui-words.tsx
 msgid "Not copied"
 msgstr "Niet gekopieerd"
@@ -12235,10 +12263,6 @@ msgstr "Zeggen dat deze klopt: {statement}"
 msgid "Say what should change"
 msgstr "Zeg wat er moet veranderen"
 
-#: src/chat/chat-subject.ts
-msgid "Say what to change. Your team sees the changes once you share them."
-msgstr "Zeg wat er moet veranderen. Je team ziet de wijzigingen zodra je ze deelt."
-
 #: src/apps/apps-overview.tsx
 msgid "Say what you want to build, and Grasp builds it."
 msgstr "Zeg wat je wilt bouwen, en Grasp bouwt het."
@@ -13529,6 +13553,11 @@ msgstr "Systeem"
 #: src/frame/ui-words.tsx
 msgid "Table"
 msgstr "Tabel"
+
+#. placeholder {0}: index + 1
+#: src/chat/answer-table-actions.tsx
+msgid "Table {0}"
+msgstr "Tabel {0}"
 
 #: src/apps/app-data-model.tsx
 msgid "Table name"

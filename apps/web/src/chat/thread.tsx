@@ -84,6 +84,7 @@ import { formatList, formatTime } from "../format.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 import { ThreadAgentChange } from "./agent-change-card.tsx";
 import { ThreadAgentDraft } from "./agent-draft-card.tsx";
+import { AnswerTableActions } from "./answer-table-actions.tsx";
 import {
   SeeInBrain,
   useAnswerThinking,
@@ -1116,6 +1117,10 @@ const AnswerRow = ({
               <MessageAction aria-label={t`Ask again`} onClick={retry}>
                 <Icon icon={RefreshCwIcon} />
               </MessageAction>
+            )}
+            {/* Its tables are read once it is written. */}
+            {status === "streaming" ? null : (
+              <AnswerTableActions text={copyText} />
             )}
           </MessageActions>
         )}

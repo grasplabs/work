@@ -123,10 +123,6 @@ export const chainStatuses: Readonly<
   stopped: "pending",
 };
 
-/** Who wrote a message of the chat, as a Message stands: the person's at the end. */
-export const messageAlign = (role: "user" | "assistant"): "start" | "end" =>
-  role === "user" ? "end" : "start";
-
 /** Where the box to ask in stands, as Damsko's PromptInput takes it. */
 export type PromptStatus = "ready" | "submitted" | "streaming" | "error";
 
