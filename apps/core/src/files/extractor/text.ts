@@ -39,6 +39,16 @@ export const textMarkdown = (bytes: Uint8Array): string =>
 
 const fenceRuns = /`+/gu;
 
+/** `text` whole in one code block, fenced by more backticks than it holds in a row. */
+const fenced = (text: string): string => {
+  let longest = 2;
+  for (const [run] of text.matchAll(fenceRuns)) {
+    longest = Math.max(longest, run.length);
+  }
+  const fence = "`".repeat(longest + 1);
+  return `${fence}\n${text}\n${fence}`;
+};
+
 /**
  * Data kept as text (JSON, XML, YAML), whole in one code block, so
  * none of it reads as Markdown: fenced by more backticks than it holds in
@@ -46,15 +56,7 @@ const fenceRuns = /`+/gu;
  */
 export const dataMarkdown = (bytes: Uint8Array): string => {
   const text = decoded(bytes).trim();
-  if (text === "") {
-    return "";
-  }
-  let longest = 2;
-  for (const [run] of text.matchAll(fenceRuns)) {
-    longest = Math.max(longest, run.length);
-  }
-  const fence = "`".repeat(longest + 1);
-  return `${fence}\n${text}\n${fence}`;
+  return text === "" ? "" : fenced(text);
 };
 
 type Node = DefaultTreeAdapterTypes.ChildNode;
@@ -117,48 +119,100 @@ const blankLines = /\n{3,}/gu;
 /** What a page's text is gathered into, a piece at a time. */
 interface Page {
   pieces: string[];
+  /**
+   * Its preformatted blocks, as written: each stands in `pieces` as a
+   * mark (`preMark`), put back as a code block once the rest is tidied,
+   * so its own spaces and line breaks are left as they are.
+   */
+  pre: string[];
 }
+
+/**
+ * Where a preformatted block stands until it is put back: between NUL
+ * characters, which no parsed page holds (the HTML parser replaces them).
+ */
+const preMark = (at: number): string => `\0pre${at}\0`;
+const preMarks = /\0pre(?<at>\d+)\0/gu;
+
+/** The text under `nodes`, as written: what a preformatted block holds. */
+const textOf = (nodes: readonly Node[]): string =>
+  nodes
+    .map((node) => {
+      if (node.nodeName === "#text" && "value" in node) {
+        return node.value;
+      }
+      if (!("tagName" in node) || unread.has(node.tagName)) {
+        return "";
+      }
+      return node.tagName === "br" ? "\n" : textOf(node.childNodes);
+    })
+    .join("");
+
+/** Whether an element is one a browser doesn't show: marked `hidden`. */
+const isHidden = (element: DefaultTreeAdapterTypes.Element): boolean =>
+  element.attrs.some(({ name }) => name === "hidden");
 
 const breakParagraph = ({ pieces }: Page): void => {
   pieces.push("\n\n");
 };
 
 /**
- * Reads `nodes` into `page`, in document order: text with its whitespace
- * collapsed as a browser shows it (kept as written inside `pre`), each
- * block on lines of its own, a heading by its level, a list item as one,
- * a table's cells apart.
+ * Reads one element into `page`: a line break, a heading by its level, a
+ * list item as one, a table's cells apart, a preformatted block as a mark
+ * for its code block, any other block on lines of its own.
  */
-const read = (nodes: readonly Node[], page: Page, pre: boolean): void => {
+const readElement = (
+  { tagName, childNodes }: DefaultTreeAdapterTypes.Element,
+  page: Page,
+  /** Reads an element's children into the page, as the page itself is read. */
+  within: (nodes: readonly Node[]) => void
+): void => {
+  const level = headingLevels[tagName];
+  if (tagName === "br") {
+    page.pieces.push("\n");
+  } else if (tagName === "pre") {
+    breakParagraph(page);
+    page.pieces.push(preMark(page.pre.length));
+    page.pre.push(textOf(childNodes));
+    breakParagraph(page);
+  } else if (level !== undefined) {
+    breakParagraph(page);
+    page.pieces.push(`${"#".repeat(level)} `);
+    within(childNodes);
+    breakParagraph(page);
+  } else if (tagName === "li") {
+    page.pieces.push("\n- ");
+    within(childNodes);
+    page.pieces.push("\n");
+  } else if (tagName === "td" || tagName === "th") {
+    within(childNodes);
+    page.pieces.push(" | ");
+  } else if (blocks.has(tagName)) {
+    breakParagraph(page);
+    within(childNodes);
+    breakParagraph(page);
+  } else {
+    within(childNodes);
+  }
+};
+
+/**
+ * Reads `nodes` into `page`, in document order: text with its whitespace
+ * collapsed as a browser shows it, and each element a browser shows
+ * (`readElement`), none it hides.
+ */
+const read = (nodes: readonly Node[], page: Page): void => {
   for (const node of nodes) {
     if (node.nodeName === "#text" && "value" in node) {
-      page.pieces.push(
-        pre ? node.value : node.value.replaceAll(whitespace, " ")
-      );
-    } else if ("tagName" in node && !unread.has(node.tagName)) {
-      const { tagName, childNodes } = node;
-      const level = headingLevels[tagName];
-      if (tagName === "br") {
-        page.pieces.push("\n");
-      } else if (level !== undefined) {
-        breakParagraph(page);
-        page.pieces.push(`${"#".repeat(level)} `);
-        read(childNodes, page, pre);
-        breakParagraph(page);
-      } else if (tagName === "li") {
-        page.pieces.push("\n- ");
-        read(childNodes, page, pre);
-        page.pieces.push("\n");
-      } else if (tagName === "td" || tagName === "th") {
-        read(childNodes, page, pre);
-        page.pieces.push(" | ");
-      } else if (blocks.has(tagName)) {
-        breakParagraph(page);
-        read(childNodes, page, pre || tagName === "pre");
-        breakParagraph(page);
-      } else {
-        read(childNodes, page, pre);
-      }
+      page.pieces.push(node.value.replaceAll(whitespace, " "));
+    } else if (
+      "tagName" in node &&
+      !unread.has(node.tagName) &&
+      !isHidden(node)
+    ) {
+      readElement(node, page, (children) => {
+        read(children, page);
+      });
     }
   }
 };
@@ -182,23 +236,27 @@ const find = (
 /**
  * A web page's text, parsed as a browser parses it (parse5, the HTML
  * standard's own algorithm): its title as the first heading, then what
- * its body shows, without scripts, styles or anything else a reader
- * never sees.
+ * its body shows, without scripts, styles, what is marked hidden or
+ * anything else a reader never sees. A preformatted block is a code
+ * block, its spaces and line breaks as written.
  */
 export const htmlMarkdown = (bytes: Uint8Array): string => {
   const { childNodes } = parse(decoded(bytes));
-  const page: Page = { pieces: [] };
+  const page: Page = { pieces: [], pre: [] };
   const title = find(childNodes, "title");
   if (title !== undefined) {
     page.pieces.push("# ");
-    read(title.childNodes, page, false);
+    read(title.childNodes, page);
     breakParagraph(page);
   }
   const body = find(childNodes, "body");
-  read(body === undefined ? [] : body.childNodes, page, false);
+  read(body === undefined ? [] : body.childNodes, page);
   return page.pieces
     .join("")
     .replaceAll(spacesAroundBreak, "\n")
     .replaceAll(blankLines, "\n\n")
-    .trim();
+    .trim()
+    .replaceAll(preMarks, (_mark, at: string) =>
+      fenced(page.pre[Number(at)] ?? "")
+    );
 };

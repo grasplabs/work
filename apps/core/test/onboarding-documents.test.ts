@@ -539,6 +539,12 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         bytes: fileOf("<title>Handbook</title><p>Claims go to ClaimsPro.</p>"),
       },
       { name: `teams-${run}.csv`, bytes: fileOf("Team,Lead\nOps,Ada\n") },
+      // UTF-16 with its byte order mark, as Windows saves "Unicode" text:
+      // half of it is NUL bytes, and it is text all the same.
+      {
+        name: `wide-${run}.txt`,
+        bytes: new Uint8Array([0xff, 0xfe, 0x48, 0x00, 0x69, 0x00]),
+      },
     ];
     const { requests, result } = await answering(
       files.map(() => answer(reading)),

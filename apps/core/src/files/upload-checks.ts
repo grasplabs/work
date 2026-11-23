@@ -33,12 +33,20 @@ const isZip = (bytes: Uint8Array): boolean =>
 /** How much of a file is looked at to tell text from anything else. */
 const textWithin = 8192;
 
+/** UTF-16's byte order marks, little and big endian: how Windows saves "Unicode" text. */
+const utf16Marks = [
+  [0xff, 0xfe],
+  [0xfe, 0xff],
+] as const;
+
 /**
- * Whether a file starts as text does: no NUL byte, which text has none of
- * and nearly every other kind of file has early. Whether all of it is
- * UTF-8 is for its reader to find (files/extractor/formats.ts).
+ * Whether a file starts as text does: with UTF-16's byte order mark,
+ * whose text is half NUL bytes; else with no NUL byte, which other text
+ * has none of and nearly every other kind of file has early. Whether all
+ * of it reads is for its reader to find (files/extractor/text.ts).
  */
 const isText = (bytes: Uint8Array): boolean =>
+  utf16Marks.some((mark) => startsWith(bytes, mark)) ||
   !bytes.subarray(0, textWithin).includes(0);
 
 /**
