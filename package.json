@@ -10,6 +10,7 @@
     "seed": "node scripts/seed.ts",
     "seed:admin": "node scripts/seed-admin.ts",
     "seed:onboarding": "node scripts/seed-onboarding.ts",
+    "seed:supplier-changes": "node scripts/seed-supplier-changes.ts",
     "e2e": "playwright test",
     "e2e:admin": "playwright test -c playwright.admin.config.ts",
     "e2e:build": "node e2e/build.ts",
