@@ -84,6 +84,10 @@ export default class extends WorkerEntrypoint {
   return started;
 };
 
+/** Text as the bytes of a file. */
+const bytesOf = (text: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(new TextEncoder().encode(text));
+
 describe("core's extractor", { timeout: 60_000 }, () => {
   it("reads a PDF by page, a Word file by its headings and a workbook by sheet", async () => {
     const [pdf, docx, xlsx] = await Promise.all([
@@ -112,6 +116,75 @@ describe("core's extractor", { timeout: 60_000 }, () => {
       economy: true,
       xlsx: true,
       facilities: true,
+    });
+  });
+
+  it("reads text as it is, a CSV as a table, data whole, and a web page and a deck by what they show", async () => {
+    const slide = (text: string): Uint8Array =>
+      bytesOf(
+        `<p:sld xmlns:a="a" xmlns:p="p"><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sld>`
+      );
+    const [markdown, latin, wide, csv, json, html, deck] = await Promise.all([
+      extracted(
+        "notes.md",
+        bytesOf("# Returns\n\nWithin *thirty* days."),
+        "md"
+      ),
+      // Windows-1252, as an older export is: "Café" with one byte for é.
+      extracted("old.txt", new Uint8Array([0x43, 0x61, 0x66, 0xe9]), "txt"),
+      // UTF-16 with its byte order mark, as Windows saves "Unicode" text.
+      extracted(
+        "wide.txt",
+        new Uint8Array([0xff, 0xfe, 0x48, 0x00, 0x69, 0x00]),
+        "txt"
+      ),
+      extracted(
+        "offices.csv",
+        bytesOf('City,Lead\n"Utrecht, NL",Ada\nGhent,Max\n'),
+        "csv"
+      ),
+      extracted("rules.json", bytesOf('{"note":"uses ``` inside"}'), "json"),
+      extracted(
+        "handbook.html",
+        bytesOf(
+          "<!doctype html><title>Handbook</title><style>p{color:red}</style><body><h2>Leave</h2><p hidden>The old policy.</p><p>Ask   your&nbsp;lead <b>first</b>.</p><script>track()</script><ul><li>Two weeks ahead</li></ul><pre>leave:\n  days: 25</pre>"
+        ),
+        "html"
+      ),
+      extracted(
+        "kickoff.pptx",
+        // A deck whose second file was moved to the front: its slide list
+        // says the order, not its files' names.
+        zipSync({
+          "ppt/presentation.xml": bytesOf(
+            '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst><p:sldId id="257" r:id="rId3"/><p:sldId id="256" r:id="rId2"/></p:sldIdLst></p:presentation>'
+          ),
+          "ppt/_rels/presentation.xml.rels": bytesOf(
+            '<Relationships><Relationship Id="rId2" Target="slides/slide1.xml"/><Relationship Id="rId3" Target="slides/slide2.xml"/></Relationships>'
+          ),
+          "ppt/slides/slide2.xml": slide("Who decides"),
+          "ppt/slides/slide1.xml": slide("First &amp; foremost"),
+          "ppt/notesSlides/notesSlide1.xml": slide("Not read"),
+        }),
+        "pptx"
+      ),
+    ]);
+
+    // A page that is only an empty preformatted block has no text at all:
+    // no fence of its own that would read as some.
+    await expect(
+      extracted("empty.html", bytesOf("<pre>  </pre>"), "html")
+    ).resolves.toBe("");
+    expect({ markdown, latin, wide, csv, json, html, deck }).toStrictEqual({
+      markdown: "# Returns\n\nWithin *thirty* days.",
+      latin: "Café",
+      wide: "Hi",
+      csv: "| City | Lead |\n| --- | --- |\n| Utrecht, NL | Ada |\n| Ghent | Max |",
+      json: '````\n{"note":"uses ``` inside"}\n````',
+      // What is marked hidden isn't read; a preformatted block keeps its
+      // indentation, as a code block.
+      html: "# Handbook\n\n## Leave\n\nAsk your lead first.\n\n- Two weeks ahead\n\n```\nleave:\n  days: 25\n```",
+      deck: "## Slide 1\n\nWho decides\n\n## Slide 2\n\nFirst & foremost",
     });
   });
 
