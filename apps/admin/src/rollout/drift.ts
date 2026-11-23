@@ -5,6 +5,7 @@
  * changed outside the admin (a `wrangler deploy`, a rollback in the
  * dashboard); one whose traffic is split was left so.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";

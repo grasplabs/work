@@ -4,17 +4,19 @@
  * from its Setup (src/hosting/placement.ts), in its stage's one shared
  * destination. No account is adopted or created for a client.
  */
+import "@tanstack/react-start/server-only";
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import { newClientIdSchema } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
+import { clientSignInSchema } from "../clients/sign-in-schema.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain, signInApps } from "../deploy/context.ts";
-import { clientSignInSchema, missingSignInApp } from "../deploy/core-config.ts";
+import { missingSignInApp } from "../deploy/core-config.ts";
 import { hostingKinds, jurisdictions } from "../hosting/organization.ts";
 import { clientIdProblem } from "./client-id.ts";
 import { ProvisionError } from "./errors.ts";

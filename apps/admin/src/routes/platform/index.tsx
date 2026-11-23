@@ -204,6 +204,8 @@ export const Route = createFileRoute("/platform/")({
         return null;
       }
     })();
+    // Every company read anew on entering, not the frame's minute-old
+    // grid: staff act on their deploys here.
     const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),

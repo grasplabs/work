@@ -8,6 +8,7 @@
  * Read only: staff see it, the organization's admins change it in their
  * own Settings. Never a key or its mask: core doesn't send one.
  */
+import "@tanstack/react-start/server-only";
 import {
   aiStatusReportPath,
   aiStatusReportPurpose,

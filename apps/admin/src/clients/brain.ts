@@ -7,6 +7,7 @@
  * whom core's audit log records for every read and every action. Nothing
  * of it is kept here: the page reads it as it opens and after an action.
  */
+import "@tanstack/react-start/server-only";
 import {
   brainActionAnswerSchema,
   brainActionPath,

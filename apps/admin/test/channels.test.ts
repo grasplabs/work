@@ -13,8 +13,8 @@ import {
   clients,
   clientWorkers,
 } from "../src/db/schema.ts";
-import type { Channel } from "../src/db/schema.ts";
 import { PlacementError, placeAndProvision } from "../src/hosting/placement.ts";
+import type { Channel } from "../src/rollout/channel-ids.ts";
 import {
   pinClient,
   promoteRelease,

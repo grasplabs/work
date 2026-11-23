@@ -30,13 +30,13 @@
  * the next is read; no tick holds more than a page in memory or in a
  * statement.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import { and, asc, count, eq, gt, lte, sql } from "drizzle-orm";
 
 import { adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
-  channelIds,
   channels,
   clientDeploys,
   clientPlacements,
@@ -46,11 +46,12 @@ import {
   clientWorkers,
   reconcilerLease,
 } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { currentRun, hasEnded, instanceStatus } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
+import { channelIds } from "./channel-ids.ts";
+import type { Channel } from "./channel-ids.ts";
 import { recordEnd } from "./deploy.ts";
 import type { DeployParams } from "./deploy.ts";
 import {

@@ -97,8 +97,9 @@ export const fetchClientLive = createServerFn({ method: "GET" })
  * last answered (`clientAdmins`), but those in `except`: the one whose
  * page is open, which that page reads on its own (`fetchClientAdmin`).
  * A POST, though it reads: it keeps when each core answered, and every
- * core's audit log records the read, so it takes the same-origin check
- * every change does (src/access.ts).
+ * core's audit log records the read, as staff opening it, which a page
+ * elsewhere mustn't make happen: Start's CSRF check (src/start.ts) refuses
+ * any call another site could send, GET or POST.
  */
 export const fetchClientAdmins = createServerFn({ method: "POST" })
   .validator(z.object({ except: z.array(z.string().min(1)).max(1) }).optional())

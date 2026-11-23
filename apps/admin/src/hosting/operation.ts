@@ -76,6 +76,7 @@
  * reach a row, an audit event or a log line, only their keyed
  * fingerprints.
  */
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import {

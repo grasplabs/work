@@ -4,6 +4,7 @@
  * it runs now, as a deploy, an apply and provisioning read them. Apart
  * from the reconciler, so the hosting code imports it without it.
  */
+import "@tanstack/react-start/server-only";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -14,7 +15,7 @@ import {
   clients,
   clientWorkers,
 } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
+import type { Channel } from "./channel-ids.ts";
 import { targetOf } from "./desired.ts";
 import type { ChannelReleases } from "./desired.ts";
 

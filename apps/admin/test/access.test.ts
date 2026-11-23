@@ -2,9 +2,12 @@ import { env, exports } from "cloudflare:workers";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { fetchClientGrid } from "../src/clients/functions.ts";
+import { setChannelFn } from "../src/rollout/functions.ts";
 import worker from "../src/server.ts";
 import { accessTeam } from "./access-config.ts";
 import { accessJwt, mockAccess } from "./access.ts";
+import { callServerFn } from "./pages.ts";
 
 mockAccess();
 
@@ -25,12 +28,15 @@ const statusOf = async (request: Request, changes: Partial<Env> = {}) => {
 };
 
 describe("the Access JWT", () => {
-  it("lets a staff member with a valid JWT in", async () => {
+  it("lets a staff member with a valid JWT in, to the page and to the server functions it reads with", async () => {
     const response = await exports.default.fetch(
       asStaff("/", await accessJwt(staffEmail))
     );
     expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toContain("Organizations");
+    await expect(response.text()).resolves.toContain(
+      "<title>Grasp admin</title>"
+    );
+    await expect(callServerFn(fetchClientGrid)).resolves.toBeInstanceOf(Array);
   });
 
   it("refuses every path without one, server functions and unknown pages included", async () => {
@@ -121,49 +127,71 @@ describe("the local dev bypass", () => {
 });
 
 describe("cross-site requests", () => {
-  it("refuses a server function called without TanStack's header, even a GET", async () => {
-    const jwt = await accessJwt(staffEmail);
-    const statuses = await Promise.all([
-      statusOf(asStaff("/_serverFn/anything?payload=x", jwt)),
-      statusOf(
-        asStaff("/_serverFn/anything", jwt, {
-          method: "POST",
-          headers: { origin },
-        })
-      ),
-      statusOf(
-        asStaff("/_serverFn/anything", jwt, {
-          headers: { "x-tsr-serverFn": "false" },
-        })
+  // Start's own check (src/start.ts), on a read (a GET) and a change (a
+  // POST), past the Access check: what a page on another site could send
+  // with a staff member's Access cookie, and a call nobody vouches for.
+  it("refuses a read and a change called from another site, from nowhere it can tell, or by no one Access vouches for", async () => {
+    const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
+    const change = { clientId, channel: "edge" as const };
+    const callers = [
+      { from: "https://attacker.test" },
+      { from: "https://attacker.test", fetchSite: "cross-site" },
+      { fetchSite: "same-site" },
+      { from: null },
+      { email: null },
+    ];
+    const refusals = await Promise.all(
+      callers.flatMap((caller) => [
+        callServerFn(fetchClientGrid, undefined, caller).then(
+          () => "answered",
+          String
+        ),
+        callServerFn(setChannelFn, change, caller).then(
+          () => "answered",
+          String
+        ),
+      ])
+    );
+    expect(refusals).toStrictEqual(
+      callers.flatMap(() => [
+        "Error: The server function answered 403",
+        "Error: The server function answered 403",
+      ])
+    );
+  });
+
+  it("lets the admin's own page call a read and a change, as the browser says it is or by its origin", async () => {
+    const answers = await Promise.all([
+      callServerFn(fetchClientGrid, undefined, { fetchSite: "same-origin" }),
+      callServerFn(fetchClientGrid),
+      callServerFn(
+        setChannelFn,
+        { clientId: "client-none", channel: "edge" },
+        { fetchSite: "same-origin", from: null }
       ),
     ]);
-    expect(statuses).toStrictEqual([403, 403, 403]);
+    expect(answers.map((answer) => typeof answer)).toStrictEqual([
+      "object",
+      "object",
+      "object",
+    ]);
   });
 
-  it("lets the admin's own client call a server function", async () => {
-    const jwt = await accessJwt(staffEmail);
-    const status = await statusOf(
-      asStaff("/_serverFn/anything", jwt, {
-        method: "POST",
-        headers: { origin, "x-tsr-serverFn": "true" },
-      })
-    );
-    // Past the check, TanStack Start answers: no such server function.
-    expect(status).toBe(500);
-  });
-
-  it("refuses a state change from another origin, or none", async () => {
+  it("refuses a state change elsewhere from another origin, or none", async () => {
     const jwt = await accessJwt(staffEmail);
     const statuses = await Promise.all([
       statusOf(
-        asStaff("/_serverFn/anything", jwt, {
+        asStaff("/mcp", jwt, {
           method: "POST",
-          headers: { origin: "https://attacker.test" },
+          headers: {
+            origin: "https://attacker.test",
+            "content-type": "text/plain",
+          },
         })
       ),
-      statusOf(asStaff("/_serverFn/anything", jwt, { method: "POST" })),
+      statusOf(asStaff("/ask", jwt, { method: "POST" })),
       statusOf(
-        asStaff("/_serverFn/anything", jwt, {
+        asStaff("/ask", jwt, {
           method: "DELETE",
           headers: { origin: "http://ops.grasp.test" },
         })

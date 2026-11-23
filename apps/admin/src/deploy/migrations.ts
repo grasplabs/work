@@ -9,6 +9,7 @@
  * step, so two runs at once could apply a migration twice: a deploy
  * expects to be its client's only runner (src/deploy/deploy.ts).
  */
+import "@tanstack/react-start/server-only";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 
 import type { CloudflareApi } from "../cloudflare/api.ts";

@@ -49,14 +49,15 @@ import {
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { StaffWindowSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
+import type { ClientSignInRecord } from "../clients/sign-in-schema.ts";
 import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
-import { channelIds } from "../db/schema.ts";
-import type { Channel } from "../db/schema.ts";
-import type { ClientSignInRecord, StaffWindow } from "../deploy/core-config.ts";
+import type { StaffWindow } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { formatTime } from "../releases/format.ts";
 import { releaseName } from "../releases/version.ts";
+import { channelIds } from "../rollout/channel-ids.ts";
+import type { Channel } from "../rollout/channel-ids.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { pinClientFn, setChannelFn } from "../rollout/functions.ts";

@@ -11,6 +11,7 @@
  * (`configChangedAt`), so its Setup says a change waits until staff
  * apply it, or a deploy of its next release carries it.
  */
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -25,8 +26,6 @@ import {
   storeSecret,
 } from "../deploy/context.ts";
 import {
-  adminUnreachable,
-  clientSignInSchema,
   missingSignInApp,
   staffWindowMaxDays,
   staffWindowOf,
@@ -35,6 +34,7 @@ import type { StaffWindow } from "../deploy/core-config.ts";
 import { sealSecret } from "../deploy/sealed-secrets.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
+import { adminUnreachable, clientSignInSchema } from "./sign-in-schema.ts";
 import { teamsBotSchema } from "./teams-bot.ts";
 
 /** Why staff's change to a client's settings was refused, as the page words it. */

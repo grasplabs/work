@@ -8,6 +8,7 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
+import "@tanstack/react-start/server-only";
 import { usualHostProviders } from "@grasp-os/shared/ai-providers";
 import {
   clientDomain as stageDomain,

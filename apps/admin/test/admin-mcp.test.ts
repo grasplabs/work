@@ -4,16 +4,18 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appKey } from "../src/admin/integrations-asked.ts";
+import { appKey, askedApps } from "../src/admin/integrations-asked.ts";
 import { adminMcp, servedTools } from "../src/admin/mcp.ts";
+import { organizationsOf } from "../src/admin/views.ts";
+import { fetchClientAdmins } from "../src/clients/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 import { longStream } from "./streamed-body.ts";
 
 // The admin's MCP (GRA-656), from its threat model: only a staff member
@@ -279,7 +281,14 @@ describe("the admin's MCP", () => {
         arguments: { organization: acme.clientId },
       })
     );
-    const { html } = await page("/", staff.email);
+    // What the overview reads, and the view of it the overview shows
+    // (src/admin/overview.test.tsx shows its words).
+    const read = await callServerFn(fetchClientAdmins, undefined, {
+      email: staff.email,
+    });
+    const shown = organizationsOf(read).find(
+      ({ admin }) => admin.client.id === acme.clientId
+    )?.view;
 
     const { organizations } = listedSchema.parse(
       listed.answer.result?.structuredContent
@@ -290,10 +299,7 @@ describe("the admin's MCP", () => {
       // Only a client whose core answered has numbers: the one down has none.
       organizations,
       // The overview says the same of Acme.
-      page: [
-        "85% known. Ready for Grasp’s go",
-        'text-status-attention tabular-nums">3<',
-      ].map((shown) => html.includes(shown)),
+      page: { known: shown?.knowledge.percent, needs: shown?.needs.length },
       oneSaysKnown: text?.includes("85%"),
       oneFailed: one.answer.result?.isError,
       // Each call read Acme's core once, as the caller; the page once more.
@@ -304,7 +310,7 @@ describe("the admin's MCP", () => {
       organizations: [
         expect.objectContaining({ id: acme.clientId, known: 85, needs: 3 }),
       ],
-      page: [true, true],
+      page: { known: 85, needs: 3 },
       oneSaysKnown: true,
       oneFailed: undefined,
       readers: [staff.email, staff.email, staff.email],
@@ -527,7 +533,11 @@ describe("the admin's MCP", () => {
     const { answer } = await asStaff(
       rpc("tools/call", { name: "apps_asked", arguments: {} })
     );
-    const { html } = await page("/integrations", staff.email);
+    // What the page of apps asked for reads, and the apps it lists of it
+    // (src/admin/overview.test.tsx shows them).
+    const read = await callServerFn(fetchClientAdmins, undefined, {
+      email: staff.email,
+    });
     const text = answer.result?.content?.[0]?.text ?? "";
     const structured = z
       .object({
@@ -544,13 +554,7 @@ describe("the admin's MCP", () => {
           .loose(),
       })
       .parse(answer.result?.structuredContent);
-    const onPage = [
-      ...new Set(
-        [...html.matchAll(/href="\/integrations\?app=(?<key>[^"]+)"/gu)].map(
-          (match) => match.groups?.key ?? ""
-        )
-      ),
-    ];
+    const onPage = askedApps(read).map(({ key }) => key);
 
     expect({
       isError: answer.result?.isError,

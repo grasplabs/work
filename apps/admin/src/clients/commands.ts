@@ -12,6 +12,7 @@
  * only connects out, will fetch its pending commands instead; that is a
  * second delivery behind `deliverCommand`, with the same envelope.
  */
+import "@tanstack/react-start/server-only";
 import {
   adminCommandAnswerSchema,
   adminCommandPath,

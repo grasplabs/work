@@ -21,16 +21,11 @@ import { Route as PlatformOffboardedRouteImport } from './routes/platform/offboa
 import { Route as OrganizationsClientIdIndexRouteImport } from './routes/organizations/$clientId/index'
 import { Route as OrganizationsClientIdAiUseRouteImport } from './routes/organizations/$clientId/ai-use'
 import { Route as OrganizationsClientIdBrainRouteImport } from './routes/organizations/$clientId/brain'
-import { Route as OrganizationsClientIdContractRouteImport } from './routes/organizations/$clientId/contract'
-import { Route as OrganizationsClientIdDataRouteImport } from './routes/organizations/$clientId/data'
 import { Route as OrganizationsClientIdDetailsRouteImport } from './routes/organizations/$clientId/details'
-import { Route as OrganizationsClientIdFlowRouteImport } from './routes/organizations/$clientId/flow'
 import { Route as OrganizationsClientIdHoursRouteImport } from './routes/organizations/$clientId/hours'
 import { Route as OrganizationsClientIdIntegrationsRouteImport } from './routes/organizations/$clientId/integrations'
 import { Route as OrganizationsClientIdInterviewsRouteImport } from './routes/organizations/$clientId/interviews'
 import { Route as OrganizationsClientIdLogRouteImport } from './routes/organizations/$clientId/log'
-import { Route as OrganizationsClientIdMembersRouteImport } from './routes/organizations/$clientId/members'
-import { Route as OrganizationsClientIdOrganizationRouteImport } from './routes/organizations/$clientId/organization'
 import { Route as OrganizationsClientIdSetupRouteImport } from './routes/organizations/$clientId/setup'
 import { Route as OrganizationsClientIdStepsRouteImport } from './routes/organizations/$clientId/steps'
 import { Route as OrganizationsClientIdWorkflowsRouteImport } from './routes/organizations/$clientId/workflows'
@@ -100,28 +95,10 @@ const OrganizationsClientIdBrainRoute =
     path: '/brain',
     getParentRoute: () => OrganizationsClientIdRoute,
   } as any)
-const OrganizationsClientIdContractRoute =
-  OrganizationsClientIdContractRouteImport.update({
-    id: '/contract',
-    path: '/contract',
-    getParentRoute: () => OrganizationsClientIdRoute,
-  } as any)
-const OrganizationsClientIdDataRoute =
-  OrganizationsClientIdDataRouteImport.update({
-    id: '/data',
-    path: '/data',
-    getParentRoute: () => OrganizationsClientIdRoute,
-  } as any)
 const OrganizationsClientIdDetailsRoute =
   OrganizationsClientIdDetailsRouteImport.update({
     id: '/details',
     path: '/details',
-    getParentRoute: () => OrganizationsClientIdRoute,
-  } as any)
-const OrganizationsClientIdFlowRoute =
-  OrganizationsClientIdFlowRouteImport.update({
-    id: '/flow',
-    path: '/flow',
     getParentRoute: () => OrganizationsClientIdRoute,
   } as any)
 const OrganizationsClientIdHoursRoute =
@@ -146,18 +123,6 @@ const OrganizationsClientIdLogRoute =
   OrganizationsClientIdLogRouteImport.update({
     id: '/log',
     path: '/log',
-    getParentRoute: () => OrganizationsClientIdRoute,
-  } as any)
-const OrganizationsClientIdMembersRoute =
-  OrganizationsClientIdMembersRouteImport.update({
-    id: '/members',
-    path: '/members',
-    getParentRoute: () => OrganizationsClientIdRoute,
-  } as any)
-const OrganizationsClientIdOrganizationRoute =
-  OrganizationsClientIdOrganizationRouteImport.update({
-    id: '/organization',
-    path: '/organization',
     getParentRoute: () => OrganizationsClientIdRoute,
   } as any)
 const OrganizationsClientIdSetupRoute =
@@ -202,16 +167,11 @@ export interface FileRoutesByFullPath {
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
-  '/organizations/$clientId/contract': typeof OrganizationsClientIdContractRoute
-  '/organizations/$clientId/data': typeof OrganizationsClientIdDataRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
-  '/organizations/$clientId/flow': typeof OrganizationsClientIdFlowRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
   '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
   '/organizations/$clientId/log': typeof OrganizationsClientIdLogRoute
-  '/organizations/$clientId/members': typeof OrganizationsClientIdMembersRoute
-  '/organizations/$clientId/organization': typeof OrganizationsClientIdOrganizationRoute
   '/organizations/$clientId/setup': typeof OrganizationsClientIdSetupRoute
   '/organizations/$clientId/steps': typeof OrganizationsClientIdStepsRoute
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
@@ -230,16 +190,11 @@ export interface FileRoutesByTo {
   '/platform': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
-  '/organizations/$clientId/contract': typeof OrganizationsClientIdContractRoute
-  '/organizations/$clientId/data': typeof OrganizationsClientIdDataRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
-  '/organizations/$clientId/flow': typeof OrganizationsClientIdFlowRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
   '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
   '/organizations/$clientId/log': typeof OrganizationsClientIdLogRoute
-  '/organizations/$clientId/members': typeof OrganizationsClientIdMembersRoute
-  '/organizations/$clientId/organization': typeof OrganizationsClientIdOrganizationRoute
   '/organizations/$clientId/setup': typeof OrganizationsClientIdSetupRoute
   '/organizations/$clientId/steps': typeof OrganizationsClientIdStepsRoute
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
@@ -260,16 +215,11 @@ export interface FileRoutesById {
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
-  '/organizations/$clientId/contract': typeof OrganizationsClientIdContractRoute
-  '/organizations/$clientId/data': typeof OrganizationsClientIdDataRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
-  '/organizations/$clientId/flow': typeof OrganizationsClientIdFlowRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
   '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
   '/organizations/$clientId/log': typeof OrganizationsClientIdLogRoute
-  '/organizations/$clientId/members': typeof OrganizationsClientIdMembersRoute
-  '/organizations/$clientId/organization': typeof OrganizationsClientIdOrganizationRoute
   '/organizations/$clientId/setup': typeof OrganizationsClientIdSetupRoute
   '/organizations/$clientId/steps': typeof OrganizationsClientIdStepsRoute
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
@@ -291,16 +241,11 @@ export interface FileRouteTypes {
     | '/platform/'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
-    | '/organizations/$clientId/contract'
-    | '/organizations/$clientId/data'
     | '/organizations/$clientId/details'
-    | '/organizations/$clientId/flow'
     | '/organizations/$clientId/hours'
     | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
     | '/organizations/$clientId/log'
-    | '/organizations/$clientId/members'
-    | '/organizations/$clientId/organization'
     | '/organizations/$clientId/setup'
     | '/organizations/$clientId/steps'
     | '/organizations/$clientId/workflows'
@@ -319,16 +264,11 @@ export interface FileRouteTypes {
     | '/platform'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
-    | '/organizations/$clientId/contract'
-    | '/organizations/$clientId/data'
     | '/organizations/$clientId/details'
-    | '/organizations/$clientId/flow'
     | '/organizations/$clientId/hours'
     | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
     | '/organizations/$clientId/log'
-    | '/organizations/$clientId/members'
-    | '/organizations/$clientId/organization'
     | '/organizations/$clientId/setup'
     | '/organizations/$clientId/steps'
     | '/organizations/$clientId/workflows'
@@ -348,16 +288,11 @@ export interface FileRouteTypes {
     | '/platform/'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
-    | '/organizations/$clientId/contract'
-    | '/organizations/$clientId/data'
     | '/organizations/$clientId/details'
-    | '/organizations/$clientId/flow'
     | '/organizations/$clientId/hours'
     | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
     | '/organizations/$clientId/log'
-    | '/organizations/$clientId/members'
-    | '/organizations/$clientId/organization'
     | '/organizations/$clientId/setup'
     | '/organizations/$clientId/steps'
     | '/organizations/$clientId/workflows'
@@ -466,32 +401,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationsClientIdBrainRouteImport
       parentRoute: typeof OrganizationsClientIdRoute
     }
-    '/organizations/$clientId/contract': {
-      id: '/organizations/$clientId/contract'
-      path: '/contract'
-      fullPath: '/organizations/$clientId/contract'
-      preLoaderRoute: typeof OrganizationsClientIdContractRouteImport
-      parentRoute: typeof OrganizationsClientIdRoute
-    }
-    '/organizations/$clientId/data': {
-      id: '/organizations/$clientId/data'
-      path: '/data'
-      fullPath: '/organizations/$clientId/data'
-      preLoaderRoute: typeof OrganizationsClientIdDataRouteImport
-      parentRoute: typeof OrganizationsClientIdRoute
-    }
     '/organizations/$clientId/details': {
       id: '/organizations/$clientId/details'
       path: '/details'
       fullPath: '/organizations/$clientId/details'
       preLoaderRoute: typeof OrganizationsClientIdDetailsRouteImport
-      parentRoute: typeof OrganizationsClientIdRoute
-    }
-    '/organizations/$clientId/flow': {
-      id: '/organizations/$clientId/flow'
-      path: '/flow'
-      fullPath: '/organizations/$clientId/flow'
-      preLoaderRoute: typeof OrganizationsClientIdFlowRouteImport
       parentRoute: typeof OrganizationsClientIdRoute
     }
     '/organizations/$clientId/hours': {
@@ -520,20 +434,6 @@ declare module '@tanstack/react-router' {
       path: '/log'
       fullPath: '/organizations/$clientId/log'
       preLoaderRoute: typeof OrganizationsClientIdLogRouteImport
-      parentRoute: typeof OrganizationsClientIdRoute
-    }
-    '/organizations/$clientId/members': {
-      id: '/organizations/$clientId/members'
-      path: '/members'
-      fullPath: '/organizations/$clientId/members'
-      preLoaderRoute: typeof OrganizationsClientIdMembersRouteImport
-      parentRoute: typeof OrganizationsClientIdRoute
-    }
-    '/organizations/$clientId/organization': {
-      id: '/organizations/$clientId/organization'
-      path: '/organization'
-      fullPath: '/organizations/$clientId/organization'
-      preLoaderRoute: typeof OrganizationsClientIdOrganizationRouteImport
       parentRoute: typeof OrganizationsClientIdRoute
     }
     '/organizations/$clientId/setup': {
@@ -577,16 +477,11 @@ declare module '@tanstack/react-router' {
 interface OrganizationsClientIdRouteChildren {
   OrganizationsClientIdAiUseRoute: typeof OrganizationsClientIdAiUseRoute
   OrganizationsClientIdBrainRoute: typeof OrganizationsClientIdBrainRoute
-  OrganizationsClientIdContractRoute: typeof OrganizationsClientIdContractRoute
-  OrganizationsClientIdDataRoute: typeof OrganizationsClientIdDataRoute
   OrganizationsClientIdDetailsRoute: typeof OrganizationsClientIdDetailsRoute
-  OrganizationsClientIdFlowRoute: typeof OrganizationsClientIdFlowRoute
   OrganizationsClientIdHoursRoute: typeof OrganizationsClientIdHoursRoute
   OrganizationsClientIdIntegrationsRoute: typeof OrganizationsClientIdIntegrationsRoute
   OrganizationsClientIdInterviewsRoute: typeof OrganizationsClientIdInterviewsRoute
   OrganizationsClientIdLogRoute: typeof OrganizationsClientIdLogRoute
-  OrganizationsClientIdMembersRoute: typeof OrganizationsClientIdMembersRoute
-  OrganizationsClientIdOrganizationRoute: typeof OrganizationsClientIdOrganizationRoute
   OrganizationsClientIdSetupRoute: typeof OrganizationsClientIdSetupRoute
   OrganizationsClientIdStepsRoute: typeof OrganizationsClientIdStepsRoute
   OrganizationsClientIdWorkflowsRoute: typeof OrganizationsClientIdWorkflowsRoute
@@ -596,18 +491,12 @@ interface OrganizationsClientIdRouteChildren {
 const OrganizationsClientIdRouteChildren: OrganizationsClientIdRouteChildren = {
   OrganizationsClientIdAiUseRoute: OrganizationsClientIdAiUseRoute,
   OrganizationsClientIdBrainRoute: OrganizationsClientIdBrainRoute,
-  OrganizationsClientIdContractRoute: OrganizationsClientIdContractRoute,
-  OrganizationsClientIdDataRoute: OrganizationsClientIdDataRoute,
   OrganizationsClientIdDetailsRoute: OrganizationsClientIdDetailsRoute,
-  OrganizationsClientIdFlowRoute: OrganizationsClientIdFlowRoute,
   OrganizationsClientIdHoursRoute: OrganizationsClientIdHoursRoute,
   OrganizationsClientIdIntegrationsRoute:
     OrganizationsClientIdIntegrationsRoute,
   OrganizationsClientIdInterviewsRoute: OrganizationsClientIdInterviewsRoute,
   OrganizationsClientIdLogRoute: OrganizationsClientIdLogRoute,
-  OrganizationsClientIdMembersRoute: OrganizationsClientIdMembersRoute,
-  OrganizationsClientIdOrganizationRoute:
-    OrganizationsClientIdOrganizationRoute,
   OrganizationsClientIdSetupRoute: OrganizationsClientIdSetupRoute,
   OrganizationsClientIdStepsRoute: OrganizationsClientIdStepsRoute,
   OrganizationsClientIdWorkflowsRoute: OrganizationsClientIdWorkflowsRoute,
@@ -637,10 +526,11 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
+import type { startInstance } from './start.ts'
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
     router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }
