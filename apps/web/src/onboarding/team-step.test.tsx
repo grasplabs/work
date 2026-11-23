@@ -1,0 +1,445 @@
+import type { OnboardingView, PlanInput } from "@grasp-os/shared/onboarding";
+// @vitest-environment happy-dom
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import { noContext } from "@grasp-os/shared/onboarding-context";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import { dateLocale } from "./date-locale.ts";
+import { firstChoice } from "./send-plan.ts";
+import { SetupStepBody } from "./setup-steps.tsx";
+import type { SetupData } from "./setup-steps.tsx";
+import { listeningOf, steps } from "./setup.ts";
+import { noteHeard, planDraft } from "./visit.ts";
+
+// The team step's plan, as a person in a region of their own types its
+// day: read in their order, or refused in words, and what "What happens
+// next" says is what core is asked to save. Core's answer is faked.
+
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+/** A Monday: the first links go out tomorrow, Tuesday 24 November. */
+const today = "2026-11-23";
+
+const view: OnboardingView = {
+  roster: {
+    teams: [
+      { id: "sales", name: "Sales", lead: "ana", does: "", off: false },
+      { id: "ops", name: "Ops", lead: "bo", does: "", off: false },
+    ],
+    people: [
+      {
+        id: "ana",
+        name: "Ana",
+        email: "ana@acme.test",
+        team: "sales",
+        title: "",
+        away: false,
+      },
+      {
+        id: "bo",
+        name: "Bo",
+        email: "bo@acme.test",
+        team: "ops",
+        title: "",
+        away: false,
+      },
+    ],
+  },
+  plan: null,
+  progress: null,
+  agreed: true,
+  paused: false,
+  kickoff: null,
+  teamsInBrain: null,
+  sponsor: null,
+  context: noContext,
+  waiting: 0,
+  mailSends: true,
+  mailDomain: "mail.example.test",
+};
+
+const data: SetupData = {
+  admin: "Ada",
+  company: null,
+  view,
+  links: [],
+  documents: [],
+  sendingDomain: "mail.example.test",
+  gate: {
+    open: false,
+    closedSince: null,
+    threshold: 80,
+    known: 10,
+    parts: [],
+    ready: false,
+    over: false,
+    openedAt: null,
+    staff: null,
+  },
+  review: { differences: [], mapped: 0 },
+  directory: null,
+  hr: null,
+  suites: [],
+  places: null,
+  choices: noChoices,
+  signIn: ["microsoft"],
+  ai: null,
+  identity: {
+    userId: "ada",
+    email: "ada@acme.test",
+    name: "Ada",
+    role: "admin",
+    teams: [],
+    staff: false,
+    expiresAt: "2026-11-24T00:00:00Z",
+  },
+};
+
+let root: Root | undefined;
+
+/** The browser's own languages, as the page reads them. */
+const browserIn = (languages: string[]): void => {
+  Object.defineProperty(navigator, "languages", {
+    configurable: true,
+    get: () => languages,
+  });
+};
+
+/** Lets every pending promise and render settle. */
+const settled = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 0);
+    await promise;
+  });
+};
+
+/** The team step, on a page in `language` in a browser set to `browser`; what core is asked to save. */
+const shown = async (
+  language: string,
+  browser: string[]
+): Promise<{ saved: PlanInput[] }> => {
+  i18n.loadAndActivate({ locale: language, messages: {} });
+  browserIn(browser);
+  noteHeard("team");
+  const saved: PlanInput[] = [];
+  const core = {
+    withSession: async <T,>(
+      action: (session: {
+        onboarding: { savePlan: (plan: PlanInput) => Promise<OnboardingView> };
+      }) => Promise<T>
+    ): Promise<T> =>
+      await action({
+        onboarding: {
+          savePlan: async (plan) => {
+            saved.push(plan);
+            return await Promise.resolve(view);
+          },
+        },
+      }),
+  };
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () => (
+        <SetupStepBody
+          cramped={false}
+          data={data}
+          furthest={0}
+          go={() => {}}
+          listening={listeningOf(
+            { roster: null, plan: null, progress: null },
+            today
+          )}
+          message={null}
+          onMadeWay={() => {}}
+          onMessage={() => {}}
+          onSettle={() => {}}
+          onStory={() => {}}
+          onward={() => {}}
+          parts={[]}
+          path={steps}
+          percent={10}
+          settled={[]}
+          step="team"
+          today={today}
+        />
+      ),
+    }),
+    history: createMemoryHistory(),
+    context: { core },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    );
+    await router.load();
+  });
+  await settled();
+  return { saved };
+};
+
+/** The field named `name`. */
+const field = (name: string): HTMLInputElement => {
+  const found = document.querySelector(`input[aria-label="${name}"]`);
+  if (!(found instanceof HTMLInputElement)) {
+    throw new TypeError(`No field ${name}`);
+  }
+  return found;
+};
+
+/** Types `typed` into the first day's field and leaves it, as a person does. */
+const typeDay = async (typed: string): Promise<void> => {
+  const day = field("Another day");
+  await act(async () => {
+    day.focus();
+    Reflect.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set?.call(day, typed);
+    day.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await act(async () => {
+    day.blur();
+    day.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+const sendButton = (): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (each) => each.textContent?.trim() === "I sent it"
+  );
+  if (found === undefined) {
+    throw new TypeError("No I sent it");
+  }
+  return found;
+};
+
+/** What "What happens next" says. */
+const nextSaid = (): string =>
+  [...document.querySelectorAll('[role="status"]')]
+    .map((each) => each.textContent ?? "")
+    .find((each) => each.startsWith("What happens next"))
+    ?.replace(/^What happens next/u, "") ?? "";
+
+const send = async (): Promise<void> => {
+  await act(async () => {
+    sendButton().click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** The text of the error under the first day's field, if it shows one. */
+const error = (): string | undefined =>
+  document.querySelector('[data-slot="field-error"]')?.textContent?.trim();
+
+describe("the locale a day is typed in", () => {
+  it("is the page's language in the browser's region, else its first language's", () => {
+    expect({
+      uk: dateLocale("en", ["en-GB", "en"]),
+      us: dateLocale("en", ["en-US"]),
+      onlyEnglish: dateLocale("en", ["en"]),
+      dutchFirst: dateLocale("en", ["nl-NL", "en-US"]),
+      dutchOnly: dateLocale("en", ["nl-NL"]),
+      regionless: dateLocale("en", ["nl"]),
+      dutch: dateLocale("nl", ["en-GB", "nl-BE"]),
+      german: dateLocale("de", ["de-AT"]),
+      nothing: dateLocale("fr", []),
+      broken: dateLocale("es", ["not a tag", "es-MX"]),
+    }).toStrictEqual({
+      uk: "en-GB",
+      us: "en-US",
+      onlyEnglish: "en-US",
+      dutchFirst: "en-US",
+      dutchOnly: "en-NL",
+      regionless: "en-NL",
+      dutch: "nl-BE",
+      german: "de-AT",
+      nothing: "fr",
+      broken: "es-MX",
+    });
+  });
+});
+
+// Each region's own order, day first or month first, as typed and as the field writes it back.
+const regions = [
+  {
+    language: "en",
+    browser: "en-GB",
+    dayFirst: "12/01/2027",
+    monthFirst: "01/12/2027",
+    reads: "dayFirst",
+    hint: "For example 31/12/2026",
+    // As "What happens next" says it, in the page's language.
+    said: "12 Jan 2027",
+  },
+  {
+    language: "en",
+    browser: "en-US",
+    dayFirst: "12/01/2027",
+    monthFirst: "01/12/2027",
+    reads: "monthFirst",
+    hint: "For example 12/31/2026",
+    // As "What happens next" says it, in the page's language.
+    said: "12 Jan 2027",
+  },
+  {
+    language: "nl",
+    browser: "nl-NL",
+    dayFirst: "12-01-2027",
+    monthFirst: "01-12-2027",
+    reads: "dayFirst",
+    hint: "For example 31-12-2026",
+    // As "What happens next" says it, in the page's language.
+    said: "12 jan 2027",
+  },
+  {
+    language: "de",
+    browser: "de-DE",
+    dayFirst: "12.01.2027",
+    monthFirst: "01.12.2027",
+    reads: "dayFirst",
+    hint: "For example 31.12.2026",
+    // As "What happens next" says it, in the page's language.
+    said: "12. Jan. 2027",
+  },
+  {
+    language: "fr",
+    browser: "fr-FR",
+    dayFirst: "12/01/2027",
+    monthFirst: "01/12/2027",
+    reads: "dayFirst",
+    hint: "For example 31/12/2026",
+    // As "What happens next" says it, in the page's language.
+    said: "12 janv. 2027",
+  },
+  {
+    language: "es",
+    browser: "es-ES",
+    dayFirst: "12/01/2027",
+    monthFirst: "01/12/2027",
+    reads: "dayFirst",
+    hint: "For example 31/12/2026",
+    // As "What happens next" says it, in the page's language.
+    said: "12 ene 2027",
+  },
+] as const;
+
+describe("the team step's day, typed", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+    i18n.loadAndActivate({ locale: "en", messages: {} });
+    // What one test chose is no draft of the next one's.
+    planDraft.keep("forgotten", firstChoice(today));
+  });
+
+  it.each(regions)(
+    "reads $browser's order, says the format, and saves what it says",
+    async (region) => {
+      const { saved } = await shown(region.language, [region.browser]);
+      expect(document.body.textContent).toContain(region.hint);
+      // 12 January 2027 in this region's order; the other order is 1 December.
+      await typeDay(region[region.reads]);
+      const said = nextSaid();
+      await send();
+      expect({
+        field: field("Another day").value,
+        saved: saved.map((plan) => plan.start),
+        said: said.includes(region.said),
+      }).toStrictEqual({
+        field: region[region.reads],
+        saved: ["2027-01-12"],
+        said: true,
+      });
+    }
+  );
+
+  it("takes the other order only where it is a day too: 01/12 in the UK is 1 December", async () => {
+    const { saved } = await shown("en", ["en-GB"]);
+    await typeDay("01/12/2026");
+    expect(nextSaid()).toContain("on 1 Dec at 9:00");
+    await send();
+    expect(saved.map((plan) => plan.start)).toStrictEqual(["2026-12-01"]);
+  });
+
+  it("says the day it saves, its year only when it isn't this one", async () => {
+    await shown("en", ["en-GB"]);
+    expect(nextSaid()).toContain("on 24 Nov at 9:00");
+    await typeDay("04/01/2027");
+    expect(nextSaid()).toContain("on 4 Jan 2027 at 9:00");
+  });
+
+  it("refuses a day typed in another order, says why, and sends nothing until it is put right", async () => {
+    const { saved } = await shown("en", ["en-US"]);
+    await typeDay("31/12/2026");
+    expect({
+      error: error(),
+      marked: field("Another day").getAttribute("aria-invalid"),
+      disabled: sendButton().disabled,
+      // What it would have said is still the day before, so it can't be sent with it.
+      next: nextSaid().includes("on 24 Nov at 9:00"),
+    }).toStrictEqual({
+      error:
+        "I can’t plan that day. Type one like 12/31/2026, 23 Nov or later.",
+      marked: "true",
+      disabled: true,
+      next: true,
+    });
+    // Said too, by the page's one announcer, a moment after it shows.
+    await act(async () => {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      setTimeout(() => {
+        resolve(true);
+      }, 150);
+      await promise;
+    });
+    expect(
+      document.querySelector('[data-ui-sdk-announcer=""]')?.textContent
+    ).toBe(error());
+    await send();
+    expect(saved).toStrictEqual([]);
+
+    await typeDay("12/31/2026");
+    expect({ error: error(), disabled: sendButton().disabled }).toStrictEqual({
+      error: undefined,
+      disabled: false,
+    });
+    await send();
+    expect(saved.map((plan) => plan.start)).toStrictEqual(["2026-12-31"]);
+  });
+
+  it("refuses a day before today, and text that is no day at all", async () => {
+    await shown("en", ["en-GB"]);
+    await typeDay("20/11/2026");
+    expect(sendButton().disabled).toBeTruthy();
+    await typeDay("soon");
+    expect(sendButton().disabled).toBeTruthy();
+    await typeDay("25/11/2026");
+    expect(sendButton().disabled).toBeFalsy();
+  });
+});

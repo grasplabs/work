@@ -1874,7 +1874,9 @@ const Team = (props: StepProps) => {
   };
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
-  const when = useSendWords()(choice.day, choice.time);
+  // A day field holding typed text that is no day to plan: the plan waits for one, as what it says and saves is the day before it.
+  const [wrong, setWrong] = useState({ first: false, later: false });
+  const when = useSendWords(props.today)(choice.day, choice.time);
   const going = teams.length - choice.held.length;
   const next =
     choice.held.length === 0
@@ -1958,6 +1960,9 @@ const Team = (props: StepProps) => {
           <SendPlanForm
             choice={choice}
             onChange={choose}
+            onWrong={(field, now) => {
+              setWrong((before) => ({ ...before, [field]: now }));
+            }}
             teams={teams}
             today={props.today}
           />
@@ -1967,6 +1972,8 @@ const Team = (props: StepProps) => {
       <Primary
         busy={busy}
         disabled={
+          wrong.first ||
+          wrong.later ||
           !choiceHolds(
             choice,
             teams.map((team) => team.id)

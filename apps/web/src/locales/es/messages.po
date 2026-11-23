@@ -5981,6 +5981,10 @@ msgstr "Para todos"
 msgid "For everyone in the company"
 msgstr "Para todos en la empresa"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "For example {example}"
+msgstr "Por ejemplo {example}"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Por ejemplo Personio o Twinfield"
@@ -6874,6 +6878,10 @@ msgstr "Conexiones HTTP"
 #: src/connections/http-connections.tsx
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// y un nombre de host público, sin nada detrás."
+
+#: src/onboarding/send-plan-form.tsx
+msgid "I can’t plan that day. Type one like {example}, {earliest} or later."
+msgstr "No puedo planificar ese día. Escribe uno como {example}, a partir del {earliest}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."

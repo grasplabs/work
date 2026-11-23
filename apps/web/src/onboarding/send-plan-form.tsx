@@ -1,6 +1,11 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+} from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Text } from "@grasp-os/ui/components/text";
 import {
@@ -18,9 +23,11 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { formatList } from "../format.ts";
+import { dateLocale } from "./date-locale.ts";
 import { dayChoices } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 
@@ -50,13 +57,14 @@ const styles = stylex.create({
   },
   teamsPart: { gap: space[2] },
   words: { display: "flex", flexDirection: "column" },
+  // On one line by their words: a day's form to type it in, or why it can't be, hangs below it.
   when: {
     display: "flex",
     flexWrap: "wrap",
-    alignItems: "center",
+    alignItems: "baseline",
     gap: space[2],
   },
-  day: { width: "10rem" },
+  day: { width: "11rem" },
   hour: { width: "7rem" },
   // The legend's words stand in the fieldset's own flow, as a row.
   legend: { display: "contents" },
@@ -133,29 +141,135 @@ const isoMonths = [
   "Dec",
 ] as const;
 
-/** "6 Oct": an ISO day, without its year, in the page's language. */
-const formatDay = (iso: string, locale: string): string => {
+/** "6 Oct", or "6 Oct 2027" in a year other than `thisYear`: an ISO day in the page's language. */
+const formatDay = (iso: string, locale: string, thisYear: number): string => {
   const [year = 0, month = 1, day = 1] = iso.split("-").map(Number);
+  const withYear = year !== thisYear;
   if (locale === "en") {
-    return `${day} ${isoMonths[month - 1] ?? ""}`;
+    const date = `${day} ${isoMonths[month - 1] ?? ""}`;
+    return withYear ? `${date} ${year}` : date;
   }
   return new Intl.DateTimeFormat(locale, {
     day: "numeric",
     month: "short",
+    ...(withYear ? { year: "numeric" } : {}),
     timeZone: "UTC",
   }).format(Date.UTC(year, month - 1, day));
 };
 
+/** The year of an ISO day. */
+const yearOf = (iso: string): number => Number(iso.slice(0, 4));
+
 const leadingZero = /^0/u;
 
-/** A choice in a sentence, as the screen says it: "on 6 Oct at 9:00". */
-export const useSendWords = (): ((day: string, time: string) => string) => {
+/** A choice in a sentence, as the screen says it, `today` being today: "on 6 Oct at 9:00", "on 4 Jan 2027 at 9:00". */
+export const useSendWords = (
+  today: string
+): ((day: string, time: string) => string) => {
   const { t, i18n } = useLingui();
   return (day, time) => {
-    const date = formatDay(day, i18n.locale);
+    const date = formatDay(day, i18n.locale, yearOf(today));
     const hour = time.replace(leadingZero, "");
     return t`on ${date} at ${hour}`;
   };
+};
+
+/** The locale this person types a date in: the page's language in their browser's region (date-locale.ts). */
+const useDateLocale = (): string => {
+  const { i18n } = useLingui();
+  return dateLocale(
+    i18n.locale,
+    typeof navigator === "undefined" ? [] : navigator.languages
+  );
+};
+
+/** The last day of `year` as it is typed in `locale`, so its order is plain: "31/12/2026", "12/31/2026". */
+const exampleDay = (year: number, locale: string): string =>
+  new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(Date.UTC(year, 11, 31));
+
+/** Where Damsko's DatePicker marks typed text it can't take, a day that is none or comes too early. */
+const unreadable = '[data-slot="date-picker"][data-invalid]';
+
+/**
+ * A day, typed in this person's own date order or chosen in the calendar,
+ * with the form to type it in under it; while what is typed is no day that
+ * can be planned, why, said as it shows, and `onWrong` hears it, so the
+ * plan is not sent with the day before it.
+ */
+const DayField = ({
+  label,
+  min,
+  value,
+  today,
+  onDay,
+  onWrong,
+}: {
+  label: string;
+  /** The first day that can be planned. */
+  min: string;
+  value: string;
+  today: string;
+  onDay: (day: string) => void;
+  onWrong: (wrong: boolean) => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const locale = useDateLocale();
+  const example = exampleDay(yearOf(today), locale);
+  const earliest = formatDay(min, i18n.locale, yearOf(today));
+  const box = useRef<HTMLDivElement>(null);
+  const [wrong, setWrong] = useState(false);
+  // At once: the press that left the field lands on a plan that waits.
+  const tell = useEffectEvent((now: boolean) => {
+    flushSync(() => {
+      setWrong(now);
+      onWrong(now);
+    });
+  });
+  // The picker keeps typed text it can't take, marked, and the day before it; it says so only by its
+  // mark, until Damsko's DatePicker tells a page itself. Gone, as when the later teams are not
+  // planned after all, the field holds nothing up.
+  useEffect(() => {
+    const at = box.current;
+    const watch = new MutationObserver(() => {
+      tell(at?.querySelector(unreadable) !== null);
+    });
+    if (at !== null) {
+      watch.observe(at, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-invalid"],
+      });
+    }
+    return () => {
+      watch.disconnect();
+      tell(false);
+    };
+  }, []);
+  return (
+    <div ref={box} {...stylex.props(styles.day)}>
+      <Field data-invalid={wrong}>
+        <DatePicker
+          aria-label={label}
+          locale={locale}
+          min={min}
+          onValueChange={(day) => {
+            if (typeof day === "string" && day !== "") {
+              onDay(day);
+            }
+          }}
+          size="sm"
+          value={value}
+        />
+        <FieldDescription>{t`For example ${example}`}</FieldDescription>
+        <FieldError>{t`I can’t plan that day. Type one like ${example}, ${earliest} or later.`}</FieldError>
+      </Field>
+    </div>
+  );
 };
 
 export const SendPlanForm = ({
@@ -163,11 +277,14 @@ export const SendPlanForm = ({
   teams,
   choice,
   onChange,
+  onWrong,
 }: {
   today: string;
   teams: SendTeam[];
   choice: SendChoice;
   onChange: (choice: SendChoice) => void;
+  /** Hears whether a day field holds typed text that is no day that can be planned: the first one's, or the later one's. */
+  onWrong: (field: "first" | "later", wrong: boolean) => void;
 }) => {
   const { t } = useLingui();
   const dayField = useId();
@@ -226,19 +343,18 @@ export const SendPlanForm = ({
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-          <div {...stylex.props(styles.day)}>
-            <DatePicker
-              aria-label={t`Another day`}
-              min={today}
-              onValueChange={(value) => {
-                if (typeof value === "string" && value !== "") {
-                  onChange({ ...choice, day: value });
-                }
-              }}
-              size="sm"
-              value={choice.day}
-            />
-          </div>
+          <DayField
+            label={t`Another day`}
+            min={today}
+            onDay={(day) => {
+              onChange({ ...choice, day });
+            }}
+            onWrong={(wrong) => {
+              onWrong("first", wrong);
+            }}
+            today={today}
+            value={choice.day}
+          />
           <label htmlFor={timeField} {...stylex.props(styles.at)}>
             {at}
           </label>
@@ -351,19 +467,18 @@ export const SendPlanForm = ({
             </ToggleGroup>
             {choice.heldDay === null ? null : (
               <>
-                <div {...stylex.props(styles.day)}>
-                  <DatePicker
-                    aria-label={t`The day the other teams get their links`}
-                    min={choice.day}
-                    onValueChange={(value) => {
-                      if (typeof value === "string" && value !== "") {
-                        onChange({ ...choice, heldDay: value });
-                      }
-                    }}
-                    size="sm"
-                    value={choice.heldDay}
-                  />
-                </div>
+                <DayField
+                  label={t`The day the other teams get their links`}
+                  min={choice.day}
+                  onDay={(heldDay) => {
+                    onChange({ ...choice, heldDay });
+                  }}
+                  onWrong={(wrong) => {
+                    onWrong("later", wrong);
+                  }}
+                  today={today}
+                  value={choice.heldDay}
+                />
                 <span {...stylex.props(styles.at)}>{at}</span>
                 <Input
                   aria-label={t`The hour the other teams get their links`}
