@@ -11,6 +11,8 @@ import type {
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
 
+import { brands } from "../connections/brands.ts";
+import type { Brand } from "../connections/brands.ts";
 import {
   httpConnectionsOf,
   integrationsOf,
@@ -143,12 +145,17 @@ const overviewRows = ({
 };
 
 /**
- * A tool a workflow reaches: an app by its name. Its mark waits for the
- * product's brand logos (Damsko draws none): a tile shows its first letter.
+ * A tool a workflow reaches: an app by its name, with the product's own
+ * mark (connections/brands.ts) where its catalog id is exactly a brand's;
+ * a tile shows its first letter for the rest.
  */
 export interface Tool {
   name: string;
+  brand: Brand | undefined;
 }
+
+/** Whether the product has its own mark for the catalog id `id`, by that id exactly. */
+const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
 
 /** The tools each workflow reaches, by the workflow's ID. */
 export type ToolsByWorkflow = ReadonlyMap<string, readonly Tool[]>;
@@ -168,7 +175,8 @@ const toolsByWorkflow = (
     tools.set(workflow, [...(tools.get(workflow) ?? []), tool]);
   };
   for (const integration of integrationsOf(entries, connections)) {
-    const tool = { name: integration.name };
+    const { id, name } = integration;
+    const tool = { name, brand: isBrand(id) ? id : undefined };
     for (const workflow of workflowsOf(integration, uses)) {
       add(workflow.id, tool);
     }
@@ -178,7 +186,7 @@ const toolsByWorkflow = (
       ({ connectionId }) => connectionId === connection.id
     );
     for (const workflow of used?.workflows ?? []) {
-      add(workflow.id, { name: http.name });
+      add(workflow.id, { name: http.name, brand: undefined });
     }
   }
   return tools;

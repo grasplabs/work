@@ -57,7 +57,13 @@ const rows = [
 ];
 
 const tools: ToolsByWorkflow = new Map([
-  ["wf-archive", [{ name: "Microsoft 365" }, { name: "Acme CRM" }]],
+  [
+    "wf-archive",
+    [
+      { name: "Microsoft 365", brand: "microsoft" },
+      { name: "Acme CRM", brand: undefined },
+    ],
+  ],
 ]);
 
 const triggers: TriggersByWorkflow = new Map([
@@ -188,6 +194,12 @@ describe("the Workflows page's rows", () => {
         .querySelector('[data-slot="brand-icon-group"]')
         ?.getAttribute("aria-label")
     ).toBe("Microsoft 365 and Acme CRM");
+    // Microsoft's own mark, and Acme CRM's first letter: it has none.
+    expect(
+      [...archive.querySelectorAll('[data-slot="brand-icon"]')].map((tile) =>
+        tile.querySelector("svg") === null ? tile.textContent : "mark"
+      )
+    ).toStrictEqual(["mark", "A"]);
     expect(archive.textContent).toContain("12 this week");
   });
 

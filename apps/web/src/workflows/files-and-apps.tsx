@@ -49,9 +49,9 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState, Fragment } from "react";
 import type { ReactNode } from "react";
 
-import { AppLogo } from "../connections/app-logo.tsx";
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
+import { ProviderMark } from "../connections/provider-mark.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatBytes, formatDateTime } from "../format.ts";
@@ -167,12 +167,11 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
               to="/integrations/$integration"
             >
               <ItemMedia>
-                {/* The app's own mark, as Integrations draws it, until its
-                  brand logos move onto Damsko with that area. */}
-                <AppLogo
+                {/* The app's own mark, as Integrations draws it. */}
+                <ProviderMark
+                  id={integration.id}
                   logo={integration.logo}
                   name={integration.name}
-                  size="sm"
                 />
               </ItemMedia>
               <ItemContent>

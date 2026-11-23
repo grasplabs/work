@@ -38,6 +38,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Fragment, useId } from "react";
 
+import { brands } from "../connections/brands.ts";
 import { formatDayMonth, formatNumber, formatSince } from "../format.ts";
 import { phases, stateOf } from "./overview.ts";
 import type {
@@ -234,7 +235,9 @@ const Route = ({
       )}
       {tools.length === 0 ? null : (
         <BrandIconGroup
-          items={tools.map(({ name }) => ({ name }))}
+          items={tools.map(({ name, brand }) =>
+            brand === undefined ? { name } : { name, logo: brands[brand].logo }
+          )}
           max={toolsShown}
           size="xs"
         />
