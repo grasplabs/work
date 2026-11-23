@@ -44,7 +44,6 @@ import { HeaderIcon } from "./chat-switcher.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import type { ModelsUnavailable } from "./global-chat.tsx";
 import { pendingCard } from "./make-card.tsx";
-import { RecentsButton } from "./recents.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
 
@@ -330,7 +329,6 @@ const Footer = () => {
       <ChatSources names={sourceNames} provenance={view.provenance} />
       <AskOrCompose
         {...composer}
-        actions={<RecentsButton />}
         agent={
           summary === undefined ? undefined : (
             <AgentName agentId={summary.agentId} agents={agents} />

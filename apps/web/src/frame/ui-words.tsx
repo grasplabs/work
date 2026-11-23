@@ -172,7 +172,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     questionnaire: {
       error: t`Could not send the answer`,
       next: t({ message: "Next", context: "the next question" }),
-      other: t({ message: "Other", context: "an answer in one's own words" }),
+      other: t`In my own words`,
       previous: t({ message: "Previous", context: "the question before" }),
       progress: (current, total) => t`Question ${current} of ${total}`,
       progressLabel: t`Progress`,

@@ -1,3 +1,4 @@
+import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
 import type { ModelEffort } from "@grasp-os/shared/models";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -5,9 +6,12 @@ import {
   ModelSelectorContent,
   ModelSelectorEffort,
   ModelSelectorEmpty,
+  ModelSelectorGroup,
   ModelSelectorInput,
   ModelSelectorItem,
   ModelSelectorList,
+  ModelSelectorMaker,
+  ModelSelectorMakers,
   ModelSelectorName,
   ModelSelectorTrigger,
 } from "@grasp-os/ui/components/model-selector";
@@ -23,11 +27,13 @@ import {
   PromptInputHeader,
   PromptInputMention,
   PromptInputNote,
+  PromptInputSpeechButton,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
   usePromptInputAttachments,
 } from "@grasp-os/ui/components/prompt-input";
+import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { msg, select } from "@lingui/core/macro";
@@ -42,6 +48,7 @@ import { acceptedFiles, FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { promptStatusOf } from "./chat-states.ts";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
+import { useDictation } from "./dictation.ts";
 import {
   mentionsOf,
   textOf,
@@ -90,6 +97,15 @@ const maxQuestionLength = 100_000;
 export const modelName = (model: string): string =>
   model.split("/").at(-1) ?? model;
 
+/** Who makes `model`: the first part of its ID (`anthropic/…`). */
+const makerOf = (model: string): string => model.split("/")[0] ?? "";
+
+/** A maker as people know it: the AI provider's name, else its ID. */
+const makerName = (maker: string): string => {
+  const provider = aiProviderIdSchema.safeParse(maker);
+  return provider.success ? aiProviders[provider.data].label : maker;
+};
+
 /** How each effort is called, least first. */
 const effortNames = {
   low: msg({ message: "Low", context: "thinking effort" }),
@@ -118,6 +134,7 @@ const ModelPicker = ({
   const { t } = useLingui();
   const name = modelName(model);
   const thinks = efforts.length > 0 && onEffort !== undefined;
+  const makers = [...new Set(models.map(makerOf))];
   const level =
     thinks && effort !== undefined ? t(effortNames[effort]) : undefined;
   return (
@@ -154,16 +171,39 @@ const ModelPicker = ({
       </ModelSelectorTrigger>
       <ModelSelectorContent side="top">
         <ModelSelectorInput />
+        {makers.length > 1 ? (
+          <ModelSelectorMakers>
+            {makers.map((maker) => (
+              <ModelSelectorMaker
+                aria-label={makerName(maker)}
+                key={maker}
+                value={maker}
+              />
+            ))}
+          </ModelSelectorMakers>
+        ) : null}
         <ModelSelectorList>
           <ModelSelectorEmpty />
-          {models.map((each, index) => (
-            <ModelSelectorItem
-              {...(index === 0 ? { description: t`The default` } : {})}
-              key={each}
-              value={each}
+          {makers.map((maker) => (
+            <ModelSelectorGroup
+              heading={makerName(maker)}
+              key={maker}
+              value={maker}
             >
-              <ModelSelectorName>{modelName(each)}</ModelSelectorName>
-            </ModelSelectorItem>
+              {models
+                .filter((each) => makerOf(each) === maker)
+                .map((each) => (
+                  <ModelSelectorItem
+                    {...(each === models[0]
+                      ? { description: t`The default` }
+                      : {})}
+                    key={each}
+                    value={each}
+                  >
+                    <ModelSelectorName>{modelName(each)}</ModelSelectorName>
+                  </ModelSelectorItem>
+                ))}
+            </ModelSelectorGroup>
           ))}
         </ModelSelectorList>
         {thinks ? (
@@ -198,9 +238,8 @@ const AgentModel = ({ model }: { model: string }) => {
   );
 };
 
-/** The box's tools at its foot: add, the agent and the model in a full box; what the page adds. */
+/** The box's tools at its foot: add, the agent, the model, the microphone, and what the page adds. */
 const ComposerTools = ({
-  compact,
   attaches,
   agent,
   agentModel,
@@ -210,10 +249,9 @@ const ComposerTools = ({
   efforts,
   effort,
   onEffort,
-  actions,
+  speech,
   children,
 }: {
-  compact: boolean;
   /** The box takes files. */
   attaches: boolean;
   agent: ReactNode;
@@ -224,13 +262,11 @@ const ComposerTools = ({
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
-  actions: ReactNode;
+  /** Dictation, where the person can dictate here (dictation.ts). */
+  speech: PromptInputSpeechButtonProps | undefined;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
-  if (compact) {
-    return <PromptInputTools>{children}</PromptInputTools>;
-  }
   return (
     <PromptInputTools>
       {attaches ? (
@@ -258,7 +294,8 @@ const ComposerTools = ({
           onModel={onModel}
         />
       ) : null}
-      {actions}
+      {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
+      {children}
     </PromptInputTools>
   );
 };
@@ -278,6 +315,18 @@ const BoxFiles = ({
       <FileCards files={files} onRemove={busy ? undefined : onRemove} />
     </div>
   );
+
+/** Under the box: why dictating stopped, else why the last question didn't go. */
+const BoxNote = ({
+  failure,
+  problem,
+}: {
+  failure: string | undefined;
+  problem: string | undefined;
+}) => {
+  const note = problem ?? failure;
+  return note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>;
+};
 
 /** Where nobody picks a model. */
 export const noModels: readonly string[] = [];
@@ -464,7 +513,6 @@ export const Composer = ({
   label,
   placeholder,
   children,
-  actions,
   subject,
   files = noFiles,
   onAttach,
@@ -503,15 +551,13 @@ export const Composer = ({
   onSend: () => void;
   /** Stops the answer being written; only where one can be. */
   onStop?: () => void;
-  /** One row, its tools, the text and Send side by side, no model to pick: the chat dock. */
+  /** One row, its tools, the text and Send side by side: the chat's idle bar. */
   compact?: boolean;
   /** What the box is called; "Your question" without it. */
   label?: string;
   placeholder?: string;
-  /** Among the tools, in a compact box only: such as the way to open the dock. */
+  /** Among the tools, after the box's own: such as the way to open the chat from its bar. */
   children?: ReactNode;
-  /** Among the tools, in a full box: such as the recent chats on Chat's own page. */
-  actions?: ReactNode;
   /** What the question is about, over the text: a page's subject. */
   subject?: ReactNode;
   /** The files the question will carry, each shown as a card. */
@@ -543,6 +589,7 @@ export const Composer = ({
   // No AI provider to call yet: the box takes nothing. Not while the models
   // are still being read, so what is typed then stays.
   const noProvider = offered !== undefined && lacksModel(model);
+  const dictation = useDictation(text, onText);
   const { held, submit } = useSend({
     text,
     running,
@@ -572,9 +619,7 @@ export const Composer = ({
       value={value}
     >
       {noProvider ? <NoProviderBanner /> : null}
-      {failure === undefined ? null : (
-        <PromptInputNote>{failure}</PromptInputNote>
-      )}
+      <BoxNote failure={failure} problem={dictation.problem} />
       {subject === undefined && files.length === 0 ? null : (
         <PromptInputHeader>
           {subject}
@@ -589,11 +634,10 @@ export const Composer = ({
       </PromptInputBody>
       <PromptInputFooter>
         <ComposerTools
-          actions={actions}
+          speech={dictation.speech}
           agent={agent}
           agentModel={agentModel}
           attaches={onAttach !== undefined}
-          compact={compact}
           effort={effort}
           efforts={efforts}
           model={model}

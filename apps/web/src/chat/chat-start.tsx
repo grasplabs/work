@@ -11,7 +11,6 @@ import { Await, useRouteContext } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
-import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import type { Session } from "../core.ts";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -24,15 +23,14 @@ import { openChat } from "./chat-layout.ts";
 import { ChatSwitcherButton } from "./chat-switcher.tsx";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
-import { RecentsButton } from "./recents.tsx";
 import { useAsk } from "./use-ask.ts";
 
-// Chat's own page (routes/_shell.index.tsx): where to start. Grasp's buddy
-// and the question "What should we look at today?", centred, with the box
-// to ask in, and Make something for
-// who builds. Make something comes here too (`make`, from `?make=app` or
-// `?make=workflow` and `&project=`): what to get done, and ideas to start
-// from under the box (make/make-ideas.tsx), the blueprints for
+// Chat's own page (routes/_shell.index.tsx): where to start. The question
+// "What should we look at today?", centred, with the box to ask in, and
+// Make something for who builds (as on #2503, without Grasp's buddy).
+// Make something comes here too (`make`, from `?make=app` or
+// `?make=workflow` and `&project=`): what to get done, how to say it and
+// ideas to start from under the box (make/make-ideas.tsx), the blueprints for
 // an App, a few starting sentences for a workflow; the first question
 // starts the chat with what to make (`ChatMake`), which the chat keeps.
 // From an opportunity an admin drafts (`opportunity`, GRA-1751), the box
@@ -73,7 +71,7 @@ const styles = stylex.create({
     gap: space["6"],
     textAlign: "center",
   },
-  words: { display: "grid", gap: space["2"] },
+  words: { display: "grid", gap: space["4"] },
 });
 
 /** What Make something offers to start from: an App's blueprints, or a workflow's starting sentences. */
@@ -104,23 +102,33 @@ const Ideas = ({
 );
 
 /** The page's question: what to look at, or, making something, what to get done. */
-const Greeting = ({ making }: { making: boolean }) =>
-  making ? (
-    <div {...stylex.props(styles.words)}>
-      <Heading id="new-chat" level={1} size="lg">
-        <Trans>What do you want to get done?</Trans>
-      </Heading>
-      <Text as="p" color="muted">
-        <Trans>
-          Say it like you&apos;d tell a colleague. Grasp works out what to make.
-        </Trans>
-      </Text>
-    </div>
-  ) : (
-    <Heading id="new-chat" level={1} size="lg">
+const Greeting = ({ making }: { making: boolean }) => (
+  <Heading id="new-chat" level={1} size="lg">
+    {making ? (
+      <Trans>What do you want to get done?</Trans>
+    ) : (
       <Trans>What should we look at today?</Trans>
-    </Heading>
-  );
+    )}
+  </Heading>
+);
+
+/** Under the box, making something: how to say it, then the ideas to start from. */
+const Making = ({
+  ideas,
+  onPick,
+}: {
+  ideas: Promise<Loaded<MakeIdeas>> | undefined;
+  onPick: (text: string) => void;
+}) => (
+  <div {...stylex.props(styles.words)}>
+    <Text as="p" color="muted" size="sm">
+      <Trans>
+        Say it like you&apos;d tell a colleague. Grasp works out what to make.
+      </Trans>
+    </Text>
+    {ideas === undefined ? null : <Ideas ideas={ideas} onPick={onPick} />}
+  </div>
+);
 
 /** What Make something offers for `make`, read for the person. */
 export const ideasOf = async (
@@ -215,17 +223,16 @@ export const ChatStart = ({
         <div {...stylex.props(styles.centre)}>
           <div {...stylex.props(styles.column)}>
             <div {...stylex.props(styles.greeting)}>
-              <GraspBuddy />
               <Greeting making={make !== undefined} />
             </div>
             <Composer
-              actions={<RecentsButton />}
+              placeholder={t`Ask anything, or describe a process`}
               agentModel={agentModelOf(agents, answering)}
               running={false}
               {...composer}
             />
-            {ideas === undefined ? null : (
-              <Ideas
+            {make === undefined ? null : (
+              <Making
                 ideas={ideas}
                 onPick={(text) => {
                   composer.onText(text);

@@ -2973,6 +2973,7 @@ msgstr "Reposer la question"
 msgid "Ask an admin"
 msgstr "Demander à un administrateur"
 
+#: src/chat/chat-start.tsx
 #: src/chat/global-chat.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
@@ -4958,6 +4959,14 @@ msgstr "Diagramme"
 #: src/frame/ui-words.tsx
 msgid "Dictate"
 msgstr "Dicter"
+
+#: src/chat/dictation.ts
+msgid "Dictation isn't set up here yet."
+msgstr "La dictée n'est pas encore configurée ici."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped. What was heard is kept."
+msgstr "La dictée s'est arrêtée. Ce qui a été entendu est conservé."
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a change whose answer was lost"
@@ -7222,6 +7231,10 @@ msgstr "Dans le chat de Grasp"
 msgid "In Grasp's chat. Chat apps are under Access."
 msgstr "Dans le chat de Grasp. Les applications de chat sont sous Accès."
 
+#: src/frame/ui-words.tsx
+msgid "In my own words"
+msgstr "Avec mes propres mots"
+
 #: src/inbox/request-details.tsx
 msgid "In one chat only, for {requester}"
 msgstr "Dans une seule conversation, pour {requester}"
@@ -9098,6 +9111,10 @@ msgstr "N’est plus là où il était"
 msgid "No matches"
 msgstr "Aucun résultat"
 
+#: src/chat/dictation.ts
+msgid "No microphone was found."
+msgstr "Aucun micro n'a été trouvé."
+
 #: src/onboarding/setup-steps.tsx
 msgid "No Microsoft or Google? A staff list works too."
 msgstr "Pas de Microsoft ni de Google ? Une liste du personnel fonctionne aussi."
@@ -10348,11 +10365,6 @@ msgstr "Origine"
 msgid "Oslo"
 msgstr "Oslo"
 
-#: src/frame/ui-words.tsx
-msgctxt "an answer in one's own words"
-msgid "Other"
-msgstr "Autre"
-
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Other"
@@ -11222,14 +11234,6 @@ msgstr "A rappelé des informations du Cerveau"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Reçu"
-
-#: src/chat/recents.tsx
-msgid "Recent chats"
-msgstr "Chats récents"
-
-#: src/chat/recents.tsx
-msgid "Recents"
-msgstr "Récents"
 
 #: src/frame/ui-words.tsx
 msgid "Recommended"
@@ -17308,6 +17312,10 @@ msgstr "Vous êtes connecté en tant qu’invité avec {email}. Ce que l’on pa
 msgid "You're still signed in. Try again in a moment."
 msgstr "Vous êtes toujours connecté. Réessayez dans un instant."
 
+#: src/chat/dictation.ts
+msgid "You've dictated as much as you can today."
+msgstr "Vous avez dicté tout ce que vous pouviez aujourd'hui."
+
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Votre compte"
@@ -17349,6 +17357,10 @@ msgstr "Votre réponse"
 msgctxt "the answer a person gives a decision"
 msgid "Your answer"
 msgstr "Votre réponse"
+
+#: src/chat/dictation.ts
+msgid "Your browser doesn't let Grasp use the microphone. Allow it in the browser's settings to dictate."
+msgstr "Votre navigateur ne laisse pas Grasp utiliser le micro. Autorisez-le dans les réglages du navigateur pour dicter."
 
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."

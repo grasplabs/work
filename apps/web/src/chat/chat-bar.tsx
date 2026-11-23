@@ -12,8 +12,8 @@ import { chatKey, useGlobalChat } from "./global-chat.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
 // page, centred over it, as one row to ask in (Damsko's PromptInput,
-// compact), which sinks away as the chat opens and rises back once it has
-// gone. It mentions with `@` as the chat's box does, and takes files
+// compact, with the full box's add menu, model and microphone), which
+// sinks away as the chat opens and rises back once it has gone. It mentions with `@` as the chat's box does, and takes files
 // pasted or dropped on it; sending opens the chat where it last was, with
 // the answer coming in, and its last button opens it without asking. What
 // is typed here, mentions and files too, is the chat's own box's, so it is
@@ -96,6 +96,14 @@ export const ChatBar = () => {
         mentions={composer.mentions}
         model={composer.model}
         models={composer.models}
+        onModel={(chosen) => {
+          composer.onModel(chosen);
+        }}
+        efforts={composer.efforts}
+        onEffort={(chosen) => {
+          composer.onEffort(chosen);
+        }}
+        {...(composer.effort === undefined ? {} : { effort: composer.effort })}
         onMentions={(mentions) => {
           composer.onMentions(mentions);
         }}

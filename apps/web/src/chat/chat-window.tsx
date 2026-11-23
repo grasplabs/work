@@ -5,7 +5,6 @@ import { failureText } from "@grasp-os/shared/errors";
 import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Button } from "@grasp-os/ui/components/button";
 import {
-  Command,
   CommandDialog,
   CommandEmpty,
   CommandHighlight,
@@ -355,8 +354,8 @@ const isRowAction = (value: string): value is RowAction =>
 
 /**
  * The person's chats as a Command's items, with what its search, its rows
- * and their actions do: shared by the window and the box's Recents. Read
- * each time it is `shown`, so it shows what changed elsewhere.
+ * and their actions do, for the window. Read each time it is `shown`, so
+ * it shows what changed elsewhere.
  */
 const useChatItems = ({
   shown,
@@ -372,7 +371,7 @@ const useChatItems = ({
    * Before a row's dialog opens (Rename, Delete): the window it stands in
    * closes, so no dialog opens over another.
    */
-  onDialog?: () => void;
+  onDialog: () => void;
 }) => {
   const { t, i18n } = useLingui();
   const router = useRouter();
@@ -455,7 +454,7 @@ const useChatItems = ({
       return;
     }
     if (action === "rename" || action === "delete") {
-      onDialog?.();
+      onDialog();
       (action === "rename" ? setRenaming : setDeleting)(chat);
     } else {
       const done = await run(async (session) => {
@@ -523,35 +522,6 @@ const useChatItems = ({
       ? t`${plural(count, { one: "# archived chat", other: "# archived chats" })}`
       : t`Search chats`,
   };
-};
-
-/**
- * The person's chats, behind the box's Recents: a search on top, then the
- * chats by when they were last used, each to open, rename, archive or
- * delete.
- */
-export const ChatList = ({
-  shown,
-  onOpen,
-}: {
-  shown: boolean;
-  onOpen: (chatId: string) => void;
-}) => {
-  const { command, empty, failure, dialogs, label } = useChatItems({
-    shown,
-    onOpen,
-  });
-  return (
-    <>
-      <Command {...command}>
-        <CommandInput aria-label={label} placeholder={label} />
-        <FailureLine>{failure}</FailureLine>
-        <CommandEmpty>{empty}</CommandEmpty>
-        <CommandList />
-      </Command>
-      {dialogs}
-    </>
-  );
 };
 
 /**

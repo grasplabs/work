@@ -543,13 +543,20 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     "Model: mistral-large-latest. Change model"
   );
   await control.click();
-  const models = page.getByRole("listbox").getByRole("option");
-  await expect(models).toHaveText([
-    /mistral-large-latest/u,
-    /claude-sonnet-4-6/u,
-  ]);
+  // The models by their makers: each maker's beside the list, its models
+  // in the list while it is chosen, the default's first.
+  const models = page.getByRole("option");
+  const makers = page.getByRole("listbox", { name: "Makers" });
+  await expect(makers.getByRole("option")).toHaveCount(2);
+  await expect(makers.getByRole("option").first()).toHaveAccessibleName(
+    "Mistral AI"
+  );
+  await expect(
+    page.getByRole("option", { name: /^mistral-large-latest/u })
+  ).toBeVisible();
   // A model picked closes the panel; one that thinks then offers its
   // efforts beside the models, at the model's own default.
+  await makers.getByRole("option", { name: "Anthropic" }).click();
   await page.getByRole("option", { name: /^claude-sonnet-4-6/u }).click();
   await expect(models).toHaveCount(0);
   await control.click();
@@ -598,6 +605,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
+  await makers.getByRole("option", { name: "Mistral AI" }).click();
   await page.getByRole("option", { name: /^mistral-large-latest/u }).click();
   await expect(effort).toHaveCount(0);
   await page.keyboard.press("Escape");
