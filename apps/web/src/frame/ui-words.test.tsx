@@ -18,10 +18,11 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 /** A part of Damsko's, as any reads its words. */
 const Part = () => {
-  const { copyButton, menu } = useI18n();
+  const { audioPlayer, copyButton, menu } = useI18n();
   return (
     <p lang={useLocale()}>
-      {copyButton.copyError}, {menu.loading}
+      {copyButton.copyError}, {menu.loading}, {audioPlayer.play},{" "}
+      {audioPlayer.pause}
     </p>
   );
 };
@@ -54,14 +55,14 @@ describe("Damsko's own words", () => {
 
   it("are English in English", async () => {
     const part = await drawn();
-    expect(part.textContent).toBe("Not copied, Working");
+    expect(part.textContent).toBe("Not copied, Working, Play, Pause");
     expect(part.lang).toBe("en");
   });
 
   it("are the page's language's", async () => {
     i18n.loadAndActivate({ locale: "nl", messages: dutch });
     const part = await drawn();
-    expect(part.textContent).toBe("Niet gekopieerd, Bezig");
+    expect(part.textContent).toBe("Niet gekopieerd, Bezig, Afspelen, Pauzeren");
     expect(part.lang).toBe("nl");
   });
 });

@@ -549,15 +549,17 @@ test("Stephen says his line a sentence at a time, without a gap, its words light
   // From here: the sound check's own line may still be ending as Start shows.
   const startedAt = await page.evaluate(() => performance.now());
 
-  // While he talks, the box is a voice bar; once he asks, the bar listens to them.
-  await expect(page.getByText("Stephen is talking")).toBeVisible();
+  // While he talks, the box is a spoken conversation, his mark in it; once
+  // he asks, it is their turn, its time running where his mark stood.
+  const spoken = page.getByRole("group", { name: "Voice conversation" });
   await expect(
-    page.getByRole("button", { name: "Type instead" })
+    spoken.getByRole("status").filter({ hasText: "Stephen is talking" })
+  ).toBeVisible();
+  await expect(
+    spoken.getByRole("button", { name: "Type instead" })
   ).toBeVisible();
   await expect(page.getByText(line)).toBeVisible();
-  await expect(page.getByText("Listening", { exact: true })).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(spoken.getByRole("timer")).toBeVisible({ timeout: 30_000 });
 
   // Each sentence was asked for on its own, the first first; each word lit up as it was said, one after another, with no gap between the sentences.
   const words = line.split(" ");

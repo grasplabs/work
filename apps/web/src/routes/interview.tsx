@@ -1,9 +1,11 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
+import { Button } from "@grasp-os/ui/components/button";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -19,6 +21,7 @@ import {
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
+import { Mark } from "../interview/mark.tsx";
 import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
@@ -94,6 +97,37 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   return { state: "open", secret, session: answer };
 };
 
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space["6"],
+    boxSizing: "border-box",
+    minHeight: "100svh",
+    paddingInline: space["4"],
+    textAlign: "center",
+    backgroundColor: colors.background,
+  },
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space["3"],
+    maxWidth: "24rem",
+  },
+  // The way in, under what there is to say.
+  signIn: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space["4"],
+    width: "100%",
+    maxWidth: "24rem",
+  },
+});
+
 /**
  * Why the link opens no interview here, laid out as calm as the prototype's
  * (`routes/i/$code.tsx`): the mark, and what there is to say.
@@ -111,14 +145,16 @@ const Notice = ({
   /** What they can do about it, under what there is to say. */
   children?: ReactNode;
 }) => (
-  <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
-    <GraspMark className="size-6" />
-    <div className="flex max-w-sm flex-col items-center gap-3">
-      <PageHeaderTitle>{title}</PageHeaderTitle>
+  <main {...stylex.props(styles.page)}>
+    <Mark size="lg" />
+    <div {...stylex.props(styles.words)}>
+      <Heading level={1} size="default">
+        {title}
+      </Heading>
       {failed ? (
         <ErrorText>{message}</ErrorText>
       ) : (
-        <p className="text-muted-foreground text-balance">{message}</p>
+        <Text color="muted">{message}</Text>
       )}
     </div>
     {children}
@@ -128,9 +164,13 @@ const Notice = ({
 const Loading = () => {
   const { t } = useLingui();
   return (
-    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
-      <GraspMark className="size-6" />
-      <output className="text-muted-foreground">{t`Opening your interview…`}</output>
+    <main {...stylex.props(styles.page)}>
+      <Mark size="lg" />
+      <output>
+        <Text as="span" color="muted">
+          {t`Opening your interview…`}
+        </Text>
+      </output>
     </main>
   );
 };
@@ -154,7 +194,7 @@ const SignOut = ({ core }: { core: CoreConnection }) => {
       onClick={() => {
         void signingOut();
       }}
-      variant="outline"
+      variant="secondary"
     >
       {t`Sign out`}
     </Button>
@@ -186,10 +226,10 @@ const SignIn = ({
       message={t`Use your work account, the one your link was sent to.`}
       title={t`Sign in to open your interview`}
     >
-      <div className="flex w-full max-w-sm flex-col items-center gap-4">
-        <p className="text-muted-foreground text-balance">
+      <div {...stylex.props(styles.signIn)}>
+        <Text color="muted">
           {t`Signing in is recorded by your company's sign-in, as every sign-in is.`}
-        </p>
+        </Text>
         <ErrorText>
           {error === undefined
             ? undefined
