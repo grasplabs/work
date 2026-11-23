@@ -69,13 +69,15 @@ export const MakeCard = ({
   children: ReactNode;
   actions?: ReactNode;
 }) => (
-  <Card aria-label={label}>
-    <CardHeader>
-      <CardTitle>{title}</CardTitle>
-      <CardDescription>{description}</CardDescription>
-    </CardHeader>
-    <CardContent>{children}</CardContent>
-    {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
+  <Card asChild>
+    <section aria-label={label}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+      {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
+    </section>
   </Card>
 );
 
