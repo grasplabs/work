@@ -180,8 +180,7 @@ export const FileItemDialog = ({ project }: { project: Project }) => {
           setOpen(true);
           void read();
         }}
-        size="sm"
-        variant="ghost"
+        variant="outline"
       >
         <Icon icon={PlusIcon} />
         <Trans context="put in a project">Add</Trans>

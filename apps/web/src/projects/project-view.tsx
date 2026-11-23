@@ -115,7 +115,7 @@ const styles = stylex.create({
 
 /** An item's link: to its App or workflow page. */
 const ItemLink = ({ item }: { item: ProjectItem }) => (
-  <Link asChild variant="plain">
+  <Link asChild>
     {item.type === "app" ? (
       <RouterLink params={{ app: item.id }} to="/apps/$app">
         {item.name}
@@ -497,7 +497,7 @@ const ProjectMenu = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button aria-label={t`More for ${title}`} size="icon" variant="ghost">
+        <Button aria-label={t`More for ${title}`} size="icon" variant="outline">
           <Icon icon={EllipsisIcon} />
         </Button>
       </DropdownMenuTrigger>
@@ -563,7 +563,7 @@ export const ProjectView = ({
                 />
               ) : null}
               {makes ? (
-                <Button asChild>
+                <Button asChild variant="outline">
                   <RouterLink
                     search={{ make: "app", project: project.id }}
                     to="/"

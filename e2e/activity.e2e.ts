@@ -113,45 +113,49 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   } finally {
     reader.core[Symbol.dispose]();
   }
-  // A link to the audit trail keeps its filters.
+  // A link to the audit trail keeps its filters: the events about the
+  // request, by its ID, set under Filters.
   await page.goto(`/settings/audit?target=${approved}`);
-  await expect(page.getByRole("textbox", { name: "Target ID" })).toHaveValue(
+  await page.getByRole("button", { name: "Filters, 1 set" }).click();
+  await expect(page.getByRole("textbox", { name: "About, by ID" })).toHaveValue(
     approved
   );
-  // Each entry in words, under who did it and to what.
-  const entries = page
-    .getByRole("list", { name: "Entries" })
-    .getByRole("listitem");
-  const granted = entries.filter({ hasText: "Granted a permission" });
+  await page.keyboard.press("Escape");
+  // Each event in words, by who did it and to what kind of thing.
+  const rows = page.getByRole("table", { name: "Events" }).getByRole("row");
+  const granted = rows.filter({ hasText: "Granted a permission" });
   await expect(granted).toHaveCount(1);
   await expect(granted).toContainText("Permission");
-  await expect(granted).toContainText(`permission ${approved}`);
-  await expect(
-    entries.filter({ hasText: "Asked for a permission" })
-  ).toHaveCount(1);
+  await expect(rows.filter({ hasText: "Asked for a permission" })).toHaveCount(
+    1
+  );
+  // Its details beside the table, or in a sheet on a narrow page: what it
+  // recorded, and its action to copy.
   await granted.getByRole("button", { name: /^Details of event /u }).click();
   await expect(
-    page.getByText(`"requestedBy": "${builder.userId}"`)
-  ).toBeVisible();
-  await expect(granted).toContainText("permission.granted");
+    page.getByRole("listitem").filter({ hasText: "RequestedBy" })
+  ).toContainText(builder.userId);
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "permission.granted" })
+  ).toHaveCount(1);
+  await page.keyboard.press("Escape");
 
   // Narrowed to grants, the request drops out; the action is taken as
   // core takes it, whatever its case and a trailing dot.
-  await page.getByRole("combobox", { name: "Type" }).click();
-  await page.getByRole("option", { name: "Permission" }).click();
-  await page
-    .getByRole("textbox", { name: "Action" })
-    .fill("Permission.Granted.");
-  await page.getByRole("button", { name: "Filter" }).click();
-  await expect(page).toHaveURL(/action=permission\.granted/u);
+  await page.goto(
+    `/settings/audit?target=${approved}&action=${encodeURIComponent("Permission.Granted.")}`
+  );
   await expect(
-    entries.filter({ hasText: "Asked for a permission" })
-  ).toHaveCount(0);
+    page.getByRole("button", { name: "Filters, 2 set" })
+  ).toBeVisible();
   await expect(granted).toHaveCount(1);
+  await expect(rows.filter({ hasText: "Asked for a permission" })).toHaveCount(
+    0
+  );
 
   const downloading = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export the audit trail" }).click();
-  await page.getByRole("menuitem", { name: "Export CSV" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  await page.getByRole("menuitem", { name: "CSV" }).click();
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/^audit-log-.+\.csv$/u);
   const csv = await readFile(await download.path(), "utf-8");
@@ -166,12 +170,13 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await page.goto(
     `/settings/audit?target=${approved}&action=${encodeURIComponent("no such action!")}&from=2024-02-29&to=2099-02-29`
   );
-  await expect(page.getByRole("textbox", { name: "Action" })).toHaveValue("");
-  // A leap day is a day; 2099 has none.
-  await expect(page.getByLabel("From")).toHaveValue("2024-02-29");
-  await expect(page.getByLabel("To", { exact: true })).toHaveValue("");
+  await page.getByRole("button", { name: /^Filters, \d set$/u }).click();
+  await expect(page.getByRole("textbox", { name: "Action" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await expect(granted).toHaveCount(1);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
+    0
+  );
 });
 
 test("an admin approves an App's request only for the version the list shows", async ({

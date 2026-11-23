@@ -153,7 +153,6 @@ const ProjectForm = ({
                   setIcon(chosen);
                 }
               }}
-              size="default"
               value={[icon]}
             >
               {projectIcons.map((each) => (

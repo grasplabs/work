@@ -80,6 +80,7 @@ const Projects = () => {
       onClick={() => {
         setMaking(true);
       }}
+      variant="outline"
     >
       <Icon icon={PlusIcon} />
       <Trans>New project</Trans>

@@ -115,8 +115,7 @@ export const AddChat = ({
           setOpen(true);
           void readMine();
         }}
-        size="sm"
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={PlusIcon} />
         <Trans>Add a chat</Trans>
@@ -242,7 +241,7 @@ export const ProjectChatList = ({
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>
-                    <Link asChild variant="plain">
+                    <Link asChild>
                       <RouterLink search={{ chat: chat.id }} to="/">
                         {title}
                       </RouterLink>

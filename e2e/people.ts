@@ -577,6 +577,7 @@ const cast = {
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
+  projects: { builder: "builder", colleague: "user" },
   chat: { user: "user" },
   globalChat: { user: "user" },
   exports: { admin: "admin" },

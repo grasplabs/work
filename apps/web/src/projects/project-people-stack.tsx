@@ -48,7 +48,7 @@ export const ProjectPeopleStack = ({ project }: { project: Project }) => {
           aria-label={t`Add people`}
           onClick={openPeople}
           size="icon"
-          variant="secondary"
+          variant="outline"
         >
           <Icon icon={UserPlusIcon} />
         </Button>
