@@ -34,6 +34,7 @@ const aiKeys = [
   "ANTHROPIC_API_KEY",
   "MISTRAL_API_KEY",
   "OPENROUTER_API_KEY",
+  "KUGELAUDIO_API_KEY",
   "ELEVENLABS_API_KEY",
 ] as const;
 
@@ -95,10 +96,17 @@ describe("a deploy's shared secrets", () => {
         ANTHROPIC_API_KEY: "grasp-ANTHROPIC_API_KEY",
         MISTRAL_API_KEY: "grasp-MISTRAL_API_KEY",
         OPENROUTER_API_KEY: "grasp-OPENROUTER_API_KEY",
+        KUGELAUDIO_API_KEY: "grasp-KUGELAUDIO_API_KEY",
+        // Still delivered, for a client on a release that reads it.
         ELEVENLABS_API_KEY: "grasp-ELEVENLABS_API_KEY",
       },
       core: [],
-      some: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY"],
+      some: [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "KUGELAUDIO_API_KEY",
+        "ELEVENLABS_API_KEY",
+      ],
     });
   });
 });
@@ -109,7 +117,7 @@ describe("a deploy's shared secrets", () => {
 // EU by a var.
 describe("the providers a deploy sends to their usual host", () => {
   it("are staging's alone, and only the ones that have a usual host: production gives none, whatever its vars say", () => {
-    const named = "elevenlabs, openai, anthropic";
+    const named = "kugelaudio, openai, anthropic";
     expect([
       usualHostsOf({ STAGE: "staging", PLATFORM_AI_USUAL_HOSTS: named }),
       usualHostsOf({ STAGE: "production", PLATFORM_AI_USUAL_HOSTS: named }),
@@ -118,7 +126,7 @@ describe("the providers a deploy sends to their usual host", () => {
       usualHostsOf({ STAGE: "staging", PLATFORM_AI_USUAL_HOSTS: "anthropic" }),
       usualHostsOf({ STAGE: "staging" }),
     ]).toStrictEqual([
-      "elevenlabs,openai",
+      "openai",
       undefined,
       undefined,
       undefined,

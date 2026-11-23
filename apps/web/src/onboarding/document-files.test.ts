@@ -14,12 +14,19 @@ describe("the files of a drop that are read", () => {
       file("Procedures.PDF"),
       file("photo.jpg"),
       file("notes.md"),
+      file("handbook.html"),
+      file("deck.pptx"),
+      file("old.doc"),
+      file("archive.zip"),
     ]);
     expect(fresh.map((each) => each.name)).toStrictEqual([
       "Procedures.PDF",
       "notes.md",
+      "handbook.html",
+      "deck.pptx",
+      "old.doc",
     ]);
-    expect(refused).toBe(1);
+    expect(refused).toBe(2);
   });
 
   it("include two files of the same name, and the same file only once", () => {

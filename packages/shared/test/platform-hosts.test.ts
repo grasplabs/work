@@ -13,66 +13,62 @@ import {
 // was sent elsewhere.
 
 describe("where a platform feature's requests go", () => {
-  it("is the provider's EU data residency host, said to run in the EU, unless the deployment was set up otherwise", () => {
+  it("is the provider's EU host, said to run in the EU, unless the deployment was set up otherwise", () => {
     expect([
-      platformRouteOf("elevenlabs"),
+      platformRouteOf("kugelaudio"),
       platformRouteOf("openai"),
-      platformHostOf("elevenlabs"),
+      platformHostOf("kugelaudio"),
     ]).toStrictEqual([
       {
-        host: "api.eu.residency.elevenlabs.io",
+        host: "api.eu.kugelaudio.com",
         region: "eu",
-        whereItRuns: "ElevenLabs, European Union",
+        whereItRuns: "KugelAudio, European Union",
       },
       {
         host: "eu.api.openai.com",
         region: "eu",
         whereItRuns: "OpenAI, European Union",
       },
-      "api.eu.residency.elevenlabs.io",
+      "api.eu.kugelaudio.com",
     ]);
   });
 
   it("is the provider's usual host, said to run where that is, on a deployment set up to test there", () => {
     expect([
-      platformRouteOf("elevenlabs", ["elevenlabs"]),
-      platformHostOf("elevenlabs", ["elevenlabs"]),
-      // Only the provider named: OpenAI's stays where it was.
-      platformHostOf("openai", ["elevenlabs"]),
-      platformRouteOf("openai", ["openai"])?.host,
-      platformRouteOf("openai", ["openai"])?.region,
+      platformRouteOf("openai", ["openai"]),
+      platformHostOf("openai", ["openai"]),
+      // Only the provider named: with another named, OpenAI's stays where
+      // it was.
+      platformHostOf("openai", ["anthropic"]),
     ]).toStrictEqual([
       {
-        host: "api.elevenlabs.io",
+        host: "api.openai.com",
         region: "us",
-        whereItRuns: "ElevenLabs, United States",
+        whereItRuns: "OpenAI, United States",
       },
-      "api.elevenlabs.io",
-      "eu.api.openai.com",
       "api.openai.com",
-      "us",
+      "eu.api.openai.com",
     ]);
   });
 
   it("takes from the setting only providers that have a usual host to test at", () => {
     expect([
-      usualHostProviders("elevenlabs"),
-      usualHostProviders(" elevenlabs , openai,nonsense,"),
+      usualHostProviders("openai"),
+      usualHostProviders(" kugelaudio , openai,nonsense,"),
+      usualHostProviders("kugelaudio"),
       usualHostProviders("anthropic"),
       usualHostProviders(""),
       usualHostProviders(null),
-      usualHostProviders(["elevenlabs"]),
+      usualHostProviders(["openai"]),
+    ]).toStrictEqual([["openai"], ["openai"], [], [], [], [], []]);
+    // A provider with no usual host named here goes where it always did:
+    // KugelAudio's speech stays at its EU host.
+    expect([
+      platformRouteOf("kugelaudio", ["kugelaudio"]),
+      platformHostOf("anthropic", ["anthropic"]),
     ]).toStrictEqual([
-      ["elevenlabs"],
-      ["elevenlabs", "openai"],
-      [],
-      [],
-      [],
-      [],
+      platformRouteOf("kugelaudio"),
+      platformHostOf("anthropic"),
     ]);
-    // A provider with no usual host named here goes where it always did.
-    expect(platformHostOf("anthropic", ["anthropic"])).toBe(
-      platformHostOf("anthropic")
-    );
   });
 });
