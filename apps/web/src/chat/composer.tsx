@@ -38,13 +38,11 @@ import { useRef } from "react";
 import type { ReactNode, Ref } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import {
-  ConnectAiProvider,
-  ConnectAiProviderCover,
-} from "../frame/connect-ai-provider.tsx";
+import { ConnectAiProviderCover } from "../frame/connect-ai-provider.tsx";
 import { FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { ComposerMenu } from "./composer-menu.tsx";
+import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import {
   useMentionables,
   useMentionKinds,
@@ -413,7 +411,7 @@ export const NoModelNotice = ({
   models: readonly string[] | undefined;
 }) =>
   model === undefined || models === undefined || models.length > 0 ? null : (
-    <ConnectAiProvider size="xs" />
+    <ConnectAiProvider />
   );
 
 /** Where the model doesn't think, or nobody picks how hard. */

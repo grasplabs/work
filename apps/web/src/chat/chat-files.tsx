@@ -1,3 +1,4 @@
+import { chatFileTypes } from "@grasp-os/shared/chat";
 import {
   Attachment,
   AttachmentAction,
@@ -7,10 +8,9 @@ import {
   AttachmentGroup,
   AttachmentMedia,
   AttachmentTitle,
-} from "@grasp-os/app-kit/components/attachment";
-import { chatFileTypes } from "@grasp-os/shared/chat";
+} from "@grasp-os/ui/components/attachment";
+import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import { FileTextIcon, XIcon } from "lucide-react";
 import type { Ref } from "react";
 
 import { formatBytes } from "../format.ts";
@@ -24,6 +24,14 @@ import { formatBytes } from "../format.ts";
 const accepted = Object.keys(chatFileTypes)
   .map((extension) => `.${extension}`)
   .join(",");
+
+/** A file's media type, as core takes it by its extension; none for one it doesn't name. */
+const typeOf = (name: string): string | undefined => {
+  const extension = name.split(".").at(-1)?.toLowerCase() ?? "";
+  return Object.entries(chatFileTypes).find(
+    ([known]) => known === extension
+  )?.[1];
+};
 
 /** A file as its card shows it. */
 export interface CardFile {
@@ -44,11 +52,9 @@ const FileCard = ({
   const { name } = file;
   return (
     <Attachment size="sm">
-      <AttachmentMedia>
-        <FileTextIcon />
-      </AttachmentMedia>
+      <AttachmentMedia type={typeOf(name)} />
       <AttachmentContent>
-        <AttachmentTitle title={name}>{name}</AttachmentTitle>
+        <AttachmentTitle>{name}</AttachmentTitle>
         <AttachmentDescription>{formatBytes(file.bytes)}</AttachmentDescription>
       </AttachmentContent>
       {onRemove === undefined ? null : (
@@ -59,7 +65,7 @@ const FileCard = ({
               onRemove(file.id);
             }}
           >
-            <XIcon />
+            <Icon icon={XIcon} />
           </AttachmentAction>
         </AttachmentActions>
       )}
@@ -74,13 +80,16 @@ export const FileCards = ({
 }: {
   files: readonly CardFile[];
   onRemove?: (id: string) => void;
-}) => (
-  <AttachmentGroup>
-    {files.map((file) => (
-      <FileCard file={file} key={file.id} onRemove={onRemove} />
-    ))}
-  </AttachmentGroup>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <AttachmentGroup aria-label={t`Files`}>
+      {files.map((file) => (
+        <FileCard file={file} key={file.id} onRemove={onRemove} />
+      ))}
+    </AttachmentGroup>
+  );
+};
 
 /**
  * The picker for the files core takes, hidden: whatever opens it calls
@@ -96,7 +105,7 @@ export const FilePicker = ({
   <input
     accept={accepted}
     aria-hidden="true"
-    className="hidden"
+    hidden
     multiple
     onChange={(event) => {
       onAttach([...(event.target.files ?? [])]);

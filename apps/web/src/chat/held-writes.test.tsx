@@ -31,6 +31,14 @@ import { HeldWrites } from "./held-writes.tsx";
 // nothing. A decision that fails is said above the list, as its card
 // may be gone, until the next decision, and in its own chat alone.
 
+/** The exact input the card shows, line by line, as its code block draws it. */
+const exactShown = (): string | undefined => {
+  const lines = [
+    ...document.querySelectorAll('[data-slot="code-block-line"]'),
+  ].map((line) => (line.textContent === "\n" ? "" : line.textContent));
+  return lines.length === 0 ? undefined : lines.join("\n");
+};
+
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const request = JSON.stringify({
@@ -233,7 +241,7 @@ const alerted = (): string | null =>
 
 /** The cards shown, by their names. */
 const cards = (): string[] =>
-  [...document.querySelectorAll("article")].map(
+  [...document.querySelectorAll("section[aria-label] section[aria-label]")].map(
     (card) => card.getAttribute("aria-label") ?? ""
   );
 
@@ -267,9 +275,7 @@ describe("a write to an App held for the person", () => {
   it("says why it waits and shows exactly what would run, then confirms exactly that request", async () => {
     const { confirmed, declined } = await shown();
     const text = document.body.textContent ?? "";
-    const exact: unknown = JSON.parse(
-      document.querySelector("pre code")?.textContent ?? ""
-    );
+    const exact: unknown = JSON.parse(exactShown() ?? "");
     const sent: unknown = JSON.parse(request);
     const seen = {
       why: text.includes("This uses something only you can read"),
@@ -318,7 +324,7 @@ describe("a write to an App held for the person", () => {
     });
 
     expect({
-      exact: document.querySelector("pre code")?.textContent,
+      exact: exactShown(),
       named: document.body.textContent?.includes(
         String.raw`Waiting for you: notes.cre\u{202E}ate in No\u{200B}tes`
       ),
@@ -458,7 +464,7 @@ describe("a write to an App held for the person", () => {
     await shown({ calls: { "chat-1": holds } });
 
     expect(
-      document.querySelectorAll('article[aria-label^="notes.create"]')
+      document.querySelectorAll('section[aria-label^="notes.create"]')
     ).toHaveLength(heldAppCallsPage + 1);
   });
 

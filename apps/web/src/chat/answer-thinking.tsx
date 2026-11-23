@@ -1,12 +1,7 @@
-import {
-  TraceIcon,
-  TraceLine,
-  TraceTitle,
-} from "@grasp-os/app-kit/components/trace";
 import type { ChatMessage } from "@grasp-os/shared/chat";
+import { Link } from "@grasp-os/ui/components/link";
 import { Trans } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { BrainIcon, ClockIcon } from "lucide-react";
+import { Link as RouterLink } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { useLessMotion } from "../brain/less-motion.ts";
@@ -16,9 +11,9 @@ import { thinkAddress, thinkingIn } from "../brain/thinking/play.ts";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 
 // An answer that showed Grasp's thinking in the brain (`show_thinking`,
-// brain/thinking/*), in the thread: while Grasp works, the line over the
-// answer says the step it is at, each up as long as it takes to read; once
-// done, the answer's trace has "See it in the brain", which plays it again
+// brain/thinking/*), in the thread: while Grasp works, the working line
+// over the answer says the step it is at, each up as long as it takes to read; once
+// done, the answer has "See it in the brain", which plays it again
 // there (grasplabs/prototype `components/chat/chat-message.tsx`). The
 // thread is on every page, in the chat dock: this reads only what the tab
 // saw of the thinking (log.ts, play.ts, line.ts), never how the brain draws
@@ -52,29 +47,18 @@ export const useAnswerThinking = (
   };
 };
 
-/** The trace's first line while Grasp shows its thinking: the step it is at, each up as long as it takes to read. */
-export const ThinkingLine = ({
-  thinking,
-  arrivals,
-  fallback,
-}: {
-  thinking: ThinkingOf;
-  arrivals: readonly (number | undefined)[];
-  /** What it says before the first step reached the tab. */
-  fallback: string;
-}) => {
-  const step = useSteppedLine(thinking.steps, arrivals, useLessMotion());
-  return (
-    <TraceLine>
-      <TraceIcon>
-        <ClockIcon />
-      </TraceIcon>
-      <TraceTitle>
-        {/* A live status, so a screen reader hears what Grasp does. */}
-        <output className="shimmer-text">{step?.text ?? fallback}</output>
-      </TraceTitle>
-    </TraceLine>
-  );
+/**
+ * What Grasp's thinking is at while it works: the step it is at, each up
+ * as long as it takes to read; `fallback` before the first step reached
+ * the tab.
+ */
+export const useThinkingStep = (
+  thinking: ThinkingOf | undefined,
+  arrivals: readonly (number | undefined)[],
+  fallback: string
+): string => {
+  const step = useSteppedLine(thinking?.steps ?? [], arrivals, useLessMotion());
+  return step?.text ?? fallback;
 };
 
 /** A finished answer's thinking, played again in the brain. */
@@ -85,18 +69,12 @@ export const SeeInBrain = ({
   chatId: string;
   thinking: ThinkingOf;
 }) => (
-  <TraceLine>
-    <TraceIcon>
-      <BrainIcon />
-    </TraceIcon>
-    <TraceTitle>
-      <Link
-        className="hover:text-foreground focus-visible:ring-ring/50 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-3"
-        search={{ think: thinkAddress(chatId, thinking.questionId) }}
-        to="/brain"
-      >
-        <Trans>See it in the brain</Trans>
-      </Link>
-    </TraceTitle>
-  </TraceLine>
+  <Link asChild variant="plain">
+    <RouterLink
+      search={{ think: thinkAddress(chatId, thinking.questionId) }}
+      to="/brain"
+    >
+      <Trans>See it in the brain</Trans>
+    </RouterLink>
+  </Link>
 );

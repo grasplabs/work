@@ -1,4 +1,5 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { ChatMessage } from "@grasp-os/shared/chat";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
@@ -6,14 +7,15 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@grasp-os/app-kit/components/card";
-import type { ChatMessage } from "@grasp-os/shared/chat";
+} from "@grasp-os/ui/components/card";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import type { ThreadBuild } from "./build-progress.tsx";
+import { FailureLine } from "./failure-line.tsx";
 
 // What making something in a chat looks like, whatever it makes: an App
 // or a workflow (a plan, `proposePlan`), an agent (`draftAgent`) or a
@@ -21,6 +23,11 @@ import type { ThreadBuild } from "./build-progress.tsx";
 // the thread, and nothing is made until the person presses the card's
 // button: Build it, Make it, Change it. Each card keeps its own content
 // and its own words; the frame, the press and when it waits are the same.
+
+const styles = stylex.create({
+  actions: { display: "grid", gap: space["2"] },
+  presses: { display: "flex", flexWrap: "wrap", gap: space["2"] },
+});
 
 /** The cards the chat proposes, by where a reply keeps each. */
 export type MakeKind = "planned" | "agentDraft" | "agentChange";
@@ -62,11 +69,9 @@ export const MakeCard = ({
   children: ReactNode;
   actions?: ReactNode;
 }) => (
-  <Card aria-label={label} render={<section />}>
+  <Card aria-label={label}>
     <CardHeader>
-      <CardTitle>
-        <h2 className="type-display">{title}</h2>
-      </CardTitle>
+      <CardTitle>{title}</CardTitle>
       <CardDescription>{description}</CardDescription>
     </CardHeader>
     <CardContent>{children}</CardContent>
@@ -107,29 +112,26 @@ export const MakeActions = <T,>({
   const { busy, failure, run } = useCoreAction();
   const { model, effort } = build;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div {...stylex.props(styles.actions)}>
+      <div {...stylex.props(styles.presses)}>
         <Button
           disabled={!ready || busy || model === undefined}
-          onClick={() => {
+          onClick={async () => {
             if (model === undefined) {
               return;
             }
-            void (async () => {
-              const made = await run(
-                async (session) =>
-                  await press(session, {
-                    text: label,
-                    model,
-                    ...(effort === undefined ? {} : { effort }),
-                  })
-              );
-              if (made !== undefined) {
-                onDone(made);
-              }
-            })();
+            const made = await run(
+              async (session) =>
+                await press(session, {
+                  text: label,
+                  model,
+                  ...(effort === undefined ? {} : { effort }),
+                })
+            );
+            if (made !== undefined) {
+              onDone(made);
+            }
           }}
-          variant="highlight"
         >
           {label}
         </Button>
@@ -142,7 +144,7 @@ export const MakeActions = <T,>({
           {changeLabel}
         </Button>
       </div>
-      <ErrorText>{failure}</ErrorText>
+      <FailureLine>{failure}</FailureLine>
     </div>
   );
 };

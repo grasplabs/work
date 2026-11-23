@@ -21,12 +21,12 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { answerAgentsOf, ChatThread } from "./thread.tsx";
 
-// An answer's steps as one trace in the thread. What the model thought:
-// while it thinks, its words stream in, open under "Thinking"; once the
-// answer is kept, a quiet line says how long it thought, folded, and opens
-// to what it thought. How long Grasp worked is the trace's first line.
-// While an answer is written, the words of the block being written fade
-// in where they land, the blocks before it done; a kept one stands still.
+// An answer's steps as one chain of thought in the thread. What the model
+// thought: while it thinks, its words stream in, open under "Thinking";
+// once the answer is kept, a quiet line says how long it thought, folded,
+// and opens to what it thought. Each step is a line of the chain, its call
+// opening to what went in and came back. While an answer is written, it
+// is busy; a kept one is done.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -124,22 +124,68 @@ const thread = async (
   });
 };
 
+/**
+ * What an element says, as a screen reader reads its words: without the
+ * copies drawn for the eye alone, and without a line's status in words.
+ */
+const spoken = (element: Element | null | undefined): string | undefined => {
+  const copy = element?.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return undefined;
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent.replace(/, (?:Working|Failed|Waiting)$/u, "");
+};
+
+/** The words of a line that folds open: its title. */
+const titleOf = (line: Element | null | undefined) =>
+  spoken(line?.querySelector('[data-slot="trace-title"]') ?? line);
+
 /** The first step that folds open: its line, whether it is open, and what it shows. */
 const firstStep = () => {
   const line = document.querySelector("button[aria-expanded]");
   const shows = line?.getAttribute("aria-controls");
+  const open = line?.getAttribute("aria-expanded") === "true";
   return {
-    line: line?.textContent,
-    open: line?.getAttribute("aria-expanded") === "true",
+    line: titleOf(line),
+    open,
+    // What it shows while open: a folded panel keeps its words, unseen.
     shows:
-      shows === null || shows === undefined
+      !open || shows === null || shows === undefined
         ? undefined
         : document.querySelector(`#${shows}`)?.textContent,
   };
 };
 
-/** What the thread's live status line says now. */
-const status = () => document.querySelector("output")?.textContent;
+/** Grasp's answer in the thread. */
+const answer = () =>
+  document.querySelector<HTMLElement>('article[aria-label="Grasp"]');
+
+/** What the line over the answer says while Grasp works on it. */
+const workingLine = () =>
+  spoken(document.querySelector('[data-slot="shimmer"]'));
+
+/** The answer's steps, in order: each step's words. */
+const stepLines = () =>
+  [
+    ...document.querySelectorAll(
+      '[data-slot="chain-of-thought"] [role="listitem"]'
+    ),
+  ].map((step) => titleOf(step));
+
+/** Opens the answer's steps, as a press on their line does. */
+const openSteps = async () => {
+  await act(async () => {
+    document
+      .querySelector<HTMLElement>(
+        '[data-slot="chain-of-thought"] button[aria-expanded]'
+      )
+      ?.click();
+    await Promise.resolve();
+  });
+};
 
 /** The way to the brain under an answer, if there is one. */
 const findWay = () =>
@@ -442,7 +488,7 @@ describe(ChatThread, () => {
       },
     ];
     await thread(answered, null, [], undefined, true);
-    const checking = status();
+    const checking = workingLine();
     act(() => {
       root?.unmount();
     });
@@ -450,9 +496,9 @@ describe(ChatThread, () => {
     // Running on without a check: what it does otherwise.
     await thread(answered, null, [], undefined, false);
 
-    expect({ checking, otherwise: status() }).toStrictEqual({
+    expect({ checking, otherwise: workingLine() }).toStrictEqual({
       checking: "Checking the App…",
-      otherwise: "Thinking",
+      otherwise: "Working on it",
     });
   });
 
@@ -477,8 +523,8 @@ describe(ChatThread, () => {
     });
 
     expect([folded, firstStep()]).toStrictEqual([
-      { line: "Thought for 3s", open: false, shows: undefined },
-      { line: "Thought for 3s", open: true, shows: "Add two to two." },
+      { line: "Thought for 3 seconds", open: false, shows: undefined },
+      { line: "Thought for 3 seconds", open: true, shows: "Add two to two." },
     ]);
   });
 
@@ -505,7 +551,7 @@ describe(ChatThread, () => {
             callId: "search",
             tool: "searchBrain",
             codeBefore: 0,
-            input: { query: "expense policy" },
+            input: { question: "expense policy" },
           },
         ],
         end: "done",
@@ -520,28 +566,37 @@ describe(ChatThread, () => {
         at,
       },
     ]);
-    const lines = [...document.querySelectorAll("button[aria-expanded]")].map(
-      (line) => line.textContent
-    );
+    await openSteps();
+    const lines = stepLines();
+    // The first step's call, opened to what went in and came back.
     await act(async () => {
-      document.querySelector<HTMLElement>("button[aria-expanded]")?.click();
+      document
+        .querySelector<HTMLElement>('[role="listitem"] button[aria-expanded]')
+        ?.click();
       await Promise.resolve();
     });
-    const opened = firstStep().shows;
+    const call = document.querySelector('[role="listitem"]');
+    const opened = call?.textContent;
 
     expect({
       lines,
       given: opened?.includes('"src/routes/index.tsx": "export default"'),
       came: opened?.includes('{"changed":["src/routes/index.tsx"]}'),
-      code: document.body.textContent.includes("Code step"),
+      stopped: spoken(
+        document
+          .querySelectorAll('[role="listitem"]')[1]
+          ?.querySelector('[data-slot="trace-description"]')
+      ),
+      code: document.body.textContent.includes("code step"),
     }).toStrictEqual({
       // The search has no result yet, and Grasp has stopped: it never ran.
       lines: [
         "Wrote src/routes/index.tsx",
-        "Searching the brain for expense policyStopped",
+        "Searching the brain for expense policy",
       ],
       given: true,
       came: true,
+      stopped: "Stopped",
       code: false,
     });
   });
@@ -593,23 +648,26 @@ describe(ChatThread, () => {
       done(5, "edit"),
     ]);
 
-    expect(
-      [...document.querySelectorAll("button[aria-expanded]")].map(
-        (line) => line.textContent
-      )
-    ).toStrictEqual(["Wrote 2 files", "Code stepDone", "Edited app.ts"]);
+    await openSteps();
+
+    expect(stepLines()).toStrictEqual([
+      "Wrote 2 files",
+      "Ran a code step",
+      "Edited app.ts",
+    ]);
   });
 
-  it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
+  it("shows an answer as it is written, busy until it is kept, then done", async () => {
     await thread([asked], {
       text: "It adds up.\n\nFour, as **two** and two.",
       code: [],
       tools: [],
       reasoning: "",
     });
-    const landing = [...document.querySelectorAll("span.animate-in")].map(
-      (word) => word.textContent
-    );
+    const writing = {
+      status: answer()?.dataset.status,
+      words: answer()?.textContent.includes("It adds up."),
+    };
     act(() => {
       root?.unmount();
     });
@@ -628,11 +686,11 @@ describe(ChatThread, () => {
     ]);
 
     expect({
-      landing,
-      kept: document.querySelectorAll("span.animate-in").length,
+      writing,
+      kept: answer()?.dataset.status,
     }).toStrictEqual({
-      landing: ["Four,", "as", "two", "and", "two."],
-      kept: 0,
+      writing: { status: "streaming", words: true },
+      kept: "done",
     });
   });
 
@@ -700,7 +758,8 @@ describe(ChatThread, () => {
         picture: true,
       },
     });
-  });
+    // As long as the drawing's first load may take, beside the waits above.
+  }, 20_000);
 });
 
 /** An answer, by the agent `agentId`. */
@@ -779,8 +838,8 @@ describe("answers given by the agents a question addressed", () => {
     );
     // The names over answers: Claire's kept answer names none until
     // another is kept, and Pat's being written is named.
-    const named = [...document.querySelectorAll("p")]
-      .map((each) => each.textContent?.trim())
+    const named = [...document.querySelectorAll("article")]
+      .map((each) => each.getAttribute("aria-label"))
       .filter((each) => each === "Claire" || each === "Pat");
     expect(named).toStrictEqual(["Pat"]);
   });

@@ -6,15 +6,7 @@ import {
   useDockablePanel,
 } from "@grasp-os/app-kit/components/dockable-panel";
 import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
 import { Panel } from "@grasp-os/app-kit/components/panel";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
 import {
@@ -23,17 +15,16 @@ import {
   SquarePenIcon,
   XIcon,
 } from "lucide-react";
-import { Suspense, lazy, useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
 import { setActiveChat, startAfresh } from "./active-chat.ts";
 import { AgentName, agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
+import { ChatConversation } from "./chat-body.tsx";
 import {
   chatWidth,
   closeChat,
@@ -46,12 +37,9 @@ import {
 import { ChatTitleMenu } from "./chat-more.tsx";
 import { allows } from "./chat-presence.ts";
 import { HeaderIcon } from "./chat-switcher.tsx";
-import { ConnectionRequests } from "./connection-requests.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import type { ModelsUnavailable } from "./global-chat.tsx";
-import { HeldWrites } from "./held-writes.tsx";
 import { pendingCard } from "./make-card.tsx";
-import { PackageRequests } from "./package-requests.tsx";
 import { RecentsButton } from "./recents.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
@@ -62,13 +50,6 @@ import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
 // close it; the thread; and the box to ask in, which takes the cursor as the
 // chat opens. Escape closes it to its idle bar, which takes the cursor back
 // (chat-bar.tsx).
-
-// The conversation, with its Markdown and code highlighting, loads once a
-// chat is open: most pages show the chat idle.
-const ChatThread = lazy(async () => {
-  const { ChatThread: thread } = await import("./thread.tsx");
-  return { default: thread };
-});
 
 /**
  * The open chat's title at the head of the chat, renamed where it stands,
@@ -196,138 +177,16 @@ const HeaderActions = () => {
   );
 };
 
-/** What the chat says before anything is asked in it. */
-const Welcome = ({ text }: { text: string }) => (
-  <div className="animate-in fade-in-0 flex flex-1 flex-col motion-reduce:animate-none">
-    <Empty className="flex-1">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <GraspMark />
-        </EmptyMedia>
-        <EmptyTitle>{text}</EmptyTitle>
-      </EmptyHeader>
-    </Empty>
-  </div>
-);
-
 /** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
 const Thread = ({ focusBox }: { focusBox: () => void }) => {
-  const { t } = useLingui();
-  const {
-    chatId,
-    finding,
-    view,
-    failure,
-    empty,
-    words,
-    ask,
-    composer,
-    offered,
-  } = useGlobalChat();
+  const chat = useGlobalChat();
   const { placement } = useDockablePanel();
-  // A subject's chat, while core finds it, or why it gave none.
-  if (finding.searching || finding.failure !== undefined) {
-    return finding.failure === undefined ? (
-      <div className="flex flex-1 justify-center py-8">
-        <Spinner aria-label={t`Loading…`} />
-      </div>
-    ) : (
-      <div className="flex flex-1 flex-col items-center gap-3 py-8">
-        <NotLoaded page={finding.failure} />
-        <Button
-          onClick={() => {
-            finding.retry();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Try again</Trans>
-        </Button>
-      </div>
-    );
-  }
-  if (chatId === undefined || empty) {
-    return <Welcome text={words.empty} />;
-  }
-  const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   return (
-    <Suspense
-      fallback={
-        <div className="flex flex-1 justify-center py-8">
-          <Spinner aria-label={t`Loading…`} />
-        </div>
-      }
-    >
-      <ChatThread
-        agents={offered?.agents}
-        chatId={chatId}
-        compact={placement !== "fullscreen"}
-        loaded={view.loaded || failure !== undefined}
-        messages={view.messages}
-        onRetry={() => {
-          if (lastQuestion !== undefined) {
-            void ask(lastQuestion.text);
-          }
-        }}
-        output={view.output}
-        partial={view.partial}
-        checking={view.checking}
-        running={view.running}
-        tools={view.tools}
-        build={{
-          model: composer.model,
-          effort: composer.effort,
-          onChangePlan: focusBox,
-        }}
-      >
-        {failure === undefined && view.stopped === null ? null : (
-          <div className="flex flex-col gap-2">
-            <ErrorText>{failure}</ErrorText>
-            <ErrorText>{view.stopped ?? undefined}</ErrorText>
-            {/* A question stopped before the agent answered (a deploy, say)
-              is asked again from here: it may be the chat's first. */}
-            {view.stopped !== null &&
-            !view.running &&
-            lastQuestion !== undefined ? (
-              <Button
-                className="self-start"
-                onClick={() => {
-                  void ask(lastQuestion.text);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                <Trans>Try again</Trans>
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <HeldWrites
-          chatId={chatId}
-          // Confirmed, the agent reads how it ended and goes on, in a turn
-          // the person's own message starts, as for approved packages
-          // below: the decision itself reaches it as a note (GRA-2224).
-          onConfirmed={() => {
-            if (!view.running) {
-              void ask(t`Confirmed. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-        <ConnectionRequests chatId={chatId} version={view.held} />
-        <PackageRequests
-          chatId={chatId}
-          // Approved, the work the agent stopped for goes on, in a turn
-          // the person's own message starts: the thread says why it did.
-          onApproved={() => {
-            if (!view.running) {
-              void ask(t`The packages are approved. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-      </ChatThread>
-    </Suspense>
+    <ChatConversation
+      chat={chat}
+      compact={placement !== "fullscreen"}
+      focusBox={focusBox}
+    />
   );
 };
 
