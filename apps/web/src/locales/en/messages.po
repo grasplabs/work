@@ -6324,8 +6324,8 @@ msgid "Didn't run: it isn't set up to answer this person"
 msgstr "Didn't run: it isn't set up to answer this person"
 
 #: src/agents/agent-overview.tsx
-msgid "Didn't run: it was still busy, and tries again shortly"
-msgstr "Didn't run: it was still busy, and tries again shortly"
+msgid "Didn't run: it was still busy"
+msgstr "Didn't run: it was still busy"
 
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: no AI provider is connected"
@@ -6809,6 +6809,10 @@ msgstr "Edit"
 #: src/agents/agent-page.tsx
 msgid "Edit {name}"
 msgstr "Edit {name}"
+
+#: src/agents/agent-overview.tsx
+msgid "Edit access"
+msgstr "Edit access"
 
 #: src/settings/billing-card.tsx
 msgid "Edit billing information"
@@ -13185,10 +13189,6 @@ msgstr "Open {tool}"
 msgid "Open a link outside Grasp?"
 msgstr "Open a link outside Grasp?"
 
-#: src/agents/agent-overview.tsx
-msgid "Open access"
-msgstr "Open access"
-
 #: src/frame/part-words.tsx
 msgid "Open as a page"
 msgstr "Open as a page"
@@ -16899,8 +16899,8 @@ msgid "Something went wrong."
 msgstr "Something went wrong."
 
 #: src/agents/agent-overview.tsx
-msgid "Something went wrong. It tries again shortly, then at its next run."
-msgstr "Something went wrong. It tries again shortly, then at its next run."
+msgid "Something went wrong. It tries again at its next run."
+msgstr "Something went wrong. It tries again at its next run."
 
 #: src/brain/memories-page.tsx
 msgid "something without a name"

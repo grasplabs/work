@@ -46,7 +46,7 @@ import { SectionCard } from "../grasp/section-card/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { nextWakeAt } from "./agent-facts.tsx";
+import { nextWakeAt, wakesOn } from "./agent-facts.tsx";
 import { foldOf, mentionOf, withMentions } from "./instructions-read.ts";
 import type { Named } from "./instructions-read.ts";
 import { weekOf } from "./schedule-read.ts";
@@ -201,7 +201,7 @@ const markOf = {
   other: { icon: Failed, look: styles.failed },
 } as const;
 
-/** Outcomes that say nothing is wrong with the agent: it ran, was paused, or was busy and tries again. */
+/** Outcomes that say nothing is wrong with the agent: it ran, was paused, or was still busy. */
 const fine = new Set<Outcome>(["started", "agent.paused", "agent.busy"]);
 
 /**
@@ -293,7 +293,7 @@ const StatusLine = ({
     detail = t`Last run ${when}`;
   } else if (agent.ownerId !== null) {
     detail = t`Just for you`;
-  } else if (next === undefined && wakes.length > 0) {
+  } else if (wakes.length > 0 && wakesOn(wakes).length === 0) {
     detail = t`Its schedule is paused`;
   } else if (next === undefined) {
     detail = t`Runs when asked`;
@@ -617,7 +617,7 @@ const RunHistory = ({ wakes }: { wakes: readonly AgentWake[] }) => {
     "agent.not_for_you": t`Didn't run: it isn't set up to answer this person`,
     "permission.person_inactive": t`Didn't run: this person is no longer in the company`,
     "model.no_provider": t`Didn't run: no AI provider is connected`,
-    "agent.busy": t`Didn't run: it was still busy, and tries again shortly`,
+    "agent.busy": t`Didn't run: it was still busy`,
     other: t`Didn't run: something went wrong`,
   };
   let empty = t`No runs yet.`;
@@ -680,7 +680,7 @@ const FailingAlert = ({
     "agent.not_for_you": t`It isn't set up to answer the person its schedule works for.`,
     "permission.person_inactive": t`The person its schedule works for is no longer in the company.`,
     "model.no_provider": t`No AI provider is connected.`,
-    other: t`Something went wrong. It tries again shortly, then at its next run.`,
+    other: t`Something went wrong. It tries again at its next run.`,
   };
   const outcome =
     run.outcome === "started" ||
@@ -692,7 +692,7 @@ const FailingAlert = ({
   if (editable && outcome === "agent.not_for_you") {
     action = (
       <TabLink agentId={agent.id} tab="access">
-        {t`Open access`}
+        {t`Edit access`}
       </TabLink>
     );
   } else if (editable && outcome === "permission.person_inactive") {
