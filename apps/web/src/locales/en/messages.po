@@ -19624,6 +19624,7 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/drafts/draft-history.tsx
+#: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-rows.tsx

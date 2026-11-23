@@ -165,6 +165,8 @@ const runColumns = (words: {
   startedBy: (principal: WorkflowResourceRun["principal"]) => string;
   started: string;
   version: string;
+  /** A version as people call it everywhere: "v3". */
+  versionOf: (version: number) => string;
   by: string;
   ended: string;
   status: string;
@@ -175,7 +177,12 @@ const runColumns = (words: {
     value: (run) => run.createdAt,
     cell: (run) => formatDateTime(run.createdAt),
   },
-  { key: "version", header: words.version, value: (run) => run.version },
+  {
+    key: "version",
+    header: words.version,
+    value: (run) => run.version,
+    cell: (run) => words.versionOf(run.version),
+  },
   {
     key: "by",
     header: words.by,
@@ -237,6 +244,7 @@ export const WorkflowRunsTable = ({
     startedBy,
     started: t`Started`,
     version: t`Version`,
+    versionOf: (version) => t`v${version}`,
     by: t`Started by`,
     ended: t`Ended`,
     status: t`Status`,
