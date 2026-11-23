@@ -300,6 +300,9 @@ test("a builder sees every declared branch of the checked definition, a test run
   await expect(steps.getByText("What it returned")).toBeVisible({
     timeout: 30_000,
   });
+  // Its steps speak the workflow's code: folded away until a builder asks.
+  // The panel's last section, so its last Details.
+  await steps.getByRole("button", { name: "Details" }).last().click();
   await expect(steps.getByText("Step by step")).toBeVisible(pageRead);
   const ran = steps.getByRole("region", {
     name: "What the run of version 1 did",
