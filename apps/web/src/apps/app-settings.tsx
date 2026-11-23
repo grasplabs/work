@@ -472,8 +472,11 @@ const ForBuilders = ({
             </WithInfo>
           </CardHeader>
           <CardContent>
-            <PuttingAway app={app} />
-            <RemoveApp app={app} identity={identity} />
+            {/* Archive or Restore, then Delete under it, a step apart. */}
+            <div {...stylex.props(styles.section)}>
+              <PuttingAway app={app} />
+              <RemoveApp app={app} identity={identity} />
+            </div>
           </CardContent>
         </section>
       </Card>
