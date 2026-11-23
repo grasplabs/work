@@ -4,36 +4,42 @@ import { useRef } from "react";
 import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Settings saved whole, a field at a time, as each is changed: every
-// change is laid over the last one sent (not over the page as it was
-// read, which a save still on its way hasn't reached yet), and they go to
-// core one after the other, so a field changed while another saves loses
-// nothing. Once one is refused, the next starts again from what core
-// keeps, which the page reads again after every save.
+// A setting core keeps whole (its `saveSetting` replaces the row, so a
+// save names every field), changed a few fields at a time from one page:
+// a switch here, a dialog's fields there. Every change goes through this
+// one queue, one after the other, and each is laid over what core keeps
+// as its turn comes (read again just before it is sent), never over the
+// page as it was read or over what this page sent last: a change made
+// while another saves, or from another part of the page, writes nothing
+// stale back over it. The page reads again after every save.
 
 export const useQueuedSave = <T extends object>(
-  saved: T,
+  read: (session: Session) => Promise<T>,
   send: (session: Session, next: T) => Promise<unknown>
 ) => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const latest = useRef<T | null>(null);
-  const queue = useRef<Promise<void>>(Promise.resolve());
-  const save = (change: Partial<T>): void => {
-    const next = { ...(latest.current ?? saved), ...change };
-    latest.current = next;
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * Saves `change` in its turn; true once core kept it. Why it wasn't goes
+   * to `report` when given (a dialog saying it), else to `failure`.
+   */
+  const save = async (
+    change: Partial<T>,
+    report?: (reason: string) => void
+  ): Promise<boolean> => {
     const before = queue.current;
-    queue.current = (async () => {
+    const mine = (async () => {
       await before;
       const done = await run(async (session) => {
-        await send(session, next);
+        await send(session, { ...(await read(session)), ...change });
         return true;
-      });
-      if (done === undefined) {
-        latest.current = null;
-      }
+      }, report);
       await router.invalidate({ sync: true });
+      return done === true;
     })();
+    queue.current = mine;
+    return await mine;
   };
   return { busy, failure, save };
 };

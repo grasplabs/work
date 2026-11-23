@@ -40,37 +40,57 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
   await expect(sectionOf(page, "Plan")).toContainText("Current plan");
-  // The billing details are the admin's to keep, saved whole from their
-  // card's dialog.
+  // The billing details are the admin's to keep, from their card's dialog,
+  // and the billing emails, each switch saved as it is flipped; core keeps
+  // them all as one, so a switch flipped before the details and one after
+  // them leave the details as saved.
   const billing = sectionOf(page, "Billing information");
+  const emails = sectionOf(page, "Billing emails");
+  const invoices = emails.getByRole("switch", { name: "Email invoices" });
+  const receipts = emails.getByRole("switch", {
+    name: "Email payment receipts",
+  });
+  const invoicesBefore = await invoices.isChecked();
+  const receiptsBefore = await receipts.isChecked();
+  await invoices.click();
   await billing
     .getByRole("button", { name: "Edit billing information" })
     .click();
   const dialog = page.getByRole("dialog", { name: "Billing information" });
+  await dialog.getByLabel("Company").fill("Acme Billing B.V.");
   await dialog.getByLabel("VAT number").fill("nl123456789b01");
   await dialog.getByLabel("Billing email").fill("finance@acme.test");
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toBeHidden();
+  await receipts.click();
+  const kept = {
+    company: "Acme Billing B.V.",
+    email: "finance@acme.test",
+    vatNumber: "NL123456789B01",
+    emailInvoices: !invoicesBefore,
+    emailReceipts: !receiptsBefore,
+  };
   {
     const { core, api } = apiOf(admin);
     try {
       await expect
         .poll(async () => {
-          const { email, vatNumber } = await api.orgSettings.billing();
-          return { email, vatNumber };
+          const { company, email, vatNumber, emailInvoices, emailReceipts } =
+            await api.orgSettings.billing();
+          return { company, email, vatNumber, emailInvoices, emailReceipts };
         })
-        .toStrictEqual({
-          email: "finance@acme.test",
-          vatNumber: "NL123456789B01",
-        });
+        .toStrictEqual(kept);
     } finally {
       core[Symbol.dispose]();
     }
   }
-  // As core keeps them, on the card.
+  // As core keeps them, on the card and the switches.
   await page.reload();
-  await expect(billing).toContainText("NL123456789B01");
-  await expect(billing).toContainText("finance@acme.test");
+  await expect(billing).toContainText(kept.company);
+  await expect(billing).toContainText(kept.vatNumber);
+  await expect(billing).toContainText(kept.email);
+  await expect(invoices).toBeChecked({ checked: kept.emailInvoices });
+  await expect(receipts).toBeChecked({ checked: kept.emailReceipts });
 
   await nav.getByRole("link", { name: "Security" }).click();
   await expect(page).toHaveURL(/\/settings\/security$/u);
