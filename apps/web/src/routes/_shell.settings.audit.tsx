@@ -1,9 +1,6 @@
-import type { AuditPage, FullVerification } from "@grasp-os/shared/audit-log";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import type { AuditPage } from "@grasp-os/shared/audit-log";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
 
 import {
   LogExport,
@@ -15,32 +12,19 @@ import { logSearchOf } from "../activity/log-search.ts";
 import type { LogSearch } from "../activity/log-search.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { ArchivedEvents, RetentionRows } from "../settings/audit-archive.tsx";
+import { AuditArchive } from "../settings/audit-archive.tsx";
+import { AuditChainCheck } from "../settings/audit-chain.tsx";
 import {
-  ChainBroken,
-  endedOf,
-  IntegrityDialog,
-} from "../settings/audit-chain.tsx";
-import {
+  SettingsBody,
   SettingsError,
-  SettingsGroup,
-  SettingsStack,
-} from "../settings/section.tsx";
+  SettingsSection,
+} from "../settings/settings-parts.tsx";
 
-// Settings › Audit trail, for admins: the events are the page. A broken
-// hash chain shows above them (settings/audit-chain.tsx); otherwise the
-// events card stands under the page's title, with the integrity check and
-// how long events are kept behind one quiet button in its head, and the
-// export beside it. Over the records, the filters (activity/audit-log.tsx,
-// which the log's own pages share), in the address; under them the
-// archive, searched with the same filters (settings/audit-archive.tsx).
-// Core checks the role on every call; every search of the log is itself
-// recorded in it.
-
-const styles = stylex.create({
-  // The filters in the rows' inset, over the records.
-  filters: { padding: space[4] },
-});
+// Settings → Audit trail, for admins, as in the prototype
+// (`routes/settings/audit.tsx`): core's audit log, searched by its filters
+// (in the address), page by page, each record in words, with its export
+// and its chain check (settings/audit-chain.tsx). Core checks the role on every call; every search
+// of the log is itself recorded in it.
 
 /**
  * The records' key: their filters and the first page read, so the log read
@@ -54,25 +38,17 @@ const AuditTrail = () => {
   const { t } = useLingui();
   const { log, last } = Route.useLoaderData();
   const filters = Route.useSearch();
-  const [own, setOwn] = useState<FullVerification | null>(null);
   return (
-    <SettingsStack>
-      <ChainBroken ended={endedOf(own, last)} />
-      <SettingsGroup
-        actions={
-          <>
-            <IntegrityDialog last={last} onChecked={setOwn} own={own}>
-              <RetentionRows />
-            </IntegrityDialog>
-            <LogExport search={filters} />
-          </>
-        }
-        title={t`Events`}
+    <>
+      <SettingsSection
+        action={<LogExport search={filters} />}
+        description={t`Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen.`}
+        title={t`Audit trail`}
       >
-        {/* Filters and records start again from new filters. */}
-        <div {...stylex.props(styles.filters)}>
+        <SettingsBody>
+          {/* Filters and records start again from new filters. */}
           <LogFilters key={JSON.stringify(filters)} search={filters} />
-        </div>
+        </SettingsBody>
         {log.state === "ready" ? (
           <LogRecords
             directory={log.data.directory}
@@ -81,17 +57,20 @@ const AuditTrail = () => {
             search={filters}
           />
         ) : (
-          <NotLoadedState heading="h3" page={log} />
+          <div className="border-t">
+            <NotLoadedState heading="h3" page={log} />
+          </div>
         )}
-      </SettingsGroup>
+      </SettingsSection>
+      <AuditChainCheck last={last} />
       {log.state === "ready" ? (
-        <ArchivedEvents
+        <AuditArchive
           directory={log.data.directory}
           key={JSON.stringify(filters)}
           search={filters}
         />
       ) : null}
-    </SettingsStack>
+    </>
   );
 };
 
