@@ -12576,6 +12576,10 @@ msgstr "Log in om te antwoorden"
 msgid "Sign in to connect {name} now"
 msgstr "Inloggen om {name} nu te koppelen"
 
+#: src/routes/sign-in.tsx
+msgid "Sign in to Grasp"
+msgstr "Inloggen bij Grasp"
+
 #: src/routes/interview.tsx
 msgid "Sign in to open your interview"
 msgstr "Log in om je interview te openen"

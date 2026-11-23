@@ -2,7 +2,9 @@ import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
 import { LockIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
-import { useLingui } from "@lingui/react/macro";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { z } from "zod";
@@ -159,6 +161,10 @@ const SignIn = () => {
   if (by === "code" && connected) {
     return (
       <OnboardingFrame>
+        {/* The page's title, heard and not shown: the form is the whole page. */}
+        <h1 {...stylex.props(visuallyHidden)}>
+          <Trans>Sign in to Grasp</Trans>
+        </h1>
         <GuestCodeSignIn
           onBack={() => {
             void navigate({ search: { returnTo } });
@@ -186,6 +192,7 @@ const SignIn = () => {
   const codePath = `${signInPath}?by=code&returnTo=${encodeURIComponent(returnTo)}`;
   return (
     <SignInPage
+      again={failed}
       foot={
         <>
           {connected ? (

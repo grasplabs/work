@@ -15,6 +15,22 @@ import { endSession, peopleIn, signInAs, signInTo } from "./people.ts";
  */
 const reconnectMs = 10_000;
 
+test("says a sign-in core would not start on the page, with focus on the first way in again", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/sign-in/sso", async (route) => {
+    await route.fulfill({ status: 500, json: { code: "INTERNAL" } });
+  });
+  await page.goto("/sign-in");
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Sign-in didn't work. Try again, or ask an admin."
+  );
+  await expect(
+    page.getByRole("button", { name: "Continue with Microsoft" })
+  ).toBeFocused();
+});
+
 test("loads the frontend from core, reaches core over RPC, and asks whoever isn't signed in to sign in", async ({
   page,
 }) => {
@@ -62,6 +78,9 @@ test("offers each way in, marks the one used last in this browser, and gives a g
   // A guest, from outside the company, asks for a code instead, and can
   // go back to the company's ways in.
   await page.getByRole("link", { name: "Sign in with a code" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Sign in to Grasp" })
+  ).toBeAttached();
   await expect(page.getByLabel("Your email address")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("by")).toBe("code");
   await page.getByRole("button", { name: "Back" }).click();

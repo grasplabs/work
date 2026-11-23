@@ -22,7 +22,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { MouseEvent, PointerEvent, ReactNode } from "react";
+import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
 import { idleDoor, startDoor } from "./door.ts";
@@ -304,6 +304,8 @@ interface WaysProps {
   leaving: string | undefined;
   choose: (id: string, event: MouseEvent<HTMLElement>) => void;
   aim: (on: boolean) => void;
+  /** The first way's button, to put focus on. */
+  first: RefObject<HTMLButtonElement | null>;
 }
 
 /** The ways in, each a button to its provider; the one used last time first, ringed and tagged. */
@@ -315,11 +317,12 @@ const SignInWays = ({
   leaving,
   choose,
   aim,
+  first,
 }: WaysProps) => {
   const { t } = useLingui();
   return (
     <div {...stylex.props(styles.ways)}>
-      {ways.map((way) => {
+      {ways.map((way, index) => {
         const provider = way.name;
         return (
           <div
@@ -351,6 +354,7 @@ const SignInWays = ({
               onClick={(event: MouseEvent<HTMLElement>) => {
                 choose(way.id, event);
               }}
+              ref={index === 0 ? first : undefined}
               size="lg"
               status={leaving === way.id ? "loading" : "idle"}
               successText={t`Opened`}
@@ -455,6 +459,11 @@ export interface SignInProps {
   onChoose: (id: string) => void;
   /** The line at the foot, and the language. */
   foot: ReactNode;
+  /**
+   * Drawn again after a sign-in that did not start: focus goes to the first
+   * way in, just after the notice saying so, not to the page's body.
+   */
+  again?: boolean;
 }
 
 /** The sign-in page: the door behind, the title, the ways in, and why someone is back. */
@@ -466,11 +475,18 @@ export const SignIn = ({
   onPress,
   onChoose,
   foot,
+  again = false,
 }: SignInProps) => {
   const { t } = useLingui();
   const titleId = useId();
   const kept = useKeptLastUsed();
   const { canvas, door } = useDoor();
+  const first = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (again) {
+      first.current?.focus();
+    }
+  }, [again]);
   // A press leaves for the provider: that button works while the door opens, the rest fades.
   const [pressed, setPressed] = useState<string>();
   // The door has opened at the chosen way: that way fades too, and the page leaves.
@@ -558,6 +574,7 @@ export const SignIn = ({
           <SignInWays
             aim={setAimed}
             choose={choose}
+            first={first}
             gone={gone}
             last={last}
             leaving={leaving}
