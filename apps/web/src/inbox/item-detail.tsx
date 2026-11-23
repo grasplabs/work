@@ -20,12 +20,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
-import {
-  CodeBlock,
-  CodeBlockContent,
-  CodeBlockHeader,
-  CodeBlockTitle,
-} from "@grasp-os/ui/components/code-block";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import {
@@ -63,6 +57,7 @@ import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { ApprovalRequest } from "./approval-request.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
+import { JsonBlock } from "./json-block.tsx";
 import { isUnresolvable, OutcomeDetails } from "./outcome-details.tsx";
 import { RequestDetails } from "./request-details.tsx";
 import { TargetLink } from "./target-link.tsx";
@@ -127,7 +122,7 @@ const ConfirmedAct = ({
   act: Act;
   confirm: NonNullable<Act["confirm"]>;
   disabled: boolean;
-  variant: "default" | "secondary";
+  variant: "default" | "outline";
 }) => {
   const [open, setOpen] = useState(false);
   return (
@@ -178,7 +173,7 @@ const ActButton = ({
   /** The item's own next step: filled; the rest quiet. */
   first: boolean;
 }) => {
-  const variant = first ? "default" : "secondary";
+  const variant = first ? "default" : "outline";
   if (act.to !== undefined) {
     return (
       <Button asChild size="sm" variant={variant}>
@@ -448,16 +443,7 @@ const HeldStartItem = ({
   return (
     <ApprovalFrame
       approveLabel={t`Start it`}
-      details={
-        <CodeBlock language="json" size="sm">
-          <CodeBlockHeader>
-            <CodeBlockTitle>{t`What it starts with`}</CodeBlockTitle>
-          </CodeBlockHeader>
-          <CodeBlockContent wrap>
-            {JSON.stringify(start.args, null, 2)}
-          </CodeBlockContent>
-        </CodeBlock>
-      }
+      details={<JsonBlock title={t`What it starts with`} value={start.args} />}
       frame={frame}
       onApprove={async (session) => {
         await session.heldStarts.confirm(start.id, start.argsHash);

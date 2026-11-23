@@ -13,10 +13,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
-import {
-  CodeBlock,
-  CodeBlockContent,
-} from "@grasp-os/ui/components/code-block";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -28,6 +24,7 @@ import { z } from "zod";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
+import { JsonBlock } from "./json-block.tsx";
 
 // The trusted host decision UI's confirmation (spec 10.7.2, GRA-624):
 // before a person's answer to a decision is recorded, Grasp itself shows
@@ -103,15 +100,6 @@ const styles = stylex.create({
   facts: { display: "grid", gap: space["4"], minWidth: 0 },
 });
 
-/** JSON as the person reads it: all of it, wrapped. */
-const Json = ({ value }: { value: unknown }) => (
-  <CodeBlock language="json" size="sm">
-    <CodeBlockContent wrap>
-      {JSON.stringify(value, undefined, 2)}
-    </CodeBlockContent>
-  </CodeBlock>
-);
-
 /**
  * The answer's payload as the person reads it, under what it is called:
  * whose it is, and what it holds. A comment alone, as the decision's page
@@ -147,7 +135,7 @@ const usePayloadItems = (
   }
   const value: ReactNode =
     comment === undefined ? (
-      <Json value={payload} />
+      <JsonBlock value={payload} />
     ) : (
       <span {...stylex.props(styles.comment)}>{comment}</span>
     );
@@ -180,7 +168,7 @@ const useAskedItems = (decision: DecisionView | undefined): KeyValueItem[] => {
               context:
                 "what a decision is about, as its workflow run passed it",
             }),
-            value: <Json value={decision.input} />,
+            value: <JsonBlock value={decision.input} />,
           },
         ]),
     {

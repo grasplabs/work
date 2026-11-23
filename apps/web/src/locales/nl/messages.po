@@ -7045,9 +7045,8 @@ msgstr "In je documenten zag ik {tools}."
 msgid "In your own words, as you would tell a colleague."
 msgstr "In je eigen woorden, zoals je het een collega zou vertellen."
 
-#: src/inbox/inbox-page.tsx
-#: src/inbox/inbox-pending.tsx
 #: src/inbox/nav-item.tsx
+#: src/routes/_shell.inbox.tsx
 msgid "Inbox"
 msgstr "Inbox"
 

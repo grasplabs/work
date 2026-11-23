@@ -8,10 +8,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
-import {
-  CodeBlock,
-  CodeBlockContent,
-} from "@grasp-os/ui/components/code-block";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
@@ -33,6 +29,7 @@ import {
   WithheldAskNote,
 } from "./decision-confirmation.tsx";
 import type { PendingConfirmation } from "./decision-confirmation.tsx";
+import { JsonBlock } from "./json-block.tsx";
 
 // A decision as the person who answers it sees it on its own page
 // (routes/decisions.$decision.tsx): what is asked, where it comes from,
@@ -83,13 +80,7 @@ const useFacts = (current: DecisionView, open: boolean): KeyValueItem[] => {
               context:
                 "what a decision is about, as its workflow run passed it",
             }),
-            value: (
-              <CodeBlock language="json" size="sm">
-                <CodeBlockContent wrap>
-                  {JSON.stringify(current.input, undefined, 2)}
-                </CodeBlockContent>
-              </CodeBlock>
-            ),
+            value: <JsonBlock value={current.input} />,
           },
         ]),
     ...(open
@@ -272,7 +263,7 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                           void run(readAgain);
                         }}
                         size="sm"
-                        variant="secondary"
+                        variant="outline"
                       >
                         {t`Try again`}
                       </Button>
@@ -319,7 +310,7 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                           void answer(false);
                         }}
                         size="sm"
-                        variant="secondary"
+                        variant="outline"
                       >
                         {t({
                           message: "Reject",

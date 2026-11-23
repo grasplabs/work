@@ -7045,9 +7045,8 @@ msgstr "En tus documentos vi {tools}."
 msgid "In your own words, as you would tell a colleague."
 msgstr "Con tus propias palabras, como se lo dirías a un compañero."
 
-#: src/inbox/inbox-page.tsx
-#: src/inbox/inbox-pending.tsx
 #: src/inbox/nav-item.tsx
+#: src/routes/_shell.inbox.tsx
 msgid "Inbox"
 msgstr "Bandeja de entrada"
 
