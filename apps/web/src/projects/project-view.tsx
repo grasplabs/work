@@ -788,8 +788,9 @@ const Overview = ({
           >
             {t`No workflows yet, such as booking invoices.`}
           </EmptyLine>
-        ) : (
-          <ItemGroup aria-labelledby="project-workflows" separated>
+        ) : null}
+        {filedWorkflows.length === 0 ? null : (
+          <ItemGroup separated>
             {filedWorkflows.slice(0, slice).map((item) => (
               <WorkflowRow item={item} key={item.id} row={rows.get(item.id)} />
             ))}
@@ -818,7 +819,7 @@ const Overview = ({
             {t`None of your chats are in this project yet.`}
           </EmptyLine>
         ) : (
-          <ItemGroup aria-labelledby="project-chats" separated>
+          <ItemGroup separated>
             {chats.slice(0, slice).map((chat) => (
               <ChatRow chat={chat} key={chat.id} />
             ))}
@@ -849,8 +850,9 @@ const Overview = ({
           >
             {t`No Apps yet, such as a debtor overview.`}
           </EmptyLine>
-        ) : (
-          <ul aria-labelledby="project-apps" {...stylex.props(styles.cards)}>
+        ) : null}
+        {apps.length === 0 ? null : (
+          <ul {...stylex.props(styles.cards)}>
             {apps.slice(0, slice).map((item) => (
               <AppCard item={item} key={item.id} />
             ))}
@@ -863,7 +865,11 @@ const Overview = ({
       >
         <SectionHead
           {...(project.moreMembers ? {} : { count: 1 + people.length })}
-          end={<ViewAll project={project} tab="people" />}
+          end={
+            people.length > 0 || project.moreMembers ? (
+              <ViewAll project={project} tab="people" />
+            ) : null
+          }
           id="project-people"
           title={t`People`}
         />
@@ -892,7 +898,7 @@ const Overview = ({
             {ownerIsYou ? t`Only you so far.` : t`Only ${owner} so far.`}
           </EmptyLine>
         ) : (
-          <ItemGroup aria-labelledby="project-people" separated>
+          <ItemGroup separated>
             <PersonRow
               name={owner}
               role={t({ message: "Owner", context: "a project's owner" })}
@@ -1082,7 +1088,7 @@ export const ProjectView = ({
             />
             <ConnectionChips connections={connections} />
             <StoppedConnection
-              builds={builds}
+              builds={makes}
               connections={connections.connections}
               owner={owner}
             />
