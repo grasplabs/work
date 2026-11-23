@@ -145,8 +145,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** How long a page may take to come to rest before a test fails on it. */
-const restMs = 5000;
+/**
+ * How long a page may take to come to rest before a test fails on it: the
+ * first page with a Damsko component compiles its StyleX, 7 s on a loaded
+ * machine (vite.components.config.ts), so well inside the test's timeout.
+ */
+const restMs = 20_000;
 
 /** One macrotask, past React's and the router's microtasks. */
 const tick = async (): Promise<void> => {

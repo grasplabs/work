@@ -3,10 +3,12 @@ import path from "node:path";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import type { PluginConfig } from "@cloudflare/vite-plugin";
 import babel from "@rolldown/plugin-babel";
+import stylex from "@stylexjs/unplugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { bindings } from "cf/config";
+import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 
 import { serverOnlyCheck } from "./server-only-check.ts";
@@ -19,6 +21,25 @@ export const adminDefine = {
   "import.meta.env.VITE_GRASP_BUILD": JSON.stringify(
     process.env.GITHUB_SHA ?? "local"
   ),
+};
+
+/**
+ * Damsko's tokens give a colour's light and dark values in one
+ * `light-dark()`, which every browser staff use reads: kept as written by
+ * both of the CSS passes, StyleX's and Vite's, as in apps/web.
+ */
+const keepLightDark = { exclude: Features.LightDark };
+
+/**
+ * Damsko's components (packages/ui) are StyleX, compiled to class names
+ * before React's own transforms (the plugin runs first, whatever its place
+ * in a list), their CSS joined to the browser's stylesheet outside any
+ * cascade layer, as in apps/web, whose config says why. Its plugin, typed
+ * as `any`, is called where each config lists its plugins: here, in
+ * vite.e2e.config.ts and vite.components.config.ts.
+ */
+export const damskoStyles = {
+  lightningcssOptions: { ...keepLightDark, errorRecovery: true, minify: true },
 };
 
 /**
@@ -51,7 +72,13 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
   // of silently shipping it uncompiled.
   babel({ presets: [reactCompilerPreset({ panicThreshold: "all_errors" })] }),
   tailwindcss(),
-  { name: "grasp-admin-build", config: () => ({ define: adminDefine }) },
+  {
+    name: "grasp-admin-build",
+    config: () => ({
+      define: adminDefine,
+      css: { lightningcss: keepLightDark },
+    }),
+  },
   serverOnlyCheck(path.join(import.meta.dirname, "src")),
 ];
 
@@ -80,5 +107,5 @@ export const adminWorker = (command: "serve" | "build"): PluginConfig =>
     : {};
 
 export default defineConfig(({ command }) => ({
-  plugins: adminPlugins(adminWorker(command)),
+  plugins: [stylex(damskoStyles), ...adminPlugins(adminWorker(command))],
 }));

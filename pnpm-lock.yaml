@@ -588,12 +588,18 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@grasp-os/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@grasp-os/workerflow':
         specifier: workspace:*
         version: link:../../packages/workerflow
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7)
+      '@stylexjs/stylex':
+        specifier: 'catalog:'
+        version: 0.19.2
       '@tanstack/react-router':
         specifier: 'catalog:'
         version: 1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -640,6 +646,9 @@ importers:
       '@rolldown/plugin-babel':
         specifier: 'catalog:'
         version: 0.2.4(@babel/core@7.29.7(supports-color@10.2.2))(@babel/runtime@7.29.7)(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(rolldown@1.2.16)
+      '@stylexjs/unplugin':
+        specifier: 'catalog:'
+        version: 0.19.2(supports-color@10.2.2)(unplugin@2.3.11)
       '@tailwindcss/vite':
         specifier: 'catalog:'
         version: 4.3.3(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))
@@ -664,6 +673,9 @@ importers:
       happy-dom:
         specifier: 'catalog:'
         version: 21.0.4
+      lightningcss:
+        specifier: 'catalog:'
+        version: 1.33.0
       seroval:
         specifier: 'catalog:'
         version: 1.7.5

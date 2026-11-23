@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AskRouteImport } from './routes/ask'
+import { Route as DamskoRouteImport } from './routes/damsko'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
@@ -40,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
 const AskRoute = AskRouteImport.update({
   id: '/ask',
   path: '/ask',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DamskoRoute = DamskoRouteImport.update({
+  id: '/damsko',
+  path: '/damsko',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -158,6 +164,7 @@ const PlatformReleasesReleaseIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
+  '/damsko': typeof DamskoRoute
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
@@ -182,6 +189,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
+  '/damsko': typeof DamskoRoute
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
@@ -206,6 +214,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
+  '/damsko': typeof DamskoRoute
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
@@ -232,6 +241,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/ask'
+    | '/damsko'
     | '/integrations'
     | '/lab'
     | '/new-organization'
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/ask'
+    | '/damsko'
     | '/integrations'
     | '/lab'
     | '/new-organization'
@@ -279,6 +290,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/ask'
+    | '/damsko'
     | '/integrations'
     | '/lab'
     | '/new-organization'
@@ -304,6 +316,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
+  DamskoRoute: typeof DamskoRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
@@ -329,6 +342,13 @@ declare module '@tanstack/react-router' {
       path: '/ask'
       fullPath: '/ask'
       preLoaderRoute: typeof AskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/damsko': {
+      id: '/damsko'
+      path: '/damsko'
+      fullPath: '/damsko'
+      preLoaderRoute: typeof DamskoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -511,6 +531,7 @@ const OrganizationsClientIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
+  DamskoRoute: DamskoRoute,
   IntegrationsRoute: IntegrationsRoute,
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,

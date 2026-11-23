@@ -1,6 +1,17 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -31,7 +42,9 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
   const [noExport, setNoExport] = useState(false);
   const [deleted, setDeleted] = useState<OffboardResult["deletion"]>(null);
   const waits = !client.deletable;
-  const id = `no-export-${client.clientId}`;
+  const name = `${client.name} (${client.clientId})`;
+  const more =
+    client.remaining > 0 || deleted !== null || client.emptying.length > 0;
   const remove = () => {
     void run(async () => {
       const result = await thenRefresh(
@@ -48,59 +61,76 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
     });
   };
   return (
-    <li className="flex flex-col gap-3 rounded-xl border p-4 text-sm">
-      <p className="font-medium">{`${client.name} (${client.clientId})`}</p>
-      <p className="text-muted-foreground">
-        {`Offboarded on ${formatTime(client.offboardedAt)} UTC from ${client.destinationId}. Its resources are kept until ${formatTime(client.deletableFrom)} UTC; ${client.remaining} are still there.`}
-      </p>
-      {client.remaining === 0 ? null : (
-        <>
-          <Field orientation="horizontal">
-            <Checkbox
-              checked={noExport}
-              disabled={waits}
-              id={id}
-              onCheckedChange={setNoExport}
-            />
-            <FieldLabel htmlFor={id}>
-              No export of it was made, and I delete its resources without one
-            </FieldLabel>
-          </Field>
-          <div className="flex flex-wrap items-center gap-4">
-            <Button
-              size="sm"
-              disabled={busy || waits || !noExport}
-              onClick={remove}
-              variant="destructive"
-            >
-              Delete its resources
-            </Button>
-            {waits ? (
-              <p className="text-muted-foreground">
-                {`It can be deleted from ${formatTime(client.deletableFrom)} UTC, once its 30 days are over.`}
-              </p>
-            ) : null}
-            {failure === null ? null : (
-              <p className="text-destructive" role="alert">
-                {failure}
-              </p>
-            )}
-          </div>
-        </>
-      )}
-      {deleted === null ? null : (
-        <output>{`Deleted ${deleted.deleted} of its resources.`}</output>
-      )}
-      {client.emptying.length === 0 ? null : (
-        <ul className="flex flex-col gap-1">
-          {client.emptying.map(({ physicalName, emptyBy }) => (
-            <li key={physicalName}>
-              {`${physicalName} still held objects, which expire by ${formatTime(emptyBy)} UTC: delete again after that to delete it.`}
-            </li>
-          ))}
-        </ul>
-      )}
-    </li>
+    <Card asChild size="sm">
+      <li>
+        <CardHeader>
+          <CardTitle level={2}>{name}</CardTitle>
+          <CardDescription>
+            {`Offboarded on ${formatTime(client.offboardedAt)} UTC from ${client.destinationId}. Its resources are kept until ${formatTime(client.deletableFrom)} UTC; ${client.remaining} are still there.`}
+          </CardDescription>
+        </CardHeader>
+        {more ? (
+          <CardContent>
+            <div {...stylex.props(styles.stack)}>
+              {client.remaining === 0 ? null : (
+                <>
+                  <Field disabled={waits} orientation="horizontal">
+                    <Checkbox
+                      checked={noExport}
+                      onCheckedChange={(checked) => {
+                        setNoExport(checked === true);
+                      }}
+                    />
+                    <FieldLabel>
+                      No export of it was made, and I delete its resources
+                      without one
+                    </FieldLabel>
+                  </Field>
+                  <div {...stylex.props(styles.row)}>
+                    <Button
+                      disabled={busy || waits || !noExport}
+                      onClick={remove}
+                      size="sm"
+                      variant="destructive"
+                    >
+                      Delete its resources
+                    </Button>
+                    {waits ? (
+                      <Text color="muted" size="sm">
+                        {`It can be deleted from ${formatTime(client.deletableFrom)} UTC, once its 30 days are over.`}
+                      </Text>
+                    ) : null}
+                  </div>
+                  {failure === null ? null : (
+                    <Alert appearance="subtle" variant="destructive">
+                      <AlertDescription>{failure}</AlertDescription>
+                    </Alert>
+                  )}
+                </>
+              )}
+              {deleted === null ? null : (
+                <output>
+                  <Text as="span" size="sm">
+                    {`Deleted ${deleted.deleted} of its resources.`}
+                  </Text>
+                </output>
+              )}
+              {client.emptying.length === 0 ? null : (
+                <ul {...stylex.props(styles.list)}>
+                  {client.emptying.map(({ physicalName, emptyBy }) => (
+                    <li key={physicalName}>
+                      <Text size="sm">
+                        {`${physicalName} still held objects, which expire by ${formatTime(emptyBy)} UTC: delete again after that to delete it.`}
+                      </Text>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </CardContent>
+        ) : null}
+      </li>
+    </Card>
   );
 };
 
@@ -122,7 +152,7 @@ const OffboardedPage = () => {
       {offboarded.length === 0 ? (
         <EmptySection>No client is offboarded.</EmptySection>
       ) : (
-        <ul className="flex flex-col gap-4">
+        <ul {...stylex.props(styles.list, styles.cards)}>
           {offboarded.map((client) => (
             <DeleteResources client={client} key={client.clientId} />
           ))}
@@ -131,6 +161,25 @@ const OffboardedPage = () => {
     </AdminPage>
   );
 };
+
+const styles = stylex.create({
+  stack: { display: "flex", flexDirection: "column", gap: space["3"] },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["4"],
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["1"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  cards: { gap: space["4"] },
+});
 
 export const Route = createFileRoute("/platform/offboarded")({
   loader: async () => await fetchOffboardedClients(),

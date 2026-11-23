@@ -15,6 +15,20 @@ import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
 
+/**
+ * Damsko's styles in development (packages/ui is StyleX): its Vite plugin
+ * serves them at an address of its own, with a script that fetches them
+ * again after an edit, and adds both to an `index.html`, which the admin,
+ * whose document is `RootDocument`, has none of: so they are added here, as
+ * its README says for such a shell. A build joins them to styles.css.
+ */
+const stylexDev = import.meta.env.DEV
+  ? {
+      links: [{ rel: "stylesheet", href: "/virtual:stylex.css" }],
+      scripts: [{ type: "module", src: "/@id/virtual:stylex:runtime" }],
+    }
+  : { links: [], scripts: [] };
+
 /** What every route's loader is given (src/router.tsx). */
 interface AdminContext {
   /** The router's own reads of clients' cores. */
@@ -88,10 +102,10 @@ export const Route = createRootRouteWithContext<AdminContext>()({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Grasp admin" },
     ],
-    links: [{ rel: "stylesheet", href: styles }],
+    links: [{ rel: "stylesheet", href: styles }, ...stylexDev.links],
     // Light or dark as the system has it, set before first paint
     // (public/theme.js, the admin's own), so the admin never flashes light.
-    scripts: [{ src: "/theme.js" }],
+    scripts: [{ src: "/theme.js" }, ...stylexDev.scripts],
   }),
   shellComponent: RootDocument,
   // The document's body until the frame's records are in: also what the
