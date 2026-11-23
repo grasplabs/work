@@ -514,7 +514,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
     .getByLabel("The day the other teams get their links")
     .inputValue();
   const next = page
-    .getByRole("alert")
+    .getByRole("status")
     .filter({ hasText: "What happens next" })
     .getByText(/^The lead of 1 team gets their link /u);
   await expect(next).toBeVisible();

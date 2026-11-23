@@ -207,7 +207,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   await page.getByLabel("at", { exact: true }).fill("00:00");
   await expect(
     page
-      .getByRole("alert")
+      .getByRole("status")
       .filter({ hasText: "What happens next" })
       .getByText(/^Leads get their link on \d+ \w+ at 0:00\./u)
   ).toBeVisible();
