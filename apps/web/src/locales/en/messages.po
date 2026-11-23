@@ -10401,6 +10401,7 @@ msgid "Oldest first"
 msgstr "Oldest first"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/setup/schedule-step.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
@@ -11577,6 +11578,10 @@ msgstr "Queries of {app}"
 #: src/activity/pending.tsx
 msgid "Queries, mutations and actions of {app}"
 msgstr "Queries, mutations and actions of {app}"
+
+#: src/agents/new-agent.tsx
+msgid "Question"
+msgstr "Question"
 
 #: src/frame/ui-words.tsx
 msgid "Question {current} of {total}"

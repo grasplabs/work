@@ -207,7 +207,7 @@ const NewWake = ({
           setOpen(true);
         }}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={PlusIcon} />
         {t`Add a time`}
@@ -393,19 +393,21 @@ export const AgentWakes = ({
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
-                      <Switch
-                        aria-label={t`${when}, for ${person}, is on`}
-                        checked={wake.state === "on"}
-                        disabled={!can}
-                        onCheckedChange={(next) => {
-                          void change(async (session) => {
-                            await session.connections.setAgentWakePaused(
-                              wake.id,
-                              !next
-                            );
-                          });
-                        }}
-                      />
+                      <Field disabled={!can} orientation="horizontal">
+                        <FieldLabel>{t`On`}</FieldLabel>
+                        <Switch
+                          aria-label={t`${when}, for ${person}, is on`}
+                          checked={wake.state === "on"}
+                          onCheckedChange={(next) => {
+                            void change(async (session) => {
+                              await session.connections.setAgentWakePaused(
+                                wake.id,
+                                !next
+                              );
+                            });
+                          }}
+                        />
+                      </Field>
                       {editable ? (
                         <Button
                           aria-label={t`Remove ${when}, for ${person}`}

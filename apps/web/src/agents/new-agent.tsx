@@ -184,6 +184,12 @@ const styles = stylex.create({
     width: "100%",
   },
   end: { display: "flex", alignItems: "center", gap: space["2"] },
+  head: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: space["2"],
+    width: "100%",
+  },
 });
 
 /** The words each question, choice and answer is said in. */
@@ -321,9 +327,15 @@ const Asking = ({
         submit();
       }}
     >
-      <Text color="muted" size="sm">
-        {t`${position} of ${count}`}
-      </Text>
+      {/* The head of the question, where it is in the run at its end. */}
+      <span {...stylex.props(styles.head)}>
+        <Text as="span" color="muted" size="xs">
+          {t`Question`}
+        </Text>
+        <Text as="span" color="muted" size="xs">
+          {t`${position} of ${count}`}
+        </Text>
+      </span>
       <QuestionnaireItem name="answer" required={skip === undefined}>
         <QuestionnaireTitle>{question.question}</QuestionnaireTitle>
         {options.length === 0 ? null : (

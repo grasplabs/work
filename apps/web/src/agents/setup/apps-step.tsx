@@ -82,7 +82,7 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
                         put(app.id, false);
                       }}
                       size="sm"
-                      variant="secondary"
+                      variant="outline"
                     >
                       {t`Remove`}
                     </Button>
@@ -106,7 +106,7 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
                   setPicking(true);
                 }}
                 size="sm"
-                variant="secondary"
+                variant="outline"
               >
                 <Icon icon={PlusIcon} />
                 {t`Add connector`}
@@ -141,7 +141,7 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
                           put(app.id, true);
                         }}
                         size="sm"
-                        variant="secondary"
+                        variant="outline"
                       >
                         <Icon icon={PlusIcon} />
                         {t`Add`}

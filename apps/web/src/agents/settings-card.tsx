@@ -37,6 +37,9 @@ const styles = stylex.create({
     minWidth: 0,
   },
   head: { paddingInline: space.tableCellInline },
+  // A fact's value fills the control column, from its start, as the
+  // reference's fact rows have it.
+  value: { display: "block", width: "100%", textAlign: "start" },
   // A row's name and its info mark, on one line.
   named: {
     display: "inline-flex",
@@ -180,8 +183,10 @@ export const FactRow = ({
 }) => (
   <Field orientation="responsive">
     <RowWords control={false} help={help} info={info} label={label} />
-    <Text as="span" size="sm" color="default">
-      {children}
-    </Text>
+    <span {...stylex.props(styles.value)}>
+      <Text as="span" color="default" size="sm">
+        {children}
+      </Text>
+    </span>
   </Field>
 );

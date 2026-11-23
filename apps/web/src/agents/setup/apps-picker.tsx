@@ -164,7 +164,7 @@ const Detail = ({
           onClick={() => {
             onToggle(!added);
           }}
-          variant={added ? "secondary" : "default"}
+          variant={added ? "outline" : "default"}
         >
           <Icon icon={added ? CheckIcon : PlusIcon} />
           {added ? t`Added` : t`Add ${name}`}

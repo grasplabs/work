@@ -457,7 +457,7 @@ const AgentApps = ({
               disabled={!can || busy}
               onClick={workOut}
               size="xs"
-              variant="secondary"
+              variant="outline"
             >
               <Icon icon={SparklesIcon} />
               {busy
@@ -542,13 +542,13 @@ const AgentApps = ({
                             set(agentAppOf(app.source, app.id), true);
                           }}
                           size="sm"
-                          variant="secondary"
+                          variant="outline"
                         >
                           <Icon icon={PlusIcon} />
                           {t`Add`}
                         </Button>
                       ) : (
-                        <Button asChild size="sm" variant="secondary">
+                        <Button asChild size="sm" variant="outline">
                           <Link
                             aria-label={t`Connect ${appName}`}
                             params={{

@@ -103,8 +103,6 @@ import type { Part, Typed } from "./agent-form.tsx";
 import { AgentLook } from "./agent-look.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
-import { AgentFigure } from "./figure/agent-figure.tsx";
-import { lookOf } from "./figure/look.ts";
 import { FactRow, SettingRow, SettingsCard } from "./settings-card.tsx";
 import { agentTabOf } from "./tabs.tsx";
 import type { AgentTab } from "./tabs.tsx";
@@ -694,13 +692,11 @@ const AgentHead = ({
           ) : (
             <Badge variant="warning">{t`Off`}</Badge>
           )}
-          {own ? <Badge variant="secondary">{t`Just for you`}</Badge> : null}
+          {own ? <Badge>{t`Just for you`}</Badge> : null}
         </span>
       }
       // What it is for, under its name: the details no longer repeat it.
       description={agent.job === "" ? undefined : agent.job}
-      // Its own figure, as its card on the Agents page has it.
-      media={<AgentFigure look={lookOf(agent)} size="sm" />}
       size="sm"
       tabs={tabs}
       title={name}

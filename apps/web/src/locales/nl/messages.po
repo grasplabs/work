@@ -10401,6 +10401,7 @@ msgid "Oldest first"
 msgstr "Oudste eerst"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/setup/schedule-step.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
@@ -11577,6 +11578,10 @@ msgstr "Queries van {app}"
 #: src/activity/pending.tsx
 msgid "Queries, mutations and actions of {app}"
 msgstr "Queries, mutaties en acties van {app}"
+
+#: src/agents/new-agent.tsx
+msgid "Question"
+msgstr "Vraag"
 
 #: src/frame/ui-words.tsx
 msgid "Question {current} of {total}"
@@ -16834,7 +16839,7 @@ msgstr "Week {week} van {weeks} · {stage}"
 
 #: src/agents/agent-templates.ts
 msgid "Week in review"
-msgstr "Week in review"
+msgstr "Weekoverzicht"
 
 #: src/agents/agent-templates.ts
 msgid "Weekly reporter"
