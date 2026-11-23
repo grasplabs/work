@@ -326,7 +326,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   });
 });
 
-test("a link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
+test("a link to an app or its full page, opened signed out, leads through sign-in to it", async ({
   page,
   pageOf,
 }) => {
@@ -343,6 +343,18 @@ test("a link to an app, opened signed out, leads through sign-in to the app in t
   );
   await expect(signedIn).toHaveURL(new RegExp(`/apps/${app}/pages/home$`, "u"));
   await counterPage(signedIn);
+
+  // Its full page sits outside the frame, and leads through sign-in all the same.
+  await page.goto(`/apps/${app}/full`);
+  await expect(
+    page.getByRole("link", { name: "Sign in with a code" })
+  ).toBeVisible();
+  const fullReturnTo = new URL(page.url()).searchParams.get("returnTo");
+  expect(fullReturnTo).toBe(`/apps/${app}/full`);
+  await signedIn.goto(
+    `/sign-in?returnTo=${encodeURIComponent(fullReturnTo ?? "")}`
+  );
+  await expect(signedIn).toHaveURL(new RegExp(`/apps/${app}/full$`, "u"));
 });
 
 test("signing in goes back to the page asked for, and only to a page of this site", async ({

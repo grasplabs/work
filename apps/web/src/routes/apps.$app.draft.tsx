@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useDraft } from "../drafts/use-draft.ts";
 import { useAppAddress } from "../pages/app-address.ts";
 import { PreviewFrame } from "../pages/page-frame.tsx";
+import { signInFirst } from "../sign-in-redirect.ts";
 
 // The preview of an App's draft, full page, outside the shell: Open in a
 // new tab over the workspace's preview links here, at the route it had
@@ -42,5 +43,10 @@ const DraftPage = () => {
 };
 
 export const Route = createFileRoute("/apps/$app/draft")({
+  // Outside the shell, so it asks who is in itself: whoever isn't signs in
+  // first and comes back here, as a link into the shell does.
+  beforeLoad: async ({ context: { core }, location }) => {
+    await signInFirst(core, location);
+  },
   component: DraftPage,
 });
