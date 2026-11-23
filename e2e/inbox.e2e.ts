@@ -40,8 +40,8 @@ test("a person with nothing waiting finds their inbox from the nav, with nothing
     .click();
   await expect(page).toHaveURL(/\/inbox$/u);
   await expect(
-    page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Inbox")
-  ).toBeVisible(pageRead);
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).toContainText("Inbox", pageRead);
   await expect(page.getByRole("tab", { name: /^To do/u })).toHaveText(
     /^To do\s*0$/u
   );
@@ -59,5 +59,7 @@ test("a person with nothing waiting finds their inbox from the nav, with nothing
   );
   await page.getByRole("tab", { name: /^Done/u }).click();
   await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
+    0
+  );
 });

@@ -41,9 +41,10 @@ test("an admin reads the allowed models and the run limit, and nobody else does"
 
   const refused = await pageOf(builder);
   await refused.goto("/settings/models");
-  await expect(refused.getByRole("alert")).toHaveText(
-    "Your role doesn't allow that."
-  );
+  // What the page says: the components' own live region is there too, empty.
+  await expect(
+    refused.getByRole("alert").filter({ hasText: /\S/u })
+  ).toHaveText("Your role doesn't allow that.");
 });
 
 test("an admin reads this month's AI spend, and nobody else does", async ({
@@ -66,9 +67,10 @@ test("an admin reads this month's AI spend, and nobody else does", async ({
 
   const refused = await pageOf(builder);
   await refused.goto("/settings/spend");
-  await expect(refused.getByRole("alert")).toHaveText(
-    "Your role doesn't allow that."
-  );
+  // What the page says: the components' own live region is there too, empty.
+  await expect(
+    refused.getByRole("alert").filter({ hasText: /\S/u })
+  ).toHaveText("Your role doesn't allow that.");
   await expect(
     refused
       .getByRole("navigation", { name: "Settings" })

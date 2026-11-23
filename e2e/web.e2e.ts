@@ -501,7 +501,8 @@ test("shows the page loading while the members list is slow, then says core can'
   await page.goto("/settings/members");
   // In the frame, as skeletons, while the read is slow.
   await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
-  const nav = page.getByRole("navigation", { name: "Main" });
+  // The sidebar, on Settings' own level.
+  const nav = page.getByRole("navigation", { name: "Settings" });
   await expect(nav).toBeVisible();
 
   // Then the page says it didn't load and why, with a way to ask again,
@@ -509,7 +510,8 @@ test("shows the page loading while the members list is slow, then says core can'
   await expect(
     page.getByRole("heading", { name: "This page didn't load" })
   ).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("alert")).toHaveText(
+  // What the page says: the components' own live region is there too, empty.
+  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveText(
     "Grasp can't be reached right now. Try again in a moment."
   );
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
@@ -625,7 +627,7 @@ test("never sends what it gave up on while core was out of reach, once core is b
       server.send(message);
     });
   });
-  await page.goto("/settings/members");
+  await page.goto("/projects");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Brain" })).toBeVisible();
 

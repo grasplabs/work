@@ -156,8 +156,8 @@ const styles = stylex.create({
  * by a slash, as the product's bar has them), with where its
  * subject stands after it (`trailing`), and at its end the page's actions.
  * It is app-shell-01's header, drawn by the page: the block draws its own
- * and the page's title from props, which a page here can't give it
- * (damsko-registry-gaps, 2026-11-23, frame).
+ * from props (the crumbs, the title, the actions), which the pages here
+ * draw themselves.
  */
 export const SiteHeader = ({
   crumbs,

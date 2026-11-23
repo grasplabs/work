@@ -51,7 +51,9 @@ test("the App's builder approves the packages its chat's agent asked for, on the
         return approved?.id;
       })
       .toBe(request.id);
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(
+      page.getByRole("alert").filter({ hasText: /\S/u })
+    ).toHaveCount(0);
   } finally {
     core[Symbol.dispose]();
   }

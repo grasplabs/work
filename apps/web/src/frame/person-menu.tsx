@@ -230,14 +230,16 @@ export const PersonMenu = ({
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side={isMobile ? "top" : "right"}>
-            <DropdownMenuLabel>
-              <span {...stylex.props(styles.signedIn)}>
-                <span>{identity.name}</span>
-                <span {...stylex.props(styles.role)}>
-                  {identity.staff ? t`${role}, Grasp staff` : role}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>
+                <span {...stylex.props(styles.signedIn)}>
+                  <span>{identity.name}</span>
+                  <span {...stylex.props(styles.role)}>
+                    {identity.staff ? t`${role}, Grasp staff` : role}
+                  </span>
                 </span>
-              </span>
-            </DropdownMenuLabel>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild icon={SettingsIcon}>

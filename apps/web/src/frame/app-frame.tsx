@@ -52,15 +52,22 @@ const styles = stylex.create({
   },
   covered: { opacity: 0, transitionDelay: "0s" },
   // Over the page, centred at the card's foot, clear of its edges: what
-  // stays at hand on every page. Presses go through where it has nothing.
+  // stays at hand on every page. Not in the card's own box, which is the
+  // main landmark (SidebarInset), so it is no part of the page's content:
+  // over it, on the card's edges as the card publishes them. Presses go
+  // through where it has nothing.
   dock: {
-    position: "absolute",
-    insetInline: space["4"],
-    insetBlockEnd: space["4"],
+    position: "fixed",
+    insetInlineStart: `calc(var(--app-shell-main-left, 0px) + ${space["4"]})`,
+    insetInlineEnd: `calc(var(--app-shell-main-right, 0px) + ${space["4"]})`,
+    insetBlockEnd: `calc(var(--app-shell-main-bottom, 0px) + ${space["4"]})`,
     zIndex: 30,
     display: "flex",
     justifyContent: "center",
     pointerEvents: "none",
+    transitionProperty: "opacity",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
   },
   // What it holds takes presses again: inherited, through a wrapper that
   // draws no box of its own.
@@ -68,12 +75,12 @@ const styles = stylex.create({
 });
 
 /**
- * Says where the page's card starts, on the document, for the chat gone
- * full screen over it (the kit's DockablePanel reads
- * `--app-shell-main-left`), as the sidebar folds and the window resizes.
- * It goes with the chat's panel when the chat leaves the kit.
+ * Says where the page's card stands in the window, on the document, as the
+ * sidebar folds, the chat docks beside it and the window resizes: its start
+ * for the chat gone full screen over it (the kit's DockablePanel reads
+ * `--app-shell-main-left`), and its end and foot for the dock.
  */
-const usePublishedStart = () => {
+const usePublishedCard = () => {
   const card = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = card.current;
@@ -84,9 +91,15 @@ const usePublishedStart = () => {
     }
     const root = document.documentElement;
     const publish = () => {
+      const box = element.getBoundingClientRect();
+      root.style.setProperty("--app-shell-main-left", `${box.left}px`);
       root.style.setProperty(
-        "--app-shell-main-left",
-        `${element.getBoundingClientRect().left}px`
+        "--app-shell-main-right",
+        `${root.clientWidth - box.right}px`
+      );
+      root.style.setProperty(
+        "--app-shell-main-bottom",
+        `${root.clientHeight - box.bottom}px`
       );
     };
     publish();
@@ -95,7 +108,9 @@ const usePublishedStart = () => {
     observer.observe(root);
     return () => {
       observer.disconnect();
-      root.style.removeProperty("--app-shell-main-left");
+      for (const edge of ["left", "right", "bottom"]) {
+        root.style.removeProperty(`--app-shell-main-${edge}`);
+      }
     };
   }, []);
   return card;
@@ -116,7 +131,7 @@ const usePublishedStart = () => {
  * them, not the block itself: the block keeps the fold to itself, draws the
  * page's bar from props, and has one resizable panel and no dock, where
  * here each page draws its bar and the chat docks, floats and covers the
- * page (damsko-registry-gaps, 2026-11-23, frame).
+ * page. It moves onto the block once the block takes those.
  */
 export const AppFrame = ({
   core,
@@ -139,7 +154,7 @@ export const AppFrame = ({
   covered?: boolean;
   children: ReactNode;
 }) => {
-  const card = usePublishedStart();
+  const card = usePublishedCard();
   return (
     // The kit's toasts and tooltips, for the pages still on it; Damsko's
     // toasts (below) for the frame's own, such as a sign-out core didn't
@@ -162,13 +177,17 @@ export const AppFrame = ({
               >
                 <InFrame value>{children}</InFrame>
               </div>
-              {dock === undefined ? null : (
-                <div data-slot="app-shell-dock" {...stylex.props(styles.dock)}>
-                  <div {...stylex.props(styles.docked)}>{dock}</div>
-                </div>
-              )}
             </div>
           </SidebarInset>
+          {dock === undefined ? null : (
+            <div
+              data-slot="app-shell-dock"
+              inert={covered}
+              {...stylex.props(styles.dock, covered && styles.covered)}
+            >
+              <div {...stylex.props(styles.docked)}>{dock}</div>
+            </div>
+          )}
           {panels}
         </SidebarProvider>
         <Toaster />
