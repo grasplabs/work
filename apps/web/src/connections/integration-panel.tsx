@@ -78,7 +78,7 @@ export const IntegrationPanel = ({
   const tools = useSettled(read?.tools);
   const used = useSettled(uses);
   const app = appOf(integration, {
-    size: "md",
+    size: "default",
     tools: tools?.state === "ready" ? tools.data : undefined,
     uses: used?.state === "ready" ? used.data : undefined,
   });

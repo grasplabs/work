@@ -3,11 +3,8 @@ import {
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
-import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { toast } from "@grasp-os/ui/components/toast";
-import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -23,7 +20,7 @@ import type { AppActions } from "./app/parts.tsx";
 import {
   canConnect,
   ConnectDialog,
-  goTo,
+  leaveFor,
   returnToOf,
   signInAgainTarget,
   signInHostOf,
@@ -32,6 +29,7 @@ import { DisconnectDialog, mayDisconnect } from "./connection-list.tsx";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
+import { noteReplacing } from "./replace-stopped.tsx";
 import { allowedOf, toolRules } from "./tool-choices.ts";
 
 // What can be done to an app from its panel and its page, as its app
@@ -46,17 +44,18 @@ import { allowedOf, toolRules } from "./tool-choices.ts";
 // ConnectAppConsent, always for everyone: the consent word for word and
 // what Grasp may do with each tool; connect records a hash of the exact
 // text the admin was shown and the tools as the ones they chose. One that
-// stopped working is connected again the same way, its stopped connections
-// disconnected first. The steps dialog (connect-dialog.tsx) is left for
+// stopped working is connected again the same way, and its stopped
+// connections are disconnected once the new one is made
+// (replace-stopped.tsx). The steps dialog (connect-dialog.tsx) is left for
 // what that one doesn't do: a toolkit that takes a key (its fields), one
 // whose tools couldn't be read (it reads them again, and says why not),
 // signing in again and connecting another account.
 
 /**
  * Connecting a Composio toolkit from the app parts' dialog. Connecting it
- * again, once it stopped working, disconnects the connections that stopped
- * first: Composio's account can't be signed in to again, and the same
- * account can't be connected twice.
+ * again, once it stopped working, is a new connection (Composio's account
+ * can't be signed in to again), which replaces the ones that stopped once
+ * it is made: until then they stay as they are (replace-stopped.tsx).
  */
 const ConnectToolkit = ({
   app: shown,
@@ -99,27 +98,19 @@ const ConnectToolkit = ({
           ...(resource === undefined ? {} : { resource }),
         };
       });
-    try {
-      const started = await core.withSession(async (session) => {
-        await Promise.all(
-          replacing.map(
-            async ({ id }) => await session.connections.disconnect(id)
-          )
-        );
-        return await session.connections.connectToolkit({
+    const started = await core.withSession(
+      async (session) =>
+        await session.connections.connectToolkit({
           toolkit: integration.id,
           tools: toolRules(allowed),
           // Word for word what the dialog showed: core records its hash.
           consent,
-          returnTo: returnToOf(integration.key),
-        });
-      });
-      // The browser leaves for the provider's sign-in.
-      goTo(started);
-    } catch (error) {
-      toast.error(failureText(error));
-      throw error;
-    }
+          returnTo: returnToOf(integration.key, old !== undefined),
+        })
+    );
+    noteReplacing(integration.key, replacing);
+    // The browser leaves for the provider's sign-in.
+    await leaveFor(started);
   };
   return (
     <ConnectAppConsent
@@ -154,29 +145,21 @@ const ConnectNative = ({
   size: "xs" | "sm";
 }) => {
   const core = useCore();
-  const { t } = useLingui();
   const provider = oauthProviderSchema.safeParse(integration.id);
   if (!provider.success) {
     return null;
   }
-  const app = integration.name;
-  const connect = ({ forWhom }: ConnectAppChoice): void => {
-    const start = async (): Promise<void> => {
-      const started = await core.withSession(
-        async (session) =>
-          await session.connections.start({
-            provider: provider.data,
-            scope: forWhom === "everyone" ? "shared" : "personal",
-            returnTo: returnToOf(integration.key),
-          })
-      );
-      // The browser leaves for the provider's sign-in.
-      goTo(started);
-    };
-    toast.promise(start(), {
-      loading: t`Waiting for ${app}`,
-      error: (error) => failureText(error),
-    });
+  const connect = async ({ forWhom }: ConnectAppChoice): Promise<void> => {
+    const started = await core.withSession(
+      async (session) =>
+        await session.connections.start({
+          provider: provider.data,
+          scope: forWhom === "everyone" ? "shared" : "personal",
+          returnTo: returnToOf(integration.key),
+        })
+    );
+    // The browser leaves for the provider's sign-in.
+    await leaveFor(started);
   };
   const signInAt = signInHostOf(integration);
   return (
@@ -210,14 +193,17 @@ const removableOf = (
 
 /**
  * A toolkit's connections that stopped working, which an admin connects
- * again (disconnecting them first); none while one the company relies on
- * still works, or for anyone else.
+ * again (the new one replacing them once made); none while one the company
+ * relies on still works, or for anyone else. None for a toolkit that takes
+ * a key either: connect keeps one key connection of a toolkit live, a
+ * stopped one included, so the admin disconnects it first, from its row.
  */
 const stoppedOf = (
   integration: Integration,
   identity: Identity
 ): ListedConnection[] =>
   integration.source === "composio" &&
+  integration.auth !== "key" &&
   fixOf(integration, identity) === "reconnect" &&
   reliedOnLapsed(integration)
     ? integration.connections.filter(

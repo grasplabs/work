@@ -1,5 +1,4 @@
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
@@ -17,6 +16,7 @@ import {
 } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import { PartNotLoaded } from "../connections/part-not-loaded.tsx";
+import { ReplaceStopped } from "../connections/replace-stopped.tsx";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
 import { NotFound, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
@@ -32,12 +32,10 @@ import type { Loaded } from "../load-from-core.tsx";
 // it, the Apps and agents holding a permission for it). A
 // flow comes back here from the provider, through core's callback, with
 // `connection=<id>` (and `again=1` when it signed in again), and opens the
-// success page.
-
-type Tab = "overview" | "workflows" | "account";
+// success page; a toolkit connected again replaces its stopped connections
+// then (connections/replace-stopped.tsx).
 
 interface IntegrationSearch {
-  tab?: Tab;
   connection?: string;
   /** The flow that made `connection` signed in again (connect-dialog.tsx). */
   again?: true;
@@ -122,8 +120,6 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
       : integration.connections.find(({ id }) => id === connection);
   return (
     <>
-      {/* Damsko's toasts, for this area's, until the frame draws them for every page. */}
-      <Toaster />
       <SiteHeader
         crumbs={[
           { label: t`Integrations`, to: "/integrations" },
@@ -152,6 +148,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           tools={read}
           uses={used}
         >
+          <ReplaceStopped integration={integration} made={connected} />
           <Notices catalog={catalog} integration={integration} tools={read} />
           <HeldNotLoaded held={held} />
           <ConnectionsAccess
@@ -219,10 +216,6 @@ const IntegrationRoute = () => {
 
 export const Route = createFileRoute("/_shell/integrations/$integration")({
   validateSearch: (search: Record<string, unknown>): IntegrationSearch => ({
-    tab:
-      search.tab === "account" || search.tab === "workflows"
-        ? search.tab
-        : undefined,
     connection:
       typeof search.connection === "string" ? search.connection : undefined,
     again: search.again === 1 || search.again === "1" ? true : undefined,
@@ -242,7 +235,7 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
     const read = await loadIntegrations(core, identity, { held: true });
     return { ...read, tools };
   },
-  // No `shouldReload`: a tab, or a notice dropped (the search), keeps what
+  // No `shouldReload`: a notice dropped (the search) keeps what
   // was read; opening this app or another reads it again, as does a change
   // (use-change.ts invalidates it).
   pendingComponent: IntegrationSkeleton,

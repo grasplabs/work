@@ -212,7 +212,7 @@ export const AppPanel = ({
                 </>
               }
               description={<Clamped text={app.description} />}
-              icon={<AppMark app={app} size="md" />}
+              icon={<AppMark app={app} size="default" />}
               // A member, where the app waits to be connected: why there is no Connect.
               meta={
                 actions.member === true && asksConnect(app)

@@ -1,3 +1,5 @@
+import { failureText } from "@grasp-os/shared/errors";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -33,7 +35,9 @@ import { useAppWords } from "./words.ts";
 //                 its place where it fixes it)
 //   where         one quiet line: "You'll sign in at microsoft.com."
 //
-// The foot ends the dialog: Cancel, then "Sign in to Microsoft 365".
+// The foot ends the dialog: Cancel, then "Sign in to Microsoft 365", busy
+// while the host starts the sign-in (a second press does nothing), and why
+// it failed in the dialog, above the foot.
 //
 // ConnectAppConsent is the same dialog for an app a third party holds (a
 // Composio toolkit): the same head, then the host's consent as written,
@@ -49,8 +53,11 @@ export interface ConnectAppChoice {
 /** Every prop a ConnectApp takes. */
 interface ConnectAppProps {
   app: App;
-  /** Sign in: the host opens the app's sign-in. */
-  onConnect: (choice: ConnectAppChoice) => void;
+  /**
+   * Sign in: the host opens the app's sign-in. The button is busy until it
+   * settles; where it fails, the dialog says why.
+   */
+  onConnect: (choice: ConnectAppChoice) => Promise<void>;
   /** Where the sign-in happens ("microsoft.com"), said in one line. Without it, no line. */
   signInAt?: string;
   /** The trigger's size: `xs` in a panel's bar, `sm` on a page. */
@@ -147,7 +154,7 @@ const Head = ({ app, again }: { app: App; again: boolean }) => {
       {/* Without a colour of its own, the mint. */}
       <div {...stylex.props(styles.head(tint ?? colors.mint))}>
         <div {...stylex.props(styles.mark)}>
-          <AppMark app={app} size="md" />
+          <AppMark app={app} size="default" />
         </div>
         <DialogTitle>
           {again ? t`Connect ${name} again` : t`Connect ${name}`}
@@ -212,6 +219,38 @@ const SignInAt = ({ host }: { host: string | undefined }) => {
   );
 };
 
+/**
+ * Why the dialog's action failed, said in the dialog: `press` runs the
+ * host's work for the action's Button, which is busy until it settles and
+ * then says it failed, and keeps why; `clear` forgets it as the dialog
+ * opens again.
+ */
+const usePressFailure = () => {
+  const [failure, setFailure] = useState<string>();
+  const press = async (work: () => Promise<void>): Promise<void> => {
+    setFailure(undefined);
+    try {
+      await work();
+    } catch (error) {
+      setFailure(failureText(error));
+      throw error;
+    }
+  };
+  const said =
+    failure === undefined ? null : (
+      <Alert variant="destructive">
+        <AlertDescription>{failure}</AlertDescription>
+      </Alert>
+    );
+  return {
+    press,
+    said,
+    clear: () => {
+      setFailure(undefined);
+    },
+  };
+};
+
 /** Connect an app: who uses it and where you'll sign in, on one screen from its Connect button. */
 export const ConnectApp = ({
   app,
@@ -223,12 +262,23 @@ export const ConnectApp = ({
 }: ConnectAppProps) => {
   const { t } = useLingui();
   const words = useAppWords();
+  const [open, setOpen] = useState(false);
   const [forWhom, setForWhom] = useState<AppConnection["forWhom"]>(
     fixed ?? "you"
   );
+  const { press, said, clear } = usePressFailure();
   const { name } = app;
   return (
-    <Dialog>
+    <Dialog
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) {
+          setForWhom(fixed ?? "you");
+          clear();
+        }
+      }}
+      open={open}
+    >
       <DialogTrigger asChild>
         <Button size={size}>
           {again ? words.connectAgain : words.connect}
@@ -240,13 +290,16 @@ export const ConnectApp = ({
           <div {...stylex.props(styles.body)}>
             <WhoUses fixed={fixed} forWhom={forWhom} onChange={setForWhom} />
             <SignInAt host={signInAt} />
+            {said}
           </div>
         </DialogBody>
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            onClick={() => {
-              onConnect({ forWhom });
+            onClick={async () => {
+              await press(async () => {
+                await onConnect({ forWhom });
+              });
             }}
             size="sm"
           >
@@ -354,9 +407,8 @@ export const ConnectAppConsent = ({
    */
   consent: string;
   /**
-   * Connect: the host records the choice and opens the sign-in. Return a
-   * Promise and Connect says it is working until it settles, and failed if
-   * it fails.
+   * Connect: the host records the choice and opens the sign-in. Connect is
+   * busy until it settles; where it fails, the dialog says why.
    */
   onConnect: (choice: ConnectAppConsentChoice) => Promise<void>;
   /**
@@ -376,6 +428,7 @@ export const ConnectAppConsent = ({
   const [tools, setTools] = useState<readonly AppTool[]>(() =>
     defaultsOf(app.tools ?? [], initialTools)
   );
+  const { press, said, clear } = usePressFailure();
   const consentId = useId();
   const consentLabel = t`Consent`;
   const allowsSome = tools.some((tool) => tool.choice !== "never");
@@ -386,6 +439,7 @@ export const ConnectAppConsent = ({
         if (next) {
           setTools(defaultsOf(app.tools ?? [], initialTools));
           setForWhom(fixed ?? "you");
+          clear();
         }
       }}
       open={open}
@@ -435,6 +489,7 @@ export const ConnectAppConsent = ({
               />
             ) : null}
             <SignInAt host={signInAt} />
+            {said}
           </div>
         </DialogBody>
         <DialogFooter>
@@ -442,13 +497,15 @@ export const ConnectAppConsent = ({
           <Button
             disabled={!allowsSome}
             onClick={async () => {
-              await onConnect({
-                forWhom,
-                tools: tools.map((tool) => ({
-                  id: tool.id,
-                  choice: tool.choice,
-                })),
-                consent,
+              await press(async () => {
+                await onConnect({
+                  forWhom,
+                  tools: tools.map((tool) => ({
+                    id: tool.id,
+                    choice: tool.choice,
+                  })),
+                  consent,
+                });
               });
             }}
             size="sm"

@@ -97,6 +97,10 @@ msgstr "{app} est connecté"
 msgid "{app} is connected again"
 msgstr "{app} est de nouveau connecté"
 
+#: src/connections/replace-stopped.tsx
+msgid "{app} is connected again, but the connection that stopped couldn't be disconnected. Disconnect it from its row."
+msgstr "{app} est de nouveau connecté, mais la connexion qui ne fonctionnait plus n’a pas pu être déconnectée. Déconnectez-la depuis sa ligne."
+
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
 msgstr "{app}, compte personnel de {whose}"
@@ -161,6 +165,16 @@ msgstr "{by} l’a créée <0>{since}</0>"
 #: src/drafts/draft-history.tsx
 msgid "{by} shared it <0>{since}</0>"
 msgstr "{by} l’a partagé <0>{since}</0>"
+
+#. An account's line: {by} connected it (a person's name, or You), on the date {on}.
+#: src/connections/app/page.tsx
+msgid "{by}, {on}"
+msgstr "{by}, {on}"
+
+#. An account's line: {by} connected it (a person's name, or You), on the date {on}, for {forWhom} (Just you, or Everyone).
+#: src/connections/app/page.tsx
+msgid "{by}, {on} · {forWhom}"
+msgstr "{by}, {on} · {forWhom}"
 
 #: src/apps/app-data-model.tsx
 msgid "{changeCount, plural, one {# change to publish} other {# changes to publish}}"
@@ -15711,7 +15725,6 @@ msgstr "attendent maintenant une décision"
 msgid "Waiting"
 msgstr "En attente"
 
-#: src/connections/app-actions.tsx
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
 msgstr "En attente de {app}"

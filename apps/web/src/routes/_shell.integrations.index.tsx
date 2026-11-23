@@ -27,7 +27,6 @@ import { ItemGrid } from "@grasp-os/ui/components/item";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Text } from "@grasp-os/ui/components/text";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { Icon, PlusIcon, SearchIcon } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -622,8 +621,6 @@ const Integrations = () => {
         onOpenChange={setRequesting}
         open={requesting}
       />
-      {/* Damsko's toasts, for this area's, until the frame draws them for every page. */}
-      <Toaster />
       <SiteHeader crumbs={crumbs} />
       <Page>
         <PageHeader

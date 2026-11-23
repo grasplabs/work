@@ -190,14 +190,12 @@ const styles = stylex.create({
 });
 
 /** The size of an app's mark: Damsko's BrandIcon's own, by where it stands. */
-export type MarkSize = "sm" | "md" | "lg";
-
-const brandSize = { sm: "sm", md: "default", lg: "lg" } as const;
+export type MarkSize = "sm" | "default" | "lg";
 
 /** The app's mark at a size: the host's, or its first letter on a tile. */
 export const AppMark = ({ app, size }: { app: App; size: MarkSize }) =>
   app.mark === undefined ? (
-    <BrandIcon label={app.name} size={brandSize[size]} decorative />
+    <BrandIcon label={app.name} size={size} decorative />
   ) : (
     <span aria-hidden="true" {...stylex.props(styles.mark)}>
       {app.mark}

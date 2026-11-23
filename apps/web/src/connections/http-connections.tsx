@@ -46,7 +46,7 @@ import {
 } from "@grasp-os/ui/components/field";
 import { Form } from "@grasp-os/ui/components/form";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import {
   Item,
   ItemActions,
@@ -300,13 +300,10 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
           ) : null}
           <Field>
             <FieldLabel>{kind === "bearer" ? t`Token` : t`Secret`}</FieldLabel>
-            <Input
+            <SecretInput
               size="sm"
-              autoComplete="off"
               maxLength={httpLimits.secretChars}
               onValueChange={setSecret}
-              spellCheck={false}
-              type="password"
               value={secret}
             />
             <FieldDescription>

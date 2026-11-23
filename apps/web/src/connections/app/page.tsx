@@ -45,6 +45,7 @@ import {
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Fragment, useId, useState } from "react";
 import type { ReactNode } from "react";
@@ -96,6 +97,7 @@ const styles = stylex.create({
   column: {
     display: "grid",
     gap: space["8"],
+    containerType: "inline-size",
     width: "100%",
     maxWidth: COLUMN,
     marginInline: "auto",
@@ -134,8 +136,12 @@ const styles = stylex.create({
     lineHeight: font.textSmLine,
     color: colors.mutedForeground,
   },
-  // The search in the card's head, narrower on a phone so the title keeps its line.
-  search: { width: "14rem", maxWidth: "100%" },
+  // The search beside the card's title; in a column under 28rem, a line of its own under it, so
+  // the title keeps its line (the column is the container).
+  search: {
+    display: "block",
+    width: { default: "14rem", "@container (width < 28rem)": "100cqi" },
+  },
   // A group: its row, and what it opened under it, a hairline before every group but the first.
   group: {
     borderBlockStartWidth: { default: sizes.hairline, ":first-child": 0 },
@@ -585,14 +591,24 @@ const AccountRow = ({
   own: ReactNode;
 }) => {
   const words = useAppWords();
+  const { t } = useLingui();
   const name = connection.signedInAs ?? connection.account;
   const forWhom =
     connection.forWhom === "everyone" ? words.forEveryone : words.forYou;
+  const { by, on } = connection;
   // Who can use it: a Select among its actions where it may be changed, else words after when.
   const when =
     onForWhomChange === undefined
-      ? `${connection.by}, ${connection.on} · ${forWhom}`
-      : `${connection.by}, ${connection.on}`;
+      ? t({
+          message: `${by}, ${on} · ${forWhom}`,
+          comment:
+            "An account's line: {by} connected it (a person's name, or You), on the date {on}, for {forWhom} (Just you, or Everyone).",
+        })
+      : t({
+          message: `${by}, ${on}`,
+          comment:
+            "An account's line: {by} connected it (a person's name, or You), on the date {on}.",
+        });
   return (
     <Item size="xs">
       <ItemContent>

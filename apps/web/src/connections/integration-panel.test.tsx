@@ -16,12 +16,15 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
+import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { IntegrationPanel } from "./integration-panel.tsx";
 import { integrationsOf } from "./integrations.ts";
+import type { Integration } from "./integrations.ts";
+import { ReplaceStopped } from "./replace-stopped.tsx";
 
 // One app's panel over the Integrations page, on the library's app panel,
 // against core's connections as the page reaches them over RPC, faked: an
@@ -31,8 +34,10 @@ import { integrationsOf } from "./integrations.ts";
 // members and Grasp's staff get nothing to connect it with; Microsoft 365
 // connects in the library's connect dialog, for everyone where an admin
 // chooses it and otherwise for the person alone, saying where they'll sign
-// in; and whoever may sign in to a lapsed native connection again finds it
-// under Manage.
+// in, busy until the sign-in starts and saying in the dialog why it didn't;
+// a stopped toolkit connected again replaces its stopped connection only
+// once the new one is made; and whoever may sign in to a lapsed native
+// connection again finds it under Manage.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -122,37 +127,49 @@ interface Started {
   returnTo: string;
 }
 
-/** The panel of `id`, as `identity` sees it, recording each toolkit connect sent to core. */
-const opened = async (
+/** What the faked core's connections answer: each recorded in `sent`, connecting refused unless a test says otherwise. */
+const connectionsApi = (
+  sent: (Sent | Started | { disconnected: string })[],
+  given: {
+    catalogTools?: () => Promise<CatalogTool[]>;
+    connectToolkit?: (request: Sent) => Promise<{ url: string }>;
+    start?: (request: Started) => Promise<{ url: string }>;
+    disconnect?: (connectionId: string) => Promise<{ revoked: boolean }>;
+  } = {}
+) => ({
+  disconnect: async (connectionId: string): Promise<{ revoked: boolean }> => {
+    sent.push({ disconnected: connectionId });
+    return await (given.disconnect?.(connectionId) ??
+      Promise.resolve({ revoked: true }));
+  },
+  catalogTools:
+    given.catalogTools ??
+    (async (): Promise<CatalogTool[]> => await Promise.resolve(tools)),
+  connectToolkit: async (request: Sent): Promise<{ url: string }> => {
+    sent.push(request);
+    // Refused, so the browser stays here for the test to read.
+    return await (given.connectToolkit?.(request) ??
+      Promise.reject(new Error("Not now")));
+  },
+  start: async (request: Started): Promise<{ url: string }> => {
+    sent.push(request);
+    return await (given.start?.(request) ??
+      Promise.reject(new Error("Not now")));
+  },
+});
+
+/** A faked core that hands `api` to every session. */
+const coreOf = (api: object) => ({
+  withSession: async <T,>(
+    action: (session: { connections: typeof api }) => Promise<T>
+  ): Promise<T> => await action({ connections: api }),
+});
+
+/** The integration `id` with `connections`, as the page lists it. */
+const integrationOf = (
   id: string,
-  connections: ListedConnection[],
-  identity: Identity = person(),
-  given: { core?: object; catalogTools?: () => Promise<CatalogTool[]> } = {}
-): Promise<(Sent | Started | { disconnected: string })[]> => {
-  const sent: (Sent | Started | { disconnected: string })[] = [];
-  const api = {
-    disconnect: async (connectionId: string): Promise<{ revoked: boolean }> => {
-      sent.push({ disconnected: connectionId });
-      return await Promise.resolve({ revoked: true });
-    },
-    catalogTools:
-      given.catalogTools ??
-      (async (): Promise<CatalogTool[]> => await Promise.resolve(tools)),
-    connectToolkit: async (request: Sent): Promise<{ url: string }> => {
-      sent.push(request);
-      // Refused, so the browser stays here for the test to read.
-      return await Promise.reject(new Error("Not now"));
-    },
-    start: async (request: Started): Promise<{ url: string }> => {
-      sent.push(request);
-      return await Promise.reject(new Error("Not now"));
-    },
-  };
-  const core = given.core ?? {
-    withSession: async <T,>(
-      action: (session: { connections: typeof api }) => Promise<T>
-    ): Promise<T> => await action({ connections: api }),
-  };
+  connections: ListedConnection[]
+): Integration => {
   const integration = integrationsOf(
     [
       entry("composio", "hubspot", "HubSpot"),
@@ -163,18 +180,12 @@ const opened = async (
   if (integration === undefined) {
     throw new Error(`No ${id}`);
   }
-  const rootRoute = createRootRoute({
-    component: () => (
-      <IntegrationPanel
-        identity={identity}
-        integration={integration}
-        onClose={() => {
-          // The test reads the panel, not it closing.
-        }}
-        uses={Promise.resolve({ state: "ready", data: [] })}
-      />
-    ),
-  });
+  return integration;
+};
+
+/** Draws `element` in a router whose context holds `core`. */
+const mounted = async (element: ReactElement, core: object): Promise<void> => {
+  const rootRoute = createRootRoute({ component: () => element });
   const router = createRouter({
     routeTree: rootRoute,
     history: createMemoryHistory(),
@@ -192,7 +203,37 @@ const opened = async (
     await router.load();
   });
   await settled();
+};
+
+/** The panel of `id`, as `identity` sees it, recording what it sends to core. */
+const opened = async (
+  id: string,
+  connections: ListedConnection[],
+  identity: Identity = person(),
+  given: { core?: object } & Parameters<typeof connectionsApi>[1] = {}
+): Promise<(Sent | Started | { disconnected: string })[]> => {
+  const sent: (Sent | Started | { disconnected: string })[] = [];
+  const core = given.core ?? coreOf(connectionsApi(sent, given));
+  await mounted(
+    <IntegrationPanel
+      identity={identity}
+      integration={integrationOf(id, connections)}
+      onClose={() => {
+        // The test reads the panel, not it closing.
+      }}
+      uses={Promise.resolve({ state: "ready", data: [] })}
+    />,
+    core
+  );
   return sent;
+};
+
+/** Unmounts what a test drew, for it to draw the page anew. */
+const unmounted = (): void => {
+  act(() => {
+    root?.unmount();
+  });
+  document.body.innerHTML = "";
 };
 
 const press = async (element: Element | null | undefined): Promise<void> => {
@@ -231,6 +272,24 @@ const dialogOf = (title: string): Element | undefined =>
     each.textContent.includes(title)
   );
 
+/** A HubSpot connection that stopped working, with what it allowed. */
+const stopped: ListedConnection = {
+  id: "c-hubspot",
+  source: "composio",
+  provider: "hubspot",
+  scope: "shared",
+  status: "needs_reauth",
+  ownerUserId: null,
+  connectedBy: "u1",
+  connectedByName: "Ada",
+  accountName: null,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  // A tool the catalog no longer lists starts off, not as it was.
+  tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE", "HUBSPOT_DROPPED"],
+  readTools: ["HUBSPOT_LIST_CONTACTS"],
+  toolResources: { HUBSPOT_CREATE_NOTE: "contactId" },
+};
+
 describe("an app's panel", () => {
   afterEach(() => {
     act(() => {
@@ -238,6 +297,8 @@ describe("an app's panel", () => {
     });
     root = undefined;
     document.body.innerHTML = "";
+    sessionStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it("has an admin connect a toolkit for everyone, consenting to its text word for word", async () => {
@@ -280,40 +341,108 @@ describe("an app's panel", () => {
     });
   });
 
-  it("has an admin connect a stopped toolkit again from what it allowed, its stopped connection disconnected first", async () => {
-    const stopped: ListedConnection = {
-      id: "c-hubspot",
-      source: "composio",
-      provider: "hubspot",
-      scope: "shared",
-      status: "needs_reauth",
-      ownerUserId: null,
-      connectedBy: "u1",
-      connectedByName: "Ada",
-      accountName: null,
-      createdAt: "2026-10-01T00:00:00.000Z",
-      // A tool the catalog no longer lists starts off, not as it was.
-      tools: [
-        "HUBSPOT_LIST_CONTACTS",
-        "HUBSPOT_CREATE_NOTE",
-        "HUBSPOT_DROPPED",
-      ],
-      readTools: ["HUBSPOT_LIST_CONTACTS"],
-      toolResources: { HUBSPOT_CREATE_NOTE: "contactId" },
-    };
+  it("has an admin connect a stopped toolkit again from what it allowed, disconnecting nothing when connecting is refused", async () => {
     const sent = await opened("hubspot", [stopped]);
     await press(buttons("Connect again")[0]);
     await press(dialogAction("Connect"));
 
-    expect(
-      sent.map((each) => ("toolkit" in each ? each.tools : each))
-    ).toStrictEqual([
-      { disconnected: "c-hubspot" },
-      [
-        { name: "HUBSPOT_LIST_CONTACTS", read: true },
-        { name: "HUBSPOT_CREATE_NOTE", resource: "contactId" },
+    expect({
+      sent: sent.map((each) => ("toolkit" in each ? each.tools : each)),
+      said: dialogOf("Connect HubSpot again")?.querySelector('[role="alert"]')
+        ?.textContent,
+    }).toStrictEqual({
+      // Only the connect: the stopped connection stays, with its consent, its Brain audience and its permissions.
+      sent: [
+        [
+          { name: "HUBSPOT_LIST_CONTACTS", read: true },
+          { name: "HUBSPOT_CREATE_NOTE", resource: "contactId" },
+        ],
       ],
-    ]);
+      said: "Not now",
+    });
+  });
+
+  it("replaces a stopped toolkit's connection once connecting it again made the new one, and only from the tab that connected", async () => {
+    const assign = vi
+      .spyOn(window.location, "assign")
+      .mockImplementation(() => {
+        // The browser stays here for the test to read.
+      });
+    const sent = await opened("hubspot", [stopped], person(), {
+      connectToolkit: async () =>
+        await Promise.resolve({ url: "https://composio.example/sign-in" }),
+    });
+    await press(buttons("Connect again")[0]);
+    await press(dialogAction("Connect"));
+    const leaving = {
+      to: assign.mock.calls.map(([url]) => url),
+      returnTo: sent.flatMap((each) =>
+        "returnTo" in each ? [each.returnTo] : []
+      ),
+      disconnected: sent.filter((each) => "disconnected" in each),
+    };
+    assign.mockRestore();
+    unmounted();
+    // Back from the provider with the new connection: the page lists both.
+    const made: ListedConnection = {
+      ...stopped,
+      id: "c-hubspot-new",
+      status: "active",
+      createdAt: "2026-11-23T00:00:00.000Z",
+    };
+    const back = integrationOf("hubspot", [stopped, made]);
+    const replaced: { disconnected: string }[] = [];
+    const core = coreOf(connectionsApi(replaced));
+    await mounted(<ReplaceStopped integration={back} made={made} />, core);
+    const first = [...replaced];
+    unmounted();
+    // The same page again, or a link to it: nothing noted, nothing disconnected.
+    await mounted(<ReplaceStopped integration={back} made={made} />, core);
+
+    expect({ leaving, first, again: replaced.length }).toStrictEqual({
+      leaving: {
+        to: ["https://composio.example/sign-in"],
+        returnTo: ["/integrations/composio:hubspot?again=1"],
+        disconnected: [],
+      },
+      first: [{ disconnected: "c-hubspot" }],
+      again: 1,
+    });
+  });
+
+  it("says on the page when the stopped connection couldn't be disconnected after connecting again", async () => {
+    vi.spyOn(window.location, "assign").mockImplementation(() => {
+      // The browser stays here for the test to read.
+    });
+    await opened("hubspot", [stopped], person(), {
+      connectToolkit: async () =>
+        await Promise.resolve({ url: "https://composio.example/sign-in" }),
+    });
+    await press(buttons("Connect again")[0]);
+    await press(dialogAction("Connect"));
+    vi.restoreAllMocks();
+    unmounted();
+    const made: ListedConnection = {
+      ...stopped,
+      id: "c-new",
+      status: "active",
+    };
+    await mounted(
+      <ReplaceStopped
+        integration={integrationOf("hubspot", [stopped, made])}
+        made={made}
+      />,
+      coreOf(
+        connectionsApi([], {
+          disconnect: async () =>
+            await Promise.reject(new Error("Connect can't be reached")),
+        })
+      )
+    );
+
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      "HubSpot is connected again, but the connection that stopped couldn't be disconnected. Disconnect it from its row.Connect can't be reached"
+    );
   });
 
   it("has an admin connect Microsoft 365 for everyone, saying where they'll sign in", async () => {
@@ -325,8 +454,15 @@ describe("an app's panel", () => {
     await press(buttons("Everyone")[0]);
     await press(dialogAction("Sign in to Microsoft 365"));
 
-    expect({ where, sent }).toStrictEqual({
+    expect({
+      where,
+      sent,
+      // Refused: the dialog says why, beside its Sign in.
+      said: dialogOf("Connect Microsoft 365")?.querySelector('[role="alert"]')
+        ?.textContent,
+    }).toStrictEqual({
       where: true,
+      said: "Not now",
       sent: [
         {
           provider: "microsoft",
@@ -334,6 +470,26 @@ describe("an app's panel", () => {
           returnTo: "/integrations/native:microsoft",
         },
       ],
+    });
+  });
+
+  it("starts one sign-in for a second press while the first is under way", async () => {
+    const answer = Promise.withResolvers<{ url: string }>();
+    const sent = await opened("microsoft", [], person(), {
+      start: async () => await answer.promise,
+    });
+    await press(buttons("Connect")[0]);
+    await press(dialogAction("Sign in to Microsoft 365"));
+    const busy = dialogAction("Sign in to Microsoft 365")?.getAttribute(
+      "aria-busy"
+    );
+    await press(dialogAction("Sign in to Microsoft 365"));
+    answer.reject(new Error("Not now"));
+    await settled();
+
+    expect({ busy, starts: sent.length }).toStrictEqual({
+      busy: "true",
+      starts: 1,
     });
   });
 
@@ -358,10 +514,7 @@ describe("an app's panel", () => {
   it("gives members and Grasp's staff nothing to connect a toolkit with", async () => {
     await opened("hubspot", [], person({ role: "user" }));
     const member = buttons("Connect").length;
-    act(() => {
-      root?.unmount();
-    });
-    document.body.innerHTML = "";
+    unmounted();
     await opened("hubspot", [], person({ staff: true }));
     const staff = buttons("Connect").length;
 
@@ -429,10 +582,7 @@ describe("an app's panel", () => {
     };
     await opened("hubspot", [], person(), { core, catalogTools: flaky });
     const first = document.body.textContent.includes("All 2 tools");
-    act(() => {
-      root?.unmount();
-    });
-    document.body.innerHTML = "";
+    unmounted();
     await opened("hubspot", [], person(), { core, catalogTools: flaky });
 
     expect({

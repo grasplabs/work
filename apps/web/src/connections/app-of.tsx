@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 
 import { formatDate } from "../format.ts";
 import type { App, AppConnection } from "./app/model.ts";
+import type { MarkSize } from "./app/parts.tsx";
 import { rollUp } from "./app/state.ts";
 import { useAppWords } from "./app/words.ts";
 import type { AppWords } from "./app/words.ts";
@@ -104,7 +105,7 @@ interface AppOptions {
   /** Which workflows use each connection, once read. */
   uses?: readonly ConnectionWorkflows[] | undefined;
   /** The mark's size: `sm` on a tile, `md` in the panel, `lg` on the page. */
-  size: "sm" | "md" | "lg";
+  size: MarkSize;
 }
 
 /** The parts' App for an integration, in this person's words. */

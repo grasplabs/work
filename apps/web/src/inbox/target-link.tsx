@@ -44,7 +44,6 @@ export const TargetLink = ({
     return (
       <Link
         params={{ integration: destination.integration }}
-        search={{ tab: "account" }}
         to="/integrations/$integration"
         {...props}
       />

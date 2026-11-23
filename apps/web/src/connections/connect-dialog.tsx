@@ -31,7 +31,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import {
   Item,
   ItemContent,
@@ -59,6 +59,7 @@ import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import type { Integration } from "./integrations.ts";
+import { noteReplacing } from "./replace-stopped.tsx";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
@@ -79,10 +80,21 @@ export const returnToOf = (key: string, again = false): string =>
   again ? `/integrations/${key}?again=1` : `/integrations/${key}`;
 
 /** Sends the browser to the provider, once core started the flow. */
-export const goTo = (started: { url: string } | undefined): void => {
+const goTo = (started: { url: string } | undefined): void => {
   if (started !== undefined) {
     window.location.assign(started.url);
   }
+};
+
+/**
+ * Sends the browser to the provider (`goTo`), and never settles: the press
+ * that started it stays busy, and takes no second press, until the page
+ * is gone.
+ */
+export const leaveFor = async (started: { url: string }): Promise<void> => {
+  goTo(started);
+  // Never resolved: the page leaves first.
+  await Promise.withResolvers<undefined>().promise;
 };
 
 /**
@@ -555,7 +567,8 @@ const NativeFlow = ({
 
 /**
  * What an admin types to connect a toolkit with a key, as Composio
- * describes each field: a secret one as a password, never filled back in.
+ * describes each field: a secret one in a SecretInput (masked, never offered
+ * to a password manager or read back by an agent), never filled back in.
  * The values stay in this form until they go to core, and the form never
  * submits by itself, so they never reach an address or the history.
  */
@@ -582,18 +595,27 @@ const KeyFields = ({
       {fields.map(({ name, label, description, required, secret }) => (
         <Field key={name}>
           <FieldLabel>{required ? label : t`${label} (optional)`}</FieldLabel>
-          <Input
-            autoComplete="off"
-            disabled={disabled}
-            onValueChange={(value) => {
-              onChange(name, value);
-            }}
-            required={required}
-            secret={secret}
-            spellCheck={false}
-            type={secret ? "password" : "text"}
-            value={values[name] ?? ""}
-          />
+          {secret ? (
+            <SecretInput
+              disabled={disabled}
+              onValueChange={(value) => {
+                onChange(name, value);
+              }}
+              required={required}
+              value={values[name] ?? ""}
+            />
+          ) : (
+            <Input
+              autoComplete="off"
+              disabled={disabled}
+              onValueChange={(value) => {
+                onChange(name, value);
+              }}
+              required={required}
+              spellCheck={false}
+              value={values[name] ?? ""}
+            />
+          )}
           {description === null ? null : (
             <FieldDescription>{description}</FieldDescription>
           )}
@@ -601,20 +623,6 @@ const KeyFields = ({
         </Field>
       ))}
     </form>
-  );
-};
-
-/**
- * Disconnects the connections a toolkit's new one replaces, first:
- * Composio's account can't be signed in to again, and the same account
- * can't be connected twice.
- */
-const disconnectReplaced = async (
-  session: Session,
-  replacing: readonly ListedConnection[]
-): Promise<void> => {
-  await Promise.all(
-    replacing.map(async ({ id }) => await session.connections.disconnect(id))
   );
 };
 
@@ -627,13 +635,11 @@ const disconnectReplaced = async (
 const KeyStep = ({
   integration,
   allowed,
-  replacing,
   returnTo,
   onClose,
 }: {
   integration: Integration;
   allowed: AllowedTool[];
-  replacing: readonly ListedConnection[];
   returnTo: string;
   onClose: () => void;
 }) => {
@@ -666,16 +672,16 @@ const KeyStep = ({
       ({ name, required }) => !required || (values[name] ?? "") !== ""
     ) === true;
   const connect = async (): Promise<void> => {
-    await begin(async (session) => {
-      await disconnectReplaced(session, replacing);
-      return await session.connections.connectToolkitWithKey({
-        toolkit: id,
-        tools: toolRules(allowed),
-        consent: composioKeyConsentText,
-        values,
-        returnTo,
-      });
-    });
+    await begin(
+      async (session) =>
+        await session.connections.connectToolkitWithKey({
+          toolkit: id,
+          tools: toolRules(allowed),
+          consent: composioKeyConsentText,
+          values,
+          returnTo,
+        })
+    );
   };
   return (
     <>
@@ -771,13 +777,15 @@ const ComposioFlow = ({
   const tools = listed?.state === "ready" ? listed.data : undefined;
   const connect = async (): Promise<void> => {
     await begin(async (session) => {
-      await disconnectReplaced(session, replacing);
-      return await session.connections.connectToolkit({
+      const started = await session.connections.connectToolkit({
         toolkit: integration.id,
         tools: toolRules(allowed),
         consent: composioConsentText,
         returnTo,
       });
+      // Replaced once the new one is made, not before (replace-stopped.tsx).
+      noteReplacing(integration.key, replacing);
+      return started;
     });
   };
   const steps = [
@@ -840,7 +848,6 @@ const ComposioFlow = ({
           <KeyStep
             allowed={allowed}
             integration={integration}
-            replacing={replacing}
             onClose={onClose}
             returnTo={returnTo}
           />
@@ -896,7 +903,7 @@ export const ConnectDialog = ({
   integration: Integration;
   identity: Identity;
   again?: ListedConnection;
-  /** A toolkit's connections that stopped working, disconnected before connecting it again. */
+  /** A toolkit's connections that stopped working, which its new connection replaces once made. */
   replacing?: readonly ListedConnection[];
   returnTo?: string;
   open: boolean;
@@ -941,7 +948,9 @@ export const ConnectDialog = ({
               onClose={() => {
                 onOpenChange(false);
               }}
-              returnTo={returnTo ?? returnToOf(integration.key)}
+              returnTo={
+                returnTo ?? returnToOf(integration.key, replacing.length > 0)
+              }
             />
           ) : null}
         </DialogBody>
