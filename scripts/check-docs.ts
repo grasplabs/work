@@ -10,6 +10,9 @@ const MARKDOWN = /\.mdx?$/iu;
 
 const ALLOWED = [
   /^README\.md$/u,
+  // How the installed Damsko is owned here and sent back to Damsko: the
+  // steps a developer follows beside the files they edit.
+  /^packages\/ui\/README\.md$/u,
   /^AGENTS\.md$/u,
   /^\.github\/[^/]+\.md$/u,
   // Skills are product content the platform loads, not docs.

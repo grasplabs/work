@@ -303,14 +303,25 @@ const styles = stylex.create({
   },
   // The line runs through the steps from mark to mark: a box round a whole step would be crossed by
   // it. The press shows on its mark instead, the node the line joins: the ring round the mark, a soft
-  // fill behind it under the pointer, and the name in ink.
+  // band round it under the pointer, and the name in ink.
   pressOnMark: {
     outline: "none",
     backgroundColor: "transparent",
   },
-  markPress: {
+  // What the press and focus are drawn on: a circle in the mark's middle, as wide as the mark and as
+  // tall as it is wide. Across with names the mark is the current dot's width and its ring's height,
+  // and drawn on that box a circle's corners would make an oval; this one is round in every layout,
+  // and its middle is the dot's: both are centred in the mark's one cell, a whole number of pixels
+  // in from its edges (the mark's sides and the dot's are all even). It takes no room: nothing in
+  // the row moves.
+  halo: {
+    gridArea: "1 / 1",
+    width: "100%",
+    aspectRatio: "1",
     borderRadius: radius.circle,
     cornerShape: "round",
+  },
+  markPress: {
     outline: {
       default: "none",
       [stylex.when.ancestor(":focus-visible", stepMarker)]: {
@@ -329,10 +340,8 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   // The marks alone: a step that is not a button still takes focus for its tooltip; its ring is on
-  // its mark, with no hover fill (nothing to press).
+  // its mark, with no hover band (nothing to press).
   markFocus: {
-    borderRadius: radius.circle,
-    cornerShape: "round",
     outline: {
       default: "none",
       [stylex.when.ancestor(":focus-visible", stepMarker)]: {
@@ -408,6 +417,8 @@ const styles = stylex.create({
   // marks keep their own system colours and their shapes (filled, open, ringed, square) tell the
   // states apart without colour.
   dot: {
+    // In the mark's one cell, over the circle the press is drawn on.
+    gridArea: "1 / 1",
     boxSizing: "border-box",
     width: size.stepperDot,
     height: size.stepperDot,
@@ -634,7 +645,8 @@ const ringOf = (ring: Ring) => {
   return ring === "focus" && styles.markFocus;
 };
 
-/** A step's mark: the dot, round the current one its ring while it is not at work. */
+/** A step's mark: the dot, round the current one its ring while it is not at work, and under it the
+ * circle a press or focus is drawn on. */
 const Mark = ({
   status,
   ring,
@@ -654,10 +666,12 @@ const Mark = ({
     {...stylex.props(
       styles.mark,
       across && styles.markAcross,
-      pitched && styles.markPitched,
-      ringOf(ring)
+      pitched && styles.markPitched
     )}
   >
+    {ring !== undefined && (
+      <span {...stylex.props(styles.halo, ringOf(ring))} />
+    )}
     <span
       {...stylex.props(
         styles.dot,

@@ -20,8 +20,8 @@
  * the tree at the commit is what the CLI installs. A font is held as the
  * font: it travels as base64 text, which Damsko's own script, installed
  * beside it, unpacks; the check runs that script's `--check` too. A listed
- * file may differ; one that no longer does fails, and one listed for two
- * weeks with no pull request in Damsko is named, without failing.
+ * file may differ; one that no longer does fails, and one listed for over
+ * two weeks is named, without failing.
  *
  * `update` builds the registry from that commit as Damsko does
  * (`pnpm install`, then its scripts/registry-dist.ts), serves it on
@@ -61,9 +61,10 @@ import {
   fontsUnpack,
   namespace,
   parseRegistry,
+  overdue,
   pinSchema,
+  proposal,
   readLocalChanges,
-  unproposed,
 } from "./ui-sync-lib.ts";
 import type { Content, Expected, LocalChange, Pin } from "./ui-sync-lib.ts";
 
@@ -76,16 +77,11 @@ const localChangesPath = path.join(ui, "local-changes.json");
 const run = async (
   command: string,
   args: readonly string[],
-  cwd: string,
-  output: "inherit" | "capture" = "inherit"
-): Promise<string> => {
+  cwd: string
+): Promise<void> => {
   const child = spawn(command, args, {
     cwd,
-    stdio: ["ignore", output === "capture" ? "pipe" : "inherit", "inherit"],
-  });
-  const chunks: Buffer[] = [];
-  child.stdout?.on("data", (chunk: Buffer) => {
-    chunks.push(chunk);
+    stdio: ["ignore", "inherit", "inherit"],
   });
   await once(child, "close");
   if (child.exitCode !== 0) {
@@ -93,7 +89,6 @@ const run = async (
       `${command} ${args.join(" ")} exited ${String(child.exitCode)}.`
     );
   }
-  return Buffer.concat(chunks).toString("utf-8");
 };
 
 /** Damsko's tree at a commit, in a folder of its own. */
@@ -251,7 +246,11 @@ const update = async (
   const wasExpected = local.length > 0 ? expectedAt(was, kept) : undefined;
   await install(pin, damsko);
   if (pin.commit !== kept.commit) {
-    writeFileSync(pinPath, `${JSON.stringify(pin, null, 2)}\n`);
+    // The commit alone, so the file keeps its formatting.
+    writeFileSync(
+      pinPath,
+      readFileSync(pinPath, "utf-8").replace(kept.commit, pin.commit)
+    );
   }
   if (wasExpected === undefined) {
     return [];
@@ -279,31 +278,20 @@ const update = async (
 };
 
 /** The listed changes as one patch against Damsko's tree at the pin. */
-const propose = async (
-  pin: Pin,
-  damsko: string,
-  local: LocalChange[]
-): Promise<void> => {
+const propose = (pin: Pin, damsko: string, local: LocalChange[]): void => {
   if (local.length === 0) {
     console.log("packages/ui/local-changes.json lists no change to propose.");
     return;
   }
   const expected = expectedAt(damsko, pin);
-  for (const { path: file } of local) {
-    const target = path.join(damsko, damskoPath(expected, file));
-    const content = readOurs(file);
-    if (content === undefined) {
-      rmSync(target, { force: true });
-    } else {
-      writeFileSync(target, content);
-    }
-  }
-  await run("git", ["add", "--all"], damsko);
-  const patch = await run(
-    "git",
-    ["diff", "--cached", "--binary"],
+  const patch = proposal(
     damsko,
-    "capture"
+    new Map(
+      local.map(({ path: file }) => [
+        damskoPath(expected, file),
+        readOurs(file),
+      ])
+    )
   );
   const out = path.join(
     tmpdir(),
@@ -347,7 +335,7 @@ try {
   const damsko = path.join(scratch, "damsko");
   await fetchDamsko(pin.commit, damsko);
   if (command === "propose") {
-    await propose(pin, damsko, local);
+    propose(pin, damsko, local);
   } else {
     const conflicts =
       command === "update" ? await update(pin, kept, damsko, local) : [];
@@ -359,7 +347,7 @@ try {
     if (existsSync(path.join(ui, fontsUnpack))) {
       await run("node", [fontsUnpack, "--check"], ui);
     }
-    for (const warning of unproposed(listed, new Date())) {
+    for (const warning of overdue(listed, new Date())) {
       console.warn(`packages/ui: ${warning}`);
     }
     for (const file of conflicts) {
