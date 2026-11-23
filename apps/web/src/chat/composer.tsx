@@ -309,7 +309,6 @@ const BoxTools = ({
       {attaches ? <AddMenu /> : null}
       {compact ? null : answerer}
     </PromptInputTools>
-    {/* oxlint-disable-next-line shadcn/no-inline-styles -- StyleX layout on Damsko's part, which #2611's grasp/no-inline-styles lets through: this line goes on rebase */}
     <PromptInputTools style={styles.end}>
       {compact && typed ? answerer : null}
       {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}

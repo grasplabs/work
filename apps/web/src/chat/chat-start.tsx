@@ -240,7 +240,6 @@ export const ChatStart = ({
                 placeholder={t`Ask anything, or describe a process`}
                 agentModel={agentModelOf(agents, answering)}
                 running={false}
-                // oxlint-disable-next-line shadcn/no-inline-styles -- StyleX layout on Damsko's part, which #2611's grasp/no-inline-styles lets through: this line goes on rebase
                 style={styles.box}
                 {...(unavailable === undefined ? {} : { unavailable })}
                 {...composer}
