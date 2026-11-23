@@ -1,12 +1,10 @@
-// ModelSelector: the model an assistant answers with, and how hard it thinks, as one quiet chip that
-// opens one panel. The parts and their names are shadcn's Model Selector (apps/v4/content/docs/
-// ai-elements/base/model-selector.mdx); the look and the way it works are the original design's
-// model and effort picker: a search field across the top; down its start side a column of the
-// makers' logos, a star for favourites first; the chosen maker's models as plain 28px rows beside
-// it, each level with a logo, so the panel is as tall as the taller column; and at its foot the
-// effort as segments. Picking a model keeps the panel open while there is an effort to set, so both
-// are chosen in one opening. Typing searches every maker.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// ModelSelector: the model an assistant answers with, and how hard it thinks, as one quiet chip
+// that opens one panel. The look and the way it works are the original design's model and effort
+// picker: a search field across the top; down its start side a column of the makers' logos, a star
+// for favourites first; the chosen maker's models as plain 28px rows beside it, each level with a
+// logo, so the panel is as tall as the taller column; and at its foot the effort as segments.
+// Picking a model keeps the panel open while there is an effort to set, so both are chosen in one
+// opening. Typing searches every maker.
 //
 //   <ModelSelector value={model} onValueChange={setModel} favorites={favorites}
 //     onFavoritesChange={setFavorites} effort={effort} onEffortChange={setEffort}>
@@ -17,7 +15,7 @@
 //     <ModelSelectorContent>
 //       <ModelSelectorInput />
 //       <ModelSelectorMakers>
-//         <ModelSelectorMaker value="maker" label="Maker" logo={makerLogo} />
+//         <ModelSelectorMaker value="maker" aria-label="Maker" logo={makerLogo} />
 //       </ModelSelectorMakers>
 //       <ModelSelectorList>
 //         <ModelSelectorEmpty />
@@ -222,7 +220,7 @@ export interface ModelSelectorMakerProps {
   /** Matches the `value` of the ModelSelectorGroup holding its models. */
   value: string;
   /** The maker's name ("Maker"): the option's name and its tooltip. */
-  label: string;
+  "aria-label": string;
   /** The maker's logo, from the product's own (an IconData made with lib/icons' `filledMark`). Left out, its first letter. */
   logo?: IconData;
 }
@@ -297,7 +295,7 @@ export interface ModelSelectorEffortProps {
    * Its heading, and the name of its segments.
    * @default "Thinking" (`modelSelector.effort`)
    */
-  label?: string;
+  heading?: string;
 }
 
 /** Every prop a ModelSelectorLogo takes. */
@@ -308,7 +306,7 @@ export interface ModelSelectorLogoProps {
    * The maker's name, when the logo stands without it in words beside it. Left out, the logo is
    * decoration.
    */
-  label?: string;
+  "aria-label"?: string;
   /** Layout only. */
   style?: LayoutStyle;
 }
@@ -333,7 +331,7 @@ const StarFilledIcon: IconData = StarIcon.map(([tag, attrs]) => [
 // One step for the makers and the rows (28px, 44 on a touch screen), so each logo stands level with
 // a row; the corner nests in the panel's, capped at half the step.
 const STEP = size.controlXs;
-const STEP_CORNER = `min(${radius.base}, calc(${size.controlXs} / 2))`;
+const STEP_CORNER = `min(${radius.xl}, calc(${size.controlXs} / 2))`;
 const COARSE = media.pointerCoarse;
 const FORCED = media.forcedColors;
 const HOVER = media.hover;
@@ -1010,14 +1008,14 @@ export const ModelSelectorMakers = ({
 /** A maker in the column: its logo, named by the maker. */
 export const ModelSelectorMaker = ({
   value,
-  label,
+  "aria-label": label,
   logo,
 }: ModelSelectorMakerProps) => {
   const { registerMaker } = usePanel("ModelSelectorMaker");
   useLayoutEffect(() => registerMaker(value), [registerMaker, value]);
   return (
     <Rail value={value} label={label}>
-      <BrandIcon logo={logo} label={label} size="sm" decorative tile={false} />
+      <BrandIcon logo={logo} name={label} size="sm" decorative tile={false} />
     </Rail>
   );
 };
@@ -1109,13 +1107,13 @@ export const ModelSelectorGroup = ({
 /** A maker's logo, beside the model's name, at the icon's size. */
 export const ModelSelectorLogo = ({
   logo,
-  label,
+  "aria-label": label,
   style,
 }: ModelSelectorLogoProps) => (
   <span data-slot="model-selector-logo" {...stylex.props(styles.logo, style)}>
     <BrandIcon
       logo={logo}
-      label={label ?? ""}
+      name={label ?? ""}
       size="sm"
       decorative={label === undefined}
       tile={false}
@@ -1292,11 +1290,11 @@ const NO_LEVELS: readonly { value: string; label: string }[] = [];
  */
 export const ModelSelectorEffort = ({
   levels,
-  label,
+  heading,
 }: ModelSelectorEffortProps) => {
   const root = useRoot("ModelSelectorEffort");
   const words = useI18n().modelSelector;
-  const named = label ?? words.effort;
+  const named = heading ?? words.effort;
   const open = levels.length > 1;
   const [kept, setKept] = useState(levels);
   if (open && levelsKey(kept) !== levelsKey(levels)) {

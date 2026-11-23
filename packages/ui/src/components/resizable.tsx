@@ -1,6 +1,5 @@
 // Resizable: panels side by side or stacked, with a handle between each two that drags,
 // in StyleX, built on UI SDK's Resizable.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <ResizablePanelGroup aria-label="Editor">
 //     <ResizablePanel defaultSize={30} minSize={20}>…</ResizablePanel>

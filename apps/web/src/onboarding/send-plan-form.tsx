@@ -244,7 +244,6 @@ export const SendPlanForm = ({
           </label>
           <Input
             id={timeField}
-            // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
             style={styles.hour}
             onValueChange={(time) => {
               onChange({ ...choice, time });
@@ -267,7 +266,6 @@ export const SendPlanForm = ({
                 aria-controls={teamsList}
                 aria-expanded={false}
 
-                // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                 style={styles.change}
                 onClick={() => {
                   setChoosing(true);
@@ -369,7 +367,6 @@ export const SendPlanForm = ({
                 <span {...stylex.props(styles.at)}>{at}</span>
                 <Input
                   aria-label={t`The hour the other teams get their links`}
-                  // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                   style={styles.hour}
                   onValueChange={(heldTime) => {
                     onChange({ ...choice, heldTime });

@@ -277,7 +277,6 @@ const ConnectForm = ({
               }}
               value={provider.provider}
             >
-              {/* oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style */}
               <SelectTrigger style={styles.full}>
                 <SelectValue />
               </SelectTrigger>
@@ -327,7 +326,6 @@ const ConnectForm = ({
                 }}
                 value={listed ?? null}
               >
-                {/* oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style */}
                 <SelectTrigger style={styles.full}>
                   <SelectValue />
                 </SelectTrigger>
@@ -336,7 +334,6 @@ const ConnectForm = ({
               {models.length < provider.models.length ? (
                 <Button
                   disabled={busy}
-                  // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                   style={styles.start}
                   onClick={() => {
                     setAll(true);

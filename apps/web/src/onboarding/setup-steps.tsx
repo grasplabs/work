@@ -866,14 +866,13 @@ const SignIns = ({
               <Button
                 disabled={reading !== null}
                 key={suite}
-                // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                 style={styles.full}
                 onClick={() => {
                   onConnect(suite);
                 }}
                 size="lg"
-                successLabel={words}
-                errorLabel={words}
+                successText={words}
+                errorText={words}
                 status={waiting ? "loading" : "idle"}
                 variant="outline"
               >
@@ -1041,14 +1040,13 @@ const Company = (props: StepProps) => {
     <Button
       disabled={reading !== null}
 
-      // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
       style={styles.listButton}
       onClick={() => {
         list.current?.click();
       }}
       size="lg"
-      successLabel={listWords}
-      errorLabel={listWords}
+      successText={listWords}
+      errorText={listWords}
       status={reading === "list" ? "loading" : "idle"}
       variant="default"
     >
@@ -1216,8 +1214,8 @@ const PlaceButton = ({
     <Button
       disabled={disabled}
       onClick={onChoose}
-      successLabel={words}
-      errorLabel={words}
+      successText={words}
+      errorText={words}
       status={waiting ? "loading" : "idle"}
       variant="outline"
     >
@@ -1712,7 +1710,6 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
                 >
                   <SelectTrigger
                     aria-label={t`Lead of ${name}`}
-                    // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                     style={styles.full}
                   >
                     <SelectValue placeholder={t`Who leads it?`} />

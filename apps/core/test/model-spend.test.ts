@@ -242,7 +242,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       work: { onboarding: true },
     }).speak({
       text: "Hello there.",
-      voice: "s3TPKV1kjDlVtZbl4Ksh",
+      voice: "1656",
       language: "en",
     });
     const [grasp] = await recordedUsage(month, 1, { credential: "platform" });
@@ -255,7 +255,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       // The organization's spend is what its own key cost: the call.
       user: pricedMicros,
       organization: pricedMicros,
-      grasp: ["speech", "elevenlabs/eleven_v4", true],
+      grasp: ["speech", "kugelaudio/kugel-3.5", true],
     });
   });
 

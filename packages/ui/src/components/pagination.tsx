@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's
 // Pagination: two small outlined steps, with the range shown ("Showing 21 – 30 of 100 items"), the
 // page ("2 / 10"), numbered page links, or nothing beside them.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Pagination total={100} pageSize={10} page={page} onPageChange={setPage} aria-label="Projects">
 //     <PaginationRange />
@@ -258,7 +257,7 @@ const styles = stylex.create({
       default: "currentColor",
       [FORCED]: { default: "ButtonText", [OFF]: "GrayText" },
     },
-    borderRadius: `min(${radius.base}, calc(${size.paginationStep} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.paginationStep} / 2))`,
     cornerShape: radius.shape,
     color: {
       default: colors.foreground,

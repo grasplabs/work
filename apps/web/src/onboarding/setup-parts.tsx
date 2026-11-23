@@ -458,7 +458,6 @@ export const Primary = ({
     <Onward ready={ready}>
       <Button
         disabled={disabled}
-        // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
         style={styles.primary}
         onClick={onClick}
         size="lg"

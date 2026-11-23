@@ -1,7 +1,6 @@
 // DropdownMenu: a list of actions on one thing, opened from a button, in StyleX, built on UI
 // SDK's Menu: a raised panel beside its trigger, items with an icon, words and keys, groups with a
 // label, separators, checkbox and radio items, submenus, and an item whose work can fail.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <DropdownMenu>
 //     <DropdownMenuTrigger asChild>
@@ -12,7 +11,7 @@
 //         Duplicate <DropdownMenuShortcut>mod+d</DropdownMenuShortcut>
 //       </DropdownMenuItem>
 //       <DropdownMenuSeparator />
-//       <DropdownMenuItem variant="destructive" onSelect={remove} errorLabel="Could not delete">
+//       <DropdownMenuItem variant="destructive" onSelect={remove} errorText="Could not delete">
 //         Delete
 //       </DropdownMenuItem>
 //     </DropdownMenuContent>
@@ -161,7 +160,7 @@ export interface DropdownMenuItemProps {
   /**
    * Runs when it is pressed, by pointer, Enter or Space. Call `event.preventDefault()` to keep the
    * menu open. Return a Promise and the menu stays open while it runs, with a spinner at the end of
-   * the item, and closes once it is done; when it rejects, the item says `errorLabel` and the menu
+   * the item, and closes once it is done; when it rejects, the item says `errorText` and the menu
    * stays open to try again.
    */
   onSelect?: (event: Event) => unknown;
@@ -174,13 +173,13 @@ export interface DropdownMenuItemProps {
    * What a screen reader hears as the work of an `onSelect` that returns a Promise starts.
    * @default "Working"
    */
-  loadingLabel?: string;
+  loadingText?: string;
   /**
    * The words when its work failed, at the end of the item, said aloud and given to an agent
    * ("Could not publish").
    * @default "Failed"
    */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * What the item does, for the person an agent must ask first ("Deletes the report"). A
    * `destructive` item asks with its own words when this is left out.

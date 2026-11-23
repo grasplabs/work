@@ -196,6 +196,11 @@ export const provisionOperationErrorCodes = [
   "probe_binding_unanswered",
   /** Core's clock or connect's isn't armed with tasks after the probe. */
   "probe_clock_unarmed",
+  /**
+   * A company that has to start closed for its onboarding is on a release
+   * whose core starts open: its address isn't published.
+   */
+  "probe_starts_open",
   /** Another runner holds the client: this one changes nothing more. */
   "runner_replaced",
   /** The operation's row is gone before it could be recorded done. */
@@ -960,6 +965,13 @@ interface Loaded {
     staffWindow: string | null;
     /** The onboarding its company starts with, by name; null for all of it. */
     startingFlow: string | null;
+    /** When it was added, where it starts closed; null where it starts open. */
+    closedFrom: Date | null;
+    /**
+     * Its address was never published: where it starts closed, core has
+     * to say it does before it is (`probe`).
+     */
+    unpublished: boolean;
     teamsBot: string | null;
     /** Where its data is kept: what its Durable Objects are made in. */
     jurisdiction: "eu" | "none";
@@ -1452,6 +1464,7 @@ const coreVarsOf = (
     signIn: loaded.client.signIn,
     staffWindow: loaded.client.staffWindow,
     startingFlow: loaded.client.startingFlow,
+    closedFrom: loaded.client.closedFrom,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
     ...(context.router.oauthRelay === undefined
@@ -1532,6 +1545,7 @@ const load = async (
       signIn: clients.signIn,
       staffWindow: clients.staffWindow,
       startingFlow: clients.startingFlow,
+      closedFrom: clients.closedFrom,
       teamsBot: clients.teamsBot,
       jurisdiction: clients.jurisdiction,
     })
@@ -1546,7 +1560,8 @@ const load = async (
   }
   // An offboarded client is served no more: no attempt runs for it, so
   // none puts its hostname back (src/hosting/offboarding.ts).
-  const { status, ...client } = row;
+  const { status, ...settings } = row;
+  const client = { ...settings, unpublished: status === "provisioning" };
   if (status === "offboarded") {
     throw new ProvisionOperationError(
       "client_not_active",
@@ -2396,6 +2411,10 @@ const probe = async (
       workerOf(loaded.manifest, "core"),
       workerOf(loaded.manifest, "connect")
     ),
+    // Only before its address is first published: once its gate was
+    // read, core keeps it, and a release from before it changes nothing.
+    startsClosed:
+      loaded.client.unpublished && loaded.client.closedFrom !== null,
   });
   if (fault !== null) {
     throw new ProvisionOperationError(fault.code, fault.message);

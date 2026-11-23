@@ -1,6 +1,5 @@
 // Empty: what a list, a card or a page says when there is nothing in it, or when it could not
 // load: centred, quiet, a short title over one sentence, in one of three sizes.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Empty>
 //     <EmptyHeader>
@@ -532,7 +531,7 @@ const styles = stylex.create({
     justifyContent: "center",
     width: space[10],
     height: space[10],
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     color: colors.foreground,
     backgroundColor: colors.muted,

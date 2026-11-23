@@ -196,7 +196,6 @@ const OtherItem = ({
   };
   return (
     <Item
-      // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
       style={[wide && styles.wide, folded && styles.folded]}
       size="sm"
       variant="outline"
@@ -420,7 +419,6 @@ export const Sources = ({
             return (
               <Item
                 key={source.id}
-                // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                 style={away && !all ? styles.folded : undefined}
                 size="sm"
                 variant="outline"
@@ -462,7 +460,6 @@ export const Sources = ({
         </ItemGrid>
         {all ? null : (
           <Button
-            // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
             style={styles.more}
             onClick={() => {
               setAll(true);

@@ -381,7 +381,7 @@ const sheetStyles = stylex.create({
     display: "grid",
     placeItems: "end center",
     paddingBlockEnd: "0.375rem",
-    borderRadius: radii.mark,
+    borderRadius: radii.sm,
     backgroundColor: colors.card,
     boxShadow: shadow.sm,
     color: colors.mutedForeground,
@@ -690,12 +690,7 @@ const Row = ({
           {/* The bar opens with the reading, fills, then folds away once it is read. */}
           {row.state === "reading" ? (
             <span aria-hidden="true" {...stylex.props(styles.bar)}>
-              <Progress
-                label={row.name}
-                showLabel={false}
-                size="sm"
-                value={percent}
-              />
+              <Progress aria-label={row.name} size="sm" value={percent} />
             </span>
           ) : null}
         </span>

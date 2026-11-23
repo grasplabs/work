@@ -276,8 +276,7 @@ const TeamRow = ({ team }: { team: TeamProgress }) => {
       </span>
       {numbers.shown === "both" ? (
         <Progress
-          label={team.name}
-          showLabel={false}
+          aria-label={team.name}
           size="sm"
           value={
             numbers.asked === 0
@@ -300,7 +299,6 @@ const ByTeam = ({ teams }: { teams: TeamProgress[] }) => {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        {/* oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style */}
         <Button size="sm" style={styles.trigger} variant="ghost">
           {t`By team`}
         </Button>
@@ -311,7 +309,6 @@ const ByTeam = ({ teams }: { teams: TeamProgress[] }) => {
           {teams.map((team) => (
             <TeamRow key={team.id} team={team} />
           ))}
-          {/* oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style */}
           <Text style={styles.note} size="xs" color="muted">
             {t`Teams under five people show only whether their lead talked, so nobody can be singled out.`}
           </Text>
@@ -392,7 +389,6 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        {/* oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style */}
         <Button size="sm" style={styles.trigger} variant="ghost">
           <Icon icon={LinkIcon} />
           {freshCount > 0

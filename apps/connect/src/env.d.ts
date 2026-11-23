@@ -82,8 +82,8 @@ interface __BaseEnv_Env {
   ANTHROPIC_API_KEY?: string;
   MISTRAL_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
-  /** Grasp's own ElevenLabs key, for its speech feature alone. */
-  ELEVENLABS_API_KEY?: string;
+  /** Grasp's own KugelAudio key, for its speech feature alone. */
+  KUGELAUDIO_API_KEY?: string;
   /**
    * For testing only, on a staging deployment: the providers whose
    * platform requests may go to their usual host, not their EU data

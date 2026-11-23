@@ -104,7 +104,7 @@ export interface AudioPlayerProps {
    */
   playbackRates?: number[];
   /** The words when the file cannot be played, shown in place of the controls ("This recording has moved"). */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * Where a play starts, in seconds: the first play, and the first after a new `src` or a new
    * `startTime`, and a play after it stopped at `endTime`. A seek before the first play wins.
@@ -162,7 +162,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: `min(${radius.base}, calc((${size.controlSm} + 2 * ${space["1"]}) / 2))`,
+    borderRadius: `min(${radius.xl}, calc((${size.controlSm} + 2 * ${space["1"]}) / 2))`,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.sm,
@@ -640,7 +640,7 @@ export const AudioPlayer = ({
   duration: known,
   "aria-label": label,
   playbackRates = PLAYBACK_RATES,
-  errorLabel,
+  errorText,
   startTime,
   endTime,
   onTimeUpdate,
@@ -873,7 +873,7 @@ export const AudioPlayer = ({
           <span {...stylex.props(styles.errorMark)}>
             <Icon icon={TriangleAlertIcon} />
           </span>
-          {errorLabel ?? words.error}
+          {errorText ?? words.error}
         </p>
       ) : (
         <Controls

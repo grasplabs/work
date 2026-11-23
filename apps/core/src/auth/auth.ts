@@ -63,7 +63,7 @@ import {
   isErasedSubject,
   subjectsOf,
 } from "../erased-people.ts";
-import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
+import { mayComeIn, memberMayBeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
 import { namedOnListUnmade } from "../staff-list-teams.ts";
@@ -470,6 +470,65 @@ const emailOf = async (
 };
 
 /**
+ * Whether an admin's open invitation makes `email` an admin as they join:
+ * they come in while the gate is closed as the admin they are about to
+ * be, so an admin can bring another in for the onboarding.
+ */
+const invitedAsAdmin = async (
+  env: Env,
+  email: string | undefined
+): Promise<boolean> => {
+  if (email === undefined) {
+    return false;
+  }
+  const invitation = await openInvitation(env, email.toLowerCase(), Date.now());
+  return invitation?.role === "admin";
+};
+
+/**
+ * Whether the directory made whoever Entra names by the object id `oid` a
+ * member, and they are an admin now: someone an admin promoted before
+ * they ever signed in. Their user still holds the directory's placeholder
+ * address until their first sign-in adopts it (`adoptDirectoryMember`),
+ * so their verified email finds no admin; their object id does.
+ */
+const directoryAdmin = async (
+  env: Env,
+  oid: string | null | undefined
+): Promise<boolean> => {
+  if (oid === null || oid === undefined || oid === "") {
+    return false;
+  }
+  const [held] = await drizzle(env.DB)
+    .select({ userId: accounts.userId })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.providerId, directoryProviderId),
+        sql`lower(${accounts.oid}) = lower(${oid})`,
+        activeMember(accounts.userId, ["admin"])
+      )
+    )
+    .limit(1);
+  return held !== undefined;
+};
+
+/** The Entra object id `userId` signed in with, if they did. */
+const entraOidOf = async (env: Env, userId: string): Promise<string | null> => {
+  const [account] = await drizzle(env.DB)
+    .select({ oid: accounts.oid })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.userId, userId),
+        eq(accounts.providerId, providerIds.entra)
+      )
+    )
+    .limit(1);
+  return account?.oid ?? null;
+};
+
+/**
  * Whether the gate lets `userId` in: checked again as their session is
  * made, beside the check of their claims (`validateUserInfo`).
  */
@@ -477,7 +536,14 @@ const gateLetsIn = async (
   env: Env,
   config: SignInConfig,
   userId: string
-): Promise<boolean> => await mayComeIn(env, config, await emailOf(env, userId));
+): Promise<boolean> => {
+  const email = await emailOf(env, userId);
+  return (
+    (await mayComeIn(env, config, email)) ||
+    (await invitedAsAdmin(env, email)) ||
+    (await directoryAdmin(env, await entraOidOf(env, userId)))
+  );
+};
 
 /**
  * Whether `email`, verified by the company's sign-in, opens someone's
@@ -867,6 +933,12 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
     if (!(await ensureMember(env, config, userId))) {
       return false;
     }
+    // Asked again of the member they now are: an invitation that let them
+    // in as an admin may have been withdrawn before they joined, and they
+    // joined as a user, whom a closed gate keeps out.
+    if (!(await memberMayBeIn(env, config, userId))) {
+      return false;
+    }
     await tieAtSignIn(env, userId);
     return {
       data: {
@@ -1181,12 +1253,21 @@ const createAuth = (
               )
             : "method_not_allowed";
         // While the company is onboarding, only its admins come in through
-        // its IdP, and those an interview link went to, for their interview
+        // its IdP (and whoever an admin invited as one), and those an
+        // interview link went to, for their interview
         // alone, before any user or membership is made (onboarding/gate.ts).
         if (
           refusal === undefined &&
           provider !== providerIds.staff &&
           !(await mayComeIn(env, config, user.email)) &&
+          !(await invitedAsAdmin(env, user.email)) &&
+          !(
+            provider === providerIds.entra &&
+            (await directoryAdmin(
+              env,
+              z.string().safeParse(source.sso?.profile?.oid).data
+            ))
+          ) &&
           !(await interviewInvites(env, user.email))
         ) {
           refusal = "not_open_yet";

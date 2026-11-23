@@ -161,7 +161,6 @@ const ReviewItem = ({
           <span {...stylex.props(styles.tick)}>
             <Icon icon={CheckIcon} />
           </span>
-          {/* oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style */}
           <Text as="span" style={styles.settledWords} size="sm" color="muted">
             {t`Settled: ${choice}`}
           </Text>

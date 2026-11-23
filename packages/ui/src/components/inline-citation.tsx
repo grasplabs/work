@@ -3,7 +3,6 @@
 // The chip is a small secondary Button naming where the source lives ("example.com +2"); resting
 // on it, or tabbing to it, opens a card with the source's title, a line about it and a link to it,
 // and pages through several sources when there are more.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <InlineCitation>
 //     <InlineCitationText>Streaming sends the page in pieces.</InlineCitationText>
@@ -227,7 +226,7 @@ const styles = stylex.create({
   },
   // Lit while the pointer is on the citation, or focus is on its chip.
   text: {
-    borderRadius: radius.hairline,
+    borderRadius: radius.xs,
     backgroundColor: {
       default: "transparent",
       [stylex.when.ancestor(":focus-within")]: colors.accent,

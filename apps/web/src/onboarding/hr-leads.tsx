@@ -215,8 +215,8 @@ export const HrLeads = ({
             </Field>
             <Button
               disabled={busy || !ready}
-              successLabel={connectIt}
-              errorLabel={connectIt}
+              successText={connectIt}
+              errorText={connectIt}
               status={busy ? "loading" : "idle"}
               type="submit"
               variant="outline"

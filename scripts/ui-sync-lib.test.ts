@@ -4,7 +4,14 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { differences, expectedOf, parseRegistry } from "./ui-sync-lib.ts";
+import {
+  carry,
+  differences,
+  expectedOf,
+  parseRegistry,
+  unproposed,
+} from "./ui-sync-lib.ts";
+import type { LocalChange } from "./ui-sync-lib.ts";
 
 const registry = parseRegistry(
   JSON.stringify({
@@ -155,5 +162,141 @@ describe("what packages/ui must hold", () => {
     ).toStrictEqual([
       'package.json: @stylexjs/stylex must be a dependency at "catalog:", and is "^0.19.2"',
     ]);
+  });
+});
+
+/** A change listed in local-changes.json. */
+const listed = (path: string, since = "2026-11-20"): LocalChange => ({
+  path,
+  reason: "A feature needs it before Damsko has it.",
+  since,
+});
+
+describe("a change made here on purpose", () => {
+  const expected = expectedOf(registry, ["button"]);
+
+  it("passes where local-changes.json lists it: a file edited, one added and one removed", () => {
+    const { "src/components/spinner.tsx": _, ...rest } = inStep;
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({
+          ...rest,
+          "src/components/button.tsx": "edited",
+          "src/lib/extra.ts": "added",
+        }),
+        [
+          listed("src/components/button.tsx"),
+          listed("src/lib/extra.ts"),
+          listed("src/components/spinner.tsx"),
+        ]
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("still fails beside it for a difference not listed", () => {
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({
+          ...inStep,
+          "src/components/button.tsx": "edited",
+          "src/lib/utils.ts": "edited too",
+        }),
+        [listed("src/components/button.tsx")]
+      )
+    ).toStrictEqual([
+      "src/lib/utils.ts differs from Damsko's src/lib/utils.ts",
+    ]);
+  });
+
+  it("fails once the listed file is Damsko's again, or gone", () => {
+    expect(
+      differences(expected, damsko, installed(inStep), [
+        listed("src/components/button.tsx"),
+        listed("src/lib/extra.ts"),
+      ])
+    ).toStrictEqual([
+      "local-changes.json lists src/components/button.tsx, which no longer differs from Damsko's: remove the entry",
+      "local-changes.json lists src/lib/extra.ts, which no longer differs from Damsko's: remove the entry",
+    ]);
+  });
+
+  it("is named after two weeks with no pull request in Damsko, and never fails for it", () => {
+    const today = new Date("2026-12-10T12:00:00Z");
+    expect(
+      unproposed(
+        [
+          listed("src/components/button.tsx", "2026-11-20"),
+          {
+            ...listed("src/lib/utils.ts", "2026-11-20"),
+            pullRequest: "https://github.com/grasplabs/damsko/pull/50",
+          },
+          listed("src/components/spinner.tsx", "2026-12-01"),
+        ],
+        today
+      )
+    ).toStrictEqual([
+      "local-changes.json: src/components/button.tsx has differed from Damsko's since 2026-11-20 with no pull request there (vp run ui:propose)",
+    ]);
+  });
+});
+
+const lines = (...each: string[]) => bytes(`${each.join("\n")}\n`);
+const text = (content: Uint8Array | undefined) =>
+  content === undefined ? undefined : new TextDecoder().decode(content);
+
+describe("a listed change at a new pin", () => {
+  const pinned = lines("one", "two", "three", "four", "five");
+  const ours = lines("one", "TWO", "three", "four", "five");
+
+  it("is dropped once Damsko's file is the same", () => {
+    expect(carry({ was: pinned, now: ours, ours })).toStrictEqual({
+      kind: "dropped",
+    });
+  });
+
+  it("is kept as it was where Damsko left the file alone", () => {
+    expect(carry({ was: pinned, now: pinned, ours })).toStrictEqual({
+      kind: "kept",
+      content: ours,
+    });
+  });
+
+  it("is applied again on top of Damsko's own change elsewhere in the file", () => {
+    const carried = carry({
+      was: pinned,
+      now: lines("one", "two", "three", "four", "FIVE"),
+      ours,
+    });
+    expect(carried.kind).toBe("kept");
+    expect(text("content" in carried ? carried.content : undefined)).toBe(
+      "one\nTWO\nthree\nfour\nFIVE\n"
+    );
+  });
+
+  it("is a conflict, marked by git, where Damsko changed the same lines", () => {
+    const carried = carry({
+      was: pinned,
+      now: lines("one", "Two", "three", "four", "five"),
+      ours,
+    });
+    expect(carried.kind).toBe("conflict");
+    expect(text("content" in carried ? carried.content : undefined)).toContain(
+      "<<<<<<< here\nTWO\n"
+    );
+  });
+
+  it("keeps a file added here, and a file removed here stays removed", () => {
+    expect(carry({ ours })).toStrictEqual({
+      kind: "kept",
+      content: ours,
+    });
+    expect(carry({ was: pinned, now: pinned })).toStrictEqual({
+      kind: "kept",
+      content: undefined,
+    });
   });
 });

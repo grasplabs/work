@@ -132,7 +132,7 @@ const styles = stylex.create({
     position: "relative",
     display: "grid",
     boxSizing: "border-box",
-    borderRadius: `min(${radius.base}, 28%)`,
+    borderRadius: `min(${radius.xl}, 28%)`,
     cornerShape: radius.shape,
   },
   // The initials at the size an Avatar gives them at that size. `default` stands in a setting's

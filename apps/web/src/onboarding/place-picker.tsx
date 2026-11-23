@@ -218,8 +218,8 @@ const MoreRow = ({
     <li {...stylex.props(styles.more)}>
       <Button
         disabled={loading}
-        successLabel={words}
-        errorLabel={words}
+        successText={words}
+        errorText={words}
         onClick={onMore}
         size="sm"
         status={loading ? "loading" : "idle"}
