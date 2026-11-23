@@ -44,6 +44,12 @@ test.describe.configure({ mode: "serial" });
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+/** A day as the page writes it in English ("11/24/2026"), as core's plan has it ("2026-11-24"). */
+const isoOf = (shown: string): string => {
+  const [month, day, year] = shown.split("/");
+  return `${year}-${month}-${day}`;
+};
+
 const dayMs = 24 * 60 * 60 * 1000;
 
 /** The day `days` from today, as core's plan reads it (UTC). */
@@ -505,14 +511,16 @@ test("the company's admin goes through their onboarding: the staff list, the org
     })
   ).toBeVisible();
   await page.getByRole("button", { name: "The day after" }).click();
-  const start = await page.getByLabel("Another day").inputValue();
+  const start = isoOf(await page.getByLabel("Another day").inputValue());
   // Only the teams that take part are there to hold back.
   await expect(page.getByRole("checkbox", { name: /^Legal/u })).toHaveCount(0);
   await page.getByRole("checkbox", { name: /^Ops/u }).click();
   await page.getByRole("button", { name: "On a later day" }).click();
-  const later = await page
-    .getByLabel("The day the other teams get their links")
-    .inputValue();
+  const later = isoOf(
+    await page
+      .getByLabel("The day the other teams get their links")
+      .inputValue()
+  );
   const next = page
     .getByRole("status")
     .filter({ hasText: "What happens next" })

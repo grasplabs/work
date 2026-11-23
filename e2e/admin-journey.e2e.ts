@@ -26,6 +26,12 @@ test.use({ timezoneId: "UTC" });
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+/** A day ("2026-11-23") as a person types it in the page's English ("11/23/2026"). */
+const typed = (day: string): string => {
+  const [year, month, date] = day.split("-");
+  return `${month}/${date}/${year}`;
+};
+
 const dayMs = 24 * 60 * 60 * 1000;
 
 /** The day `days` from today, as core's plan reads it (UTC). */
@@ -203,7 +209,11 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
       name: "Before I reach out, let your team know",
     })
   ).toBeVisible();
-  await page.getByLabel("Another day").fill(today());
+  // Typed, the day counts once it is committed (Enter), as a person does.
+  const day = page.getByLabel("Another day");
+  await day.fill(typed(today()));
+  await day.press("Enter");
+  await expect(day).toHaveValue(typed(today()));
   await page.getByLabel("at", { exact: true }).fill("00:00");
   await expect(
     page
