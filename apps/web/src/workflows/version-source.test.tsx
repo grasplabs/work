@@ -136,13 +136,21 @@ describe("a version's definition and source", () => {
 
   it("names each version by its label, shows the definition of exactly the version picked, and lists its source files to download", async () => {
     const asked = await shown(true);
-    const select = document.querySelector("select");
-    const latest = select?.value;
+    const choice = document.querySelector<HTMLElement>(
+      '[role="combobox"][aria-label="Version"]'
+    );
+    const latest = choice?.textContent.trim();
     await act(async () => {
-      if (select !== null) {
-        select.value = "1";
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      choice?.click();
+      await settled();
+    });
+    const offered = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ];
+    // Each version by its label.
+    const options = offered.map((each) => each.textContent.trim());
+    await act(async () => {
+      offered.find((each) => each.textContent.trim() === "26.11.1")?.click();
       await settled();
     });
     await press("Show its definition");
@@ -150,16 +158,15 @@ describe("a version's definition and source", () => {
 
     expect({
       latest,
-      // Each version by its label.
-      options: [...(select?.options ?? [])].map(({ text }) => text),
+      options,
       asked,
-      definition: document.querySelector("pre")?.textContent,
+      definition: document.querySelector("code[data-language]")?.textContent,
       downloads: [...document.querySelectorAll("button")]
         .map((each) => each.getAttribute("aria-label"))
         .filter((label) => label?.startsWith("Download") === true),
     }).toStrictEqual({
       // The latest, until another is picked.
-      latest: "2",
+      latest: "26.11.2",
       options: ["26.11.1", "26.11.2"],
       asked: [
         { files: "workflow-1", version: 1 },

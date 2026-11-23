@@ -9,6 +9,7 @@ import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
+import { goTo } from "./tabs-nav.ts";
 
 // An independent workflow, end to end, as its people make and use it: a
 // builder makes it from Make something, saying what they want done, and
@@ -177,11 +178,11 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     `Person (ID …${decider.userId.slice(-6)})`
   );
   await start.getByRole("button", { name: "Start the run" }).click();
-  await expect(start.getByRole("status")).toHaveText(
-    "The run started. It is listed with the workflow's runs.",
-    pageRead
-  );
+  await expect(
+    start.getByText("The run started. It is listed with the workflow's runs.")
+  ).toBeVisible(pageRead);
   await start.getByRole("button", { name: "Close" }).first().click();
+  await expect(start).toHaveCount(0);
 
   // The approver decides from their inbox. Beside Workflows, their nav
   // counts the workflow that needs them.
@@ -231,7 +232,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     await expect(run).toBeVisible(pageRead);
     await expect(run).toContainText("Completed", { timeout: 1000 });
   }).toPass(untilItHappens);
-  await run.getByRole("button").click();
+  await run.getByRole("link").click();
   const sheet = page.getByRole("dialog");
   await expect(sheet).toContainText('"status": "approved"', pageRead);
   await expect(sheet).toContainText('"comment": "Matches the order"');
@@ -255,22 +256,24 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
 
   // The builder starts the workflow on its invoices, in its Settings'
   // Triggers.
+  await goTo(
+    page.getByRole("navigation", { name: "Workflow views" }),
+    "Settings"
+  );
+  await goTo(
+    page.getByRole("navigation", { name: "Settings sections" }),
+    "Triggers"
+  );
+  await page.getByRole("button", { name: "Add a trigger" }).click();
+  const adder = page.getByRole("dialog", { name: "Add a trigger" });
+  await adder.getByRole("combobox", { name: "What starts it" }).click();
   await page
-    .getByRole("navigation", { name: "Workflow views" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("option", { name: "An event from a webhook source" })
     .click();
-  await page
-    .getByRole("navigation", { name: "Settings sections" })
-    .getByRole("link", { name: "Triggers" })
-    .click();
-  await page.getByLabel("What starts it").selectOption({
-    label: "An event from a webhook source",
-  });
-  await page
-    .getByLabel("Source", { exact: true })
-    .selectOption({ label: sourceName });
-  await page.getByLabel("Event type").fill("invoice.received");
-  await page.getByRole("button", { name: "Add the trigger" }).click();
+  await adder.getByRole("combobox", { name: "Source", exact: true }).click();
+  await page.getByRole("option", { name: sourceName }).click();
+  await adder.getByLabel("Event type").fill("invoice.received");
+  await adder.getByRole("button", { name: "Add the trigger" }).click();
   await expect(page.getByText("Waiting for an admin")).toBeVisible(pageRead);
 
   // Its start waits for an admin, who grants it from their inbox. The

@@ -1,16 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
 import { expectedMessageOf, failureText } from "@grasp-os/shared/errors";
 import type {
   TraceState,
@@ -21,8 +8,42 @@ import type {
   WorkflowActivity,
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useEffectEvent, useId, useState } from "react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@grasp-os/ui/components/trace";
+import type { TraceLineStatus } from "@grasp-os/ui/components/trace";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useEffectEvent, useState, Fragment } from "react";
 
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -30,23 +51,24 @@ import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { ActivityLine, activityKey } from "./activity-bar.tsx";
+import { activityKey, activityText } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
-import { OpenRun } from "./resource-runs.tsx";
-import { RunSheet } from "./run-detail.tsx";
-import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { WorkflowRunsTable } from "./resource-runs.tsx";
+import { RunBeside } from "./run-detail.tsx";
+import { SectionCard } from "./section-card.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
 // one thing at a time behind a switch. Runs: a test of the draft on recent
-// real items, then every run, a row each; a row opens beside the page with
+// real items, then every run, a row each; a row opens beside the list with
 // when it ran, how it ended and what it returned or why it failed
 // (run-detail.tsx), then what the run did laid over its own version's
 // diagram, and each step its journal recorded with its state, attempts,
-// loop item and error code (`workflowResources.runTrace`). Activity:
-// everything that happened to the workflow, in full.
+// loop item and error code (`workflowResources.runTrace`), as Damsko's
+// Trace. Activity: everything that happened to the
+// workflow, in full.
 
 /** Which part of Traces shows. */
 export type TracesPart = "runs" | "activity";
@@ -54,10 +76,21 @@ export type TracesPart = "runs" | "activity";
 /** How often a run still going is read again. */
 const followMs = 1500;
 
-/** Ended, or nothing more of it is shown: no need to read it again. */
+const styles = stylex.create({
+  traces: { display: "grid", rowGap: space["6"], minWidth: 0 },
+  // A run's steps, in the card of its "What it did".
+  did: {
+    display: "grid",
+    rowGap: space["4"],
+    paddingBlock: space["3"],
+    paddingInline: space.sidePanelPadding,
+    minWidth: 0,
+  },
+});
+
 /**
  * Where a run is, as a read of its trace says it, for what follows it (the
- * run sheet's facts, run-detail.tsx): its status, and, while a step waits
+ * run panel's facts, run-detail.tsx): its status, and, while a step waits
  * for its AI provider, that wait. A wait begun or ended moves it, as its
  * status, still running, doesn't.
  */
@@ -66,27 +99,21 @@ export const followedState = (trace: WorkflowRunTrace): string =>
     ? trace.status
     : `${trace.status}:${trace.aiProvider.trouble}:${trace.aiProvider.since}`;
 
+/** Ended, or nothing more of it is shown: no need to read it again. */
 const settled = (trace: WorkflowRunTrace): boolean =>
   trace.status === "completed" ||
   trace.status === "failed" ||
   trace.status === "cancelled" ||
   trace.detailsRemoved;
 
-/** The words for a step's state, the diagram's own. */
-const StepState = ({ state }: { state: TraceState }) => {
-  const { t } = useLingui();
-  const label = {
-    reached: t`Reached`,
-    running: t({ message: "Running", context: "an attempt of a step" }),
-    waiting: t`Waiting`,
-    failed: t`Failed`,
-  }[state];
-  return (
-    <Badge variant={state === "failed" ? "destructive" : "secondary"}>
-      {label}
-    </Badge>
-  );
-};
+/** A step's state, as a Trace's line says it: done has none. */
+const lineStatuses: Readonly<Record<TraceState, TraceLineStatus | undefined>> =
+  {
+    reached: undefined,
+    running: "running",
+    waiting: "pending",
+    failed: "error",
+  };
 
 /**
  * Why a step failed, in core's words where core has them (the workflow
@@ -95,32 +122,65 @@ const StepState = ({ state }: { state: TraceState }) => {
  */
 const failureOf = (code: string): string => expectedMessageOf(code) ?? code;
 
-/** One step its journal recorded: task, loop item, state, attempts, error. */
-const StepLine = ({ step }: { step: TraceStep }) => {
-  const { item, attempts, errorCode } = step;
+/**
+ * The steps its journal recorded, one line each on Damsko's Trace: the
+ * task, with its loop item, its attempts and when it started in the quiet
+ * note after it, and why it failed after that. Folded under one line that
+ * names them all, open at first, its line running while the run goes on.
+ */
+const StepByStep = ({
+  steps,
+  going,
+  label,
+}: {
+  steps: readonly TraceStep[];
+  going: boolean;
+  label: string;
+}) => {
+  const { t } = useLingui();
   return (
-    <li className="bg-card flex flex-col gap-1 rounded-lg border px-3 py-2">
-      <span className="flex flex-wrap items-center gap-2">
-        <code className="font-medium">{step.task}</code>
-        {item === null ? null : (
-          <span className="text-muted-foreground">
-            <Trans>Item {item}</Trans>
-          </span>
-        )}
-        <StepState state={step.state} />
-        {attempts > 1 ? (
-          <Badge variant="outline">
-            <Plural one="# attempt" other="# attempts" value={attempts} />
-          </Badge>
-        ) : null}
-      </span>
-      <span className="text-muted-foreground text-xs tabular-nums">
-        <time dateTime={step.startedAt}>{formatDateTime(step.startedAt)}</time>
-      </span>
-      {errorCode === null ? null : (
-        <span className="text-destructive">{failureOf(errorCode)}</span>
-      )}
-    </li>
+    <Trace>
+      <TraceCollapsible defaultOpen>
+        <TraceCollapsibleTrigger>
+          <TraceLine {...(going ? { status: "running" as const } : {})}>
+            <TraceTitle>{label}</TraceTitle>
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <Trace>
+            {steps.map((step) => {
+              const { item, attempts, errorCode } = step;
+              const notes = [
+                ...(item === null ? [] : [t`Item ${item}`]),
+                ...(attempts > 1
+                  ? [
+                      t`${plural(attempts, {
+                        one: "# attempt",
+                        other: "# attempts",
+                      })}`,
+                    ]
+                  : []),
+                formatDateTime(step.startedAt),
+              ];
+              const status = lineStatuses[step.state];
+              return (
+                <TraceLine
+                  key={step.ordinal}
+                  {...(status === undefined ? {} : { status })}
+                >
+                  <TraceIcon />
+                  <TraceTitle>{step.task}</TraceTitle>
+                  <TraceDescription>{notes.join(" · ")}</TraceDescription>
+                  {errorCode === null ? null : (
+                    <TraceDescription>{failureOf(errorCode)}</TraceDescription>
+                  )}
+                </TraceLine>
+              );
+            })}
+          </Trace>
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
   );
 };
 
@@ -180,23 +240,29 @@ const RunTraceDetail = ({
   }, [core, runId, workflow]);
 
   if (trace === undefined) {
-    return <ErrorText>{failure}</ErrorText>;
+    return failure === undefined ? null : (
+      <div {...stylex.props(styles.did)}>
+        <ErrorText>{failure}</ErrorText>
+      </div>
+    );
   }
   const { version } = trace;
   const states = new Map(trace.tasks.map(({ task, state }) => [task, state]));
   const attempts = new Map(
     trace.tasks.map(({ task, attempts: made }) => [task, made])
   );
+  const stepByStep = t({
+    message: "Step by step",
+    context: "the steps of one run, one under the other",
+  });
   // How it stands is said over it, with its result (run-detail.tsx).
   return (
-    <div className="flex flex-col gap-6">
+    <div {...stylex.props(styles.did)}>
       <ErrorText>{failure}</ErrorText>
       {trace.detailsRemoved ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            The details of this run were removed when its retention ended.
-          </Trans>
-        </p>
+        <Text color="muted" size="sm">
+          {t`The details of this run were removed when its retention ended.`}
+        </Text>
       ) : (
         <>
           <WorkflowDiagramView
@@ -205,113 +271,27 @@ const RunTraceDetail = ({
             label={t`What the run of version ${version} did`}
             states={states}
           />
-          <section className="flex flex-col gap-2">
-            <h3 className="text-muted-foreground">
-              {t({
-                message: "Step by step",
-                context: "the steps of one run, one under the other",
-              })}
-            </h3>
-            {trace.steps.length === 0 ? (
-              <p className="text-muted-foreground">
-                <Trans>It has recorded no step yet.</Trans>
-              </p>
-            ) : (
-              <ol className="flex flex-col gap-2">
-                {trace.steps.map((step) => (
-                  <StepLine key={step.ordinal} step={step} />
-                ))}
-              </ol>
-            )}
-            {trace.truncated ? (
-              <p className="text-muted-foreground">
-                <Trans>Showing the first part of this run</Trans>
-              </p>
-            ) : null}
-          </section>
+          {/* Said only when nothing is drawn either: a run whose tasks the
+              diagram shows, but that recorded no action, says enough there. */}
+          {trace.steps.length === 0 && trace.tasks.length === 0 ? (
+            <Text color="muted" size="sm">
+              {t`It has recorded no step yet.`}
+            </Text>
+          ) : null}
+          {trace.steps.length === 0 ? null : (
+            <StepByStep
+              going={!settled(trace)}
+              label={stepByStep}
+              steps={trace.steps}
+            />
+          )}
+          {trace.truncated ? (
+            <Text color="muted" size="sm">
+              {t`Showing the first part of this run`}
+            </Text>
+          ) : null}
         </>
       )}
-    </div>
-  );
-};
-
-/** Every run, a row each; a press on one opens it, with what it did. */
-const RunsTable = ({
-  runs,
-  names,
-  onOpen,
-}: {
-  runs: WorkflowResourceRun[];
-  names: Names;
-  onOpen: (run: WorkflowResourceRun) => void;
-}) => {
-  const { t } = useLingui();
-  const captionId = useId();
-  if (runs.length === 0) {
-    return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>No runs yet.</Trans>
-      </p>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Started`}</TableHead>
-              <TableHead variant="card">{t`Status`}</TableHead>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Started by`}</TableHead>
-              <TableHead variant="card">
-                <span className="sr-only">
-                  {t({
-                    message: "Open",
-                    context: "column: a button that opens a run",
-                  })}
-                </span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {runs.map((run) => {
-              const started = formatDateTime(run.createdAt);
-              return (
-                <TableRow key={run.id}>
-                  <TableCell variant="roomy">{started}</TableCell>
-                  <TableCell variant="roomy">
-                    <span className="inline-flex items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-                      />
-                      {t(runStatusLabels[run.status])}
-                    </span>
-                  </TableCell>
-                  <TableCell variant="roomy">{run.version}</TableCell>
-                  <TableCell variant="roomy">
-                    {run.principal === names.me
-                      ? t`You`
-                      : (names.people.get(run.principal) ?? t`Someone else`)}
-                  </TableCell>
-                  <TableCell variant="roomy">
-                    <OpenRun
-                      onOpen={() => {
-                        onOpen(run);
-                      }}
-                      started={started}
-                    />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>The latest runs, newest first.</Trans>
-      </p>
     </div>
   );
 };
@@ -324,22 +304,41 @@ const ActivityList = ({
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
 }) => {
+  const { t } = useLingui();
   if (activity.state !== "ready") {
     return <NotLoadedState page={activity} />;
   }
   if (activity.data.length === 0) {
     return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>Nothing has happened yet.</Trans>
-      </p>
+      <Empty>
+        <EmptyHeader>
+          <EmptyDescription>{t`Nothing has happened yet.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
+  const label = t({
+    message: "Activity",
+    context: "what a workflow did lately",
+  });
   return (
-    <ol className="bg-card flex flex-col rounded-xl border px-4 py-2">
-      {activity.data.map((row) => (
-        <ActivityLine key={activityKey(row)} names={names} row={row} />
-      ))}
-    </ol>
+    <SectionCard aria-label={label} flush>
+      <ItemGroup aria-label={label}>
+        {activity.data.map((row, at) => (
+          <Fragment key={activityKey(row)}>
+            {at === 0 ? null : <ItemSeparator />}
+            <Item size="sm">
+              <ItemContent>
+                <ItemTitle>{activityText(row, names)}</ItemTitle>
+                <ItemDescription>
+                  <time dateTime={row.at}>{formatDateTime(row.at)}</time>
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          </Fragment>
+        ))}
+      </ItemGroup>
+    </SectionCard>
   );
 };
 
@@ -352,8 +351,14 @@ export const Traces = ({
   testable,
   part,
   onPartChange,
+  openRun,
+  onCloseRun,
 }: {
   workflow: string;
+  /** The run the address asks to open, by its ID. */
+  openRun?: string | undefined;
+  /** Clears the run from the address once it is closed. */
+  onCloseRun?: () => void;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
   runs: Loaded<WorkflowResourceRun[]>;
@@ -365,84 +370,90 @@ export const Traces = ({
   onPartChange: (part: TracesPart) => void;
 }) => {
   const { t } = useLingui();
-  const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
+  // The run the address names: one of the table's, or Run's "Open the run".
+  const opened =
+    runs.state === "ready"
+      ? (runs.data.find((run) => run.id === openRun) ?? null)
+      : null;
   // The opened run's status, as its followed trace last said it.
   const [traced, setTraced] = useState<{ runId: string; status: string }>();
+  const openedId = opened === null ? undefined : opened.id;
   return (
-    <div className="flex flex-col gap-6">
-      <ToggleGroup
-        aria-label={t`What to show of the traces`}
-        onValueChange={(value: unknown[]) => {
-          const [next] = value;
+    <div {...stylex.props(styles.traces)}>
+      <Tabs
+        onValueChange={(next) => {
           if (next === "runs" || next === "activity") {
             onPartChange(next);
           }
         }}
-        value={[part]}
+        value={part}
       >
-        {/* Quiet, each with how many, as the prototype has them. */}
-        <ToggleGroupItem value="runs">
-          {t({ message: "Runs", context: "activity of a workflow: what ran" })}
-          <ListedCount
-            count={runs.state === "ready" ? runs.data.length : undefined}
-            of="runs"
-          />
-        </ToggleGroupItem>
-        <ToggleGroupItem value="activity">
-          {t({ message: "Activity", context: "what a workflow did lately" })}
-          <ListedCount
-            count={
-              activity.state === "ready" ? activity.data.length : undefined
-            }
-            of="activity"
-          />
-        </ToggleGroupItem>
-      </ToggleGroup>
-      {/* Kept while Activity shows: a test going on stays followed, and
-          the answers typed for it stay. */}
-      <div className="flex flex-col gap-6" hidden={part !== "runs"}>
-        {testable === null ? null : (
-          <ItemTest revision={testable} workflow={workflow} />
-        )}
-        {runs.state === "ready" ? (
-          <RunsTable names={names} onOpen={setOpened} runs={runs.data} />
-        ) : (
-          <NotLoadedState page={runs} />
-        )}
-      </div>
-      {part === "activity" ? (
-        <ActivityList activity={activity} names={names} />
-      ) : null}
-      <RunSheet
-        admin={admin}
-        names={names}
-        onClose={() => {
-          setOpened(null);
-        }}
-        opened={opened}
-        status={
-          traced !== undefined && traced.runId === opened?.id
-            ? traced.status
-            : null
-        }
-        steps={
-          opened === null ? null : (
-            <section className="flex flex-col gap-3">
-              <h3 className="text-muted-foreground">
-                <Trans>What it did</Trans>
-              </h3>
-              <RunTraceDetail
-                onStatus={(status) => {
-                  setTraced({ runId: opened.id, status });
-                }}
-                runId={opened.id}
-                workflow={workflow}
-              />
-            </section>
-          )
-        }
-        workflow={workflow}
-      />
+        <TabsList aria-label={t`What to show of the traces`} variant="default">
+          {/* The bar's Runs view already counts the runs. */}
+          <TabsTrigger value="runs">
+            {t({
+              message: "Runs",
+              context: "activity of a workflow: what ran",
+            })}
+          </TabsTrigger>
+          <TabsTrigger value="activity">
+            {t({ message: "Activity", context: "what a workflow did lately" })}
+            <ListedCount
+              count={
+                activity.state === "ready" ? activity.data.length : undefined
+              }
+              of="activity"
+            />
+          </TabsTrigger>
+        </TabsList>
+        {/* Kept while Activity shows: a test going on stays followed, and
+            the answers typed for it stay. */}
+        <TabsContent keepMounted value="runs">
+          <div {...stylex.props(styles.traces)}>
+            {testable === null ? null : (
+              <ItemTest revision={testable} workflow={workflow} />
+            )}
+            <RunBeside
+              admin={admin}
+              names={names}
+              onClose={() => {
+                onCloseRun?.();
+              }}
+              opened={opened}
+              status={
+                traced !== undefined && traced.runId === openedId
+                  ? traced.status
+                  : null
+              }
+              steps={
+                opened === null ? null : (
+                  <RunTraceDetail
+                    onStatus={(status) => {
+                      setTraced({ runId: opened.id, status });
+                    }}
+                    runId={opened.id}
+                    workflow={workflow}
+                  />
+                )
+              }
+              workflow={workflow}
+            >
+              {runs.state === "ready" ? (
+                <WorkflowRunsTable
+                  names={names}
+                  runs={runs.data}
+                  workflow={workflow}
+                />
+              ) : (
+                <NotLoadedState page={runs} />
+              )}
+            </RunBeside>
+          </div>
+        </TabsContent>
+        <TabsContent value="activity">
+          <ActivityList activity={activity} names={names} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

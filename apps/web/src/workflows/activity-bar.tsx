@@ -1,10 +1,23 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { WorkflowActivity } from "@grasp-os/shared/workflow-resources";
+import { Button } from "@grasp-os/ui/components/button";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ArrowRightIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  Icon,
+} from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  duration,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { ArrowRightIcon, ChevronUpIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { formatDateTime } from "../format.ts";
@@ -67,19 +80,73 @@ export const activityKey = (row: WorkflowActivity): string => {
   return `version ${row.version}`;
 };
 
+const styles = stylex.create({
+  line: {
+    display: "grid",
+    gridTemplateColumns: "10rem minmax(0, 1fr)",
+    alignItems: "baseline",
+    columnGap: space["4"],
+    paddingBlock: space["1"],
+  },
+  bar: {
+    position: "sticky",
+    insetBlockEnd: 0,
+    paddingBlock: space["1"],
+    paddingInline: space["6"],
+    backgroundColor: colors.background,
+    borderBlockStartWidth: size.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  head: { display: "flex", alignItems: "center", gap: space["4"] },
+  heading: {
+    flexShrink: 0,
+    margin: 0,
+    marginInlineStart: `calc(-1 * ${space["2"]})`,
+  },
+  all: { marginInlineStart: "auto" },
+  newest: { flexGrow: 1, minWidth: 0 },
+  // The recent lines, opening under the bar's one line.
+  fold: {
+    display: "grid",
+    gridTemplateRows: "0fr",
+    transitionProperty: "grid-template-rows",
+    transitionDuration: {
+      default: duration.open,
+      [media.reducedMotion]: "0s",
+    },
+    transitionTimingFunction: duration.ease,
+  },
+  folded: { gridTemplateRows: "1fr" },
+  inner: { minHeight: 0, overflow: "hidden" },
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "13rem",
+    overflowY: "auto",
+    margin: 0,
+    paddingBlockStart: space["1"],
+    paddingBlockEnd: space["2"],
+    paddingInline: 0,
+    listStyle: "none",
+  },
+});
+
 /** One line: when, and what happened. */
-export const ActivityLine = ({
+const ActivityLine = ({
   row,
   names,
 }: {
   row: WorkflowActivity;
   names: Names;
 }) => (
-  <li className="grid grid-cols-[10rem_minmax(0,1fr)] items-baseline gap-x-4 py-1">
-    <time className="text-muted-foreground tabular-nums" dateTime={row.at}>
-      {formatDateTime(row.at)}
-    </time>
-    <span className="min-w-0 truncate">{activityText(row, names)}</span>
+  <li {...stylex.props(styles.line)}>
+    <Text as="span" color="muted" size="sm">
+      <time dateTime={row.at}>{formatDateTime(row.at)}</time>
+    </Text>
+    <Text as="span" size="sm" truncate>
+      {activityText(row, names)}
+    </Text>
   </li>
 );
 
@@ -104,12 +171,9 @@ export const ActivityBar = ({
   const rows = activity.data;
   const [newest] = rows;
   return (
-    <section
-      aria-labelledby="workflow-activity"
-      className="bg-background sticky bottom-0 border-t px-6 py-1.5"
-    >
-      <div className="flex items-center gap-4">
-        <h2 className="-ml-2.5 flex-none" id="workflow-activity">
+    <section aria-labelledby="workflow-activity" {...stylex.props(styles.bar)}>
+      <div {...stylex.props(styles.head)}>
+        <h2 id="workflow-activity" {...stylex.props(styles.heading)}>
           <Button
             aria-controls="workflow-activity-lines"
             aria-expanded={open}
@@ -119,51 +183,42 @@ export const ActivityBar = ({
             size="sm"
             variant="ghost"
           >
-            <Trans context="what a workflow did lately">Activity</Trans>
-            <ChevronUpIcon
-              className={cn(
-                "transition-transform duration-300",
-                open && "rotate-180"
-              )}
-              data-icon="inline-end"
-            />
+            {t({ message: "Activity", context: "what a workflow did lately" })}
+            <Icon icon={open ? ChevronDownIcon : ChevronUpIcon} />
           </Button>
         </h2>
         {open && onAll !== undefined ? (
           <Button
             aria-label={t`Activity: see all of it in Traces`}
-            className="-mr-2.5 ml-auto"
             onClick={onAll}
             size="sm"
+            style={styles.all}
             variant="ghost"
           >
-            <Trans context="open the whole list">See all</Trans>
-            <ArrowRightIcon data-icon="inline-end" />
+            {t({ message: "See all", context: "open the whole list" })}
+            <Icon icon={ArrowRightIcon} />
           </Button>
         ) : null}
         {!open && newest !== undefined ? (
-          <p className="text-muted-foreground min-w-0 flex-1 truncate">
+          <Text color="muted" size="sm" style={styles.newest} truncate>
             <time dateTime={newest.at}>{formatDateTime(newest.at)}</time>
             {" · "}
             {activityText(newest, names)}
-          </p>
+          </Text>
         ) : null}
         {newest === undefined ? (
-          <p className="text-muted-foreground">
-            <Trans>Nothing has happened yet.</Trans>
-          </p>
+          <Text color="muted" size="sm">
+            {t`Nothing has happened yet.`}
+          </Text>
         ) : null}
       </div>
       <div
-        className={cn(
-          "ease-sidebar grid transition-all duration-300",
-          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-        )}
         id="workflow-activity-lines"
         inert={!open}
+        {...stylex.props(styles.fold, open && styles.folded)}
       >
-        <div className="min-h-0 overflow-hidden">
-          <ol className="flex max-h-52 flex-col overflow-y-auto pt-1 pb-2">
+        <div {...stylex.props(styles.inner)}>
+          <ol {...stylex.props(styles.lines)}>
             {rows.map((row) => (
               <ActivityLine key={activityKey(row)} names={names} row={row} />
             ))}

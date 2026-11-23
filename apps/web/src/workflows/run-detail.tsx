@@ -1,14 +1,34 @@
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@grasp-os/app-kit/components/sheet";
 import { failureText } from "@grasp-os/shared/errors";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowResourceRun,
+  WorkflowRunStatus,
+} from "@grasp-os/shared/workflow-resources";
+import { Badge } from "@grasp-os/ui/components/badge";
+import type { BadgeVariant } from "@grasp-os/ui/components/badge";
+import { IconTile } from "@grasp-os/ui/components/icon-tile";
+import {
+  Item,
+  ItemContent,
+  ItemDetail,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
+import {
+  SidePanel,
+  SidePanelContent,
+  SidePanelHeader,
+  SidePanelSection,
+} from "@grasp-os/ui/components/side-panel";
+import { Text } from "@grasp-os/ui/components/text";
+import { PlayIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useState } from "react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState, Fragment } from "react";
 import type { ReactNode } from "react";
 
 import { isTransient } from "../core.ts";
@@ -16,28 +36,59 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
 import type { Names } from "./activity-bar.tsx";
-import { RunFiles } from "./run-files.tsx";
-import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { Code } from "./code.tsx";
+import { RunFilesReader, useRunFilesSection } from "./run-files.tsx";
+import type { RunFilesRead, RunPanelSection } from "./run-files.tsx";
+import { runStatusLabels } from "./run-status.ts";
 import { WaitingForAiProvider } from "./runs.tsx";
 import { StopRun } from "./stop-run.tsx";
 
-// One run of an independent workflow, opened beside the page (prototype
-// `workflow-inside/inside-traces.tsx` `Detail`): when it ran, how it
-// ended, who started it, and what it returned or why it failed; then, for
-// the workflow's builders, its steps (traces.tsx). The run is read on its
-// own (`workflowResources.run`) and again until it ends: the list carries
-// no result, as only the person it acted for and the organization's admins
-// see what it returned or why it failed (it can hold what the run read for
-// them). Everyone else is told so, rather than shown nothing. Where its
-// steps show under it, they follow the run (`status`): the run is read
-// again only when where it is moves (its status, or a wait for its AI
-// provider begun or ended, traces.tsx `followedState`), never on a second
-// timer of its own. The workflow's builders may stop a run that hasn't
-// ended (asked again first); the files it finished writing are there to
-// download for those who may see what it returned (run-files.tsx).
+// One run of an independent workflow, opened beside its list on a side
+// panel (in a Sheet where the page is narrow): when it
+// ran, how it ended, who started it, and what it returned or why it
+// failed; then, for the workflow's builders, its steps (traces.tsx). The
+// run is read on its own (`workflowResources.run`) and again until it
+// ends: the list carries no result, as only the person it acted for and
+// the organization's admins see what it returned or why it failed (it can
+// hold what the run read for them). Everyone else is told so, rather than
+// shown nothing. Where its steps show under it, they follow the run
+// (`status`): the run is read again only when where it is moves (its
+// status, or a wait for its AI provider begun or ended, traces.tsx
+// `followedState`), never on a second timer of its own. The workflow's
+// builders may stop a run that hasn't ended (asked again first); the files
+// it finished writing are there to download for those who may see what it
+// returned (run-files.tsx).
 
 /** How often a run still going is read again. */
 const followMs = 1500;
+
+/** How wide the page must be for a run to open beside its list. */
+const besideFrom = 60 * 16;
+
+const styles = stylex.create({
+  // The list and the run opened beside it.
+  split: {
+    display: "grid",
+    gridTemplateColumns: `minmax(0, 1fr) ${size.sidePanelWidth}`,
+    columnGap: space["6"],
+    alignItems: "start",
+  },
+  // What stands in a section's card, in its rows' inset.
+  card: {
+    display: "grid",
+    rowGap: space["2"],
+    paddingBlock: space["3"],
+    paddingInline: space.sidePanelPadding,
+    minWidth: 0,
+  },
+  // Its status, and what it waits for, under its name.
+  status: {
+    display: "inline-flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["1"],
+  },
+});
 
 /** Whether `run` has ended: nothing about it changes after. */
 const ended = (run: WorkflowResourceRun): boolean => run.endedAt !== null;
@@ -51,13 +102,26 @@ const readsAgain = (
   status: string | null | undefined
 ): boolean => status === undefined && !ended(run);
 
-/** A label over what it names, in a run's facts. */
-const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="flex flex-col gap-0.5">
-    <dt className="text-muted-foreground">{label}</dt>
-    <dd>{children}</dd>
-  </div>
-);
+/**
+ * How a run's status stands as a Badge: done is success, failed is
+ * danger, anything else a plain fact (nobody need act on it).
+ */
+const runVariantOf = (status: WorkflowRunStatus): BadgeVariant => {
+  if (status === "completed") {
+    return "success";
+  }
+  return status === "failed" ? "destructive" : "default";
+};
+
+/** A run's status, in words, as a Badge. */
+export const RunStatusBadge = ({ status }: { status: WorkflowRunStatus }) => {
+  const { t } = useLingui();
+  return (
+    <Badge size="sm" variant={runVariantOf(status)}>
+      {t(runStatusLabels[status])}
+    </Badge>
+  );
+};
 
 /**
  * How many kept values a run started without, if any: core withheld them
@@ -71,41 +135,54 @@ export const StartedWithout = ({ run }: { run: WorkflowResourceRun }) => {
     return null;
   }
   return (
-    <p className="text-muted-foreground">
-      {t`${plural(count, {
-        one: "It started without # kept value: the run that kept it read something that is no longer there to read.",
-        other:
-          "It started without # kept values: the runs that kept them read something that is no longer there to read.",
-      })}`}
-    </p>
+    <div {...stylex.props(styles.card)}>
+      <Text color="muted" size="sm">
+        {t`${plural(count, {
+          one: "It started without # kept value: the run that kept it read something that is no longer there to read.",
+          other:
+            "It started without # kept values: the runs that kept them read something that is no longer there to read.",
+        })}`}
+      </Text>
+    </div>
   );
 };
 
-/** What an ended run returned, or why it failed, as far as the reader may see. */
 /**
  * An opened run's status, and, while a step of it waits for its AI
  * provider, what for: as the runs table says it (`WaitingForAiProvider`).
  */
-export const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => {
-  const { t } = useLingui();
-  return (
-    <Fact label={t`Status`}>
-      <output className="inline-flex items-center gap-2">
-        <span
-          aria-hidden="true"
-          className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-        />
-        {t(runStatusLabels[run.status])}
-      </output>
-      {run.aiProvider === undefined ? null : (
-        <span className="text-muted-foreground block text-xs">
-          <WaitingForAiProvider wait={run.aiProvider} />
-        </span>
-      )}
-    </Fact>
-  );
+const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => (
+  <output {...stylex.props(styles.status)}>
+    <RunStatusBadge status={run.status} />
+    {run.aiProvider === undefined ? null : (
+      <Text as="span" color="muted" size="xs">
+        <WaitingForAiProvider wait={run.aiProvider} />
+      </Text>
+    )}
+  </output>
+);
+
+/**
+ * What an ended run's result is titled in its panel: why it failed, or
+ * what it returned; none when there is nothing of either to show.
+ */
+const resultLabelOf = (
+  run: WorkflowResourceRun
+): "failed" | "returned" | null => {
+  if (!ended(run)) {
+    return null;
+  }
+  if (run.error !== undefined) {
+    return "failed";
+  }
+  return run.result === undefined ? null : "returned";
 };
 
+/**
+ * What an ended run returned, or why it failed, as far as the reader may
+ * see: its section's card in the panel, or, where core kept it from them,
+ * who sees it.
+ */
 export const RunResultView = ({
   run,
   seesResult,
@@ -113,68 +190,46 @@ export const RunResultView = ({
   run: WorkflowResourceRun;
   seesResult: boolean;
 }) => {
+  const { t } = useLingui();
   if (!ended(run)) {
     return null;
   }
   if (run.error !== undefined) {
     return (
-      <section className="flex flex-col gap-2">
-        <h3 className="text-muted-foreground">
-          <Trans>Why it failed</Trans>
-        </h3>
-        <p>{run.error.message}</p>
+      <div {...stylex.props(styles.card)}>
+        <Text size="sm">{run.error.message}</Text>
         {run.error.code === null ? null : (
-          <code className="text-muted-foreground text-xs">
-            {run.error.code}
-          </code>
+          <Text color="muted" size="xs">
+            <code>{run.error.code}</code>
+          </Text>
         )}
-      </section>
+      </div>
     );
   }
   if (run.result !== undefined) {
-    return (
-      <section className="flex flex-col gap-2">
-        <h3 className="text-muted-foreground">
-          <Trans>What it returned</Trans>
-        </h3>
-        <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs">
-          {JSON.stringify(run.result, null, 2)}
-        </pre>
-      </section>
-    );
+    return <Code code={JSON.stringify(run.result, null, 2)} language="json" />;
   }
   // Core keeps the result from whoever may not see it, and says nothing
   // of one that is gone (a run cancelled, or kept past its retention).
   return seesResult ? null : (
-    <p className="text-muted-foreground">
-      <Trans>
-        Only the person it ran for and the organization&apos;s admins see what
-        it returned or why it failed.
-      </Trans>
-    </p>
+    <Text color="muted" size="sm">
+      {t`Only the person it ran for and the organization's admins see what it returned or why it failed.`}
+    </Text>
   );
 };
 
 /**
- * Run `opened`: its facts, then its result. Read again until it ends, or,
- * given `status` (what its followed steps last said of it; null before
- * they said anything), once each time that moves.
+ * Run `opened`, read again until it ends, or, given `status` (what its
+ * followed steps last said of it; null before they said anything), once
+ * each time that moves; whether the reader builds the workflow, and so
+ * may stop it; and the stop.
  */
-const RunFacts = ({
-  workflow,
-  opened,
-  names,
-  admin,
-  status,
-}: {
-  workflow: string;
-  opened: WorkflowResourceRun;
-  names: Names;
-  admin: boolean;
-  status: string | null | undefined;
-}) => {
+const useFollowedRun = (
+  workflow: string,
+  opened: WorkflowResourceRun,
+  status: string | null | undefined
+) => {
   const core = useCore();
-  const { t } = useLingui();
   const [run, setRun] = useState(opened);
   const [failure, setFailure] = useState<string>();
 
@@ -245,47 +300,168 @@ const RunFacts = ({
     setRun(stopped);
   };
 
-  const seesResult = run.principal === names.me || admin;
-  return (
-    <div className="flex flex-col gap-6">
-      <ErrorText>{failure}</ErrorText>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
-        <RunStatusFact run={run} />
-        <Fact label={t`Started by`}>
-          {run.principal === names.me
-            ? t`You`
-            : (names.people.get(run.principal) ?? t`Someone else`)}
-        </Fact>
-        <Fact label={t`Started`}>{formatDateTime(run.createdAt)}</Fact>
-        <Fact label={t`Ended`}>
-          {run.endedAt === null ? (
-            <span className="text-muted-foreground">
-              <Trans context="a run that hasn't ended">Not yet</Trans>
-            </span>
-          ) : (
-            formatDateTime(run.endedAt)
-          )}
-        </Fact>
-        <Fact label={t`Version`}>{run.version}</Fact>
-      </dl>
-      <StartedWithout run={run} />
-      {builder && !ended(run) ? <StopRun stop={stop} /> : null}
-      <RunResultView run={run} seesResult={seesResult} />
-      <RunFiles
-        // Read again once the run ends, with what it finished last.
-        key={ended(run) ? "ended" : "going"}
-        run={run.id}
-        workflow={workflow}
-      />
+  return { run, failure, builder, stop };
+};
+
+/** Who started a run, in words, by its person's ID. */
+export const useStartedBy = (names: Names) => {
+  const { t } = useLingui();
+  return (principal: string): string =>
+    principal === names.me
+      ? t`You`
+      : (names.people.get(principal) ?? t`Someone else`);
+};
+
+/** Where a panel or a list holding it says what went wrong reading it. */
+const Failure = ({ children }: { children: string | undefined }) =>
+  children === undefined ? null : (
+    <div {...stylex.props(styles.card)}>
+      <ErrorText>{children}</ErrorText>
     </div>
+  );
+
+/**
+ * Run `opened` on the Inspector panel: its status under its name; its
+ * facts; what it returned or why it failed; the files it wrote; then
+ * `steps`, for its builders. Beside the list (`framed`), or in a Sheet.
+ */
+const RunPanel = ({
+  workflow,
+  opened,
+  names,
+  admin,
+  framed,
+  onClose,
+  steps,
+  status,
+}: {
+  workflow: string;
+  opened: WorkflowResourceRun;
+  names: Names;
+  admin: boolean;
+  framed: boolean;
+  onClose: () => void;
+  steps: ReactNode;
+  status: string | null | undefined;
+}) => {
+  const { t } = useLingui();
+  const { run, failure, builder, stop } = useFollowedRun(
+    workflow,
+    opened,
+    status
+  );
+  const startedBy = useStartedBy(names);
+  const [files, setFiles] = useState<RunFilesRead>();
+  const filesSection = useRunFilesSection(workflow, run.id, files);
+  const openedAt = formatDateTime(opened.createdAt);
+  const seesResult = run.principal === names.me || admin;
+  const facts = [
+    { id: "started-by", name: t`Started by`, detail: startedBy(run.principal) },
+    { id: "started", name: t`Started`, detail: formatDateTime(run.createdAt) },
+    {
+      id: "ended",
+      name: t`Ended`,
+      detail:
+        run.endedAt === null
+          ? t({ message: "Not yet", context: "a run that hasn't ended" })
+          : formatDateTime(run.endedAt),
+    },
+    { id: "version", name: t`Version`, detail: String(run.version) },
+  ];
+  const sections: RunPanelSection[] = [];
+  const result = resultLabelOf(run);
+  if (result !== null) {
+    sections.push({
+      id: "result",
+      label: result === "failed" ? t`Why it failed` : t`What it returned`,
+      content: <RunResultView run={run} seesResult={seesResult} />,
+    });
+  }
+  if (filesSection !== undefined) {
+    sections.push(filesSection);
+  }
+  if (steps !== null && steps !== undefined) {
+    sections.push({ id: "steps", label: t`What it did`, content: steps });
+  }
+  const label = t`The run started ${openedAt}`;
+  return (
+    <SidePanel aria-label={label} framed={framed}>
+      <SidePanelHeader
+        actions={builder && !ended(run) ? <StopRun stop={stop} /> : undefined}
+        description={<RunStatusFact run={run} />}
+        icon={<IconTile icon={PlayIcon} variant="tinted" />}
+        onClose={onClose}
+        title={label}
+      />
+      <SidePanelContent>
+        <SidePanelSection title={t`Details`}>
+          <ItemGroup aria-label={t`Details`}>
+            {facts.map((fact, at) => (
+              <Fragment key={fact.id}>
+                {at === 0 ? null : <ItemSeparator />}
+                <Item size="xs">
+                  <ItemContent>
+                    <ItemTitle>
+                      {fact.name}
+                      <ItemDetail>{fact.detail}</ItemDetail>
+                    </ItemTitle>
+                  </ItemContent>
+                </Item>
+              </Fragment>
+            ))}
+          </ItemGroup>
+          {/* The kept values it started without, if any, under its facts. */}
+          <StartedWithout run={run} />
+        </SidePanelSection>
+        {sections.map((section) => (
+          <SidePanelSection key={section.id} title={section.label}>
+            {section.content}
+          </SidePanelSection>
+        ))}
+        <Failure>{failure}</Failure>
+        <Failure>{files === undefined ? undefined : files.failure}</Failure>
+        <RunFilesReader
+          // Read again once the run ends, with what it finished last.
+          key={ended(run) ? "ended" : "going"}
+          onRead={setFiles}
+          run={run.id}
+          workflow={workflow}
+        />
+        {result === null ? (
+          <RunResultView run={run} seesResult={seesResult} />
+        ) : null}
+      </SidePanelContent>
+    </SidePanel>
   );
 };
 
+/** Whether the element `holder` holds is wide enough for a run beside its list. */
+const useWide = (holder: { current: HTMLDivElement | null }): boolean => {
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    const element = holder.current;
+    const watch =
+      element === null || typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(([entry]) => {
+            setWide((entry?.contentRect.width ?? 0) >= besideFrom);
+          });
+    if (element !== null) {
+      watch?.observe(element);
+    }
+    return () => {
+      watch?.disconnect();
+    };
+  }, [holder]);
+  return wide;
+};
+
 /**
- * A run opened beside the page, `steps` under its facts and result: what
- * its builders see of what it did.
+ * A list of runs (`children`) with run `opened` beside it, `steps` under
+ * its facts and result: what its builders see of what it did. In a Sheet
+ * over the list where the page is narrow.
  */
-export const RunSheet = ({
+export const RunBeside = ({
   workflow,
   opened,
   names,
@@ -293,6 +469,7 @@ export const RunSheet = ({
   onClose,
   steps,
   status,
+  children,
 }: {
   workflow: string;
   opened: WorkflowResourceRun | null;
@@ -307,45 +484,54 @@ export const RunSheet = ({
    * null before they did), so the run's facts are not read on a timer too.
    */
   status?: string | null;
+  /** The list the run was opened from. */
+  children?: ReactNode;
 }) => {
+  const { t } = useLingui();
+  const holder = useRef<HTMLDivElement>(null);
+  const wide = useWide(holder);
+  const panel = (framed: boolean) =>
+    opened === null ? null : (
+      <RunPanel
+        // Another run starts from what the list says of it.
+        key={opened.id}
+        admin={admin}
+        framed={framed}
+        names={names}
+        onClose={onClose}
+        opened={opened}
+        status={status}
+        steps={steps}
+        workflow={workflow}
+      />
+    );
   const openedAt = opened === null ? "" : formatDateTime(opened.createdAt);
   return (
-    <Sheet
-      onOpenChange={(open) => {
-        if (!open) {
-          onClose();
-        }
-      }}
-      open={opened !== null}
-    >
-      <SheetContent>
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-col gap-1 border-b px-6 py-5 pr-14">
-            <SheetTitle>
-              <Trans>The run started {openedAt}</Trans>
-            </SheetTitle>
-            <SheetDescription>
-              <Trans context="what a side panel shows: one run of a workflow">
-                A run of this workflow
-              </Trans>
-            </SheetDescription>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-6 py-5">
-            {opened === null ? null : (
-              <RunFacts
-                // Another run starts from what the list says of it.
-                key={opened.id}
-                admin={admin}
-                names={names}
-                opened={opened}
-                status={status}
-                workflow={workflow}
-              />
-            )}
-            {steps}
-          </div>
+    <div ref={holder}>
+      {wide && opened !== null ? (
+        <div {...stylex.props(styles.split)}>
+          <div>{children}</div>
+          {panel(true)}
         </div>
-      </SheetContent>
-    </Sheet>
+      ) : (
+        children
+      )}
+      <Sheet
+        onOpenChange={(open) => {
+          if (!open) {
+            onClose();
+          }
+        }}
+        open={!wide && opened !== null}
+      >
+        {/* The panel draws the title and the close: the sheet names it only. */}
+        <SheetContent showCloseButton={false}>
+          <span {...stylex.props(visuallyHidden)}>
+            <SheetTitle>{t`The run started ${openedAt}`}</SheetTitle>
+          </span>
+          {wide ? null : panel(false)}
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 };

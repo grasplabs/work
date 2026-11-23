@@ -16,11 +16,3 @@ export const runStatusLabels: Readonly<
   failed: msg({ message: "Failed", context: "status of a workflow run" }),
   cancelled: msg({ message: "Cancelled", context: "status of a workflow run" }),
 };
-
-/** The colour of a run's dot, as the runs log has it (`runs.tsx`). */
-export const runDotOf = (status: WorkflowRunStatus): string => {
-  if (status === "completed") {
-    return "bg-status-agreed";
-  }
-  return status === "failed" ? "bg-status-attention" : "bg-foreground";
-};

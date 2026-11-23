@@ -1,10 +1,16 @@
-import { Label } from "@grasp-os/app-kit/components/label";
-import { Switch } from "@grasp-os/app-kit/components/switch";
-import { Trans } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import {
+  Field,
+  FieldContent,
+  FieldError,
+  FieldGroup,
+  FieldStatus,
+} from "@grasp-os/ui/components/field";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { useLingui } from "@lingui/react/macro";
+import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { LabelWithInfo } from "./info-tip.tsx";
 
 // Whether people may ask Stephen to start a workflow in their chat app
 // (core's channels/workflow-offers.ts): for its owner only, off until
@@ -19,7 +25,7 @@ export const AskStephen = ({
   workflow: string;
   askable: boolean;
 }) => {
-  const id = useId();
+  const { t } = useLingui();
   const [on, setOn] = useState(askable);
   const { busy, failure, run } = useCoreAction();
   const change = async (next: boolean) => {
@@ -32,27 +38,27 @@ export const AskStephen = ({
     }
   };
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
+    <FieldGroup>
+      <Field
+        orientation="responsive"
+        {...(failure === undefined ? {} : { "data-invalid": true })}
+      >
+        <FieldContent>
+          <LabelWithInfo
+            info={t`Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them.`}
+            label={t`Let people ask Stephen to start it`}
+          />
+          {failure === undefined ? null : <FieldError>{failure}</FieldError>}
+        </FieldContent>
         <Switch
           checked={on}
           disabled={busy}
-          id={id}
           onCheckedChange={(next) => {
             void change(next);
           }}
         />
-        <Label htmlFor={id}>
-          <Trans>Let people ask Stephen to start it</Trans>
-        </Label>
-      </div>
-      <p className="text-muted-foreground">
-        <Trans>
-          Stephen can offer it in Microsoft Teams to anyone who may start it. It
-          starts only when they press Start, and runs as them.
-        </Trans>
-      </p>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+        <FieldStatus status={busy ? "loading" : "idle"} />
+      </Field>
+    </FieldGroup>
   );
 };

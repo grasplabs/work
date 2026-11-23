@@ -210,6 +210,18 @@ export default defineConfig({
         rules: { "grasp/no-slow-motion": "error" },
       },
       {
+        // On Damsko a component's `style` takes a StyleX style
+        // (`stylex.create`), its layout only, as Damsko's own convention
+        // asks; this rule reads every `style` as an inline CSS object and
+        // cannot tell the two apart. Off where the frontend is on Damsko,
+        // until phase 7's own lint for StyleX takes its place.
+        files: [
+          "apps/web/src/workflows/**",
+          "apps/web/src/routes/_shell.workflows.*",
+        ],
+        rules: { "shadcn/no-inline-styles": "off" },
+      },
+      {
         // Seen once per person, so they may take longer to delight: the
         // onboarding, the interview and setup. And rare: an
         // app connected, a few times per company, whose drawn mark is the

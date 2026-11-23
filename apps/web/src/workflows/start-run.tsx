@@ -1,30 +1,41 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { failureText } from "@grasp-os/shared/errors";
+import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Dialog,
+  DialogBody,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/app-kit/components/dialog";
-import { Input } from "@grasp-os/app-kit/components/input";
-import { Label } from "@grasp-os/app-kit/components/label";
+} from "@grasp-os/ui/components/dialog";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import { failureText } from "@grasp-os/shared/errors";
-import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { Icon, PlayIcon, XIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { formatList } from "../format.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import {
   PeopleTeamsPicker,
@@ -33,7 +44,7 @@ import {
 } from "../people/people-teams-picker.tsx";
 import type { PeopleAndTeams } from "../people/people-teams-picker.tsx";
 import { useCore } from "../use-core.ts";
-import { startFieldsOf, startInputOf } from "./start-input.ts";
+import { inputSketchOf, startFieldsOf, startInputOf } from "./start-input.ts";
 import type {
   StartField,
   StartFieldProblem,
@@ -55,23 +66,36 @@ import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 /** What a start started, as the dialog says it. */
 interface Started {
   kind: "listed";
+  /** The run it started, where the page can open it. */
+  runId?: string;
 }
 
-/** What the dialog says once a start went through: where its run is listed. */
-const StartedText = () => (
-  <Trans>The run started. It is listed with the workflow&apos;s runs.</Trans>
-);
+/** The width of the workflow's bar under which Run shows its icon alone (frame/item-shell.tsx). */
+const narrowBar = "@container bar (width < 64rem)";
+
+const styles = stylex.create({
+  // Its words, hidden from the eye where the bar is narrow, still its name.
+  barWords: {
+    position: { default: null, [narrowBar]: "absolute" },
+    width: { default: null, [narrowBar]: 1 },
+    height: { default: null, [narrowBar]: 1 },
+    overflow: { default: null, [narrowBar]: "hidden" },
+    clipPath: { default: null, [narrowBar]: "inset(50%)" },
+    whiteSpace: { default: null, [narrowBar]: "nowrap" },
+  },
+  form: { display: "grid", rowGap: space["4"] },
+  person: { display: "flex", alignItems: "center", gap: space["1"] },
+});
 
 /** What is said under a field whose value can't be sent. */
-const ProblemText = ({ problem }: { problem: StartFieldProblem }) => {
-  if (problem === "missing") {
-    return <Trans>Fill this in.</Trans>;
-  }
-  return problem === "integer" ? (
-    <Trans>Type a whole number.</Trans>
-  ) : (
-    <Trans>Type a number.</Trans>
-  );
+const useProblemText = () => {
+  const { t } = useLingui();
+  return (problem: StartFieldProblem): string => {
+    if (problem === "missing") {
+      return t`Fill this in.`;
+    }
+    return problem === "integer" ? t`Type a whole number.` : t`Type a number.`;
+  };
 };
 
 /** One input field, as `field` asks for it. */
@@ -99,12 +123,12 @@ const FieldInput = ({
       const picked =
         text === "" ? undefined : subjectNamed(text, people, apart);
       return (
-        <div className="flex items-center gap-1">
+        <div {...stylex.props(styles.person)}>
           <PeopleTeamsPicker
+            buttonId={id}
             candidates={people}
             disabled={false}
             holding={new Set(text === "" ? [] : [text])}
-            buttonId={id}
             label={picked ?? (text === "" ? t`Choose…` : text)}
             onPick={(subject) => {
               onChange(subjectKey(subject));
@@ -120,7 +144,7 @@ const FieldInput = ({
               size="icon-sm"
               variant="ghost"
             >
-              <XIcon />
+              <Icon icon={XIcon} />
             </Button>
           )}
         </div>
@@ -130,38 +154,34 @@ const FieldInput = ({
       return (
         <Checkbox
           checked={value === true}
-          id={id}
           onCheckedChange={(checked) => {
-            onChange(checked);
+            onChange(checked === true);
           }}
         />
       );
     }
     case "choice": {
       return (
-        <NativeSelect
-          id={id}
-          onChange={(event) => {
-            onChange(event.target.value);
+        <Select
+          items={field.choices}
+          onValueChange={(chosen) => {
+            onChange(chosen ?? "");
           }}
-          value={text}
+          value={text === "" ? null : text}
         >
-          <NativeSelectOption value="">{t`Choose…`}</NativeSelectOption>
-          {field.choices.map((choice) => (
-            <NativeSelectOption key={choice} value={choice}>
-              {choice}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+          <SelectTrigger>
+            <SelectValue placeholder={t`Choose…`} />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
       );
     }
     case "number": {
       return (
         <Input
-          id={id}
           inputMode={field.integer ? "numeric" : "decimal"}
-          onChange={(event) => {
-            onChange(event.target.value);
+          onValueChange={(typed) => {
+            onChange(typed);
           }}
           value={text}
         />
@@ -170,9 +190,8 @@ const FieldInput = ({
     case "text": {
       return (
         <Input
-          id={id}
-          onChange={(event) => {
-            onChange(event.target.value);
+          onValueChange={(typed) => {
+            onChange(typed);
           }}
           value={text}
         />
@@ -184,8 +203,15 @@ const FieldInput = ({
   }
 };
 
+/** Under an input typed as JSON: the fields the workflow's input takes, in one line. */
+export const ExpectedInput = ({ keys }: { keys: readonly string[] }) => {
+  const { t } = useLingui();
+  const fields = formatList(keys);
+  return <FieldDescription>{t`It takes ${fields}.`}</FieldDescription>;
+};
+
 /**
- * The Start button, and the dialog it opens: `fields` as a form, or JSON
+ * The Run button, and the dialog it opens: `fields` as a form, or JSON
  * when they are undefined;
  * `start` starts the run with the input and the dialog's key, and says
  * what it started.
@@ -193,12 +219,18 @@ const FieldInput = ({
 const StartDialog = ({
   description,
   fields,
+  sketch,
   people = null,
   start,
   onFiles,
+  onOpenRun,
 }: {
-  description: ReactNode;
+  /** Opens a run beside the workflow's runs: "Open the run" once one started. */
+  onOpenRun?: ((id: string) => void) | undefined;
+  description: string;
   fields: StartField[] | undefined;
+  /** The input's shape, to start the JSON from: none when the page can't know it. */
+  sketch?: { json: string; keys: string[] } | undefined;
   /** Whom a field that takes a person may name, as core gave them. */
   people?: PeopleAndTeams | null;
   start: (input: unknown, key: string) => Promise<Started>;
@@ -207,9 +239,10 @@ const StartDialog = ({
 }) => {
   const { t } = useLingui();
   const ids = useId();
+  const problemText = useProblemText();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<StartValues>({});
-  const [json, setJson] = useState("{}");
+  const [json, setJson] = useState(sketch?.json ?? "{}");
   const [problem, setProblem] = useState<{
     field: string;
     problem: StartFieldProblem;
@@ -260,6 +293,8 @@ const StartDialog = ({
     setBusy(false);
   };
 
+  const formId = `${ids}-form`;
+  const runId = started?.runId;
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -273,89 +308,112 @@ const StartDialog = ({
       }}
       open={open}
     >
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <PlayIcon aria-hidden="true" />
-        {/* Its icon alone where its bar is narrow (frame/item-shell.tsx). */}
-        <span className="@max-5xl/bar:sr-only">
-          <Trans context="start a workflow's run by hand">Run</Trans>
-        </span>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Icon icon={PlayIcon} />
+          <span {...stylex.props(styles.barWords)}>
+            {t({ message: "Run", context: "start a workflow's run by hand" })}
+          </span>
+        </Button>
       </DialogTrigger>
-      <DialogContent closeLabel={t`Close`}>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Start a run</Trans>
-            </DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-          {fields === undefined ? (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor={`${ids}-json`}>
-                <Trans>Input, as JSON</Trans>
-              </Label>
-              <Textarea
-                id={`${ids}-json`}
-                onChange={(event) => {
-                  setJson(event.target.value);
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t`Start a run`}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+            {...stylex.props(styles.form)}
+          >
+            {fields === undefined ? (
+              <Field>
+                <FieldLabel>{t`Input, as JSON`}</FieldLabel>
+                <Textarea
+                  mono
+                  onValueChange={setJson}
+                  spellCheck={false}
+                  value={json}
+                />
+                {sketch === undefined ? null : (
+                  <ExpectedInput keys={sketch.keys} />
+                )}
+              </Field>
+            ) : (
+              fields.map((field) => {
+                const id = `${ids}-${field.name}`;
+                const { name } = field;
+                return (
+                  <Field
+                    {...(problem !== undefined && problem.field === name
+                      ? { "data-invalid": true }
+                      : {})}
+                    key={name}
+                  >
+                    <FieldLabel
+                      // A person is picked with a button, named by this
+                      // label; any other control is the field's own.
+                      {...(field.kind === "person" ? { htmlFor: id } : {})}
+                    >
+                      {field.required ? name : t`${name} (optional)`}
+                    </FieldLabel>
+                    <FieldInput
+                      field={field}
+                      id={id}
+                      onChange={(value) => {
+                        setValues({ ...values, [name]: value });
+                      }}
+                      people={people}
+                      value={values[name]}
+                    />
+                    {problem !== undefined && problem.field === name ? (
+                      <ErrorText>{problemText(problem.problem)}</ErrorText>
+                    ) : null}
+                  </Field>
+                );
+              })
+            )}
+            <ErrorText>{failure}</ErrorText>
+            {unapproved && onFiles !== undefined ? (
+              <ToApprovals
+                onFiles={() => {
+                  setOpen(false);
+                  onFiles();
                 }}
-                spellCheck={false}
-                value={json}
-                variant="code"
               />
-            </div>
-          ) : (
-            fields.map((field) => {
-              const id = `${ids}-${field.name}`;
-              const { name } = field;
-              return (
-                <div className="flex flex-col gap-2" key={name}>
-                  <Label htmlFor={id}>
-                    {field.required ? name : <Trans>{name} (optional)</Trans>}
-                  </Label>
-                  <FieldInput
-                    field={field}
-                    id={id}
-                    onChange={(value) => {
-                      setValues({ ...values, [name]: value });
-                    }}
-                    people={people}
-                    value={values[name]}
-                  />
-                  {problem?.field === name ? (
-                    <p className="text-destructive text-sm" role="alert">
-                      <ProblemText problem={problem.problem} />
-                    </p>
-                  ) : null}
-                </div>
-              );
-            })
-          )}
-          <ErrorText>{failure}</ErrorText>
-          {unapproved && onFiles !== undefined ? (
-            <ToApprovals
-              onFiles={() => {
+            ) : null}
+            {started === undefined ? null : (
+              <output>
+                <Text size="sm">
+                  {t`The run started. It is listed with the workflow's runs.`}
+                </Text>
+              </output>
+            )}
+          </form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose size="default">{t`Close`}</DialogClose>
+          {/* Once started, the next step is to see it: Open the run takes
+              Start's place, and Close closes as before. */}
+          {runId !== undefined && onOpenRun !== undefined ? (
+            <Button
+              onClick={() => {
                 setOpen(false);
-                onFiles();
+                onOpenRun(runId);
               }}
-            />
-          ) : null}
-          {started === undefined ? null : (
-            <output className="flex flex-col gap-1">
-              <StartedText />
-            </output>
-          )}
-          <DialogFooter closeLabel={t`Close`} showCloseButton>
-            <Button disabled={busy} type="submit">
+            >
+              {t`Open the run`}
+            </Button>
+          ) : (
+            <Button disabled={busy} form={formId} type="submit">
               {busy ? t`Starting…` : t`Start the run`}
             </Button>
-          </DialogFooter>
-        </form>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -367,10 +425,16 @@ const StartDialog = ({
  */
 export const StartIndependentRun = ({
   workflow,
+  live,
   onFiles,
+  onOpenRun,
 }: {
   workflow: string;
+  /** The version live now: what Run starts is read again for each, in place, so a Run dialog already open stays open. None live, there is nothing to start. */
+  live: number | null;
   onFiles?: () => void;
+  /** Opens a run beside the workflow's runs. */
+  onOpenRun?: (id: string) => void;
 }) => {
   const core = useCore();
   const router = useRouter();
@@ -381,6 +445,9 @@ export const StartIndependentRun = ({
   useEffect(() => {
     let stopped = false;
     const read = async (): Promise<void> => {
+      if (live === null) {
+        return;
+      }
       try {
         const given = await core.withSession(
           async (session) => await session.workflowResources.startForm(workflow)
@@ -399,8 +466,11 @@ export const StartIndependentRun = ({
     return () => {
       stopped = true;
     };
-  }, [core, workflow]);
+  }, [core, workflow, live]);
 
+  if (live === null) {
+    return null;
+  }
   if (unread !== undefined) {
     return <ErrorText>{t`Can't offer Run: ${unread}`}</ErrorText>;
   }
@@ -410,16 +480,14 @@ export const StartIndependentRun = ({
   }
   return (
     <StartDialog
-      description={
-        <Trans>
-          Starts version {version} as you, with the input you give it.
-        </Trans>
-      }
+      description={t`Starts version ${version} as you, with the input you give it.`}
       fields={startFieldsOf(form?.args)}
+      sketch={inputSketchOf(form?.args)}
       people={form?.people ?? null}
       onFiles={onFiles}
+      onOpenRun={onOpenRun}
       start={async (input, key) => {
-        await core.withSession(
+        const started = await core.withSession(
           async (session) =>
             await session.workflowResources.start(workflow, {
               // The version the form was filled in for: core says so if
@@ -429,9 +497,9 @@ export const StartIndependentRun = ({
               key,
             })
         );
-        // Its runs, as core lists them now.
-        void router.invalidate();
-        return { kind: "listed" };
+        // Its runs, as core lists them now: the new one among them.
+        await router.invalidate({ sync: true });
+        return { kind: "listed", runId: started.id };
       }}
     />
   );

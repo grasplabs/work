@@ -1,16 +1,32 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Input } from "@grasp-os/app-kit/components/input";
-import { Switch } from "@grasp-os/app-kit/components/switch";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type {
   WorkflowParamSetting,
   WorkflowParams,
 } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldStatus,
+} from "@grasp-os/ui/components/field";
+import type { FieldStatusValue } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   fieldValueOf,
@@ -23,6 +39,7 @@ import {
   withPart,
 } from "./param-values.ts";
 import type { FieldBase, ParamKind } from "./param-values.ts";
+import { SectionCard } from "./section-card.tsx";
 
 // An independent workflow's parameters, as its current version declares
 // them (GRA-674): for anyone with a role, each with whether a value is
@@ -31,6 +48,41 @@ import type { FieldBase, ParamKind } from "./param-values.ts";
 // configuration revision it read, so a change someone else made since
 // is never overwritten: core refuses it (`workflow.params_conflict`) and
 // says to reload. A sensitive value is never shown, only replaced.
+
+const styles = stylex.create({
+  // A field, and under it why its text isn't a value and what to do with it.
+  control: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    width: "100%",
+    minWidth: 0,
+  },
+  parts: { display: "flex", flexWrap: "wrap", gap: space["2"] },
+  part: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
+  // A currency's three letters need no more room than this.
+  currency: { flexGrow: 0, width: size.controlLg, flexShrink: 0 },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  invalid: {
+    margin: 0,
+    color: colors.destructive,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+});
+
+/** Where a parameter's row stands: saving, just saved, or at rest. */
+const statusOf = (busy: boolean, saved: boolean): FieldStatusValue => {
+  if (busy) {
+    return "loading";
+  }
+  return saved ? "success" : "idle";
+};
 
 /** What saving one parameter sends: a value, or back to its default. */
 type Change = { value: unknown } | { reset: true };
@@ -54,14 +106,12 @@ const changeInput = (name: string, revision: number, change: Change) =>
 
 /** Money's or a schedule's field: an input for each of its parts. */
 const PartsInput = ({
-  id,
   kind,
   editable,
   text,
   errorId,
   onText,
 }: {
-  id: string;
   kind: "money" | "schedule";
   editable: boolean;
   text: string;
@@ -83,20 +133,18 @@ const PartsInput = ({
     timeZone: "Europe/Amsterdam",
   };
   return (
-    <div className="flex flex-wrap gap-2">
-      {paramParts[kind].map((part, index) => (
+    <div {...stylex.props(styles.parts)}>
+      {paramParts[kind].map((part) => (
         <Input
           aria-describedby={errorId}
           aria-invalid={errorId !== undefined}
           aria-label={labels[part]}
-          className={part === "currency" ? "w-24" : "flex-1"}
           disabled={!editable}
-          // The first part is what the parameter's label names.
-          id={index === 0 ? id : `${id}-${part}`}
           inputMode={part === "amount" ? "decimal" : undefined}
           key={part}
-          onChange={(event) => {
-            onText(withPart(text, part, event.target.value));
+          style={part === "currency" ? styles.currency : styles.part}
+          onValueChange={(value) => {
+            onText(withPart(text, part, value));
           }}
           placeholder={placeholders[part]}
           value={parts[part] ?? ""}
@@ -108,7 +156,6 @@ const PartsInput = ({
 
 /** A parameter's field, as its kind takes a value. */
 const ParamInput = ({
-  id,
   kind,
   param,
   editable,
@@ -118,7 +165,6 @@ const ParamInput = ({
   onText,
   onChecked,
 }: {
-  id: string;
   kind: ParamKind;
   param: WorkflowParamSetting;
   editable: boolean;
@@ -139,7 +185,6 @@ const ParamInput = ({
       <PartsInput
         editable={editable}
         errorId={errorId}
-        id={id}
         kind={kind}
         onText={onText}
         text={text}
@@ -151,8 +196,10 @@ const ParamInput = ({
       <Switch
         checked={checked}
         disabled={!editable}
-        id={id}
-        onCheckedChange={onChecked}
+        aria-label={param.label}
+        onCheckedChange={(next) => {
+          onChecked(next);
+        }}
       />
     );
   }
@@ -164,13 +211,9 @@ const ParamInput = ({
         aria-describedby={errorId}
         aria-invalid={errorId !== undefined}
         disabled={!editable}
-        id={id}
-        onChange={(event) => {
-          onText(event.target.value);
-        }}
+        onValueChange={onText}
         placeholder={replacing ?? t`A JSON value`}
         value={text}
-        variant="code"
       />
     );
   }
@@ -179,11 +222,8 @@ const ParamInput = ({
       aria-describedby={errorId}
       aria-invalid={errorId !== undefined}
       disabled={!editable}
-      id={id}
       inputMode={kind === "number" ? "decimal" : undefined}
-      onChange={(event) => {
-        onText(event.target.value);
-      }}
+      onValueChange={onText}
       placeholder={replacing ?? (kind === "json" ? t`A JSON value` : undefined)}
       type={param.sensitive ? "password" : "text"}
       value={text}
@@ -263,82 +303,81 @@ const ParamField = ({
     setChecked(after.checked);
     setToggled(false);
   };
+  const status = statusOf(busy, saved);
   return (
-    <form
-      className="flex flex-col gap-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (read !== undefined) {
-          void save(read);
-        }
-      }}
+    <Field
+      orientation="responsive"
+      {...(failure === undefined ? {} : { "data-invalid": true })}
     >
-      <span className="flex flex-wrap items-center gap-2">
-        <label className="text-sm font-medium" htmlFor={id}>
-          {param.label}
-        </label>
-        <code className="text-muted-foreground text-xs">{param.name}</code>
-        {param.sensitive ? (
-          <Badge variant="attention">
-            <Trans>Sensitive</Trans>
-          </Badge>
+      <FieldContent>
+        <FieldLabel>{param.label}</FieldLabel>
+        <FieldDescription>{param.name}</FieldDescription>
+        {failure === undefined ? null : <FieldError>{failure}</FieldError>}
+      </FieldContent>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (read !== undefined) {
+            void save(read);
+          }
+        }}
+        {...stylex.props(styles.control)}
+      >
+        <ParamInput
+          checked={checked}
+          editable={editable}
+          errorId={invalid ? `${id}-error` : undefined}
+          kind={kind}
+          onChecked={(next) => {
+            setChecked(next);
+            setToggled(true);
+            setSaved(false);
+          }}
+          onText={(next) => {
+            setText(next);
+            setSaved(false);
+          }}
+          param={param}
+          text={text}
+        />
+        {invalid ? (
+          <p id={`${id}-error`} {...stylex.props(styles.invalid)}>
+            {t`That isn't a value this parameter takes.`}
+          </p>
         ) : null}
-        {param.set ? null : (
-          <Badge variant="outline">
-            <Trans>Default</Trans>
-          </Badge>
-        )}
-      </span>
-      <ParamInput
-        checked={checked}
-        editable={editable}
-        errorId={invalid ? `${id}-error` : undefined}
-        id={id}
-        kind={kind}
-        onChecked={(next) => {
-          setChecked(next);
-          setToggled(true);
-          setSaved(false);
-        }}
-        onText={(next) => {
-          setText(next);
-          setSaved(false);
-        }}
-        param={param}
-        text={text}
-      />
-      {invalid ? (
-        <p className="text-destructive text-sm" id={`${id}-error`}>
-          {t`That isn't a value this parameter takes.`}
-        </p>
-      ) : null}
-      {editable ? (
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={busy || read === undefined} size="sm" type="submit">
-            <Trans>Save</Trans>
-          </Button>
-          {param.set ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void save({ reset: true });
-              }}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Trans>Use the default</Trans>
-            </Button>
+        <div {...stylex.props(styles.actions)}>
+          {editable ? (
+            <>
+              <Button
+                disabled={busy || read === undefined}
+                size="sm"
+                type="submit"
+              >
+                {t`Save`}
+              </Button>
+              {param.set ? (
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    void save({ reset: true });
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {t`Use the default`}
+                </Button>
+              ) : null}
+            </>
           ) : null}
+          {param.sensitive ? (
+            <Badge size="sm" variant="warning">{t`Sensitive`}</Badge>
+          ) : null}
+          {param.set ? null : <Badge size="sm">{t`Default`}</Badge>}
         </div>
-      ) : null}
-      {saved ? (
-        <output className="text-sm">
-          <Trans>Saved.</Trans>
-        </output>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
-    </form>
+      </form>
+      <FieldStatus status={status} />
+    </Field>
   );
 };
 
@@ -351,6 +390,7 @@ export const ResourceParams = ({
   loaded: WorkflowParams;
   editable: boolean;
 }) => {
+  const { t } = useLingui();
   // What core returned for the last save here, or what the page loaded,
   // whichever is newer: its revision is the one the next save names. The
   // page loads again once a version is published, which may declare other
@@ -364,36 +404,38 @@ export const ResourceParams = ({
       setParams(loaded);
     }
   }
-  if (params.params.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>Its current version has no parameters.</Trans>
-      </p>
-    );
-  }
   return (
-    <div className="flex max-w-xl flex-col gap-6">
-      <p className="text-muted-foreground">
-        {editable ? (
-          <Trans>
-            A change applies to runs that start after it: runs already going
-            keep the values they started with. Each change is recorded, without
-            its value.
-          </Trans>
-        ) : (
-          <Trans>Only the workflow&apos;s builders can change these.</Trans>
-        )}
-      </p>
-      {params.params.map((param) => (
-        <ParamField
-          editable={editable}
-          key={param.name}
-          onSaved={setParams}
-          param={param}
-          revision={params.revision}
-          workflow={workflow}
-        />
-      ))}
-    </div>
+    <SectionCard
+      aria-label={t`Parameters`}
+      flush
+      {...(params.params.length === 0
+        ? {}
+        : {
+            footer: editable
+              ? t`A change applies to runs that start after it.`
+              : t`Only the workflow's builders can change these.`,
+          })}
+    >
+      {params.params.length === 0 ? (
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`Its current version has no parameters.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <FieldGroup>
+          {params.params.map((param) => (
+            <ParamField
+              editable={editable}
+              key={param.name}
+              onSaved={setParams}
+              param={param}
+              revision={params.revision}
+              workflow={workflow}
+            />
+          ))}
+        </FieldGroup>
+      )}
+    </SectionCard>
   );
 };
