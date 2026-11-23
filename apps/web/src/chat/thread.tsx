@@ -110,7 +110,7 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
+import { shortTime, turnsOf, workedFor } from "./turns.ts";
 
 /**
  * An answer's thinking as a card (thinking-card.tsx), loaded once an
@@ -345,7 +345,8 @@ interface AnswerStep {
   /** What it did, in the past once finished; as it goes until then. */
   label: string;
   status: StepStatus;
-  input: string;
+  /** What went in: a tool's arguments (drawn as JSON), or a code step's code. */
+  input: unknown;
   result: string | undefined;
 }
 
@@ -378,7 +379,7 @@ const useAnswerSteps = (): ((
             kind: toolKinds[step.call.tool] ?? "tool",
             label: summary(step.call, finished),
             status,
-            input: JSON.stringify(step.call.input, null, 2),
+            input: step.call.input,
             result: result?.text,
           };
         }
@@ -438,12 +439,10 @@ const useWorkingLabel = (): ((
  */
 const useStepsSummary = (): ((steps: readonly AnswerStep[]) => string) => {
   const { t } = useLingui();
-  return (steps) => {
-    const ran = steps.filter(
-      ({ status }) => stepFinished(status) || status === "failed"
-    );
-    const kinds = new Set(ran.map(({ kind }) => kind));
-    const count = ran.length;
+  // What the finished steps came to: a failed one did none of it.
+  const doneLine = (done: readonly AnswerStep[]): string => {
+    const kinds = new Set(done.map(({ kind }) => kind));
+    const count = done.length;
     const [only] = kinds;
     if (kinds.size !== 1 || only === undefined) {
       return t`${plural(count, { one: "# step", other: "# steps" })}`;
@@ -455,22 +454,50 @@ const useStepsSummary = (): ((steps: readonly AnswerStep[]) => string) => {
       tool: t`${plural(count, { one: "Ran # tool", other: "Ran # tools" })}`,
     }[only];
   };
+  return (steps) => {
+    const done = steps.filter(({ status }) => stepFinished(status));
+    const failedCount = steps.filter(
+      ({ status }) => status === "failed"
+    ).length;
+    if (failedCount === 0) {
+      return doneLine(done);
+    }
+    const failed = t`${plural(failedCount, { one: "# step failed", other: "# steps failed" })}`;
+    if (done.length === 0) {
+      return failed;
+    }
+    const line = doneLine(done);
+    return t({
+      message: `${line}; ${failed}`,
+      comment:
+        "What an answer's steps came to, then how many failed: Read 2 files; 1 step failed.",
+    });
+  };
 };
 
-/** A length of time in whole seconds, said short: "4m 21s", or "21s". */
-const useSaidShort = (): ((seconds: number) => string) => {
-  const { t } = useLingui();
-  return (seconds) => {
-    const { minutes, rest } = minutesAndSeconds(seconds);
-    return minutes > 0
-      ? t({
-          message: `${minutes}m ${rest}s`,
-          comment: "A length of time, said short: 4 minutes and 21 seconds.",
-        })
-      : t({
-          message: `${rest}s`,
-          comment: "A length of time, said short: 21 seconds.",
-        });
+/** A length of time in milliseconds, said short as #2503 says it: "5.0s", "21s", "4m 05s". */
+const useSaidShort = (): ((ms: number) => string) => {
+  const { t, i18n } = useLingui();
+  return (ms) => {
+    const { minutes, seconds, tenths } = shortTime(ms);
+    if (minutes > 0) {
+      const rest = String(seconds).padStart(2, "0");
+      return t({
+        message: `${minutes}m ${rest}s`,
+        comment: "A length of time, said short: 4 minutes and 05 seconds.",
+      });
+    }
+    const rest = tenths
+      ? new Intl.NumberFormat(i18n.locale, {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        }).format(seconds)
+      : String(seconds);
+    return t({
+      message: `${rest}s`,
+      comment:
+        "A length of time, said short: 21 seconds, or 5.0 seconds (to a tenth under ten).",
+    });
   };
 };
 
@@ -742,7 +769,7 @@ interface AnswerContext extends StepContext {
   workingLabel: string;
   /** Grasp checks the drafts it wrote, past its answer. */
   checking: boolean;
-  /** How long Grasp worked on each question, by the ID of its first reply. */
+  /** How long Grasp worked on each question, in milliseconds, by the ID of its first reply. */
   worked: ReadonlyMap<number, number>;
   /** Asks the last question again: offered under its answer only. */
   onRetry: (() => void) | undefined;
@@ -864,6 +891,18 @@ const AnswerEnding = ({
   </>
 );
 
+/** What a step came to: its result under Output, or under Error why it failed or stopped. */
+const StepOutput = ({ step }: { step: AnswerStep }) => {
+  const { t } = useLingui();
+  if (step.status === "stopped") {
+    return <ToolOutput errorText={t`Stopped before it finished`} />;
+  }
+  if (step.status === "failed" && step.result !== undefined) {
+    return <ToolOutput errorText={step.result} />;
+  }
+  return <ToolOutput output={step.result} />;
+};
+
 /**
  * An answer's steps as one Chain of thought: its line says what Grasp does
  * while it works (the running step's own words, in the shimmer), else how
@@ -901,14 +940,7 @@ const AnswerSteps = ({
                 <ToolHeader name={step.tool} state={toolStates[step.status]} />
                 <ToolContent>
                   <ToolInput input={step.input} />
-                  <ToolOutput
-                    errorText={
-                      step.status === "stopped"
-                        ? t`Stopped before it finished`
-                        : undefined
-                    }
-                    output={step.result}
-                  />
+                  <StepOutput step={step} />
                 </ToolContent>
               </Tool>
             </ChainOfThoughtStep>
@@ -942,7 +974,7 @@ const AnswerBody = ({
     .filter((words) => words.trim() !== "")
     .join("\n\n");
   const firstId = replies[0]?.id;
-  const seconds =
+  const workedMs =
     firstId === undefined ? undefined : context.worked.get(firstId);
   // The chain's line says what Grasp does once steps show, or between two
   // replies; while words arrive, they say it themselves.
@@ -958,11 +990,11 @@ const AnswerBody = ({
   let line: ReactNode = (
     <>
       {summary(steps)}
-      {seconds === undefined ? null : (
+      {workedMs === undefined ? null : (
         <>
           {" "}
           <Text as="span" color="muted">
-            {saidShort(seconds)}
+            {saidShort(workedMs)}
           </Text>
         </>
       )}

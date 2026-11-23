@@ -551,6 +551,10 @@ msgstr "{failed, plural, one {# en échec au cours des {days} derniers jours} ot
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# exécution en échec} other {# exécutions en échec}} de {name}"
 
+#: src/chat/thread.tsx
+msgid "{failedCount, plural, one {# step failed} other {# steps failed}}"
+msgstr "{failedCount, plural, one {# étape a échoué} other {# étapes ont échoué}}"
+
 #: src/apps/data-model-changes.tsx
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} dans {table} demande une modification du code avant de pouvoir être publié."
@@ -711,6 +715,11 @@ msgstr "{left, plural, one {# équipe ici n’est pas encore interviewée.} othe
 msgid "{length}/{max}"
 msgstr "{length}/{max}"
 
+#. What an answer's steps came to, then how many failed: Read 2 files; 1 step failed.
+#: src/chat/thread.tsx
+msgid "{line}; {failed}"
+msgstr "{line} ; {failed}"
+
 #: src/apps/app-code.tsx
 msgid "{lines, plural, one {# line} other {# lines}}"
 msgstr "{lines, plural, one {# ligne} other {# lignes}}"
@@ -755,7 +764,7 @@ msgstr "{memories, plural, one {Cette version a remplacé # souvenir d’une ver
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {Enregistré il y a # min} other {Enregistré il y a # min}}"
 
-#. A length of time, said short: 4 minutes and 21 seconds.
+#. A length of time, said short: 4 minutes and 05 seconds.
 #: src/chat/thread.tsx
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
@@ -1087,7 +1096,7 @@ msgstr "{records, plural, one {# enregistrement conservé} other {# enregistreme
 msgid "{refused, plural, one {# refused in the last 24 hours} other {# refused in the last 24 hours}}"
 msgstr "{refused, plural, one {# refusée au cours des dernières 24 heures} other {# refusées au cours des dernières 24 heures}}"
 
-#. A length of time, said short: 21 seconds.
+#. A length of time, said short: 21 seconds, or 5.0 seconds (to a tenth under ten).
 #: src/chat/thread.tsx
 msgid "{rest}s"
 msgstr "{rest} s"

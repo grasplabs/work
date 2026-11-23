@@ -601,6 +601,91 @@ describe(ChatThread, () => {
     });
   });
 
+  it("says a failed step under Error, its input as JSON, and counts it as failed, not as done", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        code: [],
+        tools: [
+          {
+            callId: "again",
+            tool: "searchBrain",
+            codeBefore: 0,
+            input: { question: "travel policy" },
+          },
+          // Failed last, so no later search recovered it.
+          {
+            callId: "search",
+            tool: "searchBrain",
+            codeBefore: 0,
+            input: { question: "expense policy" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "search",
+        text: "The brain could not be searched.",
+        failed: true,
+        at,
+      },
+      {
+        id: 4,
+        role: "result",
+        callId: "again",
+        text: "Returned:\n[]",
+        failed: false,
+        at,
+      },
+      {
+        id: 5,
+        role: "assistant",
+        text: "Nothing found.",
+        code: [],
+        tools: [],
+        end: "done",
+        at,
+      },
+    ]);
+    const line = spoken(
+      document.querySelector(
+        '[data-slot="chain-of-thought"] button[aria-expanded]'
+      )
+    );
+    await openSteps();
+    const [, failed] = document.querySelectorAll('[role="listitem"]');
+    await act(async () => {
+      failed?.querySelector<HTMLElement>("button[aria-expanded]")?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(
+        failed?.querySelector('[data-slot="tool-input"]')?.textContent
+      ).toContain("JSON");
+    });
+
+    expect({
+      line,
+      input: failed
+        ?.querySelector('[data-slot="tool-input"]')
+        ?.textContent.includes('"question": "expense policy"'),
+      error: failed
+        ?.querySelector('[data-slot="tool-output"][data-error]')
+        ?.textContent.includes("The brain could not be searched."),
+    }).toStrictEqual({
+      line: "Searched once; 1 step failed 5.0s",
+      input: true,
+      error: true,
+    });
+  });
+
   it("shows a response's tool calls and code steps in the order it made them", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const done = (id: number, callId: string): ChatMessage => ({
