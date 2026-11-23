@@ -339,8 +339,11 @@ export const differences = (
       differs(path, `${path} is no file of the installed items`);
     }
   }
+  // Today anywhere on Earth: a day listed where it is already tomorrow
+  // (UTC+14) is no day after today, though CI's clock is UTC's.
+  const latestToday = dayOf(new Date(today.getTime() + 14 * 3_600_000));
   for (const { path, since } of local) {
-    if (since > dayOf(today)) {
+    if (since > latestToday) {
       found.push(
         `local-changes.json dates ${path} ${since}, after today: give the day it was listed`
       );
