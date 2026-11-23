@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Item,
   ItemActions,
@@ -6,21 +6,23 @@ import {
   ItemDescription,
   ItemMedia,
   ItemTitle,
-} from "@grasp-os/app-kit/components/item";
+} from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
+import { ArrowRightIcon, CircleIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRightIcon, CircleDashedIcon } from "lucide-react";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { InterviewsProgress } from "../onboarding/interviews-progress.tsx";
 import { listeningOf } from "../onboarding/setup.ts";
 import {
-  SettingsBody,
   SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsGroup,
+  SettingsPending,
+} from "../settings/section.tsx";
 
 // Settings, Onboarding, for admins: while Stephen talks to the team, where
 // the interviews stand and the links to send, as the onboarding's own step
@@ -31,15 +33,19 @@ import {
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+const styles = stylex.create({
+  body: { display: "grid", gap: space[4] },
+});
+
 const OnboardingPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const title = t`Onboarding`;
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={title}>
+      <SettingsGroup flush={false} title={title}>
         <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      </SettingsGroup>
     );
   }
   const { view, links } = page.data;
@@ -53,44 +59,43 @@ const OnboardingPage = () => {
     step = { step: "listening" };
   }
   return (
-    <SettingsSection
-      action={
-        <Button
-          nativeButton={false}
-          render={<Link search={step} to="/setup" />}
-          size="sm"
-          variant="outline"
-        >
-          {t`Open your onboarding`}
-          <ArrowRightIcon data-icon="inline-end" />
+    <SettingsGroup
+      actions={
+        <Button asChild size="xs" variant="secondary">
+          <Link search={step} to="/setup">
+            {t`Open your onboarding`}
+            <Icon icon={ArrowRightIcon} />
+          </Link>
         </Button>
       }
       description={t`While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send.`}
+      flush={false}
       title={title}
     >
-      <SettingsBody>
+      <div {...stylex.props(styles.body)}>
         {linksToDo ? (
           <Item variant="outline">
             <ItemMedia variant="icon">
-              <CircleDashedIcon />
+              <Icon icon={CircleIcon} />
             </ItemMedia>
             <ItemContent>
               <ItemTitle>{t`To do: let your team know, and send the interview links`}</ItemTitle>
               <ItemDescription>{t`Stephen talks to nobody until you pick the day the interviews start.`}</ItemDescription>
             </ItemContent>
             <ItemActions>
-              <Button
-                nativeButton={false}
-                render={<Link search={{ step: "team" }} to="/setup" />}
-                size="sm"
-              >
-                {t`Do it now`}
+              <Button asChild size="sm">
+                <Link search={{ step: "team" }} to="/setup">
+                  {t`Do it now`}
+                </Link>
               </Button>
             </ItemActions>
           </Item>
         ) : null}
         {view.plan === null && !linksToDo ? (
-          <p className="text-muted-foreground">{t`The interviews aren’t planned yet. You plan them at the end of your onboarding.`}</p>
+          <Text
+            color="muted"
+            size="sm"
+          >{t`The interviews aren’t planned yet. You plan them at the end of your onboarding.`}</Text>
         ) : null}
         {view.plan === null ? null : (
           <InterviewsProgress
@@ -101,13 +106,13 @@ const OnboardingPage = () => {
             view={view}
           />
         )}
-      </SettingsBody>
-    </SettingsSection>
+      </div>
+    </SettingsGroup>
   );
 };
 
 export const Route = createFileRoute("/_shell/settings/onboarding")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: () => <SettingsPending groups={[4]} />,
   errorComponent: SettingsError,
   component: OnboardingPage,
   loader: async ({ context: { core } }) =>

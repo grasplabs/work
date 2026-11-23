@@ -1,21 +1,23 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type {
   InstructionFileRef,
   InstructionFileText,
 } from "@grasp-os/shared/instruction-files";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An instruction file, as someone who may change it edits it: what every
@@ -24,6 +26,15 @@ import { useCoreAction } from "../use-core-action.ts";
 // version they started from, so it never overwrites a save they didn't
 // see; the one before stays as its history. Emptied, it loads nowhere. Core decides who may read and save each file; a
 // page shows one only to those core lets read it.
+
+const styles = stylex.create({
+  // Its buttons at its end.
+  buttons: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: space[2],
+  },
+});
 
 /** What was typed and couldn't be saved before an editor opened. */
 interface Unsaved {
@@ -55,10 +66,63 @@ const triedOf = (unsaved: Unsaved | undefined): Tried | undefined =>
     ? undefined
     : { change: unsaved.change, text: unsaved.text, after: 0 };
 
+/** The field's label, unless the card's title says it, and its sentence, if any. */
+const Words = ({
+  label,
+  labelHidden,
+  description,
+}: {
+  label: string;
+  labelHidden: boolean | undefined;
+  description: string | undefined;
+}) => (
+  <>
+    {labelHidden === true ? null : <FieldLabel>{label}</FieldLabel>}
+    {description === undefined ? null : (
+      <FieldDescription>{description}</FieldDescription>
+    )}
+  </>
+);
+
+/** Save, and, once someone else saved since, the way to put one's changes aside. */
+const Actions = ({
+  busy,
+  stale,
+  cannotSave,
+  onAside,
+  onSave,
+}: {
+  busy: boolean;
+  stale: boolean;
+  cannotSave: boolean;
+  onAside: () => void;
+  onSave: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.buttons)}>
+      {stale ? (
+        <Button disabled={busy} onClick={onAside} size="sm" variant="ghost">
+          {t`Put my changes aside`}
+        </Button>
+      ) : null}
+      <Button
+        disabled={cannotSave}
+        onClick={onSave}
+        size="sm"
+        variant="secondary"
+      >
+        {t`Save`}
+      </Button>
+    </div>
+  );
+};
+
 export const InstructionFileEditor = ({
   file,
   saved,
   label,
+  labelHidden,
   description,
   onSaved,
   unsaved,
@@ -67,7 +131,9 @@ export const InstructionFileEditor = ({
   /** The file as it is now; null while it was never written. */
   saved: InstructionFileText | null;
   label: string;
-  description: string;
+  /** The label names the field for a screen reader only: the card's title already says it. */
+  labelHidden?: boolean;
+  description?: string;
   /** What else a save asks of core, once it landed and before the page is read again. */
   onSaved?: (session: Session) => Promise<void>;
   /**
@@ -79,7 +145,6 @@ export const InstructionFileEditor = ({
 }) => {
   const { t } = useLingui();
   const changedSince = t`Someone saved this file since you started. Put your changes aside to see their version, then make yours again.`;
-  const id = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   // What they typed, and the version they started from: saved only after
@@ -143,44 +208,38 @@ export const InstructionFileEditor = ({
       );
     });
   };
+  const shownFailure = stale ? changedSince : (failure ?? handedFailure);
+  // Named by its label, or for a screen reader alone when the card's title says it.
+  const hiddenLabel = labelHidden === true ? label : undefined;
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <FieldDescription>{description}</FieldDescription>
+    <Field data-invalid={shownFailure !== undefined} disabled={busy}>
+      <Words
+        description={description}
+        label={label}
+        labelHidden={labelHidden}
+      />
       <Textarea
-        disabled={busy}
-        id={id}
-        onChange={(event) => {
+        aria-label={hiddenLabel}
+        onValueChange={(next) => {
           setDraft({
-            text: event.target.value,
+            text: next,
             from: unchanged ? (saved?.version ?? 0) : draft.from,
           });
         }}
         rows={8}
         value={text}
       />
-      {stale ? (
-        <ErrorText>{changedSince}</ErrorText>
-      ) : (
-        <ErrorText>{failure ?? handedFailure}</ErrorText>
-      )}
-      <div className="flex justify-end gap-2">
-        {stale ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setDraft(undefined);
-              setTried(undefined);
-            }}
-            variant="outline"
-          >
-            <Trans>Put my changes aside</Trans>
-          </Button>
-        ) : null}
-        <Button disabled={busy || unchanged || stale || nothing} onClick={save}>
-          <Trans>Save</Trans>
-        </Button>
-      </div>
+      <FieldError match>{shownFailure}</FieldError>
+      <Actions
+        busy={busy}
+        cannotSave={busy || unchanged || stale || nothing}
+        onAside={() => {
+          setDraft(undefined);
+          setTried(undefined);
+        }}
+        onSave={save}
+        stale={stale}
+      />
     </Field>
   );
 };

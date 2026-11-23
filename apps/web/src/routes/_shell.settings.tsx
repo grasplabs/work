@@ -1,264 +1,86 @@
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { Container } from "@grasp-os/ui/components/container";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import { Toaster } from "@grasp-os/ui/components/toast";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import {
-  createFileRoute,
-  Link,
-  Outlet,
-  useLocation,
-  useNavigate,
-} from "@tanstack/react-router";
-import {
-  BrainIcon,
-  BuildingIcon,
-  CircleHelpIcon,
-  CoinsIcon,
-  CreditCardIcon,
-  FileTextIcon,
-  HistoryIcon,
-  KeyRoundIcon,
-  PlugIcon,
-  RocketIcon,
-  SparklesIcon,
-  UserRoundIcon,
-  UsersIcon,
-  WebhookIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 
-import { Page, PageHeading } from "../frame/page.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { sectionAt } from "../settings/sections.ts";
+import { roomForList, SettingsNav } from "../settings/settings-nav.tsx";
+import { settingsToast } from "../settings/settings-toast.ts";
 
-// Settings, as in the prototype (`routes/settings.tsx`): the workspace and
-// who may do what in it, then one's own account, one section at a time.
-// The workspace's sections are for admins (Members and roles, Webhooks and
-// calls of unknown outcome, never for Grasp staff); the account's for
-// everyone.
-// Core checks the role on every call whatever is listed. Onboarding is the
-// company admin's own view of the interviews, as their onboarding shows
-// it; what only Grasp's staff do there is in Grasp's admin.
+// Settings: one's own account, then the workspace and who may do what in
+// it, one section at a time, each under its own name as the page's one
+// header. The sections, their groups and who sees each are data
+// (settings/sections.ts); the list of them stands beside the section, or
+// above it where the page has no room for both (settings/settings-nav.tsx).
+//
+// A section stands in one column, Damsko's settings column (40rem): a
+// settings page needs no more, and its rows read as one group. Only a
+// section that needs the room (the Audit trail's log beside its details)
+// says `wide` and keeps the rest of the page's width.
 
-type SettingsPath =
-  | "/settings/workspace"
-  | "/settings/members"
-  | "/settings/ai-providers"
-  | "/settings/models"
-  | "/settings/spend"
-  | "/settings/onboarding"
-  | "/settings/brain"
-  | "/settings/audit"
-  | "/settings/webhooks"
-  | "/settings/outcomes"
-  | "/settings/billing"
-  | "/settings/profile"
-  | "/settings/instructions"
-  | "/settings/security";
+const styles = stylex.create({
+  // The page's own width is what decides whether the list fits beside.
+  frame: { containerType: "inline-size", containerName: "settings" },
+  row: {
+    display: "flex",
+    flexDirection: { default: "column", [roomForList]: "row" },
+    alignItems: { default: "stretch", [roomForList]: "flex-start" },
+    gap: { default: space[6], [roomForList]: space[8] },
+  },
+  section: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: space[6],
+    flexGrow: 1,
+    minWidth: 0,
+  },
+});
 
-interface SettingsItem {
-  /** Stephen is a name and stays as it is; the other labels are translated. */
-  label: MessageDescriptor | string;
-  to: SettingsPath;
-  icon: LucideIcon;
-}
-
-interface SettingsGroup {
-  id: string;
-  title: MessageDescriptor;
-  items: SettingsItem[];
-}
-
-/** The sections this person may open, in their groups. */
-const groupsFor = ({
-  admin,
-  staff,
-}: {
-  admin: boolean;
-  staff: boolean;
-}): SettingsGroup[] => {
-  const workspace: SettingsItem[] = admin
-    ? [
-        {
-          label: msg`Workspace`,
-          to: "/settings/workspace",
-          icon: BuildingIcon,
-        },
-        ...(staff
-          ? []
-          : [
-              {
-                label: msg`Members and roles`,
-                to: "/settings/members" as const,
-                icon: UsersIcon,
-              },
-            ]),
-        {
-          label: msg`AI providers`,
-          to: "/settings/ai-providers",
-          icon: PlugIcon,
-        },
-        { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
-        { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
-        // Its groups of teams, the brain's regions.
-        { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
-        {
-          label: msg`Onboarding`,
-          to: "/settings/onboarding",
-          icon: RocketIcon,
-        },
-        { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
-        ...(staff
-          ? []
-          : [
-              // The event sources outside systems send events to.
-              {
-                label: msg`Webhooks`,
-                to: "/settings/webhooks" as const,
-                icon: WebhookIcon,
-              },
-              {
-                label: msg`Unknown outcomes`,
-                to: "/settings/outcomes" as const,
-                icon: CircleHelpIcon,
-              },
-            ]),
-        { label: msg`Billing`, to: "/settings/billing", icon: CreditCardIcon },
-      ]
-    : [];
-  return [
-    ...(workspace.length === 0
-      ? []
-      : [
-          {
-            id: "workspace",
-            title: msg({ message: "Workspace", context: "settings group" }),
-            items: workspace,
-          },
-        ]),
-    {
-      id: "account",
-      title: msg`Your account`,
-      items: [
-        { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
-        // What their chats start with: Grasp's staff have no chats here.
-        ...(staff
-          ? []
-          : [
-              {
-                label: msg`Instructions`,
-                to: "/settings/instructions" as const,
-                icon: FileTextIcon,
-              },
-            ]),
-        { label: msg`Security`, to: "/settings/security", icon: KeyRoundIcon },
-      ],
-    },
-  ];
-};
-
-/**
- * Settings: the workspace and who may do what in it, then one's own account. One section at a time.
- * The list of sections stands beside the section only where the page has the room for both, which
- * is about the page and not the window: Grasp's own sidebar takes its share. With less room the
- * sections are one control above the section, so a section is never squeezed into a sliver.
- */
+/** Settings: the section the address names, under its name. */
 const SettingsLayout = () => {
   const { t, i18n } = useLingui();
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const { identity } = Route.useRouteContext();
-  const groups = groupsFor({
-    admin: isAdmin(identity.role),
-    staff: identity.staff,
-  });
-  const labelOf = (label: MessageDescriptor | string): string =>
-    typeof label === "string" ? label : i18n._(label);
-  const items = groups.flatMap((group) => group.items);
-  const current = items.find((item) => pathname.startsWith(item.to));
+  const current = sectionAt(pathname, identity);
+  const name = current === undefined ? t`Settings` : i18n._(current.label);
+  const section = (
+    <>
+      {/* One header: the section's own name; the crumbs above already say Settings. */}
+      <PageHeader size="sm" title={name} />
+      <Outlet />
+    </>
+  );
   return (
     <>
       <SiteHeader
         crumbs={
           current === undefined
             ? [{ label: t`Settings` }]
-            : [{ label: t`Settings` }, { label: labelOf(current.label) }]
+            : [{ label: t`Settings` }, { label: name }]
         }
       />
       <Page wide>
-        <PageHeading
-          description={t`Your workspace, who may do what in it, and your own account.`}
-          title={t`Settings`}
-        />
-        <div className="@container">
-          <div className="flex flex-col gap-6 text-sm @3xl:flex-row @3xl:items-start @3xl:gap-8">
-            <div className="@3xl:hidden">
-              <Select
-                items={items.map((item) => ({
-                  value: item.to,
-                  label: labelOf(item.label),
-                }))}
-                value={current?.to ?? null}
-                onValueChange={(value) => {
-                  const to = items.find((item) => item.to === value)?.to;
-                  if (to !== undefined) {
-                    void navigate({ to });
-                  }
-                }}
-              >
-                <SelectTrigger aria-label={t`Settings`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {groups.map((group) => (
-                    <SelectGroup key={group.id}>
-                      <SelectLabel>{i18n._(group.title)}</SelectLabel>
-                      {group.items.map((item) => (
-                        <SelectItem key={item.to} value={item.to}>
-                          {labelOf(item.label)}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <nav
-              aria-label={t`Settings`}
-              className="hidden w-52 flex-none flex-col gap-5 @3xl:sticky @3xl:top-16 @3xl:flex"
-            >
-              {groups.map((group) => (
-                <div className="flex flex-col gap-0.5" key={group.id}>
-                  <span className="text-muted-foreground px-2 pb-1 text-xs">
-                    {i18n._(group.title)}
-                  </span>
-                  {group.items.map(({ label, to, icon: Icon }) => (
-                    <Link
-                      className="text-muted-foreground hover:bg-accent data-[status=active]:bg-muted data-[status=active]:text-foreground hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
-                      key={to}
-                      to={to}
-                    >
-                      <Icon aria-hidden="true" className="size-4" />
-                      {labelOf(label)}
-                    </Link>
-                  ))}
-                </div>
-              ))}
-            </nav>
-            <div className="flex max-w-5xl min-w-0 flex-1 flex-col gap-6">
-              <Outlet />
+        <div {...stylex.props(styles.frame)}>
+          <div {...stylex.props(styles.row)}>
+            <SettingsNav open={current} viewer={identity} />
+            <div {...stylex.props(styles.section)}>
+              {current?.wide === true ? (
+                section
+              ) : (
+                <Container size="sm">
+                  <div {...stylex.props(styles.section)}>{section}</div>
+                </Container>
+              )}
             </div>
           </div>
         </div>
       </Page>
+      <Toaster toaster={settingsToast} />
     </>
   );
 };

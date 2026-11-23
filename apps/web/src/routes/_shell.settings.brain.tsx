@@ -1,30 +1,36 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Input } from "@grasp-os/app-kit/components/input";
+import type { Team, TeamGroup } from "@grasp-os/shared/brain";
+import { Button } from "@grasp-os/ui/components/button";
+import { FieldGroup } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import type { Team, TeamGroup } from "@grasp-os/shared/brain";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/select";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
-  SettingsBody,
+  FactRow,
+  Failure,
+  SettingRow,
   SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsGroup,
+  SettingsPending,
+  SettingsStack,
+} from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Settings → Brain: the company's groups of teams, the brain's regions
+// Settings › Brain: the company's groups of teams, the brain's regions
 // (core's brain-team-groups.ts). The prototype keeps its groups as data
 // and has no page for them; this one is in its settings' language: a
 // card with the groups, each named in a field, and every team beside the
@@ -55,6 +61,20 @@ const moved = (
     };
   });
 
+const styles = stylex.create({
+  // The group's choice at a select's own width, on the rows' edge.
+  choice: { width: "12rem", maxWidth: "100%" },
+  add: { paddingBlock: space[2], paddingInline: space.tableCellInline },
+  foot: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space[3],
+    width: "100%",
+  },
+});
+
 /** One team, and the group it is in, to choose another. */
 const TeamRow = ({
   team,
@@ -76,30 +96,31 @@ const TeamRow = ({
     { value: none, label: t`No group` },
   ];
   return (
-    <li className="flex items-center justify-between gap-4 py-1">
-      <span className="min-w-0 truncate">{name}</span>
-      <Select
-        disabled={disabled}
-        items={items}
-        onValueChange={(value: unknown) => {
-          if (typeof value === "string") {
-            onMove(value);
-          }
-        }}
-        value={inGroup}
-      >
-        <SelectTrigger aria-label={t`Group of ${name}`} className="w-48">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </li>
+    <FactRow label={name}>
+      <div {...stylex.props(styles.choice)}>
+        <Select
+          disabled={disabled}
+          items={items}
+          onValueChange={(value) => {
+            if (typeof value === "string") {
+              onMove(value);
+            }
+          }}
+          value={inGroup}
+        >
+          <SelectTrigger aria-label={t`Group of ${name}`} size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </FactRow>
   );
 };
 
@@ -132,78 +153,84 @@ const TeamGroups = ({
       }
     })();
   };
+  if (teams.length === 0) {
+    return (
+      <SettingsGroup flush={false} title={t`Groups of teams`}>
+        <Text color="muted" size="sm">
+          {t`The brain has no teams to group yet.`}
+        </Text>
+      </SettingsGroup>
+    );
+  }
   return (
-    <SettingsSection
-      description={t`The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here.`}
-      title={t`Groups of teams`}
-    >
-      {teams.length === 0 ? (
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>The brain has no teams to group yet.</Trans>
-          </p>
-        </SettingsBody>
-      ) : (
-        <>
-          <SettingsBody>
-            {groups.map((group) => (
+    <SettingsStack>
+      <SettingsGroup
+        description={t`The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here.`}
+        title={t`Groups of teams`}
+      >
+        <FieldGroup>
+          {groups.map((group, at) => (
+            <SettingRow key={group.id} label={t`Group ${at + 1}`}>
               <Input
                 aria-label={t`Group name`}
-                key={group.id}
-                disabled={busy}
                 maxLength={80}
-                onChange={(event) => {
-                  const { value } = event.target;
+                onValueChange={(value) => {
                   setGroups(
                     groups.map((each) =>
                       each.id === group.id ? { ...each, name: value } : each
                     )
                   );
                 }}
+                readOnly={busy}
+                size="sm"
                 value={group.name}
               />
-            ))}
-            <div>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  setGroups([
-                    ...groups,
-                    { id: newGroupId(), name: t`New group`, teamIds: [] },
-                  ]);
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Add a group</Trans>
-              </Button>
-            </div>
-          </SettingsBody>
-          <SettingsBody>
-            <ul aria-label={t`Teams`} className="flex flex-col">
-              {teams.map((team) => (
-                <TeamRow
-                  disabled={busy}
-                  groups={groups}
-                  key={team.id}
-                  onMove={(groupId) => {
-                    setGroups(moved(groups, team.id, groupId));
-                  }}
-                  team={team}
-                />
-              ))}
-            </ul>
-          </SettingsBody>
-          <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-3">
-            <ErrorText>{failure}</ErrorText>
+            </SettingRow>
+          ))}
+        </FieldGroup>
+        <div {...stylex.props(styles.add)}>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setGroups([
+                ...groups,
+                { id: newGroupId(), name: t`New group`, teamIds: [] },
+              ]);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            <Icon icon={PlusIcon} />
+            {t`Add a group`}
+          </Button>
+        </div>
+      </SettingsGroup>
+      <SettingsGroup
+        footer={
+          <div {...stylex.props(styles.foot)}>
+            <Failure>{failure}</Failure>
             <Button disabled={busy || unnamed} onClick={save} size="sm">
-              <Trans>Save groups</Trans>
+              {t`Save groups`}
             </Button>
           </div>
-        </>
-      )}
-    </SettingsSection>
+        }
+        title={t`Teams`}
+      >
+        <FieldGroup>
+          {teams.map((team) => (
+            <TeamRow
+              disabled={busy}
+              groups={groups}
+              key={team.id}
+              onMove={(groupId) => {
+                setGroups(moved(groups, team.id, groupId));
+              }}
+              team={team}
+            />
+          ))}
+        </FieldGroup>
+      </SettingsGroup>
+    </SettingsStack>
   );
 };
 
@@ -212,9 +239,9 @@ const BrainSettings = () => {
   const page = Route.useLoaderData();
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={t`Groups of teams`}>
+      <SettingsGroup flush={false} title={t`Groups of teams`}>
         <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      </SettingsGroup>
     );
   }
   const { teams, teamGroups } = page.data;
@@ -232,7 +259,7 @@ const BrainSettings = () => {
 };
 
 export const Route = createFileRoute("/_shell/settings/brain")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: () => <SettingsPending groups={[2, 4]} />,
   errorComponent: SettingsError,
   component: BrainSettings,
   loader: async ({ context: { core } }) =>

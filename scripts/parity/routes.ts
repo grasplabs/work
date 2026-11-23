@@ -46,7 +46,8 @@ export const parityRoutes: readonly ParityRoute[] = [
   {
     name: "settings-models",
     prototype: "/settings/models",
-    grasp: "/settings/models",
+    // Models and AI spend are one page in Grasp: AI and spend.
+    grasp: "/settings/ai-providers",
   },
   {
     name: "settings-security",
@@ -56,7 +57,7 @@ export const parityRoutes: readonly ParityRoute[] = [
   {
     name: "settings-spend",
     prototype: "/settings/spend",
-    grasp: "/settings/spend",
+    grasp: "/settings/ai-providers",
   },
   {
     name: "settings-audit",

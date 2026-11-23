@@ -1,544 +1,831 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
+import { failureText } from "@grasp-os/shared/errors";
+import { memberErrors } from "@grasp-os/shared/members";
+import type {
+  Guest,
+  Invitation,
+  Member,
+  RemovedPeoplePage,
+  RemovedPerson,
+} from "@grasp-os/shared/members";
+import { roleSchema } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { DataTable } from "@grasp-os/ui/components/data-table";
+import type { DataTableColumn } from "@grasp-os/ui/components/data-table";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
+} from "@grasp-os/ui/components/input-group";
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@grasp-os/ui/components/popover";
 import {
   Select,
   SelectContent,
-  SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/app-kit/components/select";
+} from "@grasp-os/ui/components/select";
+import { Text } from "@grasp-os/ui/components/text";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { memberErrors } from "@grasp-os/shared/members";
-import type { Invitation, Member } from "@grasp-os/shared/members";
-import { roleSchema } from "@grasp-os/shared/roles";
-import type { Role } from "@grasp-os/shared/roles";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import {
-  CheckIcon,
+  CopyIcon,
   EllipsisIcon,
+  Icon,
+  InfoIcon,
   LogOutIcon,
   SearchIcon,
-  UserMinusIcon,
-} from "lucide-react";
-import { useRef, useState } from "react";
+  TrashIcon,
+} from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useState, useSyncExternalStore } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import { formatDate } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
-import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { ConfirmAction } from "../settings/confirm-action.tsx";
 import { DirectoryReads } from "../settings/directory-reads.tsx";
-import { RemovedPeople } from "../settings/erasures.tsx";
-import { Guests } from "../settings/guests.tsx";
-import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
-import { MemberSuspension } from "../settings/member-suspension.tsx";
-import { MembersTabs } from "../settings/members-tabs.tsx";
+import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
+import { GuestActions } from "../settings/guests.tsx";
 import {
+  copyEmail,
+  InvitationActions,
+  InviteButton,
+} from "../settings/invitations.tsx";
+import { MemberSuspension } from "../settings/member-suspension.tsx";
+import { roleItems, roleLines } from "../settings/roles.ts";
+import {
+  Failure,
   SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsGroup,
+  SettingsStack,
+} from "../settings/section.tsx";
+import { settingsToast } from "../settings/settings-toast.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
-// Offboarding, for admins: the organization's members, each with their
-// role, whether the directory suspended them and why
-// (settings/member-suspension.tsx), a way to end their sessions, and a way
-// to remove them for good;
-// then the people removed, and a way to erase them (settings/erasures.tsx).
-// Core checks the role on every call; anyone else sees why they can't.
-// The admin's own row has no actions: core refuses removing yourself or
-// ending your own sessions, and demoting yourself (which core allows while
-// another admin exists) is left out so nobody loses this page by accident.
+// Settings › Members and roles, on one page as Damsko's settings pattern
+// has it: one card of people, each with their face, their email, whether
+// the directory suspended them and why (settings/member-suspension.tsx),
+// their role on one edge and a menu to end their sessions or remove them
+// for good; the invitations nobody has taken up yet; and the people
+// removed, quiet, and a way to erase them (settings/erasures.tsx). Guests,
+// people outside the company invited to what is shared with them, are
+// rows of the same table with a menu of their own (settings/guests.tsx).
+// Then where the directory's daily read stands, once one was tried
+// (settings/directory-reads.tsx). The teams have their own page
+// (settings/teams.tsx). Core checks the role on every call; anyone else
+// sees why they can't. The admin's own row has no actions: core refuses
+// removing yourself or ending your own sessions, and demoting yourself
+// (which core allows while another admin exists) is left out so nobody
+// loses this page by accident.
 
-/** The roles to pick from, in the page's language. */
-const roleItems = (): { label: string; value: Role }[] =>
-  roleSchema.options.map((role) => ({ label: roleLabel(role), value: role }));
+const styles = stylex.create({
+  // As wide as a header's search: beside the Roles mark and Invite it
+  // still fits the card's line.
+  search: { width: "14rem", maxWidth: "100%" },
+  // A person's face beside their name and email.
+  person: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    minWidth: 0,
+  },
+  words: { display: "grid", minWidth: 0 },
+  // A suspended member: their face and name, and why under them.
+  stack: { display: "flex", flexDirection: "column", gap: space[1] },
+  since: { display: "flex", alignItems: "center", gap: space[2] },
+  // The roles compared: each name over what it may do.
+  roles: { display: "grid", gap: space[3], margin: 0, padding: 0 },
+  roleText: { margin: 0 },
+});
 
-type Change = (members: Session["members"]) => Promise<unknown>;
+/** How many people a page of the table holds: the rest are a page further. */
+const pageSize = 20;
 
-/** Shows why a change failed, or what it did, or clears both when given nothing. */
-type Report = (failure?: string, done?: string) => void;
+/**
+ * The members whose role is being changed and their list read again. A
+ * row's role and its menu are cells of their own, so the menu reads it
+ * here to stay off with the role.
+ */
+const changingRoles = new Set<string>();
+const roleWatchers = new Set<() => void>();
 
-const MemberActions = ({
-  member,
-  onNotice,
-  onRemoved,
-}: {
-  member: Member;
-  onNotice: Report;
-  /** Once they are removed: their row, and what had the focus in it, is gone. */
-  onRemoved: () => void;
-}) => {
-  const router = useRouter();
-  const { busy, failure, run: runAction } = useCoreAction();
-  const [confirming, setConfirming] = useState(false);
-  const [promoting, setPromoting] = useState(false);
+const watchRoles = (changed: () => void): (() => void) => {
+  roleWatchers.add(changed);
+  return () => {
+    roleWatchers.delete(changed);
+  };
+};
+
+const markChanging = (userId: string, changing: boolean): void => {
+  if (changing) {
+    changingRoles.add(userId);
+  } else {
+    changingRoles.delete(userId);
+  }
+  for (const changed of roleWatchers) {
+    changed();
+  }
+};
+
+/**
+ * Runs `change` with `userId`'s role marked as changing. Outside
+ * components, as the React Compiler can't compile `try`/`finally`.
+ */
+const whileChanging = async (
+  userId: string,
+  change: () => Promise<void>
+): Promise<void> => {
+  markChanging(userId, true);
+  try {
+    await change();
+  } finally {
+    markChanging(userId, false);
+  }
+};
+
+/** A member's role, and the question before making them an admin. */
+const MemberRole = ({ member }: { member: Member }) => {
   const { t } = useLingui();
-  const roles = roleItems();
+  const router = useRouter();
+  const { busy, run } = useCoreAction();
+  const [asking, setAsking] = useState(false);
   const { name } = member;
   // Names needn't be unique; with the email, each row's controls are.
   const who = `${member.name} (${member.email})`;
-  const run = async (change: Change, report?: Report): Promise<void> => {
-    onNotice();
-    setConfirming(false);
-    setPromoting(false);
-    await runAction(async (session) => {
-      // `sync` waits for the loader; without it, the router reloads the
-      // page's data in the background and resolves at once.
-      await changeThenRefresh(
-        async () => await change(session.members),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    }, report);
-  };
-  const remove = async (): Promise<void> => {
-    // Shown on the page: a removal that went through takes this row with
-    // it, even when it failed to disconnect everything
-    // (`member.connections_pending`).
-    let removed = false;
-    await run(async (members) => {
-      try {
-        const { connectionsDisconnected: count } = await members.remove(
-          member.userId
-        );
-        removed = true;
-        onNotice(
-          undefined,
-          t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`
-        );
-      } catch (error) {
-        // Removed, with some connections still to disconnect: the row
-        // goes all the same, and the notice says why.
-        removed = memberErrors.codeOf(error) === "member.connections_pending";
-        throw error;
+  const setRole = async (role: Role): Promise<void> => {
+    await run(
+      async ({ members }) => {
+        await whileChanging(member.userId, async () => {
+          await changeThenRefresh(
+            async () => {
+              await members.setRole(member.userId, role);
+            },
+            async () => {
+              // `sync` waits for the loader.
+              await router.invalidate({ sync: true });
+            }
+          );
+        });
+      },
+      // A menu's change has no place of its own: said as a toast.
+      (failure) => {
+        settingsToast.error(failure);
       }
-    }, onNotice);
-    if (removed) {
-      onRemoved();
-    }
-  };
-  const setRole = (role: Role): void => {
-    void run(async (members) => {
-      await members.setRole(member.userId, role);
-    });
+    );
   };
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-1">
-        <Select
-          items={roles}
-          value={member.role}
-          disabled={busy}
-          onValueChange={(role: Role | null) => {
-            if (role === "admin") {
-              setPromoting(true);
-            } else if (role !== null) {
-              setRole(role);
-            }
-          }}
-        >
-          <SelectTrigger aria-label={t`Role of ${who}`} className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {roles.map((role) => (
-              <SelectItem key={role.value} value={role.value}>
-                {role.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Dialog open={promoting} onOpenChange={setPromoting}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Make {name} an admin?</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  Admins can change anyone&apos;s role, end their sessions and
-                  remove them, other admins included.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter showCloseButton>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  setRole("admin");
-                }}
-              >
-                <Trans>Make admin</Trans>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-        <DropdownMenu>
-          <DropdownMenuTrigger
+    <>
+      <Select
+        disabled={busy}
+        items={roleItems()}
+        onValueChange={(role) => {
+          if (role === "admin") {
+            setAsking(true);
+          } else if (role !== null && roleSchema.safeParse(role).success) {
+            void setRole(roleSchema.parse(role));
+          }
+        }}
+        value={member.role}
+      >
+        <SelectTrigger aria-label={t`Role of ${who}`} size="sm" variant="ghost">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
+      <ConfirmAction
+        action={async () => {
+          await setRole("admin");
+        }}
+        description={t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
+        errorLabel={t`Not changed`}
+        label={t`Make admin`}
+        onOpenChange={setAsking}
+        open={asking}
+        title={t`Make ${name} an admin?`}
+        variant="default"
+      />
+    </>
+  );
+};
+
+/** The menu of what else may be done to a member: copy, sign out, remove. */
+const MemberMenu = ({ member }: { member: Member }) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const router = useRouter();
+  const roleChanging = useSyncExternalStore(
+    watchRoles,
+    () => changingRoles.has(member.userId),
+    () => false
+  );
+  const [asking, setAsking] = useState(false);
+  const { name } = member;
+  const who = `${member.name} (${member.email})`;
+  const refresh = async (): Promise<void> => {
+    await router.invalidate({ sync: true });
+  };
+  const signOutEverywhere = async (): Promise<void> => {
+    try {
+      await changeThenRefresh(async () => {
+        await core.withSession(async ({ members }) => {
+          await members.revokeSessions(member.userId);
+        });
+      }, refresh);
+    } catch (error) {
+      // Core's reason, with its reference to quote; the item says it failed.
+      settingsToast.error(failureText(error));
+      throw error;
+    }
+    settingsToast.success(t`${name} is signed out everywhere.`);
+  };
+  // With none to disconnect, the removal alone is said. Outside the `try`
+  // below, as the React Compiler can't compile a conditional within one.
+  const removedSaid = (count: number): string =>
+    count === 0
+      ? t`${name} is removed.`
+      : t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`;
+  const remove = async (): Promise<void> => {
+    try {
+      const { connectionsDisconnected: count } = await core.withSession(
+        async ({ members }) => await members.remove(member.userId)
+      );
+      settingsToast.success(removedSaid(count));
+    } catch (error) {
+      // Removed, with some connections still to disconnect: the row goes
+      // all the same, and the toast says why. Core's reason, with its
+      // reference to quote, either way.
+      settingsToast.error(failureText(error));
+      if (memberErrors.codeOf(error) !== "member.connections_pending") {
+        await refresh();
+        throw error;
+      }
+    }
+    await refresh();
+  };
+  return (
+    <>
+      <DropdownMenu>
+        {/* Off while a role change is sent and the list read again, as the
+          role is: nothing acts on a row that is about to change. */}
+        <DropdownMenuTrigger asChild>
+          <Button
             aria-label={t`Actions for ${who}`}
-            disabled={busy}
-            render={<Button size="icon-sm" variant="ghost" />}
+            disabled={roleChanging}
+            size="icon-sm"
+            variant="ghost"
           >
-            <EllipsisIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem
-              onClick={() => {
-                void run(async (members) => {
-                  await members.revokeSessions(member.userId);
-                  onNotice(undefined, t`${name} is signed out everywhere.`);
-                });
-              }}
-            >
-              <LogOutIcon />
-              <Trans>Sign out everywhere</Trans>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                setConfirming(true);
-              }}
-              variant="destructive"
-            >
-              <UserMinusIcon />
-              <Trans>Remove</Trans>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Dialog open={confirming} onOpenChange={setConfirming}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Remove {name}?</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  They are signed out everywhere, their personal connections are
-                  disconnected, and they cannot sign in again.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter showCloseButton>
-              <Button
-                variant="destructive"
-                disabled={busy}
-                onClick={() => {
-                  void remove();
-                }}
-              >
-                <Trans>Remove</Trans>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-      <ErrorText>{failure}</ErrorText>
+            <Icon icon={EllipsisIcon} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            icon={CopyIcon}
+            onSelect={() => {
+              void copyEmail(member.email, {
+                copied: t`Copied`,
+                failed: t`Copying didn't work`,
+              });
+            }}
+          >
+            {t`Copy email`}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            errorLabel={t`Not signed out`}
+            icon={LogOutIcon}
+            onSelect={signOutEverywhere}
+          >
+            {t`Sign out everywhere`}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            icon={TrashIcon}
+            onSelect={() => {
+              setAsking(true);
+            }}
+            variant="destructive"
+          >
+            {t`Remove`}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ConfirmAction
+        action={remove}
+        description={t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
+        errorLabel={t`Not removed`}
+        label={t`Remove`}
+        loadingLabel={t`Removing`}
+        onOpenChange={setAsking}
+        open={asking}
+        title={t`Remove ${name}?`}
+      />
+    </>
+  );
+};
+
+/** The three roles compared, each name over what it may do: in a popover from the card's head. */
+const RolesButton = () => {
+  const { t, i18n } = useLingui();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button aria-label={t`Roles`} size="icon-xs" variant="ghost">
+          <Icon icon={InfoIcon} />
+        </Button>
+      </PopoverTrigger>
+      {/* It only explains: focus stays on the button. */}
+      <PopoverContent initialFocus="none">
+        <PopoverHeader>
+          <PopoverTitle>{t`Roles`}</PopoverTitle>
+        </PopoverHeader>
+        <dl {...stylex.props(styles.roles)}>
+          {roleSchema.options.map((role) => (
+            <div key={role}>
+              <dt>
+                <Text as="span" color="default" size="sm" weight="medium">
+                  {roleLabel(role)}
+                </Text>
+              </dt>
+              <dd {...stylex.props(styles.roleText)}>
+                <Text as="span" color="muted" size="sm">
+                  {i18n._(roleLines[role])}
+                </Text>
+              </dd>
+            </div>
+          ))}
+          <div>
+            <dt>
+              <Text as="span" color="default" size="sm" weight="medium">
+                {t`Guest`}
+              </Text>
+            </dt>
+            <dd {...stylex.props(styles.roleText)}>
+              <Text as="span" color="muted" size="sm">
+                {t`People outside your organization, invited to what is shared with them. They reach nothing else.`}
+              </Text>
+            </dd>
+          </div>
+        </dl>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/**
+ * A role nobody changes here (one's own, a guest's, what an invitation
+ * joins as): on the same edge as the others', read-only.
+ */
+const FixedRole = ({
+  value,
+  items,
+  label,
+}: {
+  value: string;
+  items: { value: string; label: string }[];
+  label: string;
+}) => (
+  <Select disabled items={items} value={value}>
+    <SelectTrigger aria-label={label} size="sm" variant="ghost">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent />
+  </Select>
+);
+
+/** One row of the people's table: a member, a guest, an invitation or someone removed, with its date. */
+interface PersonRow {
+  key: string;
+  kind: "member" | "guest" | "invited" | "removed";
+  name: string;
+  email: string;
+  /** When they joined, were invited or were removed. */
+  at: string;
+  invitedBy?: string;
+  member?: Member;
+  guest?: Guest;
+  invitation?: Invitation;
+  removed?: RemovedPerson;
+}
+
+/** The table's words, in the page's language. */
+interface PeopleWords {
+  name: string;
+  since: string;
+  role: string;
+  guest: string;
+  invited: string;
+  yourRole: string;
+  roleOf: (name: string) => string;
+  invitedOn: (date: string, by: string) => string;
+  removedOn: (date: string) => string;
+  removed: string;
+  erased: string;
+}
+
+/** The role a row's person has or would join as, in words: for search and sorting. */
+const roleOf = (row: PersonRow): string => {
+  const role = row.member?.role ?? row.invitation?.role;
+  return role === undefined ? "" : roleLabel(role);
+};
+
+/** The people's columns' words, in the reader's language. */
+const usePeopleWords = (): PeopleWords => {
+  const { t } = useLingui();
+  return {
+    name: t`Name`,
+    since: t`Since`,
+    role: t`Role`,
+    guest: t`Guest`,
+    invited: t`Invited`,
+    yourRole: t`Your role`,
+    roleOf: (name) => t`Role of ${name}`,
+    invitedOn: (date, by) => t`${date} by ${by}`,
+    removedOn: (date) => t`Removed ${date}`,
+    removed: t`Removed`,
+    erased: t`Erased`,
+  };
+};
+
+/** A row's state in words, so the search finds people by it: invited, removed or erased. */
+const stateOf = (row: PersonRow, words: PeopleWords): string => {
+  if (row.kind === "invited") {
+    return words.invited;
+  }
+  if (row.kind !== "removed") {
+    return "";
+  }
+  return (row.removed?.erasure?.completedAt ?? null) === null
+    ? words.removed
+    : words.erased;
+};
+
+/** A person's cell: their face, their name, and their email under it. */
+const PersonCell = ({ name, detail }: { name: string; detail?: string }) => (
+  <span {...stylex.props(styles.person)}>
+    <Avatar decorative name={name} size="sm">
+      <AvatarFallback />
+    </Avatar>
+    <span {...stylex.props(styles.words)}>
+      <Text as="span" color="default" size="sm" truncate>
+        {name}
+      </Text>
+      {detail === undefined ? null : (
+        <Text as="span" color="muted" size="sm" truncate>
+          {detail}
+        </Text>
+      )}
+    </span>
+  </span>
+);
+
+/** The people's columns: who, since when, and their role with what can be done. */
+const peopleColumns = ({
+  words,
+  me,
+}: {
+  words: PeopleWords;
+  me: string;
+}): DataTableColumn<PersonRow>[] => [
+  {
+    id: "name",
+    header: words.name,
+    // While the people are read, a person's box: their circle, name and email.
+    skeleton: "person",
+    value: (row) => `${row.name} ${row.email} ${stateOf(row, words)}`,
+    cell: (row) => {
+      const person = (
+        <PersonCell
+          name={row.name}
+          {...(row.kind === "invited" || row.email === ""
+            ? {}
+            : { detail: row.email })}
+        />
+      );
+      // Suspended by the directory: why, and where the way out is, under them.
+      return row.member !== undefined && row.member.suspension !== null ? (
+        <span {...stylex.props(styles.stack)}>
+          {person}
+          <MemberSuspension member={row.member} />
+        </span>
+      ) : (
+        person
+      );
+    },
+  },
+  {
+    id: "since",
+    header: words.since,
+    // On a phone Since steps aside, so Name and Role fit.
+    hideBelow: "sm",
+    value: (row) => row.at,
+    cell: (row) => {
+      const date = formatDate(row.at);
+      if (row.kind === "invited") {
+        return (
+          <span {...stylex.props(styles.since)}>
+            <Badge size="sm" variant="info">
+              {words.invited}
+            </Badge>
+            {words.invitedOn(date, row.invitedBy ?? "")}
+          </span>
+        );
+      }
+      if (row.kind === "removed") {
+        return (
+          <Text as="span" color="muted" size="sm">
+            {words.removedOn(date)}
+          </Text>
+        );
+      }
+      // Joined is what Since means: a member's cell is the date alone, and a
+      // guest's the day they were invited, when they were let in.
+      return date;
+    },
+  },
+  {
+    id: "role",
+    header: words.role,
+    align: "end",
+    control: true,
+    value: (row) => (row.kind === "guest" ? words.guest : roleOf(row)),
+    cell: (row) => {
+      if (row.kind === "guest") {
+        // Nobody changes a guest's role: it reads as one's own does.
+        return (
+          <FixedRole
+            items={[{ label: words.guest, value: "guest" }]}
+            label={words.roleOf(row.name)}
+            value="guest"
+          />
+        );
+      }
+      if (row.invitation !== undefined) {
+        // What they join as, which nobody changes here: as one's own role reads.
+        return (
+          <FixedRole
+            items={roleItems()}
+            label={words.roleOf(row.name)}
+            value={row.invitation.role}
+          />
+        );
+      }
+      if (row.member === undefined) {
+        return null;
+      }
+      return row.member.userId === me ? (
+        <FixedRole
+          items={roleItems()}
+          label={words.yourRole}
+          value={row.member.role}
+        />
+      ) : (
+        <MemberRole member={row.member} />
+      );
+    },
+  },
+  {
+    id: "actions",
+    header: "",
+    align: "end",
+    control: true,
+    value: () => "",
+    cell: (row) => {
+      if (row.invitation !== undefined) {
+        return <InvitationActions invitation={row.invitation} />;
+      }
+      if (row.removed !== undefined) {
+        return <RemovedActions person={row.removed} />;
+      }
+      if (row.guest !== undefined) {
+        return <GuestActions guest={row.guest} />;
+      }
+      if (row.member === undefined || row.member.userId === me) {
+        return null;
+      }
+      return <MemberMenu member={row.member} />;
+    },
+  },
+];
+
+/** The search over the people, in the card's head. */
+const PeopleSearch = ({
+  value,
+  onValueChange,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.search)}>
+      <InputGroup size="sm">
+        <InputGroupAddon>
+          <Icon icon={SearchIcon} />
+        </InputGroupAddon>
+        <InputGroupInput
+          aria-label={t`Search members`}
+          onValueChange={onValueChange}
+          placeholder={t`Search members`}
+          type="search"
+          value={value}
+        />
+      </InputGroup>
     </div>
   );
 };
 
 /**
- * What each role may do in Grasp, as core allows it (`@grasp-os/shared/roles`
- * and the calls that check it): everyone uses what is shared with them;
- * builders build; admins decide who does what.
+ * The people as one table: Name with the face and email, Since with the
+ * date each joined, was invited (and by whom) or was removed, and Role
+ * with what can be done; the search, Roles and Invite on the head's one
+ * line; paged twenty at a time, the search over everyone. Guests, invited
+ * and removed people are states of a row.
  */
-const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
-  {
-    label: msg`Use the chat, the Brain and the Apps shared with them`,
-    roles: ["admin", "builder", "user"],
-  },
-  {
-    label: msg`Connect accounts of their own`,
-    roles: ["admin", "builder", "user"],
-  },
-  {
-    label: msg`Build Apps and workflows, and ask for the permissions they need`,
-    roles: ["admin", "builder"],
-  },
-  {
-    label: msg`Connect shared accounts and decide what Apps may do`,
-    roles: ["admin"],
-  },
-  {
-    label: msg`See the models, AI spend and the audit trail`,
-    roles: ["admin"],
-  },
-  {
-    label: msg`Invite people, change roles, sign them out and remove them`,
-    roles: ["admin"],
-  },
-];
-
-/** What each role may do, as in the prototype: a column a role where there is room for them. */
-const Roles = () => {
-  const { t, i18n } = useLingui();
-  const roles = roleSchema.options;
+const PeopleTable = ({
+  members,
+  guests,
+  invitations,
+  removed,
+  me,
+}: {
+  members: Member[];
+  guests: Guest[];
+  invitations: Invitation[];
+  removed: RemovedPeoplePage;
+  me: string;
+}) => {
+  const { t } = useLingui();
+  const [search, setSearch] = useState("");
+  const gone = useRemovedPeople(removed);
+  const words = usePeopleWords();
+  const rows: PersonRow[] = [
+    ...members.map((member) => ({
+      key: member.userId,
+      kind: "member" as const,
+      name: member.name,
+      email: member.email,
+      at: member.joinedAt,
+      member,
+    })),
+    // A guest's name is their address: it stands alone, without a second line.
+    ...guests.map((guest) => ({
+      key: guest.userId,
+      kind: "guest" as const,
+      name: guest.email,
+      email: "",
+      at: guest.invitedAt,
+      guest,
+    })),
+    ...invitations.map((invitation) => ({
+      key: invitation.id,
+      kind: "invited" as const,
+      name: invitation.email,
+      email: invitation.email,
+      at: invitation.invitedAt,
+      invitedBy: invitation.invitedBy,
+      invitation,
+    })),
+    ...gone.people.map((person) => ({
+      key: person.userId,
+      kind: "removed" as const,
+      name: person.name,
+      email: person.email ?? "",
+      at: person.removedAt,
+      removed: person,
+    })),
+  ];
   return (
-    <SettingsSection
-      description={t`What each role may do in Grasp. An admin gives each member theirs.`}
-      title={t`Roles`}
+    <SettingsGroup
+      actions={
+        <>
+          <RolesButton />
+          <PeopleSearch onValueChange={setSearch} value={search} />
+          <InviteButton />
+        </>
+      }
+      footer={
+        gone.more ? (
+          <>
+            <Button
+              disabled={gone.busy}
+              onClick={() => {
+                void gone.showMore();
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t`Show older`}
+            </Button>
+            <Failure>{gone.failure}</Failure>
+          </>
+        ) : undefined
+      }
+      title={t`Team members`}
     >
-      {/* A column a role where there is room for them; on a phone the roles that may stand under what they may. */}
-      <div className="@container border-t">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="section">
-                <Trans comment="Heading of a list of what each role is allowed to do">
-                  May
-                </Trans>
-              </TableHead>
-              {roles.map((role) => (
-                <TableHead
-                  className="hidden w-20 text-center @lg:table-cell"
-                  variant="section"
-                  key={role}
-                >
-                  {roleLabel(role)}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {capabilities.map((capability) => (
-              <TableRow key={capability.label.id}>
-                <TableCell className="whitespace-normal" variant="section">
-                  <span className="flex flex-col gap-0.5">
-                    <span>{i18n._(capability.label)}</span>
-                    <span className="text-muted-foreground text-xs @lg:hidden">
-                      {capability.roles
-                        .map((role) => roleLabel(role))
-                        .join(" · ")}
-                    </span>
-                  </span>
-                </TableCell>
-                {roles.map((role) => (
-                  <TableCell
-                    className="hidden text-center @lg:table-cell"
-                    key={role}
-                    variant="section"
-                  >
-                    {capability.roles.includes(role) ? (
-                      <CheckIcon
-                        aria-label={t`Yes`}
-                        className="mx-auto size-4"
-                      />
-                    ) : (
-                      <span
-                        aria-label={t`No`}
-                        className="text-muted-foreground"
-                      >
-                        –
-                      </span>
-                    )}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </SettingsSection>
-  );
-};
-
-/** Whether `person` is what the search names: in their name or email. */
-const matches = (
-  person: { name?: string; email: string },
-  search: string
-): boolean => {
-  const words = search.trim().toLocaleLowerCase();
-  return (
-    words === "" ||
-    (person.name ?? "").toLocaleLowerCase().includes(words) ||
-    person.email.toLocaleLowerCase().includes(words)
+      <DataTable
+        aria-label={t`Members`}
+        columns={peopleColumns({ words, me })}
+        getRowId={(row) => row.key}
+        // Someone invited is not here yet: their row fades toward its end.
+        // Someone removed is greyed, their menu kept clear.
+        getRowStatus={(row) => {
+          if (row.kind === "invited") {
+            return "pending";
+          }
+          return row.kind === "removed" ? "removed" : undefined;
+        }}
+        onQueryChange={setSearch}
+        pageSize={pageSize}
+        query={search}
+        rows={rows}
+        unit={{ one: t`person`, other: t`people` }}
+      />
+    </SettingsGroup>
   );
 };
 
 /**
- * The members, as the prototype lists them (`routes/settings/members.tsx`):
- * each with their avatar, name and email, their role and a menu. The
- * admin's own row only shows their role.
+ * Settings › Members and roles on one page: the people and guests, with
+ * what each role may do over them.
  */
-const MembersList = ({
-  members,
-  invitations,
-  me,
-}: {
-  members: Member[];
-  invitations: Invitation[];
-  me: string;
-}) => {
-  const { t } = useLingui();
-  const [notice, setNotice] = useState<{ failure?: string; done?: string }>({});
-  const [search, setSearch] = useState("");
-  const searchField = useRef<HTMLInputElement>(null);
-  const people = members.length;
-  const shown = members.filter((member) => matches(member, search));
-  const invited = invitations.filter((invitation) =>
-    matches(invitation, search)
-  );
-  return (
-    <SettingsSection
-      action={
-        <div className="flex items-center gap-2">
-          <InputGroup className="w-56">
-            <InputGroupInput
-              aria-label={t`Search members`}
-              onChange={(event) => {
-                setSearch(event.target.value);
-              }}
-              placeholder={t`Search`}
-              ref={searchField}
-              value={search}
-            />
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-          </InputGroup>
-          <InviteButton />
-        </div>
-      }
-      description={
-        <Plural
-          one="# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start."
-          other="# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start."
-          value={people}
-        />
-      }
-      title={t`Members`}
-    >
-      {notice.failure === undefined && notice.done === undefined ? null : (
-        <div className="border-t px-5 py-3">
-          <ErrorText>{notice.failure}</ErrorText>
-          {notice.done === undefined ? null : (
-            <output className="text-muted-foreground">{notice.done}</output>
-          )}
-        </div>
-      )}
-      {shown.length === 0 && invited.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-6 text-center">
-          <Trans>Nobody matches.</Trans>
-        </p>
-      ) : null}
-      {shown.map((member) => (
-        <div
-          className="flex items-center gap-3 border-t px-5 py-3"
-          key={member.userId}
-        >
-          <Avatar className="size-8">
-            <AvatarFallback>{initials(member.name)}</AvatarFallback>
-          </Avatar>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="flex items-center gap-2">
-              <span className="truncate">{member.name}</span>
-              {member.userId === me ? (
-                <Badge variant="secondary">
-                  <Trans>You</Trans>
-                </Badge>
-              ) : null}
-            </span>
-            <span className="text-muted-foreground truncate">
-              {member.email}
-            </span>
-            <MemberSuspension member={member} />
-          </div>
-          {member.userId === me ? (
-            <Badge variant="outline">{roleLabel(member.role)}</Badge>
-          ) : (
-            <MemberActions
-              member={member}
-              onRemoved={() => {
-                searchField.current?.focus();
-              }}
-              onNotice={(failure, done) => {
-                setNotice({
-                  ...(failure === undefined ? {} : { failure }),
-                  ...(done === undefined ? {} : { done }),
-                });
-              }}
-            />
-          )}
-        </div>
-      ))}
-      {invited.map((invitation) => (
-        <InvitationRow invitation={invitation} key={invitation.id} />
-      ))}
-    </SettingsSection>
-  );
-};
-
-const Members = () => {
+const MembersPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   return (
-    <>
-      <DirectoryReads />
-      <Roles />
+    <SettingsStack>
       {page.state === "ready" ? (
-        <>
-          <MembersList
-            invitations={page.data.invitations}
-            me={identity.userId}
-            members={page.data.members}
-          />
-          <Guests guests={page.data.guests} />
-          <RemovedPeople page={page.data.removed} />
-        </>
+        <PeopleTable
+          guests={page.data.guests}
+          invitations={page.data.invitations}
+          me={identity.userId}
+          members={page.data.members}
+          removed={page.data.removed}
+        />
       ) : (
-        <SettingsSection title={t`Members`}>
+        <SettingsGroup flush={false} title={t`Members`}>
           <NotLoadedState heading="h3" page={page} />
-        </SettingsSection>
+        </SettingsGroup>
       )}
-    </>
+      {/* Nothing before a read was tried, or for anyone core refuses it. */}
+      <DirectoryReads />
+    </SettingsStack>
   );
 };
 
-/** The members, and for the organization's admins a tab of their teams. */
-const MembersPage = () => (
-  <MembersTabs>
-    <Members />
-  </MembersTabs>
-);
+/**
+ * The people's card while they are read: the card as the loaded one
+ * stands (its head's actions in place), the table waiting in its own
+ * `loading` with the columns, label and page size it will have.
+ */
+const MembersPending = () => {
+  const { t } = useLingui();
+  const words = usePeopleWords();
+  return (
+    <SettingsGroup
+      actions={
+        // Roles and Invite need no data, so they stand as they will.
+        <>
+          <RolesButton />
+          <InviteButton />
+        </>
+      }
+      title={t`Team members`}
+    >
+      <DataTable
+        aria-label={t`Members`}
+        columns={peopleColumns({ words, me: "" })}
+        getRowId={(row) => row.key}
+        loading
+        pageSize={pageSize}
+        rows={[]}
+        unit={{ one: t`person`, other: t`people` }}
+      />
+    </SettingsGroup>
+  );
+};
 
 export const Route = createFileRoute("/_shell/settings/members")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: MembersPending,
   errorComponent: SettingsError,
   component: MembersPage,
   loader: async ({ context: { core } }) =>

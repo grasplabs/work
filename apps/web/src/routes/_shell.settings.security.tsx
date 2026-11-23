@@ -1,48 +1,52 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Icon, MonitorIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { LaptopIcon, SmartphoneIcon } from "lucide-react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { deadline, unlessAborted } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { ChatAccountsSection } from "../settings/chat-accounts.tsx";
+import { ChatAppsSection } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
+import { ConfirmAction } from "../settings/confirm-action.tsx";
 import {
   SettingsError,
-  SettingsLoading,
-  SettingsRow,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+  SettingsGroup,
+  SettingsPending,
+  SettingsStack,
+  TitleLine,
+} from "../settings/section.tsx";
+import { useCore } from "../use-core.ts";
 
-// Settings → Security, as in the prototype (`routes/settings/security.tsx`):
-// how the person gets into Grasp, the devices they are signed in on, and
-// the link for AI apps outside it. Each device but this one can be signed
-// out here; this one signs out from the person menu. Core names no place
-// a session signed in from, so the prototype's places aren't here. Then
-// the chat apps where Grasp knows them (settings/chat-accounts.tsx); never
-// for Grasp staff, who aren't the company's people. Grasp has no link for
-// AI apps yet: it stays off.
-
-/** The way people sign in here, when there is just the one; core's own name for it. */
-const SignedInWith = ({ labels }: { labels: string[] }) => {
-  const { t } = useLingui();
-  const [only] = labels;
-  return labels.length === 1 && only !== undefined ? (
-    <span>{only}</span>
-  ) : (
-    <span>{t`Your organization’s account`}</span>
-  );
-};
+// Settings › Security, as Damsko's settings pattern has it: the Chat apps
+// card, and the devices the person is signed in on, this one marked. Each
+// device but this one can be signed out here, after a yes; this one signs
+// out from the person menu. Core names no place a session signed in from.
+// How they sign in isn't shown here: the organization sets that up
+// (Settings › Workspace).
+//
+// The Chat apps card (settings/chat-accounts.tsx) holds deleting the
+// person's conversations with Stephen in chat apps, where they reach him,
+// and the chat accounts linked to them. A link a chat app sent, which
+// lands here (routes/chat-link.tsx), stands above it while one waits in
+// this tab. Never for Grasp staff, who aren't the company's people.
+// Devices show the newest ten, and all on a press.
 
 /** What a session signed in on, in the page's language: "Chrome on macOS". */
 const useDeviceName = ({ browser, system }: SessionDevice): string => {
@@ -53,162 +57,142 @@ const useDeviceName = ({ browser, system }: SessionDevice): string => {
   return browser ?? system ?? t`Unknown device`;
 };
 
-/** The device this page is open on, and when it signed in. */
-const ThisDevice = ({ session }: { session: OwnSession }) => {
-  const { t } = useLingui();
-  const time = formatDateTime(session.signedInAt);
-  const device = useDeviceName(session.device);
-  return (
-    <SettingsRow description={t`Signed in ${time}`} label={t`This device`}>
-      <span className="truncate">{device}</span>
-    </SettingsRow>
-  );
-};
-
-/** One device the person is signed in on, and a way to sign it out unless it is this one. */
+/** One device the person is signed in on, and a way to sign it out, after a yes, unless it is this one. */
 const DeviceRow = ({ session }: { session: OwnSession }) => {
   const { t } = useLingui();
+  const core = useCore();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
   const time = formatDateTime(session.signedInAt);
   const device = useDeviceName(session.device);
-  const Icon = session.device.mobile ? SmartphoneIcon : LaptopIcon;
   const signOut = async (): Promise<void> => {
     // Gone either way once core answers: ended now, or ended already.
-    await run(async ({ sessions }) => {
-      // `sync` waits for the loader, so the row goes with its session.
-      await changeThenRefresh(
-        async () => await sessions.end(session.id),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
+    // `sync` waits for the loader, so the row goes with its session.
+    await changeThenRefresh(
+      async () => {
+        await core.withSession(
+          async ({ sessions }) => await sessions.end(session.id)
+        );
+      },
+      async () => {
+        await router.invalidate({ sync: true });
+      }
+    );
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <Icon
-        aria-hidden="true"
-        className="text-muted-foreground size-4 flex-none"
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-2">
-          <span className="truncate">{device}</span>
-          {session.current ? (
-            <Badge variant="secondary">
-              <Trans>This device</Trans>
-            </Badge>
-          ) : null}
-        </span>
-        <span className="text-muted-foreground">
-          <Trans>Signed in {time}</Trans>
-        </span>
-        <ErrorText>{failure}</ErrorText>
-      </div>
+    <Item size="xs">
+      <ItemMedia variant="icon">
+        <Icon icon={MonitorIcon} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          <TitleLine>
+            {device}
+            {session.current ? (
+              <Badge size="sm" variant="secondary">
+                {t`This device`}
+              </Badge>
+            ) : null}
+          </TitleLine>
+        </ItemTitle>
+        <ItemDescription>{t`Signed in ${time}`}</ItemDescription>
+      </ItemContent>
       {session.current ? null : (
-        <Button
-          aria-label={t`Sign out ${device}, signed in ${time}`}
-          disabled={busy}
-          onClick={() => {
-            void signOut();
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          <Trans>Sign out</Trans>
-        </Button>
+        <ItemActions>
+          <ConfirmAction
+            action={signOut}
+            errorLabel={t`Not signed out`}
+            label={t`Sign out`}
+            title={t`Sign out this device?`}
+            trigger={
+              <Button
+                aria-label={t`Sign out ${device}, signed in ${time}`}
+                size="sm"
+                variant="ghost"
+              >
+                {t`Sign out`}
+              </Button>
+            }
+          />
+        </ItemActions>
       )}
-    </div>
+    </Item>
   );
 };
 
-/** The devices the person is signed in on, latest active first, this one marked. */
-const Devices = ({ sessions }: { sessions: OwnSession[] }) => {
+/** How many devices show before "Show all": the newest. */
+const shownAtFirst = 10;
+
+/** The devices the person is signed in on, this one first, then latest active first. */
+const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   const { t } = useLingui();
-  const devices = sessions.length;
+  const [showAll, setShowAll] = useState(false);
+  if (sessions.state !== "ready") {
+    return (
+      <SettingsGroup flush={false} title={t`Devices`}>
+        <NotLoadedState heading="h3" page={sessions} />
+      </SettingsGroup>
+    );
+  }
+  const devices = sessions.data.length;
+  const newest = sessions.data.slice(0, shownAtFirst);
+  const here = sessions.data.find(({ current }) => current);
+  // This device stands in the list whenever it is signed in, however old.
+  const shown =
+    showAll || devices <= shownAtFirst
+      ? sessions.data
+      : [
+          ...newest,
+          ...(here === undefined || newest.includes(here) ? [] : [here]),
+        ];
+  // This device first: it is the one a person looks for, and can't sign out.
+  const ordered =
+    here === undefined
+      ? shown
+      : [here, ...shown.filter((session) => session !== here)];
   return (
-    <SettingsSection
-      description={
-        <Plural
-          one="Signed in on # device. Sign out any you do not recognise."
-          other="Signed in on # devices. Sign out any you do not recognise."
-          value={devices}
-        />
+    <SettingsGroup
+      footer={
+        shown.length < devices ? (
+          <Button
+            onClick={() => {
+              setShowAll(true);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Show all ${devices}`}
+          </Button>
+        ) : undefined
       }
       title={t`Devices`}
     >
-      {sessions.map((session) => (
-        <DeviceRow key={session.id} session={session} />
-      ))}
-    </SettingsSection>
+      <ItemGroup aria-label={t`Devices`}>
+        {ordered.map((session) => (
+          <DeviceRow key={session.id} session={session} />
+        ))}
+      </ItemGroup>
+    </SettingsGroup>
   );
 };
 
 const Security = () => {
-  const { t } = useLingui();
-  const { identity } = Route.useRouteContext();
-  const { labels, sessions, chat } = Route.useLoaderData();
-  const current =
-    sessions.state === "ready"
-      ? sessions.data.find((session) => session.current)
-      : undefined;
+  const { sessions, chat, waiting } = Route.useLoaderData();
   return (
-    <>
-      <SettingsSection
-        description={t`How you get into Grasp. Passwords and two-step sign-in live with your organization’s account.`}
-        title={t`Sign-in`}
-      >
-        <SettingsRow
-          description={t`Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles.`}
-          label={t`Signed in with`}
-        >
-          <SignedInWith labels={labels} />
-        </SettingsRow>
-        <SettingsRow
-          description={t`The account you signed in with.`}
-          label={t`Email`}
-        >
-          <span className="truncate">{identity.email}</span>
-        </SettingsRow>
-        {current === undefined ? null : <ThisDevice session={current} />}
-      </SettingsSection>
-
-      {sessions.state === "ready" ? (
-        <Devices sessions={sessions.data} />
-      ) : (
-        <SettingsSection title={t`Devices`}>
-          <NotLoadedState heading="h3" page={sessions} />
-        </SettingsSection>
+    <SettingsStack>
+      {chat === undefined ? null : (
+        <ChatAppsSection chat={chat} waiting={waiting} />
       )}
-
-      {chat === undefined ? null : <ChatAccountsSection chat={chat} />}
-    </>
+      <Devices sessions={sessions} />
+    </SettingsStack>
   );
 };
 
-/** How people sign in here; none when core doesn't say in time. */
-const signInLabels = async (
-  core: Pick<CoreConnection, "api">
-): Promise<string[]> => {
-  try {
-    const signal = deadline();
-    const api = await core.api(signal);
-    const options = await unlessAborted(
-      Promise.resolve(api.signInOptions()),
-      signal
-    );
-    return options.map(({ label }) => label);
-  } catch {
-    return [];
-  }
-};
-
-/** The person's linked chat accounts, and the link they opened in this tab, if any. */
+/** Where Stephen is reached, the person's linked chat accounts, and the link a chat app sent them while one waits in this tab. */
 const chatAccounts = async (
-  core: Pick<CoreConnection, "withSession">
-): Promise<Loaded<ChatAccounts>> => {
-  const secret = pendingChatLink();
-  return await loadFromCore(core, async (session) => {
+  core: Pick<CoreConnection, "withSession">,
+  secret: string | undefined
+): Promise<Loaded<ChatAccounts>> =>
+  await loadFromCore(core, async (session) => {
     const [reach, accounts, preview] = await Promise.all([
       session.channelAccounts.reach(),
       session.channelAccounts.list(),
@@ -224,18 +208,24 @@ const chatAccounts = async (
         : { pending: { secret, preview } }),
     };
   });
-};
+
+/** The Chat apps card, then the devices, as many as fill the first screen. */
+const SecurityPending = () => <SettingsPending groups={[1, 6]} />;
 
 export const Route = createFileRoute("/_shell/settings/security")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: SecurityPending,
   errorComponent: SettingsError,
   component: Security,
   loader: async ({ context: { core, identity } }) => {
-    const [labels, sessions, chat] = await Promise.all([
-      signInLabels(core),
+    const secret = pendingChatLink();
+    const [sessions, chat] = await Promise.all([
       loadFromCore(core, async (session) => await session.sessions.list()),
-      identity.staff ? undefined : chatAccounts(core),
+      identity.staff ? undefined : chatAccounts(core, secret),
     ]);
-    return { labels, sessions, chat };
+    return {
+      sessions,
+      chat,
+      waiting: secret !== undefined,
+    };
   },
 });
