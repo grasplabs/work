@@ -105,6 +105,18 @@ describe("the sign-in page", () => {
     document.body.replaceChildren();
   });
 
+  it("is the page's one main landmark, named by its title", async () => {
+    const { host, root } = await pressed();
+    const mains = host.querySelectorAll("main");
+    expect(mains).toHaveLength(1);
+    const title = mains[0]?.querySelector("h1");
+    expect(title?.textContent).toBe("Log in");
+    expect(mains[0]?.getAttribute("aria-labelledby")).toBe(title?.id);
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("leaves for the chosen way once the door has opened", async () => {
     const { chosen, root } = await pressed();
     expect(chosen).toStrictEqual([]);

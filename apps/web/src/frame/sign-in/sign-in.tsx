@@ -532,8 +532,9 @@ export const SignIn = ({
       on
     );
   };
+  // The page's main landmark (no frame around it gives one), named by its title.
   return (
-    <section
+    <main
       aria-labelledby={titleId}
       data-mode="dark"
       onPointerDown={(event) => {
@@ -586,6 +587,6 @@ export const SignIn = ({
       <div {...stylex.props(styles.foot, styles.fades, gone && styles.gone)}>
         {foot}
       </div>
-    </section>
+    </main>
   );
 };

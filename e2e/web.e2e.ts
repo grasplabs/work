@@ -61,6 +61,9 @@ test("offers each way in, marks the one used last in this browser, and gives a g
   page,
 }) => {
   await page.goto("/sign-in");
+  // The page is its own main landmark, named by its title: there is no frame around it.
+  await expect(page.getByRole("main")).toHaveCount(1);
+  await expect(page.getByRole("main", { name: "Log in" })).toBeVisible();
   const ways = page.getByRole("button", { name: /^Continue with /u });
   await expect(ways).toHaveCount(2);
   await expect(ways.first()).toHaveAccessibleName("Continue with Microsoft");
@@ -82,6 +85,7 @@ test("offers each way in, marks the one used last in this browser, and gives a g
     page.getByRole("heading", { level: 1, name: "Sign in to Grasp" })
   ).toBeAttached();
   await expect(page.getByLabel("Your email address")).toBeVisible();
+  await expect(page.getByRole("main")).toHaveCount(1);
   expect(new URL(page.url()).searchParams.get("by")).toBe("code");
   await page.getByRole("button", { name: "Back" }).click();
   await expect(
