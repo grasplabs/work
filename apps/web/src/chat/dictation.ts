@@ -2,36 +2,43 @@ import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/promp
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { useMatch } from "@tanstack/react-router";
+import { useLocation, useMatch } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { isLocale } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { openLiveLine } from "../interview/live-line.ts";
-import type { LiveLine } from "../interview/live-line.ts";
-import {
-  hangUp,
-  micLevel,
-  micProblem,
-  muteMic,
-  overhear,
-  reachMic,
-} from "../interview/mic.ts";
-import { resampler } from "../interview/pcm.ts";
+import type { LiveLine, LiveLineOptions } from "../interview/live-line.ts";
+import { openDictationMic } from "./dictation-mic.ts";
+import type { DictationMic } from "./dictation-mic.ts";
 
 // Dictation in the box to ask in, on Damsko's PromptInputSpeechButton: the
-// microphone at the box's foot starts it, its bar shows what is heard,
-// lighter, after what is typed, and Done writes it in after the text;
-// Cancel keeps nothing. Every member may dictate (GRA-1998): the words come
-// from core's own live transcription (`GET /api/transcription`, core's
-// src/onboarding/transcription.ts), the interview's line and microphone
-// reused (interview/live-line.ts, interview/mic.ts), so the sound reaches
-// no one but core. Where it stops on its own (the microphone refused,
-// core's daily limit, the line lost), what was heard goes in, and a line
-// under the box says why.
+// microphone by Send starts it, its bar shows what is heard, lighter,
+// after what is typed, and Done writes it in after the text; Cancel keeps
+// nothing. Every member may dictate (GRA-1998): the words come from core's
+// own live transcription (`GET /api/transcription`, core's
+// src/onboarding/transcription.ts) over the interview's line
+// (interview/live-line.ts), so the sound reaches no one but core.
+//
+// One dictation is one small state machine (`dictate`) that alone holds
+// its microphone (dictation-mic.ts) and its line: asking for the
+// microphone, then the line opening, then listening, then, after Done,
+// writing it down, then over. Every way out (Done, Cancel, Escape, a
+// problem, the box going away, another page, the tab hidden or closed)
+// ends it in one place, which lets go of the microphone and closes the
+// line; a microphone the browser gives after that is let go of at once.
+// Sound goes to core only while it listens, and it listens only while its
+// bar is on screen. Its mute is its own and ends with it. Where it stops
+// on its own, what was heard goes in, and a line under the box says why.
 
 /** Why dictating stopped, as the line under the box says it. */
-type Problem = "blocked" | "missing" | "unavailable" | "limited" | "failed";
+export type Problem =
+  | "blocked"
+  | "missing"
+  | "unavailable"
+  | "limited"
+  | "failed"
+  | "hidden";
 
 const problemWords: Record<Problem, MessageDescriptor> = {
   blocked: msg`Your browser doesn't let Grasp use the microphone. Allow it in the browser's settings to dictate.`,
@@ -39,6 +46,7 @@ const problemWords: Record<Problem, MessageDescriptor> = {
   unavailable: msg`Dictation isn't set up here yet.`,
   limited: msg`You've dictated as much as you can today.`,
   failed: msg`Dictation stopped. What was heard is kept.`,
+  hidden: msg`Dictation stopped as you left this tab. What was heard is kept.`,
 };
 
 /**
@@ -73,110 +81,181 @@ const useCanDictate = (): boolean =>
   );
 
 /** How long core's line may take to listen before it counts as failed, in ms. */
-const lineReadyMs = 10_000;
+export const lineReadyMs = 10_000;
 
-/** What a dictation hears from core, as it goes. */
-interface Listener {
+/** Why the browser gave no microphone, by the name of its error. */
+const micProblemOf = (caught: unknown): Problem => {
+  const name = caught instanceof DOMException ? caught.name : "";
+  if (name === "NotFoundError" || name === "OverconstrainedError") {
+    return "missing";
+  }
+  return name === "NotAllowedError" || name === "SecurityError"
+    ? "blocked"
+    : "failed";
+};
+
+/** Why core won't listen, by its `transcription.*` code. */
+const refusalOf = (code: string): Problem => {
+  if (code === "transcription.unavailable") {
+    return "unavailable";
+  }
+  return code === "transcription.limited" ? "limited" : "failed";
+};
+
+/** What a dictation runs on: the browser's microphone and core's line, or a test's. */
+export interface DictationParts {
+  /** Asks for the microphone, its sound to `onSound`; rejects with the browser's reason. */
+  microphone: (onSound: (sound: Int16Array) => void) => Promise<DictationMic>;
+  openLine: (options: LiveLineOptions) => LiveLine;
+}
+
+const browserParts: DictationParts = {
+  microphone: openDictationMic,
+  openLine: openLiveLine,
+};
+
+/** What a dictation tells as it goes. */
+export interface Listener {
   /** What is heard so far, all of it. */
   heard: (words: string) => void;
-  /** What stopped it. */
+  /** It stopped on its own, and why. */
   problem: (problem: Problem) => void;
 }
 
-/** One dictation: core's line, fed from the microphone. */
-interface Dictation {
-  /** Done: all it heard, settled. */
+/** One dictation, from its start to its end. */
+export interface Dictation {
+  /** Done: listens no more at once, and gives all it heard, settled. */
   finish: () => Promise<string>;
   /** Stops, keeping nothing. */
   cancel: () => void;
+  /** Gives silence for a moment, or sound again. */
+  mute: (on: boolean) => void;
+  /** How loud the voice is now, 0 to 1. */
+  level: () => number;
 }
 
-/** Listens through core's line in `locale`, telling `listener` what it hears. */
-const dictate = (locale: Locale, listener: Listener): Dictation => {
+/** Where a dictation is. */
+type Stage = "asking" | "opening" | "listening" | "settling" | "over";
+
+/** Starts one dictation in `locale`: asks for the microphone, then opens core's line. */
+export const dictate = (
+  locale: Locale,
+  listener: Listener,
+  parts: DictationParts = browserParts
+): Dictation => {
+  let stage: Stage = "asking";
+  let mic: DictationMic | undefined;
   let line: LiveLine | undefined;
-  let unhear: (() => void) | undefined;
   let waiting = 0;
   let partial = "";
-  let cancelled = false;
-  const stop = (): void => {
+  let muted = false;
+  /** Every way out ends here, once: the microphone let go of, the line closed. */
+  const end = (): void => {
+    stage = "over";
     window.clearTimeout(waiting);
-    unhear?.();
-    unhear = undefined;
-    // Gone before it closes, so its own close isn't heard as a line lost.
+    mic?.stop();
+    mic = undefined;
     const was = line;
     line = undefined;
     was?.close();
-    hangUp();
   };
-  const begin = async (): Promise<void> => {
-    const reached = await reachMic();
-    // Cancelled while the browser asked for the microphone.
-    if (cancelled) {
-      hangUp();
+  /** It stopped on its own: over, and why. */
+  const stopped = (problem: Problem): void => {
+    if (stage === "over") {
       return;
     }
-    if (!reached) {
-      const why = micProblem();
-      listener.problem(why === "blocked" || why === "missing" ? why : "failed");
+    line?.drop();
+    end();
+    if (problem === "unavailable") {
+      noteNotSetUp();
+    }
+    listener.problem(problem);
+  };
+  const onSound = (sound: Int16Array): void => {
+    if (stage === "listening" && !muted) {
+      line?.send(sound);
+    }
+  };
+  const open = (got: DictationMic): void => {
+    // Over while the browser asked: what it gives now is let go of at once.
+    if (stage !== "asking") {
+      got.stop();
       return;
     }
-    let began = false;
-    line = openLiveLine({
+    mic = got;
+    mic.mute(muted);
+    stage = "opening";
+    const opened = parts.openLine({
       locale,
       onPartial: (text) => {
-        partial = text;
-        listener.heard(text);
+        if (stage === "listening") {
+          partial = text;
+          listener.heard(text);
+        }
       },
       // Core won't listen: no use trying again.
       onRefused: (code) => {
-        line?.drop();
-        stop();
-        if (code === "transcription.unavailable") {
-          noteNotSetUp();
-          listener.problem("unavailable");
-        } else {
-          listener.problem(
-            code === "transcription.limited" ? "limited" : "failed"
-          );
-        }
+        stopped(refusalOf(code));
       },
       onLive: (live) => {
-        if (live && !began && line !== undefined) {
-          window.clearTimeout(waiting);
-          began = line.begin(new Int16Array(0));
-        } else if (!live && line !== undefined) {
+        if (!live) {
           // The line went down, before it listened or mid-way.
+          stopped("failed");
+        } else if (stage === "opening" && line !== undefined) {
           window.clearTimeout(waiting);
-          stop();
-          listener.problem("failed");
+          if (line.begin(new Int16Array(0))) {
+            stage = "listening";
+          }
         }
       },
     });
+    // Ended while the line opened (a refusal said at once).
+    if (stage !== "opening") {
+      opened.close();
+      return;
+    }
+    line = opened;
     waiting = window.setTimeout(() => {
-      if (!began) {
-        line?.drop();
-        stop();
-        listener.problem("failed");
+      if (stage === "opening") {
+        stopped("failed");
       }
     }, lineReadyMs);
-    let resample: ((sound: Float32Array) => Int16Array) | undefined;
-    unhear = overhear((sound, rate) => {
-      resample ??= resampler(rate);
-      line?.send(resample(sound));
-    });
   };
-  void begin();
+  void (async () => {
+    try {
+      open(await parts.microphone(onSound));
+    } catch (error) {
+      if (stage === "asking") {
+        stopped(micProblemOf(error));
+      }
+    }
+  })();
   return {
     finish: async () => {
+      if (stage !== "listening") {
+        // Nothing listened yet: nothing to write down.
+        end();
+        return partial;
+      }
+      stage = "settling";
+      // Nothing more is heard: only what was sent is written down.
+      mic?.stop();
+      mic = undefined;
       const words = (await line?.end()) ?? null;
-      stop();
+      end();
       return words ?? partial;
     },
     cancel: () => {
-      cancelled = true;
-      line?.drop();
-      stop();
+      if (stage !== "over") {
+        line?.drop();
+      }
+      end();
     },
+    mute: (on) => {
+      muted = on;
+      mic?.mute(on);
+    },
+    level: () => (muted || stage !== "listening" ? 0 : (mic?.level() ?? 0)),
   };
 };
 
@@ -184,98 +263,159 @@ const dictate = (locale: Locale, listener: Listener): Dictation => {
 const after = (text: string, said: string): string =>
   [text.trimEnd(), said].filter((part) => part !== "").join(" ");
 
-/** How loud the voice is now, for the bar's field. */
-const sample = () => ({ level: micLevel() });
-
 /**
- * Dictation for the box: the speech button's props,
- * none where nobody can dictate (a guest's chat, outside the shell; a
- * browser with no microphone; core not set up for it), and the line that
- * says why it stopped (`problem`). `text` is what is typed; `onText` takes
- * it back with the dictated words after it.
+ * Dictation for the box: the speech button's props, none where nobody
+ * can dictate (a guest's chat, outside the shell; a browser with no
+ * microphone; core not set up for it; the box `off`, such as the idle bar
+ * while the chat is open), and the line that says why it stopped
+ * (`problem`), until `clearProblem`. `text` is what is typed; `onText`
+ * takes it back with the dictated words after it.
  */
 export const useDictation = (
   text: string,
-  onText: (text: string) => void
+  onText: (text: string) => void,
+  {
+    off = false,
+    parts = browserParts,
+  }: { off?: boolean; parts?: DictationParts } = {}
 ): {
   speech: PromptInputSpeechButtonProps | undefined;
   problem: string | undefined;
+  clearProblem: () => void;
 } => {
   const { i18n } = useLingui();
   // A guest's chat is outside the shell: nobody to dictate for.
   const shell = useMatch({ from: "/_shell", shouldThrow: false });
+  const pathname = useLocation({ select: (location) => location.pathname });
   const possible = useCanDictate();
+  const can = shell !== undefined && possible && !off;
   const [listening, setListening] = useState(false);
   const [settling, setSettling] = useState(false);
   const [muted, setMuted] = useState(false);
   const [interim, setInterim] = useState("");
   const [problem, setProblem] = useState<Problem>();
   const running = useRef<Dictation | null>(null);
+  // What was heard of the one running, for a stop that keeps it.
+  const heard = useRef("");
   // What is in the box now: typing can change it while dictating.
   const typed = useRef(text);
   useEffect(() => {
     typed.current = text;
   });
-  // A box that goes away mid-dictation lets its line go.
+  /** The bar goes: nothing of the one that ran stays on screen. */
+  const reset = (): void => {
+    running.current = null;
+    heard.current = "";
+    setListening(false);
+    setSettling(false);
+    setMuted(false);
+    setInterim("");
+  };
+  /** Ends the one running; what was heard goes in when `keep`, and `why` says why. */
+  const stop = (keep: boolean, why?: Problem): void => {
+    const mine = running.current;
+    if (mine === null) {
+      return;
+    }
+    mine.cancel();
+    if (keep && heard.current !== "") {
+      onText(after(typed.current, heard.current));
+    }
+    reset();
+    if (why !== undefined) {
+      setProblem(why);
+    }
+  };
+  // The latest `stop`, for the listeners below, which are set once.
+  const stopNow = useRef(stop);
+  useEffect(() => {
+    stopNow.current = stop;
+  });
+  // The box goes away, or can't dictate any more: its dictation goes too.
+  useEffect(() => {
+    if (!can) {
+      stopNow.current(false);
+    }
+  }, [can]);
   useEffect(
     () => () => {
-      running.current?.cancel();
-      running.current = null;
+      stopNow.current(false);
     },
     []
   );
+  // Another page: it goes, keeping what was heard.
+  const page = useRef(pathname);
+  useEffect(() => {
+    if (page.current !== pathname) {
+      page.current = pathname;
+      stopNow.current(true);
+    }
+  }, [pathname]);
+  // The tab hidden: it stops, and says so; the tab closed: it goes.
+  useEffect(() => {
+    const onHidden = (): void => {
+      if (document.visibilityState === "hidden") {
+        stopNow.current(true, "hidden");
+      }
+    };
+    const onGone = (): void => {
+      stopNow.current(false);
+    };
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", onGone);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("pagehide", onGone);
+    };
+  }, []);
   const locale = isLocale(i18n.locale) ? i18n.locale : "en";
   const start = (): void => {
+    stop(false);
     setProblem(undefined);
-    setInterim("");
-    setMuted(false);
-    let heard = "";
-    const mine = dictate(locale, {
-      heard: (words) => {
-        if (running.current === mine) {
-          heard = words;
-          setInterim(words);
-        }
+    const mine = dictate(
+      locale,
+      {
+        heard: (words) => {
+          if (running.current === mine) {
+            heard.current = words;
+            setInterim(words);
+          }
+        },
+        problem: (why) => {
+          if (running.current === mine) {
+            stop(true, why);
+          }
+        },
       },
-      problem: (stopped) => {
-        if (running.current !== mine) {
-          return;
-        }
-        // What was heard before it stopped goes in, as Done would put it.
-        mine.cancel();
-        running.current = null;
-        if (heard !== "") {
-          onText(after(typed.current, heard));
-        }
-        setInterim("");
-        setListening(false);
-        setProblem(stopped);
-      },
-    });
+      parts
+    );
     running.current = mine;
+    setListening(true);
   };
   const done = async (): Promise<void> => {
     const mine = running.current;
     if (mine === null) {
       return;
     }
+    setListening(false);
     setSettling(true);
     const said = await mine.finish();
-    setSettling(false);
-    setInterim("");
-    // Cancelled, or another begun, while it was written down.
+    // Cancelled, stopped, or another begun, while it was written down.
     if (running.current !== mine) {
       return;
     }
-    running.current = null;
+    reset();
     if (said !== "") {
       onText(after(typed.current, said));
     }
   };
   const words =
     problem === undefined ? undefined : i18n._(problemWords[problem]);
-  if (shell === undefined || !possible) {
-    return { speech: undefined, problem: words };
+  const clearProblem = (): void => {
+    setProblem(undefined);
+  };
+  if (!can) {
+    return { speech: undefined, problem: words, clearProblem };
   }
   return {
     speech: {
@@ -283,9 +423,8 @@ export const useDictation = (
       settling,
       muted,
       interim,
-      sample,
+      sample: () => ({ level: running.current?.level() ?? 0 }),
       onListeningChange: (next: boolean) => {
-        setListening(next);
         if (next) {
           start();
         } else {
@@ -293,15 +432,14 @@ export const useDictation = (
         }
       },
       onCancel: () => {
-        running.current?.cancel();
-        running.current = null;
-        setInterim("");
+        stop(false);
       },
       onMutedChange: (next: boolean) => {
-        muteMic(next);
+        running.current?.mute(next);
         setMuted(next);
       },
     },
     problem: words,
+    clearProblem,
   };
 };

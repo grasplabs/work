@@ -100,3 +100,70 @@ test("a person dictates into the box, sees what is heard as it is, and sends it 
       .first()
   ).toContainText(`For finance: ${said}`);
 });
+
+test("Done pressed while the browser still asks for the microphone leaves nothing listening once it comes: no line, no sound, the microphone let go of", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  let sounds = 0;
+  const starts: TranscriptionStart[] = [];
+  await page.routeWebSocket("**/api/transcription", (socket) => {
+    socket.onMessage((message) => {
+      if (typeof message !== "string") {
+        sounds += 1;
+      }
+    });
+    liveLine(starts)(socket);
+  });
+  // The browser answers the ask for the microphone only when the test
+  // says, as a person still deciding would; each stream it gives is kept.
+  await page.addInitScript(() => {
+    const devices = navigator.mediaDevices;
+    const ask = devices.getUserMedia.bind(devices);
+    const gate = Promise.withResolvers<boolean>();
+    const given: MediaStream[] = [];
+    Reflect.set(window, "micGiven", given);
+    window.addEventListener("give-mic", () => {
+      gate.resolve(true);
+    });
+    devices.getUserMedia = async (wanted) => {
+      await gate.promise;
+      const stream = await ask(wanted);
+      given.push(stream);
+      return stream;
+    };
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Dictate" }).click();
+  const done = page.getByRole("button", { name: "Done" });
+  await expect(done).toBeVisible();
+  await done.click();
+  await expect(done).toBeHidden();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("give-mic"));
+  });
+  // Given, and let go of at once.
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(() => {
+          const given: unknown = Reflect.get(window, "micGiven");
+          return Array.isArray(given) && given.length > 0
+            ? given
+                .flatMap((stream: MediaStream) => stream.getTracks())
+                .map((track) => track.readyState)
+            : [];
+        })
+    )
+    .toStrictEqual(["ended"]);
+  // Long enough for a line to open and sound to go, were it to.
+  await page.waitForTimeout(1500);
+
+  expect({ starts: starts.length, sounds }).toStrictEqual({
+    starts: 0,
+    sounds: 0,
+  });
+  await expect(page.getByRole("group", { name: "Listening" })).toHaveCount(0);
+});

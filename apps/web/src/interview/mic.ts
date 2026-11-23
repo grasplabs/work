@@ -71,6 +71,21 @@ const problemOf = (caught: unknown): MicProblem => {
 };
 
 /**
+ * What is asked of the microphone: the one the person chose, when they
+ * chose one, cleaned of echo and noise. Also for a microphone held apart
+ * from this one (a chat's dictation, chat/dictation-mic.ts).
+ */
+export const micWanted = (): MediaTrackConstraints => {
+  const chosen = readChosen();
+  return {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    ...(chosen === null ? {} : { deviceId: { ideal: chosen } }),
+  };
+};
+
+/**
  * Puts the tap on the microphone. Where a browser can't, nobody overhears
  * anything, and what is said is written down from its recordings alone.
  */
@@ -116,15 +131,9 @@ export const reachMic = async (): Promise<boolean> => {
   if (stream !== null && ears !== null) {
     return true;
   }
-  const chosen = readChosen();
   try {
     const got = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        ...(chosen === null ? {} : { deviceId: { ideal: chosen } }),
-      },
+      audio: micWanted(),
     });
     for (const track of got.getAudioTracks()) {
       track.enabled = !muted;
@@ -275,14 +284,19 @@ export const micLevel = (): number => level;
 /** When someone was last heard speaking, on the page's clock; 0 when never. */
 export const lastHeard = (): number => heardAt;
 
-/** How loud the microphone is now, 0 to 1, as the root of the mean square of its samples. */
-const loudnessNow = (heard: Ears): number => {
-  heard.analyser.getByteTimeDomainData(heard.samples);
+/** How loud an analyser's samples are, 0 to 1, as the root of their mean square. */
+export const loudnessOf = (samples: Uint8Array): number => {
   let sum = 0;
-  for (const sample of heard.samples) {
+  for (const sample of samples) {
     sum += ((sample - 128) / 128) ** 2;
   }
-  return Math.sqrt(sum / heard.samples.length);
+  return Math.sqrt(sum / samples.length);
+};
+
+/** How loud the microphone is now, 0 to 1. */
+const loudnessNow = (heard: Ears): number => {
+  heard.analyser.getByteTimeDomainData(heard.samples);
+  return loudnessOf(heard.samples);
 };
 
 /** One look at the microphone: whether someone speaks now, clearly above the room. */
