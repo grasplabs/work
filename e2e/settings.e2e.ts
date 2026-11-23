@@ -108,6 +108,13 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
   ).toHaveText(["Profile", "Appearance", "Instructions", "Security"]);
+  // A link to a workspace section leads to their profile, whichever it is.
+  await page.goto("/settings/members");
+  await expect(page).toHaveURL(/\/settings\/profile$/u);
+  await page.goto("/settings/billing");
+  await expect(page).toHaveURL(/\/settings\/profile$/u);
+  await page.goto("/settings/teams");
+  await expect(page).toHaveURL(/\/settings\/profile$/u);
 });
 
 test("on a phone the sections are one control above the section", async ({

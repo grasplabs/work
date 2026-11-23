@@ -1,5 +1,4 @@
 import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Table,
   TableBody,
@@ -12,7 +11,7 @@ import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { readPeople } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
@@ -130,15 +129,6 @@ const UnknownOutcomes = () => {
 };
 
 export const Route = createFileRoute("/_shell/settings/outcomes")({
-  // Only the organization's own admins list everyone's: anyone else who
-  // follows a link here goes to their own settings. Core refuses them all
-  // the same; this only spares them a refusal.
-  beforeLoad: ({ context: { identity } }) => {
-    if (!isMemberAdmin(identity)) {
-      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
-      throw redirect({ to: "/settings/profile", replace: true });
-    }
-  },
   pendingComponent: () => <SettingsPending groups={[3]} />,
   errorComponent: SettingsError,
   component: UnknownOutcomes,

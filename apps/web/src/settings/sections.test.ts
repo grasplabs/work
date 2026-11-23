@@ -1,12 +1,25 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { groupedSectionsFor, sectionsFor } from "./sections.ts";
+import { groupedSectionsFor, hiddenAt, sectionsFor } from "./sections.ts";
 
 // Who sees which Settings sections: the filter the in-page list and,
 // later, the Sidebar both read.
 
 const ids = (viewer: Parameters<typeof sectionsFor>[0]): string[] =>
   sectionsFor(viewer).map((section) => section.id);
+
+/** Which of a few addresses `viewer` is kept from. */
+const hidden = (viewer: Parameters<typeof hiddenAt>[1]) =>
+  [
+    "/settings/profile",
+    "/settings/instructions",
+    "/settings/workspace",
+    "/settings/members",
+    "/settings/brain",
+    "/settings/audit/event-1",
+    "/settings/billing",
+    "/settings",
+  ].filter((pathname) => hiddenAt(pathname, viewer));
 
 describe("Settings sections", () => {
   it("shows someone who isn't an admin their own account alone", () => {
@@ -54,6 +67,27 @@ describe("Settings sections", () => {
       webhooks: false,
       instructions: false,
       workspace: true,
+    });
+  });
+
+  it("keeps every section out of sight of whoever may not see it, by its address and what lies under it", () => {
+    const member = { role: "user", staff: false } as const;
+    const staff = { role: "admin", staff: true } as const;
+    const admin = { role: "admin", staff: false } as const;
+    expect({
+      member: hidden(member),
+      staff: hidden(staff),
+      admin: hidden(admin),
+    }).toStrictEqual({
+      member: [
+        "/settings/workspace",
+        "/settings/members",
+        "/settings/brain",
+        "/settings/audit/event-1",
+        "/settings/billing",
+      ],
+      staff: ["/settings/instructions", "/settings/members"],
+      admin: [],
     });
   });
 });

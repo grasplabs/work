@@ -23,9 +23,10 @@ import { msg } from "@lingui/core/macro";
 // Settings' sections as data, in the order they are listed: one place for
 // whatever lists them (the Settings layout's own list today, the sidebar
 // once the frame lists them there). Who may see a section is part of its
-// data, and `sectionsFor` filters by it alone. Core checks the role on
-// every call whatever is listed: this only keeps out of sight what someone
-// can't use.
+// data, and `sectionsFor` filters by it alone; a link to a section someone
+// may not see leads to their profile (`hiddenAt`, the Settings layout).
+// Core checks the role on every call whatever is listed: this only keeps
+// out of sight what someone can't use.
 
 /** Where a section lives. */
 type SettingsHref =
@@ -244,12 +245,23 @@ export const groupedSectionsFor = (
     .filter(({ sections }) => sections.length > 0);
 };
 
+/** Whether `section` is the one open at `pathname`, or holds it. */
+const opens = (section: SettingsSection, pathname: string): boolean =>
+  pathname === section.href || pathname.startsWith(`${section.href}/`);
+
 /** The section open at `pathname`, among those `viewer` may see. */
 export const sectionAt = (
   pathname: string,
   viewer: SettingsViewer
 ): SettingsSection | undefined =>
-  sectionsFor(viewer).find(
-    (section) =>
-      pathname === section.href || pathname.startsWith(`${section.href}/`)
+  sectionsFor(viewer).find((section) => opens(section, pathname));
+
+/**
+ * Whether `pathname` is a section kept out of `viewer`'s sight: someone
+ * who follows a link to one goes to their own profile instead, the same
+ * for every such section.
+ */
+export const hiddenAt = (pathname: string, viewer: SettingsViewer): boolean =>
+  settingsSections.some(
+    (section) => opens(section, pathname) && !maySee(section.audience, viewer)
   );
