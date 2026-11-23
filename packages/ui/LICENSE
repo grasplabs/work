@@ -1,0 +1,12 @@
+The files under packages/ui/src are Damsko, Grasp's design system
+(https://github.com/grasplabs/damsko), installed here as source. They are
+not covered by this repository's licence (AGPL-3.0, in LICENSE at its
+root) and remain under Damsko's own licence, as it stands at the commit
+packages/ui/damsko.json pins:
+
+https://github.com/grasplabs/damsko/blob/2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7/LICENSE
+
+The fonts in packages/ui/src/styles/fonts are under the SIL Open Font
+License 1.1, as their OFL.txt says. A file that follows third-party work
+says so in a header line and keeps that work's licence, as Damsko's
+THIRD_PARTY_NOTICES.md lists.
