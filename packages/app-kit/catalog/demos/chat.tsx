@@ -27,22 +27,6 @@ import {
 } from "@grasp-os/app-kit/components/bubble";
 import { Button } from "@grasp-os/app-kit/components/button";
 import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import {
-  InlineCitation,
-  InlineCitationCard,
-  InlineCitationCardBody,
-  InlineCitationCardTrigger,
-  InlineCitationCarousel,
-  InlineCitationCarouselContent,
-  InlineCitationCarouselHeader,
-  InlineCitationCarouselIndex,
-  InlineCitationCarouselItem,
-  InlineCitationCarouselNext,
-  InlineCitationCarouselPrev,
-  InlineCitationQuote,
-  InlineCitationSource,
-  InlineCitationText,
-} from "@grasp-os/app-kit/components/inline-citation";
 import { InputGroup } from "@grasp-os/app-kit/components/input-group";
 import {
   Marker,
@@ -234,46 +218,6 @@ const AskCardDemo = () => (
   </AskCard>
 );
 
-const InlineCitationDemo = () => (
-  <p className="text-sm">
-    <InlineCitation>
-      <InlineCitationText>
-        Invoices are approved within two days
-      </InlineCitationText>
-      <InlineCitationCard>
-        <InlineCitationCardTrigger
-          sources={["https://handbook.example.com/finance", "Approval policy"]}
-        />
-        <InlineCitationCardBody>
-          <InlineCitationCarousel>
-            <InlineCitationCarouselHeader>
-              <InlineCitationCarouselPrev />
-              <InlineCitationCarouselNext />
-              <InlineCitationCarouselIndex />
-            </InlineCitationCarouselHeader>
-            <InlineCitationCarouselContent>
-              <InlineCitationCarouselItem>
-                <InlineCitationSource
-                  title="Finance handbook"
-                  url="https://handbook.example.com/finance"
-                  description="How invoices move from received to paid."
-                />
-                <InlineCitationQuote>
-                  Every invoice is approved within two working days.
-                </InlineCitationQuote>
-              </InlineCitationCarouselItem>
-              <InlineCitationCarouselItem>
-                <InlineCitationSource title="Approval policy" />
-              </InlineCitationCarouselItem>
-            </InlineCitationCarouselContent>
-          </InlineCitationCarousel>
-        </InlineCitationCardBody>
-      </InlineCitationCard>
-    </InlineCitation>
-    .
-  </p>
-);
-
 const PromptBarDemo = () => (
   <PromptBar>
     <PromptBarIcon>
@@ -412,7 +356,6 @@ export const chatDemos = {
   "ask-card": AskCardDemo,
   attachment: AttachmentDemo,
   bubble: BubbleDemo,
-  "inline-citation": InlineCitationDemo,
   marker: MarkerDemo,
   message: MessageDemo,
   "message-scroller": MessageScrollerDemo,

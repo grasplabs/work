@@ -1,6 +1,6 @@
 // A specialised panel: the main work on one side and an inspector for the
 // selected record on the other, with tabs for its details and its history.
-// SplitPane stacks the two on a phone; the inspector scrolls on its own.
+// The two stack on a phone; the inspector scrolls on its own.
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import {
   Card,
@@ -16,11 +16,6 @@ import {
 } from "@grasp-os/app-kit/components/progress";
 import { ScrollArea } from "@grasp-os/app-kit/components/scroll-area";
 import { Separator } from "@grasp-os/app-kit/components/separator";
-import {
-  SplitPane,
-  SplitPaneAside,
-  SplitPaneMain,
-} from "@grasp-os/app-kit/components/split-pane";
 import {
   Tabs,
   TabsContent,
@@ -41,8 +36,8 @@ const history = [
 ];
 
 export const SpecialisedPanelExample = () => (
-  <SplitPane>
-    <SplitPaneMain>
+  <div className="flex min-w-0 flex-col gap-6 md:flex-row">
+    <div className="flex min-w-0 flex-1 flex-col gap-4">
       <Card>
         <CardHeader>
           <CardTitle>Pipeline</CardTitle>
@@ -55,8 +50,11 @@ export const SpecialisedPanelExample = () => (
           </Progress>
         </CardContent>
       </Card>
-    </SplitPaneMain>
-    <SplitPaneAside aria-label="Acme renewal">
+    </div>
+    <aside
+      aria-label="Acme renewal"
+      className="flex min-w-0 shrink-0 flex-col gap-4 md:w-80"
+    >
       <Card>
         <CardHeader>
           <CardTitle>Acme renewal</CardTitle>
@@ -98,6 +96,6 @@ export const SpecialisedPanelExample = () => (
           </Tabs>
         </CardContent>
       </Card>
-    </SplitPaneAside>
-  </SplitPane>
+    </aside>
+  </div>
 );

@@ -64,7 +64,7 @@ export default defineApp({
 
 ## Server functions
 
-Every module under `server/` exports server functions. Each one declares its arguments, and Grasp checks them on every call. `returns` is optional: when a function declares it, Grasp checks every answer against it, and a `DataGrid` takes each column's kind from it. Without `returns`, callers get the type of whatever the handler returns:
+Every module under `server/` exports server functions. Each one declares its arguments, and Grasp checks them on every call. `returns` is optional: when a function declares it, Grasp checks every answer against it. Without `returns`, callers get the type of whatever the handler returns:
 
 ```ts server/tasks.ts
 import { v } from "@grasp-os/sdk";
@@ -107,12 +107,6 @@ A Page is a file in `src/routes/`, a [TanStack Router](https://tanstack.com/rout
 ```tsx src/routes/index.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
 import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
@@ -122,16 +116,12 @@ const Tasks = () => {
   const add = useMutation(api.tasks.add);
   return (
     <main className="flex flex-col gap-6 p-6">
-      <PageHeader>
-        <PageHeaderContent>
-          <PageHeaderTitle>Tasks</PageHeaderTitle>
-        </PageHeaderContent>
-        <PageHeaderActions>
-          <Button onClick={async () => await add({ title: "A new task" })}>
-            Add a task
-          </Button>
-        </PageHeaderActions>
-      </PageHeader>
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold">Tasks</h1>
+        <Button onClick={async () => await add({ title: "A new task" })}>
+          Add a task
+        </Button>
+      </header>
       {tasks === undefined ? (
         <Spinner />
       ) : (

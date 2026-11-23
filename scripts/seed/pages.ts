@@ -3,7 +3,7 @@
  * moves through four stages, and its page (`src/routes/index.tsx`) counts
  * the records in each stage and lists them, a record's stage changed in
  * place. Written as an App's builder would, with the public SDK and
- * `@grasp-os/app-kit` only. The seed adds each table's records through the
+ * `@grasp-os/app-kit`'s shadcn components only. The seed adds each table's records through the
  * App's data import.
  */
 import type { DefinitionOperation } from "@grasp-os/runtime/definition";
@@ -183,17 +183,7 @@ export const boardFiles = ({
   stages,
   money,
 }: Board): Record<string, string> => {
-  const done = Object.keys(stages).at(-1);
-  const columns = [
-    `{ field: "title", label: ${JSON.stringify(noun)} }`,
-    JSON.stringify(party),
-    ...(money ? ['"amount"'] : []),
-    `{
-            field: "stage",
-            cell: (row) => stages[row.stage],
-            edit: async (row, stage) => await setStage({ id: row._id, stage }),
-          }`,
-  ];
+  const partyLabel = `${party.charAt(0).toUpperCase()}${party.slice(1)}`;
   return {
     "server/board.ts": `import {
   paginationOptionsValidator,
@@ -237,62 +227,117 @@ export const setStage = mutation({
   },
 });
 `,
-    "src/routes/index.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+    "src/routes/index.tsx": `import { usePaginatedQuery, useMutation, useQuery } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
-import { Grid } from "@grasp-os/app-kit/components/grid";
 import {
-  PageHeader,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Stat } from "@grasp-os/app-kit/components/stat";
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 
 const stages = ${JSON.stringify(stages)} as const;
-
+const stageKeys = ${JSON.stringify(Object.keys(stages))} as const;
+${
+  money
+    ? `
+const euros = new Intl.NumberFormat("en", { style: "currency", currency: "EUR" });
+`
+    : ""
+}
 const Board = () => {
   const counts = useQuery(api.board.byStage);
+  const records = usePaginatedQuery(api.board.list, {}, { initialPageSize: 25 });
   const setStage = useMutation(api.board.setStage);
   return (
     <main className="flex flex-col gap-6 p-6">
-      <PageHeader>
-        <PageHeaderContent>
-          <PageHeaderTitle>${jsxText(title)}</PageHeaderTitle>
-          <PageHeaderDescription>${jsxText(intro)}</PageHeaderDescription>
-        </PageHeaderContent>
-      </PageHeader>
-      <Grid columns={4}>
-        {Object.entries(stages).map(([stage, label]) => (
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">${jsxText(title)}</h1>
+        <p className="text-muted-foreground text-sm">${jsxText(intro)}</p>
+      </header>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {stageKeys.map((stage) => (
           <Card key={stage} size="sm">
             <CardHeader>
-              <CardTitle>{label}</CardTitle>
+              <CardTitle>{stages[stage]}</CardTitle>
             </CardHeader>
             <CardContent>
-              <Stat variant={stage === "${done}" ? "done" : "default"}>
+              <p className="text-2xl font-semibold tabular-nums">
                 {counts === undefined
                   ? "–"
                   : (counts.find((group) => group.stage === stage)?.count ?? 0)}
-              </Stat>
+              </p>
             </CardContent>
           </Card>
         ))}
-      </Grid>
-      <DataGrid
-        args={() => ({})}
-        columns={[
-          ${columns.join(",\n          ")},
-        ]}
-        label="${title}"
-        query={api.board.list}
-      />
+      </div>
+      <Table aria-label=${JSON.stringify(title)}>
+        <TableHeader>
+          <TableRow>
+            <TableHead>${noun}</TableHead>
+            <TableHead>${partyLabel}</TableHead>
+${money ? "            <TableHead>Amount</TableHead>\n" : ""}            <TableHead>Stage</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {records.items.map((row) => (
+            <TableRow key={row._id}>
+              <TableCell>{row.title}</TableCell>
+              <TableCell>{row.${party}}</TableCell>
+${
+  money
+    ? "              <TableCell>{euros.format(row.amount.minorUnits / 100)}</TableCell>\n"
+    : ""
+}              <TableCell>
+                <NativeSelect
+                  aria-label={\`Stage of \${row.title}\`}
+                  onChange={async (event) => {
+                    const stage = stageKeys.find(
+                      (key) => key === event.target.value
+                    );
+                    if (stage !== undefined) {
+                      await setStage({ id: row._id, stage });
+                    }
+                  }}
+                  size="sm"
+                  value={row.stage}
+                >
+                  {stageKeys.map((stage) => (
+                    <NativeSelectOption key={stage} value={stage}>
+                      {stages[stage]}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {records.hasMore ? (
+        <Button
+          className="self-start"
+          onClick={() => {
+            records.loadMore();
+          }}
+          variant="outline"
+        >
+          Show more
+        </Button>
+      ) : null}
     </main>
   );
 };

@@ -890,7 +890,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     ).resolves.toStrictEqual([expect.stringContaining('"owner"')]);
   });
 
-  it("builds a page of a data grid and a field for every kind of value, typed by what each binds", async () => {
+  it("builds a page of a paged table and a field for every kind of value, typed by what each binds", async () => {
     const tasks = testApp(
       {
         name: "Tasks",
@@ -974,13 +974,14 @@ export const rename = mutation({
       }
     );
     const tasksPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useForm, useMutation } from "@grasp-os/sdk/react";
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
-import { RichText } from "@grasp-os/app-kit/components/rich-text";
-import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/app-kit/form";
+import { useForm, useMutation, usePaginatedQuery } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@grasp-os/app-kit/components/table";
+import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichText, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/app-kit/form";
 import { api, permissions } from "@server/_generated/api";
 
 function Tasks() {
+  const tasks = usePaginatedQuery(api.tasks.list, { search: "" }, { initialPageSize: 25 });
   const rename = useMutation(api.tasks.rename);
   const form = useForm(api.tasks.create, {
     defaultValues: { title: "", status: "open", labels: [], estimate: 1, due: Date.now(), urgent: false, notes: "" },
@@ -988,20 +989,27 @@ function Tasks() {
   });
   return (
     <main className="flex flex-col gap-6 p-6">
-      <DataGrid
-        label="Tasks"
-        query={api.tasks.list}
-        args={({ search, filters }) => ({ search, status: filters.status })}
-        columns={[
-          { field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) },
-          { field: "status", filter: { open: "Open", done: "Done" } },
-          { field: "notes", cell: (task) => <RichText value={task.notes} /> },
-          { field: "due", day: true },
-        ]}
-        search="Search tasks"
-        bulkActions={[{ label: "Archive", onSelect: (rows) => rows.length }]}
-        rowActions={[{ label: "Open", onSelect: (task) => task._id }]}
-      />
+      <Table aria-label="Tasks">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Notes</TableHead>
+            <TableHead>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {tasks.items.map((task) => (
+            <TableRow key={task._id}>
+              <TableCell>{task.title}</TableCell>
+              <TableCell>{task.status}</TableCell>
+              <TableCell><RichText value={task.notes} /></TableCell>
+              <TableCell><Button onClick={async () => await rename({ id: task._id, title: "Renamed" })} size="sm" variant="ghost">Rename</Button></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {tasks.hasMore ? <Button onClick={() => tasks.loadMore()} variant="outline">Load more</Button> : null}
       <Form form={form}>
         <TextField form={form} label="Title" name="title" />
         <SelectField form={form} label="Status" name="status" options={{ open: "Open", done: "Done" }} />

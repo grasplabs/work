@@ -155,10 +155,50 @@ interface Entry {
 const appKitSingleExports: ReadonlySet<string> = new Set(["./form"]);
 
 /**
- * `@grasp-os/app-kit`: one module per file its exports (`./components/*`, …)
- * cover, and its single-module exports (`appKitSingleExports`).
+ * `@grasp-os/app-kit`'s files that are not shadcn's: the product's own
+ * parts, which `apps/web` and `apps/admin` still render until they move to
+ * `packages/ui`, and the helpers only the kit's own files use. They leave
+ * the kit with that move, and this list with them. App pages are built on
+ * shadcn's components and the bound form alone, so none of these is a
+ * module App code imports; a kit module that uses one carries it.
  */
-const appKitEntries = (): Entry[] =>
+const productParts: ReadonlySet<string> = new Set(
+  [
+    "components/app-shell",
+    "components/ask-card",
+    "components/auto-height",
+    "components/brand-header",
+    "components/data-model",
+    "components/dockable-panel",
+    "components/editable-title",
+    "components/file-tree",
+    "components/grasp-mark",
+    "components/page-header",
+    "components/page-sidebar",
+    "components/painted-field",
+    "components/panel",
+    "components/prompt-bar",
+    "components/prompt-editor",
+    "components/prompt-input",
+    "components/record-grid",
+    "components/shimmer",
+    "components/site-header",
+    "components/sortable-list",
+    "components/stat",
+    "components/success-mark",
+    "hooks/use-house-spring",
+    "hooks/use-open-change-complete",
+    "hooks/use-settled",
+    "lib/css-vars",
+    "lib/row-ends",
+  ].map((part) => `@grasp-os/app-kit/${part}`)
+);
+
+/**
+ * `@grasp-os/app-kit`'s modules: one per file its exports (`./components/*`,
+ * …) cover, and its single-module exports (`appKitSingleExports`).
+ */
+const appKitModules = (): Entry[] =>
   Object.entries(exportsOf(appKit)).flatMap(([key, target]) => {
     if (appKitSingleExports.has(key) && typeof target === "string") {
       return [
@@ -183,6 +223,10 @@ const appKitEntries = (): Entry[] =>
       id: path.join(dir, file),
     }));
   });
+
+/** The kit's modules App code imports: all but the product's parts. */
+const appKitEntries = (): Entry[] =>
+  appKitModules().filter(({ specifier }) => !productParts.has(specifier));
 
 /** A specifier of one of the platform's own packages: its name and subpath. */
 const ownSpecifier = /^(?<name>@grasp-os\/[^/]+)(?:\/(?<subpath>.+))?$/u;
@@ -437,12 +481,11 @@ const withoutDomAtLoad: Plugin = {
 
 /**
  * The kit's files that opt a component out of the React Compiler, each for
- * a library the compiler lists as incompatible (AGENTS.md): RecordGrid,
- * for TanStack Virtual's `useVirtualizer`.
+ * a library the compiler lists as incompatible (AGENTS.md). None of the
+ * modules App code imports does: RecordGrid, which does for TanStack
+ * Virtual, is one of the product's parts (`productParts`), never built here.
  */
-const kitOptOuts: ReadonlySet<string> = new Set([
-  "src/components/record-grid.tsx",
-]);
+const kitOptOuts: ReadonlySet<string> = new Set<string>();
 
 /**
  * Compiles the kit's own sources with oxc and its React Compiler, the same
@@ -536,12 +579,18 @@ const assertSinglePackages = (sources: FlatModules["sources"]): void => {
 
 /**
  * Tailwind class candidates in the kit's own sources, by the module each
- * source was built into (`Kit.moduleCandidates`). Every source must be in a
- * module: one that isn't would lose its classes without a word.
+ * source was built into (`Kit.moduleCandidates`). Every source but the
+ * product's parts (`productParts`) must be in a module: one that isn't
+ * would lose its classes without a word.
  */
 const candidatesByModule = (
   sources: FlatModules["sources"]
 ): Record<string, string[]> => {
+  const parts = new Set(
+    appKitModules()
+      .filter(({ specifier }) => productParts.has(specifier))
+      .map(({ id }) => id)
+  );
   const own = new Set(sourcesIn(path.join(appKit, "src")));
   const placed = new Set<string>();
   const candidates: Record<string, string[]> = {};
@@ -555,7 +604,9 @@ const candidatesByModule = (
       placed.add(file);
     }
   }
-  const missing = [...own].filter((file) => !placed.has(file));
+  const missing = [...own].filter(
+    (file) => !placed.has(file) && !parts.has(file)
+  );
   if (missing.length > 0) {
     throw new Error(`Not in any of the kit's modules: ${missing.join(", ")}`);
   }
