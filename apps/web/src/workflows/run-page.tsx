@@ -202,7 +202,7 @@ export const RunPage = ({
   ];
   const going = run.endedAt === null;
   const { version } = run;
-  const waits = decision !== undefined && decision.status === "open";
+  const waits = going && decision?.status === "open";
   const shown = waits ? "waiting" : run.status;
   const steps = updates(run, waits);
   const seesResult = run.principal === names.me || admin;
@@ -240,15 +240,13 @@ export const RunPage = ({
           <ErrorText>{failure}</ErrorText>
           {run.error === undefined ? null : (
             <Alert title={t`It stopped here`} tone="danger">
-              {run.error.message}
+              <RunResultView builder={builder} run={run} seesResult />
             </Alert>
           )}
-          {run.status === "failed" && run.error === undefined && !seesResult ? (
-            <Text size="sm" tone="muted">
-              {t`Only the person it ran for and the organization's admins see why it failed.`}
-            </Text>
+          {run.error === undefined && run.result === undefined ? (
+            <RunResultView run={run} seesResult={seesResult} />
           ) : null}
-          {decision === undefined ? null : (
+          {decision === undefined || !going ? null : (
             <DecisionCard
               decision={decision}
               onAnswered={() => {
@@ -296,11 +294,6 @@ export const RunPage = ({
                   {t`Version ${version} ran this. Only builders see this.`}
                 </Text>
               </div>
-              {run.error?.code === null || run.error === undefined ? null : (
-                <Text size="xs" tone="muted">
-                  <code>{run.error.code}</code>
-                </Text>
-              )}
               <Collapsible title={t`Open its steps`}>
                 <RunTraceDetail runId={run.id} workflow={workflow} />
               </Collapsible>

@@ -12987,10 +12987,6 @@ msgstr "Only the people this decision is from can answer it."
 msgid "Only the person it ran for and the organization's admins see what it returned or why it failed."
 msgstr "Only the person it ran for and the organization's admins see what it returned or why it failed."
 
-#: src/workflows/run-page.tsx
-msgid "Only the person it ran for and the organization's admins see why it failed."
-msgstr "Only the person it ran for and the organization's admins see why it failed."
-
 #: src/apps/app-data-model.tsx
 msgid "Only the person who added each record"
 msgstr "Only the person who added each record"

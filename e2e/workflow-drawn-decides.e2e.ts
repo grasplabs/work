@@ -213,6 +213,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   } finally {
     core[Symbol.dispose]();
   }
+  expect(asked).not.toBe("");
   await page.goto(`/decisions/${asked}`);
   await expect(
     page.getByText("This decision is for someone else to answer.")

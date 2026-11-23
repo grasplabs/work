@@ -4,7 +4,7 @@ import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -284,6 +284,7 @@ export const WorkflowHome = ({
   onOpen: (to: WorkshopView) => void;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
   const count = runs.state === "ready" ? runs.data.length : undefined;
   return (
     <div {...stylex.props(styles.scroll)}>
@@ -294,6 +295,9 @@ export const WorkflowHome = ({
             <DecisionCard
               decision={decision}
               key={decision.id}
+              onAnswered={() => {
+                void router.invalidate();
+              }}
               where="workflow"
             />
           ))}

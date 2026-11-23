@@ -12987,10 +12987,6 @@ msgstr "Seules les personnes concernées par cette décision peuvent y répondre
 msgid "Only the person it ran for and the organization's admins see what it returned or why it failed."
 msgstr "Seuls la personne pour qui elle a tourné et les administrateurs de l’organisation voient ce qu’elle a renvoyé ou pourquoi elle a échoué."
 
-#: src/workflows/run-page.tsx
-msgid "Only the person it ran for and the organization's admins see why it failed."
-msgstr "Seuls la personne pour qui il a tourné et les admins de l'organisation voient pourquoi il a échoué."
-
 #: src/apps/app-data-model.tsx
 msgid "Only the person who added each record"
 msgstr "Seulement la personne qui a ajouté chaque enregistrement"

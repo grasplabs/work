@@ -12987,10 +12987,6 @@ msgstr "Alleen de mensen voor wie deze beslissing is, kunnen erop antwoorden."
 msgid "Only the person it ran for and the organization's admins see what it returned or why it failed."
 msgstr "Alleen de persoon voor wie hij liep en de beheerders van de organisatie zien wat hij opleverde of waarom hij mislukte."
 
-#: src/workflows/run-page.tsx
-msgid "Only the person it ran for and the organization's admins see why it failed."
-msgstr "Alleen de persoon voor wie hij liep en de beheerders van de organisatie zien waarom hij mislukte."
-
 #: src/apps/app-data-model.tsx
 msgid "Only the person who added each record"
 msgstr "Alleen wie het record heeft toegevoegd"
