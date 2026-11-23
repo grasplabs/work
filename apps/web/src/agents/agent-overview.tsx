@@ -38,14 +38,6 @@ import {
   Play,
   Trash,
 } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
 import { Link } from "../grasp/link/index.ts";
 import { Markdown } from "../grasp/markdown/index.ts";
 import type { MarkdownDrawn, MarkdownLink } from "../grasp/markdown/index.ts";
@@ -125,6 +117,27 @@ const styles = stylex.create({
   ok: { color: grasp.success, display: "inline-flex" },
   failed: { color: grasp.danger, display: "inline-flex" },
   history: { display: "grid", gap: grasp.space2 },
+  runs: { display: "grid", margin: 0, padding: 0, listStyle: "none" },
+  // A run's mark, its title and its date: the date keeps its line, and
+  // the title gives way (DAMS-4: Item wraps a trailing date under the
+  // title at phone width).
+  run: {
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "center",
+    columnGap: grasp.space3,
+    paddingBlock: grasp.space3,
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+  runTitle: {
+    minWidth: 0,
+    color: grasp.ink,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+  },
 });
 
 /** Why a wake-up didn't run, as core says it (agent-wakes.ts). */
@@ -365,7 +378,7 @@ const Instructions = ({
   if (saved === undefined) {
     return (
       <SectionCard title={t`Instructions`}>
-        <Empty size="sm">
+        <Empty place="top" size="sm">
           <EmptyHeader>
             <EmptyDescription>{t`Not shown`}</EmptyDescription>
           </EmptyHeader>
@@ -376,7 +389,7 @@ const Instructions = ({
   if (text === "") {
     return (
       <SectionCard title={t`Instructions`}>
-        <Empty size="sm">
+        <Empty place="top" size="sm">
           <EmptyHeader>
             <EmptyDescription>
               {t`Say in plain words what it should do, as to a new colleague.`}
@@ -475,7 +488,7 @@ const Schedule = ({
   if (wakes.length === 0) {
     return (
       <SectionCard title={t`Schedule`}>
-        <Empty size="sm">
+        <Empty place="top" size="sm">
           <EmptyHeader>
             <EmptyDescription>
               {own
@@ -583,33 +596,27 @@ const RunHistory = ({ wakes }: { wakes: readonly AgentWake[] }) => {
     <section {...stylex.props(styles.history)}>
       <SectionHeader title={t`Run history`} variant="group" />
       {runs.length === 0 ? (
-        <Empty size="sm">
+        <Empty place="top" size="sm">
           <EmptyHeader>
             <EmptyDescription>{empty}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
-        <ItemGroup separated>
+        <ul {...stylex.props(styles.runs)}>
           {runs.map(({ wake, at, outcome }) => (
-            <Item key={wake.id} size="sm">
-              <ItemMedia iconLook="inline">
-                <span
-                  {...stylex.props(
-                    outcome === "started" ? styles.ok : styles.failed
-                  )}
-                >
-                  <Icon icon={outcome === "started" ? Done : Failed} />
-                </span>
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{titles[outcome]}</ItemTitle>
-              </ItemContent>
-              <ItemActions>
-                <span {...stylex.props(styles.date)}>{moment(at)}</span>
-              </ItemActions>
-            </Item>
+            <li key={wake.id} {...stylex.props(styles.run)}>
+              <span
+                {...stylex.props(
+                  outcome === "started" ? styles.ok : styles.failed
+                )}
+              >
+                <Icon icon={outcome === "started" ? Done : Failed} />
+              </span>
+              <span {...stylex.props(styles.runTitle)}>{titles[outcome]}</span>
+              <span {...stylex.props(styles.date)}>{moment(at)}</span>
+            </li>
           ))}
-        </ItemGroup>
+        </ul>
       )}
     </section>
   );
@@ -659,8 +666,8 @@ const FailingAlert = ({
     );
   }
   return (
-    <Alert action={action} title={t`It didn't run on ${when}`} tone="danger">
-      {why[outcome]}
+    <Alert title={t`It didn't run on ${when}`} tone="danger">
+      {why[outcome]} {action}
     </Alert>
   );
 };
