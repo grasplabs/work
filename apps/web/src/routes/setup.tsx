@@ -170,8 +170,7 @@ const onResize = (listener: () => void): (() => void) => {
 };
 
 /** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
-const keptKey = (userId: string): string =>
-  `/* PORT: grasp.setup (None) */ grasp.setup.${userId}`;
+const keptKey = (userId: string): string => `grasp.setup.${userId}`;
 
 /**
  * Which list of steps a kept place counts in: 2 since the AI step came
