@@ -14,10 +14,10 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { objectOf, subjectOf } from "../activity/pending.tsx";
+import { requestAsker, requestWords } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
-import { formatDateTime, formatList } from "../format.ts";
+import { formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import type { NotificationsPage } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
@@ -115,37 +115,38 @@ export interface InboxItem {
   date: string;
   /** Something waits or stops until this is decided. */
   urgent: boolean;
+  /** Who asks, by name, where the item says it: an approval's quiet line names them. */
+  asker?: string;
   source: InboxSource;
 }
 
-/** The kinds, grouped as the filter offers them. */
-export type Group = "all" | "workflows" | "brain" | "apps";
+/** The kinds, grouped as the inbox's filter offers them. */
+export type Group = "all" | "asked" | "brain" | "approvals";
 
+// Workflows' and Apps' asks are one group, Approvals (Ruben, 17 November).
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
-  checkDrawing: "workflows",
-  checkProposal: "workflows",
-  approveChange: "workflows",
-  confirmResult: "workflows",
+  checkDrawing: "approvals",
+  checkProposal: "approvals",
+  approveChange: "approvals",
+  confirmResult: "approvals",
   conflict: "brain",
-  openQuestion: "brain",
-  unknownAiTool: "apps",
-  signInAgain: "apps",
-  externalDomain: "apps",
-  heldWrite: "apps",
-  heldStart: "workflows",
-  unknownOutcome: "apps",
-  permissionRequest: "apps",
-  stoppedSchedule: "workflows",
-  workflowChanged: "workflows",
-  packageNotice: "apps",
-  stoppedEvents: "workflows",
-  appMessage: "apps",
-  bindingApproval: "workflows",
-  skillShare: "brain",
-  decision: "workflows",
+  openQuestion: "asked",
+  unknownAiTool: "approvals",
+  signInAgain: "approvals",
+  externalDomain: "approvals",
+  heldWrite: "approvals",
+  heldStart: "approvals",
+  unknownOutcome: "approvals",
+  permissionRequest: "approvals",
+  stoppedSchedule: "approvals",
+  workflowChanged: "approvals",
+  packageNotice: "approvals",
+  stoppedEvents: "approvals",
+  appMessage: "approvals",
+  bindingApproval: "approvals",
+  skillShare: "approvals",
+  decision: "approvals",
 };
-
-export type Sort = "urgent" | "newest" | "oldest";
 
 /** Urgent first, then the newest, then by title: the inbox's own order. */
 const order = (a: InboxItem, b: InboxItem): number =>
@@ -153,26 +154,15 @@ const order = (a: InboxItem, b: InboxItem): number =>
   b.date.localeCompare(a.date) ||
   a.title.localeCompare(b.title);
 
-/** The list as the person filtered and ordered it; "urgent" keeps the inbox's own order. */
+/** What waits in `group`, in the inbox's own order. */
 export const listed = (
   items: readonly InboxItem[],
-  group: Group,
-  sort: Sort
+  group: Group
 ): InboxItem[] =>
-  items
-    .filter((item) => group === "all" || groupOf[item.kind] === group)
-    .toSorted((a, b) => {
-      if (sort === "newest") {
-        return b.date.localeCompare(a.date);
-      }
-      if (sort === "oldest") {
-        return a.date.localeCompare(b.date);
-      }
-      return 0;
-    });
+  items.filter((item) => group === "all" || groupOf[item.kind] === group);
 
 /** A held write's name: what it does, on which connection. */
-export const heldName = (action: PendingAction): string => {
+const heldName = (action: PendingAction): string => {
   const title = action.description?.title ?? action.action;
   const connection = action.connectionName ?? action.connectionId;
   return t`${title} on ${connection}`;
@@ -249,7 +239,7 @@ const heldStartItems = (
   });
 
 /** What a call of unknown outcome did, and where: its tool's title, or its action. */
-export const outcomeName = (outcome: UnknownOutcome): string => {
+const outcomeName = (outcome: UnknownOutcome): string => {
   const title = outcome.description?.title ?? outcome.key.action;
   const connection = outcome.connectionName ?? outcome.key.connectionId;
   return t`${title} on ${connection}`;
@@ -290,21 +280,18 @@ const outcomeItems = (
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
-    const subject = subjectOf(request, directory);
-    const object = objectOf(request, directory);
-    const actions = formatList(request.actions);
-    const who = t`${subject}: ${actions} on ${object}`;
-    const { binding } = request;
+    const who = requestWords(request, directory);
+    const asker = requestAsker(request, directory);
     return {
+      asker,
       id: `request:${request.id}`,
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
-      context: who,
-      body: [t`${subject} gets this permission once it is granted.`],
-      facts: [
-        { label: t`Binding`, value: binding },
-        { label: t`Asked`, value: formatDateTime(request.requestedAt) },
-      ],
+      // The row says who asks; the approval's title says what.
+      context: asker,
+      body: [],
+      // Who asked and when stand under the approval's Details.
+      facts: [],
       about:
         request.subject.type === "app"
           ? {
@@ -382,9 +369,10 @@ const skillShareWords = (
  */
 const skillShareItems = (shares: readonly SkillShareItem[]): InboxItem[] =>
   shares.map((item) => {
-    const { name, requestedAt } = item.share;
+    const { name, requestedAt, requestedBy } = item.share;
     const { title, body } = skillShareWords(item.share);
     return {
+      asker: requestedBy.name ?? requestedBy.userId,
       id: item.id,
       kind: "skillShare",
       title,
@@ -414,9 +402,7 @@ const askedItems = (
         kind: "openQuestion",
         title: question,
         context: owner,
-        body: [
-          t`You were asked this as the ${owner}. Answer it in the brain: everyone in the company reads the answer, with your name.`,
-        ],
+        body: [t`Everyone in the company reads your answer, with your name.`],
         facts: [{ label: t`Asked`, value: formatDateTime(at) }],
         about: { kind: "brain" },
         forWhom: { person: me },

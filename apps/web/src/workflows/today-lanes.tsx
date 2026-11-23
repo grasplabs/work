@@ -13,14 +13,14 @@ import { Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatTime } from "../format.ts";
 import {
   confirmAndAnswer,
   DecisionConfirmDialog,
   WithheldAskNote,
-} from "../decision-confirmation.tsx";
-import type { PendingConfirmation } from "../decision-confirmation.tsx";
-import { ErrorText } from "../error-text.tsx";
-import { formatTime } from "../format.ts";
+} from "../inbox/decision-confirmation.tsx";
+import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";

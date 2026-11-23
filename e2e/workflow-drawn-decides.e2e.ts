@@ -5,6 +5,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { inboxList, toItem } from "./inbox.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -64,17 +65,14 @@ const pick = async (page: Page, person: Person): Promise<void> => {
  * on its own time, after its start or delivery was answered.
  */
 const decisionIn = async (page: Page, name: string): Promise<void> => {
-  const listed = page
-    .getByRole("region", { name: "What waits on you" })
-    .getByRole("button", { name: new RegExp(`^${name} Decision`, "u") });
+  const listed = inboxList(page)
+    .getByRole("link")
+    .filter({ hasText: new RegExp(name, "u") })
+    .first();
   await expect(async () => {
     await page.goto("/inbox");
-    // Read in full first, however long a read takes; then it is listed
-    // or not yet.
-    await expect(page.getByRole("tab", { name: /^To do/u })).toBeVisible(
-      pageRead
-    );
-    await expect(listed).toBeVisible({ timeout: 1000 });
+    // However long a read takes: then it is listed, or not yet.
+    await expect(listed).toBeVisible(pageRead);
   }).toPass(untilItHappens);
   await listed.click();
 };
@@ -194,10 +192,11 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     /1 workflow needs you$/u,
     pageRead
   );
+  // Opened beside the list: what it asks, and the way to its own page.
   const item = asDecider.getByRole("article", {
     name: "Approve invoice INV-42",
   });
-  await item.getByRole("button", { name: "Review and answer" }).first().click();
+  await item.getByRole("link", { name: "Review and answer" }).click();
   await expect(
     asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
   ).toBeVisible(pageRead);
@@ -215,10 +214,11 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("alertdialog", { name: "Confirm your approval" })
     .getByRole("button", { name: "Confirm" })
     .click(pageRead);
-  await expect(asDecider.getByRole("status")).toHaveText(
-    /^Approved by Person on /u,
-    pageRead
-  );
+  await expect(
+    asDecider
+      .getByRole("status")
+      .filter({ hasText: /^Approved by Person on /u })
+  ).toBeVisible(pageRead);
   // Answered, it needs them no more.
   await asDecider.reload();
   await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
@@ -277,20 +277,13 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // request names the trigger by its kind, and the workflow by its name.
   const request = `start on Workflow ${name}`;
   await asAdmin.goto("/inbox");
-  await asAdmin
-    .getByRole("region", { name: "What waits on you" })
-    .getByText(new RegExp(request, "u"))
-    .first()
-    .click(pageRead);
-  await asAdmin
-    .getByRole("region", { name: "What happened" })
-    .getByRole("button", {
-      name: new RegExp(`^Approve Webhook trigger .+: ${request}$`, "u"),
-    })
-    .click();
-  await expect(asAdmin.getByText(/^Approved: Webhook trigger /u)).toBeVisible(
-    pageRead
+  const grant = await toItem(
+    asAdmin,
+    new RegExp(sourceName, "u"),
+    new RegExp(`^Grant Webhook trigger .+: ${request}\\?$`, "u")
   );
+  await grant.getByRole("button", { name: "Grant it" }).click();
+  await expect(grant).toHaveCount(0, pageRead);
   await page.goto(`/workflows/${workflow}?view=settings&section=triggers`);
   await expect(
     page.getByText(`On invoice.received events from ${sourceName}`)

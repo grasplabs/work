@@ -1,18 +1,50 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/app-kit/components/dialog";
 import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import {
+  CodeBlock,
+  CodeBlockContent,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@grasp-os/ui/components/code-block";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
+import {
+  Questionnaire,
+  QuestionnaireActions,
+  QuestionnaireError,
+  QuestionnaireInput,
+  QuestionnaireItem,
+  QuestionnaireSubmit,
+  QuestionnaireTitle,
+} from "@grasp-os/ui/components/questionnaire";
+import type { QuestionnaireAnswer } from "@grasp-os/ui/components/questionnaire";
+import { Text } from "@grasp-os/ui/components/text";
+import { ArrowUpRightIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
@@ -24,23 +56,46 @@ import {
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
-import { ItemMark, KindPill } from "./inbox-kind.tsx";
+import { ApprovalRequest } from "./approval-request.tsx";
+import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
 import { isUnresolvable, OutcomeDetails } from "./outcome-details.tsx";
 import { RequestDetails } from "./request-details.tsx";
 import { TargetLink } from "./target-link.tsx";
 
-// An item of the inbox, as the prototype's (`routes/inbox.tsx`): what
-// happened and what to do, its context, and a bar with its actions at the
-// bottom. Each action goes to core with the same calls the chat's held
-// writes and the approvals make, and the inbox is read again once it is
-// through, so a settled item leaves the list. What the prototype's bar adds besides
-// (dismiss with why, put away until a date, give to someone) core keeps
-// nothing of, so the bar has the item's own actions only.
+// An item of the inbox, on Damsko: an ask for the person's yes on the
+// Inbox's approval request (approval-request.tsx); anything else on a card,
+// with what happened, what has to be read before deciding, its actions in
+// one row under them, the one that settles it first, and its facts. Each
+// action goes to core, and the inbox is read again once it is through, so
+// a settled item leaves the list. A question the Brain asked the person is
+// answered here, in their own words (`brain.answerGap`); core then lists
+// it no more.
+
+const styles = stylex.create({
+  marks: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["1"],
+  },
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    minWidth: 0,
+  },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+});
 
 /** One of an item's actions: a press that goes to core, or the way to where it is done. */
 interface Act {
@@ -53,7 +108,7 @@ interface Act {
   disabled?: boolean;
   /** The id of a line that says why it waits. */
   describedBy?: string;
-  /** Asked once more before it is done, in a dialog: for a no that can't be taken back. */
+  /** Asked once more before it is done: for a no that can't be taken back. */
   confirm?: {
     title: string;
     description: string;
@@ -62,179 +117,112 @@ interface Act {
   };
 }
 
-/** The height of one line in the list. Every line in the item falls on this rhythm too, in pixels. */
-const row = 56;
-
-/**
- * A block whose height is a whole number of list lines, so its bottom line
- * meets a line of the list beside it. It grows by a whole line when its
- * content needs more room.
- */
-const pxSuffix = /px$/u;
-
-/** Makes `block` as high as the whole list lines its content takes. */
-const fitRows = (block: HTMLElement, content: HTMLElement): void => {
-  const style = getComputedStyle(block);
-  const chrome = [
-    style.paddingTop,
-    style.paddingBottom,
-    style.borderTopWidth,
-    style.borderBottomWidth,
-  ].reduce((sum, value) => sum + (Number(value.replace(pxSuffix, "")) || 0), 0);
-  // A hair under a whole line still fits in it; rounding would otherwise add a line.
-  const rows = Math.max(
-    1,
-    Math.ceil((content.offsetHeight + chrome - 0.5) / row)
-  );
-  // A custom property, not a style: the class reads it (`min-h-(--rows-height)`).
-  block.style.setProperty("--rows-height", `${rows * row}px`);
-};
-
-const Rows = ({
-  className,
-  children,
+/** An action asked once more in an alert dialog, which closes once core has it. */
+const ConfirmedAct = ({
+  act,
+  confirm,
+  disabled,
+  variant,
 }: {
-  className: string;
-  children: ReactNode;
+  act: Act;
+  confirm: NonNullable<Act["confirm"]>;
+  disabled: boolean;
+  variant: "default" | "secondary";
 }) => {
-  const outer = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const block = outer.current;
-    const content = inner.current;
-    const observer = new ResizeObserver(() => {
-      if (block !== null && content !== null) {
-        fitRows(block, content);
-      }
-    });
-    if (block !== null && content !== null) {
-      fitRows(block, content);
-      observer.observe(content);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
+  const [open, setOpen] = useState(false);
   return (
-    <div className={className} ref={outer}>
-      <div ref={inner}>{children}</div>
-    </div>
+    <AlertDialog onOpenChange={setOpen} open={open}>
+      <AlertDialogTrigger asChild>
+        <Button
+          aria-describedby={act.describedBy}
+          aria-label={act.name}
+          disabled={disabled}
+          focusableWhenDisabled={act.describedBy !== undefined}
+          size="sm"
+          variant={variant}
+        >
+          {act.label}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
+          <AlertDialogDescription>{confirm.description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel />
+          <Button
+            onClick={async () => {
+              await act.onPress?.();
+              setOpen(false);
+            }}
+            size="sm"
+            variant={confirm.variant ?? "destructive"}
+          >
+            {act.label}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
-
-/** A section of the item, with a grey band for its name, one line high. */
-const Section = ({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) => (
-  <section aria-label={title}>
-    <h2 className="bg-row-group text-row-group-foreground flex h-14 items-center border-b px-5 font-medium">
-      {title}
-    </h2>
-    {children}
-  </section>
-);
-
-/** One fact of the context: a cell one line high, or two when its value needs the room. */
-const Fact = ({ label, value }: { label: string; value: string }) => (
-  <Rows className="flex min-h-(--rows-height) flex-col justify-center border-r border-b px-5 py-2">
-    <dl>
-      <dt className="text-muted-foreground text-xs leading-4">{label}</dt>
-      <dd className="mt-0.5 leading-5">{value}</dd>
-    </dl>
-  </Rows>
-);
 
 /** An action's button: a press, asked once more where it can't be taken back, or the way to its page. */
 const ActButton = ({
   act,
   busy,
-  variant,
+  first,
 }: {
   act: Act;
   busy: boolean;
-  variant: "default" | "outline";
+  /** The item's own next step: filled; the rest quiet. */
+  first: boolean;
 }) => {
-  const [confirming, setConfirming] = useState(false);
+  const variant = first ? "default" : "secondary";
   if (act.to !== undefined) {
     return (
-      <Button
-        aria-label={act.name}
-        nativeButton={false}
-        render={<TargetLink destination={act.to} />}
-        size="sm"
-        variant={variant}
-      >
-        {act.label}
-        <ArrowUpRightIcon data-icon="inline-end" />
+      <Button asChild size="sm" variant={variant}>
+        <TargetLink aria-label={act.name} destination={act.to}>
+          {act.label}
+          <Icon icon={ArrowUpRightIcon} />
+        </TargetLink>
       </Button>
     );
   }
-  const press = () => {
-    void act.onPress?.();
-  };
-  const { confirm } = act;
   const disabled = busy || act.disabled === true;
-  if (confirm === undefined) {
+  if (act.confirm !== undefined) {
     return (
-      <Button
-        aria-describedby={act.describedBy}
-        aria-label={act.name}
+      <ConfirmedAct
+        act={act}
+        confirm={act.confirm}
         disabled={disabled}
-        onClick={press}
-        size="sm"
         variant={variant}
-      >
-        {act.label}
-      </Button>
+      />
     );
   }
-  const button = (
+  return (
     <Button
-      aria-describedby={act.describedBy}
       aria-label={act.name}
       disabled={disabled}
+      onClick={() => {
+        void act.onPress?.();
+      }}
       size="sm"
       variant={variant}
-    />
-  );
-  return (
-    <Dialog onOpenChange={setConfirming} open={confirming}>
-      <DialogTrigger render={button}>{act.label}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{confirm.title}</DialogTitle>
-          <DialogDescription>{confirm.description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            onClick={() => {
-              setConfirming(false);
-            }}
-            variant="outline"
-          >
-            <Trans>Cancel</Trans>
-          </Button>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setConfirming(false);
-              press();
-            }}
-            variant={confirm.variant ?? "destructive"}
-          >
-            {act.label}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    >
+      {act.label}
+    </Button>
   );
 };
 
-/** The item as it is shown: what happened, its context, and its actions, the first its next step. */
+/** What the inbox gives an item: where to say what was done. */
+interface Frame {
+  item: InboxItem;
+  /** Says what was done, for a screen reader: the list only loses the item. */
+  onSaid: (said: string) => void;
+}
+
+/** The item as it is shown: what happened, what to read, its actions, and its facts. */
 const ItemFrame = ({
   frame,
   extra,
@@ -249,138 +237,85 @@ const ItemFrame = ({
   busy: boolean;
   failure: string | undefined;
 }) => {
-  const { t } = useLingui();
-  const { item, onBack } = frame;
-  const [first, ...others] = acts;
-  let forWhom = t`For an admin`;
+  const { t, i18n } = useLingui();
+  const titleId = useId();
+  const { item } = frame;
+  // Who it is for, when it is someone in particular: an admin's by default.
+  const facts: KeyValueItem[] = item.facts.map(({ label, value }) => ({
+    id: label,
+    label,
+    value,
+  }));
   if (item.forWhom !== undefined && "role" in item.forWhom) {
     const { role } = item.forWhom;
-    forWhom = t`For the ${role}`;
+    facts.unshift({ id: "for", label: t`For`, value: t`The ${role}` });
   } else if (item.forWhom !== undefined) {
-    const { person } = item.forWhom;
-    forWhom = t`For ${person}`;
+    facts.unshift({ id: "for", label: t`For`, value: item.forWhom.person });
   }
   // With no action of its own, the item is dealt with where it lives.
-  const openLink =
-    item.about === undefined ? null : (
-      <Button
-        nativeButton={false}
-        render={<TargetLink destination={item.about} />}
-        size="sm"
-      >
-        <Trans>Open</Trans>
-        <ArrowUpRightIcon data-icon="inline-end" />
-      </Button>
-    );
+  const shown: Act[] =
+    acts.length === 0 && item.about !== undefined
+      ? [{ label: t`Open`, to: item.about }]
+      : acts;
   return (
-    <article aria-label={item.title} className="flex min-h-full flex-col">
-      <header className="flex h-14 flex-none items-center gap-3 border-b px-5">
-        <Button
-          aria-label={t`Back to the list`}
-          className="-ml-2 @4xl/inbox:hidden"
-          onClick={onBack}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <ArrowLeftIcon />
-        </Button>
-        <ItemMark item={item} />
-        <span className="min-w-0 flex-1 truncate font-medium">
-          {item.context}
-        </span>
-        <span className="hidden @md/item:inline-flex">
-          <KindPill kind={item.kind} />
-        </span>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {formatDate(item.date)}
-        </span>
-      </header>
-
-      <Section
-        title={t({ message: "What happened", context: "inbox item section" })}
-      >
-        <Rows className="min-h-(--rows-height) border-b px-5 py-4">
-          <div className="flex flex-col gap-3 leading-6">
-            <p className="font-medium">{item.title}</p>
+    <Card asChild size="sm">
+      <article aria-labelledby={titleId}>
+        <CardHeader>
+          <span id={titleId}>
+            <CardTitle level={2}>{item.title}</CardTitle>
+          </span>
+          {item.date === "" ? null : (
+            <CardDescription>{formatDate(item.date)}</CardDescription>
+          )}
+          <CardAction>
+            <span {...stylex.props(styles.marks)}>
+              <Badge icon={kindMark[item.kind]} size="sm" variant="secondary">
+                {i18n._(kindLabel[item.kind])}
+              </Badge>
+              {item.urgent ? (
+                <Badge size="sm" variant="warning">
+                  <Trans context="inbox: something waits on this item">
+                    Blocks work
+                  </Trans>
+                </Badge>
+              ) : null}
+            </span>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <div {...stylex.props(styles.body)}>
             {item.body.map((paragraph) => (
-              <p className="text-muted-foreground" key={paragraph}>
+              <Text key={paragraph} size="sm">
                 {paragraph}
-              </p>
+              </Text>
             ))}
             {extra}
-            {first === undefined ? null : (
-              <div className="bg-card flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
-                <span className="text-muted-foreground">
-                  <Trans context="inbox: the action that settles an item">
-                    Next step
-                  </Trans>
-                </span>
-                <ActButton act={first} busy={busy} variant="default" />
+            {shown.length === 0 ? null : (
+              <div {...stylex.props(styles.actions)}>
+                {shown.map((act, index) => (
+                  <ActButton
+                    act={act}
+                    busy={busy}
+                    first={index === 0}
+                    key={act.label}
+                  />
+                ))}
               </div>
             )}
-            <ErrorText>{failure}</ErrorText>
-          </div>
-        </Rows>
-      </Section>
-
-      <Section title={t({ message: "Context", context: "inbox item section" })}>
-        {/* Each cell draws its own right and bottom line; the column at the edge hides its right one. */}
-        <div className="overflow-hidden">
-          <div className="-mr-px grid grid-cols-1 @md/item:grid-cols-2 @2xl/item:grid-cols-3">
-            <Fact label={t`Who`} value={forWhom} />
-            {item.facts.map((fact) => (
-              <Fact
-                key={`${fact.label}-${fact.value}`}
-                label={fact.label}
-                value={fact.value}
-              />
-            ))}
-          </div>
-        </div>
-        {item.about === undefined ? null : (
-          <div className="flex h-14 items-center border-b px-5">
-            <TargetLink
-              className="inline-flex items-center gap-1 hover:underline"
-              destination={item.about}
-            >
-              <Trans>Open where it lives</Trans>
-              <ArrowUpRightIcon className="text-muted-foreground size-3.5" />
-            </TargetLink>
-          </div>
-        )}
-      </Section>
-
-      {/* The actions float at the foot of the item: the quiet ones first, the item's own last. */}
-      {first === undefined && item.about === undefined ? null : (
-        <div className="sticky bottom-4 mt-auto flex justify-center px-5 pt-6">
-          <div className="bg-background flex max-w-full flex-wrap items-center justify-center gap-1 rounded-xl border p-1.5">
-            {others.map((act) => (
-              <ActButton
-                act={act}
-                busy={busy}
-                key={act.label}
-                variant="outline"
-              />
-            ))}
-            {first === undefined ? (
-              openLink
-            ) : (
-              <ActButton act={first} busy={busy} variant="default" />
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertDescription>{failure}</AlertDescription>
+              </Alert>
+            )}
+            {facts.length === 0 ? null : (
+              <KeyValueList items={facts} orientation="horizontal" />
             )}
           </div>
-        </div>
-      )}
-    </article>
+        </CardContent>
+      </article>
+    </Card>
   );
 };
-
-/** What the inbox gives an item: the way back to the list, and where to say what was done. */
-interface Frame {
-  item: InboxItem;
-  onBack: () => void;
-  /** Says what was done, for a screen reader: the list only loses the item. */
-  onSaid: (said: string) => void;
-}
 
 /** Makes a change, says what was done, and reads the inbox again whatever came of it. */
 const useDecide = (onSaid: (said: string) => void) => {
@@ -406,7 +341,66 @@ const useDecide = (onSaid: (said: string) => void) => {
   return { ...action, decide };
 };
 
-/** A held write: approving it is for what the person was shown, all of it. */
+/**
+ * An ask for the person's yes (a held change, a start an agent asked for,
+ * a permission): on the Inbox's approval request, with what to read under
+ * Details. Each answer goes to core as the person; one core refuses fails
+ * on its own button, and the item stays, read again: a refused grant then
+ * shows the version there is now, to review that one instead. Once it is
+ * through, the item leaves.
+ */
+const ApprovalFrame = ({
+  frame,
+  details,
+  approveLabel,
+  approveHeld,
+  onApprove,
+  onDecline,
+}: {
+  frame: Frame;
+  details?: ReactNode;
+  approveLabel?: string;
+  /** Why Approve waits, while it does. */
+  approveHeld?: string | undefined;
+  onApprove: (session: Session) => Promise<unknown>;
+  onDecline: (session: Session) => Promise<unknown>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const core = useCore();
+  const { item } = frame;
+  const answer =
+    (change: (session: Session) => Promise<unknown>, said: string) =>
+    async () => {
+      await changeThenRefresh(
+        async () => {
+          await core.withSession(change);
+          frame.onSaid(said);
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+    };
+  const { title } = item;
+  return (
+    <ApprovalRequest
+      approveHeld={approveHeld}
+      approveLabel={approveLabel}
+      asker={item.asker}
+      askedAt={item.date === "" ? undefined : formatDate(item.date)}
+      details={details}
+      onApprove={answer(onApprove, t`Approved: ${title}`)}
+      onDecline={answer(onDecline, t`Declined: ${title}`)}
+      title={title}
+    />
+  );
+};
+
+/**
+ * A held write: confirming it is for what the person was shown, all of
+ * it. Confirm waits, with why, until every part of what it sends was shown.
+ */
 const HeldItem = ({
   frame,
   source,
@@ -417,45 +411,30 @@ const HeldItem = ({
   const { t } = useLingui();
   const { action } = source;
   const shown = useShown(action);
-  const { busy, failure, decide } = useDecide(frame.onSaid);
-  const who = frame.item.context;
-  const reject: Act = {
-    label: t`Reject`,
-    name: t`Reject ${who}`,
-    onPress: async () => {
-      await decide(declineHeld(action), t`Rejected: ${who}.`);
-    },
-  };
-  // Nobody approves what they can't read: withheld, it is only rejected.
-  const approve: Act[] =
-    action.withheld === undefined
-      ? [
-          {
-            label: t`Approve`,
-            name: t`Approve ${who}`,
-            disabled: shown.unseen,
-            describedBy: shown.unseen ? shown.unseenId : undefined,
-            onPress: async () => {
-              await decide(confirmHeld(action), t`Approved: ${who}.`);
-            },
-          },
-        ]
-      : [];
+  // Nobody approves what they can't read: withheld, it is only declined.
+  let approveHeld: string | undefined;
+  if (action.withheld === "revoked") {
+    approveHeld = t`What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it.`;
+  } else if (action.withheld === "unchecked") {
+    approveHeld = t`What this would send can't be shown right now, so you can only decline it for now. Try again in a moment.`;
+  } else if (shown.unseen) {
+    approveHeld = t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`;
+  }
   return (
-    <ItemFrame
-      acts={[...approve, reject]}
-      busy={busy}
-      extra={<HeldWriteDetails action={action} shown={shown} />}
-      failure={failure}
+    <ApprovalFrame
+      approveHeld={approveHeld}
+      approveLabel={t`Confirm`}
+      details={<HeldWriteDetails action={action} shown={shown} />}
       frame={frame}
+      onApprove={confirmHeld(action)}
+      onDecline={declineHeld(action)}
     />
   );
 };
 
 /**
- * A start of a workflow a chat's agent asked for: confirming starts it,
- * as the agent acting for the person, with exactly the input shown, which
- * is all shown before either button.
+ * A start of a workflow a chat's agent asked for: approving starts it, as
+ * the agent acting for the person, with exactly the input shown.
  */
 const HeldStartItem = ({
   frame,
@@ -466,60 +445,66 @@ const HeldStartItem = ({
 }) => {
   const { t } = useLingui();
   const { start } = source;
-  const { busy, failure, decide } = useDecide(frame.onSaid);
-  const name = start.workflowName;
   return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Start`,
-          name: t`Start ${name}`,
-          onPress: async () => {
-            await decide(
-              async (session) => {
-                await session.heldStarts.confirm(start.id, start.argsHash);
-              },
-              t`Started: ${name}.`
-            );
-          },
-        },
-        {
-          label: t`Decline`,
-          name: t`Decline starting ${name}`,
-          onPress: async () => {
-            await decide(
-              async (session) => {
-                await session.heldStarts.decline(start.id);
-              },
-              t`Declined: ${name}.`
-            );
-          },
-        },
-      ]}
-      busy={busy}
-      extra={
-        <div className="flex flex-col gap-2">
-          <h3 className="font-medium">
-            <Trans>What it starts with</Trans>
-          </h3>
-          <pre className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm">
-            <code className="font-mono">
-              {JSON.stringify(start.args, null, 2)}
-            </code>
-          </pre>
-        </div>
+    <ApprovalFrame
+      approveLabel={t`Start it`}
+      details={
+        <CodeBlock language="json" size="sm">
+          <CodeBlockHeader>
+            <CodeBlockTitle>{t`What it starts with`}</CodeBlockTitle>
+          </CodeBlockHeader>
+          <CodeBlockContent wrap>
+            {JSON.stringify(start.args, null, 2)}
+          </CodeBlockContent>
+        </CodeBlock>
       }
-      failure={failure}
       frame={frame}
+      onApprove={async (session) => {
+        await session.heldStarts.confirm(start.id, start.argsHash);
+      }}
+      onDecline={async (session) => {
+        await session.heldStarts.decline(start.id);
+      }}
+    />
+  );
+};
+
+/** A permission request: approving grants it for the version of its App that was reviewed. */
+const RequestItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "request" }>;
+}) => {
+  const { t } = useLingui();
+  const { request, pending } = source;
+  return (
+    <ApprovalFrame
+      approveLabel={t`Grant it`}
+      details={
+        <RequestDetails directory={pending.directory} request={request} />
+      }
+      frame={frame}
+      onApprove={async (session) =>
+        await grantReviewed(
+          session.permissions,
+          request,
+          reviewedVersion(request, pending.directory)
+        )
+      }
+      onDecline={async (session) =>
+        await session.permissions.revoke(request.id)
+      }
     />
   );
 };
 
 /**
  * A change whose answer was lost: "It happened" or "It didn't happen", each
- * asked once more (`outcome-details.tsx`). Saying it didn't happen lets
- * it go out again, so it waits while part of what was sent is cut short
- * and unseen, or no longer kept.
+ * asked once more. Saying it didn't happen lets it go out again, so it
+ * waits while part of what was sent is cut short and unseen, or no longer
+ * kept.
  */
 const OutcomeItem = ({
   frame,
@@ -612,59 +597,6 @@ const OutcomeItem = ({
   );
 };
 
-/** A permission request: approving grants it for the version of its App that was reviewed. */
-const RequestItem = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "request" }>;
-}) => {
-  const { t } = useLingui();
-  const { request, pending } = source;
-  const { busy, failure, decide } = useDecide(frame.onSaid);
-  const who = frame.item.context;
-  return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Approve`,
-          name: t`Approve ${who}`,
-          onPress: async () => {
-            await decide(
-              async (session) =>
-                await grantReviewed(
-                  session.permissions,
-                  request,
-                  reviewedVersion(request, pending.directory)
-                ),
-              t`Approved: ${who}.`
-            );
-          },
-        },
-        {
-          label: t`Reject`,
-          name: t`Reject ${who}`,
-          confirm: {
-            title: t`Reject this request?`,
-            description: t`${who} can't be granted later: it has to ask again.`,
-          },
-          onPress: async () => {
-            await decide(
-              async (session) => await session.permissions.revoke(request.id),
-              t`Rejected: ${who}.`
-            );
-          },
-        },
-      ]}
-      busy={busy}
-      extra={<RequestDetails directory={pending.directory} request={request} />}
-      failure={failure}
-      frame={frame}
-    />
-  );
-};
-
 /**
  * A version of a workflow whose bindings no admin approved: each approved
  * here for the version shown, through the workflow's own approval, which
@@ -714,13 +646,62 @@ const BindingsDetail = ({
   );
 };
 
+/**
+ * A question the Brain asked the person: answered here, in their own
+ * words, for everyone in the company to read with their name. Once it is
+ * answered core lists it no more, so it leaves the inbox.
+ */
+const AskedItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "asked" }>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const core = useCore();
+  const { notification } = source;
+  const { owner, question } = notification;
+  const asked = t`Asked of you as the ${owner}`;
+  const answer = async (
+    answers: Record<string, QuestionnaireAnswer>
+  ): Promise<void> => {
+    const text = answers.answer?.text.trim() ?? "";
+    await core.withSession(
+      async (session) => await session.brain.answerGap(notification.gap, text)
+    );
+    frame.onSaid(t`Answered: ${question}`);
+    await router.invalidate({ sync: true });
+  };
+  return (
+    <ItemFrame
+      acts={[]}
+      busy={false}
+      extra={
+        <Questionnaire aria-label={t`Question`} onSubmit={answer}>
+          <QuestionnaireItem name="answer" required>
+            <QuestionnaireTitle>{question}</QuestionnaireTitle>
+            <QuestionnaireInput />
+            <QuestionnaireError />
+          </QuestionnaireItem>
+          <QuestionnaireActions>
+            <QuestionnaireSubmit>{t`Answer`}</QuestionnaireSubmit>
+          </QuestionnaireActions>
+        </Questionnaire>
+      }
+      failure={undefined}
+      frame={{ ...frame, item: { ...frame.item, title: asked } }}
+    />
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
   const { item } = frame;
   const labels: Partial<Record<InboxSource["type"], string>> = {
     reconnect: t`Sign in again`,
-    asked: t`Answer in the brain`,
     decision: t`Review and answer`,
     stoppedEvents: t`Open the connection`,
     appMessage: t`Open the App`,
@@ -753,6 +734,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "bindings") {
     return <BindingsDetail frame={frame} source={source} />;
+  }
+  if (source.type === "asked") {
+    return <AskedItem frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };
