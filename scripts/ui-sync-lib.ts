@@ -2,7 +2,13 @@
 // from Damsko's own registry.json at the pinned commit (ui-sync.ts), and
 // the files changed here on purpose (local-changes.json).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
@@ -131,8 +137,8 @@ export const localChangesSchema = z.array(
 
 export type LocalChange = z.infer<typeof localChangesSchema>[number];
 
-/** Days a change may stay here with no pull request in Damsko. */
-const unproposedDays = 14;
+/** Days a change may stay here before check:ui names it. */
+const overdueDays = 14;
 const dayMs = 86_400_000;
 
 /**
@@ -186,21 +192,50 @@ export const differences = (
   return found;
 };
 
-/** Listed changes with no pull request in Damsko after two weeks, one line each. */
-export const unproposed = (
-  local: readonly LocalChange[],
-  today: Date
-): string[] =>
+/**
+ * Listed changes older than two weeks, one line each: one with no pull
+ * request in Damsko yet, and one whose pull request hasn't reached the pin.
+ */
+export const overdue = (local: readonly LocalChange[], today: Date): string[] =>
   local
     .filter(
-      ({ since, pullRequest }) =>
-        pullRequest === undefined &&
-        today.getTime() - Date.parse(since) > unproposedDays * dayMs
+      ({ since }) => today.getTime() - Date.parse(since) > overdueDays * dayMs
     )
-    .map(
-      ({ path, since }) =>
-        `local-changes.json: ${path} has differed from Damsko's since ${since} with no pull request there (vp run ui:propose)`
+    .map(({ path, since, pullRequest }) =>
+      pullRequest === undefined
+        ? `local-changes.json: ${path} has differed from Damsko's since ${since} with no pull request there (vp run ui:propose)`
+        : `local-changes.json: ${path} has differed from Damsko's since ${since}; once ${pullRequest} merges, move the pin there (vp run ui:update <commit>)`
     );
+
+/**
+ * The listed changes as one patch for Damsko. `damsko` is a git checkout
+ * of its tree at the pin; `files` holds each changed file by its path
+ * there, with this repository's content, undefined where it was removed
+ * here. Writes them into the checkout and returns git's binary diff of it.
+ */
+export const proposal = (
+  damsko: string,
+  files: ReadonlyMap<string, Content>
+): string => {
+  for (const [file, content] of files) {
+    const target = nodePath.join(damsko, file);
+    if (content === undefined) {
+      rmSync(target, { force: true });
+    } else {
+      mkdirSync(nodePath.dirname(target), { recursive: true });
+      writeFileSync(target, content);
+    }
+  }
+  const git = (...args: string[]): string => {
+    const run = spawnSync("git", args, { cwd: damsko, encoding: "utf-8" });
+    if (run.error || run.status !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${run.stderr}`);
+    }
+    return run.stdout;
+  };
+  git("add", "--all");
+  return git("diff", "--cached", "--binary");
+};
 
 /** A file's bytes, or undefined where there is none. */
 export type Content = Uint8Array | undefined;
