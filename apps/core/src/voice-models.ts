@@ -3,31 +3,26 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is ElevenLabs's, priced per character it is
-// asked to say, which is how ElevenLabs bills speech. Each transcription
-// model is OpenAI's, priced per second it hears, at a price never below
-// what the provider bills for it. Grasp pays for these on its own keys:
-// what each cost is recorded for Grasp's spend overview (model-usage.ts).
+// models. Each speech model is KugelAudio's, priced per second of audio it
+// says, which is how KugelAudio bills speech. Each transcription model is
+// OpenAI's, priced per second it hears. Each at a price never below what
+// the provider bills for it. Grasp pays for these on its own keys: what
+// each cost is recorded for Grasp's spend overview (model-usage.ts).
 
 /**
- * ElevenLabs's API prices for text to speech, in US dollars per 1,000
- * characters, the same on every plan.
- *
- * Source: ElevenLabs's API pricing page, "Model pricing"
- * (https://elevenlabs.io/pricing/api), read on 2026-10-21: v4 and v3 at
- * $0.08, v4 Turbo and Flash at $0.04.
+ * What a minute of speech is charged as, in US dollars. KugelAudio bills
+ * in euros, per minute of audio: €0.0525 for Kugel 3.5 (kugelaudio.com/
+ * en/pricing, read on 2026-11-19). Charged here at $0.07, above it
+ * at any exchange rate below $1.33 to the euro, as the spend overview
+ * counts in dollars.
  */
-const dollarsPer1000Chars = {
-  /** Eleven v4: the most expressive, in which Stephen's lines are said. */
-  eleven_v4: 0.08,
-  /** Eleven v4 Turbo: for a line only known as it is said. Same voices. */
-  eleven_v4_turbo: 0.04,
-  eleven_v3: 0.08,
-  eleven_flash_v2_5: 0.04,
+const dollarsPerMinute = {
+  /** Kugel 3.5: KugelAudio's newest, in which every line is said. */
+  "kugel-3.5": 0.07,
 } as const;
 
-/** The providers that say a line: ElevenLabs (platform-ai.ts). */
-const speechProviders = ["elevenlabs"] as const;
+/** The providers that say a line: KugelAudio (platform-ai.ts). */
+const speechProviders = ["kugelaudio"] as const;
 
 /** The providers that write down speech: OpenAI (platform-ai.ts). */
 const transcriptionProviders = ["openai"] as const;
@@ -35,18 +30,18 @@ const transcriptionProviders = ["openai"] as const;
 /** A speech model the gateway offers. */
 export interface VoiceRef {
   provider: (typeof speechProviders)[number];
-  id: keyof typeof dollarsPer1000Chars;
+  id: keyof typeof dollarsPerMinute;
 }
 
 const isVoiceModel = (id: string): id is VoiceRef["id"] =>
-  Object.hasOwn(dollarsPer1000Chars, id);
+  Object.hasOwn(dollarsPerMinute, id);
 
 const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
   speechProviders.some((one) => one === provider);
 
 /**
  * A speech model as the gateway names it, `<provider>/<model>`, such as
- * `elevenlabs/eleven_v4`; `undefined` for any other.
+ * `kugelaudio/kugel-3.5`; `undefined` for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
@@ -59,9 +54,9 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
     : undefined;
 };
 
-/** What saying `characters` characters costs on `ref`, in US dollars: per million, so whole micros stay whole. */
-export const speechCostOf = ({ id }: VoiceRef, characters: number): number =>
-  (characters * dollarsPer1000Chars[id] * 1000) / 1_000_000;
+/** What `seconds` seconds of speech cost on `ref`, in US dollars. */
+export const speechCostOf = ({ id }: VoiceRef, seconds: number): number =>
+  (seconds * dollarsPerMinute[id]) / 60;
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -114,62 +109,64 @@ export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
   (seconds * dollarsPerHour[id]) / 3600;
 
 /**
- * Characters a line is charged as: its UTF-16 length, never fewer than
- * the characters (code points) ElevenLabs counts, so what is recorded is
- * never below what the line is billed.
+ * A word as KugelAudio aligned it: when it is said, in ms from the start
+ * of the audio, and the part of the line as sent that it says, from
+ * `from` up to `to`, counted in code points. A number written as digits
+ * is said as several words, each with the span of the digits.
  */
-export const charactersOf = (text: string): number => text.length;
-
-/** When each character of a line is said, in seconds, as ElevenLabs aligns it. */
-export interface Alignment {
-  characters: readonly string[];
-  character_start_times_seconds: readonly number[];
-  character_end_times_seconds: readonly number[];
+export interface AlignedWord {
+  startMs: number;
+  endMs: number;
+  from: number;
+  to: number;
 }
 
 const space = /^\s$/u;
 
 /**
- * The words of an aligned line, each a run of characters between spaces,
- * with when its first character starts and its last ends, in whole ms.
- * `undefined` when the alignment doesn't hold one time of each kind for
- * every character.
+ * The words of `line` as written, each a run of characters between
+ * spaces, with when the first word said for it starts and the last ends.
+ * A word nothing is said for (a lone symbol) passes at once, where the
+ * word before it ended. `undefined` when no word was aligned at all.
  */
-export const wordsOf = ({
-  characters,
-  character_start_times_seconds: starts,
-  character_end_times_seconds: ends,
-}: Alignment): SpokenWord[] | undefined => {
-  if (
-    starts.length !== characters.length ||
-    ends.length !== characters.length
-  ) {
+export const wordsOf = (
+  line: string,
+  aligned: readonly AlignedWord[]
+): SpokenWord[] | undefined => {
+  if (aligned.length === 0) {
     return undefined;
   }
   const words: SpokenWord[] = [];
-  let word: { text: string; start: number; end: number } | undefined =
-    undefined;
+  let at = 0;
+  let word: { text: string; from: number } | undefined = undefined;
   const close = (): void => {
-    if (word !== undefined) {
-      words.push({
-        text: word.text,
-        startMs: Math.round(word.start * 1000),
-        endMs: Math.round(word.end * 1000),
-      });
-      word = undefined;
+    if (word === undefined) {
+      return;
     }
+    const { text, from } = word;
+    word = undefined;
+    const said = aligned.filter((one) => one.from < at && one.to > from);
+    const before = words.at(-1)?.endMs ?? 0;
+    words.push(
+      said.length === 0
+        ? { text, startMs: before, endMs: before }
+        : {
+            text,
+            startMs: Math.min(...said.map(({ startMs }) => startMs)),
+            endMs: Math.max(...said.map(({ endMs }) => endMs)),
+          }
+    );
   };
-  for (const [at, character] of characters.entries()) {
-    const start = starts[at] ?? 0;
-    const end = ends[at] ?? start;
+  // By code point, as KugelAudio counts where a word is in the line.
+  for (const character of line) {
     if (space.test(character)) {
       close();
     } else if (word === undefined) {
-      word = { text: character, start, end };
+      word = { text: character, from: at };
     } else {
       word.text += character;
-      word.end = end;
     }
+    at += 1;
   }
   close();
   return words;
