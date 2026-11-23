@@ -1291,6 +1291,10 @@ msgstr "{unseen, plural, one {# ejecución más hoy, de un flujo que no puedes v
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} de {total} nombradas, sin verse en uso"
 
+#: src/frame/ui-words.tsx
+msgid "{value} is not one of the choices"
+msgstr "{value} no es una de las opciones"
+
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# versión} other {# versiones}}"
@@ -5577,6 +5581,7 @@ msgid "Everyone with Grasp"
 msgstr "Todas las personas con Grasp"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Everyone with the {name} role"
 msgstr "Todos con el rol {name}"
 
@@ -9093,6 +9098,11 @@ msgstr "Ningún registro de esta tabla tiene ese ID."
 msgid "No records"
 msgstr "Sin registros"
 
+#: src/frame/ui-words.tsx
+msgctxt "a search finds nothing"
+msgid "No results"
+msgstr "Sin resultados"
+
 #: src/report/report.ts
 msgid "No run asked anyone for a decision."
 msgstr "Ninguna ejecución pidió una decisión a nadie."
@@ -9229,6 +9239,10 @@ msgstr "Nadie de Grasp puede iniciar sesión en este espacio de trabajo ahora."
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody has an agent of their own yet."
 msgstr "Nadie tiene todavía un agente propio."
+
+#: src/workflows/start-run.tsx
+msgid "Nobody has that name."
+msgstr "Nadie tiene ese nombre."
 
 #: src/apps/app-settings.tsx
 msgid "Nobody in particular"
@@ -10570,6 +10584,7 @@ msgstr "pendiente"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/workflows/start-run.tsx
 msgid "People"
 msgstr "Personas"
 
@@ -11814,6 +11829,7 @@ msgstr "Rol con el que compartir"
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/workflows/start-run.tsx
 msgid "Roles"
 msgstr "Roles"
 
@@ -12263,6 +12279,7 @@ msgid "Search people and teams"
 msgstr "Buscar personas y equipos"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Search people, teams and roles"
 msgstr "Buscar personas, equipos y roles"
 
@@ -12784,6 +12801,10 @@ msgstr "Mostrar contraseña"
 #: src/settings/event-source-activity.tsx
 msgid "Show payload"
 msgstr "Mostrar contenido"
+
+#: src/frame/ui-words.tsx
+msgid "Show the choices"
+msgstr "Mostrar las opciones"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
@@ -13654,6 +13675,7 @@ msgstr "Tamaño del equipo desconocido."
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
 #: src/settings/teams.tsx
+#: src/workflows/start-run.tsx
 msgid "Teams"
 msgstr "Equipos"
 

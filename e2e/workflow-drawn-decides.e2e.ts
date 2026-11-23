@@ -169,12 +169,13 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // Picked from the organization's people, never typed as an ID. Everyone
   // the stack signs in is called Person, and a starter sees names, not
   // emails: told apart by the end of the ID each goes by.
-  await start.getByLabel("approver").click();
+  const approver = start.getByRole("combobox", { name: "approver" });
+  await start.getByRole("button", { name: "Show the choices" }).click();
   await page
-    .getByRole("option", { name: "Person" })
-    .and(page.locator(`[data-value="person:${decider.userId}"]`))
+    .getByRole("option")
+    .filter({ hasText: `ID …${decider.userId.slice(-6)}` })
     .click();
-  await expect(start.getByLabel("approver")).toHaveText(
+  await expect(approver).toHaveValue(
     `Person (ID …${decider.userId.slice(-6)})`
   );
   await start.getByRole("button", { name: "Start the run" }).click();

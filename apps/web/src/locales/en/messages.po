@@ -1291,6 +1291,10 @@ msgstr "{unseen, plural, one {# more run today, of a workflow you can't see} oth
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} of {total} named, not seen in use"
 
+#: src/frame/ui-words.tsx
+msgid "{value} is not one of the choices"
+msgstr "{value} is not one of the choices"
+
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# version} other {# versions}}"
@@ -5577,6 +5581,7 @@ msgid "Everyone with Grasp"
 msgstr "Everyone with Grasp"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Everyone with the {name} role"
 msgstr "Everyone with the {name} role"
 
@@ -9093,6 +9098,11 @@ msgstr "No record of this table has that ID."
 msgid "No records"
 msgstr "No records"
 
+#: src/frame/ui-words.tsx
+msgctxt "a search finds nothing"
+msgid "No results"
+msgstr "No results"
+
 #: src/report/report.ts
 msgid "No run asked anyone for a decision."
 msgstr "No run asked anyone for a decision."
@@ -9229,6 +9239,10 @@ msgstr "Nobody from Grasp can sign in to this workspace now."
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody has an agent of their own yet."
 msgstr "Nobody has an agent of their own yet."
+
+#: src/workflows/start-run.tsx
+msgid "Nobody has that name."
+msgstr "Nobody has that name."
 
 #: src/apps/app-settings.tsx
 msgid "Nobody in particular"
@@ -10570,6 +10584,7 @@ msgstr "pending"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/workflows/start-run.tsx
 msgid "People"
 msgstr "People"
 
@@ -11814,6 +11829,7 @@ msgstr "Role to share with"
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/workflows/start-run.tsx
 msgid "Roles"
 msgstr "Roles"
 
@@ -12263,6 +12279,7 @@ msgid "Search people and teams"
 msgstr "Search people and teams"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Search people, teams and roles"
 msgstr "Search people, teams and roles"
 
@@ -12784,6 +12801,10 @@ msgstr "Show password"
 #: src/settings/event-source-activity.tsx
 msgid "Show payload"
 msgstr "Show payload"
+
+#: src/frame/ui-words.tsx
+msgid "Show the choices"
+msgstr "Show the choices"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
@@ -13654,6 +13675,7 @@ msgstr "Team size unknown."
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
 #: src/settings/teams.tsx
+#: src/workflows/start-run.tsx
 msgid "Teams"
 msgstr "Teams"
 

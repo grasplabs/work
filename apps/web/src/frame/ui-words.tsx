@@ -55,6 +55,11 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       plainText: t({ message: "Text", context: "code's language: plain text" }),
       streaming: t({ message: "Writing", context: "code still being written" }),
     },
+    combobox: {
+      empty: t({ message: "No results", context: "a search finds nothing" }),
+      notChoice: (value) => t`${value} is not one of the choices`,
+      trigger: t`Show the choices`,
+    },
     dataTable: {
       actions: t({ message: "Actions", context: "a table's row actions" }),
       actionsFor: (name) => t`Actions for ${name}`,

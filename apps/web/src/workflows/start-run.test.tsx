@@ -138,11 +138,12 @@ const button = (text: string): HTMLButtonElement | undefined =>
     (each) => shownWords(each) === text
   );
 
-/** The buttons whose text is `text`. */
-const buttonsNamed = (text: string): HTMLButtonElement[] =>
-  [...document.querySelectorAll("button")].filter(
-    (each) => shownWords(each) === text
-  );
+/** The buttons that open a person's choices, one a field, in order. */
+const choiceButtons = (): HTMLButtonElement[] => [
+  ...document.querySelectorAll<HTMLButtonElement>(
+    '[data-slot="combobox"] button[aria-label="Show the choices"]'
+  ),
+];
 
 /** Clicks `element`, and lets what it does settle. */
 const click = async (
@@ -254,7 +255,7 @@ describe("starting a workflow by hand", () => {
     });
   });
 
-  it("has a person picked, never typed, for a field that takes one: a person, a team or a role", async () => {
+  it("has a person picked from a search, never typed, for a field that takes one: a person, a team or a role", async () => {
     const asked = await shown(
       () => <StartIndependentRun live={1} workflow="workflow-1" />,
       {
@@ -275,19 +276,18 @@ describe("starting a workflow by hand", () => {
       }
     );
     await press("Run");
-    const typed = document.querySelector("input");
     await press("Start the run");
     const unpicked = {
       asked: asked.length,
       said: said().includes("Fill this in."),
     };
-    const [approver, watcher] = buttonsNamed("Choose…");
+    const [approver, watcher] = choiceButtons();
     await click(approver);
     const offered = [...document.querySelectorAll('[role="option"]')].map(
       (each) => each.textContent.trim()
     );
     await choose("Everyone with the Admin role");
-    await press("Admin");
+    await click(approver);
     await choose("Ada Lovelace");
     // An optional one picked by mistake is cleared again.
     await click(watcher);
@@ -297,11 +297,10 @@ describe("starting a workflow by hand", () => {
     );
     await press("Start the run");
 
-    expect({ typed, unpicked, offered, asked }).toStrictEqual({
-      typed: null,
+    expect({ unpicked, offered, asked }).toStrictEqual({
       unpicked: { asked: 0, said: true },
       offered: [
-        "ALAda Lovelace",
+        "Ada Lovelace",
         "Finance",
         "Everyone with the Admin role",
         "Everyone with the Builder role",
@@ -338,10 +337,12 @@ describe("starting a workflow by hand", () => {
       },
     });
     await press("Run");
-    await click(button("Choose…"));
-    await choose("ID …222222");
+    await click(choiceButtons()[0]);
+    await choose("Ada Lovelace (ID …222222)");
 
-    expect(button("Ada Lovelace (ID …222222)")).toBeDefined();
+    expect(
+      document.querySelector<HTMLInputElement>('[role="combobox"]')?.value
+    ).toBe("Ada Lovelace (ID …222222)");
   });
 
   it("offers no Run for a workflow core gives no version to start", async () => {

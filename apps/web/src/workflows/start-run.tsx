@@ -1,7 +1,10 @@
 import { failureText } from "@grasp-os/shared/errors";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Combobox, ComboboxEmpty } from "@grasp-os/ui/components/combobox";
+import type { ComboboxItems } from "@grasp-os/ui/components/combobox";
 import {
   Dialog,
   DialogBody,
@@ -36,12 +39,10 @@ import { useEffect, useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
-import {
-  PeopleTeamsPicker,
-  subjectKey,
-  subjectNamed,
-} from "../people/people-teams-picker.tsx";
+import type { PeopleApart } from "../people/people-apart.ts";
+import { subjectKey } from "../people/people-teams-picker.tsx";
 import type { PeopleAndTeams } from "../people/people-teams-picker.tsx";
 import { useCore } from "../use-core.ts";
 import { inputSketchOf, startFieldsOf, startInputOf } from "./start-input.ts";
@@ -98,16 +99,52 @@ const useProblemText = () => {
   };
 };
 
+/**
+ * Whom a field that takes a person may name, as a search's items: the
+ * people (told apart from a namesake), the teams, and everyone with a
+ * role, each under the key a start's input names it by (`subjectKey`).
+ */
+const usePickable = () => {
+  const { t } = useLingui();
+  return (people: PeopleAndTeams | null, apart: PeopleApart): ComboboxItems => [
+    {
+      type: "group",
+      label: t`People`,
+      items: (people?.people ?? []).map((person) => ({
+        value: subjectKey({ type: "person", id: person.id }),
+        label: apart.named(person),
+      })),
+    },
+    {
+      type: "group",
+      label: t`Teams`,
+      items: (people?.teams ?? []).map((team) => ({
+        value: subjectKey({ type: "team", id: team.id }),
+        label: team.name,
+      })),
+    },
+    {
+      type: "group",
+      label: t`Roles`,
+      items: roleSchema.options.map((role) => {
+        const name = roleLabel(role);
+        return {
+          value: subjectKey({ type: "role", id: role }),
+          label: t`Everyone with the ${name} role`,
+        };
+      }),
+    },
+  ];
+};
+
 /** One input field, as `field` asks for it. */
 const FieldInput = ({
   field,
-  id,
   value,
   people,
   onChange,
 }: {
   field: StartField;
-  id: string;
   value: string | boolean | undefined;
   /** Whom a field that takes a person may name, as core gave them. */
   people: PeopleAndTeams | null;
@@ -115,26 +152,25 @@ const FieldInput = ({
 }) => {
   const { t } = useLingui();
   const apart = usePeopleApart(people?.people ?? []);
+  const pickable = usePickable();
   const text = typeof value === "string" ? value : "";
   switch (field.kind) {
     case "person": {
-      // The one picked, by name, and for an optional field a way to pick
-      // nobody again: core checks the start's input again.
-      const picked =
-        text === "" ? undefined : subjectNamed(text, people, apart);
+      // Picked from the organization's people, teams and roles, as a
+      // search; for an optional field, a way to pick nobody again. Core
+      // checks the start's input again.
       return (
         <div {...stylex.props(styles.person)}>
-          <PeopleTeamsPicker
-            buttonId={id}
-            candidates={people}
-            disabled={false}
-            holding={new Set(text === "" ? [] : [text])}
-            label={picked ?? (text === "" ? t`Choose…` : text)}
-            onPick={(subject) => {
-              onChange(subjectKey(subject));
+          <Combobox
+            items={pickable(people, apart)}
+            onValueChange={(chosen) => {
+              onChange(chosen ?? "");
             }}
-            roles
-          />
+            placeholder={t`Search people, teams and roles`}
+            value={text === "" ? null : text}
+          >
+            <ComboboxEmpty>{t`Nobody has that name.`}</ComboboxEmpty>
+          </Combobox>
           {field.required || text === "" ? null : (
             <Button
               aria-label={t`Clear ${field.name}`}
@@ -345,7 +381,6 @@ const StartDialog = ({
               </Field>
             ) : (
               fields.map((field) => {
-                const id = `${ids}-${field.name}`;
                 const { name } = field;
                 return (
                   <Field
@@ -354,16 +389,11 @@ const StartDialog = ({
                       : {})}
                     key={name}
                   >
-                    <FieldLabel
-                      // A person is picked with a button, named by this
-                      // label; any other control is the field's own.
-                      {...(field.kind === "person" ? { htmlFor: id } : {})}
-                    >
+                    <FieldLabel>
                       {field.required ? name : t`${name} (optional)`}
                     </FieldLabel>
                     <FieldInput
                       field={field}
-                      id={id}
                       onChange={(value) => {
                         setValues({ ...values, [name]: value });
                       }}

@@ -1291,6 +1291,10 @@ msgstr "{unseen, plural, one {Nog # run vandaag, van een workflow die je niet ku
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} van {total} genoemd, niet in gebruik gezien"
 
+#: src/frame/ui-words.tsx
+msgid "{value} is not one of the choices"
+msgstr "{value} is geen van de keuzes"
+
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# versie} other {# versies}}"
@@ -5577,6 +5581,7 @@ msgid "Everyone with Grasp"
 msgstr "Iedereen met Grasp"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Everyone with the {name} role"
 msgstr "Iedereen met de rol {name}"
 
@@ -9093,6 +9098,11 @@ msgstr "Geen record van deze tabel heeft die ID."
 msgid "No records"
 msgstr "Geen records"
 
+#: src/frame/ui-words.tsx
+msgctxt "a search finds nothing"
+msgid "No results"
+msgstr "Geen resultaten"
+
 #: src/report/report.ts
 msgid "No run asked anyone for a decision."
 msgstr "Geen enkele run vroeg iemand om een beslissing."
@@ -9229,6 +9239,10 @@ msgstr "Niemand van Grasp kan nu inloggen in deze werkruimte."
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody has an agent of their own yet."
 msgstr "Nog niemand heeft een eigen agent."
+
+#: src/workflows/start-run.tsx
+msgid "Nobody has that name."
+msgstr "Niemand heeft die naam."
 
 #: src/apps/app-settings.tsx
 msgid "Nobody in particular"
@@ -10570,6 +10584,7 @@ msgstr "in afwachting"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/workflows/start-run.tsx
 msgid "People"
 msgstr "Mensen"
 
@@ -11814,6 +11829,7 @@ msgstr "Rol bij het delen"
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/workflows/start-run.tsx
 msgid "Roles"
 msgstr "Rollen"
 
@@ -12263,6 +12279,7 @@ msgid "Search people and teams"
 msgstr "Mensen en teams zoeken"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Search people, teams and roles"
 msgstr "Mensen, teams en rollen zoeken"
 
@@ -12784,6 +12801,10 @@ msgstr "Wachtwoord tonen"
 #: src/settings/event-source-activity.tsx
 msgid "Show payload"
 msgstr "Payload tonen"
+
+#: src/frame/ui-words.tsx
+msgid "Show the choices"
+msgstr "Toon de keuzes"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
@@ -13654,6 +13675,7 @@ msgstr "Teamomvang onbekend."
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
 #: src/settings/teams.tsx
+#: src/workflows/start-run.tsx
 msgid "Teams"
 msgstr "Teams"
 

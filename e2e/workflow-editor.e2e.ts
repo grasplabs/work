@@ -308,7 +308,10 @@ test("a builder sees every declared branch of the checked definition, a test run
     ran.getByRole("listitem", { name: "greetOther" })
   ).toHaveAttribute("data-state", "none");
   await page.keyboard.press("Escape");
-  await expect(steps).toHaveCount(0);
+  // Gone, the sheet with it: a press meanwhile would close it.
+  await expect(
+    page.getByRole("dialog", { name: /^The run started/u })
+  ).toHaveCount(0);
 
   // Paused once the person says so and the moment to take it back has
   // passed: it says so, and Resume runs it again.

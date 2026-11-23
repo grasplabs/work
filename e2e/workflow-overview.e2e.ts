@@ -90,7 +90,9 @@ test("a builder finds their workflows by phase, their runs on a page of their ow
     .first()
     .click(pageRead);
   await expect(page).toHaveURL(/[?&]run=/u);
-  const opened = page.getByRole("heading", { name: /^The run started/u });
+  const opened = page.getByRole("complementary", {
+    name: /^The run started/u,
+  });
   await expect(opened).toBeVisible(pageRead);
   await page.reload();
   await expect(opened).toBeVisible(pageRead);
