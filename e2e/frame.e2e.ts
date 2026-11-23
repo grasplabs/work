@@ -11,6 +11,16 @@ import { peopleIn } from "./people.ts";
 const wide = { width: 1440, height: 900 };
 const phone = { width: 390, height: 844 };
 
+/**
+ * The fold in the sidebar's head: its first button of that name (the rail
+ * along its edge says the same, for a pointer).
+ */
+const foldOf = (page: Page) =>
+  page
+    .getByRole("complementary", { name: "Sidebar" })
+    .getByRole("button", { name: "Show or hide the sidebar" })
+    .first();
+
 /** The sidebar, beside the page or in its sheet. */
 const sidebarOf = (page: Page) =>
   page
@@ -57,17 +67,15 @@ test("a folded sidebar stays folded across a reload, never drawn open first", as
   await page.goto("/projects");
   const sidebar = page.locator('aside[data-slot="sidebar"]');
   await expect(sidebar).toHaveAttribute("data-state", "expanded");
-  await page
-    .getByRole("complementary", { name: "Sidebar" })
-    .getByRole("button", { name: "Show or hide the sidebar" })
-    .click();
+  await foldOf(page).click();
   await expect(sidebar).toHaveAttribute("data-state", "collapsed");
 
   // Every state the sidebar is drawn in while the page loads again, kept
   // on the page's root as it goes.
   await page.addInitScript(() => {
-    const root = document.documentElement;
+    // The root is there once the page is parsed, not yet as this runs.
     new MutationObserver(() => {
+      const root = document.documentElement;
       for (const aside of document.querySelectorAll<HTMLElement>(
         'aside[data-slot="sidebar"]'
       )) {
@@ -98,9 +106,7 @@ test("opened from the page's bar, the sidebar takes the focus to its own fold", 
   const page = await pageOf(member);
   await page.setViewportSize(wide);
   await page.goto("/projects");
-  const fold = page
-    .getByRole("complementary", { name: "Sidebar" })
-    .getByRole("button", { name: "Show or hide the sidebar" });
+  const fold = foldOf(page);
   await fold.click();
   const reopen = page
     .getByRole("main")
