@@ -1,3 +1,5 @@
+import { aiDemos } from "./ai.tsx";
+import { blockDemos } from "./blocks.tsx";
 import { controlDemos } from "./controls.tsx";
 import { dataDemos } from "./data.tsx";
 import type { Demos } from "./demo.ts";
@@ -8,4 +10,6 @@ export const demoGroups: Record<string, Demos> = {
   "Form and basic controls": controlDemos,
   "Overlays and navigation": overlayDemos,
   "Data and content": dataDemos,
+  AI: aiDemos,
+  Blocks: blockDemos,
 };
