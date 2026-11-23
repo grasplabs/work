@@ -238,11 +238,10 @@ export const SetupFrame = ({
               {narrow ? (
                 <Button
                   aria-label={t`Back`}
-
                   onClick={() => {
                     onGo(back);
                   }}
-                  size="sm"
+                  size="icon-sm"
                   variant="ghost"
                 >
                   <Icon icon={ArrowLeftIcon} />
@@ -267,11 +266,10 @@ export const SetupFrame = ({
               {narrow ? (
                 <Button
                   aria-label={t`Forward`}
-
                   onClick={() => {
                     onGo(on);
                   }}
-                  size="sm"
+                  size="icon-sm"
                   variant="ghost"
                 >
                   <Icon icon={ArrowRightIcon} />

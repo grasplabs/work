@@ -64,7 +64,8 @@ const styles = stylex.create({
   grow: { flexGrow: 1 },
   // Only on a phone, where the teams fold away, on the head's line.
   change: {
-    display: { default: null, [media.sm]: "none" },
+    // The Button's own display restated, as null would drop it.
+    display: { default: "inline-flex", [media.sm]: "none" },
     marginBlock: `calc(-1 * ${space[1]})`,
   },
   // Many teams scroll in the list, so the step still fits on screen.

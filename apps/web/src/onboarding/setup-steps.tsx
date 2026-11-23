@@ -865,7 +865,6 @@ const SignIns = ({
             return (
               <Button
                 disabled={reading !== null}
-
                 key={suite}
                 // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
                 style={styles.full}
@@ -1216,7 +1215,6 @@ const PlaceButton = ({
   return (
     <Button
       disabled={disabled}
-
       onClick={onChoose}
       successLabel={words}
       errorLabel={words}

@@ -549,11 +549,10 @@ const RemoveRead = ({
         aria-label={t`Remove ${file}`}
         data-remove
         disabled={removing}
-
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
+        size="icon-sm"
         variant="ghost"
       >
         <Icon icon={XIcon} />
@@ -650,11 +649,10 @@ const Row = ({
       <Button
         aria-label={t`Remove ${file}`}
         data-remove
-
         onClick={() => {
           void onRemove();
         }}
-        size="sm"
+        size="icon-sm"
         variant="ghost"
       >
         <Icon icon={XIcon} />

@@ -55,10 +55,12 @@ const styles = stylex.create({
   // Alone on its row, the last tile takes the whole row, so the grid stays even.
   wide: { gridColumn: "1 / -1" },
   // On a phone, folded away with the rest of a long list until that is shown.
-  folded: { display: { default: null, [media.maxSm]: "none" } },
+  // On a Damsko part: its own display restated, as null would drop it.
+  folded: { display: { default: "flex", [media.maxSm]: "none" } },
   // Only on a phone, close under the list it opens.
   more: {
-    display: { default: null, [media.sm]: "none" },
+    // The Button's own display restated, as null would drop it.
+    display: { default: "inline-flex", [media.sm]: "none" },
     marginBlockStart: `calc(-1 * ${space[3]})`,
   },
   settled: {

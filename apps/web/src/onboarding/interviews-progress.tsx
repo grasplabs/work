@@ -354,9 +354,8 @@ const LinkRow = ({
       <Button
         aria-label={t`Copy the link for ${name}`}
         disabled={link.path === null}
-
         onClick={onCopy}
-        size="sm"
+        size="icon-sm"
         variant="ghost"
       >
         <Icon icon={copied ? CheckIcon : CopyIcon} />
@@ -411,7 +410,6 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
           </Text>
           <Button
             disabled={list.length === 0}
-
             onClick={() => {
               downloadCsv(
                 linksCsv(list, origin, [t`Name`, t`Email`, t`Team`, t`Link`]),
