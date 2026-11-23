@@ -9,6 +9,8 @@ import { useLingui } from "@lingui/react/macro";
 export interface AppWords {
   connect: string;
   connectAgain: string;
+  /** What connecting a stopped app again makes, and what becomes of the stopped connection. */
+  connectAgainNote: string;
   manage: string;
   /** The panel's way to the app's own page. */
   settings: string;
@@ -131,6 +133,7 @@ export const useAppWords = (): AppWords => {
   return {
     connect: t`Connect`,
     connectAgain: t`Connect again`,
+    connectAgainNote: t`This makes a new connection. The one that stopped stays until it is disconnected. The new one starts fresh: you consent to it again, and nobody may read in the Brain what agents read through it until you choose who may.`,
     manage: t`Manage`,
     settings: t`Settings`,
     signInAgain: t`Sign in again`,

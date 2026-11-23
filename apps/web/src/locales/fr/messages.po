@@ -97,10 +97,6 @@ msgstr "{app} est connecté"
 msgid "{app} is connected again"
 msgstr "{app} est de nouveau connecté"
 
-#: src/connections/replace-stopped.tsx
-msgid "{app} is connected again, but the connection that stopped couldn't be disconnected. Disconnect it from its row."
-msgstr "{app} est de nouveau connecté, mais la connexion qui ne fonctionnait plus n’a pas pu être déconnectée. Déconnectez-la depuis sa ligne."
-
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
 msgstr "{app}, compte personnel de {whose}"
@@ -1488,6 +1484,10 @@ msgstr "Une connexion seulement"
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
 msgstr "Une connexion a refusé de dire ce qui a changé"
+
+#: src/connections/connection-list.tsx
+msgid "A connection that works has taken its place, so this one can be disconnected now."
+msgstr "{'de': 'Eine funktionierende Verbindung hat ihren Platz eingenommen, daher kann diese jetzt getrennt werden.', 'es': 'Una conexión que funciona ha ocupado su lugar, así que esta ya se puede desconectar.', 'fr': 'Une connexion qui fonctionne a pris sa place : celle-ci peut donc être déconnectée maintenant.', 'nl': 'Een koppeling die werkt heeft haar plaats ingenomen, dus deze kan nu worden ontkoppeld.'}"
 
 #: src/brain/own-export.tsx
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
@@ -4941,6 +4941,10 @@ msgstr "Déconnecter {label}"
 #: src/connections/connection-list.tsx
 msgid "Disconnect {label}?"
 msgstr "Déconnecter {label} ?"
+
+#: src/connections/connection-list.tsx
+msgid "Disconnect it"
+msgstr "{'de': 'Trennen', 'es': 'Desconectarla', 'fr': 'La déconnecter', 'nl': 'Ontkoppelen'}"
 
 #: src/activity/audit-words.ts
 msgid "Disconnected an account"
@@ -14271,6 +14275,10 @@ msgstr "Les entretiens sont terminés."
 msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
 msgstr "Les entretiens ne sont pas encore planifiés. Vous les planifiez à la fin de votre onboarding."
 
+#: src/connections/app-actions.tsx
+msgid "The key that stopped working must be disconnected before a new one can be added."
+msgstr "{'de': 'Der Schlüssel, der nicht mehr funktioniert, muss getrennt werden, bevor ein neuer hinzugefügt werden kann.', 'es': 'La clave que dejó de funcionar debe desconectarse antes de poder añadir una nueva.', 'fr': 'La clé qui ne fonctionne plus doit être déconnectée avant qu’une nouvelle puisse être ajoutée.', 'nl': 'De sleutel die niet meer werkt moet worden ontkoppeld voordat er een nieuwe kan worden toegevoegd.'}"
+
 #: src/settings/directory-reads.tsx
 msgid "The last read couldn’t list the accounts deleted in the directory."
 msgstr "La dernière lecture n’a pas pu lister les comptes supprimés dans l’annuaire."
@@ -14839,6 +14847,10 @@ msgstr "Ce lien n’a pas été envoyé par Grasp. Écrivez à Grasp dans l’ap
 #: src/onboarding/setup-steps.tsx
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
 msgstr "Cette liste est trop longue. Je peux prendre jusqu’à {peopleMost} personnes dans {teamsMost} équipes au plus."
+
+#: src/connections/app/words.ts
+msgid "This makes a new connection. The one that stopped stays until it is disconnected. The new one starts fresh: you consent to it again, and nobody may read in the Brain what agents read through it until you choose who may."
+msgstr "{'de': 'Damit entsteht eine neue Verbindung. Die nicht mehr funktionierende bleibt, bis sie getrennt wird. Die neue beginnt von vorn: Sie stimmen ihr erneut zu, und niemand darf im Brain lesen, was Agenten über sie lesen, bis Sie wählen, wer es darf.', 'es': 'Esto crea una conexión nueva. La que dejó de funcionar se queda hasta que se desconecte. La nueva empieza de cero: vuelves a dar tu consentimiento y nadie puede leer en el Brain lo que los agentes leen a través de ella hasta que elijas quién puede.', 'fr': 'Cela crée une nouvelle connexion. Celle qui ne fonctionne plus reste jusqu’à ce qu’elle soit déconnectée. La nouvelle repart de zéro : vous y consentez à nouveau, et personne ne peut lire dans le Brain ce que les agents lisent par elle tant que vous n’avez pas choisi qui le peut.', 'nl': 'Zo ontstaat een nieuwe koppeling. De koppeling die niet meer werkt blijft tot ze wordt ontkoppeld. De nieuwe begint opnieuw: je geeft er opnieuw toestemming voor, en niemand mag in het Brain lezen wat agents erdoor lezen tot je kiest wie dat mag.'}"
 
 #: src/brain/memories-page.tsx
 msgid "This memory has changed or is no longer yours to read. Look at it again first."

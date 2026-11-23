@@ -35,6 +35,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { MarkSize } from "../provider-mark.tsx";
 import { useMarkTint } from "./mark-tint.ts";
 import type {
   App,
@@ -75,6 +76,8 @@ const styles = stylex.create({
     lineHeight: font.textSmLine,
     color: colors.mutedForeground,
   },
+  // A change that didn't go through: why, in the line's place, as a field's error.
+  offerFailed: { color: colors.destructive },
   // A host's action, laid out as if it stood there itself.
   slot: { display: "contents" },
   // A mark the host gave, in its own box at the size asked.
@@ -188,9 +191,6 @@ const styles = stylex.create({
   },
   more: { marginBlockStart: space["1"] },
 });
-
-/** The size of an app's mark: Damsko's BrandIcon's own, by where it stands. */
-export type MarkSize = "sm" | "default" | "lg";
 
 /** The app's mark at a size: the host's, or its first letter on a tile. */
 export const AppMark = ({ app, size }: { app: App; size: MarkSize }) =>
@@ -509,13 +509,19 @@ export const Clamped = ({ text }: { text: string }) => {
   );
 };
 
-/** Whether the app is offered in the organization: a compact switch, named by `offered`, and one line for its state. */
+/**
+ * Whether the app is offered in the organization: a compact switch, named
+ * by `offered`, and one line for its state, or why its last change didn't
+ * go through (`failure`).
+ */
 export const OfferSwitch = ({
   offered,
   onChange,
+  failure,
 }: {
   offered: boolean;
   onChange: (offered: boolean) => void;
+  failure?: string | undefined;
 }) => {
   const words = useAppWords();
   return (
@@ -527,9 +533,18 @@ export const OfferSwitch = ({
           onCheckedChange={onChange}
         />
       </span>
-      <span {...stylex.props(styles.offerLine)}>
-        {offered ? words.offeredOn : words.offeredOff}
-      </span>
+      {failure === undefined ? (
+        <span {...stylex.props(styles.offerLine)}>
+          {offered ? words.offeredOn : words.offeredOff}
+        </span>
+      ) : (
+        <span
+          role="alert"
+          {...stylex.props(styles.offerLine, styles.offerFailed)}
+        >
+          {failure}
+        </span>
+      )}
     </span>
   );
 };
@@ -557,6 +572,13 @@ export interface AppActions {
    * host still loading what it needs), never that line.
    */
   member?: boolean;
+  /**
+   * Why it can't be connected again yet, where it asks to be but something
+   * must go first (a key that stopped working, which connect keeps as the
+   * app's one): the panel offers Manage in place of Connect and says this,
+   * as does the page's head.
+   */
+  whyNoConnect?: string;
 }
 
 /** Manage: a menu of what can be done to the connection, Disconnect last. */
@@ -657,6 +679,10 @@ export const ConnectAction = ({
 export const canConnect = (actions: AppActions) =>
   actions.connect !== undefined || actions.onConnect !== undefined;
 
-/** Whether the app asks to be connected (again) before anything else: none yet, or it stopped. */
-export const asksConnect = (app: App) =>
-  app.connection === undefined || app.connection.state === "reconnect";
+/**
+ * Whether the app asks to be connected (again) before anything else: none
+ * yet, or it stopped, unless something must go first (`whyNoConnect`).
+ */
+export const asksConnect = (app: App, actions: AppActions) =>
+  actions.whyNoConnect === undefined &&
+  (app.connection === undefined || app.connection.state === "reconnect");

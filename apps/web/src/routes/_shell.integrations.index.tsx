@@ -43,7 +43,10 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { connectionErrorMessage } from "../connection-errors.ts";
-import { ConnectedDialog } from "../connections/connected-dialog.tsx";
+import {
+  ConnectedDialog,
+  returnedOf,
+} from "../connections/connected-dialog.tsx";
 import { groupLabel } from "../connections/groups.ts";
 import {
   HttpConnections,
@@ -415,8 +418,7 @@ const Others = ({
 
 /**
  * The success dialog for the connection a flow just made, once core sent
- * the browser back here with it. Only a connection the page lists: anyone
- * can put an ID in a link.
+ * the browser back here with it, as the page lists it (`returnedOf`).
  */
 const Returned = ({
   connection,
@@ -432,11 +434,12 @@ const Returned = ({
       : integrations.find((integration) =>
           integration.connections.some(({ id }) => id === connection)
         );
+  const returned = returnedOf(connectedTo?.connections ?? [], connection);
   return (
     <ConnectedDialog
-      again={false}
+      again={returned.again}
       app={connectedTo?.name ?? ""}
-      connection={connectedTo?.connections.find(({ id }) => id === connection)}
+      connection={returned.connection}
       onClose={() => {
         void navigate({
           replace: true,

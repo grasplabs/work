@@ -24,7 +24,6 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { IntegrationPanel } from "./integration-panel.tsx";
 import { integrationsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
-import { ReplaceStopped } from "./replace-stopped.tsx";
 
 // One app's panel over the Integrations page, on the library's app panel,
 // against core's connections as the page reaches them over RPC, faked: an
@@ -35,9 +34,10 @@ import { ReplaceStopped } from "./replace-stopped.tsx";
 // connects in the library's connect dialog, for everyone where an admin
 // chooses it and otherwise for the person alone, saying where they'll sign
 // in, busy until the sign-in starts and saying in the dialog why it didn't;
-// a stopped toolkit connected again replaces its stopped connection only
-// once the new one is made; and whoever may sign in to a lapsed native
-// connection again finds it under Manage.
+// a stopped toolkit is connected again beside its stopped connection,
+// which nothing disconnects; one that takes a key offers Manage and
+// Disconnect, saying its stopped key goes first; and whoever may sign in to
+// a lapsed native connection again finds it under Manage.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -173,6 +173,7 @@ const integrationOf = (
   const integration = integrationsOf(
     [
       entry("composio", "hubspot", "HubSpot"),
+      { ...entry("composio", "airtable", "Airtable"), auth: "key" },
       entry("native", "microsoft", "Microsoft 365"),
     ],
     connections
@@ -297,7 +298,6 @@ describe("an app's panel", () => {
     });
     root = undefined;
     document.body.innerHTML = "";
-    sessionStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -362,7 +362,7 @@ describe("an app's panel", () => {
     });
   });
 
-  it("replaces a stopped toolkit's connection once connecting it again made the new one, and only from the tab that connected", async () => {
+  it("says connecting a stopped toolkit again makes a new connection beside the stopped one, and leaves for the sign-in disconnecting nothing", async () => {
     const assign = vi
       .spyOn(window.location, "assign")
       .mockImplementation(() => {
@@ -373,76 +373,71 @@ describe("an app's panel", () => {
         await Promise.resolve({ url: "https://composio.example/sign-in" }),
     });
     await press(buttons("Connect again")[0]);
+    const says = dialogOf("Connect HubSpot again")?.textContent ?? "";
     await press(dialogAction("Connect"));
-    const leaving = {
+
+    expect({
+      says: {
+        stays: says.includes(
+          "The one that stopped stays until it is disconnected."
+        ),
+        fresh: says.includes(
+          "The new one starts fresh: you consent to it again, and nobody may read in the Brain what agents read through it until you choose who may."
+        ),
+        consent: says.includes(composioConsentText),
+      },
       to: assign.mock.calls.map(([url]) => url),
       returnTo: sent.flatMap((each) =>
         "returnTo" in each ? [each.returnTo] : []
       ),
       disconnected: sent.filter((each) => "disconnected" in each),
-    };
-    assign.mockRestore();
-    unmounted();
-    // Back from the provider with the new connection: the page lists both.
-    const made: ListedConnection = {
-      ...stopped,
-      id: "c-hubspot-new",
-      status: "active",
-      createdAt: "2026-11-23T00:00:00.000Z",
-    };
-    const back = integrationOf("hubspot", [stopped, made]);
-    const replaced: { disconnected: string }[] = [];
-    const core = coreOf(connectionsApi(replaced));
-    await mounted(<ReplaceStopped integration={back} made={made} />, core);
-    const first = [...replaced];
-    unmounted();
-    // The same page again, or a link to it: nothing noted, nothing disconnected.
-    await mounted(<ReplaceStopped integration={back} made={made} />, core);
-
-    expect({ leaving, first, again: replaced.length }).toStrictEqual({
-      leaving: {
-        to: ["https://composio.example/sign-in"],
-        returnTo: ["/integrations/composio:hubspot?again=1"],
-        disconnected: [],
-      },
-      first: [{ disconnected: "c-hubspot" }],
-      again: 1,
+    }).toStrictEqual({
+      says: { stays: true, fresh: true, consent: true },
+      to: ["https://composio.example/sign-in"],
+      returnTo: ["/integrations/composio:hubspot"],
+      disconnected: [],
     });
   });
 
-  it("says on the page when the stopped connection couldn't be disconnected after connecting again", async () => {
-    vi.spyOn(window.location, "assign").mockImplementation(() => {
-      // The browser stays here for the test to read.
-    });
-    await opened("hubspot", [stopped], person(), {
-      connectToolkit: async () =>
-        await Promise.resolve({ url: "https://composio.example/sign-in" }),
-    });
-    await press(buttons("Connect again")[0]);
-    await press(dialogAction("Connect"));
-    vi.restoreAllMocks();
-    unmounted();
-    const made: ListedConnection = {
+  it("offers a toolkit whose key stopped working Manage and Disconnect, saying the key goes before a new one", async () => {
+    const key: ListedConnection = {
       ...stopped,
-      id: "c-new",
-      status: "active",
+      id: "c-airtable",
+      provider: "airtable",
     };
-    await mounted(
-      <ReplaceStopped
-        integration={integrationOf("hubspot", [stopped, made])}
-        made={made}
-      />,
-      coreOf(
-        connectionsApi([], {
-          disconnect: async () =>
-            await Promise.reject(new Error("Connect can't be reached")),
-        })
-      )
-    );
+    const sent = await opened("airtable", [key]);
+    const offered = {
+      connect: [...buttons("Connect again"), ...buttons("Connect")].length,
+      says: document.body.textContent.includes(
+        "The key that stopped working must be disconnected before a new one can be added."
+      ),
+    };
+    await press(buttons("Manage")[0]);
+    await press(buttons("Disconnect")[0]);
+    await press(dialogAction("Disconnect"));
 
-    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
-      "HubSpot is connected again, but the connection that stopped couldn't be disconnected. Disconnect it from its row.Connect can't be reached"
-    );
+    expect({ offered, sent }).toStrictEqual({
+      offered: { connect: 0, says: true },
+      sent: [{ disconnected: "c-airtable" }],
+    });
+  });
+
+  it("tells a member nothing of a stopped key's removal, and offers them nothing to do", async () => {
+    const key: ListedConnection = {
+      ...stopped,
+      id: "c-airtable",
+      provider: "airtable",
+    };
+    await opened("airtable", [key], person({ role: "user" }));
+
+    expect({
+      says: document.body.textContent.includes("must be disconnected"),
+      actions: [
+        ...buttons("Manage"),
+        ...buttons("Connect again"),
+        ...buttons("Disconnect"),
+      ].length,
+    }).toStrictEqual({ says: false, actions: 0 });
   });
 
   it("has an admin connect Microsoft 365 for everyone, saying where they'll sign in", async () => {

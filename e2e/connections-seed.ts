@@ -215,6 +215,41 @@ export const seedConnections = async (
   process.env[seededVariable] = JSON.stringify(seeded);
 };
 
+/**
+ * A shared HubSpot connection that stopped working (`needs_reauth`),
+ * connected by `connectedBy`, beside the scene's working one: how an app's
+ * page stands once the browser is back from connecting a stopped toolkit
+ * again, as the stopped one stays until someone disconnects it. Written
+ * for the one test that asks for it, which takes it away again
+ * (`removeSeeded`).
+ */
+export const seedStoppedToolkit = async (
+  connectedBy: string
+): Promise<SeededConnection> => {
+  const stopped = newConnection(
+    `hubspot-stopped-${crypto.randomUUID().slice(0, 8)}`
+  );
+  await execute(
+    insert(
+      {
+        connection: stopped,
+        provider: "hubspot",
+        scope: "shared",
+        owner: null,
+        status: "needs_reauth",
+        connectedBy,
+      },
+      Date.now()
+    )
+  );
+  return stopped;
+};
+
+/** Takes a seeded connection's row away, however far its test got. */
+export const removeSeeded = async ({ id }: SeededConnection): Promise<void> => {
+  await execute(`DELETE FROM connections WHERE id = ${quoted(id)}`);
+};
+
 /** The connections scene's connections, for this attempt at the test. */
 export const seededConnections = (): SeededConnections => {
   const { retry } = test.info();

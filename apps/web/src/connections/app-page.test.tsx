@@ -28,7 +28,8 @@ import { integrationsOf } from "./integrations.ts";
 // or a tool's choice sends the whole new choice of tools with what the
 // page showed, a resource rule goes with it, the last tool allowed can't
 // be taken away, a tool no longer offered can still be, and members and
-// Grasp's staff read what Grasp may do without changing it. A change ends
+// Grasp's staff read what Grasp may do without changing it. A change that
+// didn't go through says why in place, beside its control. A change ends
 // with the page read again at the address it then has.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -159,6 +160,9 @@ const shown = async (
       await answered;
       return { tools: [] };
     },
+    setOffered: async (): Promise<void> => {
+      await answered;
+    },
   };
   const core = {
     withSession: async <T,>(
@@ -261,6 +265,12 @@ const accountRows = (): HTMLElement[] => [
   ),
 ];
 
+/** What the section titled `title` says went wrong, in place. */
+const saidOver = (title: string): string | undefined =>
+  [...document.querySelectorAll("section")]
+    .find((each) => each.querySelector("h2, h3")?.textContent === title)
+    ?.querySelector('[role="alert"]')?.textContent;
+
 /** How many buttons the page's first account row has. */
 const rowOf = () => accountRows()[0]?.querySelectorAll("button").length;
 
@@ -338,13 +348,50 @@ describe("changing what Grasp may do in a connected app", () => {
     ]);
   });
 
-  it("keeps the last tool allowed", async () => {
+  it("keeps the last tool allowed, saying why over the tools", async () => {
     const one = { ...connection, tools: ["HUBSPOT_LIST_CONTACTS"] };
     const sent = await shown(one);
     await openGroup("Other");
     await pick("List contacts", "Never");
 
-    expect(sent).toStrictEqual([]);
+    expect({ sent, said: saidOver("What Grasp may do") }).toStrictEqual({
+      sent: [],
+      said: "A connection allows at least one tool. Disconnect it instead.",
+    });
+  });
+
+  it("says over the tools why a change didn't go through, in place, not in a toast", async () => {
+    const refused = Promise.reject(new Error("The tools changed meanwhile."));
+    refused.catch(() => {
+      // Read by the page's change.
+    });
+    await shown(connection, { answered: refused });
+    await pick("Notes", "Write");
+
+    expect(saidOver("What Grasp may do")).toBe("The tools changed meanwhile.");
+  });
+
+  it("says beside the switch why offering it didn't change, in place, not in a toast", async () => {
+    const refused = Promise.reject(new Error("Core can't be reached."));
+    refused.catch(() => {
+      // Read by the page's change.
+    });
+    await shown(connection, { answered: refused });
+    await press(
+      document.querySelector(
+        '[role="switch"][aria-label="Available in your organization"]'
+      )
+    );
+    // The switch's line, in the page's head.
+    const head = document.querySelector("header");
+
+    expect({
+      said: [...(head?.querySelectorAll('[role="alert"]') ?? [])].map(
+        (each) => each.textContent
+      ),
+      // Only beside the switch: nothing over the tools.
+      tools: saidOver("What Grasp may do"),
+    }).toStrictEqual({ said: ["Core can't be reached."], tools: undefined });
   });
 
   it("shows members and Grasp's staff what Grasp may do, with nothing to change", async () => {

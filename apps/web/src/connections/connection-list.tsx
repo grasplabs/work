@@ -481,6 +481,62 @@ export const mayDisconnect = (
   !identity.staff;
 
 /**
+ * Whether `connection` stopped working beside a shared connection of its
+ * app that works, and `identity` may disconnect it: its row then says it
+ * can go now (`StoppedNotice`). Read from what the page lists, on every
+ * load: never from the address, never from anything kept in the browser.
+ */
+export const stoppedBesideWorking = (
+  connection: ListedConnection,
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): boolean =>
+  connection.status === "needs_reauth" &&
+  connection.scope === "shared" &&
+  mayDisconnect(connection, identity) &&
+  integration.connections.some(
+    ({ id, status, scope }) =>
+      id !== connection.id && status === "active" && scope === "shared"
+  );
+
+/**
+ * A stopped connection's row, beside one that works: that it can be
+ * disconnected now, and the Disconnect dialog, which says what goes with
+ * it. Nothing goes until it is confirmed there.
+ */
+export const StoppedNotice = ({
+  connection,
+  integration,
+}: {
+  connection: ListedConnection;
+  integration: Integration;
+}) => {
+  const { t } = useLingui();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {t`A connection that works has taken its place, so this one can be disconnected now.`}{" "}
+      <Button
+        onClick={() => {
+          setOpen(true);
+        }}
+        size="xs"
+        variant="link"
+      >
+        {t`Disconnect it`}
+      </Button>
+      <DisconnectDialog
+        connection={connection}
+        label={labelOf(connection, integration)}
+        last={!integration.listed && integration.connections.length === 1}
+        onOpenChange={setOpen}
+        open={open}
+      />
+    </>
+  );
+};
+
+/**
  * What can be done to one account from its row on the app's page: sign in
  * again where its access ran out and this person may, and disconnect where
  * they may. Each dialog grows from its own button.

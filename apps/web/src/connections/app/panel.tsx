@@ -162,6 +162,20 @@ const UsedBy = ({ app }: { app: App }) => {
   );
 };
 
+/** Why the panel's head has no Connect, where it says: for a member, or what must go first. */
+const metaOf = (
+  app: App,
+  actions: AppActions,
+  adminConnects: string
+): string[] | undefined => {
+  if (actions.whyNoConnect !== undefined) {
+    return [actions.whyNoConnect];
+  }
+  return actions.member === true && asksConnect(app, actions)
+    ? [adminConnects]
+    : undefined;
+};
+
 /** An app's panel over the page: its head and two buttons, its account, what it can do, and what uses it. */
 export const AppPanel = ({
   app,
@@ -201,7 +215,7 @@ export const AppPanel = ({
             <SidePanelHeader
               actions={
                 <>
-                  {asksConnect(app) ? (
+                  {asksConnect(app, actions) ? (
                     <ConnectAction actions={actions} app={app} size="sm" />
                   ) : (
                     <ManageMenu actions={actions} app={app} asState size="sm" />
@@ -213,12 +227,9 @@ export const AppPanel = ({
               }
               description={<Clamped text={app.description} />}
               icon={<AppMark app={app} size="default" />}
-              // A member, where the app waits to be connected: why there is no Connect.
-              meta={
-                actions.member === true && asksConnect(app)
-                  ? [words.adminConnects]
-                  : undefined
-              }
+              // Why there is no Connect: a member, where the app waits to be
+              // connected, or what must go before it is connected again.
+              meta={metaOf(app, actions, words.adminConnects)}
               onClose={() => {
                 onOpenChange(false);
               }}

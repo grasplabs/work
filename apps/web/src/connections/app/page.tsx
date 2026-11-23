@@ -136,6 +136,14 @@ const styles = stylex.create({
     lineHeight: font.textSmLine,
     color: colors.mutedForeground,
   },
+  // Why a change didn't go through, over what it was about, as a field's error: small, in the destructive colour.
+  failed: {
+    margin: 0,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.destructive,
+  },
   // The search beside the card's title; in a column under 28rem, a line of its own under it, so
   // the title keeps its line (the column is the container).
   search: {
@@ -442,10 +450,13 @@ export const GroupRows = ({
 const MayDo = ({
   app,
   editable,
+  failure,
   onToolsChange,
 }: {
   app: App;
   editable: boolean;
+  /** Why the last change didn't go through, said over the tools it was about. */
+  failure: string | undefined;
   onToolsChange: AppPageProps["onToolsChange"];
 }) => {
   const words = useAppWords();
@@ -474,6 +485,11 @@ const MayDo = ({
         title={words.mayDo}
         variant="group"
       />
+      {failure === undefined ? null : (
+        <p role="alert" {...stylex.props(styles.failed)}>
+          {failure}
+        </p>
+      )}
       <Card padding="none" size="sm">
         <GroupRows
           connected={app.connection !== undefined}
@@ -489,10 +505,16 @@ const MayDo = ({
   );
 };
 
-/** The one action that moves the connection on: Connect (for a member, who can), or Manage. */
+/**
+ * The one action that moves the connection on: Connect (for a member, who
+ * can), or Manage; or what must go before it is connected again.
+ */
 const MainAction = ({ app, actions }: { app: App; actions: AppActions }) => {
   const words = useAppWords();
-  if (!asksConnect(app)) {
+  if (actions.whyNoConnect !== undefined) {
+    return <span {...stylex.props(styles.help)}>{actions.whyNoConnect}</span>;
+  }
+  if (!asksConnect(app, actions)) {
     return <ManageMenu actions={actions} app={app} asState size="sm" />;
   }
   if (actions.member === true) {
@@ -583,12 +605,14 @@ const AccountRow = ({
   onForWhomChange,
   actions,
   own,
+  note,
 }: {
   app: App;
   connection: AppConnection;
   onForWhomChange: AppPageProps["onForWhomChange"];
   actions: AppActions;
   own: ReactNode;
+  note: ReactNode;
 }) => {
   const words = useAppWords();
   const { t } = useLingui();
@@ -619,6 +643,9 @@ const AccountRow = ({
           </ItemDetail>
         </ItemTitle>
         <ItemDescription>{when}</ItemDescription>
+        {note === undefined || note === null ? null : (
+          <ItemDescription>{note}</ItemDescription>
+        )}
       </ItemContent>
       <ItemActions>
         {onForWhomChange === undefined ? null : (
@@ -689,12 +716,18 @@ export interface AppPageProps extends AppActions {
    * they open grow from them.
    */
   accountActions?: (connection: AppConnection) => ReactNode;
+  /** A short notice of the host's on an account's row, under who connected it: what to do about it now. */
+  accountNote?: (connection: AppConnection) => ReactNode;
+  /** Why the last change of what Grasp may do didn't go through, said over the tools. */
+  toolsFailure?: string | undefined;
   /** What the host adds under the page's own sections, in the same column: its notices, a connection's access. */
   children?: ReactNode;
   /** Whether the app is offered in the organization. With `onOfferedChange`, a compact switch under the head (an admin). */
   offered?: boolean;
   /** A change of whether it is offered: the host keeps it. */
   onOfferedChange?: (offered: boolean) => void;
+  /** Why the last change of whether it is offered didn't go through, said beside the switch. */
+  offeredFailure?: string | undefined;
 }
 
 /** An app's own page: its head, its connection, what uses it, what Grasp may do, and whether it is offered. */
@@ -704,8 +737,11 @@ export const AppPage = ({
   onToolsChange,
   onForWhomChange,
   accountActions,
+  accountNote,
+  toolsFailure,
   offered,
   onOfferedChange,
+  offeredFailure,
   children,
   ...actions
 }: AppPageProps) => {
@@ -735,7 +771,11 @@ export const AppPage = ({
           </span>
           {offered === undefined || onOfferedChange === undefined ? null : (
             <span {...stylex.props(styles.headOffer)}>
-              <OfferSwitch offered={offered} onChange={onOfferedChange} />
+              <OfferSwitch
+                failure={offeredFailure}
+                offered={offered}
+                onChange={onOfferedChange}
+              />
             </span>
           )}
         </header>
@@ -751,6 +791,7 @@ export const AppPage = ({
                     actions={actions}
                     app={app}
                     connection={each}
+                    note={accountNote?.(each)}
                     // Changed only where the host can keep the change.
                     onForWhomChange={editable ? onForWhomChange : undefined}
                     own={accountActions?.(each)}
@@ -763,7 +804,12 @@ export const AppPage = ({
       )}
       {used ? <UsedBy app={app} /> : null}
       {app.tools === undefined || app.tools.length === 0 ? null : (
-        <MayDo app={app} editable={editable} onToolsChange={onToolsChange} />
+        <MayDo
+          app={app}
+          editable={editable}
+          failure={toolsFailure}
+          onToolsChange={onToolsChange}
+        />
       )}
       {children}
     </div>

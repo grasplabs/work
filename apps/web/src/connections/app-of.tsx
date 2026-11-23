@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 
 import { formatDate } from "../format.ts";
 import type { App, AppConnection } from "./app/model.ts";
-import type { MarkSize } from "./app/parts.tsx";
 import { rollUp } from "./app/state.ts";
 import { useAppWords } from "./app/words.ts";
 import type { AppWords } from "./app/words.ts";
@@ -17,6 +16,7 @@ import { aboutOf } from "./integration-facts.ts";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed, workflowsOf } from "./integrations.ts";
 import { ProviderMark } from "./provider-mark.tsx";
+import type { MarkSize } from "./provider-mark.tsx";
 import { appToolsOf } from "./tool-choices.ts";
 
 // An integration as its app parts draw it (app/): its mark at the size the part shows it, what it
@@ -104,7 +104,7 @@ interface AppOptions {
   tools?: readonly CatalogTool[] | undefined;
   /** Which workflows use each connection, once read. */
   uses?: readonly ConnectionWorkflows[] | undefined;
-  /** The mark's size: `sm` on a tile, `md` in the panel, `lg` on the page. */
+  /** The mark's size: `sm` on a tile, `default` in the panel, `lg` on the page. */
   size: MarkSize;
 }
 
@@ -186,9 +186,10 @@ export const useAppOf = (
 /**
  * A tile's own words, where its one fact says more than the part's: a
  * hidden app is not offered; one without a tool count is of its kind; a
- * Composio app says how many of its tools its admin allowed; and an app
- * that stopped working which this person can't connect again waits for an
- * admin.
+ * Composio app says how many of its tools its admin allowed; an app that
+ * stopped working which this person can't connect again waits for an
+ * admin; and one whose key stopped working says so, as its key goes
+ * before another is added.
  */
 export const useTileWords = (identity: Pick<Identity, "role" | "staff">) => {
   const { t, i18n } = useLingui();
@@ -206,11 +207,15 @@ export const useTileWords = (identity: Pick<Identity, "role" | "staff">) => {
         ? { tools: () => i18n._(groupLabel[integration.group]) }
         : {};
     }
-    if (
-      primary.status === "needs_reauth" &&
-      fixOf(integration, identity) === "none"
-    ) {
-      return { needsConnect: t`Waiting for an admin` };
+    if (primary.status === "needs_reauth") {
+      const fix = fixOf(integration, identity);
+      if (fix === "none") {
+        return { needsConnect: t`Waiting for an admin` };
+      }
+      // A key connect keeps as the app's one: it goes before a new one comes.
+      if (fix === "reconnect" && integration.auth === "key") {
+        return { needsConnect: words.stopped };
+      }
     }
     const allowed = primary.offeredTools ?? primary.tools;
     return integration.source === "composio" &&

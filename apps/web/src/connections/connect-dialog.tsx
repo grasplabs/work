@@ -58,8 +58,8 @@ import type { Session } from "../core.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { AgainNote } from "./app/connect-app.tsx";
 import type { Integration } from "./integrations.ts";
-import { noteReplacing } from "./replace-stopped.tsx";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
@@ -74,10 +74,10 @@ import type { AllowedTool } from "./tool-choices.ts";
 
 /**
  * Where a flow sends the browser back to: the integration's own page, which
- * says the app is connected again when `again`.
+ * says whether the app is connected again from what it lists, never from
+ * the address.
  */
-export const returnToOf = (key: string, again = false): string =>
-  again ? `/integrations/${key}?again=1` : `/integrations/${key}`;
+export const returnToOf = (key: string): string => `/integrations/${key}`;
 
 /** Sends the browser to the provider, once core started the flow. */
 const goTo = (started: { url: string } | undefined): void => {
@@ -740,13 +740,13 @@ const KeyStep = ({
  */
 const ComposioFlow = ({
   integration,
-  replacing,
+  stopped,
   returnTo,
   onClose,
 }: {
   integration: Integration;
-  /** The connections that stopped working, which connecting again replaces. */
-  replacing: readonly ListedConnection[];
+  /** Whether it is connected again beside connections that stopped working. */
+  stopped: boolean;
   returnTo: string;
   onClose: () => void;
 }) => {
@@ -776,17 +776,15 @@ const ComposioFlow = ({
   }, [core, source, id]);
   const tools = listed?.state === "ready" ? listed.data : undefined;
   const connect = async (): Promise<void> => {
-    await begin(async (session) => {
-      const started = await session.connections.connectToolkit({
-        toolkit: integration.id,
-        tools: toolRules(allowed),
-        consent: composioConsentText,
-        returnTo,
-      });
-      // Replaced once the new one is made, not before (replace-stopped.tsx).
-      noteReplacing(integration.key, replacing);
-      return started;
-    });
+    await begin(
+      async (session) =>
+        await session.connections.connectToolkit({
+          toolkit: integration.id,
+          tools: toolRules(allowed),
+          consent: composioConsentText,
+          returnTo,
+        })
+    );
   };
   const steps = [
     {
@@ -853,6 +851,7 @@ const ComposioFlow = ({
           />
         ) : (
           <>
+            {stopped ? <AgainNote /> : null}
             {/* The consent stays as written: core keeps a hash of the exact
                 text consented to (connection-list.tsx shows it again). */}
             <Text color="muted" size="sm">
@@ -884,8 +883,6 @@ const ComposioFlow = ({
   );
 };
 
-const noneReplaced: readonly ListedConnection[] = [];
-
 /**
  * The dialog: connecting `integration`, or signing in again to `again`.
  * Open only for someone `canConnect` or `canReconnect` allows. The flow
@@ -895,7 +892,7 @@ export const ConnectDialog = ({
   integration,
   identity,
   again,
-  replacing = noneReplaced,
+  stopped = false,
   returnTo,
   open,
   onOpenChange,
@@ -903,8 +900,8 @@ export const ConnectDialog = ({
   integration: Integration;
   identity: Identity;
   again?: ListedConnection;
-  /** A toolkit's connections that stopped working, which its new connection replaces once made. */
-  replacing?: readonly ListedConnection[];
+  /** Whether a toolkit is connected again beside connections that stopped working. */
+  stopped?: boolean;
   returnTo?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -936,21 +933,17 @@ export const ConnectDialog = ({
               onClose={() => {
                 onOpenChange(false);
               }}
-              returnTo={
-                returnTo ?? returnToOf(integration.key, again !== undefined)
-              }
+              returnTo={returnTo ?? returnToOf(integration.key)}
             />
           ) : null}
           {open && integration.source === "composio" ? (
             <ComposioFlow
               integration={integration}
-              replacing={replacing}
               onClose={() => {
                 onOpenChange(false);
               }}
-              returnTo={
-                returnTo ?? returnToOf(integration.key, replacing.length > 0)
-              }
+              returnTo={returnTo ?? returnToOf(integration.key)}
+              stopped={stopped}
             />
           ) : null}
         </DialogBody>

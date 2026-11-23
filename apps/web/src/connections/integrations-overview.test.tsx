@@ -31,7 +31,8 @@ import type { Known } from "./recommended.ts";
 // The Integrations overview as people meet it: the slim band says how
 // many apps are connected; Recommended names the apps to connect first,
 // each with its reason; every app is its tile, saying where it
-// stands, that opens it over the page.
+// stands (a stopped toolkit asks to be connected again, unless its key
+// must go first), that opens it over the page.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -113,7 +114,8 @@ const opened = async (
       entry("microsoft", "Microsoft 365"),
       entry("google", "Google Workspace"),
       entry("acme-crm", "Acme CRM", "composio"),
-      entry("ledger", "Ledger", "composio"),
+      // Connected with a key, which connect keeps as its one.
+      { ...entry("ledger", "Ledger", "composio"), auth: "key" },
     ],
     connections
   );
@@ -271,6 +273,26 @@ describe("the Integrations overview", () => {
     await expect(
       appAfter(router, tiles[2]?.querySelector("button"))
     ).resolves.toBe("composio:acme-crm");
+  });
+
+  it("asks to connect a stopped toolkit again, but not one whose key stopped, which goes first", async () => {
+    const stopped: Partial<ListedConnection> = {
+      source: "composio",
+      status: "needs_reauth",
+      tools: [],
+    };
+    const { host } = await opened([
+      connection("acme-crm", stopped),
+      connection("ledger", stopped),
+    ]);
+    const tiles = [
+      ...host.querySelectorAll<HTMLElement>('ul[aria-label="Apps"] li'),
+    ];
+
+    expect(tiles.map((tile) => heard(tile)).slice(2)).toStrictEqual([
+      "Acme CRMConnect again",
+      "LedgerStopped working",
+    ]);
   });
 
   it("says an app needs someone when a spare account ran out, and how to fix the one relied on", async () => {

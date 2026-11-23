@@ -5,6 +5,7 @@ import {
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -29,7 +30,6 @@ import { DisconnectDialog, mayDisconnect } from "./connection-list.tsx";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
-import { noteReplacing } from "./replace-stopped.tsx";
 import { allowedOf, toolRules } from "./tool-choices.ts";
 
 // What can be done to an app from its panel and its page, as its app
@@ -44,9 +44,10 @@ import { allowedOf, toolRules } from "./tool-choices.ts";
 // ConnectAppConsent, always for everyone: the consent word for word and
 // what Grasp may do with each tool; connect records a hash of the exact
 // text the admin was shown and the tools as the ones they chose. One that
-// stopped working is connected again the same way, and its stopped
-// connections are disconnected once the new one is made
-// (replace-stopped.tsx). The steps dialog (connect-dialog.tsx) is left for
+// stopped working is connected again the same way: a new connection beside
+// the stopped one, which stays until someone disconnects it (its row says
+// it can go once one works, connection-list.tsx). Nothing here ever
+// disconnects anything by itself. The steps dialog (connect-dialog.tsx) is left for
 // what that one doesn't do: a toolkit that takes a key (its fields), one
 // whose tools couldn't be read (it reads them again, and says why not),
 // signing in again and connecting another account.
@@ -54,26 +55,26 @@ import { allowedOf, toolRules } from "./tool-choices.ts";
 /**
  * Connecting a Composio toolkit from the app parts' dialog. Connecting it
  * again, once it stopped working, is a new connection (Composio's account
- * can't be signed in to again), which replaces the ones that stopped once
- * it is made: until then they stay as they are (replace-stopped.tsx).
+ * can't be signed in to again), starting from what the stopped one
+ * allowed; the stopped one stays as it is until it is disconnected.
  */
 const ConnectToolkit = ({
   app: shown,
   integration,
-  replacing,
+  stopped,
   catalog,
   size,
 }: {
   app: App;
   integration: Integration;
-  /** The connections that stopped working, which connecting again replaces. */
-  replacing: readonly ListedConnection[];
+  /** The connections that stopped working, beside which it is connected again. */
+  stopped: readonly ListedConnection[];
   /** The toolkit's tools as the catalog lists them now. */
   catalog: readonly CatalogTool[];
   size: "xs" | "sm";
 }) => {
   const core = useCore();
-  const [old] = replacing;
+  const [old] = stopped;
   // What the old connection allowed of what the catalog still lists: where
   // connecting again starts, each tool keeping the resource it was held to.
   const listed = new Set(catalog.map(({ name }) => name));
@@ -105,10 +106,9 @@ const ConnectToolkit = ({
           tools: toolRules(allowed),
           // Word for word what the dialog showed: core records its hash.
           consent,
-          returnTo: returnToOf(integration.key, old !== undefined),
+          returnTo: returnToOf(integration.key),
         })
     );
-    noteReplacing(integration.key, replacing);
     // The browser leaves for the provider's sign-in.
     await leaveFor(started);
   };
@@ -192,18 +192,15 @@ const removableOf = (
 };
 
 /**
- * A toolkit's connections that stopped working, which an admin connects
- * again (the new one replacing them once made); none while one the company
- * relies on still works, or for anyone else. None for a toolkit that takes
- * a key either: connect keeps one key connection of a toolkit live, a
- * stopped one included, so the admin disconnects it first, from its row.
+ * A toolkit's shared connections that stopped working, where an admin
+ * connects it anew (`fixOf`) and the company relied on one of them; none
+ * otherwise, or for anyone else.
  */
-const stoppedOf = (
+const lapsedOf = (
   integration: Integration,
   identity: Identity
 ): ListedConnection[] =>
   integration.source === "composio" &&
-  integration.auth !== "key" &&
   fixOf(integration, identity) === "reconnect" &&
   reliedOnLapsed(integration)
     ? integration.connections.filter(
@@ -273,6 +270,7 @@ export const useAppActions = ({
    */
   accountRows: boolean;
 }): { actions: AppActions; dialogs: ReactNode } => {
+  const { t } = useLingui();
   const [native, setNative] = useState<Native>();
   const connectable = canConnect(integration, identity);
   const none = integration.connections.length === 0;
@@ -281,7 +279,12 @@ export const useAppActions = ({
     setNative({ again: target });
   };
   const actions: AppActions = {};
-  const stopped = stoppedOf(integration, identity);
+  const lapsed = lapsedOf(integration, identity);
+  // Connect keeps one key connection of a toolkit live, a stopped one
+  // included (`connection.already_connected`): its key is disconnected
+  // before another is added, so it isn't connected again beside it.
+  const keyed = integration.auth === "key";
+  const stopped = keyed ? [] : lapsed;
   const way = connectWayOf(integration, identity, tools, stopped);
   if (way === "native") {
     actions.connect = (
@@ -298,8 +301,8 @@ export const useAppActions = ({
         app={app}
         catalog={tools?.state === "ready" ? tools.data : []}
         integration={integration}
-        replacing={stopped}
         size={size}
+        stopped={stopped}
       />
     );
   } else if (way === "dialog") {
@@ -310,6 +313,9 @@ export const useAppActions = ({
   }
   if (connectable && !none && integration.source === "native") {
     actions.onConnectAnother = openNative();
+  }
+  if (connectable && keyed && lapsed.length > 0) {
+    actions.whyNoConnect = t`The key that stopped working must be disconnected before a new one can be added.`;
   }
   const dialogs = (
     <ConnectDialog
@@ -322,7 +328,7 @@ export const useAppActions = ({
         }
       }}
       open={native !== undefined}
-      replacing={stopped}
+      stopped={stopped.length > 0}
     />
   );
   return { actions, dialogs };

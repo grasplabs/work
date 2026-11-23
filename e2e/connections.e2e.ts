@@ -3,7 +3,12 @@ import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
-import { seededConnections, seededTools } from "./connections-seed.ts";
+import {
+  removeSeeded,
+  seedStoppedToolkit,
+  seededConnections,
+  seededTools,
+} from "./connections-seed.ts";
 import type { SeededConnection } from "./connections-seed.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -12,7 +17,9 @@ import { apiOf, peopleIn } from "./people.ts";
 // its integration's page, a row each with where it stands, signs in again
 // to one whose access ran out and disconnects one from its own row; an
 // admin sees which Apps hold a permission for a shared connection and
-// revokes it there, and reads a Composio connection's consent. The
+// revokes it there, and reads a Composio connection's consent; back from
+// connecting a stopped toolkit again, nothing is disconnected by itself,
+// and the admin removes the stopped one from its row's notice. The
 // connections are what finished flows leave behind
 // (e2e/connections-seed.ts): the flows through Entra and Composio are
 // core's tests.
@@ -332,6 +339,54 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   await expect(
     page.getByRole("button", { name: "Manage", exact: true })
   ).toHaveCount(0);
+});
+
+test("an admin comes back from connecting a stopped toolkit again, finds the stopped connection still there, and removes it from its row's notice", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("connections");
+  const { toolkit } = seededConnections();
+  // Back from the sign-in: the new, working connection (the scene's) beside
+  // the one that stopped.
+  const stopped = await seedStoppedToolkit(admin.userId);
+  try {
+    const page = await pageOf(admin);
+    await page.goto(`/integrations/composio:hubspot?connection=${toolkit.id}`);
+    const done = page.getByRole("dialog", {
+      name: "hubspot is connected again",
+    });
+    await expect(done).toBeVisible();
+    await done.getByRole("button", { name: "Close" }).first().click();
+    await expect(page.getByRole("dialog", { includeHidden: true })).toHaveCount(
+      0
+    );
+
+    // Nothing went by itself: the stopped one is still on its row, which
+    // says it can go now. The working one says nothing of the kind.
+    const stoppedRow = rowOf(page, stopped);
+    await expect(stoppedRow).toContainText(
+      "A connection that works has taken its place, so this one can be disconnected now."
+    );
+    await expect(rowOf(page, toolkit)).not.toContainText("can be disconnected");
+    await page.reload();
+    await expect(stoppedRow).toBeVisible();
+
+    // Its notice opens the Disconnect question, which says what goes.
+    await stoppedRow.getByRole("button", { name: "Disconnect it" }).click();
+    const question = page.getByRole("alertdialog", {
+      name: `Disconnect hubspot (${stopped.account})?`,
+    });
+    await expect(question).toContainText(
+      "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped."
+    );
+    await question
+      .getByRole("button", { name: "Disconnect", exact: true })
+      .click();
+    await expect(stoppedRow).toHaveCount(0);
+    await expect(rowOf(page, toolkit)).toContainText("Connected");
+  } finally {
+    await removeSeeded(stopped);
+  }
 });
 
 test("an admin opens an app from its tile, goes on to its own page from its panel, and hides it from members there", async ({

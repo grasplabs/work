@@ -43,7 +43,9 @@ import { useAppWords } from "./words.ts";
 // Composio toolkit): the same head, then the host's consent as written,
 // word for word, in a quiet scroller of its own height, then what Grasp
 // may do with each tool, by group, and Cancel, Connect. The host records
-// the consent it was handed back and the tools chosen.
+// the consent it was handed back and the tools chosen. Connecting a stopped
+// one again says first that it makes a new connection beside the stopped
+// one, which stays until it is disconnected (`AgainNote`).
 
 /** What `onConnect` is handed: who uses it. */
 export interface ConnectAppChoice {
@@ -251,6 +253,21 @@ const usePressFailure = () => {
   };
 };
 
+/**
+ * Connecting a stopped app again, said before its consent: a new
+ * connection, beside the stopped one, which stays until it is
+ * disconnected, starting fresh (consented to again, read in the Brain by
+ * nobody until someone chooses), as core makes it.
+ */
+export const AgainNote = () => {
+  const words = useAppWords();
+  return (
+    <Alert>
+      <AlertDescription>{words.connectAgainNote}</AlertDescription>
+    </Alert>
+  );
+};
+
 /** Connect an app: who uses it and where you'll sign in, on one screen from its Connect button. */
 export const ConnectApp = ({
   app,
@@ -453,6 +470,7 @@ export const ConnectAppConsent = ({
         <Head again={again} app={app} />
         <DialogBody>
           <div {...stylex.props(styles.body)}>
+            {again ? <AgainNote /> : null}
             <WhoUses fixed={fixed} forWhom={forWhom} onChange={setForWhom} />
             <section
               aria-labelledby={consentId}

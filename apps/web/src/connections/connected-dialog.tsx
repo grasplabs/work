@@ -24,10 +24,41 @@ import { Fragment } from "react";
 // (`components/connect-dialog.tsx`): the sign-in happens at the provider,
 // which sends the person back to the page with `connection=<id>`, so the
 // page opens this once it lists that connection: that the
-// app is connected (again, when the flow signed in again), what Grasp may
+// app is connected (again, where one of its connections that stopped
+// working stands beside it, `returnedOf`), what Grasp may
 // do there, and what was chosen: who uses it and, for a Composio toolkit,
 // the tools allowed. A Damsko Dialog: Damsko has no success mark, and its
 // title says it.
+
+/**
+ * What a flow came back with, from what the page lists, never from the
+ * address alone: the connection named `id`, only where it is listed and
+ * works (anyone can put an ID in a link), and whether it connected the app
+ * again: a shared one, beside a shared one of the same kind that stopped
+ * working (a Composio toolkit connected again, app-actions.tsx). Another
+ * account beside one of someone's own that ran out is not "again".
+ */
+export const returnedOf = (
+  connections: readonly ListedConnection[],
+  id: string | undefined
+): { connection: ListedConnection | undefined; again: boolean } => {
+  const connection =
+    id === undefined
+      ? undefined
+      : connections.find((each) => each.id === id && each.status === "active");
+  return {
+    connection,
+    again:
+      connection?.scope === "shared" &&
+      connections.some(
+        (each) =>
+          each.id !== connection.id &&
+          each.status === "needs_reauth" &&
+          each.scope === "shared" &&
+          each.source === connection.source
+      ),
+  };
+};
 
 /** The scope chosen, in the connect dialog's own words. */
 const ScopeRow = ({ connection }: { connection: ListedConnection }) => {
