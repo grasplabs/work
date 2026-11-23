@@ -416,8 +416,8 @@ const findingOf = (
   if (own === undefined && drawn !== undefined) {
     return {
       kind: "notInSap",
-      title: words(name, "is on the drawing, not in SAP"),
-      detail: words("Position", position, "of the drawing."),
+      title: name,
+      detail: words("On the drawing at position", position, "· not in SAP"),
       effect: null,
       estimate: false,
     };
@@ -427,8 +427,8 @@ const findingOf = (
       ? null
       : {
           kind: "notOnDrawing",
-          title: words(name, "is in SAP and in the price, not on the drawing"),
-          detail: words("Position", position, "in SAP:", own.line.quantity, own.line.unit),
+          title: name,
+          detail: words("In SAP and in the price at position", position, "· not on the drawing"),
           effect: price === null ? null : -withMargin(own.line.quantity * price, margin),
           estimate: false,
         };
@@ -436,8 +436,13 @@ const findingOf = (
   if (own.line.quantity !== drawn.quantity) {
     return {
       kind: "quantity",
-      title: words(name, "· the drawing says", drawn.quantity, "but SAP and the price count", own.line.quantity),
-      detail: "The customer approves the drawing, so the product is built as drawn.",
+      title: name,
+      detail: words(
+        "The drawing the customer approves says",
+        drawn.quantity,
+        "· SAP and the price count",
+        own.line.quantity
+      ),
       effect:
         price === null
           ? null
@@ -455,8 +460,8 @@ const findingOf = (
   }
   return {
     kind: "part",
-    title: words(name, "· the drawing names", drawn.supplierPart, "but SAP has", article.supplierPart),
-    detail: words("Position", position),
+    title: name,
+    detail: words("The drawing names", drawn.supplierPart, "· SAP has", article.supplierPart),
     effect: null,
     estimate: false,
   };
@@ -472,7 +477,8 @@ const unpricedOf = (lines: readonly SapLine[], margin: number): Finding | null =
   let known = false;
   for (const { line, article } of unpriced) {
     const last = article?.lastPurchasePrice ?? null;
-    if (last !== null) {
+    // SAP's 0 means it was never bought.
+    if (last !== null && last > 0) {
       estimate += line.quantity * last;
       known = true;
     }
@@ -482,7 +488,7 @@ const unpricedOf = (lines: readonly SapLine[], margin: number): Finding | null =
     title: words(
       unpriced.length,
       unpriced.length === 1 ? "part has" : "parts have",
-      "no price in the price list, so the price leaves them out"
+      "no price, so the price leaves them out"
     ),
     detail: unpriced
       .map(({ line, article }) => article?.description ?? line.article)
@@ -1085,43 +1091,6 @@ export const amount = (value: number): string => numbers.format(value);
 export const day = (moment: number): string => days.format(moment);
 `;
 
-const figure = `import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/app-kit/components/card";
-import { Stat } from "@grasp-os/app-kit/components/stat";
-
-/** A key figure: what it is, its value, and a word under it. */
-export const Figure = ({
-  label,
-  value,
-  note,
-  attention = false,
-}: {
-  label: string;
-  value: string;
-  note?: string;
-  attention?: boolean;
-}) => (
-  <Card size="sm">
-    <CardHeader>
-      <CardDescription>{label}</CardDescription>
-      <CardTitle>
-        <Stat variant={attention ? "attention" : "default"}>{value}</Stat>
-      </CardTitle>
-    </CardHeader>
-    {note === undefined ? null : (
-      <CardContent>
-        <CardDescription>{note}</CardDescription>
-      </CardContent>
-    )}
-  </Card>
-);
-`;
-
 const home = `import { useAction, useMutation, usePaginatedQuery } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Button } from "@grasp-os/app-kit/components/button";
@@ -1129,7 +1098,6 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
@@ -1142,14 +1110,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/app-kit/components/dialog";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
+import { Empty, EmptyHeader, EmptyTitle } from "@grasp-os/app-kit/components/empty";
 import { Field, FieldGroup, FieldLabel } from "@grasp-os/app-kit/components/field";
-import { Grid } from "@grasp-os/app-kit/components/grid";
 import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Item,
@@ -1172,33 +1134,13 @@ import { api } from "@server/_generated/api";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { Titled } from "../components/info";
 import { day } from "../lib/format";
 import { handOver } from "../lib/hand-over";
 import { statuses } from "../lib/statuses";
 
-/** How every letter goes, the same way each time. */
-const steps = [
-  { title: "A letter comes in", detail: "A price change, or a change to a part." },
-  { title: "Grasp reads it", detail: "Who sent it, what changes, from when, which parts." },
-  { title: "Grasp works out what it touches", detail: "Articles, products and new prices, from SAP." },
-  { title: "You approve", detail: "The message to customers, written and ready." },
-] as const;
-
-const HowItRuns = () => (
-  <Grid columns={4}>
-    {steps.map((step, index) => (
-      <Card key={step.title} size="sm">
-        <CardHeader>
-          <CardDescription>{["Step", String(index + 1)].join(" ")}</CardDescription>
-          <CardTitle>{step.title}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <CardDescription>{step.detail}</CardDescription>
-        </CardContent>
-      </Card>
-    ))}
-  </Grid>
-);
+/** Records a list shows first, and more by. */
+const pageSize = 20;
 
 const AddLetter = () => {
   const add = useMutation(api.notices.add);
@@ -1261,8 +1203,11 @@ const AddLetter = () => {
   );
 };
 
-/** Records a list shows first, and more by. */
-const pageSize = 20;
+const More = ({ onClick }: { onClick: () => void }) => (
+  <Button onClick={onClick} variant="ghost">
+    Show more
+  </Button>
+);
 
 const Letters = () => {
   const { items: notices, hasMore, isLoading, loadMore } = usePaginatedQuery(
@@ -1278,7 +1223,6 @@ const Letters = () => {
       <Empty>
         <EmptyHeader>
           <EmptyTitle>No letters yet</EmptyTitle>
-          <EmptyDescription>Add the next one a supplier sends.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -1293,9 +1237,7 @@ const Letters = () => {
         >
           <ItemContent>
             <ItemTitle>{[notice.supplier, notice.title].join(" · ")}</ItemTitle>
-            <ItemDescription>
-              {notice.summary ?? ["Received", day(notice.received)].join(" ")}
-            </ItemDescription>
+            <ItemDescription>{notice.summary ?? day(notice.received)}</ItemDescription>
           </ItemContent>
           <ItemActions>
             <Badge variant={statuses[notice.status].variant}>
@@ -1309,12 +1251,6 @@ const Letters = () => {
     </ItemGroup>
   );
 };
-
-const More = ({ onClick }: { onClick: () => void }) => (
-  <Button onClick={onClick} variant="ghost">
-    Show more
-  </Button>
-);
 
 const Products = () => {
   const { items: assemblies, hasMore, isLoading, loadMore } = usePaginatedQuery(
@@ -1335,9 +1271,7 @@ const Products = () => {
         >
           <ItemContent>
             <ItemTitle>{assembly.name}</ItemTitle>
-            <ItemDescription>
-              {[assembly.number, ["REV", assembly.revision].join(" "), assembly.customer].join(" · ")}
-            </ItemDescription>
+            <ItemDescription>{[assembly.number, assembly.customer].join(" · ")}</ItemDescription>
           </ItemContent>
         </Item>
       ))}
@@ -1352,15 +1286,18 @@ const Home = () => (
       <PageHeaderContent>
         <PageHeaderTitle>Supplier changes</PageHeaderTitle>
         <PageHeaderDescription>
-          Every letter from a supplier, read and worked out the same way. You only approve.
+          Grasp reads every supplier letter and works out what it changes. You approve.
         </PageHeaderDescription>
       </PageHeaderContent>
     </PageHeader>
-    <HowItRuns />
     <Card>
       <CardHeader>
-        <CardTitle>Letters</CardTitle>
-        <CardDescription>From suppliers, newest first.</CardDescription>
+        <CardTitle>
+          <Titled
+            info="Letters from your suppliers: price changes and changes to parts. Grasp reads each one the same way. Here you add one by hand; later they come in from your mailbox."
+            title="Letters"
+          />
+        </CardTitle>
         <CardAction>
           <AddLetter />
         </CardAction>
@@ -1371,10 +1308,12 @@ const Home = () => (
     </Card>
     <Card>
       <CardHeader>
-        <CardTitle>Products</CardTitle>
-        <CardDescription>
-          Checked against their drawing, SAP and the price list, again whenever one changes.
-        </CardDescription>
+        <CardTitle>
+          <Titled
+            info="Your products. Grasp checks each one: does the drawing the customer approves match the parts list in SAP and the price list?"
+            title="Products"
+          />
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <Products />
@@ -1384,6 +1323,37 @@ const Home = () => (
 );
 
 export const Route = createFileRoute("/")({ component: Home });
+`;
+
+/** A quiet info mark beside a title, for someone seeing the App for the first time. */
+const infoFile = `import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@grasp-os/app-kit/components/tooltip";
+import { InfoIcon } from "lucide-react";
+
+/** An info mark that says, on hover or focus, what this part shows. */
+export const Info = ({ children }: { children: string }) => (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger render={<Button aria-label={children} size="icon-xs" variant="ghost" />}>
+        <InfoIcon />
+      </TooltipTrigger>
+      <TooltipContent>{children}</TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
+/** A title with its info mark after it. */
+export const Titled = ({ title, info }: { title: string; info: string }) => (
+  <span className="flex items-center gap-1">
+    {title}
+    <Info>{info}</Info>
+  </span>
+);
 `;
 
 /** Hands a letter to Grasp: both steps, one after the other. */
@@ -1425,6 +1395,12 @@ export const statuses = {
 const letter = `import { useAction, useMutation, useQuery, useUser } from "@grasp-os/sdk/react";
 import type { FunctionReturn } from "@grasp-os/sdk";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@grasp-os/app-kit/components/accordion";
+import {
   Alert,
   AlertAction,
   AlertDescription,
@@ -1440,13 +1416,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { Grid } from "@grasp-os/app-kit/components/grid";
+import { Empty, EmptyHeader, EmptyTitle } from "@grasp-os/app-kit/components/empty";
 import {
   PageHeader,
   PageHeaderActions,
@@ -1475,10 +1445,10 @@ import {
 import { api } from "@server/_generated/api";
 import type { Doc, Id } from "@server/_generated/dataModel";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CheckIcon, CircleIcon, LoaderIcon, UserIcon } from "lucide-react";
+import { CheckIcon, CircleAlertIcon, CircleIcon, LoaderIcon, UserIcon } from "lucide-react";
 import { useState } from "react";
 
-import { Figure } from "../components/figure";
+import { Titled } from "../components/info";
 import { amount, change, day, money } from "../lib/format";
 import { handOver } from "../lib/hand-over";
 import { statuses } from "../lib/statuses";
@@ -1486,33 +1456,34 @@ import { statuses } from "../lib/statuses";
 type Notice = Doc<"notices">;
 type Impact = NonNullable<FunctionReturn<typeof api.notices.impact>>;
 
-/** Articles shown before the person asks for all. */
-const firstArticles = 8;
-
 /** The statuses a letter goes through, in order. */
 const order = ["new", "reading", "working", "writing", "read", "approved"] as const;
 
 const failureOf = (error: unknown): string =>
   error instanceof Error ? error.message : "Something went wrong.";
 
-const percentOf = (notice: Notice): string =>
-  notice.percent === null
-    ? "Price change"
-    : [notice.percent > 0 ? "+" : "", amount(notice.percent), "%"].join("");
+/** What the letter changes, in a few words: +4% from January 1, 2027. */
+const changeOf = (notice: Notice): string => {
+  const what =
+    notice.kind === "price" && notice.percent !== null
+      ? [notice.percent > 0 ? "+" : "", amount(notice.percent), "%"].join("")
+      : [amount(notice.parts.length), notice.parts.length === 1 ? "part" : "parts"].join(" ");
+  return notice.effective === null ? what : [what, "from", notice.effective].join(" ");
+};
 
-/** One step of the letter: done, at work, or still to come. */
+/** One step of the letter: done with its result, at work, or still to come. */
 const Step = ({
   at,
   step,
   done,
   doing,
-  detail,
+  result,
 }: {
   at: number;
   step: number;
   done: string;
   doing: string;
-  detail?: string;
+  result?: string;
 }) => {
   if (at > step) {
     return (
@@ -1521,7 +1492,7 @@ const Step = ({
           <CheckIcon />
         </TraceIcon>
         <TraceTitle>{done}</TraceTitle>
-        {detail === undefined ? null : <TraceDescription>{detail}</TraceDescription>}
+        {result === undefined ? null : <TraceDescription>{result}</TraceDescription>}
       </TraceLine>
     );
   }
@@ -1533,42 +1504,47 @@ const Step = ({
   );
 };
 
-/** What Grasp did with the letter, step by step, as it happens. */
+/** The letter in one sentence, and what Grasp did with it, step by step, as it happens. */
 const Steps = ({ notice, impact }: { notice: Notice; impact: Impact | null | undefined }) => {
   const at = order.indexOf(notice.status);
   const approved = notice.status === "approved";
+  const toQuality = impact !== null && impact !== undefined && impact.products.length === 0;
   return (
     <Card>
       <CardHeader>
-        <CardTitle>What Grasp did</CardTitle>
-        <CardDescription>The same steps for every letter.</CardDescription>
+        <CardTitle>
+          <Titled
+            info="What Grasp did with this letter, step by step: it reads the letter, finds the supplier and the parts in your SAP data, works out what changes, and writes the message. Nothing goes out until you approve."
+            title={notice.summary ?? "Grasp is reading the letter"}
+          />
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <Trace>
-          <Step at={1} detail={day(notice.received)} doing="" done="Letter received" step={0} />
           <Step
             at={at}
-            detail={notice.supplierName ?? undefined}
             doing="Reading the letter"
             done="Read the letter"
+            result={notice.kind === null ? undefined : changeOf(notice)}
             step={1}
           />
           <Step
             at={at}
-            detail={
+            doing="Working out what it touches in SAP"
+            done="Worked out what it touches in SAP"
+            result={
               impact === null || impact === undefined
                 ? undefined
                 : [amount(impact.count), "articles ·", amount(impact.products.length), impact.products.length === 1 ? "product" : "products"].join(" ")
             }
-            doing="Working out what it touches in SAP"
-            done="Worked out what it touches in SAP"
             step={2}
           />
-          {impact !== null && impact !== undefined && impact.products.length === 0 ? (
-            <Step at={at} doing="Writing a note for Quality" done="Wrote a note for Quality" step={3} />
-          ) : (
-            <Step at={at} doing="Writing the message to customers" done="Wrote the message to customers" step={3} />
-          )}
+          <Step
+            at={at}
+            doing={toQuality ? "Writing a note for Quality" : "Writing the message to customers"}
+            done={toQuality ? "Wrote a note for Quality" : "Wrote the message to customers"}
+            step={3}
+          />
           {at < 4 ? (
             <TraceLine status="pending" wrap>
               <TraceIcon>
@@ -1593,57 +1569,11 @@ const Steps = ({ notice, impact }: { notice: Notice; impact: Impact | null | und
   );
 };
 
-const WhatItSays = ({ notice }: { notice: Notice }) => (
-  <Card>
-    <CardHeader>
-      <CardTitle>What the letter says</CardTitle>
-      <CardDescription>{notice.summary ?? "Grasp is reading it."}</CardDescription>
-    </CardHeader>
-    <CardContent>
-      {notice.kind === null ? (
-        <Skeleton className="h-32" />
-      ) : (
-        <Table>
-          <TableBody>
-            <TableRow>
-              <TableHead>Supplier in SAP</TableHead>
-              <TableCell>{notice.supplierName ?? "Not found among the articles"}</TableCell>
-            </TableRow>
-            <TableRow>
-              <TableHead>Change</TableHead>
-              <TableCell>{notice.kind === "price" ? percentOf(notice) : "Change to a part"}</TableCell>
-            </TableRow>
-            <TableRow>
-              <TableHead>From</TableHead>
-              <TableCell>{notice.effective ?? "Not given"}</TableCell>
-            </TableRow>
-            <TableRow>
-              <TableHead>Parts</TableHead>
-              <TableCell>
-                {notice.parts.length === 0 ? (
-                  "Every article of the supplier"
-                ) : (
-                  <span className="flex flex-wrap gap-1">
-                    {notice.parts.map((part) => (
-                      <Badge key={part} variant="outline">
-                        {part}
-                      </Badge>
-                    ))}
-                  </span>
-                )}
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      )}
-    </CardContent>
-  </Card>
-);
-
 /** What Grasp found in the products it checked on the way. */
 const AlsoFound = ({ impact }: { impact: Impact }) => {
   const flagged = impact.products.filter((product) => product.findings > 0);
-  if (flagged.length === 0) {
+  const [first] = flagged;
+  if (first === undefined) {
     return null;
   }
   let findings = 0;
@@ -1652,151 +1582,80 @@ const AlsoFound = ({ impact }: { impact: Impact }) => {
     findings += product.findings;
     effect += product.effect;
   }
-  const [first] = flagged;
   return (
     <Alert variant="attention">
+      <CircleAlertIcon />
       <AlertTitle>
-        {[
+        <Titled
+          info="For every product a letter touches, Grasp also checks its drawing against SAP and the price list. Amounts are per piece, margin included."
+          title={[
           "Grasp also checked",
-          flagged.length === 1 && first !== undefined ? first.name : [amount(flagged.length), "products"].join(" "),
+          flagged.length === 1 ? first.name : [amount(flagged.length), "products"].join(" "),
           "and found",
           amount(findings),
           findings === 1 ? "thing" : "things",
           "that don't match",
         ].join(" ")}
+        />
       </AlertTitle>
       <AlertDescription>
         {effect > 0
-          ? ["Its price leaves out about", money(effect), "a piece: more than this letter changes."].join(" ")
+          ? ["Its price leaves out about", money(effect), "a piece."].join(" ")
           : "The drawing the customer approves, SAP and the price disagree."}
       </AlertDescription>
-      {first === undefined ? null : (
-        <AlertAction>
-          <Button render={<Link params={{ number: first.number }} to="/products/$number" />} variant="outline">
-            See what
-          </Button>
-        </AlertAction>
-      )}
+      <AlertAction>
+        <Button render={<Link params={{ number: first.number }} to="/products/$number" />} variant="outline">
+          See what
+        </Button>
+      </AlertAction>
     </Alert>
   );
 };
 
-const ProductsTouched = ({ notice, impact }: { notice: Notice; impact: Impact }) => (
+const Products = ({ notice, impact }: { notice: Notice; impact: Impact }) => (
   <Card>
     <CardHeader>
       <CardTitle>
-        {notice.kind === "price" ? "Products whose price changes" : "Products using these parts"}
+        <Titled
+          info="The price of one piece of each product before and after the change, worked out the way your calculation file does: parts with margin, labour and the production order."
+          title={notice.kind === "price" ? "New prices" : "Products using these parts"}
+        />
       </CardTitle>
-      <CardDescription>From the parts lists in SAP, priced as the calculation prices them.</CardDescription>
     </CardHeader>
     <CardContent>
-      {impact.products.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>No product in the parts lists uses these parts</EmptyTitle>
-            <EmptyDescription>
-              With production orders, Grasp also finds which customers received them.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Parts affected</TableHead>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Product</TableHead>
+            <TableHead>Customer</TableHead>
+            {notice.kind === "price" ? (
+              <>
+                <TableHead>Now</TableHead>
+                <TableHead>New</TableHead>
+                <TableHead>Difference</TableHead>
+              </>
+            ) : null}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {impact.products.map((product) => (
+            <TableRow key={product.number}>
+              <TableCell>{[product.name, product.number].join(" · ")}</TableCell>
+              <TableCell>{product.customer}</TableCell>
               {notice.kind === "price" ? (
                 <>
-                  <TableHead>Price now</TableHead>
-                  <TableHead>New price</TableHead>
-                  <TableHead>Difference</TableHead>
+                  <TableCell>{money(product.now)}</TableCell>
+                  <TableCell>{money(product.after)}</TableCell>
+                  <TableCell>{change(product.after - product.now)}</TableCell>
                 </>
               ) : null}
-              <TableHead>Check</TableHead>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {impact.products.map((product) => (
-              <TableRow key={product.number}>
-                <TableCell>{[product.name, product.number].join(" · ")}</TableCell>
-                <TableCell>{product.customer}</TableCell>
-                <TableCell>{product.uses.length}</TableCell>
-                {notice.kind === "price" ? (
-                  <>
-                    <TableCell>{money(product.now)}</TableCell>
-                    <TableCell>{money(product.after)}</TableCell>
-                    <TableCell>{change(product.after - product.now)}</TableCell>
-                  </>
-                ) : null}
-                <TableCell>
-                  <Badge
-                    render={<Link params={{ number: product.number }} to="/products/$number" />}
-                    variant={product.findings === 0 ? "passed" : "attention"}
-                  >
-                    {product.findings === 0
-                      ? "Agrees"
-                      : [amount(product.findings), product.findings === 1 ? "finding" : "findings"].join(" ")}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+          ))}
+        </TableBody>
+      </Table>
     </CardContent>
   </Card>
 );
-
-const Articles = ({ notice, impact }: { notice: Notice; impact: Impact }) => {
-  const [all, setAll] = useState(false);
-  const shown = all ? impact.articles : impact.articles.slice(0, firstArticles);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Articles</CardTitle>
-        <CardDescription>
-          {[amount(impact.count), "from", notice.supplierName ?? notice.supplier, "· most in stock first · price list, else last purchase price"].join(" ")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Article</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Supplier part</TableHead>
-              <TableHead>In stock</TableHead>
-              <TableHead>Price</TableHead>
-              {notice.kind === "price" ? <TableHead>New price</TableHead> : null}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {shown.map((article) => (
-              <TableRow key={article.number}>
-                <TableCell>{article.number}</TableCell>
-                <TableCell>{article.description}</TableCell>
-                <TableCell>{article.supplierPart}</TableCell>
-                <TableCell>{amount(article.stock)}</TableCell>
-                <TableCell>{article.price === null ? "–" : money(article.price)}</TableCell>
-                {notice.kind === "price" ? (
-                  <TableCell>{article.newPrice === null ? "–" : money(article.newPrice)}</TableCell>
-                ) : null}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-      {impact.articles.length > firstArticles ? (
-        <CardFooter>
-          <Button onClick={() => setAll(!all)} variant="ghost">
-            {all ? "Show fewer" : ["Show all", amount(impact.articles.length)].join(" ")}
-          </Button>
-        </CardFooter>
-      ) : null}
-    </Card>
-  );
-};
 
 const Message = ({ notice, forCustomers }: { notice: Notice; forCustomers: boolean }) => {
   const approve = useMutation(api.notices.approve);
@@ -1817,11 +1676,20 @@ const Message = ({ notice, forCustomers }: { notice: Notice; forCustomers: boole
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{forCustomers ? "Message to customers" : "Note for Quality"}</CardTitle>
+        <CardTitle>
+          <Titled
+            info={
+              forCustomers
+                ? "Grasp wrote this from the letter and the prices above. Change it if you like: it only goes out once you approve."
+                : "No product uses these parts, so no customer needs a message. Grasp wrote a note for your quality team instead."
+            }
+            title={forCustomers ? "Message to customers" : "Note for Quality"}
+          />
+        </CardTitle>
         <CardDescription>
           {approved && notice.approvedAt !== null
             ? ["Approved by", notice.approvedBy ?? "", "on", day(notice.approvedAt)].join(" ")
-            : "Written by Grasp from the figures above. Change what you like, then approve it."}
+            : "Written by Grasp. Change what you like."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -1829,73 +1697,88 @@ const Message = ({ notice, forCustomers }: { notice: Notice; forCustomers: boole
           aria-label={forCustomers ? "Message to customers" : "Note for Quality"}
           disabled={approved || busy}
           onChange={(event) => setText(event.target.value)}
-          rows={12}
+          rows={8}
           value={text}
         />
       </CardContent>
-      <CardFooter>
-        <div className="flex items-center gap-3">
-          {approved ? (
-            <Badge variant="passed">Approved</Badge>
-          ) : (
+      {approved ? null : (
+        <CardFooter>
+          <div className="flex items-center gap-3">
             <Button disabled={busy || text.trim() === ""} onClick={submit} variant="highlight">
               {busy ? <Spinner /> : null}
               Approve
             </Button>
-          )}
-          {failure === null ? null : <span>{failure}</span>}
-        </div>
-      </CardFooter>
+            {failure === null ? null : <span>{failure}</span>}
+          </div>
+        </CardFooter>
+      )}
     </Card>
   );
 };
 
-const LetterText = ({ letter }: { letter: string }) => (
-  <Card>
-    <CardHeader>
-      <CardTitle>The letter</CardTitle>
-    </CardHeader>
-    <CardContent className="max-h-96 overflow-y-auto whitespace-pre-wrap">
-      {letter}
-    </CardContent>
-  </Card>
+/** What stays out of the way until someone asks: the articles and the letter itself. */
+const Details = ({ notice, impact }: { notice: Notice; impact: Impact | null | undefined }) => (
+  <Accordion>
+    {impact === null || impact === undefined ? null : (
+      <AccordionItem value="articles">
+        <AccordionTrigger>
+          {[amount(impact.count), "articles from", notice.supplierName ?? notice.supplier].join(" ")}
+        </AccordionTrigger>
+        <AccordionContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Article</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>In stock</TableHead>
+                <TableHead>Price</TableHead>
+                {notice.kind === "price" ? <TableHead>New price</TableHead> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {impact.articles.map((article) => (
+                <TableRow key={article.number}>
+                  <TableCell>{article.number}</TableCell>
+                  <TableCell>{article.description}</TableCell>
+                  <TableCell>{amount(article.stock)}</TableCell>
+                  <TableCell>{article.price === null ? "–" : money(article.price)}</TableCell>
+                  {notice.kind === "price" ? (
+                    <TableCell>{article.newPrice === null ? "–" : money(article.newPrice)}</TableCell>
+                  ) : null}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </AccordionContent>
+      </AccordionItem>
+    )}
+    <AccordionItem value="letter">
+      <AccordionTrigger>The letter</AccordionTrigger>
+      <AccordionContent>
+        <p className="whitespace-pre-wrap">{notice.letter}</p>
+      </AccordionContent>
+    </AccordionItem>
+  </Accordion>
 );
 
-/** A letter Grasp is reading or read: its steps, and what came of each. */
+/** A letter Grasp is reading or read: its steps, and what came of them. */
 const Reading = ({ notice }: { notice: Notice }) => {
   const impact = useQuery(api.notices.impact, { id: notice._id });
   const ready = notice.status === "read" || notice.status === "approved";
+  const found = impact === undefined || impact === null ? null : impact;
   return (
     <>
-      <Grid columns={2}>
-        <Steps impact={impact} notice={notice} />
-        <WhatItSays notice={notice} />
-      </Grid>
-      {impact === undefined || impact === null ? null : (
-        <>
-          <Grid columns={4}>
-            <Figure label="Articles" note={[amount(impact.inStock), "in stock"].join(" ")} value={amount(impact.count)} />
-            <Figure label="Products" note="in the parts lists" value={amount(impact.products.length)} />
-            <Figure
-              label="Change"
-              note={notice.kind === "price" ? "on every article" : "to the parts listed"}
-              value={notice.kind === "price" ? percentOf(notice) : "Drawing"}
-            />
-            <Figure label="From" note="as the letter says" value={notice.effective ?? "–"} />
-          </Grid>
-          {ready ? <AlsoFound impact={impact} /> : null}
-          <ProductsTouched impact={impact} notice={notice} />
-        </>
-      )}
+      <Steps impact={impact} notice={notice} />
+      {ready && found !== null ? <AlsoFound impact={found} /> : null}
+      {found !== null && found.products.length > 0 ? <Products impact={found} notice={notice} /> : null}
       {ready ? (
         <Message
-          forCustomers={impact === undefined || impact === null || impact.products.length > 0}
+          forCustomers={found === null || found.products.length > 0}
           key={notice.message ?? ""}
           notice={notice}
         />
       ) : null}
-      {impact === undefined || impact === null ? null : <Articles impact={impact} notice={notice} />}
-      <LetterText letter={notice.letter} />
+      <Details impact={impact} notice={notice} />
     </>
   );
 };
@@ -1922,11 +1805,14 @@ const Letter = () => {
     );
   }
   const status = statuses[notice.status];
-  const readLetter = async () => {
+  const run = async (steps: () => Promise<void>) => {
     setStarting(true);
-    await handOver(read, write, notice._id);
+    await steps();
     setStarting(false);
   };
+  // A letter left between the steps (its page closed after reading) carries
+  // on from here: the claim makes a second click harmless.
+  const carryOn = notice.status === "working" && !starting;
   return (
     <main className="flex flex-col gap-6 p-6">
       <PageHeader>
@@ -1937,13 +1823,12 @@ const Letter = () => {
           </PageHeaderDescription>
         </PageHeaderContent>
         <PageHeaderActions>
-          {notice.status !== "new" && builds ? (
-            <Button onClick={async () => await startOver({ id: notice._id })} variant="ghost">
-              Start over
-            </Button>
-          ) : null}
           {notice.status === "new" ? (
-            <Button disabled={starting} onClick={readLetter} variant="highlight">
+            <Button
+              disabled={starting}
+              onClick={async () => await run(async () => await handOver(read, write, notice._id))}
+              variant="highlight"
+            >
               {starting ? <Spinner /> : null}
               Read with Grasp
             </Button>
@@ -1953,6 +1838,22 @@ const Letter = () => {
               {status.label}
             </Badge>
           )}
+          {carryOn ? (
+            <Button
+              onClick={async () =>
+                await run(async () => {
+                  try {
+                    await write({ id: notice._id });
+                  } catch {
+                    // Kept on the letter.
+                  }
+                })
+              }
+              variant="outline"
+            >
+              Write the message
+            </Button>
+          ) : null}
         </PageHeaderActions>
       </PageHeader>
       {notice.problem === null || notice.status !== "new" ? null : (
@@ -1961,7 +1862,20 @@ const Letter = () => {
           <AlertDescription>{notice.problem}</AlertDescription>
         </Alert>
       )}
-      {notice.status === "new" ? <LetterText letter={notice.letter} /> : <Reading notice={notice} />}
+      {notice.status === "new" ? (
+        <Card>
+          <CardContent className="whitespace-pre-wrap">{notice.letter}</CardContent>
+        </Card>
+      ) : (
+        <Reading notice={notice} />
+      )}
+      {notice.status !== "new" && builds ? (
+        <div>
+          <Button onClick={async () => await startOver({ id: notice._id })} variant="ghost">
+            Start over
+          </Button>
+        </div>
+      ) : null}
     </main>
   );
 };
@@ -1975,18 +1889,16 @@ export const Route = createFileRoute("/letters/$noticeId")({
 
 const product = `import { useQuery } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
+import { Empty, EmptyHeader, EmptyTitle } from "@grasp-os/app-kit/components/empty";
 import { Grid } from "@grasp-os/app-kit/components/grid";
 import {
   Item,
@@ -1998,12 +1910,12 @@ import {
 } from "@grasp-os/app-kit/components/item";
 import {
   PageHeader,
-  PageHeaderActions,
   PageHeaderContent,
   PageHeaderDescription,
   PageHeaderTitle,
 } from "@grasp-os/app-kit/components/page-header";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import {
   Table,
   TableBody,
@@ -2014,8 +1926,9 @@ import {
 } from "@grasp-os/app-kit/components/table";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 
-import { Figure } from "../components/figure";
+import { Titled } from "../components/info";
 import { amount, change, money } from "../lib/format";
 
 const issues = {
@@ -2029,6 +1942,7 @@ const issues = {
 const Product = () => {
   const { number } = Route.useParams();
   const check = useQuery(api.products.check, { number });
+  const [all, setAll] = useState(false);
   if (check === undefined) {
     return <Skeleton className="m-6 h-9 w-64" />;
   }
@@ -2042,7 +1956,12 @@ const Product = () => {
     );
   }
   const { assembly, findings, lines, prices } = check;
-  const [single] = prices;
+  let effect = 0;
+  for (const finding of findings) {
+    effect += finding.effect ?? 0;
+  }
+  const flagged = lines.filter((line) => line.issue !== null);
+  const shown = all ? lines : flagged;
   return (
     <main className="flex flex-col gap-6 p-6">
       <PageHeader>
@@ -2052,35 +1971,27 @@ const Product = () => {
             {[assembly.number, ["REV", assembly.revision].join(" "), assembly.customer].join(" · ")}
           </PageHeaderDescription>
         </PageHeaderContent>
-        <PageHeaderActions>
-          <Badge variant={findings.length === 0 ? "passed" : "attention"}>
-            {findings.length === 0
-              ? "Drawing, SAP and price agree"
-              : [amount(findings.length), findings.length === 1 ? "finding" : "findings"].join(" ")}
-          </Badge>
-        </PageHeaderActions>
       </PageHeader>
-      <Grid columns={4}>
-        <Figure label="Price for one" note="per piece" value={single === undefined ? "–" : money(single.price)} />
-        <Figure label="Parts" note={["with ", amount(assembly.margin * 100), "% margin"].join("")} value={money(check.parts)} />
-        <Figure label="Labour" note={money(check.labour)} value={[amount(assembly.labourMinutes), "min"].join(" ")} />
-        <Figure attention={findings.length > 0} label="Findings" note="to look at" value={amount(findings.length)} />
-      </Grid>
       <Card>
         <CardHeader>
-          <CardTitle>What doesn&apos;t match</CardTitle>
+          <CardTitle>
+            <Titled
+              info="Grasp lays the drawing the customer approves next to the parts list in SAP and the price list, line by line. Each amount is what it does to the price of one piece, margin included."
+              title={
+                findings.length === 0
+                  ? "The drawing, SAP and the price agree"
+                  : [amount(findings.length), findings.length === 1 ? "thing doesn't" : "things don't", "match"].join(" ")
+              }
+            />
+          </CardTitle>
           <CardDescription>
-            {["The drawing the customer approves", assembly.drawing === "" ? "" : ["(", assembly.drawing, ")"].join(""), "against SAP and the price."].join(" ")}
+            {effect > 0
+              ? ["The price leaves out about", money(effect), "a piece."].join(" ")
+              : "Between the drawing the customer approves, SAP and the price."}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {findings.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>The drawing, SAP and the price agree</EmptyTitle>
-              </EmptyHeader>
-            </Empty>
-          ) : (
+        {findings.length === 0 ? null : (
+          <CardContent>
             <ItemGroup spacing="tight">
               {findings.map((finding) => (
                 <Item key={[finding.kind, finding.title].join(":")} variant="outline">
@@ -2091,23 +2002,46 @@ const Product = () => {
                   {finding.effect === null ? null : (
                     <ItemActions>
                       <Badge variant="attention">
-                        {[finding.estimate ? "about" : "", change(finding.effect), "a piece"].join(" ").trim()}
+                        {[finding.estimate ? "about" : "", change(finding.effect)].join(" ").trim()}
                       </Badge>
                     </ItemActions>
                   )}
                 </Item>
               ))}
             </ItemGroup>
-          )}
-        </CardContent>
+          </CardContent>
+        )}
       </Card>
-      <Grid columns={2}>
-        <Card>
-          <CardHeader>
-            <CardTitle>Price per piece</CardTitle>
-            <CardDescription>By how many are ordered at once.</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardDescription>
+            <Titled
+              info="Worked out like your calculation file: parts with margin, labour minutes times the rate, and the production order spread over the pieces ordered."
+              title="Price for one piece"
+            />
+          </CardDescription>
+          <CardTitle>
+            <Stat>{prices[0] === undefined ? "–" : money(prices[0].price)}</Stat>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Grid columns={2} gap="lg">
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableHead>{["Parts, with ", amount(assembly.margin * 100), "% margin"].join("")}</TableHead>
+                  <TableCell>{money(check.parts)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead>{["Labour, ", amount(assembly.labourMinutes), " min"].join("")}</TableHead>
+                  <TableCell>{money(check.labour)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead>Production order</TableHead>
+                  <TableCell>{money(assembly.orderCost)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2124,37 +2058,22 @@ const Product = () => {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>How the price is built</CardTitle>
-            <CardDescription>For one piece.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableBody>
-                <TableRow>
-                  <TableHead>Parts, with margin</TableHead>
-                  <TableCell>{money(check.parts)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableHead>Labour</TableHead>
-                  <TableCell>{money(check.labour)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableHead>Production order</TableHead>
-                  <TableCell>{money(assembly.orderCost)}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Parts list</CardTitle>
-          <CardDescription>Each line of the drawing beside SAP.</CardDescription>
+          <CardTitle>
+            <Titled
+              info="Each line of the drawing beside the same line in SAP. Amber marks the lines that don't match."
+              title="Parts list"
+            />
+          </CardTitle>
+          <CardDescription>
+            {all
+              ? ["All", amount(lines.length), "lines, the drawing beside SAP"].join(" ")
+              : ["The", amount(flagged.length), "of", amount(lines.length), "lines that don't match"].join(" ")}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -2162,19 +2081,17 @@ const Product = () => {
               <TableRow>
                 <TableHead>#</TableHead>
                 <TableHead>Part</TableHead>
-                <TableHead>Article</TableHead>
                 <TableHead>Drawing</TableHead>
                 <TableHead>SAP</TableHead>
                 <TableHead>Unit price</TableHead>
-                <TableHead>Check</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {lines.map((line) => (
+              {shown.map((line) => (
                 <TableRow key={line.position}>
                   <TableCell>{line.position}</TableCell>
                   <TableCell>{line.name}</TableCell>
-                  <TableCell>{line.article ?? "–"}</TableCell>
                   <TableCell>{line.drawing === null ? "–" : [amount(line.drawing), line.unit].join(" ")}</TableCell>
                   <TableCell>{line.sap === null ? "–" : [amount(line.sap), line.unit].join(" ")}</TableCell>
                   <TableCell>{line.price === null ? "–" : money(line.price)}</TableCell>
@@ -2186,6 +2103,11 @@ const Product = () => {
             </TableBody>
           </Table>
         </CardContent>
+        <CardFooter>
+          <Button onClick={() => setAll(!all)} variant="ghost">
+            {all ? "Only what doesn't match" : ["Show all", amount(lines.length)].join(" ")}
+          </Button>
+        </CardFooter>
       </Card>
     </main>
   );
@@ -2363,6 +2285,28 @@ export default appTest(schema, {
     const check = await ada.query(api.products.check, { number: "P1" });
     expect(check?.findings.map(({ kind }) => kind)).toStrictEqual(["part"]);
   },
+  "Grasp takes up a letter only from the step it is at, so it never reads one twice": async (t) => {
+    const [reading, fresh] = await t.run(async (ctx) => {
+      const letter = { supplier: "Acme", title: "Prices", received: 0, letter: "Prices go up." };
+      return [
+        await ctx.db.insert("notices", { ...letter, status: "reading" }),
+        await ctx.db.insert("notices", letter),
+      ];
+    });
+    const ada = t.withIdentity({ name: "Ada" });
+    await expect(ada.action(api.notices.read, { id: reading })).rejects.toMatchObject({
+      code: "notice.busy",
+    });
+    await expect(ada.action(api.notices.write, { id: fresh })).rejects.toMatchObject({
+      code: "notice.busy",
+    });
+    // A run cut off mid-step is started over by a builder, from any step.
+    const bea = t.withIdentity({ name: "Bea", role: "builder" });
+    await bea.mutation(api.notices.startOver, { id: reading });
+    await expect(ada.query(api.notices.get, { id: reading })).resolves.toMatchObject({
+      status: "new",
+    });
+  },
   "only the App's builders start a letter over": async (t) => {
     const id = await t.run(
       async (ctx) =>
@@ -2395,7 +2339,7 @@ export const files: Readonly<Record<string, string>> = {
   "src/lib/format.ts": format,
   "src/lib/statuses.ts": statusesFile,
   "src/lib/hand-over.ts": handOverFile,
-  "src/components/figure.tsx": figure,
+  "src/components/info.tsx": infoFile,
   "src/routes/index.tsx": home,
   "src/routes/letters.$noticeId.tsx": letter,
   "src/routes/products.$number.tsx": product,
