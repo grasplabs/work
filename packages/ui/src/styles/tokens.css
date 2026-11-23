@@ -366,6 +366,8 @@
   --damsko-duration-work: 1200ms;
   /* How long a result (Saved, Could not save) stays on a control before it returns. */
   --damsko-duration-hold: 1600ms;
+  /* How long work with no loading words of its own runs before a screen reader is told it is working. Work over sooner says only how it went: a copy never says it is working. */
+  --damsko-loading-delay: 1000ms;
   /* One turn of a spinner: slow enough to read as calm. Constant motion, so linear. */
   --damsko-duration-spin: 1500ms;
   /* How long a hold-to-confirm button is pressed and held before it acts: the fill crosses it in this time. */

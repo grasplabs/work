@@ -7,6 +7,8 @@ import type { RenderProp } from "@ui-sdk/react/primitive";
 import { createContext, createElement, isValidElement, lazy, use } from "react";
 import type { ReactElement, ReactNode, Ref } from "react";
 
+import { durations } from "./tokens.values";
+
 type Value = string | number | null;
 
 /**
@@ -421,6 +423,25 @@ export const announce = (
   if (!speaking) {
     sayNext();
   }
+};
+
+/**
+ * Says that work is under way. Words the caller gave for it (`own`) are said at once; the
+ * catalogue's plain word only once the work has run for loading-delay, so quick work with no words
+ * of its own (a copy) says only how it went. Returns what to call when the work is over.
+ *
+ *   const over = announceWork(saving, true);   await work;   over();   announce(saved);
+ */
+export const announceWork = (message: string, own: boolean) => {
+  const timer = setTimeout(
+    () => {
+      announce(message);
+    },
+    own ? 0 : durations.loadingDelay
+  );
+  return () => {
+    clearTimeout(timer);
+  };
 };
 
 // The system's dither, as numbers: ordered dither on a 4×4 Bayer matrix, in two textures. Charts
