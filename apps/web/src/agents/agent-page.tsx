@@ -156,7 +156,7 @@ const styles = stylex.create({
   // A tab's name and its count, a small step apart.
   counted: { display: "inline-flex", alignItems: "center", gap: space["2"] },
   // A setting's control at its own width beside its name, on a phone too.
-  control: { display: "block", width: "10rem", maxWidth: "100%" },
+  control: { display: "block", width: "9rem", maxWidth: "100%" },
   // The header, then the tab shown, as far apart as its cards.
   column: { display: "grid", gap: space["6"], width: "100%" },
   // A part's cards, as far apart as the column sets its own.

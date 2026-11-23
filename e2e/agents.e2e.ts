@@ -11,6 +11,13 @@ import { peopleIn } from "./people.ts";
 // each page keeps (whom it answers, its classes, its schedule, its
 // documents) is in the pages' own tests (apps/web/src/agents).
 
+/**
+ * A name no other agent of the stack has: core keeps each name to one
+ * agent, and a file run again, or beside itself, makes its agents anew.
+ */
+const named = (name: string): string =>
+  `${name} ${crypto.randomUUID().slice(0, 6)}`;
+
 /** The way on under the question shown: the last Next, or what it says on the last step. */
 const goOn = async (page: Page, name = "Next") => {
   await page.getByRole("button", { name, exact: true }).last().click();
@@ -20,6 +27,7 @@ test("an admin sets up an agent for everyone by hand, turns it off from its page
   pageOf,
 }) => {
   const { admin } = peopleIn("agents");
+  const name = named("Invoice chaser");
   const page = await pageOf(admin);
   await page.goto("/agents");
   await expect(
@@ -45,7 +53,7 @@ test("an admin sets up an agent for everyone by hand, turns it off from its page
   await expect(page.getByRole("radio", { name: /Everyone/u })).toBeChecked();
   await goOn(page);
 
-  await page.getByRole("textbox", { name: "Name" }).fill("Invoice chaser");
+  await page.getByRole("textbox", { name: "Name" }).fill(name);
   await goOn(page);
 
   // A starting point takes its job and its instructions, and goes on.
@@ -65,34 +73,33 @@ test("an admin sets up an agent for everyone by hand, turns it off from its page
   await goOn(page);
 
   await expect(
-    page.getByRole("heading", { name: "Ready to make Invoice chaser?" })
+    page.getByRole("heading", { name: `Ready to make ${name}?` })
   ).toBeVisible();
-  await goOn(page, "Make Invoice chaser");
+  await goOn(page, `Make ${name}`);
   await expect(page).toHaveURL(/\/agents\/[^/?]+$/u, { timeout: 30_000 });
-  await expect(
-    page.getByRole("heading", { name: "Invoice chaser", level: 1 })
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
   await expect(page.getByText("On", { exact: true })).toBeVisible();
 
   // Turned off from the heading's "…": it says so.
-  await page.getByRole("button", { name: "More for Invoice chaser" }).click();
+  await page.getByRole("button", { name: `More for ${name}` }).click();
   await page.getByRole("menuitem", { name: "Turn off" }).click();
   await expect(page.getByText("Off", { exact: true })).toBeVisible();
 
   // Deleted for good, only once asked again; the Agents page no longer has it.
-  await page.getByRole("button", { name: "More for Invoice chaser" }).click();
+  await page.getByRole("button", { name: `More for ${name}` }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await page.getByRole("button", { name: "Delete for good" }).click();
   await expect(page).toHaveURL(/\/agents$/u);
-  await expect(page.getByRole("link", { name: /Invoice chaser/u })).toHaveCount(
-    0
-  );
+  await expect(
+    page.getByRole("link", { name: new RegExp(name, "u") })
+  ).toHaveCount(0);
 });
 
 test("someone who isn't an admin makes an agent of their own in a chat, and only they see it", async ({
   pageOf,
 }) => {
   const { member, admin } = peopleIn("agents");
+  const name = named("Receipt sorter");
   const page = await pageOf(member);
   await page.goto("/agents/new");
   await page.getByRole("link", { name: /In a chat/u }).click();
@@ -104,20 +111,18 @@ test("someone who isn't an admin makes an agent of their own in a chat, and only
   await goOn(page);
   await page
     .getByRole("textbox", { name: "What should we call it?" })
-    .fill("Receipt sorter");
+    .fill(name);
   await goOn(page);
   // Its shape and its colours, as offered.
   await goOn(page);
   await goOn(page);
   // Nothing more it should always know: skipped, to the whole agent.
   await page.getByRole("button", { name: "Skip" }).click();
-  await expect(page.getByRole("dialog")).toContainText("Receipt sorter");
+  await expect(page.getByRole("dialog")).toContainText(name);
   await page.getByRole("button", { name: "Make agent" }).click();
 
   await expect(page).toHaveURL(/\/agents\/[^/?]+$/u, { timeout: 30_000 });
-  await expect(
-    page.getByRole("heading", { name: "Receipt sorter", level: 1 })
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
   await expect(page.getByText("Just for you")).toBeVisible();
   const own = page.url();
 
@@ -125,7 +130,7 @@ test("someone who isn't an admin makes an agent of their own in a chat, and only
   await expect(
     page
       .getByRole("list", { name: "Your agents" })
-      .getByRole("link", { name: /Receipt sorter/u })
+      .getByRole("link", { name: new RegExp(name, "u") })
   ).toBeVisible();
 
   // Nobody else is shown it, the company's admin included.
@@ -133,12 +138,10 @@ test("someone who isn't an admin makes an agent of their own in a chat, and only
   await adminPage.goto("/agents?tab=organization");
   await expect(adminPage.getByRole("list", { name: "Agents" })).toBeVisible();
   await expect(
-    adminPage.getByRole("link", { name: /Receipt sorter/u })
+    adminPage.getByRole("link", { name: new RegExp(name, "u") })
   ).toHaveCount(0);
   // Its own page is not found for them: it is among no agents they read.
   await adminPage.goto(own);
   await expect(adminPage.getByText("Agent not found")).toBeVisible();
-  await expect(
-    adminPage.getByRole("heading", { name: "Receipt sorter" })
-  ).toHaveCount(0);
+  await expect(adminPage.getByRole("heading", { name })).toHaveCount(0);
 });
