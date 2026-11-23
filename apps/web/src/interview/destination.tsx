@@ -201,18 +201,17 @@ const SendFoot = ({
           {note}
         </p>
       )}
-      <SheetClose>{sending === "choosing" ? t`Cancel` : t`Close`}</SheetClose>
+      <SheetClose size="default">
+        {sending === "choosing" ? t`Cancel` : t`Close`}
+      </SheetClose>
       {sending === "not_kept" ? (
-        <Button onClick={saveAgainNow} size="sm">
-          {t`Try again`}
-        </Button>
+        <Button onClick={saveAgainNow}>{t`Try again`}</Button>
       ) : (
         <Button
           disabled={!canSave}
           errorLabel={t`Not saved`}
           loadingLabel={t`Saving…`}
           onClick={onSave}
-          size="sm"
           status={saving ? "loading" : "idle"}
           successLabel={t`Saved`}
         >
