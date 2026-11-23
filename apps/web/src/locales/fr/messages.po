@@ -4175,11 +4175,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 msgid "Cancel"
 msgstr "Annuler"
 
-#: src/workflows/today-lanes.tsx
-msgctxt "a run someone stopped before its end"
-msgid "cancelled"
-msgstr "annulée"
-
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
 msgid "cannot be undone"
@@ -17104,6 +17099,11 @@ msgstr "Arrêter l’exécution"
 #: src/workflows/stop-run.tsx
 msgid "Stop this run?"
 msgstr "Arrêter cette exécution ?"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "stopped"
+msgstr "arrêtée"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts

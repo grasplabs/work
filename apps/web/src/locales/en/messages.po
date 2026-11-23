@@ -4175,11 +4175,6 @@ msgstr "Can't offer Run: {unread}"
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/workflows/today-lanes.tsx
-msgctxt "a run someone stopped before its end"
-msgid "cancelled"
-msgstr "cancelled"
-
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
 msgid "cannot be undone"
@@ -17104,6 +17099,11 @@ msgstr "Stop the run"
 #: src/workflows/stop-run.tsx
 msgid "Stop this run?"
 msgstr "Stop this run?"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "stopped"
+msgstr "stopped"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts

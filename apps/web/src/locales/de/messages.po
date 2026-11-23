@@ -4175,11 +4175,6 @@ msgstr "Ausführen nicht möglich: {unread}"
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#: src/workflows/today-lanes.tsx
-msgctxt "a run someone stopped before its end"
-msgid "cancelled"
-msgstr "abgebrochen"
-
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
 msgid "cannot be undone"
@@ -17104,6 +17099,11 @@ msgstr "Lauf stoppen"
 #: src/workflows/stop-run.tsx
 msgid "Stop this run?"
 msgstr "Diesen Lauf stoppen?"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "stopped"
+msgstr "gestoppt"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts

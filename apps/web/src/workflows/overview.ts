@@ -289,8 +289,9 @@ export type TriggersByWorkflow = ReadonlyMap<string, readonly RowTrigger[]>;
  * Why a trigger starts nothing (`RowTrigger.blocked`): a permission it
  * needs (its start on its workflow, a connection trigger's events too)
  * waits for an admin or was never asked for, or was refused or taken back;
- * a schedule that stopped, or a deleted source, as refused: no admin
- * allowing anything makes it start. Null when it can start.
+ * a schedule that stopped, a deleted source, or one holding no start (it
+ * asks for none, so no request waits), as refused: no admin allowing
+ * anything makes it start. Null when it can start.
  */
 const blockOf = ({
   start,
@@ -299,7 +300,7 @@ const blockOf = ({
   source,
 }: WorkflowTrigger): TriggerBlock["why"] | null => {
   const needs = events === null ? [start] : [start, events];
-  if (stopped || source?.deleted === true) {
+  if (stopped || source?.deleted === true || start === null) {
     return "refused";
   }
   if (needs.some((status) => status === "revoked")) {

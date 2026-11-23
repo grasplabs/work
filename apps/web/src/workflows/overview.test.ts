@@ -1,11 +1,12 @@
 import type { ListedConnection } from "@grasp-os/shared/connect";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
+import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { phaseOf, readOverview, readTools } from "./overview.ts";
+import { phaseOf, readOverview, readTools, workflowBlock } from "./overview.ts";
 
 // What the Workflows page reads, against core's API as the page reaches it
 // over RPC, faked: each workflow stands in the phase its live version and
@@ -84,6 +85,65 @@ describe(phaseOf, () => {
       phaseOf({ live: true, ...quiet, waiting: 1 }),
       phaseOf({ live: false, ...quiet, failed: 2 }),
     ]).toStrictEqual(["needsYou", "needsYou"]);
+  });
+
+  it("never runs while paused or while nothing can start it, and needs only an admin where a trigger waits for one", () => {
+    expect([
+      phaseOf({ live: true, ...quiet, paused: true }),
+      phaseOf({ live: true, ...quiet, blocked: "waiting" }),
+      phaseOf({ live: true, ...quiet, blocked: "waiting", admin: true }),
+      phaseOf({ live: true, ...quiet, blocked: "refused", admin: true }),
+    ]).toStrictEqual(["building", "building", "needsYou", "building"]);
+  });
+});
+
+/** An enabled email trigger whose start an admin allowed, changed by `change`. */
+const trigger = (change: Partial<WorkflowTrigger> = {}): WorkflowTrigger => ({
+  id: "trigger",
+  kind: "email",
+  owner: "owner",
+  workflowId: "id-intake",
+  principal: "owner",
+  enabled: true,
+  createdAt: "2026-10-08T09:00:00.000Z",
+  config: null,
+  nextAt: null,
+  address: "intake@acme.test",
+  source: null,
+  stopped: false,
+  start: "active",
+  events: null,
+  ...change,
+});
+
+describe(workflowBlock, () => {
+  it("is nothing while one of its enabled triggers can start it, or it has none", () => {
+    expect([
+      workflowBlock([]),
+      workflowBlock([trigger()]),
+      workflowBlock([trigger({ start: "requested" }), trigger()]),
+      workflowBlock([trigger({ start: "requested", enabled: false })]),
+    ]).toStrictEqual([null, null, null, null]);
+  });
+
+  it("waits for an admin only where a request waits: refused where an admin took it back, it holds none, it stopped or its source is gone", () => {
+    expect(
+      [
+        trigger({ start: "requested" }),
+        trigger({ start: "revoked" }),
+        trigger({ start: null }),
+        trigger({ stopped: true }),
+      ].map((one) => workflowBlock([one])?.why)
+    ).toStrictEqual(["waiting", "refused", "refused", "refused"]);
+  });
+
+  it("names the trigger an admin could allow, before one refused", () => {
+    expect(
+      workflowBlock([
+        trigger({ start: "revoked" }),
+        trigger({ kind: "schedule", start: "requested" }),
+      ])
+    ).toStrictEqual({ kind: "schedule", why: "waiting" });
   });
 });
 

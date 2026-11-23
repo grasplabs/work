@@ -12,6 +12,7 @@ import type {
   WorkflowResourceVersion,
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
@@ -842,6 +843,22 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
           )
         : undefined;
     };
+    // What starts it, for whether anything can: only where the reader
+    // manages its triggers, its builders and the organization's admins.
+    // Core lists anyone else their own alone, which says nothing of it.
+    const triggersRead = async (): Promise<
+      Loaded<WorkflowTrigger[]> | undefined
+    > => {
+      const read = await resourceRead;
+      return read.state === "ready" &&
+        (read.data.role === "builder" || isAdmin(identity.role))
+        ? await loadFromCore(
+            core,
+            async (session) =>
+              await session.workflowResources.triggers.list(workflow)
+          )
+        : undefined;
+    };
     const [
       resource,
       draft,
@@ -882,13 +899,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await readItemProject(session, project)
       ),
-      // What starts it, for whether anything can: none where core doesn't
-      // list them to the reader.
-      loadFromCore(
-        core,
-        async (session) =>
-          await session.workflowResources.triggers.list(workflow)
-      ),
+      triggersRead(),
     ]);
     return {
       resource,
@@ -899,7 +910,8 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       runs,
       askable,
       activity,
-      blocked: triggers.state === "ready" ? workflowBlock(triggers.data) : null,
+      blocked:
+        triggers?.state === "ready" ? workflowBlock(triggers.data) : null,
       people,
       project: inProject.state === "ready" ? inProject.data : undefined,
     };

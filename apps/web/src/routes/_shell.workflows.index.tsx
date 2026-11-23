@@ -130,14 +130,19 @@ export const Route = createFileRoute("/_shell/workflows/")({
       return { overview: read, tools, triggers: noTriggers };
     }
     // What starts each workflow, read once the rows name them: it decides
-    // how each stands, so the rows wait for it.
+    // how each stands, so the rows wait for it. Only where the reader
+    // manages its triggers: core lists anyone else their own alone, which
+    // would read as nothing starting it.
+    const admin = isMemberAdmin(identity);
     const triggers = await readTriggers(
       core,
-      read.data.map(({ id }) => id)
+      read.data.flatMap(({ id, role }) =>
+        admin || role === "builder" ? [id] : []
+      )
     );
     const overview = {
       ...read,
-      data: withTriggers(read.data, triggers, isMemberAdmin(identity)),
+      data: withTriggers(read.data, triggers, admin),
     };
     return { overview, tools, triggers };
   },

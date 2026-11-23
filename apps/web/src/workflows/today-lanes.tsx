@@ -429,7 +429,7 @@ const useRunText = (run: LaneRun): string => {
     done: t({ message: "done by itself", context: "a run that ran alone" }),
     failed: t({ message: "failed", context: "a run that ended in failure" }),
     cancelled: t({
-      message: "cancelled",
+      message: "stopped",
       context: "a run someone stopped before its end",
     }),
   };
