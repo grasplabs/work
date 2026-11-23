@@ -1,7 +1,10 @@
 import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import type { I18nCatalog } from "@grasp-os/ui/lib/i18n";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
+
+import { formatList } from "../format.ts";
 
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
@@ -31,6 +34,73 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Could not finish`,
       loading: t`Working`,
       success: t`Done`,
+    },
+    alert: {
+      close: t`Dismiss`,
+    },
+    alertDialog: {
+      cancel: t`Cancel`,
+    },
+    avatar: {
+      groupCount: (count) => t`+${count}`,
+      groupName: (shown, rest) =>
+        rest === 0
+          ? formatList(shown)
+          : formatList([
+              ...shown,
+              plural(rest, { one: "# other", other: "# others" }),
+            ]),
+    },
+    calendar: {
+      next: t`Next month`,
+      previous: t`Previous month`,
+    },
+    combobox: {
+      empty: t`No results`,
+      notChoice: (value) => t`${value} is not one of the choices`,
+      trigger: t`Show the choices`,
+    },
+    datePicker: {
+      last30: t`Last 30 days`,
+      last7: t`Last 7 days`,
+      presets: t({ message: "Presets", context: "ranges of dates to pick" }),
+      rangeEnd: (field) => t`${field}, end`,
+      rangeStart: (field) => t`${field}, start`,
+      rangeTrigger: t`Choose dates`,
+      select: t`Choose date`,
+      triggerWith: (trigger, chosen) => t`${trigger}, ${chosen}`,
+      thisMonth: t`This month`,
+      today: t({ message: "Today", context: "a date to pick" }),
+    },
+    dialog: {
+      close: t`Close`,
+    },
+    dropdownMenu: {
+      expand: t`More actions`,
+    },
+    empty: {
+      error: t`This did not load`,
+    },
+    keyValue: {
+      // A fact's name inside the sentence, lower case, but for German, whose
+      // nouns keep their capital.
+      copy: (fact) => {
+        const label =
+          i18n.locale === "de" ? fact : fact.toLocaleLowerCase(i18n.locale);
+        return t`Copy ${label}`;
+      },
+      loading: t`Loading the value`,
+    },
+    sheet: {
+      close: t`Close`,
+    },
+    sidePanel: {
+      close: t`Close`,
+      showAll: t`Show all`,
+      views: t`Views`,
+    },
+    switch: {
+      error: t`Could not save`,
     },
   };
   return (

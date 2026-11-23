@@ -82,6 +82,14 @@ msgstr "{accepted, plural, one {# événement accepté au cours des dernières 2
 msgid "{account} on {provider}"
 msgstr "{account} sur {provider}"
 
+#: src/activity/audit-log.tsx
+msgid "{agent} for {person}"
+msgstr "{agent} pour {person}"
+
+#: src/activity/audit-log.tsx
+msgid "{agent} for {person}, in {app}"
+msgstr "{agent} pour {person}, dans {app}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Un outil d’IA, selon l’équipe} builtIn {IA intégrée, selon l’équipe} other {Pas d’IA, selon l’équipe}}"
@@ -447,6 +455,7 @@ msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fi
 msgstr "{cutOff, plural, one {# exécution plus ancienne d’aujourd’hui n’est pas affichée : seules les plus récentes tiennent} other {# exécutions plus anciennes d’aujourd’hui ne sont pas affichées : seules les plus récentes tiennent}}"
 
 #: src/settings/audit-archive.tsx
+msgctxt "how long something is kept"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# jour} other {# jours}}"
 
@@ -507,6 +516,14 @@ msgstr "{failed, plural, one {# exécution en échec} other {# exécutions en é
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} dans {table} demande une modification du code avant de pouvoir être publié."
 
+#: src/frame/ui-words.tsx
+msgid "{field}, end"
+msgstr "{field}, fin"
+
+#: src/frame/ui-words.tsx
+msgid "{field}, start"
+msgstr "{field}, début"
+
 #: src/onboarding/document-drop.tsx
 msgid "{file} couldn’t be removed"
 msgstr "{file} n’a pas pu être retiré"
@@ -514,6 +531,10 @@ msgstr "{file} n’a pas pu être retiré"
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} retiré"
+
+#: src/activity/audit-log.tsx
+msgid "{firstShown}–{lastShown}"
+msgstr "{firstShown}–{lastShown}"
 
 #: src/chat/held-writes.tsx
 msgid "{fn} in {app}"
@@ -592,6 +613,10 @@ msgstr "{idle, plural, one {# autre workflow n’a pas été exécuté pendant c
 #: src/report/report-bar.tsx
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Votre prochain rapport est prêt demain} other {Votre prochain rapport est prêt dans # jours}}"
+
+#: src/activity/audit-event.tsx
+msgid "{input} in, {output} out"
+msgstr "{input} en entrée, {output} en sortie"
 
 #: src/brain/brain.ts
 msgid "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
@@ -1023,6 +1048,10 @@ msgstr "{records, plural, one {# enregistrement conservé} other {# enregistreme
 msgid "{refused, plural, one {# refused in the last 24 hours} other {# refused in the last 24 hours}}"
 msgstr "{refused, plural, one {# refusée au cours des dernières 24 heures} other {# refusées au cours des dernières 24 heures}}"
 
+#: src/frame/ui-words.tsx
+msgid "{rest, plural, one {# other} other {# others}}"
+msgstr "{rest, plural, one {# autre} other {# autres}}"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -1075,6 +1104,10 @@ msgstr "{scheduled, plural, one {Travaille seul, # horaire} other {Travaille seu
 #: src/agents/agent-page.tsx
 msgid "{scheduled} on a schedule"
 msgstr "{scheduled} selon un horaire"
+
+#: src/activity/audit-log.tsx
+msgid "{set, plural, one {Filters, # set} other {Filters, # set}}"
+msgstr "{set, plural, one {Filtres, # actif} other {Filtres, # actifs}}"
 
 #: src/settings/stephen-card.tsx
 msgid "{share} of questions answered · 30 days"
@@ -1259,6 +1292,10 @@ msgstr "{title} sur {connection}"
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} sur # outil autorisé} other {{count} sur # outils autorisés}}"
 
+#: src/frame/ui-words.tsx
+msgid "{trigger}, {chosen}"
+msgstr "{trigger}, {chosen}"
+
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} sur {total} pas encore interviewées"
@@ -1274,6 +1311,10 @@ msgstr "{unseen, plural, one {# exécution de plus aujourd’hui, d’un workflo
 #: src/brain/brain-atlas.ts
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} sur {total} citées, pas vues en usage"
+
+#: src/frame/ui-words.tsx
+msgid "{value} is not one of the choices"
+msgstr "{value} ne fait pas partie des choix"
 
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
@@ -1393,6 +1434,10 @@ msgstr "**Grasp :**"
 #: src/chat/chat-markdown.ts
 msgid "**You:**"
 msgstr "**Vous :**"
+
+#: src/frame/ui-words.tsx
+msgid "+{count}"
+msgstr "+{count}"
 
 #: src/brain/memories-page.tsx
 msgid "<0>{label}</0>: {held}"
@@ -1678,6 +1723,7 @@ msgstr "Un workflow"
 msgid "A workflow needs an app that is not here yet? Tell Grasp which one, and what it should do there."
 msgstr "Un workflow a besoin d’une app qui n’est pas encore ici ? Dites à Grasp laquelle, et ce qu’il doit y faire."
 
+#: src/activity/audit-event.tsx
 #: src/apps/app-settings.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "About"
@@ -1710,6 +1756,10 @@ msgstr "À propos des équipes"
 #: src/brain/brain.ts
 msgid "About tools"
 msgstr "À propos des outils"
+
+#: src/activity/audit-log.tsx
+msgid "About, by ID"
+msgstr "Concerne, par ID"
 
 #: src/agents/agent-page.tsx
 #: src/drafts/share-with-team.tsx
@@ -1751,6 +1801,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Account owner"
 msgstr "Responsable du compte"
 
+#: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/activity/type-labels.ts
 msgid "Action"
@@ -1810,10 +1861,6 @@ msgstr "Activité"
 msgid "Activity: see all of it in Traces"
 msgstr "Activité : tout voir dans Traces"
 
-#: src/activity/audit-log.tsx
-msgid "Actor ID"
-msgstr "ID de l’acteur"
-
 #: src/agents/agent-apps-card.tsx
 #: src/apps/indexes-view.tsx
 #: src/chat/chat-bar.tsx
@@ -1825,14 +1872,29 @@ msgstr "ID de l’acteur"
 msgid "Add"
 msgstr "Ajouter"
 
+#: src/activity/audit-event.tsx
+msgctxt "a panel section's action"
+msgid "Add"
+msgstr "Ajouter"
+
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-chats.tsx
+#: src/projects/project-people.tsx
 msgctxt "put in a project"
 msgid "Add"
 msgstr "Ajouter"
 
+#: src/activity/audit-event.tsx
+msgid "Add {section}"
+msgstr "Ajouter {section}"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add a card"
 msgstr "Ajouter une carte"
+
+#: src/projects/project-chats.tsx
+msgid "Add a chat"
+msgstr "Ajouter un chat"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -1878,10 +1940,6 @@ msgstr "Ajouter un index"
 msgid "Add an integration"
 msgstr "Ajouter une intégration"
 
-#: src/projects/project-people.tsx
-msgid "Add as"
-msgstr "Ajouter en tant que"
-
 #: src/agents/agent-documents.tsx
 msgid "Add document"
 msgstr "Ajouter un document"
@@ -1910,13 +1968,13 @@ msgstr "Ajoutez-en une pour que les factures soient payées dès leur arrivée."
 msgid "Add option"
 msgstr "Ajouter une option"
 
+#: src/projects/project-people-stack.tsx
+msgid "Add people"
+msgstr "Ajouter des personnes"
+
 #: src/apps/indexes-view.tsx
 msgid "Add search"
 msgstr "Ajouter la recherche"
-
-#: src/projects/project-people.tsx
-msgid "Add someone"
-msgstr "Ajouter quelqu’un"
 
 #: src/interview/closed.tsx
 msgid "Add something"
@@ -1971,12 +2029,20 @@ msgid "Added"
 msgstr "Apports"
 
 #: src/activity/audit-words.ts
+msgid "Added a document to an agent"
+msgstr "A ajouté un document à un agent"
+
+#: src/activity/audit-words.ts
 msgid "Added a member to an App"
 msgstr "A ajouté un membre à une application"
 
 #: src/activity/audit-words.ts
 msgid "Added a webhook to an App"
 msgstr "A ajouté un webhook à une application"
+
+#: src/activity/audit-words.ts
+msgid "Added an AI provider's key"
+msgstr "A ajouté la clé d’un fournisseur d’IA"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Added by hand"
@@ -1998,6 +2064,10 @@ msgstr "Ajoutées d’après ses instructions : {added}."
 #: src/connections/http-connections.tsx
 msgid "Added on"
 msgstr "Ajoutée le"
+
+#: src/activity/audit-words.ts
+msgid "Added records to the Brain"
+msgstr "A ajouté des enregistrements au Brain"
 
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
@@ -2022,6 +2092,10 @@ msgstr "Ajouté aux skills de l'équipe, puis retiré depuis."
 #: src/brain/skills-page.tsx
 msgid "Added to the team's skills."
 msgstr "Ajouté aux skills de l'équipe."
+
+#: src/projects/project-people.tsx
+msgid "Adding"
+msgstr "Ajout en cours"
 
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
@@ -2065,14 +2139,11 @@ msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses session
 msgid "Advisory"
 msgstr "Avis de sécurité"
 
-#: src/settings/audit-archive.tsx
-msgid "After a run ends. After this, its inputs, outputs and messages are removed."
-msgstr "Après la fin d’une exécution. Ensuite, ses entrées, sorties et messages sont supprimés."
-
 #: src/brain/opportunities-page.tsx
 msgid "After step {position}, some go to {system}: {step}"
 msgstr "Après l'étape {position}, certains passent à {system} : {step}"
 
+#: src/activity/audit-event.tsx
 #: src/routes/_shell.agents.$agent.tsx
 msgid "Agent"
 msgstr "Agent"
@@ -2082,12 +2153,8 @@ msgid "Agent {agent}"
 msgstr "Agent {agent}"
 
 #: src/activity/audit-log.tsx
-msgid "Agent {agentId} for {person}"
-msgstr "Agent {agentId} pour {person}"
-
-#: src/activity/audit-log.tsx
-msgid "Agent {agentId} for {person}, in {app}"
-msgstr "Agent {agentId} pour {person}, dans {app}"
+msgid "Agent {agentId}"
+msgstr "Agent {agentId}"
 
 #: src/apps/app-data.tsx
 msgid "Agent for {person}"
@@ -2526,6 +2593,7 @@ msgstr "Voulez-vous connecter autre chose ?"
 msgid "Anything else?"
 msgstr "Autre chose ?"
 
+#: src/activity/audit-event.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/items.ts
 #: src/pages/page-frame.tsx
@@ -2703,6 +2771,7 @@ msgstr "L'approuver remplace le skill {name} de l'équipe {team} pour ses membre
 #: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
@@ -2723,14 +2792,6 @@ msgstr "Applications et agents avec une autorisation"
 msgctxt "inbox filter"
 msgid "Apps and connections"
 msgstr "Applications et connexions"
-
-#: src/projects/project-view.tsx
-msgid "Apps and workflows"
-msgstr "Apps et workflows"
-
-#: src/routes/_shell.projects.index.tsx
-msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
-msgstr "Des apps et des workflows regroupés par processus, équipe ou objectif. Placer quelque chose dans un projet ne le partage avec personne."
 
 #: src/chat/agent-change-card.tsx
 msgid "Apps it gets"
@@ -2757,11 +2818,6 @@ msgstr "Apps retirées"
 msgid "Archive"
 msgstr "Archiver"
 
-#: src/settings/audit-archive.tsx
-msgctxt "where retention keeps older audit events"
-msgid "Archive"
-msgstr "Archive"
-
 #: src/apps/app-status.tsx
 msgid "Archive {name}?"
 msgstr "Archiver {name} ?"
@@ -2775,7 +2831,8 @@ msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archivée"
 
-#: src/settings/audit-archive.tsx
+#: src/activity/audit-log.tsx
+#: src/routes/_shell.settings.audit.tsx
 msgid "Archived events"
 msgstr "Événements archivés"
 
@@ -2786,6 +2843,10 @@ msgstr "Archivée : personne n’ouvre ses pages et rien ne s’exécute, jusqu�
 #: src/settings/erasures.tsx
 msgid "Areas finished"
 msgstr "Domaines terminés"
+
+#: src/activity/audit-words.ts
+msgid "Arranged the company's groups of teams"
+msgstr "A organisé les groupes d’équipes de l’entreprise"
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -2952,9 +3013,21 @@ msgstr "A demandé une autorisation"
 msgid "asked for by the agent, in their chat"
 msgstr "demandé par l’agent, dans son chat"
 
+#: src/activity/audit-words.ts
+msgid "Asked Grasp which Apps an agent needs"
+msgstr "A demandé à Grasp de quelles applications un agent a besoin"
+
 #: src/agents/agent-page.tsx
 msgid "Asked it, or it works for them on a schedule"
 msgstr "L'ont interrogé, ou il travaille pour elles selon un horaire"
+
+#: src/activity/audit-words.ts
+msgid "Asked people to fill a gap in the Brain"
+msgstr "A demandé à des personnes de combler une lacune du Brain"
+
+#: src/activity/audit-words.ts
+msgid "Asked Stephen to hear more people about a piece of work"
+msgstr "A demandé à Stephen d’entendre plus de personnes sur un travail"
 
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
@@ -2975,6 +3048,10 @@ msgstr "Reconnexion demandée le {since}."
 #: src/activity/audit-words.ts
 msgid "Asked to erase a removed member"
 msgstr "A demandé d'effacer un membre retiré"
+
+#: src/activity/audit-words.ts
+msgid "Asked to erase what the Brain kept from a shared connection"
+msgstr "A demandé d’effacer ce que le Brain a conservé d’une connexion partagée"
 
 #: src/activity/audit-words.ts
 msgid "Asked to send, edit or delete a chat app message as the company's bot"
@@ -3026,9 +3103,7 @@ msgstr "Athènes"
 msgid "Attached a file to a chat"
 msgstr "A joint un fichier à une discussion"
 
-#: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
-#: src/settings/audit-archive.tsx
 msgid "Audit trail"
 msgstr "Journal d’audit"
 
@@ -3095,10 +3170,6 @@ msgstr "Avant de commencer, quelle langue préférez-vous ?"
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
 msgstr "Avant de faire cette modification"
-
-#: src/projects/project-view.tsx
-msgid "Being in the project reaches only what is shared with everyone in it."
-msgstr "Faire partie du projet ne donne accès qu’à ce qui est partagé avec tous ses membres."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -3196,6 +3267,10 @@ msgid "Briefcase"
 msgstr "Mallette"
 
 #: src/activity/audit-words.ts
+msgid "Brought back a dismissed opportunity"
+msgstr "A rétabli une opportunité écartée"
+
+#: src/activity/audit-words.ts
 msgid "Brought changes from a connected system into the Brain"
 msgstr "A apporté au Brain les changements d’un système connecté"
 
@@ -3233,6 +3308,10 @@ msgstr "A compilé des paquets approuvés"
 #: src/workflows/workflow-settings.tsx
 msgid "Business process"
 msgstr "Processus métier"
+
+#: src/activity/audit-log.tsx
+msgid "By"
+msgstr "Par"
 
 #: src/apps/app-data.tsx
 msgctxt "a change's source"
@@ -3338,6 +3417,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/decision-confirmation.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
 #: src/interview/transcript.tsx
@@ -3348,8 +3428,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-people.tsx
-#: src/projects/project-view.tsx
 #: src/settings/erasures.tsx
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
@@ -3403,18 +3481,18 @@ msgstr "Cas par semaine"
 msgid "Cases a week: {cases}."
 msgstr "Cas par semaine : {cases}."
 
-#: src/settings/audit-chain.tsx
-msgid "Chain check"
-msgstr "Vérification de la chaîne"
-
 #: src/apps/app-workflows.tsx
-#: src/projects/project-view.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Change"
 msgstr "Modification"
 
 #: src/onboarding/review-parts.tsx
 msgctxt "change how it was settled"
+msgid "Change"
+msgstr "Modifier"
+
+#: src/projects/project-view.tsx
+msgctxt "change the project: a menu item"
 msgid "Change"
 msgstr "Modifier"
 
@@ -3549,8 +3627,16 @@ msgid "Changed a workflow's parameter"
 msgstr "A modifié un paramètre d’un workflow"
 
 #: src/activity/audit-words.ts
+msgid "Changed an agent"
+msgstr "A modifié un agent"
+
+#: src/activity/audit-words.ts
 msgid "Changed an App"
 msgstr "A modifié une application"
+
+#: src/activity/audit-words.ts
+msgid "Changed an App an agent may use"
+msgstr "A modifié une application qu’un agent peut utiliser"
 
 #: src/apps/draft-changes.tsx
 msgid "Changed by <0/>"
@@ -3564,6 +3650,10 @@ msgstr "Modifié par <0/>, parmi les lignes qu’ils peuvent lire"
 msgid "Changed by nobody"
 msgstr "Modifié par personne"
 
+#: src/activity/audit-words.ts
+msgid "Changed for whom an agent has a kind of tool"
+msgstr "A modifié pour qui un agent dispose d’un type d’outil"
+
 #: src/apps/app-workflows.tsx
 msgid "Changed in the draft: publish the App for it to start the new workflow."
 msgstr "Modifié dans le brouillon : publiez l’application pour qu’elle lance le nouveau workflow."
@@ -3572,6 +3662,10 @@ msgstr "Modifié dans le brouillon : publiez l’application pour qu’elle lanc
 msgid "Changed knowledge"
 msgstr "A modifié des connaissances"
 
+#: src/activity/audit-words.ts
+msgid "Changed the AI providers"
+msgstr "A modifié les fournisseurs d’IA"
+
 #: src/brain/brain.ts
 msgid "Changed the answer to: {question}"
 msgstr "Réponse modifiée : {question}"
@@ -3579,6 +3673,18 @@ msgstr "Réponse modifiée : {question}"
 #: src/chat/thread.tsx
 msgid "Changed the App's definition"
 msgstr "Définition de l'App modifiée"
+
+#: src/activity/audit-words.ts
+msgid "Changed the default and fallback models"
+msgstr "A modifié les modèles par défaut et de secours"
+
+#: src/activity/audit-words.ts
+msgid "Changed the organization's logo"
+msgstr "A changé le logo de l’organisation"
+
+#: src/activity/audit-words.ts
+msgid "Changed the organization's time zone"
+msgstr "A changé le fuseau horaire de l’organisation"
 
 #: src/activity/audit-words.ts
 msgid "Changed what a connection listens for"
@@ -3591,6 +3697,14 @@ msgstr "A modifié si les données d’une application vont à du code hors de G
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
 msgstr "A modifié les intégrations proposées"
+
+#: src/activity/audit-words.ts
+msgid "Changed who reaches Stephen in a place"
+msgstr "A modifié qui joint Stephen à un endroit"
+
+#: src/activity/audit-words.ts
+msgid "Changed who reads what a shared connection brings into the Brain"
+msgstr "A modifié qui lit ce qu’une connexion partagée apporte au Brain"
 
 #: src/connections/tool-permissions.tsx
 msgid "Changes"
@@ -3689,6 +3803,10 @@ msgstr "Vérifier et enregistrer"
 msgid "Check mark"
 msgstr "Coche"
 
+#: src/settings/audit-chain.tsx
+msgid "Check now"
+msgstr "Vérifier maintenant"
+
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
 msgstr "Vérifiez-la ou remplacez-la dans Paramètres › Fournisseurs d'IA"
@@ -3701,17 +3819,13 @@ msgstr "Vérifiez-la ou remplacez-la dans Paramètres › Fournisseurs d'IA."
 msgid "Check sound and microphone"
 msgstr "Tester le son et le micro"
 
-#: src/settings/audit-chain.tsx
-msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
-msgstr "Vérifiez qu’aucune entrée du journal d’audit n’a été supprimée ni modifiée depuis son écriture, de la première à la plus récente."
-
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "A vérifié la chaîne du journal d’audit"
 
 #: src/settings/audit-chain.tsx
-msgid "Checked through entry {through}…"
-msgstr "Vérifié jusqu’à l’entrée {through}…"
+msgid "Checking"
+msgstr "Vérification"
 
 #: src/drafts/share-with-team.tsx
 msgid "Checking it…"
@@ -3760,6 +3874,14 @@ msgstr "Choisissez un workflow"
 msgid "Choose an app"
 msgstr "Choisir une app"
 
+#: src/frame/ui-words.tsx
+msgid "Choose date"
+msgstr "Choisir une date"
+
+#: src/frame/ui-words.tsx
+msgid "Choose dates"
+msgstr "Choisir les dates"
+
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Choisir des documents"
@@ -3796,11 +3918,14 @@ msgstr "Choisissez votre langue"
 msgid "Choose your staff list"
 msgstr "Choisir votre liste du personnel"
 
-#: src/projects/file-item-dialog.tsx
 #: src/workflows/start-run.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose…"
 msgstr "Choisir…"
+
+#: src/activity/audit-words.ts
+msgid "Chose between Grasp's AI and the organization's own key"
+msgstr "A choisi entre l’IA de Grasp et la propre clé de l’organisation"
 
 #: src/settings/stephen-audience.tsx
 msgid "Chosen teams"
@@ -3818,6 +3943,11 @@ msgstr "Effacer {0}"
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
 msgstr "Effacer les filtres"
+
+#: src/activity/audit-log.tsx
+#: src/projects/project-chats.tsx
+msgid "Clear the search"
+msgstr "Effacer la recherche"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
@@ -3838,8 +3968,11 @@ msgstr "Effacer les filtres"
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/place-picker.tsx
+#: src/projects/project-chats.tsx
+#: src/projects/project-people-stack.tsx
 #: src/report/report-dialog.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
@@ -3869,6 +4002,10 @@ msgstr "Fermer cette question sans réponse ?"
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
 msgstr "Fermer sans réponse"
+
+#: src/activity/audit-words.ts
+msgid "Closed Grasp to the company"
+msgstr "A fermé Grasp à l’entreprise"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
@@ -4297,6 +4434,10 @@ msgstr "Copies"
 msgid "Copy"
 msgstr "Copier"
 
+#: src/frame/ui-words.tsx
+msgid "Copy {label}"
+msgstr "Copier {label}"
+
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Copier en Markdown"
@@ -4350,6 +4491,7 @@ msgstr "Copier l’URL de {name}"
 msgid "Copying didn't work"
 msgstr "La copie n’a pas fonctionné"
 
+#: src/activity/audit-event.tsx
 #: src/agents/agent-page.tsx
 msgid "Cost"
 msgstr "Coût"
@@ -4362,6 +4504,14 @@ msgstr "Coût"
 #: src/frame/ui-words.tsx
 msgid "Could not finish"
 msgstr "Impossible de terminer"
+
+#: src/frame/ui-words.tsx
+msgid "Could not save"
+msgstr "Impossible d’enregistrer"
+
+#: src/projects/project-view.tsx
+msgid "Couldn't delete"
+msgstr "Suppression impossible"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
@@ -4401,6 +4551,10 @@ msgid "Created a collection"
 msgstr "A créé une collection"
 
 #: src/activity/audit-words.ts
+msgid "Created a data store"
+msgstr "A créé un magasin de données"
+
+#: src/activity/audit-words.ts
 msgid "Created a team"
 msgstr "A créé une équipe"
 
@@ -4438,9 +4592,17 @@ msgstr "CRM"
 msgid "Cron fields"
 msgstr "Champs cron"
 
+#: src/activity/audit-log.tsx
+msgid "CSV"
+msgstr "CSV"
+
 #: src/apps/app-data.tsx
 msgid "CSV file"
 msgstr "Fichier CSV"
+
+#: src/activity/audit-log.tsx
+msgid "CSV, with the archive"
+msgstr "CSV, avec les archives"
 
 #: src/workflows/resource-params.tsx
 msgid "Currency"
@@ -4557,6 +4719,10 @@ msgstr "Refusé"
 #: src/activity/audit-words.ts
 msgid "Declined a write to an App"
 msgstr "A refusé une modification dans une application"
+
+#: src/activity/audit-words.ts
+msgid "Declined an agent offered to the company"
+msgstr "A refusé un agent proposé à l’entreprise"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -4694,12 +4860,28 @@ msgid "Deleted"
 msgstr "Supprimé"
 
 #: src/activity/audit-words.ts
+msgid "Deleted a data store"
+msgstr "A supprimé un magasin de données"
+
+#: src/activity/audit-words.ts
 msgid "Deleted a team"
 msgstr "A supprimé une équipe"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a webhook source"
 msgstr "A supprimé une source de webhook"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an agent"
+msgstr "A supprimé un agent"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an agent's schedule"
+msgstr "A supprimé la planification d’un agent"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an AI provider's key"
+msgstr "A supprimé la clé d’un fournisseur d’IA"
 
 #: src/activity/audit-words.ts
 msgid "Deleted entries past their retention"
@@ -4716,6 +4898,10 @@ msgstr "Supprimé. Rien de ce que vous avez dit n’est conservé."
 #: src/interview/page.tsx
 msgid "Deleted. What the Brain kept of it is being removed."
 msgstr "Supprimé. Ce que le Cerveau en a gardé est en cours de suppression."
+
+#: src/projects/project-view.tsx
+msgid "Deleting"
+msgstr "Suppression en cours"
 
 #: src/activity/audit-words.ts
 msgid "Denied packages"
@@ -4760,6 +4946,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Repensé"
 
+#: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
@@ -4861,6 +5048,7 @@ msgstr "A déconnecté un compte"
 msgid "Disconnected on {since}."
 msgstr "Déconnecté le {since}."
 
+#: src/frame/ui-words.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Fermer"
@@ -4877,6 +5065,10 @@ msgstr "Fermer l’astuce"
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
 msgstr "A écarté un signal de connaissances"
+
+#: src/activity/audit-words.ts
+msgid "Dismissed an opportunity"
+msgstr "A écarté une opportunité"
 
 #: src/routes/_shell.settings.onboarding.tsx
 msgid "Do it now"
@@ -5001,6 +5193,10 @@ msgstr "Télécharger le tableau en CSV"
 #: src/chat/answer-markdown.tsx
 msgid "Download table as Markdown"
 msgstr "Télécharger le tableau en Markdown"
+
+#: src/activity/audit-words.ts
+msgid "Downloaded a file"
+msgstr "A téléchargé un fichier"
 
 #: src/workflows/workflow-settings.tsx
 #: src/workflows/workflows-table.tsx
@@ -5225,17 +5421,17 @@ msgstr "Terminé"
 msgid "Ended a held write to an App nobody confirmed within a day"
 msgstr "A mis fin à une modification retenue dans une application que personne n’a confirmée en un jour"
 
+#: src/activity/audit-words.ts
+msgid "Ended Grasp staff's access"
+msgstr "A mis fin à l’accès du personnel de Grasp"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Termine le workflow"
 
-#: src/activity/audit-log.tsx
-msgid "Entries"
-msgstr "Entrées"
-
 #: src/settings/audit-chain.tsx
-msgid "Entries through {purged} were removed when their retention ended: they still link up, but could not be checked."
-msgstr "Les entrées jusqu’à la {purged} ont été supprimées à la fin de leur conservation : elles restent liées, mais n’ont pas pu être vérifiées."
+msgid "Entries through {purged} were removed when their retention ended; they still link up."
+msgstr "Les entrées jusqu'à {purged} ont été supprimées à la fin de leur conservation ; la chaîne reste liée."
 
 #: src/settings/erasures.tsx
 msgid "Erase"
@@ -5311,6 +5507,10 @@ msgstr "A effacé ce que le Brain avait copié d’une connexion, lors de sa dé
 msgid "Erased what the Brain kept from a connection, as it was disconnected"
 msgstr "A effacé ce que le Brain avait conservé d’une connexion, lors de sa déconnexion"
 
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a shared connection"
+msgstr "A effacé ce que le Brain a conservé d’une connexion partagée"
+
 #: src/onboarding/forget-teams.tsx
 msgid "Erased. Your Brain keeps nothing of your teams until you confirm them again."
 msgstr "Effacées. Votre Brain ne garde rien de vos équipes jusqu’à ce que vous les confirmiez à nouveau."
@@ -5331,9 +5531,19 @@ msgstr "Erreur"
 msgid "European Union"
 msgstr "Union européenne"
 
+#: src/activity/audit-log.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Event"
 msgstr "Événement"
+
+#: src/activity/audit-event.tsx
+#: src/routes/_shell.settings.audit.tsx
+msgid "Event details"
+msgstr "Détails de l’événement"
+
+#: src/activity/audit-event.tsx
+msgid "Event ID"
+msgstr "ID de l’événement"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Event type"
@@ -5343,9 +5553,18 @@ msgstr "Type d’événement"
 msgid "Event type of a test event"
 msgstr "Type d’événement d’un événement de test"
 
+#: src/activity/audit-log.tsx
+#: src/routes/_shell.settings.audit.tsx
+msgid "Events"
+msgstr "Événements"
+
 #: src/settings/audit-archive.tsx
-msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
-msgstr "Les événements plus anciens que ce que conserve le journal d’audit, déplacés vers l’archive. La recherche et l’export utilisent les filtres ci-dessus."
+msgid "Events in the archive"
+msgstr "Événements dans les archives"
+
+#: src/settings/audit-archive.tsx
+msgid "Events in the log"
+msgstr "Événements dans le journal"
 
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
@@ -5362,6 +5581,10 @@ msgstr "Tous les jours à {time}"
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
 msgstr "Chaque livraison est signée avec, pour que le destinataire sache qu'elle vient de Grasp."
+
+#: src/settings/audit-chain.tsx
+msgid "Every event is chained to the one before it, so an event removed or changed later shows as a break in the chain."
+msgstr "Chaque événement est chaîné au précédent : un événement supprimé ou modifié après coup apparaît comme une rupture de la chaîne."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -5516,10 +5739,6 @@ msgstr "Tout"
 msgid "Everything around employees, from hiring to leaving."
 msgstr "Tout ce qui concerne les employés, de l’embauche au départ."
 
-#: src/routes/_shell.settings.audit.tsx
-msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
-msgstr "Tout ce qui est fait dans Grasp, par qui et quand, conservé dans une chaîne que personne ne peut modifier sans que cela se voie."
-
 #: src/workflows/business-process.tsx
 msgid "Everything from a first client conversation until the money is in the bank."
 msgstr "Tout, du premier échange avec un client jusqu’à l’argent sur le compte."
@@ -5604,6 +5823,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Expertise"
 msgstr "Expertise"
 
+#: src/activity/audit-log.tsx
 #: src/brain/own-export.tsx
 #: src/export/export-menu.tsx
 msgid "Export"
@@ -5617,35 +5837,17 @@ msgstr "Exporter à nouveau"
 msgid "Export as CSV"
 msgstr "Exporter en CSV"
 
-#: src/activity/audit-log.tsx
-#: src/settings/audit-archive.tsx
-msgid "Export CSV"
-msgstr "Exporter en CSV"
-
 #: src/apps/app-definition.tsx
 msgid "Export definition"
 msgstr "Exporter la définition"
-
-#: src/activity/audit-log.tsx
-#: src/settings/audit-archive.tsx
-msgid "Export JSON"
-msgstr "Exporter en JSON"
 
 #: src/report/report-bar.tsx
 msgid "Export report"
 msgstr "Exporter le rapport"
 
-#: src/activity/audit-log.tsx
-msgid "Export the audit trail"
-msgstr "Exporter le journal d’audit"
-
 #: src/brain/own-export.tsx
 msgid "Export what only you may read"
 msgstr "Exporter ce que vous seul pouvez lire"
-
-#: src/settings/audit-archive.tsx
-msgid "Export with archive"
-msgstr "Exporter avec l’archive"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -5783,7 +5985,6 @@ msgstr "Fichiers écrits par ses exécutions"
 msgid "Fill this in."
 msgstr "Remplissez ce champ."
 
-#: src/activity/audit-log.tsx
 #: src/settings/filter-menu.tsx
 msgid "Filter"
 msgstr "Filtrer"
@@ -5810,9 +6011,21 @@ msgctxt "kind of app"
 msgid "Finance and accounting"
 msgstr "Finance et comptabilité"
 
+#: src/projects/project-chats.tsx
+msgid "Find a chat"
+msgstr "Trouver un chat"
+
 #: src/apps/app-data.tsx
 msgid "Find a record by its ID"
 msgstr "Trouver un enregistrement par son ID"
+
+#: src/projects/file-item-dialog.tsx
+msgid "Find an app or workflow"
+msgstr "Trouver une app ou un workflow"
+
+#: src/activity/audit-event.tsx
+msgid "Find similar"
+msgstr "Similaires"
 
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
@@ -5887,6 +6100,10 @@ msgstr "Suivre les devis jusqu’au paiement"
 #: src/settings/erasures.tsx
 msgid "Follow the erasure of {who}"
 msgstr "Suivre l’effacement de {who}"
+
+#: src/activity/audit-event.tsx
+msgid "For"
+msgstr "Pour"
 
 #. placeholder {0}: gap.owner
 #: src/chat/brain-questions.tsx
@@ -5988,6 +6205,10 @@ msgstr "Oublier notre premier échange"
 msgid "Forget our first conversation?"
 msgstr "Oublier notre premier échange ?"
 
+#: src/activity/audit-words.ts
+msgid "Forgot an erased member as the one who answered the Brain's questions"
+msgstr "A oublié un membre effacé comme auteur des réponses aux questions du Brain"
+
 #: src/brain/memories-page.tsx
 msgid "Forgotten, kept as history"
 msgstr "Oublié, conservé dans l’historique"
@@ -6025,10 +6246,6 @@ msgstr "Trouvé dans {source}"
 msgctxt "what the Brain remembers about something"
 msgid "Frequency"
 msgstr "Fréquence"
-
-#: src/activity/audit-log.tsx
-msgid "From"
-msgstr "Source"
 
 #: src/decision-card.tsx
 #: src/decision-confirmation.tsx
@@ -6092,10 +6309,6 @@ msgstr "D’après ce que disent des personnes de toute l’entreprise, version 
 #: src/brain/memories-page.tsx
 msgid "From what your team said, version {version}"
 msgstr "D’après ce qu’a dit votre équipe, version {version}"
-
-#: src/settings/audit-archive.tsx
-msgid "From when each event was recorded, archive included. After this, archived events are deleted."
-msgstr "À partir de l’enregistrement de chaque événement, archive comprise. Ensuite, les événements archivés sont supprimés."
 
 #: src/frame/surface-nav.tsx
 msgid "From your Apps"
@@ -6432,6 +6645,10 @@ msgstr "Grasp a envoyé ce lien à ce compte dans {app}. Reliez-le seulement s�
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
 
+#: src/activity/audit-event.tsx
+msgid "Grasp staff"
+msgstr "Équipe Grasp"
+
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
 msgid "Grasp staff access"
@@ -6522,10 +6739,6 @@ msgstr "Nom du groupe"
 msgid "Group of {name}"
 msgstr "Groupe de {name}"
 
-#: src/routes/_shell.projects.index.tsx
-msgid "Group the apps and workflows of a process, a team or a goal in a project. You see the projects you are in."
-msgstr "Regroupez les apps et les workflows d’un processus, d’une équipe ou d’un objectif dans un projet. Vous voyez les projets dont vous faites partie."
-
 #: src/routes/_shell.settings.brain.tsx
 msgid "Groups of teams"
 msgstr "Groupes d’équipes"
@@ -6544,9 +6757,17 @@ msgstr "Les comptes invités ne peuvent pas se connecter. Utilisez un compte pro
 msgid "Guests"
 msgstr "Invités"
 
+#: src/activity/audit-words.ts
+msgid "Had the Brain forget a record"
+msgstr "A fait oublier un enregistrement au Brain"
+
 #: src/onboarding/about-story.tsx
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
 msgstr "La moitié de mon lundi part dans les factures. La plupart n’ont pas de numéro de commande, alors j’écris à tout le monde pour demander."
+
+#: src/activity/audit-words.ts
+msgid "Handed a file to a run"
+msgstr "A transmis un fichier à une exécution"
 
 #: src/activity/audit-words.ts
 msgid "Handed an email attachment to a run"
@@ -6564,7 +6785,7 @@ msgstr "Passations"
 msgid "has it"
 msgstr "l’a"
 
-#: src/activity/audit-log.tsx
+#: src/activity/audit-event.tsx
 msgid "Hash"
 msgstr "Hash"
 
@@ -6625,10 +6846,6 @@ msgstr "Masquées"
 #: src/brain/opportunities-page.tsx
 msgid "Hidden for every admin until their evidence changes, or until one of you shows them again."
 msgstr "Masquées pour tous les admins jusqu'à ce que leurs éléments changent, ou qu'un de vous les affiche à nouveau."
-
-#: src/activity/audit-log.tsx
-msgid "Hide"
-msgstr "Masquer"
 
 #: src/settings/event-source-activity.tsx
 msgid "Hide events"
@@ -6720,10 +6937,6 @@ msgstr "Combien de temps vous prend chacune, {name} ?"
 #: src/onboarding/about-story.tsx
 msgid "How long does that take you, {name}?"
 msgstr "Combien de temps cela vous prend-il, {name} ?"
-
-#: src/settings/audit-archive.tsx
-msgid "How long Grasp keeps what it records."
-msgstr "Combien de temps Grasp conserve ce qu’il enregistre."
 
 #: src/onboarding/knowledge-bar.tsx
 msgid "How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at {threshold}%, and I keep learning after that."
@@ -7082,6 +7295,10 @@ msgstr "Entrée"
 msgid "Input, as JSON"
 msgstr "Entrée, en JSON"
 
+#: src/activity/audit-words.ts
+msgid "Installed Grasp's skills with a release"
+msgstr "A installé les skills de Grasp avec une version"
+
 #: src/chat/saved-memory.tsx
 msgid "Instruction"
 msgstr "Instruction"
@@ -7114,6 +7331,14 @@ msgstr "Intégration"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Intégrations"
+
+#: src/activity/audit-event.tsx
+msgid "Integrity"
+msgstr "Intégrité"
+
+#: src/settings/audit-chain.tsx
+msgid "Integrity and archive"
+msgstr "Intégrité et archives"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
@@ -7583,6 +7808,14 @@ msgstr "A rejoint depuis l’annuaire, en écrivant à Stephen"
 msgid "Joined through an invitation"
 msgstr "A rejoint via une invitation"
 
+#: src/activity/audit-log.tsx
+msgid "JSON"
+msgstr "JSON"
+
+#: src/activity/audit-log.tsx
+msgid "JSON, with the archive"
+msgstr "JSON, avec les archives"
+
 #: src/interview/words.ts
 msgid "Judgment"
 msgstr "Jugement"
@@ -7747,6 +7980,14 @@ msgstr "Langue"
 msgid "Language: {name}"
 msgstr "Langue : {name}"
 
+#: src/frame/ui-words.tsx
+msgid "Last 30 days"
+msgstr "30 derniers jours"
+
+#: src/frame/ui-words.tsx
+msgid "Last 7 days"
+msgstr "7 derniers jours"
+
 #: src/chat/chat-window.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
@@ -7760,6 +8001,10 @@ msgstr "Dernière demande"
 #: src/agents/agent-page.tsx
 msgid "Last changed {0}"
 msgstr "Dernière modification : {0}"
+
+#: src/settings/audit-chain.tsx
+msgid "Last check"
+msgstr "Dernière vérification"
 
 #: src/settings/event-source-activity.tsx
 msgid "Last event {last}."
@@ -7976,6 +8221,10 @@ msgstr "Liens"
 msgid "Linked {time}"
 msgstr "Relié {time}"
 
+#: src/activity/audit-words.ts
+msgid "Linked a chat app account"
+msgstr "A associé un compte d’application de chat"
+
 #: src/pages/page-links.ts
 msgid "Links can't be opened here."
 msgstr "Les liens ne peuvent pas être ouverts ici."
@@ -8001,13 +8250,13 @@ msgstr "À l’écoute"
 msgid "Live, being measured"
 msgstr "En production, en cours de mesure"
 
-#: src/activity/audit-log.tsx
-msgid "Load older"
-msgstr "Charger les plus anciens"
-
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Chargement"
+
+#: src/frame/ui-words.tsx
+msgid "Loading the value"
+msgstr "Chargement de la valeur"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
@@ -8038,6 +8287,10 @@ msgstr "A consulté l’accès à retirer à la main"
 msgid "Looked at the uploads shared with a team or everyone"
 msgstr "A consulté les fichiers importés partagés avec une équipe ou tout le monde"
 
+#: src/activity/audit-words.ts
+msgid "Looked up whether something was erased from the Brain"
+msgstr "A vérifié si quelque chose a été effacé du Brain"
+
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "Low"
@@ -8067,6 +8320,10 @@ msgstr "Créée le {made}"
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "A généré un nouveau secret pour une source de webhook"
+
+#: src/activity/audit-words.ts
+msgid "Made an agent"
+msgstr "A créé un agent"
 
 #: src/apps/app-settings.tsx
 msgid "Made by {person} on {date}."
@@ -8162,6 +8419,7 @@ msgid "Make project"
 msgstr "Créer le projet"
 
 #: src/make/make-link.tsx
+#: src/projects/project-view.tsx
 msgid "Make something"
 msgstr "Créer quelque chose"
 
@@ -8199,6 +8457,10 @@ msgstr "Markdown (.md)"
 msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
+
+#: src/activity/audit-words.ts
+msgid "Matched a directory group to a team"
+msgstr "A associé un groupe de l’annuaire à une équipe"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -8352,6 +8614,10 @@ msgstr "En savoir plus sur ces connexions"
 msgid "More about this connection"
 msgstr "En savoir plus sur cette connexion"
 
+#: src/frame/ui-words.tsx
+msgid "More actions"
+msgstr "Plus d’actions"
+
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "the catalog's apps nobody connected"
 msgid "More apps"
@@ -8362,6 +8628,7 @@ msgid "More for {name}"
 msgstr "Plus pour {name}"
 
 #: src/chat/chat-menus.tsx
+#: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "Plus pour {title}"
 
@@ -8626,6 +8893,10 @@ msgstr "Nouvelle équipe"
 msgid "New version"
 msgstr "Nouvelle version"
 
+#: src/activity/audit-log.tsx
+msgid "Newer"
+msgstr "Plus récents"
+
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox sort"
 msgid "Newest first"
@@ -8642,6 +8913,10 @@ msgstr "Suivante"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Next invoice"
 msgstr "Prochaine facture"
+
+#: src/frame/ui-words.tsx
+msgid "Next month"
+msgstr "Mois suivant"
 
 #: src/interview/words.ts
 msgid "Next person"
@@ -8719,8 +8994,11 @@ msgstr "Aucune application n'a de modèle lié."
 msgid "No App is called “{asked}”"
 msgstr "Aucune application ne s’appelle « {asked} »"
 
+#: src/projects/project-view.tsx
+msgid "No Apps in it yet."
+msgstr "Aucune app pour l’instant."
+
 #: src/apps/apps-overview.tsx
-#: src/projects/project-counts.tsx
 msgid "No Apps yet"
 msgstr "Aucune application pour l’instant"
 
@@ -8743,6 +9021,10 @@ msgstr "Aucune modification n'est conservée pour cet enregistrement."
 #: src/settings/chat-accounts.tsx
 msgid "No chat app accounts are linked."
 msgstr "Aucun compte d’application de chat n’est relié."
+
+#: src/projects/project-chats.tsx
+msgid "No chat by that name."
+msgstr "Aucun chat de ce nom."
 
 #: src/chat/chat-window.tsx
 msgid "No chat has that."
@@ -8882,6 +9164,10 @@ msgstr "Aucun enregistrement de cette table n'a cet ID."
 msgid "No records"
 msgstr "Aucun enregistrement"
 
+#: src/frame/ui-words.tsx
+msgid "No results"
+msgstr "Aucun résultat"
+
 #: src/report/report.ts
 msgid "No run asked anyone for a decision."
 msgstr "Aucune exécution n’a demandé de décision à quiconque."
@@ -8964,14 +9250,17 @@ msgstr "Aucun workflow n’utilise encore {app}."
 msgid "No workflow yet"
 msgstr "Pas encore de workflow"
 
-#: src/projects/project-counts.tsx
+#: src/projects/project-view.tsx
+msgid "No workflows in it yet."
+msgstr "Aucun workflow pour l’instant."
+
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Pas encore de workflows"
 
-#: src/activity/audit-log.tsx
-msgid "No: its hash or its link to the event before it doesn't match."
-msgstr "Non : son hachage ou son lien avec l’événement précédent ne correspond pas."
+#: src/activity/audit-event.tsx
+msgid "No: it was changed, or doesn't link to the event before it."
+msgstr "Non : il a été modifié, ou n’est pas lié à l’événement précédent."
 
 #: src/apps/access-view.tsx
 #: src/connections/brain-audience.tsx
@@ -9095,6 +9384,10 @@ msgstr "Aucune des autorisations d’intégration de l’application ne sert {co
 msgid "None of this is right"
 msgstr "Rien de tout cela n’est exact"
 
+#: src/projects/project-view.tsx
+msgid "None of your chats are in it. Only you see the chats you put here."
+msgstr "Aucun de vos chats n’y est. Vous seul voyez les chats que vous y mettez."
+
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
 msgid "None yet"
@@ -9111,6 +9404,10 @@ msgstr "Aucun : son fournisseur a été supprimé."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Aucun."
+
+#: src/projects/project-people.tsx
+msgid "Not added"
+msgstr "Non ajouté"
 
 #: src/brain/skills-page.tsx
 msgid "Not added yet"
@@ -9133,6 +9430,10 @@ msgstr "Non lié"
 #: src/apps/resource-bindings.tsx
 msgid "Not checked"
 msgstr "Non vérifié"
+
+#: src/settings/audit-chain.tsx
+msgid "Not checked yet"
+msgstr "Pas encore vérifié"
 
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
@@ -9251,6 +9552,10 @@ msgstr "Pas encore enregistré. D’ici là, vos lignes vont toujours là où el
 msgid "Not served"
 msgstr "Non servi"
 
+#: src/activity/audit-event.tsx
+msgid "Not set"
+msgstr "Non défini"
+
 #: src/projects/project-view.tsx
 msgid "Not shared with the project"
 msgstr "Non partagé avec le projet"
@@ -9262,6 +9567,11 @@ msgstr "Pas encore partagé"
 #: src/agents/agent-page.tsx
 msgid "Not shown"
 msgstr "Non affiché"
+
+#: src/projects/project-people.tsx
+#: src/projects/project-view.tsx
+msgid "Not taken out"
+msgstr "Non retiré"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "Not the same in {team}"
@@ -9449,6 +9759,10 @@ msgstr "Rien de ce que le workflow peut utiliser ne la sert pour l'instant : acc
 msgid "Nothing this App asked for is waiting."
 msgstr "Rien de ce que cette application a demandé n’est en attente."
 
+#: src/settings/audit-chain.tsx
+msgid "Nothing to check yet"
+msgstr "Rien à vérifier pour l'instant"
+
 #: src/connections/sync-places.tsx
 msgid "Nothing to copy into the Brain yet"
 msgstr "Rien à copier dans le Brain pour l’instant"
@@ -9569,6 +9883,10 @@ msgstr "Proposez {name} aux administrateurs de votre entreprise. S'ils le repren
 msgid "Offer to the company"
 msgstr "Proposer à l'entreprise"
 
+#: src/activity/audit-words.ts
+msgid "Offered an agent to the company, or took the offer back"
+msgstr "A proposé un agent à l’entreprise, ou a retiré l’offre"
+
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Proposé le {since}. Les administrateurs de votre entreprise peuvent reprendre {name}. Ce que vous lui avez dit ne part pas avec lui, et une fois qu'ils l'ont repris, vous ne pouvez plus l'ouvrir."
@@ -9584,6 +9902,10 @@ msgstr "Proposé à votre organisation"
 #: src/report/report.ts
 msgid "Often corrected"
 msgstr "Souvent corrigé"
+
+#: src/activity/audit-log.tsx
+msgid "Older"
+msgstr "Plus anciens"
 
 #: src/apps/app-data.tsx
 msgid "Older changes"
@@ -9620,8 +9942,12 @@ msgid "on {date} at {hour}"
 msgstr "le {date} à {hour}"
 
 #: src/settings/audit-chain.tsx
-msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
-msgstr "Le {time}, la chaîne s’est rompue à l’entrée {entry} : rien à partir de là n’est vérifié."
+msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
+msgstr "Le {time}, la chaîne s'est rompue à l'entrée {entry} : rien n'est vérifié à partir de là. {reason}"
+
+#: src/settings/audit-chain.tsx
+msgid "On {time}, the check found a break at event {entry}: nothing from there on is verified. {reason}"
+msgstr "Le {time}, la vérification a trouvé une rupture à l’événement {entry} : rien à partir de là n’est vérifié. {reason}"
 
 #: src/workflows/trigger-description.ts
 msgid "On {type} events from {name}"
@@ -9987,6 +10313,10 @@ msgstr "Ouvrir votre onboarding"
 msgid "Open: {open}"
 msgstr "Ouvertes : {open}"
 
+#: src/activity/audit-words.ts
+msgid "Opened Grasp to the whole company"
+msgstr "A ouvert Grasp à toute l’entreprise"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Grasp s’ouvre"
@@ -10187,6 +10517,10 @@ msgctxt "files of an App"
 msgid "Pages"
 msgstr "Pages"
 
+#: src/activity/audit-log.tsx
+msgid "Pages of events"
+msgstr "Pages d'événements"
+
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Parameters"
@@ -10272,6 +10606,14 @@ msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "En pause"
 
+#: src/activity/audit-words.ts
+msgid "Paused or resumed an agent"
+msgstr "A mis en pause ou relancé un agent"
+
+#: src/activity/audit-words.ts
+msgid "Paused or resumed an agent's schedule"
+msgstr "A mis en pause ou relancé la planification d’un agent"
+
 #: src/settings/stephen-card.tsx
 msgid "Paused outside Grasp"
 msgstr "En pause en dehors de Grasp"
@@ -10321,7 +10663,7 @@ msgstr "Stylo"
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-view.tsx
+#: src/projects/project-people-stack.tsx
 msgid "People"
 msgstr "Personnes"
 
@@ -10351,6 +10693,14 @@ msgstr "« {name} » se fait de deux façons"
 #: src/report/report.ts
 msgid "People heard"
 msgstr "Personnes entendues"
+
+#: src/projects/project-people-stack.tsx
+msgid "People in it: {count}"
+msgstr "Personnes dedans : {count}"
+
+#: src/projects/project-people.tsx
+msgid "People in the project"
+msgstr "Personnes dans le projet"
 
 #: src/chat/agent-draft-card.tsx
 msgid "People in these teams: {named}"
@@ -10405,6 +10755,7 @@ msgstr "Autorisation pour les statistiques de la plateforme"
 msgid "Permission to read the Brain"
 msgstr "Autorisation de lire le Cerveau"
 
+#: src/activity/audit-event.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Personne"
@@ -10413,6 +10764,10 @@ msgstr "Personne"
 msgctxt "a kind of field"
 msgid "Person"
 msgstr "Personne"
+
+#: src/activity/audit-log.tsx
+msgid "Person or ID"
+msgstr "Personne ou ID"
 
 #: src/settings/erasures.tsx
 msgid "Personal connections"
@@ -10494,7 +10849,7 @@ msgstr "Réécouter"
 msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
 msgstr "Politiques, procédures, instructions de travail. Partagez ce que vous avez. Les brouillons conviennent aussi."
 
-#: src/activity/audit-log.tsx
+#: src/activity/audit-event.tsx
 msgid "Position"
 msgstr "Position"
 
@@ -10512,6 +10867,11 @@ msgctxt "what the Brain remembers about something"
 msgid "Preference"
 msgstr "Préférence"
 
+#: src/frame/ui-words.tsx
+msgctxt "ranges of dates to pick"
+msgid "Presets"
+msgstr "Raccourcis"
+
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Choisissez où va chaque ligne. Ce que vous laissez, c’est ce qui compte."
@@ -10523,6 +10883,18 @@ msgstr "Appuie sur « {words} »"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Aperçu : ne modifie rien, ne lit aucune donnée réelle"
+
+#: src/activity/audit-words.ts
+msgid "Previewed a file"
+msgstr "A prévisualisé un fichier"
+
+#: src/activity/audit-event.tsx
+msgid "Previous hash"
+msgstr "Hachage précédent"
+
+#: src/frame/ui-words.tsx
+msgid "Previous month"
+msgstr "Mois précédent"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -10596,6 +10968,10 @@ msgstr "A proposé des paquets"
 #: src/settings/ai-providers.tsx
 msgid "Provider"
 msgstr "Fournisseur"
+
+#: src/activity/audit-words.ts
+msgid "Published a version"
+msgstr "A publié une version"
 
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
@@ -10727,6 +11103,10 @@ msgid "Read a knowledge document"
 msgstr "A lu un document de connaissances"
 
 #: src/activity/audit-words.ts
+msgid "Read a snapshot of the workspace"
+msgstr "A lu un instantané de l’espace de travail"
+
+#: src/activity/audit-words.ts
 msgid "Read an App's statistics"
 msgstr "A lu les statistiques d’une application"
 
@@ -10745,6 +11125,10 @@ msgstr "A lu des entités du Cerveau"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "A lu les appels au résultat inconnu de tout le monde"
+
+#: src/activity/audit-event.tsx
+msgid "Read from"
+msgstr "Lu dans"
 
 #: src/brain/sources-page.tsx
 msgid "Read from {name} on {readOn}"
@@ -10787,13 +11171,29 @@ msgstr "A lu des sources restreintes et y est désormais soumis"
 msgid "Read skills from the Brain"
 msgstr "A lu des skills du Cerveau"
 
+#: src/activity/audit-words.ts
+msgid "Read the Brain's report"
+msgstr "A lu le rapport du Brain"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Lire ce qui est à l'entreprise"
 
+#: src/activity/audit-words.ts
+msgid "Read the directory for the onboarding"
+msgstr "A lu l’annuaire pour l’onboarding"
+
+#: src/activity/audit-words.ts
+msgid "Read the HR system for the onboarding"
+msgstr "A lu le système RH pour l’onboarding"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Relire les responsables depuis {name}"
+
+#: src/activity/audit-words.ts
+msgid "Read the onboarding kickoff"
+msgstr "A lu le lancement de l’onboarding"
 
 #: src/activity/audit-words.ts
 msgid "Read the payload of a webhook event"
@@ -10931,6 +11331,10 @@ msgctxt "business process"
 msgid "Record-to-Report"
 msgstr "Record-to-Report"
 
+#: src/activity/audit-event.tsx
+msgid "Recorded"
+msgstr "Enregistré"
+
 #: src/apps/app-data-model.tsx
 msgctxt "a table's records"
 msgid "Records"
@@ -11053,6 +11457,7 @@ msgstr "Retirer {label}"
 msgid "Remove {label}?"
 msgstr "Retirer {label} ?"
 
+#: src/activity/audit-event.tsx
 #: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 #: src/workflows/binding-approvals.tsx
@@ -11150,6 +11555,10 @@ msgid "Removed"
 msgstr "Supprimé"
 
 #: src/activity/audit-words.ts
+msgid "Removed a document from an agent"
+msgstr "A retiré un document d’un agent"
+
+#: src/activity/audit-words.ts
 msgid "Removed a file from a chat before sending it"
 msgstr "A retiré un fichier d’une discussion avant de l’envoyer"
 
@@ -11182,6 +11591,10 @@ msgstr "Supprimé le {date} · e-mail effacé"
 msgid "Removed people"
 msgstr "Personnes supprimées"
 
+#: src/activity/audit-words.ts
+msgid "Removed the organization's logo"
+msgstr "A supprimé le logo de l’organisation"
+
 #: src/interview/transcript.tsx
 msgid "Removed."
 msgstr "Supprimée."
@@ -11195,6 +11608,10 @@ msgstr "Renommer"
 #: src/settings/teams.tsx
 msgid "Rename {name}"
 msgstr "Renommer {name}"
+
+#: src/activity/audit-words.ts
+msgid "Renamed the organization"
+msgstr "A renommé l’organisation"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -11221,9 +11638,17 @@ msgstr "Remplacer la clé de {label}"
 msgid "Replaced a request for packages"
 msgstr "A remplacé une demande de paquets"
 
+#: src/activity/audit-words.ts
+msgid "Replaced an AI provider's key"
+msgstr "A remplacé la clé d’un fournisseur d’IA"
+
 #: src/report/report-dialog.tsx
 msgid "Report"
 msgstr "Rapport"
+
+#: src/activity/audit-event.tsx
+msgid "Request"
+msgstr "Requête"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "ask an admin to let a trigger start"
@@ -11364,10 +11789,6 @@ msgstr "Résultats"
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Reprendre"
-
-#: src/settings/audit-archive.tsx
-msgid "Retention"
-msgstr "Conservation"
 
 #: src/brain/skills-page.tsx
 msgid "Retire"
@@ -11530,6 +11951,7 @@ msgid "Role in the project"
 msgstr "Rôle dans le projet"
 
 #: src/drafts/sharing.tsx
+#: src/projects/project-people.tsx
 msgid "Role of {name}"
 msgstr "Rôle de {name}"
 
@@ -11582,6 +12004,10 @@ msgstr "Règle"
 #: src/brain/brain.ts
 msgid "Rules"
 msgstr "Règles"
+
+#: src/activity/audit-event.tsx
+msgid "Run"
+msgstr "Exécution"
 
 #: src/workflows/start-run.tsx
 msgctxt "start a workflow's run by hand"
@@ -11838,6 +12264,10 @@ msgstr "Enregistré sous {named}"
 msgid "Saved as a blueprint"
 msgstr "Enregistrée comme blueprint"
 
+#: src/activity/audit-words.ts
+msgid "Saved instructions"
+msgstr "A enregistré des instructions"
+
 #: src/workflows/saved-ago.tsx
 msgid "Saved just now"
 msgstr "Enregistré à l’instant"
@@ -11845,6 +12275,10 @@ msgstr "Enregistré à l’instant"
 #: src/workflows/saved-ago.tsx
 msgid "Saved on {date}"
 msgstr "Enregistré le {date}"
+
+#: src/activity/audit-words.ts
+msgid "Saved the company's groups of teams"
+msgstr "A enregistré les groupes d’équipes de l’entreprise"
 
 #: src/chat/thread.tsx
 msgid "Saved to your memory"
@@ -11936,6 +12370,10 @@ msgstr "Rechercher dans les chats"
 msgid "Search commands"
 msgstr "Rechercher des commandes"
 
+#: src/activity/audit-log.tsx
+msgid "Search events by person or ID"
+msgstr "Rechercher des événements par personne ou ID"
+
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"
 msgstr "Recherche dans {searched}"
@@ -11955,6 +12393,7 @@ msgstr "Rechercher des personnes"
 
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
+#: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Rechercher des personnes et des équipes"
 
@@ -11970,7 +12409,7 @@ msgstr "Rechercher parmi les agents"
 msgid "Search the Apps"
 msgstr "Rechercher dans les applications"
 
-#: src/settings/audit-archive.tsx
+#: src/activity/audit-log.tsx
 msgid "Search the archive"
 msgstr "Rechercher dans l’archive"
 
@@ -11985,10 +12424,6 @@ msgstr "Recherchez dans vos chats et ouvrez-en un."
 #: src/apps/indexes-view.tsx
 msgid "Search, to find records by the words in them"
 msgstr "Une recherche, pour trouver des enregistrements par leurs mots"
-
-#: src/settings/audit-archive.tsx
-msgid "Searched above. After this, events move to the archive."
-msgstr "Recherché ci-dessus. Ensuite, les événements passent dans l’archive."
 
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
@@ -12152,6 +12587,10 @@ msgid "Sent <0>{sent}</0>"
 msgstr "Envoyé <0>{sent}</0>"
 
 #: src/activity/audit-words.ts
+msgid "Sent a change from Grasp's admin"
+msgstr "A envoyé une modification depuis l’administration de Grasp"
+
+#: src/activity/audit-words.ts
 msgid "Sent a webhook source a test event"
 msgstr "A envoyé un événement de test à une source de webhook"
 
@@ -12192,6 +12631,10 @@ msgstr "A mis de côté des entrées que le journal d’audit n’a pas pu accep
 msgid "Set by your organization’s sign-in."
 msgstr "Défini par la connexion de votre organisation."
 
+#: src/activity/audit-words.ts
+msgid "Set how much Grasp must know before it opens to the company"
+msgstr "A fixé ce que Grasp doit savoir avant de s’ouvrir à l’entreprise"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Set in"
@@ -12217,6 +12660,10 @@ msgstr "Défini par application"
 #: src/apps/app-settings.tsx
 msgid "Set the link"
 msgstr "Définir le lien"
+
+#: src/activity/audit-words.ts
+msgid "Set up a schedule for an agent"
+msgstr "A configuré une planification pour un agent"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -12332,6 +12779,10 @@ msgstr "Partager…"
 msgid "Shared {when}"
 msgstr "Partagé le {when}"
 
+#: src/activity/audit-words.ts
+msgid "Shared a document for the onboarding"
+msgstr "A partagé un document pour l’onboarding"
+
 #: src/interview/destination.tsx
 msgid "Shared as how your team works"
 msgstr "Partagé comme la façon de travailler de votre équipe"
@@ -12404,10 +12855,19 @@ msgctxt "shows a hidden opportunity again for every admin"
 msgid "Show again"
 msgstr "Afficher à nouveau"
 
+#: src/frame/ui-words.tsx
+msgid "Show all"
+msgstr "Tout afficher"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Afficher les {count} lignes ({characters} caractères)"
 
+#: src/activity/audit-event.tsx
+msgid "Show all the {section}"
+msgstr "Afficher tous les {section}"
+
+#: src/activity/audit-log.tsx
 #: src/settings/event-source-activity.tsx
 msgid "Show events"
 msgstr "Afficher les événements"
@@ -12470,6 +12930,10 @@ msgstr "Afficher ou masquer la barre latérale"
 #: src/settings/event-source-activity.tsx
 msgid "Show payload"
 msgstr "Afficher le contenu"
+
+#: src/frame/ui-words.tsx
+msgid "Show the choices"
+msgstr "Afficher les choix"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
@@ -12617,6 +13081,10 @@ msgstr "S’est reconnecté à une connexion"
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in with"
 msgstr "Connexion via"
+
+#: src/activity/audit-words.ts
+msgid "Signed out a device"
+msgstr "A déconnecté un appareil"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -12907,6 +13375,10 @@ msgstr "A commencé à suivre une connexion en retard : les changements antérie
 msgid "Started following what changes at a connection"
 msgstr "A commencé à suivre ce qui change sur une connexion"
 
+#: src/activity/audit-words.ts
+msgid "Started handing something over to the Brain"
+msgstr "A commencé à transmettre quelque chose au Brain"
+
 #: src/inbox/item-detail.tsx
 msgid "Started: {name}."
 msgstr "Lancé : {name}."
@@ -13096,6 +13568,10 @@ msgstr "A arrêté une planification qui échouait sans cesse"
 msgid "Stopped following what changes at a connection"
 msgstr "A arrêté de suivre ce qui change sur une connexion"
 
+#: src/activity/audit-words.ts
+msgid "Stopped matching a directory group to a team"
+msgstr "A cessé d’associer un groupe de l’annuaire à une équipe"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
@@ -13193,9 +13669,9 @@ msgstr "Reprendre {name} pour l'entreprise"
 msgid "Take {name} out of {projectName}?"
 msgstr "Retirer {name} de {projectName} ?"
 
-#: src/projects/project-people.tsx
-msgid "Take {name} out of the project"
-msgstr "Retirer {name} du projet"
+#: src/projects/project-chats.tsx
+msgid "Take {title} out of the project"
+msgstr "Retirer {title} du projet"
 
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
@@ -13225,6 +13701,7 @@ msgstr "Retirer de {name}"
 msgid "Take on"
 msgstr "Reprendre"
 
+#: src/projects/project-chats.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -13258,6 +13735,11 @@ msgstr "Retire"
 msgid "Taking long? <0>Try again</0>"
 msgstr "C’est long ? <0>Réessayer</0>"
 
+#: src/projects/project-people.tsx
+#: src/projects/project-view.tsx
+msgid "Taking out"
+msgstr "Retrait en cours"
+
 #: src/routes/_shell.connect-microsoft.tsx
 msgid "Taking you to the Microsoft sign-in…"
 msgstr "Redirection vers la connexion Microsoft…"
@@ -13278,10 +13760,6 @@ msgstr "Cible"
 #: src/brain/brain.ts
 msgid "Target design agreed"
 msgstr "Conception cible validée"
-
-#: src/activity/audit-log.tsx
-msgid "Target ID"
-msgstr "ID de la cible"
 
 #: src/apps/app-data-model.tsx
 msgid "tasks"
@@ -13401,6 +13879,10 @@ msgstr "Tester sur des éléments récents"
 #: src/workflows/item-test.tsx
 msgid "Test revision {revision} on recent items"
 msgstr "Tester la révision {revision} sur des éléments récents"
+
+#: src/activity/audit-words.ts
+msgid "Tested an AI provider's key"
+msgstr "A testé la clé d’un fournisseur d’IA"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -13688,8 +14170,8 @@ msgid "The audit trail"
 msgstr "Le journal d’audit"
 
 #: src/settings/audit-chain.tsx
-msgid "The audit trail has no entries yet: there is nothing to verify."
-msgstr "Le journal d’audit n’a encore aucune entrée : il n’y a rien à vérifier."
+msgid "The audit trail's chain is broken"
+msgstr "La chaîne du journal d’audit est rompue"
 
 #: src/brain/sources-page.tsx
 msgid "The best part of its passage"
@@ -14244,14 +14726,6 @@ msgstr "Comme certains l’ont raconté"
 msgid "The webhook's secret"
 msgstr "Le secret du webhook"
 
-#: src/settings/audit-chain.tsx
-msgid "The whole chain has not been verified yet."
-msgstr "La chaîne entière n’a pas encore été vérifiée."
-
-#: src/settings/audit-chain.tsx
-msgid "The whole chain verified, through entry {entries}, on {time}."
-msgstr "Toute la chaîne est vérifiée, jusqu’à l’entrée {entries}, le {time}."
-
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
 msgstr "toute la connexion"
@@ -14267,6 +14741,10 @@ msgstr "L’exécution du workflow qui l’a demandé est terminée : cette déc
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Leur accès prend alors fin de lui-même."
+
+#: src/activity/audit-event.tsx
+msgid "Their events"
+msgstr "Ses événements"
 
 #: src/settings/erasures.tsx
 msgid "Their name, on what they did, so it stays traceable"
@@ -14494,6 +14972,10 @@ msgstr "Ce déploiement n'autorise aucun modèle."
 msgid "This device"
 msgstr "Cet appareil"
 
+#: src/frame/ui-words.tsx
+msgid "This did not load"
+msgstr "Ceci ne s'est pas chargé"
+
 #: src/brain/sources-page.tsx
 msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
 msgstr "Le texte de ce fichier est trop long pour que le Brain le conserve. Divisez-le en fichiers plus petits et importez-les."
@@ -14566,6 +15048,7 @@ msgstr "Ce souvenir a changé ou vous ne pouvez plus le partager. Regardez-le d�
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
 msgstr "Ce modèle ne peut pas donner une réponse aussi longue. Choisissez un autre modèle, ou demandez moins."
 
+#: src/frame/ui-words.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
 msgstr "Ce mois-ci"
@@ -14699,9 +15182,17 @@ msgstr "Ce qui est marqué Vous seul n'appartient qu'à vous : personne d'autre 
 msgid "Thought for {time}"
 msgstr "A réfléchi pendant {time}"
 
+#: src/activity/audit-event.tsx
+msgid "Through"
+msgstr "Via"
+
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Via Composio, qui conserve l’accès dans son propre cloud. Vos workflows peuvent l’utiliser une fois connecté, uniquement pour ce que vous autorisez."
+
+#: src/settings/audit-chain.tsx
+msgid "Through entry {through}…"
+msgstr "Jusqu'à l'entrée {through}…"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
@@ -14743,7 +15234,6 @@ msgstr "Expirées : {timedOut}"
 msgid "Timeline"
 msgstr "Chronologie"
 
-#: src/activity/audit-log.tsx
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Au"
@@ -14797,6 +15287,11 @@ msgstr "À ces équipes"
 msgid "Today"
 msgstr "Aujourd’hui"
 
+#: src/frame/ui-words.tsx
+msgctxt "a date to pick"
+msgid "Today"
+msgstr "Aujourd’hui"
+
 #: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
@@ -14837,8 +15332,16 @@ msgid "Took a reply to a run's email"
 msgstr "A reçu une réponse à l’e-mail d’une exécution"
 
 #: src/activity/audit-words.ts
+msgid "Took away an answer to the Brain's question"
+msgstr "A retiré une réponse à une question du Brain"
+
+#: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
 msgstr "A retiré l’approbation du code d’une page"
+
+#: src/activity/audit-words.ts
+msgid "Took on an agent offered to the company"
+msgstr "A repris un agent proposé à l’entreprise"
 
 #: src/activity/audit-words.ts
 msgid "Took someone off a team"
@@ -14961,9 +15464,17 @@ msgstr "Activer le son"
 msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 msgstr "Réactivez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
 
+#: src/activity/audit-words.ts
+msgid "Turned an agent on or off, or changed who may reach it"
+msgstr "A activé ou désactivé un agent, ou modifié qui peut le joindre"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."
 msgstr "Activé, car il ne fait que lire : {turned}."
+
+#: src/activity/audit-words.ts
+msgid "Turned Stephen on or off, or changed who may reach him"
+msgstr "A activé ou désactivé Stephen, ou modifié qui peut le joindre"
 
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
@@ -15099,6 +15610,10 @@ msgstr "Dissocier"
 #: src/settings/chat-accounts.tsx
 msgid "Unlink {app} account {shown}"
 msgstr "Dissocier le compte {app} {shown}"
+
+#: src/activity/audit-words.ts
+msgid "Unlinked a chat app account"
+msgstr "A dissocié un compte d’application de chat"
 
 #: src/interview/voice-bar.tsx
 msgctxt "turn your microphone back on"
@@ -15315,17 +15830,13 @@ msgstr "Numéro de TVA"
 msgid "Vault root"
 msgstr "Racine du coffre"
 
-#: src/activity/audit-log.tsx
+#: src/activity/audit-event.tsx
 msgid "Verified"
 msgstr "Vérifié"
 
 #: src/settings/audit-chain.tsx
-msgid "Verify now"
-msgstr "Vérifier maintenant"
-
-#: src/settings/audit-chain.tsx
-msgid "Verify the chain"
-msgstr "Vérifier la chaîne"
+msgid "Verified through {entries}"
+msgstr "Vérifié jusqu'à {entries}"
 
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
@@ -15393,6 +15904,15 @@ msgstr "Vienne"
 #: src/drafts/draft-history.tsx
 msgid "View changes"
 msgstr "Voir les modifications"
+
+#: src/activity/audit-words.ts
+msgid "Viewed something as Grasp staff"
+msgstr "A consulté quelque chose en tant que personnel de Grasp"
+
+#: src/activity/audit-event.tsx
+#: src/frame/ui-words.tsx
+msgid "Views"
+msgstr "Vues"
 
 #: src/brain/brain.ts
 msgid "Vision"
@@ -15622,6 +16142,10 @@ msgstr "Semaine {week} sur {weeks}"
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Semaine {week} sur {weeks} · {stage}"
 
+#: src/activity/audit-words.ts
+msgid "Went back to an earlier version"
+msgstr "Est revenu à une version antérieure"
+
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
 msgstr "est passé à des personnes"
@@ -15758,10 +16282,6 @@ msgstr "Ce qu’il peut faire dans {appName}, avec la connexion de chaque person
 msgid "What I know about your organization: {percent}%. This is not how far you are in these steps. Your team can start at {threshold}%."
 msgstr "Ce que je sais de votre organisation : {percent} %. Ce n’est pas votre avancement dans ces étapes. Votre équipe peut commencer à {threshold} %."
 
-#: src/projects/project-dialog.tsx
-msgid "What is it for?"
-msgstr "À quoi sert-il ?"
-
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."
 msgstr "Ce qui est surligné, c’est ce que j’ai noté. Vous le vérifiez à la fin."
@@ -15810,6 +16330,11 @@ msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. 
 #: src/agents/agent-form.tsx
 #: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
+msgid "What it is for"
+msgstr "À quoi il sert"
+
+#: src/projects/project-dialog.tsx
+msgctxt "a project"
 msgid "What it is for"
 msgstr "À quoi il sert"
 
@@ -16100,6 +16625,10 @@ msgstr "Ce qu’a dit votre équipe"
 msgid "What your team sees"
 msgstr "Ce que voit votre équipe"
 
+#: src/activity/audit-log.tsx
+msgid "When"
+msgstr "Quand"
+
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
 msgid "When"
@@ -16271,6 +16800,7 @@ msgstr "Quels outils les gens utilisent-ils vraiment ?"
 msgid "While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send."
 msgstr "Pendant que Stephen parle à votre équipe : où en sont les entretiens, équipe par équipe, et le lien de chacun à envoyer."
 
+#: src/activity/audit-event.tsx
 #: src/inbox/item-detail.tsx
 msgid "Who"
 msgstr "Qui"
@@ -16374,6 +16904,10 @@ msgstr "Qui le joint dans {name}"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Qui voit quelles lignes"
+
+#: src/projects/project-people.tsx
+msgid "Who to add couldn't be read. Try again in a moment."
+msgstr "Impossible de lire qui ajouter. Réessayez dans un instant."
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
@@ -16506,6 +17040,7 @@ msgstr "A calculé comment les connaissances sont utilisées"
 msgid "Worked out what could be improved"
 msgstr "A déterminé ce qui pourrait être amélioré"
 
+#: src/activity/audit-event.tsx
 #: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -16533,6 +17068,10 @@ msgstr "Workflow modifié"
 msgid "Workflow not found"
 msgstr "Workflow introuvable"
 
+#: src/activity/audit-event.tsx
+msgid "Workflow run"
+msgstr "Exécution de workflow"
+
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
 msgid "Workflow run"
@@ -16558,6 +17097,7 @@ msgstr "workflow.json"
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-view.tsx
 #: src/report/report.ts
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -16724,9 +17264,9 @@ msgstr "Oui, c’est exact"
 msgid "Yes, that’s correct."
 msgstr "Oui, c’est exact."
 
-#: src/activity/audit-log.tsx
-msgid "Yes: its hash matches, and it links to the event before it."
-msgstr "Oui : son hachage correspond et il est lié à l’événement précédent."
+#: src/activity/audit-event.tsx
+msgid "Yes: it is unchanged and links to the event before it."
+msgstr "Oui : il est inchangé et lié à l’événement précédent."
 
 #: src/connections/connection-list.tsx
 #: src/drafts/draft-history.tsx
@@ -16806,6 +17346,10 @@ msgstr "C’est vous qui décidez. Vous pouvez arrêter quand vous voulez, passe
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "Vous n’avez pas accès à cette organisation. Demandez à un admin."
+
+#: src/projects/project-chats.tsx
+msgid "You have no chats to add."
+msgstr "Vous n’avez aucun chat à ajouter."
 
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
@@ -16930,6 +17474,11 @@ msgstr "Vos modifications reviennent à leur état d’alors, pour tous ceux qui
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "L'agent de votre conversation a demandé à lancer ce workflow pour vous. Rien ne s'exécute avant que vous ne le confirmiez, avec exactement l'entrée affichée."
+
+#: src/projects/project-chats.tsx
+#: src/projects/project-view.tsx
+msgid "Your chats"
+msgstr "Vos chats"
 
 #: src/interview/before.tsx
 msgid "Your choice"
