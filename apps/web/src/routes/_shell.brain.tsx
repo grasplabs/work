@@ -1,4 +1,3 @@
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -204,8 +203,6 @@ const BrainLayout = () => {
           <NoteReveal />
         </div>
       </div>
-      {/* Damsko's toasts, for the Brain's pages, until the frame holds them for every page. */}
-      <Toaster />
     </>
   );
 };
