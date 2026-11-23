@@ -9,6 +9,34 @@
 @import "@grasp-os/ui/styles/tokens.css";
 @import "@grasp-os/ui/styles/themes.css";
 @import "@grasp-os/ui/styles/fonts.css";
+
+/*
+ * The token bridge: the kit's page colours, read from Damsko's tokens, so
+ * a page still on the kit stands on the same ground, ink and hairlines as
+ * the Damsko components beside it, in light and in dark (Damsko's follow
+ * the root's `data-mode`, which public/theme.js writes with the kit's
+ * `dark` class). Only the meanings the two themes share one to one. The
+ * kit's sidebar, its buttons' fills and its fields keep the kit's own
+ * values: Damsko pairs those differently, and they change with the frame
+ * itself. For this app alone, never App pages. It goes when the kit leaves
+ * the frontend.
+ */
+:root,
+.dark {
+  --background: var(--damsko-background);
+  --foreground: var(--damsko-foreground);
+  --card: var(--damsko-card);
+  --card-foreground: var(--damsko-foreground);
+  --popover: var(--damsko-popover);
+  --popover-foreground: var(--damsko-foreground);
+  --muted: var(--damsko-muted);
+  --muted-foreground: var(--damsko-muted-foreground);
+  --border: var(--damsko-border);
+  --destructive: var(--damsko-destructive);
+  --ring: var(--damsko-ring);
+  --status-agreed: var(--damsko-success);
+  --status-attention: var(--damsko-warning);
+}
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*
