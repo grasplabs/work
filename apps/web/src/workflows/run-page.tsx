@@ -2,6 +2,7 @@ import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { DecisionCard } from "../decision-card.tsx";
@@ -118,8 +119,7 @@ const useUpdates = (names: Names) => {
       first,
       {
         label: i18n._(runStatusLabels[run.status]),
-        description:
-          run.error === undefined ? ended : `${ended} · ${run.error.message}`,
+        description: ended,
         state: run.status === "completed" ? "done" : "failed",
       },
     ];
@@ -192,6 +192,7 @@ export const RunPage = ({
 }) => {
   const { t, i18n } = useLingui();
   const { run, failure, builder, stop } = useFollowedRun(workflow, opened);
+  const router = useRouter();
   const title = useRunTitle()(run);
   const updates = useUpdates(names);
   const crumbs: Crumb[] = [
@@ -248,7 +249,13 @@ export const RunPage = ({
             </Text>
           ) : null}
           {decision === undefined ? null : (
-            <DecisionCard decision={decision} where="run" />
+            <DecisionCard
+              decision={decision}
+              onAnswered={() => {
+                void router.invalidate();
+              }}
+              where="run"
+            />
           )}
           <section {...stylex.props(styles.section)}>
             <Heading level={2} size="ui">
@@ -289,6 +296,11 @@ export const RunPage = ({
                   {t`Version ${version} ran this. Only builders see this.`}
                 </Text>
               </div>
+              {run.error?.code === null || run.error === undefined ? null : (
+                <Text size="xs" tone="muted">
+                  <code>{run.error.code}</code>
+                </Text>
+              )}
               <Collapsible title={t`Open its steps`}>
                 <RunTraceDetail runId={run.id} workflow={workflow} />
               </Collapsible>

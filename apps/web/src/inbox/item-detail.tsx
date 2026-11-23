@@ -576,11 +576,9 @@ const HeldStartItem = ({
       deadline={t`No answer by ${date}: it closes.`}
       details={
         <>
-          {body.map((paragraph) => (
-            <Text key={paragraph} size="sm" tone="text">
-              {paragraph}
-            </Text>
-          ))}
+          <Text size="sm" tone="text">
+            {body.join(" ")}
+          </Text>
           <Text size="sm" tone="muted">
             {t`What it starts with`}
           </Text>

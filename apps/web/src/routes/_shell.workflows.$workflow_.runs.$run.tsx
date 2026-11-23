@@ -8,7 +8,7 @@ import { LoadingBar } from "../frame/page-skeletons-b.tsx";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { listRuns, readWorkflowNames } from "../workflows/reads.ts";
+import { readWorkflowNames } from "../workflows/reads.ts";
 import { RunPage } from "../workflows/run-page.tsx";
 
 // One run of an independent workflow, on its own page (workflows/run-page.tsx):
@@ -66,7 +66,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow_/runs/$run")({
   staticData: { chat: chatPresence.hidden },
   pendingComponent: LoadingBar,
   loader: async ({ context: { core }, params: { workflow, run } }) => {
-    const [resource, read, names] = await Promise.all([
+    const [resource, read, names, waiting] = await Promise.all([
       loadFromCore(
         core,
         async (session) => await session.workflowResources.get(workflow)
@@ -76,24 +76,17 @@ export const Route = createFileRoute("/_shell/workflows/$workflow_/runs/$run")({
         async (session) => await session.workflowResources.run(workflow, run)
       ),
       loadFromCore(core, readWorkflowNames),
+      // The answer it waits for, where the reader may give it.
+      loadFromCore(core, async (session) => await session.decisions.waiting()),
     ]);
-    // The answer it waits for, where the reader may give it: core names
-    // it on the Runs log's waiting runs alone (core need 79).
-    const waiting =
-      read.state === "ready" && read.data.endedAt === null
-        ? await loadFromCore(core, async (session) => {
-            const page = await listRuns(session, { status: "waiting" });
-            const id = page.runs.find((each) => each.id === run)?.decision;
-            return id === undefined
-              ? undefined
-              : await session.decisions.get(id);
-          })
-        : undefined;
     return {
       workflow: resource,
       run: read,
       names,
-      decision: waiting?.state === "ready" ? waiting.data : undefined,
+      decision:
+        waiting.state === "ready"
+          ? waiting.data.find((decision) => decision.run === run)
+          : undefined,
     };
   },
   component: WorkflowRun,

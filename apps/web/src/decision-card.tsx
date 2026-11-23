@@ -190,6 +190,9 @@ export const DecisionCard = ({
     });
     if (review !== undefined) {
       setCurrent(review.decision);
+      if (review.decision.status !== "open") {
+        onAnswered?.(outcomeOf(review.decision));
+      }
     }
     if (review?.state === "review") {
       setPending(review);
@@ -263,9 +266,7 @@ export const DecisionCard = ({
                   {t`Try again`}
                 </Button>
               }
-            >
-              {null}
-            </ApprovalAnswers>
+            />
           </>
         ) : null}
         {open && current.withheld !== "unchecked" ? (

@@ -58,7 +58,7 @@ export const ApprovalAnswers = ({
   children,
 }: {
   extra?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
 }) => (
   <div {...stylex.props(styles.answers)}>
     {extra}

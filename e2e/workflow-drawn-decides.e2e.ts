@@ -8,7 +8,7 @@ import { test } from "./csp.ts";
 import { dockedChat } from "./docked-chat.ts";
 import { inboxList, toItem } from "./inbox.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
-import { peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
@@ -200,6 +200,22 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   const item = asDecider.getByRole("complementary", { name: "Decision" });
   await expect(
     item.getByRole("heading", { name: "Approve invoice INV-42" })
+  ).toBeVisible(pageRead);
+  // Its own page is the decision's link: opened by anyone else, it only
+  // says it isn't theirs.
+  const { core, api } = apiOf(decider);
+  let asked = "";
+  try {
+    const open = await api.decisions.waiting();
+    asked =
+      open.find(({ description }) => description === "Approve invoice INV-42")
+        ?.id ?? "";
+  } finally {
+    core[Symbol.dispose]();
+  }
+  await page.goto(`/decisions/${asked}`);
+  await expect(
+    page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
   await item.getByRole("button", { name: "Add a comment" }).click();
   await item.getByLabel("Comment (optional)").fill("Matches the order");

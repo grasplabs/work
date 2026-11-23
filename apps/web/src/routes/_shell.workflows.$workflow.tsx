@@ -61,11 +61,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import type { Names } from "../workflows/activity-words.ts";
 import { workflowBlock } from "../workflows/overview.ts";
 import type { TriggerBlock } from "../workflows/overview.ts";
-import {
-  listRuns,
-  readWorkflowNames,
-  workflowVersions,
-} from "../workflows/reads.ts";
+import { readWorkflowNames, workflowVersions } from "../workflows/reads.ts";
 import { workflowSettingsSectionOf } from "../workflows/settings-sections.ts";
 import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
@@ -430,16 +426,20 @@ const useWorkshop = (
     read.versions.state === "ready"
       ? read.versions.data.filter(({ label }) => label !== null).length
       : undefined;
-  const liveLine =
-    live === null ? t`Not published yet.` : t`Version ${live} is live.`;
+  let stepsLine: string;
+  if (steps === undefined) {
+    stepsLine =
+      live === null ? t`Not published yet.` : t`Version ${live} is live.`;
+  } else if (live === null) {
+    stepsLine = t`${plural(steps, { one: "# step, drawn as a flow. Not published yet.", other: "# steps, drawn as a flow. Not published yet." })}`;
+  } else {
+    stepsLine = t`${plural(steps, { one: `# step, drawn as a flow. Version ${live} is live.`, other: `# steps, drawn as a flow. Version ${live} is live.` })}`;
+  }
   return [
     {
       id: "steps",
       title: viewNames.flow,
-      description:
-        steps === undefined
-          ? liveLine
-          : `${t`${plural(steps, { one: "# step, drawn as a flow.", other: "# steps, drawn as a flow." })}`} ${liveLine}`,
+      description: stepsLine,
       to: { view: "flow" },
     },
     {
@@ -908,6 +908,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       activity,
       inProject,
       triggers,
+      waiting,
     ] = await Promise.all([
       resourceRead,
       draftRead(),
@@ -938,19 +939,9 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         async (session) => await readItemProject(session, project)
       ),
       triggersRead(),
+      // The answers its runs wait for that the reader may give.
+      loadFromCore(core, async (session) => await session.decisions.waiting()),
     ]);
-    // The answers its runs wait for that the reader may give: core names
-    // them on the Runs log's waiting runs alone (core need 79).
-    const decisions = await loadFromCore(core, async (session) => {
-      const page = await listRuns(session, { status: "waiting" });
-      const asked = page.runs.flatMap(({ workflowId, decision }) =>
-        workflowId === workflow && decision !== undefined ? [decision] : []
-      );
-      const read = await Promise.all(
-        asked.map(async (id) => await session.decisions.get(id))
-      );
-      return read.filter(({ status }) => status === "open");
-    });
     return {
       resource,
       draft,
@@ -960,7 +951,12 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       runs,
       askable,
       activity,
-      decisions: decisions.state === "ready" ? decisions.data : [],
+      decisions:
+        waiting.state === "ready"
+          ? waiting.data.filter(
+              ({ workflowResource }) => workflowResource.id === workflow
+            )
+          : [],
       triggers,
       blocked:
         triggers?.state === "ready" ? workflowBlock(triggers.data) : null,

@@ -1426,8 +1426,12 @@ msgid "{step} of {count}"
 msgstr "{step} sur {count}"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "{steps, plural, one {# step, drawn as a flow.} other {# steps, drawn as a flow.}}"
-msgstr "{steps, plural, one {# étape, dessinée en flux.} other {# étapes, dessinées en flux.}}"
+msgid "{steps, plural, one {# step, drawn as a flow. Not published yet.} other {# steps, drawn as a flow. Not published yet.}}"
+msgstr "{steps, plural, one {# étape, dessinée en flux. Pas encore publié.} other {# étapes, dessinées en flux. Pas encore publié.}}"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "{steps, plural, one {# step, drawn as a flow. Version {live} is live.} other {# steps, drawn as a flow. Version {live} is live.}}"
+msgstr "{steps, plural, one {# étape, dessinée en flux. La version {live} est en ligne.} other {# étapes, dessinées en flux. La version {live} est en ligne.}}"
 
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
