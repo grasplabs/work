@@ -138,6 +138,7 @@ export const alike = (a: Result, b: Result): boolean =>
   a.stephen.interviewer === b.stephen.interviewer &&
   a.via.quick === b.via.quick &&
   a.via.careful === b.via.careful &&
+  (a.via.through ?? "api") === (b.via.through ?? "api") &&
   (a.people ?? "") === (b.people ?? "") &&
   (a.seed ?? 0) === (b.seed ?? 0);
 

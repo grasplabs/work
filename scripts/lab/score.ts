@@ -26,6 +26,7 @@ import type { Judged, RealCard, ScoreCard } from "./card.ts";
 import type { Transcript } from "./cases.ts";
 import {
   contradictionsIn,
+  sidesOf,
   surfacedLine,
   surfacedOf,
 } from "./contradictions.ts";
@@ -173,6 +174,14 @@ const table = (rows: string[][]): string => {
 const share = (count: number, of: number): number =>
   of === 0 ? 0 : count / of;
 
+/** An interview's own sides of the key's contradictions, written down; none when it had no side in one (sidesOf). */
+const sideScore = (
+  side: { count: number; of: number } | undefined
+): { contradictions?: number } =>
+  side === undefined || side.of === 0
+    ? {}
+    : { contradictions: share(side.count, side.of) };
+
 /** One interview, scored, with what was said and written: what the check of the judge asks people about (check.ts). */
 interface Scored {
   person: PracticePerson;
@@ -267,13 +276,12 @@ export const score = async (
   const hard = reals.flatMap((each) => each.hard);
   const untrue = reals.flatMap((each) => each.untrue);
   // Where people of the key disagree: both versions in his notes, across the interviews.
-  const surfaced = surfacedOf(
-    contradictionsIn(key),
-    scored.map(({ person, judged: found }) => ({
-      employee: person.employee,
-      judged: found,
-    }))
-  );
+  const judgedOf = scored.map(({ person, judged: found }) => ({
+    employee: person.employee,
+    judged: found,
+  }));
+  const surfaced = surfacedOf(contradictionsIn(key), judgedOf);
+  const sides = sidesOf(contradictionsIn(key), judgedOf);
   const together = [
     `All together: heard ${total.heard.count} of ${total.heard.of}, written ${total.written.count} of ${total.written.of}, supported ${total.supported.count} of ${total.supported.of} (${total.supported.repeats} repeats, ${total.supported.notSaid.length} not said).`,
     ...(reals.length > 0
@@ -309,6 +317,7 @@ export const score = async (
         notSaid: share(card.supported.notSaid.length, card.supported.of),
         stephenShare: card.burden.stephenShare,
         answers: card.burden.answers,
+        ...sideScore(sides.get(person.employee)),
         ...(real === null ? {} : realScores(real)),
       },
     })),

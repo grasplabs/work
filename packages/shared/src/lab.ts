@@ -94,6 +94,14 @@ export type LabRequest = z.output<typeof labRequestSchema>;
 export const labViaSchema = z.strictObject({
   quick: z.string().nullable(),
   careful: z.string().nullable(),
+  /**
+   * Where the models answered: on the API, as people's interviews do, or
+   * on a Claude subscription through the lab's bridge
+   * (scripts/lab/bridge.ts), which adds a little text of Claude Code's
+   * own. Set by the lab once it checked where its calls arrive; core
+   * can't tell. Missing from runs kept before, which were on the API.
+   */
+  through: z.enum(["api", "subscription"]).optional(),
 });
 export type LabVia = z.output<typeof labViaSchema>;
 

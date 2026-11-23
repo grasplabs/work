@@ -49,7 +49,7 @@ const runSchema = z.object({
   key: z.string().optional(),
   practice: z.string().optional(),
   stephen: stephenVersionSchema,
-  /** How the models were reached: always the local core's gateway, never anyone's subscription. */
+  /** How the models were reached: always the local core's gateway, and from there the API or the lab's bridge to a subscription (`through`). */
   via: labViaSchema,
   /** Whole interviews only: "real" when the people had one temper each (people v1), "v2" when they had a mix and a state that drifts, with the seed that says who had which; "ideal" when they told all they knew. */
   people: z.enum(["real", "v2", "ideal", "person"]).optional(),
