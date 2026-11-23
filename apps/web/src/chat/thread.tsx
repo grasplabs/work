@@ -31,6 +31,7 @@ import {
   MessageResponse,
   MessageSkeleton,
 } from "@grasp-os/ui/components/message";
+import type { MessageStatus } from "@grasp-os/ui/components/message";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -923,17 +924,22 @@ const AnswerBody = ({
   context,
   steps,
   ending,
+  status,
 }: {
   turn: AnswerTurn;
   context: AnswerContext;
   steps: AnswerStep[];
   ending: Ending;
+  status: MessageStatus;
 }) => {
   const { t } = useLingui();
   const saidShort = useSaidShort();
   const summary = useStepsSummary();
   const { replies, partial, live } = turn;
   const stepped: Stepped[] = partial === null ? replies : [...replies, partial];
+  const text = [...replies.map((reply) => reply.text), partial?.text ?? ""]
+    .filter((words) => words.trim() !== "")
+    .join("\n\n");
   const firstId = replies[0]?.id;
   const seconds =
     firstId === undefined ? undefined : context.worked.get(firstId);
@@ -979,15 +985,11 @@ const AnswerBody = ({
       {context.again === undefined ? null : (
         <SeeInBrain chatId={context.chatId} thinking={context.again} />
       )}
-      {replies.map((reply) =>
-        reply.text.trim() === "" ? null : (
-          <MessageResponse key={reply.id} streaming={false}>
-            {reply.text}
-          </MessageResponse>
-        )
-      )}
-      {partial === null || partial.text.trim() === "" ? null : (
-        <MessageResponse streaming>{partial.text}</MessageResponse>
+      {/* All its replies' words as one response, as Damsko draws a
+        Message: so a stopped answer says Stopped once under its words,
+        and also when it was stopped before any. */}
+      {text === "" && status !== "stopped" ? null : (
+        <MessageResponse streaming={partial !== null}>{text}</MessageResponse>
       )}
       <AnswerEnding ending={ending} retry={context.onRetry} />
       {replies.map((reply) => (
@@ -1085,6 +1087,7 @@ const AnswerRow = ({
           <AnswerBody
             context={context}
             ending={ending}
+            status={status}
             steps={steps}
             turn={turn}
           />

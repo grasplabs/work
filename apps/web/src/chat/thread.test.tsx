@@ -694,6 +694,68 @@ describe(ChatThread, () => {
     });
   });
 
+  describe("an answer stopped part way says so once, under its words", () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    /** A reply of the answer, ended as `end`. */
+    const reply = (
+      id: number,
+      text: string,
+      end: "done" | "cancelled"
+    ): ChatMessage => ({
+      id,
+      role: "assistant",
+      text,
+      code: [],
+      tools: [],
+      end,
+      at,
+    });
+    /** What the stopped answer shows: its words, and each Stopped under them. */
+    const shown = () => ({
+      status: answer()?.dataset.status,
+      notes: [
+        ...(answer()?.querySelectorAll('[data-slot="message-stopped"]') ?? []),
+      ].map((note) => note.textContent),
+      words: [
+        ...(answer()?.querySelectorAll('[data-slot="message-response"]') ?? []),
+      ].map((response) => response.textContent),
+    });
+
+    it("with two written parts", async () => {
+      await thread([
+        asked,
+        reply(2, "Let me look.", "done"),
+        reply(3, "It is four, as", "cancelled"),
+      ]);
+
+      expect(shown()).toStrictEqual({
+        status: "stopped",
+        notes: ["Stopped"],
+        words: ["Let me look.It is four, as"],
+      });
+    });
+
+    it("with one", async () => {
+      await thread([asked, reply(2, "It is four, as", "cancelled")]);
+
+      expect(shown()).toStrictEqual({
+        status: "stopped",
+        notes: ["Stopped"],
+        words: ["It is four, as"],
+      });
+    });
+
+    it("stopped before any words", async () => {
+      await thread([asked, reply(2, "", "cancelled")]);
+
+      expect(shown()).toStrictEqual({
+        status: "stopped",
+        notes: ["Stopped"],
+        words: [""],
+      });
+    });
+  });
+
   it("carries an answer's thinking as a picture that opens the brain, and the way there where it can't be drawn", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const thought: ChatMessage[] = [
