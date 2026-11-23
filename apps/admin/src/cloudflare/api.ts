@@ -7,6 +7,7 @@
  * `Authorization` header: never into a log, an error or a returned value
  * (threat model R17, CO3).
  */
+import "@tanstack/react-start/server-only";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { z } from "zod";
 

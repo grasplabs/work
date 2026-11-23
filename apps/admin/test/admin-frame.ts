@@ -1,10 +1,9 @@
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { env } from "cloudflare:workers";
 
 import { orgSections } from "../src/admin/sections.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { fakeCloudflareApi, emptyAdminSnapshot } from "./cloudflare-api.ts";
+import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 
 /**
@@ -25,9 +24,6 @@ export const db = adminDatabase(env.DB);
 export const tags = /<[^>]*>/gu;
 export const spaces = /\s+/gu;
 
-/** The moment `ago` days before now. */
-export const daysAgo = (ago: number) =>
-  new Date(Date.now() - ago * 86_400_000).toISOString();
 export const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, its core on the fake. */
@@ -61,96 +57,6 @@ export const liveClient = async () => {
     signIn: null,
   });
   return { clientId, name: `Acme ${clientId}`, core };
-};
-
-/**
- * A company whose first conversation Stephen read and of which 85% is
- * known, past the 80% it opens at, with nothing signed yet: as the model
- * has it, at the agreements, ready for Grasp's go, and with four things
- * that need Grasp (the go and both agreements; its contract core doesn't
- * hold, so nothing is known of it).
- */
-export const readySnapshot = (name: string): AdminSnapshot => {
-  const empty = emptyAdminSnapshot(name);
-  return {
-    ...empty,
-    kickoff: { at: empty.now, known: 0.5 },
-    gate: { ...empty.gate, known: 85, ready: true },
-  };
-};
-
-/**
- * A company told `daysIn` days ago, on a plan of `days` days, with one
- * team: its lead Lisa and Tom, both sent their link; Lisa has talked
- * when `leadTalked`.
- */
-export const toldSnapshot = (
-  name: string,
-  {
-    days,
-    daysIn,
-    leadTalked,
-  }: { days: number; daysIn: number; leadTalked: boolean }
-): AdminSnapshot => {
-  const empty = emptyAdminSnapshot(name);
-  const at = (back: number, hour: number) =>
-    new Date(
-      Date.parse(empty.now) - back * 86_400_000 + hour * 3_600_000
-    ).toISOString();
-  const told = at(daysIn, 0);
-  return {
-    ...empty,
-    roster: {
-      teams: [
-        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
-      ],
-      people: [
-        ["lisa", "Lisa"],
-        ["tom", "Tom"],
-      ].map(([id = "", person = ""]) => ({
-        id,
-        name: person,
-        email: "",
-        team: "sales",
-        title: "",
-        away: false,
-      })),
-    },
-    plan: { start: told.slice(0, 10), days, at: told },
-    agreements: { processing: true, assessment: true, council: "none" },
-    agreed: true,
-    told: true,
-    links: ["lisa", "tom"].map((person) => ({
-      person,
-      sentAt: told,
-      openedAt: null,
-      remindedAt: null,
-      deletedAt: null,
-      failedMail: null,
-      state: person === "lisa" && leadTalked ? "completed" : "waiting",
-    })),
-    interviews: leadTalked
-      ? [
-          {
-            person: "lisa",
-            kind: "lead",
-            startedAt: at(daysIn, 1),
-            completedAt: at(daysIn, 2),
-            updatedAt: at(daysIn, 2),
-            agreed: true,
-            phase: "readback",
-            stoppedAt: null,
-            minutes: 40,
-            facts: 4,
-            out: 0,
-            confirmed: 4,
-            rating: 5,
-            typed: false,
-            interviewer: "stephen",
-          },
-        ]
-      : [],
-  };
 };
 
 /** The overview's row for client `clientId`, in its table of organizations. */

@@ -4,8 +4,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   adminUnreachable,
   clientSignInSchema,
-  derivedCoreConfig,
   signInProblem,
+} from "../src/clients/sign-in-schema.ts";
+import {
+  derivedCoreConfig,
   signInSettingProblem,
 } from "../src/deploy/core-config.ts";
 

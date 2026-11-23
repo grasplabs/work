@@ -23,6 +23,7 @@
  * Runs on the admin's cron (src/server.ts), a few releases a run, only
  * once the import has read every release published (`caughtUp`).
  */
+import "@tanstack/react-start/server-only";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import { and, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 

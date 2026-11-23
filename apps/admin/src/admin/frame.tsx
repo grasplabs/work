@@ -30,6 +30,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSkeleton,
   useSidebar,
 } from "@grasp-os/app-kit/components/sidebar";
 import {
@@ -54,6 +55,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
+import { PageLoading } from "./failure.tsx";
 import { askedApps } from "./integrations-asked.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { useSettled } from "./settled.tsx";
@@ -374,6 +376,49 @@ export const AdminFrame = ({
       <AppShellMain>
         <AppShellContent>
           <Outlet />
+        </AppShellContent>
+      </AppShellMain>
+    </AppShell>
+  </TooltipProvider>
+);
+
+/** How many organizations the sidebar's skeleton stands in for. */
+const loadingEntries = 6;
+
+/**
+ * The frame while the admin's own records come, before the first page
+ * shows: its sidebar and the page's usual layout as skeletons. The Worker
+ * sends it as the document's body, so the admin never opens on a blank
+ * page while its script loads.
+ */
+export const FrameLoading = () => (
+  <TooltipProvider>
+    <AppShell>
+      <Sidebar collapsible="icon" label="Admin" variant="inset">
+        <SidebarHeader>
+          <BrandHeader
+            subtitle="Admin"
+            title="Grasp"
+            toggleLabel="Show or hide the sidebar"
+          />
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {Array.from({ length: loadingEntries }, (_, entry) => (
+                  <SidebarMenuItem key={entry}>
+                    <SidebarMenuSkeleton />
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+      </Sidebar>
+      <AppShellMain>
+        <AppShellContent>
+          <PageLoading />
         </AppShellContent>
       </AppShellMain>
     </AppShell>

@@ -1,3 +1,4 @@
+import "@tanstack/react-start/server-only";
 import type { RouterTarget } from "@grasp-os/shared/router";
 
 // How the admin reaches a Grasp Cloud client's core: its script in the

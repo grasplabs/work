@@ -10,6 +10,7 @@
  * Parameters and step results are identifiers only: the run's journal
  * keeps them (threat model R17).
  */
+import "@tanstack/react-start/server-only";
 import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 

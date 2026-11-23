@@ -1,3 +1,4 @@
+import "@tanstack/react-start/server-only";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import { ClientDomainUnsetError } from "./client-domain.ts";
 import { MissingStoreSecretError } from "./context.ts";

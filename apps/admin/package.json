@@ -46,6 +46,7 @@
     "babel-plugin-react-compiler": "catalog:",
     "cf": "catalog:cf",
     "drizzle-kit": "catalog:",
+    "happy-dom": "catalog:",
     "seroval": "catalog:",
     "tailwindcss": "catalog:",
     "vite-plus": "catalog:",

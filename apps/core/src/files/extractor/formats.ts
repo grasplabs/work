@@ -1,14 +1,17 @@
+import { parse as parseCsv } from "csv-parse/browser/esm/sync";
 import { unzipSync } from "fflate";
 import { extractText } from "unpdf";
 
+import { dataMarkdown, decoded, htmlMarkdown, textMarkdown } from "./text.ts";
 import { TooLargeError } from "./too-large.ts";
 import { vttExtraction } from "./vtt.ts";
 import type { VttExtraction } from "./vtt.ts";
 
 // Each file type's text as Markdown, with the headings that make its
 // sections: a PDF's pages, a Word document's own headings, an Excel
-// workbook's sheets, a WebVTT file's turns (vtt.ts, with its
-// transcript). This runs only inside the extractor's sandbox (worker.ts),
+// workbook's sheets, a PowerPoint deck's slides, a WebVTT file's turns
+// (vtt.ts, with its transcript), a web page's own headings, and text
+// files as they are (text.ts). This runs only inside the extractor's sandbox (worker.ts),
 // never in core: a file crafted to exhaust a parser exhausts
 // only that isolate.
 //
@@ -333,12 +336,13 @@ const sheetRows = (sheet: string, shared: string[]): string[][] => {
 };
 
 /**
- * Where a workbook's relationship points: a path in the archive, from
- * the root for an absolute target (`/xl/worksheets/sheet1.xml`), else from
- * `xl/`, with `.` and `..` resolved (`./worksheets/…`, `../xl/…`).
+ * Where a relationship of an Office file's main part points: a path in
+ * the archive, from the root for an absolute target
+ * (`/xl/worksheets/sheet1.xml`), else from the main part's `folder`
+ * (`xl`, `ppt`), with `.` and `..` resolved (`./worksheets/…`, `../xl/…`).
  */
-const partPath = (target: string): string => {
-  const segments = target.startsWith("/") ? [] : ["xl"];
+const partPath = (target: string, folder: string): string => {
+  const segments = target.startsWith("/") ? [] : [folder];
   for (const segment of target.split("/")) {
     if (segment === "..") {
       segments.pop();
@@ -387,13 +391,101 @@ const xlsxMarkdown = (bytes: Uint8Array): string => {
     const target = targets.get(attribute(tag, "r:id") ?? "");
     return name === undefined || target === undefined
       ? []
-      : [{ name, path: partPath(target) }];
+      : [{ name, path: partPath(target, "xl") }];
   });
   return sheets
     .map(
       ({ name, path }) =>
         `## ${name}\n\n${markdownTable(sheetRows(parts.get(path) ?? "", shared))}`
     )
+    .join("\n\n");
+};
+
+/**
+ * A CSV or tab-separated file as one table, its first row as the header,
+ * read as RFC 4180 has it (csv-parse), rows of any length. One that isn't
+ * such a file after all is kept as the text it is.
+ */
+const tableMarkdown =
+  (delimiter: string) =>
+  (bytes: Uint8Array): string => {
+    let rows: string[][];
+    try {
+      rows = parseCsv(decoded(bytes), {
+        bom: true,
+        delimiter,
+        relax_column_count: true,
+        skip_empty_lines: true,
+      });
+    } catch {
+      return dataMarkdown(bytes);
+    }
+    return rows.length === 0 ? "" : markdownTable(rows);
+  };
+
+const slideText =
+  /<a:t(?:\s[^<>]*)?>(?<text>[^<]*)<\/a:t>|<a:br(?:\s[^<>]*)?\/>/gu;
+
+/**
+ * The parts of a deck's slides, in the order it shows them: its slide
+ * list (`p:sldIdLst` in `ppt/presentation.xml`), each through its
+ * relationship. Not by their file names: a slide moved in PowerPoint
+ * keeps its file's name.
+ */
+const slidesInOrder = (parts: Map<string, string>): string[] => {
+  const presentation = parts.get("ppt/presentation.xml") ?? "";
+  const relationships = parts.get("ppt/_rels/presentation.xml.rels") ?? "";
+  const targets = new Map(
+    tags(
+      relationships,
+      `${prefixOf(relationships, "Relationships")}Relationship`
+    ).map((tag): [string, string] => [
+      attribute(tag, "Id") ?? "",
+      attribute(tag, "Target") ?? "",
+    ])
+  );
+  return tags(
+    presentation,
+    `${prefixOf(presentation, "presentation")}sldId`
+  ).flatMap((tag) => {
+    const target = targets.get(attribute(tag, "r:id") ?? "");
+    const slide =
+      target === undefined ? undefined : parts.get(partPath(target, "ppt"));
+    return slide === undefined ? [] : [slide];
+  });
+};
+
+/**
+ * A PowerPoint deck, a section per slide in the order the deck shows
+ * them: each paragraph of each text box on its own, as written. Its notes
+ * and pictures aren't read.
+ */
+const pptxMarkdown = (bytes: Uint8Array): string => {
+  const slides = slidesInOrder(
+    unzipParts(
+      bytes,
+      (name) =>
+        name === "ppt/presentation.xml" ||
+        name === "ppt/_rels/presentation.xml.rels" ||
+        name.startsWith("ppt/slides/")
+    )
+  );
+  if (slides.length === 0) {
+    throw new Error("The file has no slides in it");
+  }
+  return slides
+    .map((slide, index) => {
+      const paragraphs = elements(slide, "<a:p", "</a:p>")
+        .map((paragraph) =>
+          Array.from(paragraph.matchAll(slideText), ({ groups }) =>
+            groups?.text === undefined ? "\n" : xmlText(groups.text)
+          )
+            .join("")
+            .trim()
+        )
+        .filter((paragraph) => paragraph !== "");
+      return [`## Slide ${index + 1}`, ...paragraphs].join("\n\n");
+    })
     .join("\n\n");
 };
 
@@ -409,5 +501,15 @@ export const formats: Readonly<
     docxMarkdown,
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     xlsxMarkdown,
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+    pptxMarkdown,
   "text/vtt": vttExtraction,
+  "text/html": htmlMarkdown,
+  "text/plain": textMarkdown,
+  "text/markdown": textMarkdown,
+  "text/csv": tableMarkdown(","),
+  "text/tab-separated-values": tableMarkdown("\t"),
+  "application/json": dataMarkdown,
+  "application/xml": dataMarkdown,
+  "application/yaml": dataMarkdown,
 };

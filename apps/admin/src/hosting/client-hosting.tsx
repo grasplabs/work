@@ -21,7 +21,7 @@ import {
   retryProvisioningFn,
 } from "./functions.ts";
 import type { OffboardResult } from "./functions.ts";
-import { hostingWords } from "./organization.ts";
+import { hostingWords } from "./hosting-words.ts";
 import type { ClientHostingView } from "./placement.ts";
 import {
   discardRefusals,

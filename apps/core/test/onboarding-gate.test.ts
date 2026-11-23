@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { signInConfig } from "../src/auth/config.ts";
 import { memberFromDirectory } from "../src/auth/directory-members.ts";
-import { gateView, memberMayBeIn } from "../src/onboarding/gate.ts";
+import { gateView, mayComeIn, memberMayBeIn } from "../src/onboarding/gate.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -229,6 +229,43 @@ describe("while the company is onboarding", () => {
       admin: await signedInStill(admin),
       staff: await signedInStill(staffSession),
     }).toStrictEqual({ member: false, admin: true, staff: true });
+  });
+});
+
+describe("a deployment staff added with an onboarding", () => {
+  afterEach(reopen);
+
+  it("starts closed without anyone closing it, until the gate is opened, and stays as it was left from then on", async () => {
+    const config = signInConfig(env);
+    if (config === undefined) {
+      throw new Error("The tests' deployment has sign-in");
+    }
+    const member = "someone@acme.test";
+    // A deployment whose gate was never moved.
+    await env.DB.prepare("DELETE FROM onboarding_gate").run();
+    const made = new Date(Date.now() - 86_400_000).toISOString();
+    const startsClosed = { ...env, ONBOARDING_CLOSED_FROM: made };
+
+    const untouched = await mayComeIn(env, config, member);
+    await env.DB.prepare("DELETE FROM onboarding_gate").run();
+    const comesIn = {
+      member: await mayComeIn(startsClosed, config, member),
+      admin: await mayComeIn(startsClosed, config, String(theAdmin.email)),
+    };
+    const { closedSince } = await gateNow();
+    const atStart = { ...comesIn, since: closedSince };
+    await adminCommands().open();
+
+    expect({
+      untouched,
+      atStart,
+      // Opened, it is open, whatever the deployment started as.
+      opened: await mayComeIn(startsClosed, config, member),
+    }).toStrictEqual({
+      untouched: true,
+      atStart: { member: false, admin: true, since: made },
+      opened: true,
+    });
   });
 });
 

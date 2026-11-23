@@ -1,4 +1,5 @@
 /** Reading imported releases from the admin's database. */
+import "@tanstack/react-start/server-only";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { desc, eq, isNull, sql } from "drizzle-orm";

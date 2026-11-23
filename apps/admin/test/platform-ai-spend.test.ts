@@ -1,17 +1,21 @@
 import type { PlatformSpendRow } from "@grasp-os/shared/ai-status-report";
 import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
+import { createElement } from "react";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { OrganizationPlatformSpend } from "../src/admin/platform-spend.tsx";
+import { fetchClientAiStatus } from "../src/clients/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { fetchPlatformSpend } from "../src/platform-ai-functions.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { aiStatusOf, emptyAdminSnapshot, monthBack } from "./cloudflare-api.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn, rendered } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
+import { platformPage } from "./platform-page.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { aiStatusOf, emptyAdminSnapshot, monthBack } from "./snapshots.ts";
 
 // What Grasp's own AI features cost on its keys, read only: on an
 // organization's AI use, this month and last by feature and by model, as
@@ -84,6 +88,24 @@ const monthWords = (period: string): string =>
     timeZone: "UTC",
   });
 
+/**
+ * What an organization's AI use says of Grasp's own features, as staff's
+ * browser shows it: its core's AI status, read through the Worker's entry
+ * as the page reads it, rendered (src/admin/platform-spend.tsx).
+ */
+const spendOf = async (clientId: string): Promise<string> => {
+  const status = await callServerFn(
+    fetchClientAiStatus,
+    { clientId },
+    { email: "staff@grasp.test" }
+  ).catch(() => null);
+  return await rendered(
+    createElement(OrganizationPlatformSpend, {
+      status: Promise.resolve(status),
+    })
+  );
+};
+
 describe("what Grasp's own AI features cost", () => {
   useStoreSecrets({ deployer: token });
   // Each test's organizations are its own: an earlier test's are offboarded.
@@ -104,14 +126,13 @@ describe("what Grasp's own AI features cost", () => {
       lastMonth: [speech(500_000)],
     });
 
-    const { status, html } = await page(`/organizations/${clientId}/ai-use`);
+    const html = await spendOf(clientId);
     const [thisMonth, lastMonth] = [
       monthWords(monthBack(0)),
       monthWords(monthBack(1)),
     ];
 
     expect({
-      status,
       byFeature: tableText(html, "By feature"),
       byModel: tableText(html, "By model"),
       dollars: html.includes("US dollars at list prices"),
@@ -120,7 +141,6 @@ describe("what Grasp's own AI features cost", () => {
         html.slice(html.indexOf("Grasp’s own AI features")).includes(tag)
       ),
     }).toStrictEqual({
-      status: 200,
       byFeature: `By feature ${thisMonth} ${lastMonth} Transcription $2.00 $0.00 Document conversion $1.25 $0.00 Speech $0.30 $0.50`,
       byModel: `By model ${thisMonth} ${lastMonth} OpenAI gpt-4o-transcribe $2.00 $0.00 OpenAI gpt-5.4-mini $1.25 $0.00 ElevenLabs eleven_v4 $0.30 $0.50`,
       dollars: true,
@@ -132,12 +152,11 @@ describe("what Grasp's own AI features cost", () => {
     const before = await liveClient("Oudegracht", "unreported");
     await liveClient("Acme", { thisMonth: [conversion(1_250_000)] });
 
-    const own = await page(`/organizations/${before}/ai-use`);
+    const own = { html: await spendOf(before) };
     const spend = await callServerFn(fetchPlatformSpend);
-    const platform = await page("/platform");
+    const platform = { html: await platformPage() };
 
     expect({
-      status: own.status,
       saysUnreported: own.html.includes("Not reported by this release"),
       sum: spend.thisMonth.micros,
       unread: spend.unread,
@@ -146,7 +165,6 @@ describe("what Grasp's own AI features cost", () => {
         "Not reported by their release, so not in these sums: Oudegracht."
       ),
     }).toStrictEqual({
-      status: 200,
       saysUnreported: true,
       sum: 1_250_000,
       unread: [],
@@ -173,7 +191,7 @@ describe("what Grasp's own AI features cost", () => {
     await liveClient("Dunmore", {});
 
     const spend = await callServerFn(fetchPlatformSpend);
-    const { html } = await page("/platform");
+    const html = await platformPage();
     const [thisMonth, lastMonth] = [
       monthWords(thisPeriod),
       monthWords(lastPeriod),

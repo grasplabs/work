@@ -47,8 +47,8 @@ import {
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
-import { page } from "./pages.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { setupPage } from "./setup-page.ts";
 
 // Here: releasing a live client, rolling it back, and offboarding it; the
 // rest in the other client-provision-*.test.ts files.
@@ -111,7 +111,7 @@ const stoppedRun = async (clientId: string, physicalName: string) => {
   }
   const operation = await operationOf(clientId);
   // Its Hosting, under Settings, shows the operation and why it stopped.
-  const { html } = await page(`/organizations/${clientId}/setup?tab=settings`);
+  const html = (await setupPage(clientId, "settings")) ?? "";
   return {
     finished: operation?.step,
     code: error.code,

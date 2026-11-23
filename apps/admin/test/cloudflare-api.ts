@@ -8,22 +8,15 @@ import {
   adminKickoffPurpose,
   adminKickoffRequestSchema,
 } from "@grasp-os/shared/admin-kickoff";
-import type { AdminKickoffView } from "@grasp-os/shared/admin-kickoff";
 import {
   adminSnapshotPath,
   adminSnapshotPurpose,
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   aiStatusReportPath,
   aiStatusReportPurpose,
   aiStatusReportRequestSchema,
-} from "@grasp-os/shared/ai-status-report";
-import type {
-  AiStatusReport,
-  PlatformSpendRow,
 } from "@grasp-os/shared/ai-status-report";
 import {
   brainActionPath,
@@ -102,6 +95,7 @@ import {
   forgetDatabases,
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
+import { aiStatusOf, emptyAdminSnapshot, emptyKickoff } from "./snapshots.ts";
 
 /** A client's core where it runs: the account its scripts are in, and its own state. */
 interface CoreHost {
@@ -274,6 +268,13 @@ const answerProbe = async (
         .filter(({ type }) => probedKinds.has(type))
         .map(({ answers }) => [answers, !down.has(answers)])
     ),
+    ...(probe.beforeStartingClosed === true
+      ? {}
+      : {
+          startsClosed: bindings.some(
+            ({ name }) => name === "ONBOARDING_CLOSED_FROM"
+          ),
+        }),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);
 };
@@ -363,38 +364,6 @@ const answerSummary = async (
   }
   return Response.json(core.onboarding ?? noOnboarding);
 };
-
-/** The UTC month `monthsBack` before this one, such as `2026-09`. */
-export const monthBack = (monthsBack: number): string => {
-  const now = new Date();
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1)
-  )
-    .toISOString()
-    .slice(0, 7);
-};
-
-/**
- * A core's AI status report: `providers`, and what Grasp's own features
- * cost on its keys this month and last (none unless given), or no spend
- * at all (`unreported`), as a core on a release before it was reported
- * answers.
- */
-export const aiStatusOf = (
-  providers: AiStatusReport["providers"] = [],
-  spend:
-    | { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
-    | "unreported" = {}
-): AiStatusReport =>
-  spend === "unreported"
-    ? { providers }
-    : {
-        providers,
-        platformSpend: {
-          thisMonth: { period: monthBack(0), rows: spend.thisMonth ?? [] },
-          lastMonth: { period: monthBack(1), rows: spend.lastMonth ?? [] },
-        },
-      };
 
 /**
  * What a client's core answers the admin's AI status request with, as
@@ -527,49 +496,6 @@ const answerBrainErasure = async (
 /** Two hex characters at a time. */
 const hexPair = /../gu;
 
-/** A company with nothing begun: what a core answers that has no onboarding. */
-export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({
-  now: new Date().toISOString(),
-  company: {
-    name,
-    timeZone: "Europe/Amsterdam",
-    signInDomains: [],
-    signIn: [],
-    admins: [],
-  },
-  contacts: null,
-  roster: null,
-  plan: null,
-  agreements: null,
-  agreed: false,
-  paused: false,
-  told: false,
-  mapped: [],
-  links: [],
-  interviews: [],
-  works: { works: [], rules: STARTING_ORG_RULES, counted: [] },
-  setup: {
-    setup: { languages: [], limits: [], terms: [] },
-    changed: false,
-    suggested: { languages: [], limits: [], terms: [] },
-  },
-  kickoff: null,
-  gate: {
-    open: false,
-    closedSince: null,
-    threshold: 80,
-    known: 0,
-    ready: false,
-    over: false,
-    openedAt: null,
-  },
-  contract: null,
-  members: [],
-  integrations: null,
-  asked: [],
-  usage: [],
-});
-
 /**
  * What a client's core answers the admin's snapshot request with,
  * as core does (core's src/admin-snapshot.ts): the account's snapshot
@@ -626,14 +552,6 @@ const answerAdmin = async (
     flow,
   });
 };
-
-/** A kickoff with nothing brought in yet, as core answers it. */
-export const emptyKickoff = (): AdminKickoffView => ({
-  transcript: null,
-  read: false,
-  fields: [],
-  teams: 0,
-});
 
 /**
  * What a client's core answers the admin's kickoff request with, as core
