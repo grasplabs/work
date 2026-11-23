@@ -288,7 +288,11 @@ test("a builder sees every declared branch of the checked definition, a test run
   await expect(steps.getByText("What it returned")).toBeVisible({
     timeout: 30_000,
   });
-  await expect(steps.getByText("Step by step")).toBeVisible(pageRead);
+  // Its steps' trace, folded under one line that opens it (and works,
+  // drawn twice for its shimmer, while the run goes on).
+  await expect(
+    steps.getByRole("button", { name: /^Step by step/u })
+  ).toBeVisible(pageRead);
   const ran = steps.getByRole("region", {
     name: "What the run of version 1 did",
   });
