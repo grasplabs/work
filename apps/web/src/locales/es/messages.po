@@ -6197,6 +6197,11 @@ msgctxt "a page's side panel"
 msgid "Details"
 msgstr "Detalles"
 
+#: src/workflows/run-detail.tsx
+msgctxt "a run's steps in the workflow's code, folded away"
+msgid "Details"
+msgstr "Detalles"
+
 #: src/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"
@@ -19619,6 +19624,7 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/drafts/draft-history.tsx
+#: src/workflows/run-detail.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "v{version}"

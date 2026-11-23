@@ -12,7 +12,6 @@ import { formatDateTime } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Play } from "../grasp/icons/index.ts";
 import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
 import type { InspectorSection } from "../grasp/inspector-panel/index.ts";
 import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
@@ -26,6 +25,7 @@ import type { RunFilesRead } from "./run-files.tsx";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
 import type { AnyRunStatus } from "./run-status.ts";
 import { WaitingForAiProvider } from "./runs.tsx";
+import { RunStateIcon } from "./state-icon.tsx";
 import { StopRun } from "./stop-run.tsx";
 
 // One run of an independent workflow, opened beside its list on the
@@ -394,6 +394,7 @@ const RunPanel = ({
     context: "a run's title: its workflow's name, then how the run stands",
   });
   const seesResult = run.principal === names.me || admin;
+  const { version } = run;
   const sections: InspectorSection[] = [
     {
       id: "facts",
@@ -417,7 +418,7 @@ const RunPanel = ({
               ? t({ message: "Not yet", context: "a run that hasn't ended" })
               : formatDateTime(run.endedAt),
         },
-        { id: "version", name: t`Version`, detail: String(run.version) },
+        { id: "version", name: t`Version`, detail: t`v${version}` },
       ],
       // The kept values it started without, if any, under its facts.
       ...(run.stateWithheld === undefined
@@ -438,8 +439,27 @@ const RunPanel = ({
   if (filesSection !== undefined) {
     sections.push(filesSection);
   }
+  // Its steps speak the workflow's own code (step names, kinds, error
+  // codes): only its builders' page passes them (Traces), folded away
+  // until they ask. Mounted at once and kept mounted while folded (the
+  // Collapsible's `hiddenUntilFound`): the run follows what they report.
   if (steps !== null && steps !== undefined) {
-    sections.push({ id: "steps", label: t`What it did`, content: steps });
+    sections.push({
+      id: "steps",
+      label: t`What it did`,
+      content: (
+        <div {...stylex.props(styles.card)}>
+          <Collapsible
+            title={t({
+              message: "Details",
+              context: "a run's steps in the workflow's code, folded away",
+            })}
+          >
+            {steps}
+          </Collapsible>
+        </div>
+      ),
+    });
   }
   return (
     <InspectorPanel
@@ -463,7 +483,7 @@ const RunPanel = ({
         </>
       }
       framed={framed}
-      icon={Play}
+      mark={<RunStateIcon status={run.status} />}
       onClose={onClose}
       sections={sections}
       title={title}
