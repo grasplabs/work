@@ -5252,8 +5252,8 @@ msgid "Connection trigger"
 msgstr "Connection trigger"
 
 #: src/activity/pending.tsx
-msgid "Connection trigger for {workflow}"
-msgstr "Connection trigger for {workflow}"
+msgid "Connection trigger for {workflow} ({what})"
+msgstr "Connection trigger for {workflow} ({what})"
 
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
@@ -6820,8 +6820,8 @@ msgid "Email trigger"
 msgstr "Email trigger"
 
 #: src/activity/pending.tsx
-msgid "Email trigger for {workflow}"
-msgstr "Email trigger for {workflow}"
+msgid "Email trigger for {workflow} ({what})"
+msgstr "Email trigger for {workflow} ({what})"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -20056,8 +20056,8 @@ msgid "Webhook trigger"
 msgstr "Webhook trigger"
 
 #: src/activity/pending.tsx
-msgid "Webhook trigger for {workflow}"
-msgstr "Webhook trigger for {workflow}"
+msgid "Webhook trigger for {workflow} ({what})"
+msgstr "Webhook trigger for {workflow} ({what})"
 
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"

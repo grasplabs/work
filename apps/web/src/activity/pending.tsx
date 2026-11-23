@@ -277,15 +277,17 @@ const scheduleOf = (
 };
 
 /**
- * A trigger asking to start its workflow: what kind it is, and the
- * workflow by its name. Undefined for any other request.
+ * A trigger asking to start its workflow: what kind it is, the workflow
+ * by its name, and what it listens to. Undefined for any other request.
  */
 const triggerStartOf = ({
   trigger,
   object,
   actions,
   workflowNames,
-}: Permission): { kind: TriggerKind; workflow: string } | undefined => {
+}: Permission):
+  | { kind: TriggerKind; workflow: string; what: string }
+  | undefined => {
   const startsWorkflow =
     object.type === "workflow" &&
     actions.length === 1 &&
@@ -296,15 +298,19 @@ const triggerStartOf = ({
   return {
     kind: trigger.kind,
     workflow: workflowNames?.[object.workflowId] ?? object.workflowId,
+    what: triggerDescription(trigger),
   };
 };
 
-/** A trigger asking to start its workflow, by its kind and the workflow. */
+/**
+ * A trigger asking to start its workflow, by its kind, the workflow and
+ * what it listens to (`triggerDescription`: which mailbox, which source).
+ */
 const startAskers = {
-  email: msg({ message: "Email trigger for {workflow}" }),
+  email: msg({ message: "Email trigger for {workflow} ({what})" }),
   schedule: msg({ message: "Schedule for {workflow}" }),
-  connector: msg({ message: "Connection trigger for {workflow}" }),
-  webhook: msg({ message: "Webhook trigger for {workflow}" }),
+  connector: msg({ message: "Connection trigger for {workflow} ({what})" }),
+  webhook: msg({ message: "Webhook trigger for {workflow} ({what})" }),
 } as const satisfies Record<TriggerKind, MessageDescriptor>;
 
 /**
@@ -329,7 +335,7 @@ export const requestAsker = (
   }
   return i18n._({
     ...startAskers[started.kind],
-    values: { workflow: started.workflow },
+    values: { workflow: started.workflow, what: started.what },
   });
 };
 

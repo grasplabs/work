@@ -5252,8 +5252,8 @@ msgid "Connection trigger"
 msgstr "Disparador de conexión"
 
 #: src/activity/pending.tsx
-msgid "Connection trigger for {workflow}"
-msgstr "Disparador de conexión de {workflow}"
+msgid "Connection trigger for {workflow} ({what})"
+msgstr "Disparador de conexión de {workflow} ({what})"
 
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
@@ -6820,8 +6820,8 @@ msgid "Email trigger"
 msgstr "Disparador de correo"
 
 #: src/activity/pending.tsx
-msgid "Email trigger for {workflow}"
-msgstr "Disparador de correo de {workflow}"
+msgid "Email trigger for {workflow} ({what})"
+msgstr "Disparador de correo de {workflow} ({what})"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -20056,8 +20056,8 @@ msgid "Webhook trigger"
 msgstr "Disparador de webhook"
 
 #: src/activity/pending.tsx
-msgid "Webhook trigger for {workflow}"
-msgstr "Disparador de webhook de {workflow}"
+msgid "Webhook trigger for {workflow} ({what})"
+msgstr "Disparador de webhook de {workflow} ({what})"
 
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"

@@ -234,9 +234,9 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(async () => {
     await page.goto(`/workflows/${workflow}?view=runs`);
     await expect(run).toBeVisible(pageRead);
-    await expect(run).toContainText("Completed", { timeout: 1000 });
+    await expect(run).toContainText("Done", { timeout: 1000 });
   }).toPass(untilItHappens);
-  await run.getByRole("link").click();
+  await run.getByRole("button").first().click();
   const sheet = page.getByRole("dialog");
   await expect(sheet).toContainText('"status": "approved"', pageRead);
   await expect(sheet).toContainText('"comment": "Matches the order"');
@@ -285,13 +285,13 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(page.getByText("Waiting for an admin")).toBeVisible(pageRead);
 
   // Its start waits for an admin, who grants it from their inbox. The
-  // request names the trigger by its kind, and the workflow by its name.
-  const request = `start on Workflow ${name}`;
+  // request names the trigger by its kind and its source, and asks
+  // whether the workflow, by its name, may start.
   await asAdmin.goto("/inbox");
   const grant = await toItem(
     asAdmin,
     new RegExp(sourceName, "u"),
-    new RegExp(`^Grant Webhook trigger .+: ${request}\\?$`, "u")
+    new RegExp(`^Let ${name} start when its webhook is called\\?$`, "u")
   );
   await grant.getByRole("button", { name: "Grant it" }).click();
   await expect(grant).toHaveCount(0, pageRead);

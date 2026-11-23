@@ -141,7 +141,7 @@ const publish = async (page: Page, name: string): Promise<void> => {
 };
 
 /** A version's label, `YY.MM.N`, as History names it. */
-const versionLabel = /\d{2}\.\d{2}\.\d+/u;
+const versionLabel = /v\d+/u;
 
 /** What the editor says of a draft that passes. */
 const passes = "It passes its checks.";
@@ -291,8 +291,10 @@ test("a builder sees every declared branch of the checked definition, a test run
   await view(page, "Runs");
   await page
     .getByRole("table", { name: "Runs" })
-    .getByRole("link")
+    .getByRole("row")
     .last()
+    .getByRole("button")
+    .first()
     .click();
   const steps = page.getByRole("dialog");
   await expect(steps.getByText("What it returned")).toBeVisible({
@@ -312,7 +314,9 @@ test("a builder sees every declared branch of the checked definition, a test run
     );
   }
   await expect(
-    ran.getByRole("listitem", { name: "greetAda" }).getByText("Reached")
+    ran
+      .getByRole("listitem", { name: "greetAda" })
+      .getByText("Done", { exact: true })
   ).toBeVisible();
   await expect(
     ran.getByRole("listitem", { name: "greetOther" })
