@@ -21,18 +21,29 @@ export interface DictationMic {
 
 /**
  * Asks the browser for the microphone and taps it, handing each batch of
- * its sound to `onSound`. Rejects with the browser's reason; whatever it
- * reached by then is let go of first.
+ * its sound to `onSound`, and says when it is lost (`onLost`: its track
+ * ended, unplugged or taken by the system, after which only silence would
+ * come). Rejects with the browser's reason; whatever it reached by then is
+ * let go of first.
  */
 export const openDictationMic = async (
-  onSound: (sound: Int16Array) => void
+  onSound: (sound: Int16Array) => void,
+  onLost: () => void
 ): Promise<DictationMic> => {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: micWanted(),
   });
   let context: AudioContext | undefined;
+  const lost = (): void => {
+    onLost();
+  };
+  for (const track of stream.getAudioTracks()) {
+    track.addEventListener("ended", lost);
+  }
   const stop = (): void => {
     for (const track of stream.getTracks()) {
+      // Let go of on purpose: not lost.
+      track.removeEventListener("ended", lost);
       track.stop();
     }
     const was = context;

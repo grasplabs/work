@@ -4989,6 +4989,10 @@ msgid "Dictation stopped as you left this tab. What was heard is kept."
 msgstr "El dictado se detuvo porque saliste de esta pestaña. Lo que se oyó se conserva."
 
 #: src/chat/dictation.ts
+msgid "Dictation stopped: the microphone was lost. What was heard is kept."
+msgstr "El dictado se ha detenido: se perdió el micrófono. Lo que se oyó se conserva."
+
+#: src/chat/dictation.ts
 msgid "Dictation stopped. What was heard is kept."
 msgstr "El dictado se ha detenido. Lo que se oyó se conserva."
 

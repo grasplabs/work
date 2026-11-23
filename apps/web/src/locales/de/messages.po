@@ -4989,6 +4989,10 @@ msgid "Dictation stopped as you left this tab. What was heard is kept."
 msgstr "Das Diktieren wurde beendet, weil Sie diesen Tab verlassen haben. Was gehört wurde, bleibt erhalten."
 
 #: src/chat/dictation.ts
+msgid "Dictation stopped: the microphone was lost. What was heard is kept."
+msgstr "Das Diktieren wurde beendet: Das Mikrofon ist weg. Was gehört wurde, bleibt erhalten."
+
+#: src/chat/dictation.ts
 msgid "Dictation stopped. What was heard is kept."
 msgstr "Das Diktieren wurde beendet. Was gehört wurde, bleibt erhalten."
 

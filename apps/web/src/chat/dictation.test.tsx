@@ -62,9 +62,11 @@ const rig = ({ settled = "Which invoices are late?" } = {}) => {
   const lines: FakeLine[] = [];
   let asked: PromiseWithResolvers<DictationMic> | undefined;
   let hear: ((sound: Int16Array) => void) | undefined;
+  let lose: (() => void) | undefined;
   const parts: DictationParts = {
-    microphone: async (onSound) => {
+    microphone: async (onSound, onLost) => {
       hear = onSound;
+      lose = onLost;
       asked = Promise.withResolvers<DictationMic>();
       return await asked.promise;
     },
@@ -138,6 +140,10 @@ const rig = ({ settled = "Which invoices are late?" } = {}) => {
     /** Some sound from the microphone. */
     speak: (): void => {
       hear?.(new Int16Array(1600));
+    },
+    /** The microphone is gone: unplugged, or taken by the system. */
+    lose: (): void => {
+      lose?.();
     },
   };
 };
@@ -349,6 +355,25 @@ describe("one dictation", () => {
     }
   );
 
+  it("stops when the microphone is lost, so no silence goes on being sent", async () => {
+    const { fake, told, mic, line } = await listening();
+
+    fake.lose();
+    fake.speak();
+
+    expect({
+      problems: told.problems,
+      stopped: mic.stopped,
+      closed: line.closed,
+      sent: line.sent,
+    }).toStrictEqual({
+      problems: ["lost"],
+      stopped: true,
+      closed: true,
+      sent: 1,
+    });
+  });
+
   it("stops when the line goes down mid-way", async () => {
     const { told, mic, line } = await listening();
 
@@ -386,27 +411,38 @@ interface Seen {
 
 /**
  * A box dictating on `parts` inside the shell, which stays as the page
- * under it changes (`/` and `/other`), as the chat's does.
+ * under it changes (`/` and `/other`), as the chat's does; `boxes` of
+ * them, each drawing its dictation's bar as Damsko's box does while it
+ * listens, in a place of its own the page can hide (`[data-box]`).
  */
-const shown = async (parts: DictationParts) => {
-  const seen: { current: Seen | undefined } = { current: undefined };
-  const Box = () => {
+const shown = async (parts: DictationParts, boxes = 1) => {
+  const seen: (Seen | undefined)[] = [];
+  const Box = ({ index }: { index: number }) => {
     const [text, setText] = useState("For finance:");
     const [off, setOff] = useState(false);
     const hook = useDictation(text, setText, { off, parts });
     useEffect(() => {
-      seen.current = { hook, text };
-    }, [hook, text]);
+      seen[index] = { hook, text };
+    }, [hook, index, text]);
     // What takes dictation away from the box, as the chat's bar does while the chat is open.
     return (
-      <button
-        aria-label="Dictation off"
-        data-off
-        onClick={() => {
-          setOff(!off);
-        }}
-        type="button"
-      />
+      <div data-box={index}>
+        <button
+          aria-label="Dictation off"
+          data-off
+          onClick={() => {
+            setOff(!off);
+          }}
+          type="button"
+        />
+        {hook.speech?.listening === true ? (
+          <div data-slot="prompt-input-dictation">
+            <button data-slot="prompt-input-dictation-done" type="button">
+              Done
+            </button>
+          </div>
+        ) : null}
+      </div>
     );
   };
   const rootRoute = createRootRoute({ component: Outlet });
@@ -415,7 +451,9 @@ const shown = async (parts: DictationParts) => {
     id: "_shell",
     component: () => (
       <>
-        <Box />
+        {Array.from({ length: boxes }, (_, index) => (
+          <Box index={index} key={index} />
+        ))}
         <Outlet />
       </>
     ),
@@ -445,13 +483,14 @@ const shown = async (parts: DictationParts) => {
     );
     await router.load();
   });
-  const now = (): Seen => {
-    if (seen.current === undefined) {
+  const nowOf = (index: number): Seen => {
+    const box = seen[index];
+    if (box === undefined) {
       throw new Error("No box");
     }
-    return seen.current;
+    return box;
   };
-  return { now, router };
+  return { now: () => nowOf(0), nowOf, router };
 };
 
 /** Takes dictation away from the box, or gives it back. */
@@ -664,6 +703,75 @@ describe("dictating in the box", () => {
     });
   });
 
+  it("stops, keeping what was heard, once its bar is out of sight, though the page never said so", async () => {
+    const fake = rig();
+    const { now } = await shown(fake.parts);
+    const mic = await dictating(now, fake);
+    fake.speak();
+    const sentBefore = fake.line().sent;
+
+    // Its place hidden, as a page may hide a box without a word.
+    document.querySelector("[data-box]")?.setAttribute("hidden", "");
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(mic.stopped).toBeTruthy();
+      });
+    });
+    fake.speak();
+
+    expect({
+      closed: fake.line().closed,
+      sent: fake.line().sent - sentBefore,
+      listening: speechOf(now()).listening,
+      text: now().text,
+    }).toStrictEqual({
+      closed: true,
+      sent: 0,
+      listening: false,
+      text: "For finance: which invoices are late",
+    });
+  });
+
+  it("puts the focus on the bar's Done where starting left it on the page, so Escape reaches the bar", async () => {
+    const fake = rig();
+    const { now } = await shown(fake.parts);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    await dictating(now, fake);
+    await act(async () => {
+      await vi.waitFor(() => {
+        const focused = document.activeElement;
+        expect(focused instanceof HTMLElement && focused.dataset.slot).toBe(
+          "prompt-input-dictation-done"
+        );
+      });
+    });
+  });
+
+  it("dictates in one box of the app at a time: another starting stops the first, keeping what it heard", async () => {
+    const fake = rig();
+    const { nowOf } = await shown(fake.parts, 2);
+    const first = await dictating(() => nowOf(0), fake);
+
+    const second = await dictating(() => nowOf(1), fake);
+
+    expect({
+      first: first.stopped,
+      second: second.stopped,
+      listening: [speechOf(nowOf(0)).listening, speechOf(nowOf(1)).listening],
+      kept: nowOf(0).text,
+      lines: fake.lines.map(({ closed }) => closed),
+    }).toStrictEqual({
+      first: true,
+      second: false,
+      listening: [false, true],
+      kept: "For finance: which invoices are late",
+      lines: [true, false],
+    });
+  });
+
   it.each([
     [
       "the microphone refused",
@@ -686,6 +794,15 @@ describe("dictating in the box", () => {
         fake.line().options.onRefused?.("transcription.refused");
       },
       "Dictation stopped. What was heard is kept.",
+    ],
+    [
+      "the microphone lost",
+      async (fake: ReturnType<typeof rig>) => {
+        await fake.give();
+        fake.line().options.onLive(true);
+        fake.lose();
+      },
+      "Dictation stopped: the microphone was lost. What was heard is kept.",
     ],
     [
       "the day's 30 minutes used",

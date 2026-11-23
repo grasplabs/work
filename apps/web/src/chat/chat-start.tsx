@@ -57,7 +57,8 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     minHeight: "100%",
-    paddingInline: space["6"],
+    // As far in as #2503's: 16px from the sides on a phone.
+    paddingInline: space["4"],
     paddingBlock: space["12"],
   },
   column: {

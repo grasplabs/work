@@ -113,17 +113,24 @@ const shown = async (
     named,
     from,
     models = Promise.resolve(["openai/gpt-5"]),
+    modelsAgain = models,
   }: {
     agents?: ChatAgent[];
     named?: string;
     from?: Opportunity;
     /** What core says the models are, once it does. */
     models?: Promise<string[]>;
+    /** What it says when the page asks again (Try again). */
+    modelsAgain?: Promise<string[]>;
   } = {}
 ) => {
   const asked: string[] = [];
+  let modelReads = 0;
   const chats = {
-    models: async () => await models,
+    models: async () => {
+      modelReads += 1;
+      return await (modelReads === 1 ? models : modelsAgain);
+    },
     efforts: async () => await Promise.resolve({}),
     list: async () => await Promise.resolve([]),
     agents: async () => await Promise.resolve(agents),
@@ -503,6 +510,40 @@ describe("Chat's page from Make something", () => {
       notes: ["Could not send. Your message is kept.", reason],
       page: 2,
       retry: true,
+    });
+  });
+
+  it("takes away why a held question didn't go once Try again reads the models", async () => {
+    const models = Promise.withResolvers<string[]>();
+    await shown(undefined, undefined, {
+      models: models.promise,
+      modelsAgain: Promise.resolve(["openai/gpt-5"]),
+    });
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      models.reject(new Error("The models can't be read"));
+      await models.promise.catch(() => {});
+    });
+    await settled();
+    const before = notes().length;
+
+    await act(async () => {
+      buttonNamed("Try again")?.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({ before, notes: notes(), box: box().textContent }).toStrictEqual({
+      before: 2,
+      notes: [],
+      box: "What waits on me today?",
     });
   });
 

@@ -532,9 +532,13 @@ const useSend = ({
     setHeld(false);
     setReleased(released + 1);
   }
-  // Typing again takes the held question's failure away, as a send's.
+  // Typing again takes the held question's failure away, as a send's; so
+  // does reading the models once more and finding them (Try again).
   const [failedOn, setFailedOn] = useState(text);
-  if (heldFailure !== undefined && failedOn !== text) {
+  if (
+    heldFailure !== undefined &&
+    (failedOn !== text || unavailable === undefined)
+  ) {
     setHeldFailure(undefined);
   }
   const sendReleased = useEffectEvent(() => {

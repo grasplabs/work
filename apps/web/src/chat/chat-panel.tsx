@@ -251,8 +251,8 @@ const BrainGaps = () => {
   );
 };
 
-/** The box to ask in, or the agent's questions in its place. */
-const Footer = () => {
+/** The box to ask in, or the agent's questions in its place; dictating only while the chat is open. */
+const Footer = ({ open }: { open: boolean }) => {
   const { t } = useLingui();
   const {
     builds,
@@ -315,6 +315,8 @@ const Footer = () => {
           )
         }
         asking={asking}
+        // The panel stays while it is closed: nothing listens from it then.
+        dictates={open}
         label={words.title}
         onAnswer={(text) => {
           void ask(text);
@@ -390,7 +392,7 @@ const Body = ({ open }: { open: boolean }) => {
           }}
         />
         <BrainGaps />
-        <Footer />
+        <Footer open={open} />
       </section>
     </div>
   );

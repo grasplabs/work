@@ -24,11 +24,14 @@ import type { DictationMic } from "./dictation-mic.ts";
 // its microphone (dictation-mic.ts) and its line: asking for the
 // microphone, then the line opening, then listening, then, after Done,
 // writing it down, then over. Every way out (Done, Cancel, Escape, a
-// problem, the box going away, another page, the tab hidden or closed)
-// ends it in one place, which lets go of the microphone and closes the
-// line; a microphone the browser gives after that is let go of at once.
-// Sound goes to core only while it listens, and it listens only while its
-// bar is on screen. Its mute is its own and ends with it. Where it stops
+// problem, the microphone lost, the box going away or out of sight,
+// another page, the tab hidden or closed, another box dictating) ends it
+// in one place, which lets go of the microphone and closes the line; a
+// microphone the browser gives after that is let go of at once. Sound goes
+// to core only while it listens, and it listens only while its bar is on
+// screen: the box that dictates watches its bar itself, so a page that
+// hides a box without saying so (`off`) still stops it. One dictation in
+// the app at a time. Its mute is its own and ends with it. Where it stops
 // on its own, what was heard goes in, and a line under the box says why.
 
 /** Why dictating stopped, as the line under the box says it. */
@@ -38,6 +41,7 @@ export type Problem =
   | "unavailable"
   | "limited"
   | "failed"
+  | "lost"
   | "hidden";
 
 const problemWords: Record<Problem, MessageDescriptor> = {
@@ -46,6 +50,7 @@ const problemWords: Record<Problem, MessageDescriptor> = {
   unavailable: msg`Dictation isn't set up here yet.`,
   limited: msg`You've dictated as much as you can today.`,
   failed: msg`Dictation stopped. What was heard is kept.`,
+  lost: msg`Dictation stopped: the microphone was lost. What was heard is kept.`,
   hidden: msg`Dictation stopped as you left this tab. What was heard is kept.`,
 };
 
@@ -104,8 +109,15 @@ const refusalOf = (code: string): Problem => {
 
 /** What a dictation runs on: the browser's microphone and core's line, or a test's. */
 export interface DictationParts {
-  /** Asks for the microphone, its sound to `onSound`; rejects with the browser's reason. */
-  microphone: (onSound: (sound: Int16Array) => void) => Promise<DictationMic>;
+  /**
+   * Asks for the microphone, its sound to `onSound`, and `onLost` once it
+   * stops giving any (unplugged, taken by the system); rejects with the
+   * browser's reason.
+   */
+  microphone: (
+    onSound: (sound: Int16Array) => void,
+    onLost: () => void
+  ) => Promise<DictationMic>;
   openLine: (options: LiveLineOptions) => LiveLine;
 }
 
@@ -223,7 +235,12 @@ export const dictate = (
   };
   void (async () => {
     try {
-      open(await parts.microphone(onSound));
+      open(
+        await parts.microphone(onSound, () => {
+          // Silence would go on being sent, as if it listened.
+          stopped("lost");
+        })
+      );
     } catch (error) {
       if (stage === "asking") {
         stopped(micProblemOf(error));
@@ -257,6 +274,45 @@ export const dictate = (
     },
     level: () => (muted || stage !== "listening" ? 0 : (mic?.level() ?? 0)),
   };
+};
+
+/** No cleanup to do. */
+const nothing = (): void => {
+  // Nothing was started.
+};
+
+/** The dictation running in the app, if one is: starting another stops it first, keeping what it heard. */
+let runningInApp: { box: object; stop: () => void } | null = null;
+
+/** How often a dictating box looks whether its bar is still on screen, in ms. */
+export const shownCheckMs = 250;
+
+/**
+ * Whether the person can see `element`: on the page, and not hidden by
+ * its styles (none drawn, invisible, or faded out, as a closed chat is).
+ * Not merely inert: a menu or dialog over the box makes it inert while
+ * it still shows.
+ */
+const onScreen = (element: Element): boolean =>
+  element.isConnected &&
+  element.closest("[hidden]") === null &&
+  (typeof element.checkVisibility !== "function" ||
+    element.checkVisibility({
+      opacityProperty: true,
+      visibilityProperty: true,
+    }));
+
+/**
+ * Whether the bar of the dictation running is on screen: Damsko's, which
+ * PromptInputSpeechButton draws while it listens. One dictation runs at a
+ * time, so the bar on the page is this one's. None drawn (yet) counts as
+ * shown: only a bar the person can't see stops it.
+ */
+const barShown = (): boolean => {
+  const bars = [
+    ...document.querySelectorAll('[data-slot="prompt-input-dictation"]'),
+  ];
+  return bars.length === 0 || bars.some(onScreen);
 };
 
 /** `text` with `said` after it, a space between. */
@@ -302,9 +358,14 @@ export const useDictation = (
   useEffect(() => {
     typed.current = text;
   });
+  // This box, as the app's one dictation knows it.
+  const box = useRef({});
   /** The bar goes: nothing of the one that ran stays on screen. */
   const reset = (): void => {
     running.current = null;
+    if (runningInApp?.box === box.current) {
+      runningInApp = null;
+    }
     heard.current = "";
     setListening(false);
     setSettling(false);
@@ -351,6 +412,43 @@ export const useDictation = (
       stopNow.current(true);
     }
   }, [pathname]);
+  // Its bar out of sight (the chat closed over it, the box hidden by its
+  // page): it stops, keeping what was heard, whatever the page said.
+  useEffect(() => {
+    const timer = listening
+      ? window.setInterval(() => {
+          if (!barShown()) {
+            stopNow.current(true);
+          }
+        }, shownCheckMs)
+      : undefined;
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [listening]);
+  // Started by a press of the pointer, Damsko's box leaves the focus on
+  // the page as its microphone gives way to the bar, where Escape reaches
+  // nothing: the focus goes to the bar's Done, as it does from the keys.
+  useEffect(() => {
+    if (!listening) {
+      return nothing;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const lost =
+        document.activeElement === null ||
+        document.activeElement === document.body;
+      if (lost) {
+        document
+          .querySelector<HTMLElement>(
+            '[data-slot="prompt-input-dictation-done"]'
+          )
+          ?.focus();
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [listening]);
   // The tab hidden: it stops, and says so; the tab closed: it goes.
   useEffect(() => {
     const onHidden = (): void => {
@@ -371,25 +469,35 @@ export const useDictation = (
   const locale = isLocale(i18n.locale) ? i18n.locale : "en";
   const start = (): void => {
     stop(false);
+    // Another box dictating: it stops first, keeping what it heard.
+    if (runningInApp !== null && runningInApp.box !== box.current) {
+      runningInApp.stop();
+    }
     setProblem(undefined);
-    const mine = dictate(
+    const dictation = dictate(
       locale,
       {
         heard: (words) => {
-          if (running.current === mine) {
+          if (running.current === dictation) {
             heard.current = words;
             setInterim(words);
           }
         },
         problem: (why) => {
-          if (running.current === mine) {
+          if (running.current === dictation) {
             stop(true, why);
           }
         },
       },
       parts
     );
-    running.current = mine;
+    running.current = dictation;
+    runningInApp = {
+      box: box.current,
+      stop: () => {
+        stopNow.current(true);
+      },
+    };
     setListening(true);
   };
   const done = async (): Promise<void> => {
