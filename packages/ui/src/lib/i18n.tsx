@@ -684,6 +684,8 @@ export interface I18nCatalog {
       label: string;
       listening: string;
       mute: string;
+      /** Said once as the product writes down what it heard, after Done. */
+      settling: string;
     };
     /** Submit's name while the answer comes. */
     stop: string;
@@ -691,6 +693,16 @@ export interface I18nCatalog {
     submit: string;
     /** Said once as the status comes to `success`. */
     succeeded: string;
+    /**
+     * A spoken conversation in the card: its name, its close button, and what is said as each
+     * turn starts, the person's and the other voice's.
+     */
+    voice: {
+      close: string;
+      label: string;
+      listening: string;
+      speaking: string;
+    };
   };
   questionnaire: {
     /** Under the card when the answers could not be sent, and given to an agent. */
@@ -1359,10 +1371,17 @@ const english: I18nCatalog = {
       label: "Dictate",
       listening: "Listening",
       mute: "Mute",
+      settling: "Writing it down",
     },
     stop: "Stop",
     submit: "Send",
     succeeded: "Done",
+    voice: {
+      close: "Close voice",
+      label: "Voice conversation",
+      listening: "Listening",
+      speaking: "Speaking",
+    },
   },
   questionnaire: {
     error: "Could not send the answer",
