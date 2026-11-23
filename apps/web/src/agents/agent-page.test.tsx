@@ -41,6 +41,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
 import type { FirstAgentAccess } from "./agent-page.tsx";
+import { faceOf, lookOf } from "./figure/look.ts";
 import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
 import { agentTabOf } from "./tabs.tsx";
@@ -790,9 +791,12 @@ const answerBox = (): HTMLInputElement | HTMLTextAreaElement => {
 
 /** The choice labelled `label` (a library Select's trigger), or none. */
 const choice = (label: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(
-    `[role="combobox"][aria-label="${label}"]`
-  );
+  [...document.querySelectorAll<HTMLElement>('[role="combobox"]')].find(
+    (each) =>
+      each.getAttribute("aria-label") === label ||
+      document.querySelector(`label[for="${each.id}"]`)?.textContent.trim() ===
+        label
+  ) ?? null;
 
 /** What a choice shows as chosen, without what is hidden from a screen reader. */
 const chosenIn = (label: string): string | undefined => {
@@ -1125,6 +1129,35 @@ describe("an agent's page", () => {
     expect(chosenIn("Read their own, for Claire")).toBe(
       "As the company has it"
     );
+  });
+
+  it("saves a picture picked in Edit only with Save, and drops it on Cancel", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
+    await press(await fromMenu("Edit"));
+    await choose("Shape", "Crystal");
+    await press(dialogButton("Cancel"));
+    const cancelled = [...asked];
+    await press(await fromMenu("Edit"));
+    await choose("Shape", "Crystal");
+    await press(dialogButton("Save"));
+    expect({ cancelled, asked }).toStrictEqual({
+      cancelled: [],
+      asked: [
+        [
+          "change",
+          "agent-1",
+          {
+            ...claire,
+            face: faceOf({
+              ...lookOf({ ...claire, id: "agent-1" }),
+              shape: "crystal",
+            }),
+          },
+        ],
+      ],
+    });
   });
 
   it("saves a new name with the rest of the agent as it was", async () => {

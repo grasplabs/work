@@ -309,8 +309,16 @@ const EditAgent = ({
   const formId = useId();
   const { name } = agent;
   const parts: readonly Part[] = ["name", "job", "model"];
+  // The picture picked, saved with the rest on Save; Cancel drops it.
+  const [face, setFace] = useState<string>();
+  const close = (next: boolean): void => {
+    if (!next) {
+      setFace(undefined);
+    }
+    setOpen(next);
+  };
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog onOpenChange={close} open={open}>
       <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Edit ${name}`}</DialogTitle>
         <DialogBody>
@@ -322,15 +330,21 @@ const EditAgent = ({
               initial={typed}
               models={models}
               onSave={async (said) => {
-                if (await save(said)) {
-                  setOpen(false);
+                if (await save(face === undefined ? said : { ...said, face })) {
+                  close(false);
                 }
               }}
               parts={parts}
             />
           ) : null}
           {open && !first ? (
-            <AgentLook agent={agent} can={can} save={save} />
+            <AgentLook
+              agent={face === undefined ? agent : { ...agent, face }}
+              can={can}
+              pick={(picked) => {
+                setFace(picked);
+              }}
+            />
           ) : null}
         </DialogBody>
         <DialogFooter>

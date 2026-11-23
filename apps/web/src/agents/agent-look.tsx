@@ -42,17 +42,17 @@ const styles = stylex.create({
   control: { width: "12rem", maxWidth: "100%" },
 });
 
-/** The Look card: the agent's shape and colours, each pressed to change it. */
+/** The Look card: the agent's shape and colours, each picked to change it. */
 export const AgentLook = ({
   agent,
   can,
-  save,
+  pick,
 }: {
   agent: Agent;
   /** Whether it may be changed now. */
   can: boolean;
-  /** Saves the new face over the agent as core has it. */
-  save: (said: { face: string }) => Promise<boolean>;
+  /** Takes the face picked, for the Edit dialog to save with the rest. */
+  pick: (face: string) => void;
 }) => {
   const { t } = useLingui();
   const look = lookOf(agent);
@@ -86,7 +86,7 @@ export const AgentLook = ({
       : shapeNames[offered];
   };
   const choose = (next: AgentFigureLook): void => {
-    void save({ face: faceOf(next) });
+    pick(faceOf(next));
   };
   return (
     <SectionCard

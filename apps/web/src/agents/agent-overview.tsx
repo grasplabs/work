@@ -622,7 +622,7 @@ const RunHistory = ({
   const titles: Record<Outcome, string> = {
     started: t`Ran on its schedule`,
     "agent.paused": t`Didn't run: the agent was paused`,
-    "agent.not_for_you": t`Didn't run: it isn't set up to answer this person`,
+    "agent.not_for_you": t`Didn't run: it isn't set up for the person it works for`,
     "permission.person_inactive": t`Didn't run: this person is no longer in the company`,
     "model.no_provider": t`Didn't run: no AI provider is connected`,
     "agent.busy": t`Didn't run: it was still busy`,

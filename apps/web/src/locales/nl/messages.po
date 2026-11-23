@@ -6328,8 +6328,8 @@ msgid "Didn't run {when}: this person is no longer in the company"
 msgstr "Niet uitgevoerd op {when}: deze persoon zit niet meer in het bedrijf"
 
 #: src/agents/agent-overview.tsx
-msgid "Didn't run: it isn't set up to answer this person"
-msgstr "Niet gedraaid: niet ingesteld voor deze persoon"
+msgid "Didn't run: it isn't set up for the person it works for"
+msgstr "Niet gedraaid: hij is niet ingesteld voor de persoon voor wie hij werkt"
 
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: it was still busy"
