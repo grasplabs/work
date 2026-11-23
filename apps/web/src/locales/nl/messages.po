@@ -18359,10 +18359,6 @@ msgstr "De origin is https:// en een openbare hostnaam, zonder iets erachter: ht
 msgid "the owner"
 msgstr "de eigenaar"
 
-#: src/projects/project-view.tsx
-msgid "The owner"
-msgstr "De eigenaar"
-
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "De pakketten zijn goedgekeurd. Ga verder."

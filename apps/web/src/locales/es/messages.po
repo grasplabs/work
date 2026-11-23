@@ -18359,10 +18359,6 @@ msgstr "El origen es https:// y un nombre de host público, sin nada detrás: ht
 msgid "the owner"
 msgstr "el propietario"
 
-#: src/projects/project-view.tsx
-msgid "The owner"
-msgstr "El propietario"
-
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "Los paquetes están aprobados. Continúa."

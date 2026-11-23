@@ -756,8 +756,8 @@ const Overview = ({
     ({ type }) => type === "workflow"
   );
   const apps = project.items.filter(({ type }) => type === "app");
-  const owner = project.owner.name ?? t`The owner`;
-  const people = project.members.filter(({ name }) => name !== null);
+  const owner = project.owner.name ?? t`the owner`;
+  const people = project.members;
   const ownerIsYou = project.owner.id === userId;
   return (
     <>
@@ -907,7 +907,7 @@ const Overview = ({
             {people.slice(0, slice - 1).map((member) => (
               <PersonRow
                 key={`${member.type}:${member.id}`}
-                name={member.name ?? ""}
+                name={member.name ?? member.id}
                 role={roleLabel(member.role)}
                 team={member.type === "team"}
               />

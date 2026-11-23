@@ -18359,10 +18359,6 @@ msgstr "Der Origin ist https:// und ein öffentlicher Hostname, ohne etwas danac
 msgid "the owner"
 msgstr "der Eigentümer"
 
-#: src/projects/project-view.tsx
-msgid "The owner"
-msgstr "Der Eigentümer"
-
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "Die Pakete sind freigegeben. Machen Sie weiter."

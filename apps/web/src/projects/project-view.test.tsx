@@ -75,7 +75,6 @@ const project = (role: Project["role"]): Project => ({
   shared: 1,
 });
 
-/** Core's projects API, keeping each call it was asked. */
 /** Desk, an App filed after Invoices. */
 const desk: ProjectItemsPage["items"][number] = {
   type: "app",
@@ -110,6 +109,7 @@ const chatOf = (id: string, title: string): ChatSummary => ({
 
 const accruals = chatOf("chat-accruals", "Accruals");
 
+/** Core's projects API, keeping each call it was asked. */
 const fakeProjects = (
   pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
   /** The people core offers to add. */

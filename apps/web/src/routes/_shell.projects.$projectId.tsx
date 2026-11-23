@@ -1,6 +1,8 @@
+import type { Project } from "@grasp-os/shared/projects";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -15,6 +17,45 @@ import { readOverview } from "../workflows/overview.ts";
 // items use and how each of its workflows stands. A project the person
 // isn't in is not there for them (`project.not_found`): the page says it
 // wasn't found, as for one that never was.
+
+/** How many of each part the overview shows. */
+const shown = 3;
+
+/**
+ * The project with as many of its items as the overview needs: core pages
+ * Apps and workflows together, so a first page may hold none of one kind
+ * while the project has some. Pages are read on, after the last, until
+ * each kind has its three or none are left.
+ */
+const withOverviewItems = async (
+  session: Session,
+  project: Project
+): Promise<Project> => {
+  const short = (kind: "app" | "workflow"): boolean =>
+    project.items.filter(({ type }) => type === kind).length <
+    Math.min(
+      shown,
+      kind === "app" ? project.counts.apps : project.counts.workflows
+    );
+  const last = project.items.at(-1);
+  if (
+    !project.moreItems ||
+    last === undefined ||
+    (!short("app") && !short("workflow"))
+  ) {
+    return project;
+  }
+  const page = await session.projects.items(project.id, {
+    at: last.addedAt,
+    type: last.type,
+    id: last.id,
+  });
+  return await withOverviewItems(session, {
+    ...project,
+    items: [...project.items, ...page.items],
+    moreItems: page.more,
+  });
+};
 
 const ProjectPage = () => {
   const { t } = useLingui();
@@ -86,7 +127,9 @@ export const Route = createFileRoute("/_shell/projects/$projectId")({
         // The person's own chats in it come from their own Workspace; the
         // connections from what its items use.
         const [project, chats, connections] = await Promise.all([
-          session.projects.get(projectId),
+          session.projects
+            .get(projectId)
+            .then(async (read) => await withOverviewItems(session, read)),
           session.chats.list({ project: projectId }),
           session.projects.connections(projectId),
         ]);
