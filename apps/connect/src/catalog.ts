@@ -125,12 +125,12 @@ interface Cached<Value> {
 
 // Per isolate, keyed by the SHA-256 of connect's Composio key (a rotated
 // key starts afresh) and what was listed. Only answers are kept: a failure
-// is asked again next time. Loads under way are shared: people opening the
-// Integrations page at once ask Composio once (`loading`).
-interface Cache<Value> {
-  values: Map<string, Cached<Value>>;
-  loading: Map<string, Promise<Value>>;
-}
+// is asked again next time. A load under way is never kept for another
+// request to await: its promise settles only in the request that began it,
+// so once that request ends early (its caller gave up) every later one
+// would wait on a promise that never settles. People looking at once each
+// ask Composio.
+type Cache<Value> = Map<string, Cached<Value>>;
 
 /**
  * A toolkit in the catalog, and where Composio serves its logo, which only
@@ -141,29 +141,17 @@ export interface ListedToolkit {
   logoSource: URL | undefined;
 }
 
-const toolkitCache: Cache<ListedToolkit[]> = {
-  values: new Map(),
-  loading: new Map(),
-};
-const toolCache: Cache<CatalogTool[]> = {
-  values: new Map(),
-  loading: new Map(),
-};
+const toolkitCache: Cache<ListedToolkit[]> = new Map();
+const toolCache: Cache<CatalogTool[]> = new Map();
 
 /** Forgets everything cached, so the next answer comes from Composio. */
 export const forgetComposioCatalog = (): void => {
-  for (const cache of [toolkitCache, toolCache]) {
-    cache.values.clear();
-    cache.loading.clear();
-  }
+  toolkitCache.clear();
+  toolCache.clear();
 };
 
 /** Stores `value` under `id`, dropping expired entries, then the oldest. */
-const store = <Value>(
-  cache: Map<string, Cached<Value>>,
-  id: string,
-  value: Value
-): void => {
+const store = <Value>(cache: Cache<Value>, id: string, value: Value): void => {
   const now = Date.now();
   for (const [each, { expiresAt }] of cache) {
     if (expiresAt <= now) {
@@ -180,36 +168,22 @@ const store = <Value>(
 
 /**
  * The value `load` gives for `name` under `key`, from `cache` while it is
- * fresh. A load already under way for the same `name` and `key` is
- * awaited, not repeated; it is forgotten once it settles, and a failed one
- * is never kept.
+ * fresh. A failed load is never kept.
  */
 const cachedIn = async <Value>(
-  { values, loading }: Cache<Value>,
+  cache: Cache<Value>,
   key: string,
   name: string,
   load: () => Promise<Value>
 ): Promise<Value> => {
   const id = `${await sha256Hex(key)}:${name}`;
-  const hit = values.get(id);
+  const hit = cache.get(id);
   if (hit !== undefined && hit.expiresAt > Date.now()) {
     return hit.value;
   }
-  const underWay = loading.get(id);
-  if (underWay !== undefined) {
-    return await underWay;
-  }
-  const loaded = (async () => {
-    try {
-      const value = await load();
-      store(values, id, value);
-      return value;
-    } finally {
-      loading.delete(id);
-    }
-  })();
-  loading.set(id, loaded);
-  return await loaded;
+  const value = await load();
+  store(cache, id, value);
+  return value;
 };
 
 /**

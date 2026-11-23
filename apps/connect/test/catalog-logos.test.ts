@@ -235,19 +235,19 @@ describe("a catalog entry's logo", () => {
     expect(ends).toStrictEqual(requests.map(() => "connect.invalid"));
   });
 
-  it("is kept, a refused one too, and asked for once by people looking at the same time", async () => {
+  it("is kept, a refused one too, for a day", async () => {
     composio.logos.set("linear", () => new Response("<html>"));
-    await Promise.all([logoOf("hubspot"), logoOf("hubspot"), logoOf("linear")]);
+    await logoOf("hubspot");
+    await logoOf("linear");
     await expect(logoOf("hubspot")).resolves.toMatchObject({
       contentType: "image/png",
     });
     await expect(logoOf("linear")).resolves.toBeNull();
-    // Each fetched once, in whichever order the loads reached the host.
-    expect(
-      composio.logoRequests
-        .map(({ path }) => path)
-        .toSorted((one, other) => one.localeCompare(other))
-    ).toStrictEqual(["/api/hubspot", "/api/linear"]);
+    // Each fetched once.
+    expect(composio.logoRequests.map(({ path }) => path)).toStrictEqual([
+      "/api/hubspot",
+      "/api/linear",
+    ]);
     // A day on, each is fetched again.
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 25 * 60 * 60 * 1000);

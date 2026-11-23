@@ -182,14 +182,13 @@ describe("the catalog", () => {
     ]);
   });
 
-  it("asks Composio once for people looking at the same time", async () => {
+  it("gives people looking at the same time the same catalog", async () => {
     const [first, second] = await Promise.all([
       exports.default.catalog(),
       exports.default.catalog(),
     ]);
     expect(second).toStrictEqual(first);
-    // One read of the list's five pages.
-    expect(composio.requests).toHaveLength(5);
+    expect(first.composio).toBe("listed");
   });
 
   it("says Composio is unavailable when its list goes on past what connect reads, and keeps none of it", async () => {
