@@ -64,9 +64,8 @@ import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { formatDateTime } from "../format.ts";
-import { InfoTip } from "../frame/info-tip.tsx";
+import { WithInfo } from "../frame/info-tip.tsx";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
-/* DAMSKO? setting-row#SettingRow -> components/field: <Field orientation="responsive"><FieldContent><FieldLabel/><FieldDescription/></FieldContent>{control}<FieldError/><FieldStatus/></Field> */
 import { decidesRequests } from "../inbox/waiting.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
@@ -379,12 +378,12 @@ const AppInstructions = ({ app }: { app: ViewedApp }) => {
     <Card asChild>
       <section aria-label={t`Instructions`}>
         <CardHeader>
-          <CardTitle>
-            {t`Instructions`}{" "}
-            <InfoTip
-              label={t`More about its instructions`}
-            >{t`What a builder’s chat about this App starts with. Only its builders read and change it.`}</InfoTip>
-          </CardTitle>
+          <WithInfo
+            info={t`What a builder’s chat about this App starts with. Only its builders read and change it.`}
+            label={t`More about its instructions`}
+          >
+            <CardTitle>{t`Instructions`}</CardTitle>
+          </WithInfo>
         </CardHeader>
         <CardContent>
           <Read read={read}>
@@ -420,12 +419,12 @@ const ForBuilders = ({
       <Card asChild>
         <section aria-label={t`Copies`}>
           <CardHeader>
-            <CardTitle>
-              {t`Copies`}{" "}
-              <InfoTip
-                label={t`More about copies`}
-              >{t`Its definition to keep or move, and a blueprint others can start from.`}</InfoTip>
-            </CardTitle>
+            <WithInfo
+              info={t`Its definition to keep or move, and a blueprint others can start from.`}
+              label={t`More about copies`}
+            >
+              <CardTitle>{t`Copies`}</CardTitle>
+            </WithInfo>
           </CardHeader>
           <CardContent>
             <div {...stylex.props(styles.actions)}>
@@ -450,12 +449,12 @@ const ForBuilders = ({
         <Card asChild>
           <section aria-label={t`Its data`}>
             <CardHeader>
-              <CardTitle>
-                {t`Its data`}{" "}
-                <InfoTip
-                  label={t`More about its data`}
-                >{t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}</InfoTip>
-              </CardTitle>
+              <WithInfo
+                info={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
+                label={t`More about its data`}
+              >
+                <CardTitle>{t`Its data`}</CardTitle>
+              </WithInfo>
             </CardHeader>
             <CardContent>
               <ResetAppData app={app} />
@@ -466,12 +465,12 @@ const ForBuilders = ({
       <Card asChild>
         <section aria-label={t`Putting it away`}>
           <CardHeader>
-            <CardTitle>
-              {t`Putting it away`}{" "}
-              <InfoTip
-                label={t`More about putting it away`}
-              >{t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}</InfoTip>
-            </CardTitle>
+            <WithInfo
+              info={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
+              label={t`More about putting it away`}
+            >
+              <CardTitle>{t`Putting it away`}</CardTitle>
+            </WithInfo>
           </CardHeader>
           <CardContent>
             <PuttingAway app={app} />
@@ -688,10 +687,11 @@ const GeneralForm = ({
               </Field>
               <Field orientation="responsive">
                 <FieldContent>
-                  <FieldLabel>
-                    {t`Made for`}{" "}
-                    <InfoTip>{t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}</InfoTip>
-                  </FieldLabel>
+                  <WithInfo
+                    info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
+                  >
+                    <FieldLabel>{t`Made for`}</FieldLabel>
+                  </WithInfo>
                 </FieldContent>
                 <Select
                   disabled={disabled}
@@ -743,12 +743,14 @@ const GeneralForm = ({
           })}
         >
           <CardHeader>
-            <CardTitle>
-              {t({ message: "Owner", context: "who answers for an app" })}{" "}
-              <InfoTip
-                label={t`More about the owner`}
-              >{t`Who answers for the App: who is asked about it and decides what changes.`}</InfoTip>
-            </CardTitle>
+            <WithInfo
+              info={t`Who answers for the App: who is asked about it and decides what changes.`}
+              label={t`More about the owner`}
+            >
+              <CardTitle>
+                {t({ message: "Owner", context: "who answers for an app" })}
+              </CardTitle>
+            </WithInfo>
           </CardHeader>
           <CardContent>
             {/* The platform's one owner control, as a workflow's line has it. */}

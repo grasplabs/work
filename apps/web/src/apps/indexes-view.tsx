@@ -45,7 +45,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Fragment, useState } from "react";
 
 import { formatList } from "../format.ts";
-import { InfoTip } from "../frame/info-tip.tsx";
+import { WithInfo } from "../frame/info-tip.tsx";
 import type { ModelOperation } from "./data-model-changes.tsx";
 
 // A table's indexes and its search in an App's Data view, each by its
@@ -347,10 +347,11 @@ export const IndexesView = ({
         <Card size="sm" asChild>
           <section aria-label={t`Indexes`}>
             <CardHeader>
-              <CardTitle>
-                {t`Indexes`}{" "}
-                <InfoTip>{t`An index keeps records in order of a field, so queries that sort or filter by it stay fast. Search finds records by their words.`}</InfoTip>
-              </CardTitle>
+              <WithInfo
+                info={t`An index keeps records in order of a field, so queries that sort or filter by it stay fast. Search finds records by their words.`}
+              >
+                <CardTitle>{t`Indexes`}</CardTitle>
+              </WithInfo>
             </CardHeader>
             <CardContent flush={!none}>
               {none ? (

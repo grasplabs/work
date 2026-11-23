@@ -344,6 +344,25 @@ describe(AppSettings, () => {
     });
   });
 
+  it("keeps each title's and label's name its own words, its info mark beside it", async () => {
+    await opened(fakeCore("builder"));
+
+    // A heading's or a label's name is every word in it: a mark inside
+    // would join it ("Owner More about the owner").
+    const marks = [...document.querySelectorAll("button")].filter((each) =>
+      (each.getAttribute("aria-label") ?? "").startsWith("More about")
+    );
+    expect({
+      marks: marks.length > 0,
+      inside: marks.filter(
+        (each) => each.closest("h1, h2, h3, h4, label") !== null
+      ).length,
+      madeFor: [...document.querySelectorAll("label")].some(
+        (each) => each.textContent.trim() === "Made for"
+      ),
+    }).toStrictEqual({ marks: true, inside: 0, madeFor: true });
+  });
+
   it("shows someone who uses the App its settings to read, and nothing to change", async () => {
     await opened(fakeCore("user"));
 

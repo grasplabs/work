@@ -57,7 +57,7 @@ import { useId, useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
-import { InfoTip } from "../frame/info-tip.tsx";
+import { WithInfo } from "../frame/info-tip.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { firstChoice, formKey, noChoice, targetOf } from "./binding-form.ts";
 
@@ -506,10 +506,11 @@ const Undeclared = ({
     <Card size="sm" asChild>
       <section aria-label={t`No longer declared`}>
         <CardHeader>
-          <CardTitle level={3}>
-            {t`No longer declared`}{" "}
-            <InfoTip>{t`The current version doesn't declare these, so they serve nothing until a version declares them again.`}</InfoTip>
-          </CardTitle>
+          <WithInfo
+            info={t`The current version doesn't declare these, so they serve nothing until a version declares them again.`}
+          >
+            <CardTitle level={3}>{t`No longer declared`}</CardTitle>
+          </WithInfo>
         </CardHeader>
         <CardContent flush>
           <Table aria-label={t`No longer declared`} density="compact">
@@ -578,14 +579,15 @@ export const ResourceBindings = ({
       <Card size="sm" asChild>
         <section aria-label={t`Resources`}>
           <CardHeader>
-            <CardTitle level={3}>
-              {t`Resources`}{" "}
-              <InfoTip>
-                {decides
+            <WithInfo
+              info={
+                decides
                   ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
-                  : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`}
-              </InfoTip>
-            </CardTitle>
+                  : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`
+              }
+            >
+              <CardTitle level={3}>{t`Resources`}</CardTitle>
+            </WithInfo>
           </CardHeader>
           <CardContent>
             <div {...stylex.props(styles.body)}>
