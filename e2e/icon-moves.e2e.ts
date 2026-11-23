@@ -5,29 +5,32 @@ import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
 
 // The icon of a control moves in its own parts when the control is pointed
-// at (apps/web/src/icon-moves.css): the sidebar trigger's panel slides
-// over and back. At rest, and for whoever asked for less motion, nothing
+// at (apps/web/src/icon-moves.css): the chat bar's way into the chat, its
+// panel sliding over and back. Only the kit's (lucide's) icons: Damsko's
+// own controls, the frame's among them, keep their own look. At rest, and for whoever asked for less motion, nothing
 // moves. That every icon has a move is the lint's (grasp/icon-has-move,
 // scripts/lint/icon-has-move.test.ts).
 
-/** The animation the sidebar trigger's moving part runs now. */
+/** The control whose icon is watched: the chat bar's way into the chat. */
+const control = (page: Page) =>
+  page.getByRole("button", { name: "Open the chat" });
+
+/** The animation the control's moving part runs now. */
 const movePart = async (page: Page): Promise<string> =>
-  await page
-    .getByRole("button", { name: "Show or hide the sidebar" })
-    .locator("svg.lucide-panel-left > :nth-child(2)")
+  await control(page)
+    .locator("svg.lucide-panel-right-open > :nth-child(2)")
     .evaluate((part) => getComputedStyle(part).animationName);
 
 /** A transform that moves nothing, as the browser computes it. */
 const atRest = "matrix(1, 0, 0, 1, 0, 0)";
 
 /**
- * The sidebar trigger's moving part's transform at `share` of its move
- * (1 for its end), the move held there.
+ * The control's moving part's transform at `share` of its move (1 for
+ * its end), the move held there.
  */
 const transformAt = async (page: Page, share: number): Promise<string> =>
-  await page
-    .getByRole("button", { name: "Show or hide the sidebar" })
-    .locator("svg.lucide-panel-left > :nth-child(2)")
+  await control(page)
+    .locator("svg.lucide-panel-right-open > :nth-child(2)")
     .evaluate((part, at) => {
       const [move] = part.getAnimations();
       if (move === undefined) {
@@ -44,16 +47,8 @@ test("a control's icon moves when pointed at, and never for less motion", async 
 }) => {
   const { member } = peopleIn("iconMoves");
   const page = await pageOf(member);
-  await page.goto("/");
-  // The page itself first: while it loads, a header of its own stands in
-  // (frame/page-states.tsx), and the page's header replaces it with a
-  // trigger of its own, which isn't pointed at until the browser next
-  // looks where the pointer is. Measured across that, the move is gone.
-  // Its box.
-  await expect(page.getByLabel("Your question")).toBeVisible();
-  const trigger = page.getByRole("button", {
-    name: "Show or hide the sidebar",
-  });
+  await page.goto("/apps");
+  const trigger = control(page);
   await expect(trigger).toBeVisible();
   expect(await movePart(page)).toBe("none");
 

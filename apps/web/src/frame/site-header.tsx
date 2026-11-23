@@ -1,6 +1,17 @@
-import { SiteHeader as SiteHeaderBar } from "@grasp-os/app-kit/components/site-header";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@grasp-os/ui/components/breadcrumb";
+import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
+import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
@@ -42,63 +53,159 @@ export type Crumb =
       params: { workflow: string };
     };
 
-/** Where a crumb leads, as a link. */
-const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
+/** Where a crumb leads, as a router link holding its name. */
+const CrumbLink = ({ crumb }: { crumb: Extract<Crumb, { to: string }> }) => {
+  const { label } = crumb;
   // A place on the brain's atlas: a region, a folder in it, a note there.
   if ("search" in crumb) {
-    return <Link search={crumb.search} to="/brain" />;
+    return (
+      <Link search={crumb.search} to="/brain">
+        {label}
+      </Link>
+    );
   }
   if (!("params" in crumb)) {
-    return <Link to={crumb.to} />;
+    return <Link to={crumb.to}>{label}</Link>;
   }
   if (crumb.to === "/workflows/$workflow") {
-    return <Link params={crumb.params} to="/workflows/$workflow" />;
+    return (
+      <Link params={crumb.params} to="/workflows/$workflow">
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/projects/$projectId") {
-    return <Link params={crumb.params} to="/projects/$projectId" />;
+    return (
+      <Link params={crumb.params} to="/projects/$projectId">
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/brain/$noteId") {
-    return <Link params={crumb.params} to="/brain/$noteId" />;
+    return (
+      <Link params={crumb.params} to="/brain/$noteId">
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/brain/sections/$sectionId") {
-    return <Link params={crumb.params} to="/brain/sections/$sectionId" />;
+    return (
+      <Link params={crumb.params} to="/brain/sections/$sectionId">
+        {label}
+      </Link>
+    );
   }
-  return <Link params={crumb.params} to="/apps/$app" />;
+  return (
+    <Link params={crumb.params} to="/apps/$app">
+      {label}
+    </Link>
+  );
 };
 
+const styles = stylex.create({
+  // One row the shell's bar height, across the page's card from edge to
+  // edge, at the top of the page, which scrolls under it: on the card's
+  // own ground (Damsko's SidebarInset: the page's ground under the lg
+  // breakpoint, the sidebar's card from it), with a hairline at its foot.
+  bar: {
+    position: "sticky",
+    insetBlockStart: 0,
+    zIndex: 20,
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+    boxSizing: "border-box",
+    minWidth: 0,
+    height: size.appShellBar,
+    paddingInline: size.appShellPageInline,
+    backgroundColor: {
+      default: colors.background,
+      [media.lg]: colors.sidebarCard,
+    },
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  // Where the page is, then where its subject stands: they give way to the
+  // actions, never the other way round.
+  where: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
+  actions: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+    marginInlineStart: "auto",
+  },
+});
+
 /**
- * The bar above every signed-in page (`SiteHeader` in the kit, the same
- * as the admin's): the sidebar's trigger, then where the page is, with
- * where its subject stands after it (`trailing`), and on the right any
- * page action. `phoneCrumbs` says which crumbs a phone keeps (the kit's
- * `phoneCrumbs`).
+ * The bar above every signed-in page, the one way a page heads itself, so
+ * the frame changes every page's bar here: Damsko's SidebarTrigger at its
+ * start while the sidebar is away (folded, or a sheet on a narrow window;
+ * otherwise the sidebar's head holds it), then where the page is (Damsko's
+ * Breadcrumb, which under 640px keeps only the step back; its steps parted
+ * by a slash, as the product's bar has them), with where its
+ * subject stands after it (`trailing`), and at its end the page's actions.
+ * It is app-shell-01's header, drawn by the page: the block draws its own
+ * and the page's title from props, which a page here can't give it
+ * (damsko-registry-gaps, 2026-11-23, frame).
  */
 export const SiteHeader = ({
   crumbs,
   actions,
   trailing,
-  phoneCrumbs,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
   trailing?: ReactNode;
-  phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
+  const { state, isMobile } = useSidebar();
+  const away = isMobile || state === "collapsed";
+  const last = crumbs.length - 1;
   return (
-    <SiteHeaderBar
-      actions={actions}
-      trailing={trailing}
-      phoneCrumbs={phoneCrumbs}
-      breadcrumbLabel={t`Breadcrumb`}
-      crumbs={crumbs.map((crumb) =>
-        "to" in crumb
-          ? { label: crumb.label, link: crumbLink(crumb) }
-          : { label: crumb.label }
+    <header data-slot="site-header" {...stylex.props(styles.bar)}>
+      {away ? (
+        <SidebarTrigger aria-label={t`Show or hide the sidebar`} />
+      ) : null}
+      <div {...stylex.props(styles.where)}>
+        <Breadcrumb aria-label={t`Breadcrumb`}>
+          <BreadcrumbList>
+            {crumbs.map((crumb, index) => (
+              // A path's steps don't move: each stands at its own place.
+              <Fragment key={index}>
+                {index === 0 ? null : (
+                  <BreadcrumbSeparator>/</BreadcrumbSeparator>
+                )}
+                <BreadcrumbItem>
+                  {index !== last && "to" in crumb ? (
+                    <BreadcrumbLink asChild>
+                      <CrumbLink crumb={crumb} />
+                    </BreadcrumbLink>
+                  ) : (
+                    <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+              </Fragment>
+            ))}
+          </BreadcrumbList>
+        </Breadcrumb>
+        {trailing === undefined ? null : (
+          <div {...stylex.props(styles.trailing)}>{trailing}</div>
+        )}
+      </div>
+      {actions === undefined ? null : (
+        <div {...stylex.props(styles.actions)}>{actions}</div>
       )}
-      // The sidebar holds its own fold on a wider screen (frame/sidebar-brand.tsx).
-      trigger="mobile"
-      triggerLabel={t`Show or hide the sidebar`}
-    />
+    </header>
   );
 };

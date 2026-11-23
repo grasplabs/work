@@ -2127,13 +2127,13 @@ msgid "AI"
 msgstr "KI"
 
 #: src/routes/_shell.settings.ai-providers.tsx
-#: src/routes/_shell.settings.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/sections.ts
 msgid "AI providers"
 msgstr "KI-Anbieter"
 
 #: src/routes/_shell.settings.spend.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "AI spend"
 msgstr "KI-Ausgaben"
 
@@ -3027,8 +3027,8 @@ msgid "Attached a file to a chat"
 msgstr "Eine Datei an einen Chat angehängt"
 
 #: src/routes/_shell.settings.audit.tsx
-#: src/routes/_shell.settings.tsx
 #: src/settings/audit-archive.tsx
+#: src/settings/sections.ts
 msgid "Audit trail"
 msgstr "Audit-Trail"
 
@@ -3049,6 +3049,7 @@ msgstr "Verfügbar, über Composio"
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
 #: src/chat/composer-menu.tsx
+#: src/frame/settings-level.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Back"
@@ -3106,7 +3107,7 @@ msgid "Berlin"
 msgstr "Berlin"
 
 #: src/routes/_shell.settings.billing.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Billing"
 msgstr "Abrechnung"
 
@@ -3178,7 +3179,7 @@ msgstr "Gebunden an"
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Gehirn"
 
@@ -3188,6 +3189,7 @@ msgid "Brain"
 msgstr "Gehirn"
 
 #: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
 msgid "Breadcrumb"
 msgstr "Brotkrümelnavigation"
 
@@ -3838,6 +3840,7 @@ msgstr "Filter zurücksetzen"
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/place-picker.tsx
 #: src/report/report-dialog.tsx
@@ -4861,6 +4864,7 @@ msgstr "Ein Konto getrennt"
 msgid "Disconnected on {since}."
 msgstr "Am {since} getrennt."
 
+#: src/frame/ui-words.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Schließen"
@@ -7095,7 +7099,7 @@ msgstr "Anweisung"
 #: src/agents/agent-page.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Instructions"
 msgstr "Anweisungen"
 
@@ -7733,7 +7737,7 @@ msgstr "Bekannt"
 msgid "Known about your organization"
 msgstr "Bekannt über Ihre Organisation"
 
-#: src/language-picker.tsx
+#: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Sprache"
@@ -8114,6 +8118,7 @@ msgid "Mailbox or drive, if not the account's own"
 msgstr "Postfach oder Laufwerk, falls nicht das eigene des Kontos"
 
 #: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Main"
 msgstr "Hauptmenü"
 
@@ -8230,7 +8235,7 @@ msgstr "Mitglied"
 msgid "Members"
 msgstr "Mitglieder"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Members and roles"
 msgstr "Mitglieder und Rollen"
 
@@ -8303,8 +8308,8 @@ msgid "Model: {name}. Change model"
 msgstr "Modell: {name}. Modell ändern"
 
 #: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.settings.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/sections.ts
 msgid "Models"
 msgstr "Modelle"
 
@@ -8351,6 +8356,10 @@ msgstr "Mehr über diese Verbindungen"
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "Mehr über diese Verbindung"
+
+#: src/frame/ui-words.tsx
+msgid "More actions"
+msgstr "Weitere Aktionen"
 
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "the catalog's apps nobody connected"
@@ -9514,6 +9523,10 @@ msgstr "Bemerkt in"
 msgid "Noticed in {source}"
 msgstr "Bemerkt in {source}"
 
+#: src/frame/ui-words.tsx
+msgid "Notifications"
+msgstr "Benachrichtigungen"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "the end of a time line: this moment"
 msgid "now"
@@ -9674,7 +9687,7 @@ msgid "Onboard a new hire: laptop, accounts and a first-week plan."
 msgstr "Neue Mitarbeitende einarbeiten: Laptop, Konten und ein Plan für die erste Woche."
 
 #: src/routes/_shell.settings.onboarding.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Onboarding"
 msgstr "Onboarding"
 
@@ -9998,6 +10011,10 @@ msgstr "Notiz wird geöffnet"
 #: src/routes/interview.tsx
 msgid "Opening your interview…"
 msgstr "Ihr Gespräch wird geöffnet …"
+
+#: src/frame/ui-words.tsx
+msgid "opens in a new tab"
+msgstr "öffnet in einem neuen Tab"
 
 #: src/apps/app-own-link.tsx
 msgid "Opens the App for the workspace's members who may use it, while it is published."
@@ -10543,7 +10560,7 @@ msgid "Products"
 msgstr "Produkte"
 
 #: src/routes/_shell.settings.profile.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Profile"
 msgstr "Profil"
 
@@ -12035,7 +12052,7 @@ msgstr "Geheimnis"
 msgid "Secret revoked"
 msgstr "Geheimnis widerrufen"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Security"
 msgstr "Sicherheit"
 
@@ -12231,7 +12248,8 @@ msgid "Setting up {name}…"
 msgstr "{name} wird eingerichtet…"
 
 #: src/apps/app-page.tsx
-#: src/frame/app-sidebar.tsx
+#: src/frame/person-menu.tsx
+#: src/frame/settings-level.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -12424,6 +12442,10 @@ msgstr "Genau Gesendetes anzeigen"
 msgid "Show fewer"
 msgstr "Weniger anzeigen"
 
+#: src/frame/ui-words.tsx
+msgid "Show hidden levels"
+msgstr "Ausgeblendete Ebenen zeigen"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Show in the brain"
 msgstr "Im Gehirn zeigen"
@@ -12462,8 +12484,9 @@ msgstr "Ältere Ereignisse anzeigen"
 msgid "Show older versions"
 msgstr "Ältere Versionen anzeigen"
 
-#: src/frame/sidebar-brand.tsx
+#: src/frame/app-sidebar.tsx
 #: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
 msgid "Show or hide the sidebar"
 msgstr "Seitenleiste ein- oder ausblenden"
 
@@ -12496,6 +12519,7 @@ msgid "Shown with the App. It opens the App to nobody: who may use it is who it 
 msgstr "Wird mit der App angezeigt. Es öffnet die App für niemanden: Nutzen darf sie, mit wem sie geteilt ist."
 
 #: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Sidebar"
 msgstr "Seitenleiste"
 
@@ -13038,6 +13062,10 @@ msgstr "Noch im Versuch · {tries} Versuche"
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "Wartet noch"
+
+#: src/frame/ui-words.tsx
+msgid "Still working"
+msgstr "Läuft noch"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -15084,7 +15112,7 @@ msgid "Unknown device"
 msgstr "Unbekanntes Gerät"
 
 #: src/routes/_shell.settings.outcomes.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Unknown outcomes"
 msgstr "Unbekannte Ergebnisse"
 
@@ -15592,8 +15620,8 @@ msgstr "Wir wollen weniger Zeit mit wiederkehrender Arbeit verbringen, damit meh
 msgid "Webhook trigger"
 msgstr "Webhook-Auslöser"
 
-#: src/routes/_shell.settings.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/sections.ts
 msgid "Webhooks"
 msgstr "Webhooks"
 
@@ -16633,11 +16661,11 @@ msgstr "Arbeitet in"
 msgid "Works on its own"
 msgstr "Arbeitet selbstständig"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Workspace"
 msgstr "Workspace"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Arbeitsbereich"
@@ -16868,7 +16896,7 @@ msgstr "Du bist als Gast mit {email} angemeldet. Was jemand mit dir teilt, ersch
 msgid "You're still signed in. Try again in a moment."
 msgstr "Sie sind noch angemeldet. Versuchen Sie es gleich noch einmal."
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Your account"
 msgstr "Ihr Konto"
 

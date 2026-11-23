@@ -93,19 +93,24 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   ).toHaveText(["Profile", "Instructions", "Security"]);
 });
 
-test("on a phone the sections are one control above the section", async ({
+test("on a phone the sections are in the sidebar's sheet", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("settings");
   const page = await pageOf(admin);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/profile");
-  await expect(page.getByRole("navigation", { name: "Settings" })).toBeHidden();
-  const sections = page.getByRole("combobox", { name: "Settings" });
-  await expect(sections).toContainText("Profile");
-  await sections.click();
-  await page.getByRole("option", { name: "Members and roles" }).click();
+  const nav = page.getByRole("navigation", { name: "Settings" });
+  await expect(nav).toBeHidden();
+  await page.getByRole("button", { name: "Show or hide the sidebar" }).click();
+  await expect(nav.getByRole("link", { name: "Profile" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await nav.getByRole("link", { name: "Members and roles" }).click();
   await expect(page).toHaveURL(/\/settings\/members$/u);
+  // Going there closes the sheet, so the section is in view.
+  await expect(nav).toBeHidden();
   await expect(sectionOf(page, "Roles")).toBeVisible();
 });
 

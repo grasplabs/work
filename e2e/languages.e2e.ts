@@ -35,8 +35,9 @@ test("follows the browser's language, then the one the person picks", async ({
   ).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
-  // And in Settings → Profile, which the sidebar's Settings opens.
-  await page.getByRole("link", { name: "Instellingen", exact: true }).click();
+  // And in Settings → Profile, which the person menu's Settings opens.
+  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Instellingen" }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await page.getByRole("combobox", { name: "Taal" }).click();
   await page.getByRole("option", { name: "English" }).click();

@@ -1,4 +1,10 @@
+import type { SidebarApp } from "@grasp-os/shared/pages";
 import {
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import {
+  SidebarCollapsible,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
@@ -7,11 +13,11 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from "@grasp-os/app-kit/components/sidebar";
-import type { SidebarApp } from "@grasp-os/shared/pages";
+} from "@grasp-os/ui/components/sidebar";
+import { ChevronDownIcon, Icon, LayoutGridIcon } from "@grasp-os/ui/lib/icons";
 import { Trans } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { AppWindowIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -19,7 +25,9 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { appSplat } from "../pages/app-address.ts";
 
 // The Apps' sidebar surfaces (spec 34.1), a group of their own in the
-// shell's sidebar: each App that declares any, by name, its entries under it. An
+// shell's sidebar, which folds under its label as the person leaves it
+// (Damsko's SidebarCollapsible, kept with the sidebar's own choices): each
+// App that declares any, by name, its entries under it. An
 // entry opens the App's page at the entry's route (pages/app-address.ts),
 // which opening checks with core as any address; listing them opens
 // nothing. Read once as the sidebar shows; none while core doesn't
@@ -48,12 +56,18 @@ const useSidebarApps = (core: CoreConnection): SidebarApp[] => {
   return apps;
 };
 
+const styles = stylex.create({
+  // The fold's mark, at the label's end.
+  chevron: { display: "inline-flex", marginInlineStart: "auto" },
+});
+
 /** One App, its sidebar entries under it. */
 const AppEntries = ({ app }: { app: SidebarApp }) => {
   const matchRoute = useMatchRoute();
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        asChild
         isActive={
           matchRoute({
             to: "/apps/$app",
@@ -61,31 +75,30 @@ const AppEntries = ({ app }: { app: SidebarApp }) => {
             fuzzy: true,
           }) !== false
         }
-        render={<Link params={{ app: app.app }} to="/apps/$app" />}
-        tooltip={app.name}
       >
-        <AppWindowIcon />
-        <span>{app.name}</span>
+        <Link params={{ app: app.app }} to="/apps/$app">
+          <Icon icon={LayoutGridIcon} />
+          {app.name}
+        </Link>
       </SidebarMenuButton>
       <SidebarMenuSub>
         {app.entries.map((entry) => {
           const splat = appSplat(entry.path);
           return (
             <SidebarMenuSubItem key={entry.path}>
-              <SidebarMenuSubButton
-                render={
-                  splat === "" ? (
-                    <Link params={{ app: app.app }} to="/apps/$app" />
-                  ) : (
-                    <Link
-                      params={{ app: app.app, _splat: splat }}
-                      to="/apps/$app/pages/$"
-                    />
-                  )
-                }
-                size="sm"
-              >
-                <span className="truncate">{entry.title}</span>
+              <SidebarMenuSubButton asChild>
+                {splat === "" ? (
+                  <Link params={{ app: app.app }} to="/apps/$app">
+                    {entry.title}
+                  </Link>
+                ) : (
+                  <Link
+                    params={{ app: app.app, _splat: splat }}
+                    to="/apps/$app/pages/$"
+                  >
+                    {entry.title}
+                  </Link>
+                )}
               </SidebarMenuSubButton>
             </SidebarMenuSubItem>
           );
@@ -106,17 +119,28 @@ export const SurfaceNav = ({ core }: { core: CoreConnection }) => {
     return null;
   }
   return (
-    <SidebarGroup>
-      {/* Said in so many words: below are the Apps' own entries, not
-          Grasp's, whatever an App calls them. */}
-      <SidebarGroupLabel id={labelId}>
-        <Trans>From your Apps</Trans>
-      </SidebarGroupLabel>
-      <SidebarMenu aria-labelledby={labelId}>
-        {apps.map((app) => (
-          <AppEntries app={app} key={app.app} />
-        ))}
-      </SidebarMenu>
-    </SidebarGroup>
+    <SidebarCollapsible name="apps">
+      <SidebarGroup>
+        {/* Said in so many words: below are the Apps' own entries, not
+            Grasp's, whatever an App calls them. */}
+        <CollapsibleTrigger asChild>
+          <SidebarGroupLabel asChild>
+            <button id={labelId} type="button">
+              <Trans>From your Apps</Trans>
+              <span aria-hidden="true" {...stylex.props(styles.chevron)}>
+                <Icon icon={ChevronDownIcon} />
+              </span>
+            </button>
+          </SidebarGroupLabel>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenu aria-labelledby={labelId}>
+            {apps.map((app) => (
+              <AppEntries app={app} key={app.app} />
+            ))}
+          </SidebarMenu>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </SidebarCollapsible>
   );
 };

@@ -1,4 +1,6 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,48 +14,47 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@grasp-os/app-kit/components/sidebar";
-import { toast } from "@grasp-os/app-kit/components/toast";
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/sidebar";
+import { isThemeMode, themeModes } from "@grasp-os/ui/components/theme-toggle";
+import type { ThemeMode } from "@grasp-os/ui/components/theme-toggle";
+import { toast } from "@grasp-os/ui/components/toast";
 import {
+  ChevronsUpDownIcon,
+  GlobeIcon,
+  Icon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
   RocketIcon,
+  SettingsIcon,
   SunIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useSyncExternalStore } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
+import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
+import type { Locale } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
-import { LanguageMenu } from "../language-picker.tsx";
-import {
-  applyTheme,
-  chooseTheme,
-  isTheme,
-  onThemeChange,
-  readTheme,
-  themes,
-} from "./theme.ts";
-import type { Theme } from "./theme.ts";
+import { OrganizationName } from "./organization-name.tsx";
+import { applyTheme, chooseTheme, onThemeChange, readTheme } from "./theme.ts";
 
-// The person signed in, at the foot of the sidebar, as in the prototype
-// (`components/nav-user.tsx`): a menu with their onboarding, the language,
-// the theme and signing out. Settings is in the
-// sidebar itself, above it (app-sidebar.tsx).
+// The person signed in, at the foot of the sidebar: their initials, their
+// name and their organization's, and their menu: Settings, their
+// onboarding, the language, the theme, and signing out.
 
 const nameParts = /\s+/u;
 
@@ -75,52 +76,41 @@ export const initials = (name: string): string => {
     .join("");
 };
 
-/**
- * The person on the menu's button, as the prototype's: their initials and
- * their name, which is the button's name. Their role is in the menu.
- */
-const Who = ({ identity }: { identity: Identity }) => (
-  <>
-    <Avatar shape="square" size="xs">
-      <AvatarFallback aria-hidden="true">
-        {initials(identity.name)}
-      </AvatarFallback>
-    </Avatar>
-    <span className="flex-1 truncate text-left">{identity.name}</span>
-  </>
-);
+const styles = stylex.create({
+  // The person's name over their organization's, cut where the row ends.
+  who: {
+    display: "grid",
+    flexGrow: 1,
+    minWidth: 0,
+    textAlign: "start",
+  },
+  name: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontWeight: font.weightMedium,
+    lineHeight: font.sidebarNameLine,
+  },
+  organization: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: colors.sidebarSecondaryForeground,
+    fontSize: font.textXs,
+    lineHeight: font.sidebarNoteLine,
+  },
+  // Atop the menu: who is signed in, and their role.
+  signedIn: { display: "grid", gap: space["1"] },
+  role: { fontWeight: font.weightNormal },
+});
 
-/**
- * Who is signed in, atop the menu, as the prototype's: their initials and
- * their name, as on the menu's button; under the name, their role.
- */
-const SignedIn = ({ identity }: { identity: Identity }) => {
-  const { t } = useLingui();
-  const role = roleLabel(identity.role);
-  return (
-    <DropdownMenuLabel variant="person">
-      <Avatar shape="square">
-        <AvatarFallback aria-hidden="true">
-          {initials(identity.name)}
-        </AvatarFallback>
-      </Avatar>
-      <span className="grid min-w-0 flex-1 leading-tight">
-        <span className="truncate font-medium">{identity.name}</span>
-        <span className="truncate text-xs">
-          {identity.staff ? t`${role}, Grasp staff` : role}
-        </span>
-      </span>
-    </DropdownMenuLabel>
-  );
-};
-
-const themeNames: Record<Theme, MessageDescriptor> = {
+const themeNames: Record<ThemeMode, MessageDescriptor> = {
   light: msg`Light`,
   dark: msg`Dark`,
   system: msg`System`,
 };
 
-const themeIcons: Record<Theme, LucideIcon> = {
+const themeIcons: Record<ThemeMode, IconData> = {
   light: SunIcon,
   dark: MoonIcon,
   system: MonitorIcon,
@@ -128,33 +118,28 @@ const themeIcons: Record<Theme, LucideIcon> = {
 
 /**
  * Light, dark or the system's, as a submenu of the person menu: the
- * person's own choice in this browser (theme.ts). The person menu applies
- * it; this mounts only while the menu is open.
+ * person's own choice in this browser (theme.ts), on Damsko's modes. The
+ * person menu applies it; this mounts only while the menu is open.
  */
 const ThemeMenu = ({ userId }: { userId: string }) => {
   const { t, i18n } = useLingui();
   // Read where it is kept, so a choice made in another tab shows here too.
   const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  const Icon = themeIcons[theme];
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <Icon />
+      <DropdownMenuSubTrigger icon={themeIcons[theme]}>
         {t`Theme`}
-        <span className="text-muted-foreground ml-auto">
-          {i18n._(themeNames[theme])}
-        </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         <DropdownMenuRadioGroup
           value={theme}
           onValueChange={(value: unknown) => {
-            if (isTheme(value)) {
+            if (isThemeMode(value)) {
               chooseTheme(userId, value);
             }
           }}
         >
-          {themes.map((each) => (
+          {themeModes.map((each) => (
             <DropdownMenuRadioItem key={each} value={each}>
               {i18n._(themeNames[each])}
             </DropdownMenuRadioItem>
@@ -165,6 +150,39 @@ const ThemeMenu = ({ userId }: { userId: string }) => {
   );
 };
 
+/**
+ * The language the product speaks, as a submenu of the person menu. Each
+ * language is named in its own words, so anyone can find theirs.
+ */
+const LanguageMenu = () => {
+  const { t, i18n } = useLingui();
+  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger icon={GlobeIcon}>
+        {t`Language`}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        <DropdownMenuRadioGroup
+          value={locale}
+          onValueChange={(value: unknown) => {
+            if (isLocale(value)) {
+              void chooseLocale(value);
+            }
+          }}
+        >
+          {Object.entries(localeNames).map(([value, label]) => (
+            <DropdownMenuRadioItem key={value} label={label} value={value}>
+              <span lang={value}>{label}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+};
+
+/** The person at the sidebar's foot, and their menu. */
 export const PersonMenu = ({
   core,
   identity,
@@ -179,14 +197,14 @@ export const PersonMenu = ({
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
   const { isMobile } = useSidebar();
-  // The menu is gone once clicked: a sign-out core didn't carry out is
+  const role = roleLabel(identity.role);
+  // The menu is gone once pressed: a sign-out core didn't carry out is
   // said in a toast, and the page stays.
   const signOutOrSay = async (): Promise<void> => {
     try {
       await signOut(core);
     } catch {
-      toast.add({
-        type: "error",
+      toast.error({
         title: t`Signing out didn't work`,
         description: t`You're still signed in. Try again in a moment.`,
       });
@@ -196,38 +214,53 @@ export const PersonMenu = ({
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<SidebarMenuButton />}>
-            <Who identity={identity} />
+          <DropdownMenuTrigger asChild>
+            {/* Named by the person alone: their role is in the menu. */}
+            <SidebarMenuButton aria-label={identity.name} size="lg">
+              <Avatar decorative name={identity.name} size="sm">
+                <AvatarFallback>{initials(identity.name)}</AvatarFallback>
+              </Avatar>
+              <span {...stylex.props(styles.who)}>
+                <span {...stylex.props(styles.name)}>{identity.name}</span>
+                <span {...stylex.props(styles.organization)}>
+                  <OrganizationName core={core} />
+                </span>
+              </span>
+              <Icon icon={ChevronsUpDownIcon} />
+            </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-56"
-            side={isMobile ? "bottom" : "right"}
-            sideOffset={4}
-          >
-            <DropdownMenuGroup>
-              <SignedIn identity={identity} />
-            </DropdownMenuGroup>
+          <DropdownMenuContent align="end" side={isMobile ? "top" : "right"}>
+            <DropdownMenuLabel>
+              <span {...stylex.props(styles.signedIn)}>
+                <span>{identity.name}</span>
+                <span {...stylex.props(styles.role)}>
+                  {identity.staff ? t`${role}, Grasp staff` : role}
+                </span>
+              </span>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
+              <DropdownMenuItem asChild icon={SettingsIcon}>
+                <Link to="/settings/profile">{t`Settings`}</Link>
+              </DropdownMenuItem>
               {/* The company's own onboarding, which only its admins go through. */}
               {isAdmin(identity.role) && identity.onboardingOnly !== true ? (
-                <DropdownMenuItem render={<Link to="/setup" />}>
-                  <RocketIcon />
-                  {t`Your onboarding`}
+                <DropdownMenuItem asChild icon={RocketIcon}>
+                  <Link to="/setup">{t`Your onboarding`}</Link>
                 </DropdownMenuItem>
               ) : null}
               <LanguageMenu />
               <ThemeMenu userId={identity.userId} />
-              <DropdownMenuItem
-                onClick={() => {
-                  void signOutOrSay();
-                }}
-              >
-                <LogOutIcon />
-                {t`Sign out`}
-              </DropdownMenuItem>
             </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              icon={LogOutIcon}
+              onSelect={() => {
+                void signOutOrSay();
+              }}
+            >
+              {t`Sign out`}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

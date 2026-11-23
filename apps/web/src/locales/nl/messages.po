@@ -2127,13 +2127,13 @@ msgid "AI"
 msgstr "AI"
 
 #: src/routes/_shell.settings.ai-providers.tsx
-#: src/routes/_shell.settings.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/sections.ts
 msgid "AI providers"
 msgstr "AI-aanbieders"
 
 #: src/routes/_shell.settings.spend.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "AI spend"
 msgstr "AI-uitgaven"
 
@@ -3027,8 +3027,8 @@ msgid "Attached a file to a chat"
 msgstr "Een bestand aan een chat toegevoegd"
 
 #: src/routes/_shell.settings.audit.tsx
-#: src/routes/_shell.settings.tsx
 #: src/settings/audit-archive.tsx
+#: src/settings/sections.ts
 msgid "Audit trail"
 msgstr "Audittrail"
 
@@ -3049,6 +3049,7 @@ msgstr "Beschikbaar, via Composio"
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
 #: src/chat/composer-menu.tsx
+#: src/frame/settings-level.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Back"
@@ -3106,7 +3107,7 @@ msgid "Berlin"
 msgstr "Berlijn"
 
 #: src/routes/_shell.settings.billing.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Billing"
 msgstr "Facturatie"
 
@@ -3178,7 +3179,7 @@ msgstr "Gekoppeld aan"
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brein"
 
@@ -3188,6 +3189,7 @@ msgid "Brain"
 msgstr "Brein"
 
 #: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
 msgid "Breadcrumb"
 msgstr "Kruimelpad"
 
@@ -3838,6 +3840,7 @@ msgstr "Filters wissen"
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/place-picker.tsx
 #: src/report/report-dialog.tsx
@@ -4861,6 +4864,7 @@ msgstr "Een account ontkoppeld"
 msgid "Disconnected on {since}."
 msgstr "Ontkoppeld op {since}."
 
+#: src/frame/ui-words.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Sluiten"
@@ -7095,7 +7099,7 @@ msgstr "Instructie"
 #: src/agents/agent-page.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Instructions"
 msgstr "Instructies"
 
@@ -7733,7 +7737,7 @@ msgstr "Bekend"
 msgid "Known about your organization"
 msgstr "Bekend over je organisatie"
 
-#: src/language-picker.tsx
+#: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Taal"
@@ -8114,6 +8118,7 @@ msgid "Mailbox or drive, if not the account's own"
 msgstr "Postvak of schijf, als het niet die van het account zelf is"
 
 #: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Main"
 msgstr "Hoofdmenu"
 
@@ -8230,7 +8235,7 @@ msgstr "Lid"
 msgid "Members"
 msgstr "Leden"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Members and roles"
 msgstr "Leden en rollen"
 
@@ -8303,8 +8308,8 @@ msgid "Model: {name}. Change model"
 msgstr "Model: {name}. Model wijzigen"
 
 #: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.settings.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/sections.ts
 msgid "Models"
 msgstr "Modellen"
 
@@ -8351,6 +8356,10 @@ msgstr "Meer over deze koppelingen"
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "Meer over deze koppeling"
+
+#: src/frame/ui-words.tsx
+msgid "More actions"
+msgstr "Meer acties"
 
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "the catalog's apps nobody connected"
@@ -9514,6 +9523,10 @@ msgstr "Opgemerkt in"
 msgid "Noticed in {source}"
 msgstr "Opgemerkt in {source}"
 
+#: src/frame/ui-words.tsx
+msgid "Notifications"
+msgstr "Meldingen"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "the end of a time line: this moment"
 msgid "now"
@@ -9674,7 +9687,7 @@ msgid "Onboard a new hire: laptop, accounts and a first-week plan."
 msgstr "Een nieuwe collega inwerken: laptop, accounts en een plan voor de eerste week."
 
 #: src/routes/_shell.settings.onboarding.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Onboarding"
 msgstr "Onboarding"
 
@@ -9998,6 +10011,10 @@ msgstr "De notitie gaat open"
 #: src/routes/interview.tsx
 msgid "Opening your interview…"
 msgstr "Je gesprek wordt geopend…"
+
+#: src/frame/ui-words.tsx
+msgid "opens in a new tab"
+msgstr "opent in een nieuw tabblad"
 
 #: src/apps/app-own-link.tsx
 msgid "Opens the App for the workspace's members who may use it, while it is published."
@@ -10543,7 +10560,7 @@ msgid "Products"
 msgstr "Producten"
 
 #: src/routes/_shell.settings.profile.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Profile"
 msgstr "Profiel"
 
@@ -12035,7 +12052,7 @@ msgstr "Geheim"
 msgid "Secret revoked"
 msgstr "Geheim ingetrokken"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Security"
 msgstr "Beveiliging"
 
@@ -12231,7 +12248,8 @@ msgid "Setting up {name}…"
 msgstr "{name} wordt opgezet…"
 
 #: src/apps/app-page.tsx
-#: src/frame/app-sidebar.tsx
+#: src/frame/person-menu.tsx
+#: src/frame/settings-level.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -12424,6 +12442,10 @@ msgstr "Toon wat precies wordt verstuurd"
 msgid "Show fewer"
 msgstr "Minder tonen"
 
+#: src/frame/ui-words.tsx
+msgid "Show hidden levels"
+msgstr "Verborgen niveaus tonen"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Show in the brain"
 msgstr "Toon in het brein"
@@ -12462,8 +12484,9 @@ msgstr "Oudere gebeurtenissen tonen"
 msgid "Show older versions"
 msgstr "Oudere versies tonen"
 
-#: src/frame/sidebar-brand.tsx
+#: src/frame/app-sidebar.tsx
 #: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
 msgid "Show or hide the sidebar"
 msgstr "Zijbalk tonen of verbergen"
 
@@ -12496,6 +12519,7 @@ msgid "Shown with the App. It opens the App to nobody: who may use it is who it 
 msgstr "Wordt bij de app getoond. Het opent de app voor niemand: wie hem mag gebruiken, is met wie hij gedeeld is."
 
 #: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Sidebar"
 msgstr "Zijbalk"
 
@@ -13038,6 +13062,10 @@ msgstr "Nog bezig · {tries} pogingen"
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "Wacht nog"
+
+#: src/frame/ui-words.tsx
+msgid "Still working"
+msgstr "Nog bezig"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -15084,7 +15112,7 @@ msgid "Unknown device"
 msgstr "Onbekend apparaat"
 
 #: src/routes/_shell.settings.outcomes.tsx
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Unknown outcomes"
 msgstr "Onbekende uitkomsten"
 
@@ -15592,8 +15620,8 @@ msgstr "We willen minder tijd kwijt zijn aan herhaalwerk, zodat er meer tijd is 
 msgid "Webhook trigger"
 msgstr "Webhooktrigger"
 
-#: src/routes/_shell.settings.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/sections.ts
 msgid "Webhooks"
 msgstr "Webhooks"
 
@@ -16633,11 +16661,11 @@ msgstr "Werkt in"
 msgid "Works on its own"
 msgstr "Werkt zelfstandig"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Workspace"
 msgstr "Werkruimte"
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Werkruimte"
@@ -16868,7 +16896,7 @@ msgstr "Je bent als gast ingelogd met {email}. Wat iemand met je deelt, verschij
 msgid "You're still signed in. Try again in a moment."
 msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 
-#: src/routes/_shell.settings.tsx
+#: src/settings/sections.ts
 msgid "Your account"
 msgstr "Je account"
 

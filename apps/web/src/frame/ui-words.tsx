@@ -32,6 +32,33 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Working`,
       success: t`Done`,
     },
+    alert: {
+      close: t`Dismiss`,
+    },
+    breadcrumb: {
+      ellipsis: t`Show hidden levels`,
+      name: t`Breadcrumb`,
+    },
+    dropdownMenu: {
+      expand: t`More actions`,
+    },
+    link: {
+      external: t`opens in a new tab`,
+    },
+    sheet: {
+      close: t`Close`,
+    },
+    sidebar: {
+      main: t`Main`,
+      name: t`Sidebar`,
+      toggle: t`Show or hide the sidebar`,
+    },
+    toast: {
+      close: t`Close`,
+      error: t`Could not finish`,
+      loading: t`Still working`,
+      name: t`Notifications`,
+    },
   };
   return (
     <I18nProvider catalog={catalog} locale={i18n.locale}>
