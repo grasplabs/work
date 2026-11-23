@@ -18,7 +18,7 @@ import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import { font } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
@@ -208,6 +208,7 @@ export const DecisionConfirmDialog = ({
   onCancel: (pending: PendingConfirmation) => void;
 }) => {
   const { t } = useLingui();
+  const cancelId = useId();
   const [ready, setReady] = useState<PendingConfirmation>();
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -239,6 +240,11 @@ export const DecisionConfirmDialog = ({
   // check above, then one body that holds the answer and what is asked and
   // alone scrolls, then Cancel and Confirm, always in view however long
   // the comment or the App's description. The answer comes first in it.
+  // An alert dialog would start on Cancel by itself, but only its one
+  // paragraph of description scrolls, which can't hold the answer and what
+  // is asked (findings: damsko-registry-gaps). So focus starts on Cancel,
+  // the safe answer, as it does there: never on the body or a copy button.
+  // Escape and a press on the shade cancel; only Confirm confirms.
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -248,7 +254,10 @@ export const DecisionConfirmDialog = ({
       }}
       open={pending !== undefined}
     >
-      <DialogContent showCloseButton={false}>
+      <DialogContent
+        initialFocus={`#${CSS.escape(cancelId)}`}
+        showCloseButton={false}
+      >
         <DialogHeader>
           <DialogTitle>
             {approved ? t`Confirm your approval` : t`Confirm your rejection`}
@@ -273,7 +282,7 @@ export const DecisionConfirmDialog = ({
           </DialogBody>
         )}
         <DialogFooter>
-          <DialogClose>{t`Cancel`}</DialogClose>
+          <DialogClose id={cancelId}>{t`Cancel`}</DialogClose>
           {/* Closing is the step this dialog is for: Confirm closes it. */}
           <DialogClose
             disabled={ready !== pending}

@@ -184,8 +184,11 @@ const shown = async ({
   let open = asked;
   let waits = requests;
   const answered: string[] = [];
+  // Every answer to a Brain question that reached core, taken or not.
+  const tried: string[] = [];
   const brain = {
     answerGap: async (gap: string, answer: string) => {
+      tried.push(gap);
       await Promise.resolve();
       open = open.filter((each) => each.gap !== gap);
       if (gapClosed) {
@@ -289,6 +292,8 @@ const shown = async ({
     item: () => router.state.location.search.item,
     /** What core was told. */
     answered,
+    /** The Brain questions core was asked to take an answer to. */
+    tried,
   };
 };
 
@@ -311,16 +316,32 @@ const key = async (name: string) => {
   await settle();
 };
 
-/** Presses the button whose words are `words`. */
+/** The button whose words are `words`. */
+const buttonOf = (words: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find((each) =>
+    each.textContent.trim().startsWith(words)
+  );
+
+/** Presses the button whose words are `words`, focused first as a press does. */
 const press = async (words: string) => {
   await act(async () => {
-    [...document.querySelectorAll("button")]
-      .find((each) => each.textContent.trim().startsWith(words))
-      ?.click();
+    const button = buttonOf(words);
+    button?.focus();
+    button?.click();
     await Promise.resolve();
   });
   await settle();
 };
+
+/** Whether the button can be pressed. */
+const pressable = (button: HTMLButtonElement | undefined): boolean =>
+  button !== undefined &&
+  !button.disabled &&
+  !button.matches(":disabled") &&
+  button.getAttribute("aria-disabled") !== "true";
+
+/** The words of what has focus. */
+const focused = (): string => document.activeElement?.textContent ?? "";
 
 /** Presses the row of item `id`, as its link leads to it. */
 const pressRow = async (id: string) => {
@@ -531,7 +552,14 @@ describe("the inbox", () => {
   it("grants a request, and the one after it opens with its answers held back a moment, so a second press can't answer it", async () => {
     const page = await shown({ requests: twoRequests() });
     await press("Grant it");
-    const arrived = { open: panelTitle(), answers: answersOn() };
+    const arrived = {
+      open: panelTitle(),
+      answers: answersOn(),
+      // The button pressed went with its item: focus lands on the next one's heading.
+      focus: focused(),
+      // Its answers' pause is said, not only drawn.
+      pause: panelText().includes("Its answers can be used in a moment"),
+    };
     // Longer than the pause the arriving item's answers hold for.
     await act(async () => {
       await sleep(1100);
@@ -549,6 +577,8 @@ describe("the inbox", () => {
       arrived: {
         open: "Grant app-1: read on Connection invoices?",
         answers: false,
+        focus: "Grant app-1: read on Connection invoices?",
+        pause: true,
       },
       later: true,
       said: "Approved: Grant app-2: read on Connection invoices?",
@@ -565,6 +595,8 @@ describe("the inbox", () => {
       await press(answer);
       const kept = {
         open: panelTitle(),
+        // Its answers went off: focus lands on its heading.
+        focus: focused(),
         reason: panelText().includes(stale),
         head: panelText().includes("No longer waits for you"),
         answers: answersOn(),
@@ -586,6 +618,7 @@ describe("the inbox", () => {
         answered: [`${answer === "Decline" ? "decline" : "grant"} 2`],
         kept: {
           open: "Grant app-2: read on Connection invoices?",
+          focus: "Grant app-2: read on Connection invoices?",
           reason: true,
           head: true,
           answers: false,
@@ -599,8 +632,8 @@ describe("the inbox", () => {
     }
   );
 
-  it("keeps a Brain question answered elsewhere in place, with core's reason", async () => {
-    await shown({
+  it("keeps a Brain question answered elsewhere in place, with core's reason alone, its box and Answer off", async () => {
+    const page = await shown({
       asked: three(),
       at: "/inbox?item=asked:2",
       gapClosed: true,
@@ -615,17 +648,56 @@ describe("the inbox", () => {
     });
     await press("Answer");
     await settle();
+    const kept = {
+      focus: focused(),
+      // Off as a disabled fieldset turns off what it holds (which happy-dom
+      // doesn't carry to `:disabled` itself).
+      box:
+        document
+          .querySelector("aside textarea")
+          ?.closest("fieldset[disabled]") !== null,
+      words:
+        document.querySelector<HTMLTextAreaElement>("aside textarea")?.value,
+      answer: pressable(buttonOf("Answer")),
+    };
+    // Pressed again, and Enter in the box: nothing more goes to core.
+    await press("Answer");
+    await act(async () => {
+      document
+        .querySelector("aside textarea")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+        );
+      await Promise.resolve();
+    });
+    await settle();
 
     expect({
+      tried: page.tried,
       open: beside()?.question,
       reason: panelText().includes("That question is closed already."),
+      sendFailed: panelText().includes("Could not send"),
+      alerts: document.querySelectorAll("aside [role='alert']").length,
+      open_: buttonOf("Open") === undefined,
       head: panelText().includes("No longer waits for you"),
       rows: rows(),
+      kept,
     }).toStrictEqual({
+      tried: ["gap-2"],
       open: "Who pays the invoices?",
       reason: true,
+      sendFailed: false,
+      alerts: 1,
+      open_: true,
       head: true,
       rows: ["asked:1", "asked:3"],
+      kept: {
+        // Focus left with the answer's button: it lands on the item's heading.
+        focus: "Asked of you as the Head of finance",
+        box: true,
+        words: "The sales lead.",
+        answer: false,
+      },
     });
   });
 

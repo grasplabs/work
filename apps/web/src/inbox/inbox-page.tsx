@@ -41,7 +41,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { formatDayMonth } from "../format.ts";
 import { useWide } from "../frame/wide.ts";
@@ -354,10 +354,31 @@ const WalkHead = ({
   );
 };
 
+/**
+ * An item's heading: an approval's title (Damsko's Confirmation, which
+ * makes it a focus target itself), or a card's (item-detail.tsx).
+ */
+const itemHeading = "[data-slot='confirmation-title'], [data-item-heading]";
+
+/** Whether focus fell to the page: its element went, or was turned off. */
+const focusFell = (): boolean => {
+  const active = document.activeElement;
+  return (
+    active === null ||
+    active === document.body ||
+    !active.isConnected ||
+    active.matches(":disabled")
+  );
+};
+
 /** The panel's content: the walk's head, then the item to decide, answered in place. */
-const Inspector = ({ head, ...frame }: Frame & { head: ReactNode }) => (
+const Inspector = ({
+  head,
+  ref,
+  ...frame
+}: Frame & { head: ReactNode; ref: RefObject<HTMLDivElement | null> }) => (
   <SidePanelContent>
-    <div {...stylex.props(styles.inspector)}>
+    <div ref={ref} {...stylex.props(styles.inspector)}>
       {head}
       <ItemDetail key={frame.item.id} {...frame} />
     </div>
@@ -513,6 +534,18 @@ const ToDo = ({
   // The item an answer settled: the one that opens in its place holds its
   // answers back a moment (item-detail.tsx).
   const [answered, setAnswered] = useState<string>();
+  // Once an answer is through or refused, focus that fell to the page (the
+  // button pressed went with its item, or was turned off) goes to the
+  // heading of the item in view: the one after it, or the one kept.
+  const panel = useRef<HTMLDivElement>(null);
+  const [landed, setLanded] = useState(0);
+  useEffect(() => {
+    if (landed > 0 && focusFell()) {
+      panel.current
+        ?.querySelector<HTMLElement>(itemHeading)
+        ?.focus({ preventScroll: true });
+    }
+  }, [landed]);
   // A group that has emptied falls back to everything.
   const current = items.some(
     (item) => group === "all" || groupOf[item.kind] === group
@@ -643,6 +676,7 @@ const ToDo = ({
       />
       <Beside label={label} onBack={back} reading={reading} wide={wide}>
         <Inspector
+          ref={panel}
           arriving={answered !== undefined && answered !== shownItem.id}
           gone={gone}
           head={
@@ -654,6 +688,9 @@ const ToDo = ({
             />
           }
           item={shownItem}
+          onLanded={() => {
+            setLanded((count) => count + 1);
+          }}
           onRefused={() => {
             setRefused(shownItem);
           }}

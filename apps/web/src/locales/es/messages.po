@@ -7432,6 +7432,11 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "Su acceso ha caducado. Vuelve a iniciar sesión con la misma cuenta: las aplicaciones y los agentes conservan sus permisos sobre ella."
 
+#: src/inbox/approval-request.tsx
+#: src/inbox/item-detail.tsx
+msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
+msgstr "Sus respuestas se podrán usar en un momento, para que una pulsación pensada para el anterior no lo responda."
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "Sus apps y flujos de trabajo no se eliminan, y nada en él está compartido con el proyecto, así que nadie pierde el acceso."

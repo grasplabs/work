@@ -225,6 +225,12 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   );
   await asDecider.getByRole("button", { name: "Approve" }).click();
   const confirm = confirmation.getByRole("button", { name: "Confirm" });
+  // Focus starts on Cancel, the safe answer, not on the long body; Confirm
+  // waits its first second.
+  await expect(confirm).toBeDisabled();
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" })
+  ).toBeFocused(pageRead);
   await expect(confirm).toBeEnabled(pageRead);
   await expect(confirm).toBeInViewport({ ratio: 1 });
   await expect(

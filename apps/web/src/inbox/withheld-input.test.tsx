@@ -179,6 +179,7 @@ const opened = async ({
       arriving={false}
       gone={false}
       item={item}
+      onLanded={() => {}}
       onRefused={() => {}}
       onSaid={() => {}}
     />

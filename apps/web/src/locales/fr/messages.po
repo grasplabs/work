@@ -7432,6 +7432,11 @@ msgstr "Son accès a expiré. L’équipe Grasp ne peut pas la reconnecter : un 
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "Son accès a expiré. Reconnectez-vous avec le même compte : les applications et les agents gardent leurs autorisations."
 
+#: src/inbox/approval-request.tsx
+#: src/inbox/item-detail.tsx
+msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
+msgstr "Ses réponses seront utilisables dans un instant, pour qu'un clic destiné au précédent n'y réponde pas."
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "Ses apps et workflows ne sont pas supprimés, et rien n’y est partagé avec le projet, donc personne ne perd l’accès."

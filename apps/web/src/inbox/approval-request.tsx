@@ -15,6 +15,7 @@ import {
   ConfirmationTitle,
 } from "@grasp-os/ui/components/confirmation";
 import { Text } from "@grasp-os/ui/components/text";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -191,6 +192,13 @@ export const ApprovalRequest = ({
           <Text color="muted" size="xs">
             {approveHeld}
           </Text>
+        )}
+        {/* The pause, said: ConfirmationAction can't stay a Tab stop
+            described by why it is off (damsko-registry-gaps, Inbox 2). */}
+        {armed || gone ? null : (
+          <span {...stylex.props(visuallyHidden)}>
+            {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
+          </span>
         )}
         {failure === undefined ? null : (
           <Alert variant="destructive">

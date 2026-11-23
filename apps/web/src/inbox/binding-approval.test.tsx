@@ -122,6 +122,7 @@ const shown = async () => {
         arriving={false}
         gone={false}
         item={shownItem}
+        onLanded={() => {}}
         onRefused={() => {}}
         onSaid={(line) => {
           said.push(line);

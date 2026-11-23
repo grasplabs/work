@@ -35,7 +35,8 @@ import {
 import type { QuestionnaireAnswer } from "@grasp-os/ui/components/questionnaire";
 import { Text } from "@grasp-os/ui/components/text";
 import { ArrowUpRightIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { focusRingText, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -90,6 +91,14 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["2"],
   },
+  // A Brain question that waits no more: its words and box, off as one.
+  closed: {
+    borderWidth: 0,
+    margin: 0,
+    minInlineSize: 0,
+    padding: 0,
+  },
+  closedOff: { opacity: size.opacityDisabled },
 });
 
 /** One of an item's actions: a press that goes to core, or the way to where it is done. */
@@ -117,11 +126,13 @@ const ConfirmedAct = ({
   act,
   confirm,
   disabled,
+  describedBy,
   variant,
 }: {
   act: Act;
   confirm: NonNullable<Act["confirm"]>;
   disabled: boolean;
+  describedBy: string | undefined;
   variant: "default" | "outline";
 }) => {
   const [open, setOpen] = useState(false);
@@ -129,10 +140,10 @@ const ConfirmedAct = ({
     <AlertDialog onOpenChange={setOpen} open={open}>
       <AlertDialogTrigger asChild>
         <Button
-          aria-describedby={act.describedBy}
+          aria-describedby={describedBy}
           aria-label={act.name}
           disabled={disabled}
-          focusableWhenDisabled={act.describedBy !== undefined}
+          focusableWhenDisabled={describedBy !== undefined}
           size="sm"
           variant={variant}
         >
@@ -166,10 +177,13 @@ const ConfirmedAct = ({
 const ActButton = ({
   act,
   busy,
+  heldBy,
   first,
 }: {
   act: Act;
   busy: boolean;
+  /** The id of a line that says why every action waits, while it does. */
+  heldBy: string | undefined;
   /** The item's own next step: filled; the rest quiet. */
   first: boolean;
 }) => {
@@ -185,11 +199,15 @@ const ActButton = ({
     );
   }
   const disabled = busy || act.disabled === true;
+  // Off and said why, it stays a Tab stop that says so.
+  const why = [act.describedBy, heldBy].filter((id) => id !== undefined);
+  const describedBy = disabled && why.length > 0 ? why.join(" ") : undefined;
   if (act.confirm !== undefined) {
     return (
       <ConfirmedAct
         act={act}
         confirm={act.confirm}
+        describedBy={describedBy}
         disabled={disabled}
         variant={variant}
       />
@@ -197,8 +215,10 @@ const ActButton = ({
   }
   return (
     <Button
+      aria-describedby={describedBy}
       aria-label={act.name}
       disabled={disabled}
+      focusableWhenDisabled={describedBy !== undefined}
       onClick={() => {
         void act.onPress?.();
       }}
@@ -221,35 +241,44 @@ export interface Frame {
   onSaid: (said: string) => void;
   /** Core refused an answer: the inbox keeps the item in place until the person moves on. */
   onRefused: () => void;
+  /**
+   * An answer is through or refused, and the inbox read again: focus that
+   * fell to the page goes to the heading of the item in view.
+   */
+  onLanded: () => void;
 }
 
 /**
  * Gives an answer to core, then reads the inbox again whatever came of
- * it. Through: `said`. Refused: `refused` with core's reason, before the
- * inbox is read again (which may no longer list the item), and it fails
- * as core did. Outside components, as the React Compiler can't compile
- * `try`.
+ * it, and then says it `landed`. Through: `said`. Refused: `refused` with
+ * core's reason, before the inbox is read again (which may no longer list
+ * the item), and it fails as core did. Outside components, as the React
+ * Compiler can't compile `try`.
  */
 const answerThenRefresh = async ({
   give,
   said,
   refused,
   refresh,
+  landed,
 }: {
   give: () => Promise<unknown>;
   said: () => void;
   refused: (reason: string) => void;
   refresh: () => Promise<void>;
+  landed: () => void;
 }): Promise<void> => {
   try {
     await give();
   } catch (error) {
     refused(failureText(error));
     await refresh();
+    landed();
     throw error;
   }
   said();
   await refresh();
+  landed();
 };
 
 /** The item as it is shown: what happened, what to read, its actions, and its facts. */
@@ -269,9 +298,12 @@ const ItemFrame = ({
 }) => {
   const { t, i18n } = useLingui();
   const titleId = useId();
+  const pauseId = useId();
   const armed = useArmed(frame.arriving);
   // No action while the item has only just come, or waits no more.
   const held = busy || !armed || frame.gone;
+  // The pause after an answer, said to a screen reader on each action.
+  const paused = !armed && !busy && !frame.gone;
   const { item } = frame;
   // Who it is for, when it is someone in particular: an admin's by default.
   const facts: KeyValueItem[] = item.facts.map(({ label, value }) => ({
@@ -285,16 +317,17 @@ const ItemFrame = ({
   } else if (item.forWhom !== undefined) {
     facts.unshift({ id: "for", label: t`For`, value: item.forWhom.person });
   }
-  // With no action of its own, the item is dealt with where it lives.
-  const shown: Act[] =
-    acts.length === 0 && item.about !== undefined
-      ? [{ label: t`Open`, to: item.about }]
-      : acts;
   return (
     <Card asChild size="sm">
       <article aria-labelledby={titleId}>
         <CardHeader>
-          <span id={titleId}>
+          {/* Where focus lands once an answer is through or refused. */}
+          <span
+            data-item-heading
+            id={titleId}
+            tabIndex={-1}
+            {...stylex.props(focusRingText)}
+          >
             <CardTitle level={2}>{item.title}</CardTitle>
           </span>
           {item.date === "" ? null : (
@@ -323,16 +356,22 @@ const ItemFrame = ({
               </Text>
             ))}
             {extra}
-            {shown.length === 0 ? null : (
+            {acts.length === 0 ? null : (
               <div {...stylex.props(styles.actions)}>
-                {shown.map((act, index) => (
+                {acts.map((act, index) => (
                   <ActButton
                     act={act}
                     busy={held}
                     first={index === 0}
+                    heldBy={paused ? pauseId : undefined}
                     key={act.label}
                   />
                 ))}
+                {paused ? (
+                  <span id={pauseId} {...stylex.props(visuallyHidden)}>
+                    {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
+                  </span>
+                ) : null}
               </div>
             )}
             {failure === undefined ? null : (
@@ -374,6 +413,7 @@ const useDecide = (frame: Frame) => {
           // `sync` waits for the read, so the buttons stay off until the item goes.
           await router.invalidate({ sync: true });
         },
+        landed: frame.onLanded,
       });
     });
   };
@@ -423,6 +463,7 @@ const ApprovalFrame = ({
         refresh: async () => {
           await router.invalidate({ sync: true });
         },
+        landed: frame.onLanded,
       });
     };
   const { title } = item;
@@ -664,9 +705,10 @@ const BindingsDetail = ({
       await router.invalidate({ sync: true });
     });
   };
+  const { about } = frame.item;
   return (
     <ItemFrame
-      acts={[]}
+      acts={about === undefined ? [] : [{ label: t`Open`, to: about }]}
       busy={busy}
       extra={
         <PendingBindingList
@@ -685,7 +727,9 @@ const BindingsDetail = ({
 /**
  * A question the Brain asked the person: answered here, in their own
  * words, for everyone in the company to read with their name. Once it is
- * answered core lists it no more, so it leaves the inbox.
+ * answered core lists it no more, so it leaves the inbox. One core
+ * refuses says core's reason, once; when it waits no more (answered
+ * elsewhere) its box and Answer are off, so nothing more goes to core.
  */
 const AskedItem = ({
   frame,
@@ -697,12 +741,19 @@ const AskedItem = ({
   const { t } = useLingui();
   const router = useRouter();
   const core = useCore();
+  const armed = useArmed(frame.arriving);
   const { notification } = source;
   const { owner, question } = notification;
   const asked = t`Asked of you as the ${owner}`;
   // Why core refused the answer, in its words: answered already, say
-  // (`brain.gap_closed`). The Questionnaire only says it wasn't sent.
+  // (`brain.gap_closed`).
   const [failure, setFailure] = useState<string>();
+  // The words, kept across a refusal: the Questionnaire is drawn afresh
+  // then (`tries`), so only core's reason says it failed, not its own
+  // "Could not send" beside it.
+  const [words, setWords] = useState("");
+  const [tries, setTries] = useState(0);
+  const closed = frame.gone;
   const answer = async (
     answers: Record<string, QuestionnaireAnswer>
   ): Promise<void> => {
@@ -719,11 +770,13 @@ const AskedItem = ({
       },
       refused: (reason) => {
         setFailure(reason);
+        setTries(tries + 1);
         frame.onRefused();
       },
       refresh: async () => {
         await router.invalidate({ sync: true });
       },
+      landed: frame.onLanded,
     });
   };
   return (
@@ -731,14 +784,21 @@ const AskedItem = ({
       acts={[]}
       busy={false}
       extra={
-        <Questionnaire aria-label={t`Question`} onSubmit={answer}>
-          <QuestionnaireItem name="answer" required>
-            <QuestionnaireTitle>{question}</QuestionnaireTitle>
-            <QuestionnaireInput />
-            <QuestionnaireError />
-          </QuestionnaireItem>
+        <Questionnaire aria-label={t`Question`} key={tries} onSubmit={answer}>
+          <fieldset
+            disabled={closed}
+            {...stylex.props(styles.closed, closed && styles.closedOff)}
+          >
+            <QuestionnaireItem name="answer" required>
+              <QuestionnaireTitle>{question}</QuestionnaireTitle>
+              <QuestionnaireInput onValueChange={setWords} value={words} />
+              <QuestionnaireError />
+            </QuestionnaireItem>
+          </fieldset>
           <QuestionnaireActions>
-            <QuestionnaireSubmit>{t`Answer`}</QuestionnaireSubmit>
+            <QuestionnaireSubmit disabled={closed || !armed}>
+              {t`Answer`}
+            </QuestionnaireSubmit>
           </QuestionnaireActions>
         </Questionnaire>
       }

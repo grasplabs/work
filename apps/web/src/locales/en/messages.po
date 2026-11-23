@@ -7432,6 +7432,11 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 
+#: src/inbox/approval-request.tsx
+#: src/inbox/item-detail.tsx
+msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
+msgstr "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
