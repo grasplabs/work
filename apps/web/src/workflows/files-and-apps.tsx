@@ -55,7 +55,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import type { Names } from "./activity-bar.tsx";
+import type { Names } from "./activity-words.ts";
 import {
   BindingFrame,
   PendingBindingList,

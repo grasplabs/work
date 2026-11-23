@@ -27,7 +27,7 @@ import { useCore } from "../use-core.ts";
 // is shown nothing here, as they see nothing of what the run returned.
 
 /** One file, a row with its size and the way to download it. */
-const FileRow = ({
+export const FileRow = ({
   workflow,
   run,
   file,

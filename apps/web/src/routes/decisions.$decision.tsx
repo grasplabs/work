@@ -199,7 +199,7 @@ const Decision = () => {
       crumbs={[workflows, source, { label: t`Decision` }]}
       identity={page.identity}
     >
-      <DecisionCard decision={decision} />
+      <DecisionCard decision={decision} where="page" />
     </DecisionInFrame>
   );
 };

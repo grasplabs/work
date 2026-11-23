@@ -1212,15 +1212,15 @@ msgstr "{percent} % bekannt, jetzt"
 msgid "{person} · {connection}"
 msgstr "{person} · {connection}"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "{person} approved {alias} for version {version}"
 msgstr "{person} hat {alias} für Version {version} genehmigt"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "{person} published version {version}"
 msgstr "{person} hat Version {version} veröffentlicht"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "{person} revoked {alias} for version {version}"
 msgstr "{person} hat {alias} für Version {version} widerrufen"
 
@@ -1901,15 +1901,15 @@ msgstr "Ein Lauf eines Workflows hat um diese Antwort gebeten."
 msgid "A run of a workflow waits for this answer."
 msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "A run of version {version} for someone else ended: {status}"
 msgstr "Ein Lauf von Version {version} für jemand anderen ist beendet: {status}"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "A run of version {version} started for someone else"
 msgstr "Ein Lauf von Version {version} hat für jemand anderen begonnen"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "A run of version {version} started for you"
 msgstr "Ein Lauf von Version {version} hat für Sie begonnen"
 
@@ -2140,13 +2140,13 @@ msgctxt "the brain's log"
 msgid "Activity"
 msgstr "Aktivität"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 #: src/workflows/traces.tsx
 msgctxt "what a workflow did lately"
 msgid "Activity"
 msgstr "Aktivität"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "Activity: see all of it in Traces"
 msgstr "Aktivität: alles in Traces ansehen"
 
@@ -12416,7 +12416,7 @@ msgstr "Nichts ändert sich, bevor Sie auf Ändern drücken. Sie können vorher 
 msgid "Nothing found"
 msgstr "Nichts gefunden"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 #: src/workflows/traces.tsx
 msgid "Nothing has happened yet."
 msgstr "Bisher ist nichts passiert."
@@ -15776,7 +15776,7 @@ msgstr "Abschnittstitel"
 msgid "Security"
 msgstr "Sicherheit"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgctxt "open the whole list"
 msgid "See all"
 msgstr "Alle ansehen"
@@ -16646,7 +16646,7 @@ msgstr "Jemand hat diesen Entwurf geändert, seit Sie ihn gelesen haben. Lesen S
 msgid "Someone changed this draft since you read it. Your text is still here: read their revision, then save again, or take theirs instead."
 msgstr "Jemand hat diesen Entwurf geändert, seit Sie ihn gelesen haben. Ihr Text ist noch da: Lesen Sie die neue Revision und speichern Sie erneut, oder übernehmen Sie stattdessen die andere."
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "Someone else"
 msgstr "Jemand anderes"
 
@@ -21705,7 +21705,7 @@ msgstr "Ihr Bericht zu Woche {week} ist fertig"
 msgid "Your role"
 msgstr "Ihre Rolle"
 
-#: src/workflows/activity-bar.tsx
+#: src/workflows/activity-words.ts
 msgid "Your run of version {version} ended: {status}"
 msgstr "Ihr Lauf von Version {version} ist beendet: {status}"
 

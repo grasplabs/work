@@ -63,6 +63,27 @@ export const formatAge = (
 };
 
 /**
+ * How long something took, `ms`, in its largest whole unit (seconds,
+ * minutes, hours or days), as the page's language says it ("12 seconds").
+ */
+export const formatDuration = (ms: number): string => {
+  const units = [
+    { unit: "day", size: dayMs },
+    { unit: "hour", size: hourMs },
+    { unit: "minute", size: minuteMs },
+  ] as const;
+  const { unit, size } = units.find(({ size: each }) => ms >= each) ?? {
+    unit: "second",
+    size: 1000,
+  };
+  return new Intl.NumberFormat(i18n.locale, {
+    style: "unit",
+    unit,
+    unitDisplay: "long",
+  }).format(Math.max(0, Math.floor(ms / size)));
+};
+
+/**
  * A time zone's name as the page's language says it ("Central European
  * Time"), from its IANA name; the IANA name where the browser has none.
  */

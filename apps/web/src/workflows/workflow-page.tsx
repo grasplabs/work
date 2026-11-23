@@ -1,0 +1,300 @@
+import type { DecisionView } from "@grasp-os/shared/decisions";
+import { workflowRunsListed } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+
+import { DecisionCard } from "../decision-card.tsx";
+import { formatSince } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Chat } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import type { Loaded } from "../load-from-core.tsx";
+import type { Names } from "./activity-words.ts";
+import { useStartedBy } from "./run-detail.tsx";
+import { useRunTitle } from "./run-page.tsx";
+import { runStatusLabels, runToneOf } from "./run-status.ts";
+import type { WorkflowSettingsSection } from "./settings-sections.ts";
+
+// An independent workflow's own page as direction C (Track) has it: its
+// name and where it stands, what waits on the reader in the one approval
+// shape (decision-card.tsx), then its runs, newest first, each opening its
+// own page (run-page.tsx). For its builders, their workshop under it: a
+// row for each of the tools that change it, each opening its view. What C
+// draws beyond that needs core: a one-line description (GRA-2272), the
+// stage board and each run's pips (GRA-2283), and a run titled by what it
+// handled (GRA-2278); none of it is shown until core has it.
+
+const styles = stylex.create({
+  scroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space8,
+    paddingBlockEnd: grasp.space8,
+  },
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  head: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+  },
+  headWords: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+});
+
+/** Where a workshop row leads: one of the workflow's builder views. */
+export type WorkshopView =
+  | { view: "flow" }
+  | { view: "runs" }
+  | { view: "settings"; section: WorkflowSettingsSection };
+
+/** One tool of the workshop: what it is, in a line, and where it opens. */
+export interface WorkshopRow {
+  id: string;
+  title: string;
+  description: string;
+  to: WorkshopView;
+}
+
+/** A run as a row: when it started, who started it, and how it stands. */
+const RunRow = ({
+  workflow,
+  run,
+  names,
+}: {
+  workflow: string;
+  run: WorkflowResourceRun;
+  names: Names;
+}) => {
+  const { t, i18n } = useLingui();
+  const title = useRunTitle()(run);
+  const startedBy = useStartedBy(names);
+  const who = startedBy(run.principal);
+  return (
+    <Item
+      render={
+        <Link
+          params={{ workflow, run: run.id }}
+          to="/workflows/$workflow/runs/$run"
+        />
+      }
+      size="sm"
+    >
+      <ItemContent>
+        <ItemTitle>{title}</ItemTitle>
+        <ItemDescription>
+          {run.endedAt === null
+            ? t({ message: `By ${who}`, context: "who started a workflow run" })
+            : t({
+                message: `By ${who} · ended ${formatSince(run.endedAt)}`,
+                context: "who started a workflow run, and when it ended",
+              })}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Badge tone={runToneOf(run.status)} variant="dot">
+          {i18n._(runStatusLabels[run.status])}
+        </Badge>
+      </ItemActions>
+    </Item>
+  );
+};
+
+/** Its runs, newest first; for a reader who sees only their own (`own`), said so when there are none. */
+const Runs = ({
+  workflow,
+  runs,
+  names,
+  own,
+}: {
+  workflow: string;
+  runs: Loaded<WorkflowResourceRun[]>;
+  names: Names;
+  own: boolean;
+}) => {
+  const { t } = useLingui();
+  const label = t({ message: "Runs", context: "a workflow's runs" });
+  if (runs.state !== "ready") {
+    return <NotLoadedState page={runs} />;
+  }
+  if (runs.data.length === 0) {
+    return (
+      <Empty size="md">
+        <EmptyHeader>
+          <EmptyDescription>
+            {own
+              ? t`You haven't run it yet. Only your own runs show here.`
+              : t`No runs yet.`}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  const newest = workflowRunsListed;
+  return (
+    <>
+      <ItemGroup aria-label={label} separated>
+        {runs.data.map((run) => (
+          <RunRow key={run.id} names={names} run={run} workflow={workflow} />
+        ))}
+      </ItemGroup>
+      {/* Core lists the newest runs only. */}
+      {runs.data.length >= newest ? (
+        <Text size="sm" tone="muted">
+          {t`Only the newest ${newest} runs show here.`}
+        </Text>
+      ) : null}
+    </>
+  );
+};
+
+/** Its builders' tools, each a row with the way to it, and its chat. */
+const Workshop = ({
+  rows,
+  open,
+}: {
+  rows: readonly WorkshopRow[];
+  open: (to: WorkshopView) => void;
+}) => {
+  const { t } = useLingui();
+  const label = t({
+    message: "Workshop",
+    context: "a workflow's builder tools",
+  });
+  return (
+    <section {...stylex.props(styles.section)}>
+      <div {...stylex.props(styles.head)}>
+        <div {...stylex.props(styles.headWords)}>
+          <Heading level={2} size="ui">
+            {label}
+          </Heading>
+          <Text size="sm" tone="muted">
+            {t`Only builders see this.`}
+          </Text>
+        </div>
+        <Button
+          icon={Chat}
+          onClick={() => {
+            open({ view: "flow" });
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t`Change it in chat`}
+        </Button>
+      </div>
+      <ItemGroup aria-label={label}>
+        {rows.map((row) => (
+          <Item key={row.id} size="sm" variant="outline">
+            <ItemContent>
+              <ItemTitle>{row.title}</ItemTitle>
+              <ItemDescription>{row.description}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                aria-label={t({
+                  message: `Open ${row.title}`,
+                  context: "open a workflow's builder tool",
+                })}
+                onClick={() => {
+                  open(row.to);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t({
+                  message: "Open",
+                  context: "open a workflow's builder tool",
+                })}
+              </Button>
+            </ItemActions>
+          </Item>
+        ))}
+      </ItemGroup>
+    </section>
+  );
+};
+
+export const WorkflowHome = ({
+  workflow,
+  name,
+  status,
+  decisions,
+  runs,
+  names,
+  builder,
+  workshop,
+  onOpen,
+}: {
+  workflow: string;
+  /** Its name, as people see it. */
+  name: string;
+  /** Where it stands, in words (workflow-status.tsx). */
+  status: ReactNode;
+  /** The answers its runs wait for that the reader may give. */
+  decisions: readonly DecisionView[];
+  runs: Loaded<WorkflowResourceRun[]>;
+  names: Names;
+  builder: boolean;
+  workshop: readonly WorkshopRow[];
+  onOpen: (to: WorkshopView) => void;
+}) => {
+  const { t } = useLingui();
+  const count = runs.state === "ready" ? runs.data.length : undefined;
+  return (
+    <div {...stylex.props(styles.scroll)}>
+      <PageColumn measure="page">
+        <div {...stylex.props(styles.page)}>
+          <PageHeader description={status} title={name} />
+          {decisions.map((decision) => (
+            <DecisionCard
+              decision={decision}
+              key={decision.id}
+              where="workflow"
+            />
+          ))}
+          <section {...stylex.props(styles.section)}>
+            <Heading level={2} size="ui">
+              {t({ message: "Runs", context: "a workflow's runs" })}
+              {count === undefined || count === 0 ? null : (
+                <>
+                  {" "}
+                  <Text element="span" size="xs" tone="muted">
+                    {t`${plural(count, { one: "# run", other: "# runs" })}`}
+                  </Text>
+                </>
+              )}
+            </Heading>
+            <Runs
+              names={names}
+              own={!builder}
+              runs={runs}
+              workflow={workflow}
+            />
+          </section>
+          {builder ? <Workshop open={onOpen} rows={workshop} /> : null}
+        </div>
+      </PageColumn>
+    </div>
+  );
+};

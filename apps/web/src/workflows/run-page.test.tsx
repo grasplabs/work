@@ -17,9 +17,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { RunBeside } from "./run-detail.tsx";
+import { RunPage } from "./run-page.tsx";
 
-// What a reader can do with a run opened beside the page, against core's
+// What a reader can do on a run's page, against core's
 // workflowResources as the page reaches them over RPC, faked: a builder
 // stops a run that hasn't ended, after being asked, and only that run; a
 // user is offered nothing to stop; the run's finished files link to
@@ -80,11 +80,11 @@ const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <RunBeside
+      <RunPage
         admin={false}
+        decision={undefined}
         name="Invoice intake"
         names={{ people: new Map(), me: "ada" }}
-        onClose={() => {}}
         opened={running}
         workflow="workflow-1"
       />
@@ -131,7 +131,7 @@ const press = async (text: string): Promise<void> => {
   });
 };
 
-describe("a run opened beside the page", () => {
+describe("a run's page", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

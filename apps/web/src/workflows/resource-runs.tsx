@@ -13,24 +13,17 @@ import { Link as TextLink } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
-import type { Names } from "./activity-bar.tsx";
+import type { Names } from "./activity-words.ts";
 import { listRuns } from "./reads.ts";
-import {
-  RunBeside,
-  RunStatusBadge,
-  useOpenedRun,
-  useStartedBy,
-} from "./run-detail.tsx";
+import { RunStatusBadge, useStartedBy } from "./run-detail.tsx";
 import { WaitingForAiProvider } from "./runs.tsx";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
 // as core lists them for the reader: every run for its builders, their own
 // for its users (`workflowResources.runs`). A run its engine holds for a
 // decision says so, with the way to answer it, as the Runs log does: core
-// says which decision only there (`workflows.runs`). Each row opens beside the list
-// (run-detail.tsx) with what it returned or why it failed, read on the
-// run itself under its own rule for who sees it; its steps stay for the
-// workflow's builders, who read its definitions (Traces).
+// says which decision only there (`workflows.runs`). Each row opens the
+// run's own page (run-page.tsx).
 
 const styles = stylex.create({
   // Its status over what it waits for, at the row's end.
@@ -214,21 +207,17 @@ const runColumns = (words: {
  * A workflow's runs, newest first, on the library's Data table as the
  * tables pattern has it: when it started names the row; its version, who
  * started it and when it ended; its status at the row's end. The whole
- * row opens it beside the list: a run open there has an address of its
- * own (`?run=`), kept with the project it came from.
+ * row opens its page.
  */
 export const WorkflowRunsTable = ({
   workflow,
   runs,
   names,
-  open,
   own = false,
 }: {
   workflow: string;
   runs: WorkflowResourceRun[];
   names: Names;
-  /** The run open beside the list, by its ID. */
-  open: string | undefined;
   /** Whether core lists the reader's own runs alone: they use it, not build it. */
   own?: boolean;
 }) => {
@@ -258,18 +247,11 @@ export const WorkflowRunsTable = ({
         label={t`Runs`}
         onRowOpen={(run) => {
           void navigate({
-            to: "/workflows/$workflow",
-            params: { workflow },
-            replace: true,
-            search: (held) => ({
-              project: held.project,
-              view: "runs",
-              run: run.id,
-            }),
+            to: "/workflows/$workflow/runs/$run",
+            params: { workflow, run: run.id },
           });
         }}
         pageSize={runsPageSize}
-        rowCurrent={(run) => run.id === open}
         rowKey={(run) => run.id}
         rows={runs}
         unit={{ one: t`run`, other: t`runs` }}
@@ -281,51 +263,5 @@ export const WorkflowRunsTable = ({
         </Text>
       ) : null}
     </div>
-  );
-};
-
-export const ResourceRuns = ({
-  workflow,
-  name,
-  runs,
-  names,
-  admin,
-  openRun,
-  onCloseRun,
-}: {
-  workflow: string;
-  /** The workflow's name, as people see it. */
-  name: string;
-  /** The run the address asks to open, by its ID. */
-  openRun?: string | undefined;
-  /** Clears the run from the address once it is closed. */
-  onCloseRun?: () => void;
-  runs: WorkflowResourceRun[];
-  names: Names;
-  /** Whether the reader is one of the organization's admins. */
-  admin: boolean;
-}) => {
-  // The run the address names: one of the table's, Run's "Open the run",
-  // or an older one a link names.
-  const opened = useOpenedRun(workflow, runs, openRun);
-  return (
-    <RunBeside
-      admin={admin}
-      names={names}
-      onClose={() => {
-        onCloseRun?.();
-      }}
-      name={name}
-      opened={opened}
-      workflow={workflow}
-    >
-      <WorkflowRunsTable
-        names={names}
-        open={openRun}
-        own
-        runs={runs}
-        workflow={workflow}
-      />
-    </RunBeside>
   );
 };
