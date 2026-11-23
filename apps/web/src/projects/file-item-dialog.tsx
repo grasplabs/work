@@ -75,6 +75,8 @@ const FileForm = ({
   const { people } = project;
   const projectName = project.name;
   const who = formatList(namesInProject(project));
+  // The Add button follows it: Adding while it works, Not added for a
+  // moment where core refused, with core's reason under the form.
   const file = async (): Promise<void> => {
     if (picked === undefined) {
       return;
@@ -93,9 +95,10 @@ const FileForm = ({
       );
       return true;
     });
-    if (done === true) {
-      onDone();
+    if (done !== true) {
+      throw new Error("Not added");
     }
+    onDone();
   };
   return (
     <>
@@ -147,10 +150,10 @@ const FileForm = ({
           <Trans>Cancel</Trans>
         </DialogClose>
         <Button
-          disabled={picked === undefined || busy}
-          onClick={() => {
-            void file();
-          }}
+          disabled={picked === undefined}
+          errorLabel={t`Not added`}
+          loadingLabel={t`Adding`}
+          onClick={file}
           size="sm"
         >
           <Trans context="put in a project">Add</Trans>

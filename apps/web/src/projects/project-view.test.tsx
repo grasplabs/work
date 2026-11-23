@@ -1,5 +1,5 @@
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 // @vitest-environment happy-dom
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import type {
   FileItem,
