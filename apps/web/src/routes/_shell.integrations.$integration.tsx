@@ -1,4 +1,5 @@
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Toaster } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
@@ -121,6 +122,8 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
       : integration.connections.find(({ id }) => id === connection);
   return (
     <>
+      {/* Damsko's toasts, for this area's, until the frame draws them for every page. */}
+      <Toaster />
       <SiteHeader
         crumbs={[
           { label: t`Integrations`, to: "/integrations" },
