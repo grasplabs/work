@@ -1194,6 +1194,8 @@ describe("an agent's page", () => {
       "First run"
     );
     expect(document.body.textContent).toContain("No runs yet; the first is");
+    await press(button("Pause"));
+    expect(document.body.textContent).not.toContain("the first is");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {

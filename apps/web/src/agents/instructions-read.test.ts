@@ -20,7 +20,7 @@ describe("an agent's instructions as its page reads them", () => {
 
   it("finds a name only as written and as a whole word, never in code, a link or a picture's place", () => {
     const source =
-      "Exactly so, exact is a word, Hi!Exact stays text. `Exact` stays code, [Exact](https://example.com) stays a link.";
+      "Exactly so, exact is a word, Hi!Exact stays text, so does \\Exact. `Exact` stays code, [Exact](https://example.com) stays a link.";
     expect(withMentions(source, named)).toBe(source);
   });
 

@@ -44,7 +44,8 @@ const escaped = (words: string): string => words.replaceAll(bracket, "\\$&");
 /**
  * Each place in text where name stands as written, as a whole word: a
  * name is a proper noun, so "Files" the app never takes "files" the word.
- * Never right after "!", which would make its link a picture.
+ * Never right after "!", which would make its link a picture, or "\",
+ * which would leave its opening bracket as text.
  */
 const placesOf = (text: string, name: string): number[] => {
   const places: number[] = [];
@@ -52,7 +53,12 @@ const placesOf = (text: string, name: string): number[] => {
   while (from !== -1) {
     const before = text.slice(0, from).at(-1) ?? "";
     const after = text.at(from + name.length) ?? "";
-    if (!letter.test(before) && !letter.test(after) && before !== "!") {
+    if (
+      !letter.test(before) &&
+      !letter.test(after) &&
+      before !== "!" &&
+      before !== "\\"
+    ) {
       places.push(from);
     }
     from = text.indexOf(name, from + name.length);

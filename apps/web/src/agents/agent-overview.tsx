@@ -607,11 +607,18 @@ const Schedule = ({
 };
 
 /** What it ran: each schedule's last run, titled by how it went. */
-const RunHistory = ({ wakes }: { wakes: readonly AgentWake[] }) => {
+const RunHistory = ({
+  agent,
+  wakes,
+}: {
+  agent: Agent;
+  wakes: readonly AgentWake[];
+}) => {
   const { t } = useLingui();
   const { moment } = useDates();
   const runs = runsOf(wakes);
-  const next = nextWakeAt(wakes);
+  // A paused agent keeps its schedules' times, but runs at none of them.
+  const next = agent.state === "on" ? nextWakeAt(wakes) : undefined;
   const titles: Record<Outcome, string> = {
     started: t`Ran on its schedule`,
     "agent.paused": t`Didn't run: the agent was paused`,
@@ -808,7 +815,7 @@ export const AgentOverview = ({
         saved={instructions}
       />
       <Schedule agent={agent} editable={editable} wakes={wakes} />
-      {own ? null : <RunHistory wakes={wakes} />}
+      {own ? null : <RunHistory agent={agent} wakes={wakes} />}
       {children}
     </div>
   );
