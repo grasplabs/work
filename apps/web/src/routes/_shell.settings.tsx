@@ -9,7 +9,8 @@ import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { sectionAt } from "../settings/sections.ts";
-import { roomForList, SettingsNav } from "../settings/settings-nav.tsx";
+import { settingsLayout } from "../settings/settings-nav.stylex.ts";
+import { SettingsNav } from "../settings/settings-nav.tsx";
 import { settingsToast } from "../settings/settings-toast.ts";
 
 // Settings: one's own account, then the workspace and who may do what in
@@ -28,9 +29,12 @@ const styles = stylex.create({
   frame: { containerType: "inline-size", containerName: "settings" },
   row: {
     display: "flex",
-    flexDirection: { default: "column", [roomForList]: "row" },
-    alignItems: { default: "stretch", [roomForList]: "flex-start" },
-    gap: { default: space[6], [roomForList]: space[8] },
+    flexDirection: { default: "column", [settingsLayout.roomForList]: "row" },
+    alignItems: {
+      default: "stretch",
+      [settingsLayout.roomForList]: "flex-start",
+    },
+    gap: { default: space[6], [settingsLayout.roomForList]: space[8] },
   },
   section: {
     display: "grid",

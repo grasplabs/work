@@ -572,7 +572,7 @@ const cast = {
   notFound: { member: "user" },
   errorReports: { member: "user" },
   connections: { admin: "admin", user: "user" },
-  models: { admin: "admin", builder: "builder" },
+  aiSpend: { admin: "admin", builder: "builder" },
   settings: { admin: "admin", member: "user" },
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },

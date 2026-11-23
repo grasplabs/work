@@ -18,6 +18,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 
 import { groupedSectionsFor } from "./sections.ts";
 import type { SettingsSection } from "./sections.ts";
+import { settingsLayout } from "./settings-nav.stylex.ts";
 
 // Settings' own list of its sections, inside the page while the app's
 // sidebar doesn't list them: beside the section where the page has the
@@ -27,12 +28,9 @@ import type { SettingsSection } from "./sections.ts";
 // sections in its sidebar (settings/sections.ts is the data for it), the
 // wide list goes from here and the control stays for a phone.
 
-/** The page is wide enough for the list beside a section's column. */
-export const roomForList = "@container settings (width >= 48rem)";
-
 const styles = stylex.create({
   list: {
-    display: { default: "none", [roomForList]: "flex" },
+    display: { default: "none", [settingsLayout.roomForList]: "flex" },
     flexDirection: "column",
     gap: space[5],
     width: "13rem",
@@ -49,7 +47,9 @@ const styles = stylex.create({
   },
   // The group's name, where the links' words start.
   groupName: { marginInline: space[2], marginBlockEnd: space[1] },
-  control: { display: { default: "block", [roomForList]: "none" } },
+  control: {
+    display: { default: "block", [settingsLayout.roomForList]: "none" },
+  },
 });
 
 interface Viewer {

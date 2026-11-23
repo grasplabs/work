@@ -325,13 +325,14 @@ const KeyDialog = ({
   const [key, setKey] = useState("");
   const [failure, setFailure] = useState<string>();
   const label = providerName(provider.provider, provider.label);
+  // Why it failed is said under the key, so the form's save throws nothing.
   const save = async (): Promise<void> => {
     setFailure(undefined);
     try {
       await onReplace(key);
     } catch (error) {
       setFailure(failureText(error));
-      throw error;
+      return;
     }
     setKey("");
     onOpenChange(false);
@@ -428,19 +429,7 @@ const KeyDialog = ({
             {t`Delete key`}
           </HoldButton>
           <DialogClose>{t`Cancel`}</DialogClose>
-          <Button
-            errorLabel={t`Not saved`}
-            form={formId}
-            loadingLabel={t`Saving`}
-            onClick={async () => {
-              if (key === "") {
-                return;
-              }
-              await save();
-            }}
-            size="sm"
-            type="submit"
-          >
+          <Button form={formId} size="sm" type="submit">
             {t`Replace key`}
           </Button>
         </DialogFooter>
@@ -575,7 +564,12 @@ const useOffers = (offered: AiProvidersListing["offered"]) => {
       id: provider,
       name: providerName(provider, label),
       ...(placeholder === undefined ? {} : { placeholder }),
-      ...(provider === "openai-compatible" ? { address: true } : {}),
+      ...(provider === "openai-compatible"
+        ? {
+            address: true,
+            addressLabel: t`Use an OpenAI-compatible endpoint`,
+          }
+        : {}),
       ...(region === "custom"
         ? {}
         : {

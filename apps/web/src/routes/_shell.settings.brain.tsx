@@ -169,24 +169,27 @@ const TeamGroups = ({
         title={t`Groups of teams`}
       >
         <FieldGroup>
-          {groups.map((group, at) => (
-            <SettingRow key={group.id} label={t`Group ${at + 1}`}>
-              <Input
-                aria-label={t`Group name`}
-                maxLength={80}
-                onValueChange={(value) => {
-                  setGroups(
-                    groups.map((each) =>
-                      each.id === group.id ? { ...each, name: value } : each
-                    )
-                  );
-                }}
-                readOnly={busy}
-                size="sm"
-                value={group.name}
-              />
-            </SettingRow>
-          ))}
+          {groups.map((group, at) => {
+            const number = at + 1;
+            return (
+              <SettingRow key={group.id} label={t`Group ${number}`}>
+                <Input
+                  aria-label={t`Group name`}
+                  maxLength={80}
+                  onValueChange={(value) => {
+                    setGroups(
+                      groups.map((each) =>
+                        each.id === group.id ? { ...each, name: value } : each
+                      )
+                    );
+                  }}
+                  readOnly={busy}
+                  size="sm"
+                  value={group.name}
+                />
+              </SettingRow>
+            );
+          })}
         </FieldGroup>
         <div {...stylex.props(styles.add)}>
           <Button

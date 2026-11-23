@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { AuditArchive } from "./audit-archive.tsx";
+import { ArchivedEvents, RetentionRows } from "./audit-archive.tsx";
 
 // Settings › Audit trail › Archived events and Retention against core's
 // audit API as the page reaches it over RPC (the boundary from the web
@@ -117,10 +117,13 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <AuditArchive
-        directory={{ people: new Map(), teams: new Map(), apps: new Map() }}
-        search={action === undefined ? {} : { action }}
-      />
+      <>
+        <ArchivedEvents
+          directory={{ people: new Map(), teams: new Map(), apps: new Map() }}
+          search={action === undefined ? {} : { action }}
+        />
+        <RetentionRows />
+      </>
     ),
   });
   const router = createRouter({

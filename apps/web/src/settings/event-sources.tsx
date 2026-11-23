@@ -1,3 +1,4 @@
+import type { AuditPage, AuditRecord } from "@grasp-os/shared/audit-log";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
 import type { EventSource } from "@grasp-os/shared/event-sources";
@@ -55,6 +56,7 @@ import {
   EllipsisIcon,
   Icon,
   LinkIcon,
+  PlayIcon,
   PlusIcon,
   RefreshCwIcon,
   TrashIcon,
@@ -64,15 +66,17 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
+import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { ConfirmAction } from "./confirm-action.tsx";
 import { RefusedBadge, SourceActivity } from "./event-source-activity.tsx";
 import { Failure, SettingsGroup, SettingsStack } from "./section.tsx";
@@ -266,7 +270,7 @@ const SourceMenu = ({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          aria-label={t`Actions for ${name}`}
+          aria-label={t`More for ${name}`}
           disabled={busy}
           size="icon-sm"
           variant="ghost"
@@ -380,6 +384,94 @@ const SourceRow = ({
   );
 };
 
+/** The runs a source started, as the audit log keeps them: its newest first. */
+interface StartedRun {
+  workflowId: string;
+  at: string;
+}
+
+/** The newest runs at most to show. */
+const runsShown = 10;
+
+/** The run a record says source `sourceId` started, if it is one. */
+const runOf = (record: AuditRecord, sourceId: string): StartedRun[] => {
+  const { event } = record;
+  const workflowId = event?.target?.id;
+  if (workflowId === undefined || event?.detail?.source !== sourceId) {
+    return [];
+  }
+  return [{ workflowId, at: record.receivedAt }];
+};
+
+/**
+ * The runs source `sourceId` started, read from the audit log's
+ * `workflow.start.admitted` events, newest first, a few stretches of it
+ * at most.
+ */
+const startedRuns = async (
+  core: Pick<CoreConnection, "withSession">,
+  sourceId: string
+): Promise<StartedRun[]> =>
+  await core.withSession(async ({ audit }) => {
+    const runs: StartedRun[] = [];
+    let next: number | null = null;
+    // A few stretches at most per look: each page reads a bounded part of the log.
+    for (let page = 0; page < 5 && runs.length < runsShown; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+      const read: AuditPage = await audit.search(
+        { action: "workflow.start.admitted" },
+        next ?? undefined
+      );
+      runs.push(...read.records.flatMap((record) => runOf(record, sourceId)));
+      ({ next } = read);
+      if (next === null) {
+        break;
+      }
+    }
+    return runs.slice(0, runsShown);
+  });
+
+/** What reading a source's runs came to. */
+type RunsRead =
+  | { state: "reading" }
+  | { state: "read"; runs: StartedRun[] }
+  | { state: "failed" };
+
+/**
+ * Reads the runs source `sourceId` started into `onRead`, while `current`
+ * is live. Outside the component, as the React Compiler can't compile `try`.
+ */
+const readRuns = async (
+  core: Pick<CoreConnection, "withSession">,
+  sourceId: string,
+  current: { live: boolean },
+  onRead: (read: RunsRead) => void
+): Promise<void> => {
+  let read: RunsRead;
+  try {
+    read = { state: "read", runs: await startedRuns(core, sourceId) };
+  } catch {
+    read = { state: "failed" };
+  }
+  if (current.live) {
+    onRead(read);
+  }
+};
+
+/** The runs source `sourceId` started, newest first, read as it opens. */
+const useRecentRuns = (sourceId: string): RunsRead => {
+  const core = useCore();
+  const [read, setRead] = useState<RunsRead>({ state: "reading" });
+  useEffect(() => {
+    const current = { live: true };
+    void readRuns(core, sourceId, current, setRead);
+    return () => {
+      current.live = false;
+    };
+  }, [core, sourceId]);
+  return read;
+};
+
 /** One part of an opened source: its name over what it holds. */
 const Part = ({ title, children }: { title: string; children: ReactNode }) => (
   <section {...stylex.props(styles.part)}>
@@ -407,9 +499,21 @@ const SourceDetails = ({
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const changes = useSourceChanges(source, onSecret, onChanged);
+  const runs = useRecentRuns(source.id);
   const url =
     source.delivery === null ? undefined : urlOf(source.delivery.token);
+  const names = new Map(
+    (starts ?? []).map((workflow) => [workflow.id, workflow.name])
+  );
+  const openWorkflow = (workflow: string, runsView: boolean): void => {
+    void navigate({
+      to: "/workflows/$workflow",
+      params: { workflow },
+      ...(runsView ? { search: { view: "runs" as const } } : {}),
+    });
+  };
   return (
     <div {...stylex.props(styles.stack)}>
       <Part title={t`Setup`}>
@@ -450,18 +554,19 @@ const SourceDetails = ({
         {starts !== undefined && starts.length > 0 ? (
           <ItemGroup aria-label={t`Workflows it starts`}>
             {starts.map((workflow) => (
-              <Item asChild key={workflow.id} size="xs">
-                <Link
-                  params={{ workflow: workflow.id }}
-                  to="/workflows/$workflow"
-                >
-                  <ItemMedia variant="icon">
-                    <Icon icon={WorkflowIcon} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{workflow.name}</ItemTitle>
-                  </ItemContent>
-                </Link>
+              <Item
+                key={workflow.id}
+                onClick={() => {
+                  openWorkflow(workflow.id, false);
+                }}
+                size="xs"
+              >
+                <ItemMedia variant="icon">
+                  <Icon icon={WorkflowIcon} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{workflow.name}</ItemTitle>
+                </ItemContent>
               </Item>
             ))}
           </ItemGroup>
@@ -470,6 +575,41 @@ const SourceDetails = ({
             {starts === undefined
               ? t`The workflows couldn't be read.`
               : t`None yet: a workflow starts on its events from the workflow's Triggers tab.`}
+          </Text>
+        )}
+      </Part>
+      <Part title={t`Recent runs`}>
+        {runs.state === "read" && runs.runs.length > 0 ? (
+          <ItemGroup aria-label={t`Recent runs`}>
+            {runs.runs.map((run) => (
+              <Item
+                key={`${run.workflowId}-${run.at}`}
+                onClick={() => {
+                  openWorkflow(run.workflowId, true);
+                }}
+                size="xs"
+              >
+                <ItemMedia variant="icon">
+                  <Icon icon={PlayIcon} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    {names.get(run.workflowId) ?? t`A workflow`}
+                  </ItemTitle>
+                  <ItemDescription>{formatDateTime(run.at)}</ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        ) : (
+          <Text color="muted" size="sm">
+            {
+              {
+                reading: t`Reading the runs…`,
+                read: t`No run started from it lately.`,
+                failed: t`The runs couldn't be read.`,
+              }[runs.state]
+            }
           </Text>
         )}
       </Part>

@@ -17,7 +17,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { SignInSection } from "./sign-in-settings.tsx";
+import { SignInRow } from "./sign-in-settings.tsx";
 
 // Settings › Workspace › Sign-in against core's organization settings as
 // the page reaches them over RPC (the boundary from the web app), faked:
@@ -86,7 +86,7 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => shell,
     path: "/",
-    component: SignInSection,
+    component: () => <SignInRow />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([shell.addChildren([page])]),
@@ -124,26 +124,26 @@ describe("Settings › Workspace › Sign-in", () => {
     document.body.innerHTML = "";
   });
 
-  it("shows an admin each way people sign in, whose accounts it takes, and whether the sign-in page offers it", async () => {
+  it("shows an admin each way people sign in and whether the sign-in page offers it", async () => {
     const { session } = fakeOrgSettings(both);
     await shown(session);
 
     expect({
-      microsoft: text().includes(
-        "Only accounts of the tenant 7f9a2c1e-0000-4000-8000-000000000001."
+      ways: document.querySelector("input")?.value,
+      accounts: text().includes(
+        "Only your organization’s work accounts and work accounts at acme.test"
       ),
-      google: text().includes(
-        "Only accounts of the Google Workspace acme.test."
-      ),
-      offered: text().includes("On the sign-in page"),
-      missing: text().includes("Not offered: its secret isn’t set"),
+      // The one whose secret isn't set says so; the other says nothing.
+      notOffered: {
+        microsoft: text().includes("Microsoft 365 isn’t on the sign-in page"),
+        google: text().includes("Google Workspace isn’t on the sign-in page"),
+      },
       noSecret:
         text().includes("client-ms") || text().includes("client-google"),
     }).toStrictEqual({
-      microsoft: true,
-      google: true,
-      offered: true,
-      missing: true,
+      ways: "Microsoft 365 and Google Workspace",
+      accounts: true,
+      notOffered: { microsoft: false, google: true },
       noSecret: false,
     });
   });

@@ -1,7 +1,10 @@
 import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import type { I18nCatalog } from "@grasp-os/ui/lib/i18n";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
+
+import { formatList } from "../format.ts";
 
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
@@ -16,6 +19,175 @@ import type { ReactNode } from "react";
 export const UiWords = ({ children }: { children: ReactNode }) => {
   const { t, i18n } = useLingui();
   const catalog: Partial<I18nCatalog> = {
+    // Settings' parts (routes/_shell.settings*.tsx, settings/).
+    alert: { close: t`Dismiss` },
+    alertDialog: { cancel: t`Cancel` },
+    avatar: {
+      groupCount: (count) => `+${String(count)}`,
+      groupName: (shown, rest) => {
+        const listed = formatList(shown);
+        return rest === 0
+          ? listed
+          : t`${listed} and ${plural(rest, { one: "# other", other: "# others" })}`;
+      },
+    },
+    codeBlock: {
+      collapse: t`Show less`,
+      expand: t`Show more`,
+      moreLines: (count) =>
+        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
+      plainText: t`Text`,
+      streaming: t`Writing`,
+    },
+    combobox: {
+      empty: t`No results`,
+      notChoice: (value) => t`${value} is not one of the choices`,
+      trigger: t`Show the choices`,
+    },
+    dataTable: {
+      actions: t`Actions`,
+      actionsFor: (name) => t`Actions for ${name}`,
+      cancel: t`Cancel`,
+      chooseAll: (one) => t`Choose every ${one} shown`,
+      chooseColumn: t`Choose`,
+      clear: t`Clear`,
+      clearSearch: t`Clear search`,
+      close: (name) => t`Close ${name}`,
+      columnInfo: (header) => t`More about ${header}`,
+      columnMenu: (header) => t`Column: ${header}`,
+      columns: t`Columns`,
+      confirm: (action, count, unit) => t`${action} ${count} ${unit}?`,
+      confirmDetail: t`This cannot be undone.`,
+      done: (action, count, unit) => t`${action}: ${count} ${unit}`,
+      error: (many) => t`The ${many} did not load`,
+      exportCsv: t`Export CSV`,
+      failedDetail: t`Check the connection, then try again.`,
+      filterAtLeast: t`is at least`,
+      filterAtMost: t`is at most`,
+      filterContains: t`contains`,
+      filterField: t`Field`,
+      filterIs: t`is`,
+      filterIsNot: t`is not`,
+      filterLabel: (label) => t`Filter ${label}`,
+      filterLacks: t`does not contain`,
+      filterName: t`Filter condition`,
+      filterOperator: t`Operator`,
+      filterSegments: {
+        field: t`Filter field`,
+        operator: t`Filter operator`,
+        value: t`Filter value`,
+      },
+      filterValue: t`Value`,
+      groupAttention: t`needs attention`,
+      hide: t`Hide column`,
+      loading: (many) => t`Loading ${many}`,
+      loadingMore: (many) => t`Loading more ${many}`,
+      moveEarlier: t`Move earlier`,
+      moveLater: t`Move later`,
+      noDate: t`No date`,
+      noMatch: (many, query) => t`No ${many} match “${query}”.`,
+      noneMeet: (many) => t`No ${many} meet the filter.`,
+      noneYet: (many) => t`No ${many} yet.`,
+      open: (name) => t`Open ${name}`,
+      pages: (label) => t`Pages of ${label}`,
+      pinEnd: t`Pin to the end`,
+      pinStart: t`Pin to the start`,
+      rowPending: t`pending`,
+      rowRemoved: t`removed`,
+      search: (many) => t`Search ${many}`,
+      searchLabel: (label) => t`Search ${label}`,
+      select: (name) => t`Choose ${name}`,
+      selected: (count, total) => t`${count} of ${total} chosen`,
+      sortDown: t`Sort high to low`,
+      sortNext: t`Sort by this next`,
+      sortUp: t`Sort low to high`,
+      tryAgain: t`Try again`,
+      undo: t`Undo`,
+      unpin: t`Unpin`,
+      view: t`View`,
+      width: (header) => t`Width of ${header}`,
+      withChosen: (many) => t`With the chosen ${many}`,
+      unit: { one: t`row`, other: t`rows` },
+    },
+    dialog: { close: t`Close` },
+    dropdownMenu: { expand: t`More actions` },
+    field: {
+      statusError: t`Could not save. Your choice is kept.`,
+      statusLoading: t`Saving`,
+      statusRetry: t`Try again`,
+      statusSuccess: t`Saved`,
+    },
+    holdButton: {
+      ask: (words) => t`${words}?`,
+      cancel: t`Cancel`,
+      confirm: t`Confirm`,
+      holdTo: (words) => t`Hold to ${words}`,
+    },
+    imageUpload: {
+      add: t`Add a picture`,
+      change: t`Change picture`,
+      error: t`Could not save`,
+      how: t`Click or drop a picture.`,
+      refused: (name, reason) => {
+        if (reason === "file-too-large") {
+          return t`${name} is too large.`;
+        }
+        return reason === "file-too-small"
+          ? t`${name} is empty.`
+          : t`${name} is not a kind of picture this takes.`;
+      },
+      refusedInRow: (reason) => {
+        if (reason === "file-too-large") {
+          return t`Too large.`;
+        }
+        return reason === "file-too-small"
+          ? t`That file is empty.`
+          : t`Not a kind of picture this takes.`;
+      },
+      remove: t`Remove picture`,
+      retry: t`Try again`,
+      retryTip: t`Could not save. Try again?`,
+      saved: t`Saved`,
+      saving: t`Saving`,
+    },
+    input: {
+      hidePassword: t`Hide password`,
+      replace: t`Replace`,
+      showPassword: t`Show password`,
+    },
+    pagination: {
+      loading: t`Loading the page`,
+      name: t`Pagination`,
+      next: t`Next page`,
+      none: (unit) => t`No ${unit}`,
+      page: (current, count) => t`Page ${current} of ${count}`,
+      previous: t`Previous page`,
+      range: (first, last, total, unit) =>
+        t`Showing ${first} – ${last} of ${total} ${unit}`,
+      unit: { one: t`item`, other: t`items` },
+    },
+    sheet: { close: t`Close` },
+    switch: { error: t`Could not save` },
+    tagsInput: {
+      duplicate: (word) => t`“${word}” is already added.`,
+      empty: t`Press Enter to add it.`,
+      full: (most) => t`Up to ${most}.`,
+      invalid: t`not valid`,
+    },
+    themeToggle: {
+      dark: { name: t`Dark`, line: t`Always dark` },
+      icon: (label, current, next) =>
+        t`${label}, ${current}. Switch to ${next}`,
+      label: t`Theme`,
+      light: { name: t`Light`, line: t`Always light` },
+      // Said to an agent that asks for a mode or theme there is none of: English, as the agent reads it.
+      noMode: (mode, modes) =>
+        `No mode "${mode}" in Theme. Its modes: ${modes.join(", ")}.`,
+      noTheme: (theme, known) =>
+        `No theme "${theme}" in Theme. Its themes: ${known.join(", ")}.`,
+      system: { name: t`System`, line: t`As your device` },
+      themes: t`Colours`,
+    },
     copyButton: {
       copied: t`Copied`,
       copy: t`Copy`,

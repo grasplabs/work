@@ -6,6 +6,7 @@ import type {
   ChannelReach,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
+import { failureText } from "@grasp-os/shared/errors";
 import { Button } from "@grasp-os/ui/components/button";
 import { FieldGroup } from "@grasp-os/ui/components/field";
 import {
@@ -294,6 +295,8 @@ const ForgetConversations = () => {
   const { t } = useLingui();
   const core = useCore();
   const [deleted, setDeleted] = useState<number | "answering" | "under_way">();
+  // Core's own reason, when it refused for another one.
+  const [failure, setFailure] = useState<string>();
   const refusals = {
     answering: t`Stephen is still answering one of your conversations. Try again in a moment.`,
     under_way: t`Your conversations are being deleted. If any remain, try again in a moment.`,
@@ -305,13 +308,20 @@ const ForgetConversations = () => {
   return (
     <SettingRow
       {...(typeof deleted === "string" ? { error: refusals[deleted] } : {})}
+      {...(failure === undefined ? {} : { error: failure })}
       help={went}
       label={t`Your conversations in chat apps`}
     >
       <ConfirmAction
         action={async () => {
           setDeleted(undefined);
-          setDeleted(await core.withSession(forgotten));
+          setFailure(undefined);
+          try {
+            setDeleted(await core.withSession(forgotten));
+          } catch (error) {
+            setFailure(failureText(error));
+            throw error;
+          }
         }}
         description={t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
         errorLabel={t`Not deleted`}
