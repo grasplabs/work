@@ -371,6 +371,13 @@ const compare = `import type { Doc } from "@server/_generated/server";
 import type { SapLine } from "./costing.ts";
 import { samePart, withMargin } from "./pricing.ts";
 
+const brackets = /\\s*\\([^)]*\\)/gu;
+
+/** A part's name, short: up to its first comma, without what is in brackets. */
+const shortName = (description: string): string =>
+  (description.split(",")[0] ?? description).replaceAll(brackets, "").trim();
+
+
 /** What can be wrong with a line. */
 export type Issue = "quantity" | "price" | "notOnDrawing" | "notInSap" | "part";
 
@@ -408,7 +415,7 @@ const words = (...parts: (string | number)[]): string => parts.join(" ");
 
 /** The finding of a line on one side only, or with another quantity or part. */
 const findingOf = (
-  { position, own, drawn }: Pair,
+  { own, drawn }: Pair,
   name: string,
   margin: number
 ): Finding | null => {
@@ -417,7 +424,7 @@ const findingOf = (
     return {
       kind: "notInSap",
       title: name,
-      detail: words("On the drawing at position", position, "· not in SAP"),
+      detail: "On the drawing, not in SAP",
       effect: null,
       estimate: false,
     };
@@ -428,7 +435,7 @@ const findingOf = (
       : {
           kind: "notOnDrawing",
           title: name,
-          detail: words("In SAP and in the price at position", position, "· not on the drawing"),
+          detail: "In SAP and in the price, not on the drawing",
           effect: price === null ? null : -withMargin(own.line.quantity * price, margin),
           estimate: false,
         };
@@ -437,12 +444,7 @@ const findingOf = (
     return {
       kind: "quantity",
       title: name,
-      detail: words(
-        "The drawing the customer approves says",
-        drawn.quantity,
-        "· SAP and the price count",
-        own.line.quantity
-      ),
+      detail: words("The drawing says", drawn.quantity, "· the price counts", own.line.quantity),
       effect:
         price === null
           ? null
@@ -461,10 +463,21 @@ const findingOf = (
   return {
     kind: "part",
     title: name,
-    detail: words("The drawing names", drawn.supplierPart, "· SAP has", article.supplierPart),
+    detail: words("The drawing says", drawn.supplierPart, "· SAP has", article.supplierPart),
     effect: null,
     estimate: false,
   };
+};
+
+/** Names shown before the rest are counted. */
+const namesShown = 3;
+
+/** A few names, and how many more: Pinch Clamp, Gasket and 6 more. */
+const namesOf = (names: readonly string[]): string => {
+  const first = names.slice(0, namesShown).join(", ");
+  return names.length > namesShown
+    ? [first, "and", String(names.length - namesShown), "more"].join(" ")
+    : first;
 };
 
 /** The finding of the lines SAP has no price for: what the price leaves out. */
@@ -487,20 +500,18 @@ const unpricedOf = (lines: readonly SapLine[], margin: number): Finding | null =
     kind: "price",
     title: words(
       unpriced.length,
-      unpriced.length === 1 ? "part has" : "parts have",
-      "no price, so the price leaves them out"
+      unpriced.length === 1 ? "part" : "parts",
+      "without a price"
     ),
-    detail: unpriced
-      .map(({ line, article }) => article?.description ?? line.article)
-      .join(" · "),
+    detail: namesOf(unpriced.map(({ line, article }) => shortName(article?.description ?? line.article))),
     effect: known ? withMargin(estimate, margin) : null,
     estimate: true,
   };
 };
 
-/** What a position is called: as the drawing names it, else SAP. */
+/** What a position is called: as the drawing names it, else SAP; short. */
 const nameOf = ({ own, drawn }: Pair): string =>
-  drawn?.description ?? own?.article?.description ?? own?.line.article ?? "";
+  shortName(drawn?.description ?? own?.article?.description ?? own?.line.article ?? "");
 
 /** A position as the parts list shows it, with what is wrong with it. */
 const lineOf = (
@@ -1028,17 +1039,14 @@ export const approve = mutation({
 });
 
 /**
- * Puts a letter back as it came in, unread, wherever it is: for the App's
- * builders, and how a letter whose reading was cut off gets going again.
+ * Puts a letter back as it came in, unread, wherever it is: to read it
+ * again, and how a letter whose reading was cut off gets going again.
+ * Anyone the App is shared with may: it changes nothing but this letter.
  */
 export const startOver = mutation({
   args: { id: v.id("notices") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const user = await ctx.auth.getUser();
-    if (!user.roles.includes("builder")) {
-      throw new AppError("notice.builders_only", "Only the App's builders start a letter over.");
-    }
     await ctx.db.patch("notices", args.id, {
       status: "new",
       kind: null,
@@ -1141,6 +1149,10 @@ import { statuses } from "../lib/statuses";
 
 /** Records a list shows first, and more by. */
 const pageSize = 20;
+
+// The App's own entry in Grasp's sidebar, where the people it is shared
+// with open it.
+export const surface = { kind: "sidebar", title: "Overview" };
 
 const AddLetter = () => {
   const add = useMutation(api.notices.add);
@@ -1325,6 +1337,22 @@ const Home = () => (
 export const Route = createFileRoute("/")({ component: Home });
 `;
 
+/** The way back to the App's first page, from any other. */
+const backFile = `import { Button } from "@grasp-os/app-kit/components/button";
+import { Link } from "@tanstack/react-router";
+import { ArrowLeftIcon } from "lucide-react";
+
+/** Back to the letters and products. */
+export const Back = () => (
+  <div>
+    <Button render={<Link to="/" />} size="sm" variant="ghost">
+      <ArrowLeftIcon />
+      Supplier changes
+    </Button>
+  </div>
+);
+`;
+
 /** A quiet info mark beside a title, for someone seeing the App for the first time. */
 const infoFile = `import { Button } from "@grasp-os/app-kit/components/button";
 import {
@@ -1392,7 +1420,7 @@ export const statuses = {
 } as const;
 `;
 
-const letter = `import { useAction, useMutation, useQuery, useUser } from "@grasp-os/sdk/react";
+const letter = `import { useAction, useMutation, useQuery } from "@grasp-os/sdk/react";
 import type { FunctionReturn } from "@grasp-os/sdk";
 import {
   Accordion,
@@ -1406,6 +1434,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/app-kit/components/alert";
+import { AutoHeight, FadeIn } from "@grasp-os/app-kit/components/auto-height";
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
@@ -1417,6 +1446,7 @@ import {
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
 import { Empty, EmptyHeader, EmptyTitle } from "@grasp-os/app-kit/components/empty";
+import { Shimmer } from "@grasp-os/app-kit/components/shimmer";
 import {
   PageHeader,
   PageHeaderActions,
@@ -1448,6 +1478,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckIcon, CircleAlertIcon, CircleIcon, LoaderIcon, UserIcon } from "lucide-react";
 import { useState } from "react";
 
+import { Back } from "../components/back";
 import { Titled } from "../components/info";
 import { amount, change, day, money } from "../lib/format";
 import { handOver } from "../lib/hand-over";
@@ -1499,7 +1530,7 @@ const Step = ({
   return (
     <TraceLine status={at === step ? "running" : "pending"} wrap>
       <TraceIcon>{at === step ? <LoaderIcon /> : <CircleIcon />}</TraceIcon>
-      <TraceTitle>{at === step ? doing : done}</TraceTitle>
+      <TraceTitle>{at === step ? <Shimmer as="span">{doing}</Shimmer> : done}</TraceTitle>
     </TraceLine>
   );
 };
@@ -1520,6 +1551,7 @@ const Steps = ({ notice, impact }: { notice: Notice; impact: Impact | null | und
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <AutoHeight>
         <Trace>
           <Step
             at={at}
@@ -1564,6 +1596,7 @@ const Steps = ({ notice, impact }: { notice: Notice; impact: Impact | null | und
             </TraceLine>
           )}
         </Trace>
+        </AutoHeight>
       </CardContent>
     </Card>
   );
@@ -1769,14 +1802,24 @@ const Reading = ({ notice }: { notice: Notice }) => {
   return (
     <>
       <Steps impact={impact} notice={notice} />
-      {ready && found !== null ? <AlsoFound impact={found} /> : null}
-      {found !== null && found.products.length > 0 ? <Products impact={found} notice={notice} /> : null}
+      {ready && found !== null ? (
+        <FadeIn>
+          <AlsoFound impact={found} />
+        </FadeIn>
+      ) : null}
+      {found !== null && found.products.length > 0 ? (
+        <FadeIn>
+          <Products impact={found} notice={notice} />
+        </FadeIn>
+      ) : null}
       {ready ? (
-        <Message
-          forCustomers={found === null || found.products.length > 0}
-          key={notice.message ?? ""}
-          notice={notice}
-        />
+        <FadeIn>
+          <Message
+            forCustomers={found === null || found.products.length > 0}
+            key={notice.message ?? ""}
+            notice={notice}
+          />
+        </FadeIn>
       ) : null}
       <Details impact={impact} notice={notice} />
     </>
@@ -1789,8 +1832,6 @@ const Letter = () => {
   const read = useAction(api.notices.read);
   const write = useAction(api.notices.write);
   const startOver = useMutation(api.notices.startOver);
-  const user = useUser();
-  const builds = user?.roles.includes("builder") === true;
   const [starting, setStarting] = useState(false);
   if (notice === undefined) {
     return <Skeleton className="m-6 h-9 w-64" />;
@@ -1815,6 +1856,7 @@ const Letter = () => {
   const carryOn = notice.status === "working" && !starting;
   return (
     <main className="flex flex-col gap-6 p-6">
+      <Back />
       <PageHeader>
         <PageHeaderContent>
           <PageHeaderTitle>{notice.title}</PageHeaderTitle>
@@ -1869,13 +1911,13 @@ const Letter = () => {
       ) : (
         <Reading notice={notice} />
       )}
-      {notice.status !== "new" && builds ? (
+      {notice.status === "new" ? null : (
         <div>
           <Button onClick={async () => await startOver({ id: notice._id })} variant="ghost">
             Start over
           </Button>
         </div>
-      ) : null}
+      )}
     </main>
   );
 };
@@ -1888,18 +1930,23 @@ export const Route = createFileRoute("/letters/$noticeId")({
 `;
 
 const product = `import { useQuery } from "@grasp-os/sdk/react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@grasp-os/app-kit/components/accordion";
+import { FadeIn } from "@grasp-os/app-kit/components/auto-height";
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
 import { Empty, EmptyHeader, EmptyTitle } from "@grasp-os/app-kit/components/empty";
-import { Grid } from "@grasp-os/app-kit/components/grid";
 import {
   Item,
   ItemActions,
@@ -1928,6 +1975,7 @@ import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { Back } from "../components/back";
 import { Titled } from "../components/info";
 import { amount, change, money } from "../lib/format";
 
@@ -1962,153 +2010,126 @@ const Product = () => {
   }
   const flagged = lines.filter((line) => line.issue !== null);
   const shown = all ? lines : flagged;
+  const single = prices[0]?.price ?? 0;
   return (
     <main className="flex flex-col gap-6 p-6">
+      <Back />
       <PageHeader>
         <PageHeaderContent>
           <PageHeaderTitle>{assembly.name}</PageHeaderTitle>
           <PageHeaderDescription>
-            {[assembly.number, ["REV", assembly.revision].join(" "), assembly.customer].join(" · ")}
+            {[assembly.number, assembly.customer].join(" · ")}
           </PageHeaderDescription>
         </PageHeaderContent>
       </PageHeader>
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Titled
-              info="Grasp lays the drawing the customer approves next to the parts list in SAP and the price list, line by line. Each amount is what it does to the price of one piece, margin included."
-              title={
-                findings.length === 0
-                  ? "The drawing, SAP and the price agree"
-                  : [amount(findings.length), findings.length === 1 ? "thing doesn't" : "things don't", "match"].join(" ")
-              }
-            />
-          </CardTitle>
-          <CardDescription>
-            {effect > 0
-              ? ["The price leaves out about", money(effect), "a piece."].join(" ")
-              : "Between the drawing the customer approves, SAP and the price."}
-          </CardDescription>
-        </CardHeader>
-        {findings.length === 0 ? null : (
-          <CardContent>
-            <ItemGroup spacing="tight">
-              {findings.map((finding) => (
-                <Item key={[finding.kind, finding.title].join(":")} variant="outline">
-                  <ItemContent>
-                    <ItemTitle>{finding.title}</ItemTitle>
-                    <ItemDescription>{finding.detail}</ItemDescription>
-                  </ItemContent>
-                  {finding.effect === null ? null : (
+      <FadeIn>
+        <Card>
+          <CardHeader>
+            <CardDescription>
+              <Titled
+                info="Grasp lays the drawing the customer approves next to the parts list in SAP and the price list, line by line. The amount is what that does to the price of one piece, margin included."
+                title={findings.length === 0 ? "Drawing, SAP and price" : "Missing from the price of one piece"}
+              />
+            </CardDescription>
+            <CardTitle>
+              {findings.length === 0 ? (
+                "Everything matches"
+              ) : (
+                <Stat variant="attention">{effect > 0 ? ["about", money(effect)].join(" ") : money(0)}</Stat>
+              )}
+            </CardTitle>
+          </CardHeader>
+          {findings.length === 0 ? null : (
+            <CardContent>
+              <ItemGroup spacing="tight">
+                {findings.map((finding) => (
+                  <Item key={[finding.kind, finding.title].join(":")} size="sm" variant="outline">
+                    <ItemContent>
+                      <ItemTitle>{finding.title}</ItemTitle>
+                      <ItemDescription>{finding.detail}</ItemDescription>
+                    </ItemContent>
                     <ItemActions>
-                      <Badge variant="attention">
-                        {[finding.estimate ? "about" : "", change(finding.effect)].join(" ").trim()}
-                      </Badge>
+                      <Badge variant="outline">{issues[finding.kind]}</Badge>
+                      {finding.effect === null ? null : (
+                        <Badge variant="attention">{change(finding.effect)}</Badge>
+                      )}
                     </ItemActions>
-                  )}
-                </Item>
-              ))}
-            </ItemGroup>
-          </CardContent>
-        )}
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardDescription>
-            <Titled
-              info="Worked out like your calculation file: parts with margin, labour minutes times the rate, and the production order spread over the pieces ordered."
-              title="Price for one piece"
-            />
-          </CardDescription>
-          <CardTitle>
-            <Stat>{prices[0] === undefined ? "–" : money(prices[0].price)}</Stat>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Grid columns={2} gap="lg">
-            <Table>
-              <TableBody>
-                <TableRow>
-                  <TableHead>{["Parts, with ", amount(assembly.margin * 100), "% margin"].join("")}</TableHead>
-                  <TableCell>{money(check.parts)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableHead>{["Labour, ", amount(assembly.labourMinutes), " min"].join("")}</TableHead>
-                  <TableCell>{money(check.labour)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableHead>Production order</TableHead>
-                  <TableCell>{money(assembly.orderCost)}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Ordered</TableHead>
-                  <TableHead>Per piece</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {prices.map((tier) => (
-                  <TableRow key={tier.quantity}>
-                    <TableCell>{amount(tier.quantity)}</TableCell>
-                    <TableCell>{money(tier.price)}</TableCell>
-                  </TableRow>
+                  </Item>
                 ))}
-              </TableBody>
-            </Table>
-          </Grid>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Titled
-              info="Each line of the drawing beside the same line in SAP. Amber marks the lines that don't match."
-              title="Parts list"
-            />
-          </CardTitle>
-          <CardDescription>
-            {all
-              ? ["All", amount(lines.length), "lines, the drawing beside SAP"].join(" ")
-              : ["The", amount(flagged.length), "of", amount(lines.length), "lines that don't match"].join(" ")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>#</TableHead>
-                <TableHead>Part</TableHead>
-                <TableHead>Drawing</TableHead>
-                <TableHead>SAP</TableHead>
-                <TableHead>Unit price</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shown.map((line) => (
-                <TableRow key={line.position}>
-                  <TableCell>{line.position}</TableCell>
-                  <TableCell>{line.name}</TableCell>
-                  <TableCell>{line.drawing === null ? "–" : [amount(line.drawing), line.unit].join(" ")}</TableCell>
-                  <TableCell>{line.sap === null ? "–" : [amount(line.sap), line.unit].join(" ")}</TableCell>
-                  <TableCell>{line.price === null ? "–" : money(line.price)}</TableCell>
-                  <TableCell>
-                    {line.issue === null ? null : <Badge variant="attention">{issues[line.issue]}</Badge>}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-        <CardFooter>
-          <Button onClick={() => setAll(!all)} variant="ghost">
-            {all ? "Only what doesn't match" : ["Show all", amount(lines.length)].join(" ")}
-          </Button>
-        </CardFooter>
-      </Card>
+              </ItemGroup>
+            </CardContent>
+          )}
+        </Card>
+      </FadeIn>
+      <FadeIn>
+        <Accordion>
+          <AccordionItem value="price">
+            <AccordionTrigger>
+              {["How the price is built ·", money(single), "for one piece"].join(" ")}
+            </AccordionTrigger>
+            <AccordionContent>
+              <Table>
+                <TableBody>
+                  <TableRow>
+                    <TableHead>{["Parts, with ", amount(assembly.margin * 100), "% margin"].join("")}</TableHead>
+                    <TableCell>{money(check.parts)}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableHead>{["Labour, ", amount(assembly.labourMinutes), " min"].join("")}</TableHead>
+                    <TableCell>{money(check.labour)}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableHead>Production order</TableHead>
+                    <TableCell>{money(assembly.orderCost)}</TableCell>
+                  </TableRow>
+                  {prices.slice(1).map((tier) => (
+                    <TableRow key={tier.quantity}>
+                      <TableHead>{["Per piece when ordered", amount(tier.quantity)].join(" ")}</TableHead>
+                      <TableCell>{money(tier.price)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="parts">
+            <AccordionTrigger>
+              {["Parts list ·", amount(flagged.length), "of", amount(lines.length), "lines don't match"].join(" ")}
+            </AccordionTrigger>
+            <AccordionContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Part</TableHead>
+                    <TableHead>Drawing</TableHead>
+                    <TableHead>SAP</TableHead>
+                    <TableHead>Unit price</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {shown.map((line) => (
+                    <TableRow key={line.position}>
+                      <TableCell>{line.position}</TableCell>
+                      <TableCell>{line.name}</TableCell>
+                      <TableCell>{line.drawing === null ? "–" : [amount(line.drawing), line.unit].join(" ")}</TableCell>
+                      <TableCell>{line.sap === null ? "–" : [amount(line.sap), line.unit].join(" ")}</TableCell>
+                      <TableCell>{line.price === null ? "–" : money(line.price)}</TableCell>
+                      <TableCell>
+                        {line.issue === null ? null : <Badge variant="attention">{issues[line.issue]}</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Button onClick={() => setAll(!all)} variant="ghost">
+                {all ? "Only the lines that don't match" : ["Show all", amount(lines.length), "lines"].join(" ")}
+              </Button>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </FadeIn>
     </main>
   );
 };
@@ -2307,7 +2328,7 @@ export default appTest(schema, {
       status: "new",
     });
   },
-  "only the App's builders start a letter over": async (t) => {
+  "starting a letter over puts it back as it came in, unread": async (t) => {
     const id = await t.run(
       async (ctx) =>
         await ctx.db.insert("notices", {
@@ -2316,15 +2337,17 @@ export default appTest(schema, {
           received: 0,
           letter: "Prices go up.",
           status: "read",
+          kind: "price",
+          message: "Dear customer,",
         })
     );
     const ada = t.withIdentity({ name: "Ada" });
-    await expect(ada.mutation(api.notices.startOver, { id })).rejects.toMatchObject({
-      code: "notice.builders_only",
+    await ada.mutation(api.notices.startOver, { id });
+    await expect(ada.query(api.notices.get, { id })).resolves.toMatchObject({
+      status: "new",
+      kind: null,
+      message: null,
     });
-    const bea = t.withIdentity({ name: "Bea", role: "builder" });
-    await bea.mutation(api.notices.startOver, { id });
-    await expect(ada.query(api.notices.get, { id })).resolves.toMatchObject({ status: "new" });
   },
 });
 `;
@@ -2340,6 +2363,7 @@ export const files: Readonly<Record<string, string>> = {
   "src/lib/statuses.ts": statusesFile,
   "src/lib/hand-over.ts": handOverFile,
   "src/components/info.tsx": infoFile,
+  "src/components/back.tsx": backFile,
   "src/routes/index.tsx": home,
   "src/routes/letters.$noticeId.tsx": letter,
   "src/routes/products.$number.tsx": product,

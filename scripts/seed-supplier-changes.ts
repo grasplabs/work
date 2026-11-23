@@ -13,6 +13,9 @@
  * The App reads letters with AI: once an admin added an AI provider in
  * Settings, the App's AI is bound to one of its models, Claude's first.
  * Without one, the App says so when it reads a letter.
+ *
+ * Present it signed in as Sam Jansen (sam@acme.test), whom it is shared
+ * with: Grasp shows it as a page of its own, in the sidebar.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -26,7 +29,7 @@ import {
 } from "@grasp-os/runtime/definition";
 
 import { people } from "./seed/company.ts";
-import { origin, sessionOf } from "./seed/local.ts";
+import { localD1, origin, sessionOf } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
 import {
   appDescription,
@@ -187,11 +190,41 @@ const importData = async (
   }
 };
 
+/**
+ * Who presents the App: someone it is shared with as its user, so Grasp
+ * opens it as a page among the others, in its sidebar, rather than as the
+ * workspace its builders (every admin) get. Made up, as every seeded name.
+ */
+const presenter = { email: "sam@acme.test", name: "Sam Jansen" };
+
+/** The presenter signed in once (which makes them a member), named, and given the App. */
+const sharePresenter = async (owner: Session, app: string): Promise<void> => {
+  const presenting = await sessionOf(presenter.email);
+  presenting.close();
+  // The fake sign-in names people by their email's first word (seed.ts does the same).
+  localD1("users")
+    .prepare("UPDATE users SET name = ? WHERE id = ?")
+    .run(presenter.name, presenting.userId);
+  const shared = await owner.api.apps.members.list(app);
+  if (
+    !shared.some(
+      ({ type, id }) => type === "person" && id === presenting.userId
+    )
+  ) {
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: presenting.userId,
+      role: "user",
+    });
+  }
+};
+
 const session = await sessionOf(admin.email);
 try {
   const app = await publishApp(session);
   await bindAi(session, app);
   await importData(session, app, csvsOf(values.data));
+  await sharePresenter(session, app);
   console.log(`${appName}: ${new URL(`/apps/${app}`, origin).href}`);
 } finally {
   session.close();
