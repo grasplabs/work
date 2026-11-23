@@ -8,6 +8,21 @@ export const namespace = "@damsko";
 /** The folder of `packages/ui` every registry file lands in. */
 const installRoot = "~/";
 
+/**
+ * How a font travels: the shadcn CLI carries text only, so Damsko's
+ * registry gives each font as base64 under this name, and the script
+ * installed beside them (`fontsUnpack`) writes the font and removes the
+ * text. What `packages/ui` holds is the font.
+ */
+const packedFont = /\.woff2\.base64$/u;
+
+/** Damsko's script that unpacks the fonts, by its path in `packages/ui`. */
+export const fontsUnpack = "src/styles/fonts/unpack.mjs";
+
+/** Where a registry file stands in `packages/ui` once installed. */
+const installedPath = (target: string): string =>
+  target.slice(installRoot.length).replace(packedFont, ".woff2");
+
 const registrySchema = z.object({
   items: z.array(
     z.object({
@@ -65,7 +80,7 @@ export const expectedOf = (
           `${name}: ${file.path} has the target "${file.target}", not one under ${installRoot}.`
         );
       }
-      files.set(file.target.slice(installRoot.length), file.path);
+      files.set(installedPath(file.target), file.path);
     }
     for (const dependency of item.dependencies) {
       dependencies.add(dependency);

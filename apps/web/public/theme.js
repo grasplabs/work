@@ -1,5 +1,5 @@
 // Light, dark, or the system's colour scheme, through the theme's `dark`
-// class. Loaded as a classic script in <head>, so it runs before first paint
+// class and, for Damsko's components, the `data-mode` attribute. Loaded as a classic script in <head>, so it runs before first paint
 // and dark mode never flashes light. A file, not inline: the CSP allows no
 // inline script.
 //
@@ -27,6 +27,11 @@ globalThis.__zod_globalConfig = { jitless: true };
     }
     const isDark = theme === "dark" || (theme !== "light" && dark.matches);
     document.documentElement.classList.toggle("dark", isDark);
+    // Damsko's components (packages/ui) read the same choice from
+    // `data-mode`: their colours follow the root's `color-scheme`, which
+    // its themes.css sets from it.
+    document.documentElement.dataset.mode =
+      theme === "light" || theme === "dark" ? theme : "system";
   };
   apply();
   dark.addEventListener("change", apply);

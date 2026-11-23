@@ -1,6 +1,6 @@
 // The few words the components say themselves ("Close", "Copied", "Show more"), in English, and the
 // one way a product gives them in its own language. A product wraps each React root once, with its
-// catalogue for the page's language (from Lingui, or any source):
+// catalogue for the page's language:
 //
 //   <I18nProvider locale="nl-NL" catalog={nl}>…</I18nProvider>
 //
@@ -8,11 +8,24 @@
 //
 //   const { dialog } = useI18n();   dialog.close
 //
-// A part the catalogue leaves out keeps its English; with no provider everything is English. Words
-// built from others are functions ("Hold to delete"). Numbers and dates follow `useLocale()`.
+// The catalogue may be a constant per language, or built while rendering from a translation
+// library whose words exist only once a language is active (a runtime catalogue):
+//
+//   const { t, i18n } = useTranslations();
+//   <I18nProvider locale={i18n.locale} catalog={{ dialog: { close: t("Close") } }}>…</I18nProvider>
+//
+// Either way the provider keeps the words it has until `locale` or a string changes, so what reads
+// them is not drawn again because the object is a new one (I18nProvider, below). `locale` is
+// always given: a word that is a function is read again when it changes.
+//
+// A part the catalogue leaves out keeps its English, and a part it gives, it gives whole: every
+// word of it, so a word added here fails the product's type check until it is translated. With no
+// provider everything is English. Words built from others are functions ("Hold to delete").
+// Numbers and dates follow `useLocale()`. No part's name starts with `use`: the React Compiler
+// reads such a member as a hook.
 "use client";
 
-import { createContext, use } from "react";
+import { createContext, use, useState } from "react";
 import type { ReactNode } from "react";
 
 /** A part of a time with its plural: "2 minutes", "1 second". */
@@ -81,6 +94,21 @@ const englishLines = (start: number, count: number) => {
  * product's through I18nProvider.
  */
 export interface I18nCatalog {
+  /** The words of an action's states (hooks/use-action.ts): Button, Hold button, Inline edit, a menu's item. */
+  action: {
+    /** What an agent is told before it presses a danger or approve button with no words. */
+    agentAsks: string;
+    /** What an agent is told before it presses a danger or approve button, from its words. */
+    agentPresses: (words: string) => string;
+    /**
+     * An action whose work failed when the host gives no `errorLabel` of its own: neutral, as the
+     * work may be a save, a check or a send. Dialog's, Alert dialog's, Drawer's and Popover's actions.
+     */
+    error: string;
+    /** Said to a screen reader while it works, when no `loadingLabel` is given. */
+    loading: string;
+    success: string;
+  };
   alert: {
     /** The banner look's dismiss button, named for a screen reader. */
     close: string;
@@ -128,6 +156,10 @@ export interface I18nCatalog {
       destructive: string;
       info: string;
     };
+    /** The remove button's name, when the words are not text. */
+    remove: string;
+    /** The remove button's name, from the badge's words. */
+    removeNamed: (words: string) => string;
   };
   breadcrumb: {
     /** The button that shows the levels folded away in the middle. */
@@ -628,7 +660,7 @@ export interface I18nCatalog {
     cut: (max: number) => string;
     /** Over the card while files are dragged onto it. */
     drop: string;
-    /** Said when a send failed. */
+    /** Said when a send failed, and shown on the band under the card. */
     failed: string;
     /** In the mention menu when nothing matches. */
     mentionEmpty: string;
@@ -642,12 +674,23 @@ export interface I18nCatalog {
     near: (max: number) => string;
     /** Said once at the limit. */
     reached: (max: number) => string;
-    /** The speech button: its name, and what it says while it listens. */
-    speechButton: { label: string; listening: string };
+    /**
+     * The speech button: its name, and what it says while it listens, which names the bar that
+     * stands in the footer then; the bar's Cancel, Done and microphone.
+     */
+    speechButton: {
+      cancel: string;
+      done: string;
+      label: string;
+      listening: string;
+      mute: string;
+    };
     /** Submit's name while the answer comes. */
     stop: string;
     /** Submit's name. */
     submit: string;
+    /** Said once as the status comes to `success`. */
+    succeeded: string;
   };
   questionnaire: {
     /** Under the card when the answers could not be sent, and given to an agent. */
@@ -658,8 +701,10 @@ export interface I18nCatalog {
     other: string;
     /** The button that goes back to the question before. */
     previous: string;
-    /** Where the person is in the run, shown and said ("Question 2 of 3"). */
+    /** Where the person is in the run, said to a screen reader ("Question 2 of 3"). */
     progress: (current: number, total: number) => string;
+    /** Where the person is in the run, shown at the head's end ("2 of 3"). */
+    step: (current: number, total: number) => string;
     /** The progress bar's name. */
     progressLabel: string;
     /** The mark on the recommended choice. */
@@ -761,12 +806,6 @@ export interface I18nCatalog {
     /** The name of a tab's close button: what it closes. */
     close: (name: string) => string;
   };
-  tag: {
-    /** The remove button's name, when the words are not text. */
-    remove: string;
-    /** The remove button's name, from the tag's words. */
-    removeNamed: (words: string) => string;
-  };
   tagsInput: {
     duplicate: (value: string) => string;
     empty: string;
@@ -846,28 +885,21 @@ export interface I18nCatalog {
   treeView: {
     /** Clears the filter field. */
     clear: string;
+    /** Shown in the tree's place when the filter matches nothing. */
+    empty: string;
     /** The filter field's name and its placeholder. */
     filter: string;
-    /** Shown in the tree's place when the filter matches nothing. */
-    noMatches: string;
-  };
-  useAction: {
-    /** What an agent is told before it presses a danger or approve button with no words. */
-    agentAsks: string;
-    /** What an agent is told before it presses a danger or approve button, from its words. */
-    agentPresses: (words: string) => string;
-    /**
-     * An action whose work failed when the host gives no `errorLabel` of its own: neutral, as the
-     * work may be a save, a check or a send. Dialog's, Alert dialog's, Drawer's and Popover's actions.
-     */
-    error: string;
-    /** Said to a screen reader while it works, when no `loadingLabel` is given. */
-    loading: string;
-    success: string;
   };
 }
 
 const english: I18nCatalog = {
+  action: {
+    agentAsks: "Does something that needs your yes",
+    agentPresses: (words: string) => `Presses "${words}"`,
+    error: "Could not finish",
+    loading: "Working",
+    success: "Done",
+  },
   alert: {
     close: "Dismiss",
   },
@@ -910,6 +942,8 @@ const english: I18nCatalog = {
       destructive: "Error",
       info: "Info",
     },
+    remove: "Remove",
+    removeNamed: (words: string) => `Remove ${words}`,
   },
   breadcrumb: {
     ellipsis: "Show hidden levels",
@@ -1303,7 +1337,7 @@ const english: I18nCatalog = {
         ? "What was added was left out: no more can be written"
         : `What was added was cut at the limit of ${englishCharacters(max)}`,
     drop: "Drop to add",
-    failed: "Could not send",
+    failed: "Could not send. Your message is kept.",
     mentionEmpty: "No matches",
     mentionsError: "Could not load suggestions",
     mentionsFound: (count: number) =>
@@ -1319,9 +1353,16 @@ const english: I18nCatalog = {
       max === 0
         ? "No more can be written"
         : `The limit of ${englishCharacters(max)} is reached`,
-    speechButton: { label: "Dictate", listening: "Listening" },
+    speechButton: {
+      cancel: "Cancel dictation",
+      done: "Done",
+      label: "Dictate",
+      listening: "Listening",
+      mute: "Mute",
+    },
     stop: "Stop",
     submit: "Send",
+    succeeded: "Done",
   },
   questionnaire: {
     error: "Could not send the answer",
@@ -1330,6 +1371,7 @@ const english: I18nCatalog = {
     previous: "Previous",
     progress: (current, total) => `Question ${current} of ${total}`,
     progressLabel: "Progress",
+    step: (current, total) => `${current} of ${total}`,
     recommended: "Recommended",
     required: "Answer this question to go on",
     skip: "Skip",
@@ -1400,10 +1442,6 @@ const english: I18nCatalog = {
   },
   tabs: {
     close: (name: string) => `Close ${name}`,
-  },
-  tag: {
-    remove: "Remove",
-    removeNamed: (words: string) => `Remove ${words}`,
   },
   tagsInput: {
     duplicate: (word) => `"${word}" is already added.`,
@@ -1484,31 +1522,57 @@ const english: I18nCatalog = {
   },
   treeView: {
     clear: "Clear the filter",
+    empty: "No matches",
     filter: "Filter",
-    noMatches: "No matches",
-  },
-  useAction: {
-    agentAsks: "Does something that needs your yes",
-    agentPresses: (words: string) => `Presses "${words}"`,
-    error: "Could not finish",
-    loading: "Working",
-    success: "Done",
   },
 };
 
-const CatalogContext = createContext<Partial<I18nCatalog> | undefined>(
-  undefined
-);
+const CatalogContext = createContext<I18nCatalog>(english);
 const LocaleContext = createContext<string | undefined>(undefined);
+
+const isWords = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/**
+ * Whether two catalogues say the same: the same parts and the same strings. A word that is a
+ * function is taken as the same: one built while rendering is a new function every time, and it
+ * is read again whenever the language or a string changes.
+ */
+const sameWords = (one: unknown, other: unknown): boolean => {
+  if (one === other) {
+    return true;
+  }
+  if (typeof one === "function" && typeof other === "function") {
+    return true;
+  }
+  if (!(isWords(one) && isWords(other))) {
+    return false;
+  }
+  const keys = Object.keys(one);
+  return (
+    keys.length === Object.keys(other).length &&
+    keys.every((key) => sameWords(one[key], other[key]))
+  );
+};
+
+/** Every part's words: the catalogue's for each part it gives, English for the rest. */
+const wordsOf = (catalog: Partial<I18nCatalog> | undefined): I18nCatalog =>
+  catalog === undefined ? english : { ...english, ...catalog };
 
 export interface I18nProviderProps {
   /**
-   * The words in the page's language, by part. A part left out keeps its English. A module
-   * constant, never built during render.
+   * The words in the page's language, by part. A part left out keeps its English; a part given
+   * gives every word of it. A constant per language, or an object built while rendering from a
+   * translation library: the provider keeps the words it has until `locale` or one of the
+   * strings changes, and reads the function words again then.
    */
   catalog?: Partial<I18nCatalog>;
-  /** The page's language, as a BCP 47 tag ("nl-NL"): numbers and dates are formatted in it. */
-  locale?: string;
+  /**
+   * The page's language, as a BCP 47 tag ("nl-NL"): numbers and dates are formatted in it, and the
+   * catalogue is read again whenever it changes. Always given, so words never outlive their
+   * language.
+   */
+  locale: string;
   children: ReactNode;
 }
 
@@ -1517,17 +1581,28 @@ export const I18nProvider = ({
   catalog,
   locale,
   children,
-}: I18nProviderProps) => (
-  <LocaleContext value={locale}>
-    <CatalogContext value={catalog}>{children}</CatalogContext>
-  </LocaleContext>
-);
+}: I18nProviderProps) => {
+  // The words as last read, so a catalogue built again with the same words is the same object to
+  // everything that reads it.
+  const [read, setRead] = useState(() => ({
+    catalog,
+    locale,
+    words: wordsOf(catalog),
+  }));
+  let { words } = read;
+  if (read.locale !== locale || !sameWords(read.catalog, catalog)) {
+    words = wordsOf(catalog);
+    setRead({ catalog, locale, words });
+  }
+  return (
+    <LocaleContext value={locale}>
+      <CatalogContext value={words}>{children}</CatalogContext>
+    </LocaleContext>
+  );
+};
 
 /** Every component's words: the provider's for each part it gives, English for the rest. */
-export const useI18n = (): I18nCatalog => {
-  const catalog = use(CatalogContext);
-  return catalog === undefined ? english : { ...english, ...catalog };
-};
+export const useI18n = (): I18nCatalog => use(CatalogContext);
 
 /** The page's language for numbers and dates: the provider's, else undefined (the browser's). */
 export const useLocale = (): string | undefined => use(LocaleContext);

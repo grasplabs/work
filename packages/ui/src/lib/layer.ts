@@ -422,6 +422,7 @@ export const layerStyles = stylex.create({
     // inside it, where the panel does not cut it. Square otherwise, so the hairlines run straight
     // to its sides instead of bending up at its corners.
     borderRadius: { default: 0, ":focus-visible": radius.mark },
+    cornerShape: radius.shape,
     "::after": {
       content: '""',
       position: "sticky",

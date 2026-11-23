@@ -8,21 +8,25 @@
  *   node scripts/ui-sync.ts update [commit]   install every item again, at the pin or a new commit
  *
  * The pin is `packages/ui/damsko.json`: the commit of Damsko, and the items
- * added by name. Damsko's registry on the web has no versions (it is its
- * `main`, whenever it was last deployed), so neither command reads it:
- * both fetch Damsko at the pinned commit from GitHub.
+ * added by name. Damsko's git is the durable form of a version: its site
+ * serves its `main` as last deployed, and that one commit under an address
+ * of its own, never an older one. So neither command reads the site: both
+ * fetch Damsko at the pinned commit from GitHub.
  *
  * `check` compares with the commit's own files. Damsko's registry gives
  * every file as it stands in its tree, at the same path under `src/`, and
  * its CI holds an install to that byte for byte (its check-install.ts), so
- * the tree at the commit is what the CLI installs.
+ * the tree at the commit is what the CLI installs. A font is held as the
+ * font: it travels as base64 text, which Damsko's own script, installed
+ * beside it, unpacks; the check runs that script's `--check` too.
  *
- * `update` builds the registry from that commit with `shadcn build`,
- * serves it on 127.0.0.1 and adds every item with `shadcn add --overwrite`,
- * all at once, into an emptied `src/`: what Damsko dropped goes, too. For
- * the run alone, components.json names the local registry in place of the
- * site. Review `git diff` after it; never `shadcn add --all`, which reads
- * shadcn's own registry.
+ * `update` builds the registry from that commit as Damsko does
+ * (`pnpm install`, then its scripts/registry-dist.ts), serves it on
+ * 127.0.0.1 and adds every item with `shadcn add --overwrite`, all at
+ * once, into an emptied `src/`: what Damsko dropped goes, too. Then it
+ * unpacks the fonts. For the run alone, components.json names the local
+ * registry in place of the site. Review `git diff` after it; never
+ * `shadcn add --all`, which reads shadcn's own registry.
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -43,6 +47,7 @@ import { z } from "zod";
 import {
   differences,
   expectedOf,
+  fontsUnpack,
   namespace,
   parseRegistry,
   pinSchema,
@@ -144,22 +149,8 @@ const serve = async (
 
 const update = async (pin: Pin, damsko: string): Promise<void> => {
   const site = path.join(path.dirname(damsko), "site");
-  await run(
-    "pnpm",
-    [
-      "--dir",
-      ui,
-      "exec",
-      "shadcn",
-      "build",
-      path.join(damsko, "registry.json"),
-      "--cwd",
-      damsko,
-      "--output",
-      path.join(site, "r"),
-    ],
-    damsko
-  );
+  await run("pnpm", ["install", "--frozen-lockfile"], damsko);
+  await run("node", ["scripts/registry-dist.ts", site], damsko);
   const served = await serve(site);
   const components = readFileSync(componentsPath, "utf-8");
   const local: unknown = {
@@ -181,6 +172,9 @@ const update = async (pin: Pin, damsko: string): Promise<void> => {
       ],
       ui
     );
+    if (existsSync(path.join(ui, fontsUnpack))) {
+      await run("node", [fontsUnpack], ui);
+    }
   } finally {
     writeFileSync(componentsPath, components);
     served.close();
@@ -206,6 +200,11 @@ try {
     await update(pin, damsko);
   }
   const found = check(pin, damsko);
+  // Damsko's own check of its fonts: none still packed, and every file
+  // its stylesheet names there.
+  if (existsSync(path.join(ui, fontsUnpack))) {
+    await run("node", [fontsUnpack, "--check"], ui);
+  }
   if (found.length > 0) {
     for (const difference of found) {
       console.error(`packages/ui: ${difference}`);

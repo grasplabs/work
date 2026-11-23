@@ -173,9 +173,14 @@ const focusStyles = stylex.create({
     },
     outlineOffset: size.ringOffsetMark,
   },
+  // Inside a part that packs or clips its controls (ringInsetMarker), just inside, as ring is.
   within: {
     outline: { default: "none", ":has(:focus-visible)": line },
-    outlineOffset: size.ringOffset,
+    outlineOffset: {
+      default: size.ringOffset,
+      [stylex.when.ancestor(":is(*)", ringInsetMarker)]:
+        `calc(-1 * ${size.ringWidth})`,
+    },
   },
   ringText: {
     outline: { default: "none", [KEY]: line },
@@ -651,7 +656,7 @@ export const listStyles = stylex.create({
     boxSizing: "border-box",
     paddingBlock: `calc((${size.controlSm} - ${font.textXsLine}) / 2)`,
     paddingInline: space[2],
-    borderRadius: `min(calc(${radius.base} - ${space.popupPadding}), calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.row}, calc(${size.controlSm} / 2))`,
     cornerShape: radius.shape,
     color: colors.foreground,
     fontSize: { default: font.textXs, [COARSE]: font.textSm },
@@ -668,7 +673,7 @@ export const listStyles = stylex.create({
   menuItem: {
     minHeight: { default: size.controlDefault, [COARSE]: size.tapTarget },
     paddingBlock: `calc((${size.controlDefault} - ${font.textSmLine}) / 2)`,
-    borderRadius: `min(calc(${radius.base} - ${space.popupPadding}), calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.row}, calc(${size.controlDefault} / 2))`,
     color: colors.foreground,
     fontSize: {
       default: font.textSm,
@@ -758,7 +763,7 @@ export const listStyles = stylex.create({
 });
 
 // An item's corner nests inside the panel's, capped at half a control's height.
-const ITEM_CORNER = `min(calc(${radius.base} - ${space.popupPadding}), calc(${size.controlDefault} / 2))`;
+const ITEM_CORNER = `min(${radius.row}, calc(${size.controlDefault} / 2))`;
 
 /**
  * A menu: the panel and its items, for dropdown menu, context menu and menubar. The panel carries
@@ -992,7 +997,7 @@ export const tapTarget = tapStyles.target;
 // chevron at its end that turns as it opens, and the panel under it that opens over its height.
 //
 //   stylex.props(disclosureStyles.trigger, disclosureStyles.ghost, focusRing)
-//   stylex.props(disclosureStyles.panel, panelHeight)   with the part's own --…-panel-height
+//   className(disclosureStyles.panel, disclosureStyles.quiet)
 //
 // A part marks itself disabled with data-disabled, as UI SDK does.
 
@@ -1022,7 +1027,7 @@ export const disclosureStyles = stylex.create({
     },
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: `min(${radius.base}, calc(${size.collapsibleTrigger} / 2))`,
+    borderRadius: `min(${radius.row}, calc(${size.collapsibleTrigger} / 2))`,
     cornerShape: radius.shape,
     fontFamily: "inherit",
     fontSize: font.textSm,
@@ -1084,23 +1089,107 @@ export const disclosureStyles = stylex.create({
   chevronOpen: {
     transform: "rotate(0.5turn)",
   },
-  // The panel's height is the part's own variable, which UI SDK writes as it measures.
   panel: {
     // A base stylesheet that hides [hidden] with !important (the docs' own) still wins over this.
     // Without script nothing opens a panel, so every panel shows open.
     display: { default: null, [media.noScript]: "block" },
     overflow: "hidden",
-    fontSize: font.textXs,
-    lineHeight: "1.125rem",
-    color: colors.mutedForeground,
+    // The height UI SDK measures and writes, as a Collapsible's panel or an Accordion's.
+    height: {
+      default: "var(--collapsible-panel-height, var(--accordion-panel-height))",
+      ":is([data-starting-style], [data-ending-style])": 0,
+      [media.noScript]: "auto",
+    },
     transitionProperty: "height",
     transitionDuration: motionVars.collapsibleOpen,
     transitionTimingFunction: "ease-out",
+  },
+  // The panel's own words: small and quiet under the trigger. A panel drawn as a part of its own
+  // (CollapsibleContent's `asChild`) leaves it out and keeps that part's type.
+  quiet: {
+    fontSize: font.textXs,
+    lineHeight: "1.125rem",
+    color: colors.mutedForeground,
   },
   // The words in an open panel stand a step off the trigger above and the next thing below. On a
   // part inside the panel: padding on the panel itself would show while it is closed.
   body: {
     paddingBlock: space["2"],
+  },
+});
+
+// ---- The segmented track -------------------------------------------------------------------------
+//
+// One of a few, on one soft track, the chosen one raised out of it: Tabs' default list, a
+// ToggleGroup and ThemeToggle's segmented form. Each lays its own items out on the track.
+//
+//   stylex.props(segmentedStyles.track)
+//   stylex.props(chosen && segmentedStyles.chosen)
+
+export const segmentedStyles = stylex.create({
+  // The same room on every side, so the chosen one stands evenly inside the track.
+  track: {
+    padding: space.toggleTrackPadding,
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+    backgroundColor: colors.muted,
+    // Forced colours drop the fill: a line keeps the track.
+    outline: { default: "none", [FORCED]: "1px solid CanvasText" },
+    outlineOffset: "-1px",
+  },
+  // Raised out of the track with the low lift, so the choice is a shape and not a colour alone. In
+  // dark a lift's shadow is lost on the dark ground and the fill is barely off the track, so there
+  // it also takes the pressed veil. Light is untouched.
+  // In forced colours, the system's own highlight, drawn by the part itself: left to the browser,
+  // each run of words gets a backplate in the page's colour, which hides words in HighlightText.
+  chosen: {
+    forcedColorAdjust: { default: null, [FORCED]: "none" },
+    color: { default: colors.foreground, [FORCED]: "HighlightText" },
+    backgroundColor: { default: colors.tabBgSelected, [FORCED]: "Highlight" },
+    backgroundImage: {
+      default: `linear-gradient(light-dark(transparent, ${colors.accentActive}), light-dark(transparent, ${colors.accentActive}))`,
+      [FORCED]: "none",
+    },
+    boxShadow: { default: shadow.sm, [FORCED]: "none" },
+  },
+  // The chosen one's words where they are a part of their own, over a pill that wears `chosen`
+  // (ThemeToggle): in ink, and in forced colours the highlight's text with no backplate.
+  chosenWords: {
+    forcedColorAdjust: { default: null, [FORCED]: "none" },
+    color: { default: colors.foreground, [FORCED]: "HighlightText" },
+  },
+});
+
+// ---- The code surface ----------------------------------------------------------------------------
+//
+// What code, a command's output and an error's text stand on: CodeBlock's box, Terminal's output,
+// a failed test's error and a stack trace's frames.
+//
+//   stylex.props(codeStyles.surface)                    a box with parts of its own (CodeBlock)
+//   stylex.props(codeStyles.surface, codeStyles.text)   words set straight on it
+
+export const codeStyles = stylex.create({
+  // The wash and the edge (drawn outside, so it adds no size): the box reads by both. Forced
+  // colours drop both, so a real border draws the edge there.
+  surface: {
+    backgroundColor: colors.codeBlockBg,
+    boxShadow: size.borderStrong,
+    borderWidth: { default: 0, [FORCED]: 1 },
+    borderStyle: "solid",
+    borderColor: "CanvasText",
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+    color: colors.bodyForeground,
+  },
+  // Small mono words, with the same room on every side.
+  text: {
+    boxSizing: "border-box",
+    minWidth: 0,
+    paddingBlock: space["3"],
+    paddingInline: space["3"],
+    fontFamily: font.mono,
+    fontSize: font.textXs,
+    lineHeight: font.codeBlockLine,
   },
 });
 

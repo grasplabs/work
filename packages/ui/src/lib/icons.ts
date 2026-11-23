@@ -600,3 +600,20 @@ export const WorkflowIcon: IconData = WorkflowSquare03Icon;
 export const WrenchIcon: IconData = Wrench01Icon;
 /** Failed, or close. Cancel01Icon. */
 export const XIcon: IconData = Cancel01Icon;
+
+/** The mark a file wears for its media type (`image/png`), where it shows no picture. */
+export const fileMark = (type: string | undefined): IconData => {
+  if (type === undefined) {
+    return FileIcon;
+  }
+  if (type.startsWith("image/")) {
+    return ImageIcon;
+  }
+  if (type.startsWith("video/")) {
+    return VideoIcon;
+  }
+  if (type.startsWith("audio/")) {
+    return AudioWaveformIcon;
+  }
+  return type === "application/pdf" ? FilePdfIcon : FileIcon;
+};

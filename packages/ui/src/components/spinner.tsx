@@ -18,7 +18,7 @@ import type { LayoutStyle } from "../lib/utils";
 import { iconVars } from "../lib/vars.stylex";
 import { spinnerVars } from "./spinner.stylex";
 
-export type SpinnerSize = "default" | "lg" | "xl";
+export type SpinnerSize = "sm" | "default" | "lg";
 
 /** Every prop a Spinner takes. */
 export interface SpinnerProps {
@@ -29,8 +29,9 @@ export interface SpinnerProps {
    */
   "aria-label"?: string;
   /**
-   * `default` beside small text and in a button, `lg` beside body text, `xl` alone in a panel.
-   * @default "default"
+   * `sm` beside small text and in a button, `default` beside body text, `lg` alone in a panel. A
+   * spinner most often stands in a control or beside small text, so `sm` is what it is without one.
+   * @default "sm"
    */
   size?: SpinnerSize;
   /** Layout only: margins and alignment. The look belongs to the spinner. */
@@ -68,16 +69,16 @@ const styles = stylex.create({
     },
     animationIterationCount: "infinite",
   },
-  default: { [iconVars.size]: size.iconSm },
-  lg: { [iconVars.size]: size.iconDefault },
-  xl: { [iconVars.size]: size.spinnerLg },
+  sm: { [iconVars.size]: size.iconSm },
+  default: { [iconVars.size]: size.iconDefault },
+  lg: { [iconVars.size]: size.spinnerLg },
 });
 
-const sizes = { default: styles.default, lg: styles.lg, xl: styles.xl };
+const sizes = { sm: styles.sm, default: styles.default, lg: styles.lg };
 
 export const Spinner = ({
   "aria-label": label,
-  size: sized = "default",
+  size: sized = "sm",
   style,
 }: SpinnerProps) => {
   const spinner = (

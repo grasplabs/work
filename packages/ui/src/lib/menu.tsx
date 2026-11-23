@@ -31,8 +31,6 @@ import type {
   MenuRadioItemState,
   MenuTriggerState,
 } from "@ui-sdk/react/menu";
-import { renderElement } from "@ui-sdk/react/primitive";
-import type { RenderProp } from "@ui-sdk/react/primitive";
 import { useShortcutHint } from "@ui-sdk/react/shortcuts";
 import { isValidElement, useId } from "react";
 import type {
@@ -48,7 +46,15 @@ import type { IconData } from "./icons";
 import { menuStyles, scrollbarHidden } from "./styles";
 import { colors, media } from "./tokens.stylex";
 import { popup } from "./tokens.values";
-import { announce, isThenable, listOf, slotWords, wordsOf } from "./utils";
+import {
+  announce,
+  className,
+  isThenable,
+  listOf,
+  slotted,
+  slotWords,
+  wordsOf,
+} from "./utils";
 import type { LayoutStyle } from "./utils";
 import { menuMarker } from "./vars.stylex";
 
@@ -74,19 +80,6 @@ const styles = stylex.create({
     },
   },
 });
-
-/** The class of a part whose look follows its state (UI SDK's `className` as a function). */
-export const className = (...parts: (stylex.StyleXStyles | LayoutStyle)[]) =>
-  stylex.props(...parts).className;
-
-/**
- * Renders a part as `tag` with the menu's own slot (`dropdown-menu-item`): UI SDK names its parts after
- * its own primitive (menu-item), and overwrites a slot given as a prop.
- */
-export const slotted =
-  (tag: string, slot: string, render?: RenderProp) =>
-  (props: Record<string, unknown>) =>
-    renderElement(tag, { ...props, "data-slot": slot }, render);
 
 /** The words typing finds an item by, and an agent presses it by: none when it has none. */
 const nameOf = (label: string | undefined, children: ReactNode) => {

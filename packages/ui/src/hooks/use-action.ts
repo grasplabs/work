@@ -71,7 +71,7 @@ export const useAction = <Args extends unknown[], Result>(
   work: (...args: Args) => Promise<Result>,
   options: ActionOptions = {}
 ): Action<Args, Result> => {
-  const words = useI18n().useAction;
+  const words = useI18n().action;
   const labels: ActionStatusLabels = {
     loading: options.loadingLabel ?? words.loading,
     success: options.successLabel ?? words.success,

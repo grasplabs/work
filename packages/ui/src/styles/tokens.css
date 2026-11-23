@@ -80,11 +80,11 @@
   --damsko-code-bg: light-dark(oklch(0.29 0.05 162 / 0.06), oklch(0.96 0.02 150 / 0.09));
   /* Type: families. */
   /* Everything that is not a title: interface, body, labels. */
-  --damsko-font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --damsko-font-sans: "Geist", "Geist Variable", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   /* Titles, figures and names in a list, at weight 400 only. */
   --damsko-font-serif: "Geist Serif", Georgia, serif;
   /* Code, token names and anything typed exactly. */
-  --damsko-font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --damsko-font-mono: "Geist Mono", "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
   /* Type: sizes. */
   /* The smallest text there is: tags, labels, chips, code. */
   --damsko-text-xs: 0.8125rem;
@@ -171,9 +171,13 @@
   --damsko-radius-shape: squircle;
   /* The Prompt input's card: a button's corner at its size (16px at 32px tall) plus the footer's inset (8px), so the card nests round its buttons. */
   --damsko-prompt-input-radius: 24px;
+  /* A row: a menu or list item, a tree or sidebar row, a trigger that runs the width. The one corner less the room a container keeps round its rows, capped at half the row's height. */
+  --damsko-radius-row: calc(var(--damsko-radius) - var(--damsko-popup-padding));
+  /* A thing too thin for the mark corner: a swatch 8px square, a highlight's edge. */
+  --damsko-radius-hairline: 2px;
   /* Marks under 24px tall: a key, inline code. */
   --damsko-radius-mark: 6px;
-  /* A pill: a chip, a tag, the track of a switch or a slider. Never a control that holds buttons. */
+  /* A pill: a chip, a badge, the track of a switch or a slider. Never a control that holds buttons. */
   --damsko-radius-full: 999px;
   /* A circle: an avatar, a dot. */
   --damsko-radius-circle: 50%;
@@ -238,21 +242,21 @@
   /* Words and icons on action-fill-disabled: half strength on paper, muted at night (still 3:1 on the ground). */
   --damsko-primary-foreground-disabled: light-dark(oklch(0.99 0.004 160 / 0.5), var(--damsko-muted-foreground));
   /* The quiet fill of an outline Button and a field: white on a light ground, a veil of white on a dark one. */
-  --damsko-secondary: light-dark(oklch(1 0 none), oklch(0.96 0.02 150 / 0.08));
+  --damsko-control: light-dark(oklch(1 0 none), oklch(0.96 0.02 150 / 0.08));
   /* The quiet fill under a pointer: one step down to soft. */
-  --damsko-secondary-hover: light-dark(var(--damsko-muted), oklch(0.96 0.02 150 / 0.12));
+  --damsko-control-hover: light-dark(var(--damsko-muted), oklch(0.96 0.02 150 / 0.12));
   /* The quiet fill while pressed: one step past hover. */
-  --damsko-secondary-active: light-dark(oklch(0.95 0.007 160), oklch(0.96 0.02 150 / 0.16));
+  --damsko-control-active: light-dark(oklch(0.95 0.007 160), oklch(0.96 0.02 150 / 0.16));
   /* The fill a ghost control gains under a pointer. */
   --damsko-accent: light-dark(oklch(0.29 0.05 162 / 0.06), oklch(0.96 0.02 150 / 0.08));
   /* A ghost control's fill while pressed. */
   --damsko-accent-active: light-dark(oklch(0.29 0.05 162 / 0.1), oklch(0.96 0.02 150 / 0.14));
   /* A secondary Button's flat fill: a veil of ink with no edge and no lift, so it reads on the page, a card and a soft band alike, a step quieter than an outline Button and a step firmer than a ghost one. */
-  --damsko-button-secondary: var(--damsko-accent-active);
-  /* button-secondary under a pointer: the veil one step deeper. */
-  --damsko-button-secondary-hover: var(--damsko-toggle-bg-pressed);
-  /* button-secondary while pressed: one step past hover. */
-  --damsko-button-secondary-active: var(--damsko-toggle-bg-pressed-hover);
+  --damsko-secondary: var(--damsko-accent-active);
+  /* secondary under a pointer: the veil one step deeper. */
+  --damsko-secondary-hover: var(--damsko-toggle-bg-pressed);
+  /* secondary while pressed: one step past hover. */
+  --damsko-secondary-active: var(--damsko-toggle-bg-pressed-hover);
   /* The fill of an action that deletes or cannot be undone, on any ground. */
   --damsko-destructive-fill: oklch(0.52 0.175 28);
   /* Words and icons on danger-fill. */
@@ -354,6 +358,8 @@
   --damsko-result-mark-from: 0.6;
   /* How far a result's words slide in beside their mark. Dropped with reduced motion. */
   --damsko-result-shift: 4px;
+  /* How far a failed button shakes, once. None with reduced motion. */
+  --damsko-result-shake: 4px;
   /* How long a result's words wait after their mark appears, so the mark comes first. */
   --damsko-result-follow: 80ms;
   /* How long a demo of working lasts before it says how it went. */
@@ -372,11 +378,11 @@
   --damsko-duration-leave-margin: 250ms;
   /* Fields: fields. */
   /* The ground of a field you type in: the quiet button's fill, so a field and a button in one row match. */
-  --damsko-input-bg: var(--damsko-secondary);
+  --damsko-input-bg: var(--damsko-control);
   /* The ground of a read-only field: the soft ground (in dark a thinner veil than field-fill's, still above a disabled field's), a hairline and no lift. Settled, not greyed: quieter than a field open for typing, never as faint as a disabled one. */
   --damsko-input-bg-read: light-dark(var(--damsko-muted), oklch(0.96 0.02 150 / 0.05));
   /* The words of a read-only field: the muted step, still easy to read and copy. Disabled fields are weaker again (dim). */
-  --damsko-input-ink-read: var(--damsko-muted-foreground);
+  --damsko-input-foreground-read: var(--damsko-muted-foreground);
   /* A wrong field: its hairline tinted red, drawn inside like field-rest, so it is exactly as big as the fields beside it. */
   --damsko-input-invalid: inset 0 0 0 1px var(--damsko-input-border-invalid), var(--damsko-input-shadow);
   /* Words selected in a field: a mint tint in the palette's own tone, never the browser's blue. Ink on it reads 4.5:1. */
@@ -401,8 +407,8 @@
   --damsko-input-focus-read: inset 0 0 0 1px var(--damsko-input-border-focus);
   /* A wrong field in focus: its red hairline stays and the faint halo turns red, so it stays wrong while you type. */
   --damsko-input-focus-invalid: inset 0 0 0 1px var(--damsko-input-border-invalid), var(--damsko-input-shadow), 0 0 0 3px var(--damsko-input-focus-halo-invalid);
-  /* The size of the words in every field on a phone or a touch screen (media.typing), a Select's trigger too, so fields side by side stay one size: under 16px, Safari zooms the page in on focus. */
-  --damsko-input-text-touch: 16px;
+  /* The size of the words in every field on a phone or a touch screen (media.typing), a Select's trigger too, so fields side by side stay one size: under 16px, Safari zooms the page in on focus. Never under 16px, and in rem above it, since words follow the reader's text size. */
+  --damsko-input-text-touch: max(16px, 1rem);
   /* The breath of lift under a field, beneath its hairline: lift-low's shadow without its edge. */
   --damsko-input-shadow: 0 1px 2px var(--damsko-shadow-color-faint), 0 2px 4px var(--damsko-shadow-color-faint);
   /* Checkbox: checkbox. */
@@ -542,8 +548,16 @@
   --damsko-badge-height-sm: 18px;
   /* Room at each end of a badge, inside its pill. */
   --damsko-badge-padding: 6px;
-  /* An icon before a badge's words. */
+  /* An icon before a badge's words, and a label's remove cross. */
   --damsko-badge-icon: 12px;
+  /* The height of a label: a secondary or outline badge, which sorts or names something. */
+  --damsko-badge-label-height: var(--damsko-chip);
+  /* The height of a small label, in a dense row. */
+  --damsko-badge-label-height-sm: 20px;
+  /* Room at each end of a label's words. */
+  --damsko-badge-label-padding: var(--damsko-space-2);
+  /* A secondary badge's fill: a veil of ink, so it shows on paper and on soft. */
+  --damsko-badge-secondary: var(--damsko-accent-active);
   /* The mark of a severity: a dot beside neutral words, so the colour never paints the whole line. */
   --damsko-severity-dot: 6px;
   /* Empty: empty. */
@@ -738,7 +752,7 @@
   /* A chosen row's band in the mint look: the Data grid's wash over a range, so the two read as one family. */
   --damsko-table-row-bg-selected-mint: var(--damsko-data-grid-range-wash);
   /* A column's name in the head: the muted words, a step lighter in dark, so they reach 4.5:1 on the page's own ground as the plain head draws them. */
-  --damsko-table-head-text: light-dark(var(--damsko-muted-foreground), oklch(0.72 0.025 158));
+  --damsko-table-head-foreground: light-dark(var(--damsko-muted-foreground), oklch(0.72 0.025 158));
   /* Drawer and sheet: drawer and sheet. */
   /* The widest a drawer grows along the bottom of a wide window; a phone's is its full width. */
   --damsko-drawer-width: 40rem;
@@ -781,7 +795,7 @@
   /* A chosen day, and the ends of a chosen range: the first action's colour. */
   --damsko-calendar-bg-selected: var(--damsko-primary);
   /* The number on a chosen day. */
-  --damsko-calendar-text-selected: var(--damsko-primary-foreground);
+  --damsko-calendar-foreground-selected: var(--damsko-primary-foreground);
   /* The days inside a chosen range, between its ends. */
   --damsko-calendar-bg-range: var(--damsko-accent-highlight);
   /* Today, when it is not chosen: a quiet fill that finds it. */
@@ -824,17 +838,6 @@
   --damsko-resizable-handle-length: 24px;
   /* The width of a handle's grip. */
   --damsko-resizable-handle-width: 4px;
-  /* Tag: tag. */
-  /* The height of a tag. */
-  --damsko-tag-height: var(--damsko-chip);
-  /* The height of a small tag, in a dense row. */
-  --damsko-tag-height-sm: 20px;
-  /* Room at each end of a tag's words. */
-  --damsko-tag-padding: var(--damsko-space-2);
-  /* The size of an icon in a tag, and of its remove cross. */
-  --damsko-tag-icon: var(--damsko-badge-icon);
-  /* A soft tag's fill: a veil of ink, so it shows on paper and on soft. */
-  --damsko-tag-bg: var(--damsko-accent-active);
   /* Section header: section header. */
   /* Room between a section's header and each part under it. */
   --damsko-section-header-gap: var(--damsko-space-6);
@@ -866,6 +869,30 @@
   --damsko-attachment-thumb: var(--damsko-control-default);
   /* The width of the menu that opens at the caret when @ or / is typed. */
   --damsko-prompt-input-mention-width: 18rem;
+  /* The least width of a one-row prompt input's text: with less room beside the tools, the text takes the row and the tools go under it. The text never gives. */
+  --damsko-prompt-input-field-min: 8rem;
+  /* The working light over a prompt input's top edge: lime, sea and mint in beams with gaps between, ending as it starts so it loops without a seam. */
+  --damsko-prompt-input-light: linear-gradient(90deg, var(--damsko-brand-mint) 0%, var(--damsko-brand-sea) 12%, transparent 22%, var(--damsko-brand-lime) 34%, var(--damsko-brand-mint) 44%, transparent 54%, var(--damsko-brand-sea) 64%, var(--damsko-brand-lime) 76%, transparent 88%, var(--damsko-brand-mint) 100%);
+  /* The working light in one accent colour, the colour set on the light's layer. */
+  --damsko-prompt-input-tint: linear-gradient(90deg, currentColor 0%, color-mix(in oklch, currentColor 55%, transparent) 14%, transparent 24%, currentColor 36%, color-mix(in oklch, currentColor 30%, transparent) 50%, transparent 58%, currentColor 68%, color-mix(in oklch, currentColor 45%, transparent) 82%, currentColor 100%);
+  /* Success: a soft glow round a prompt input's card in the colour set on it, mint by default. It fades out; it never draws a line. */
+  --damsko-prompt-input-halo: 0 0 10px 2px color-mix(in oklch, currentColor 45%, transparent), 0 3px 18px 3px color-mix(in oklch, currentColor 25%, transparent);
+  /* The success halo, from nothing to full and out again: a moment, played once. */
+  --damsko-prompt-input-halo-time: 1.2s;
+  /* A prompt input's card over what scrolls behind it (variant="glass"): the card's colour most of the way, over a blur. */
+  --damsko-prompt-input-glass: color-mix(in oklch, var(--damsko-card) 86%, transparent);
+  /* The backdrop filter that goes with prompt-input-glass. */
+  --damsko-prompt-input-glass-blur: blur(14px) saturate(1.5);
+  /* How strongly the working light shows round the card: soft, never a hard ring. */
+  --damsko-prompt-input-light-opacity: 0.9;
+  /* How long the working light takes to come up or go. */
+  --damsko-prompt-input-light-in: 280ms;
+  /* The widest beam of the working light, once along the edge. A continuous sign of life: it may loop longer than a transition. */
+  --damsko-prompt-input-beam: 6s;
+  /* The quickest beam of the working light. */
+  --damsko-prompt-input-beam-fast: 4.4s;
+  /* The slowest beam of the working light: it breathes, it does not race. */
+  --damsko-prompt-input-beam-slow: 7s;
   /* Message: message. */
   /* The widest a person's message grows across the conversation, so it reads as theirs. */
   --damsko-message-bubble-width: 80%;
@@ -895,13 +922,13 @@
   /* A row or button under the pointer. */
   --damsko-sidebar-hover: light-dark(oklch(0 0 0 / 0.035), oklch(1 0 0 / 0.05));
   /* A rule that parts the sidebar, and a badge's edge. */
-  --damsko-sidebar-rule: light-dark(oklch(0 0 0 / 0.08), oklch(1 0 0 / 0.1));
+  --damsko-sidebar-border: light-dark(oklch(0 0 0 / 0.08), oklch(1 0 0 / 0.1));
   /* Words read first: the current row, the page bar's last crumb. */
-  --damsko-sidebar-text: light-dark(oklch(0.269 0 0), oklch(0.96 0 0));
+  --damsko-sidebar-foreground: light-dark(oklch(0.269 0 0), oklch(0.96 0 0));
   /* The rows' words and their icons. */
-  --damsko-sidebar-text-secondary: light-dark(oklch(0.52 0 0), oklch(0.72 0 0));
+  --damsko-sidebar-secondary-foreground: light-dark(oklch(0.52 0 0), oklch(0.72 0 0));
   /* A mark quieter than the rows' words: the chevrons at the end of a person's row. */
-  --damsko-sidebar-text-tertiary: light-dark(oklch(0.64 0 0), oklch(0.6 0 0));
+  --damsko-sidebar-tertiary-foreground: light-dark(oklch(0.64 0 0), oklch(0.6 0 0));
   /* The line drawn inside the page card's edge, round every corner; the card has no lift. */
   --damsko-sidebar-card-border: light-dark(oklch(0 0 0 / 0.1), oklch(1 0 0 / 0.1));
   /* Sidebar: sidebar sizes. */
@@ -915,12 +942,10 @@
   --damsko-sidebar-icon: 16px;
   /* A button that is only an icon in the frame (the sidebar's toggle). */
   --damsko-sidebar-icon-button: var(--damsko-control-xs);
-  /* A row's corner. */
-  --damsko-sidebar-radius: 6px;
-  /* A large row's corner. */
-  --damsko-sidebar-radius-lg: 10px;
-  /* The page card's corner. */
-  --damsko-sidebar-card-radius: 12px;
+  /* A floating sidebar's corner, in the squircle: a row's corner plus the room the sidebar keeps round its rows, so the rows nest in it. */
+  --damsko-sidebar-card-radius: calc(var(--damsko-radius-row) + var(--damsko-space-2));
+  /* The corner of the page's card beside an inset sidebar: a plain round one, as the app's main surface was drawn. It holds no sidebar rows, so it does not nest round them. */
+  --damsko-sidebar-inset-radius: 12px;
   /* The room round the page's card, on the sidebar's ground. */
   --damsko-sidebar-card-gap: 6px;
   /* The rows' letter spacing: a hair tighter than set. */
@@ -974,6 +999,8 @@
   --damsko-form-width: 40rem;
   /* The narrowest a tile in an ItemGrid stands before its row takes one fewer: as many per row as fit. */
   --damsko-item-grid-tile: 15rem;
+  /* The narrowest a provider's tile stands in the connect block before its row takes one fewer: four in a row in a settings column. */
+  --damsko-connect-tile: 11rem;
   /* A setting row's control column: one width for every row of a page, so the controls share one end edge. */
   --damsko-field-control-column: 20rem;
   /* A setting row's least height, a 32px control with room above and below; with a line of help it is 56px. */
@@ -1047,12 +1074,10 @@
   --damsko-tree-view-indent: var(--damsko-space-4);
   /* Room at each end of a tree's row, inside its fill. */
   --damsko-tree-view-row-padding: var(--damsko-space-2);
-  /* A tree row's corner: small, as a list item's. */
-  --damsko-tree-view-row-radius: 8px;
   /* The room between two rows of a tree. */
   --damsko-tree-view-row-gap: var(--damsko-hairline);
   /* A tree row's words. */
-  --damsko-tree-view-text: var(--damsko-body-foreground);
+  --damsko-tree-view-foreground: var(--damsko-body-foreground);
   /* The room between a tree row's chevron, icon and words. */
   --damsko-tree-view-icon-gap: var(--damsko-space-2);
   /* The width of a tree's guide (`guides`): its stem and elbows, a hairline. */
@@ -1060,9 +1085,9 @@
   /* A tree row's chevron and icon: quieter than its words, unless a host draws them in the words' colour (a sidebar does). */
   --damsko-tree-view-icon: var(--damsko-muted-foreground);
   /* A tree row's words under a pointer: as they stand, unless a host brightens them (a sidebar does). */
-  --damsko-tree-view-text-hover: var(--damsko-body-foreground);
+  --damsko-tree-view-foreground-hover: var(--damsko-body-foreground);
   /* The words of a chosen row and of the current page. */
-  --damsko-tree-view-text-selected: var(--damsko-foreground);
+  --damsko-tree-view-foreground-selected: var(--damsko-foreground);
   /* A tree row's words' weight. */
   --damsko-tree-view-weight: var(--damsko-font-weight-normal);
   /* The current page's words: a step heavier. */
@@ -1206,14 +1231,10 @@
   --damsko-icon-tile: 40px;
   /* The icon inside an object's tile. */
   --damsko-icon-tile-icon: 24px;
-  /* The tile's corner, in the system's squircle: the corner a 40px square takes. */
-  --damsko-icon-tile-radius: 14px;
   /* The small tile, for an object in a dense table row: as tall as a person's picture there. */
   --damsko-icon-tile-sm: var(--damsko-avatar-xs);
   /* The icon inside the small tile. */
   --damsko-icon-tile-sm-icon: 14px;
-  /* The small tile's corner, in the system's squircle: the corner a 24px square takes. */
-  --damsko-icon-tile-sm-radius: 8px;
   /* The quiet tile: a wash of the light's mint behind the icon. */
   --damsko-icon-tile-tint: light-dark(oklch(0.8005 0.1625 165.25 / 0.14), oklch(0.8005 0.1625 165.25 / 0.16));
   /* Sources: sources. */
@@ -1239,7 +1260,6 @@
   :root {
     --damsko-radius: 9px;
     --damsko-radius-mark: 4px;
-    --damsko-tree-view-row-radius: 4px;
-    --damsko-icon-tile-radius: 7px;
+    --damsko-sidebar-card-radius: 11px;
   }
 }
