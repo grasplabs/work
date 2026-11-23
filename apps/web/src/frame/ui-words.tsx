@@ -4,28 +4,6 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
-import { formatList } from "../format.ts";
-
-/** A length of time as the page's language says it: "1 minute and 5 seconds", "5 seconds". */
-const spokenTime = (locale: string, seconds: number): string => {
-  const whole = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
-  const hours = Math.floor(whole / 3600);
-  const minutes = Math.floor((whole % 3600) / 60);
-  const unit = (count: number, of: "hour" | "minute" | "second") =>
-    new Intl.NumberFormat(locale, {
-      style: "unit",
-      unit: of,
-      unitDisplay: "long",
-    }).format(count);
-  return formatList(
-    [
-      hours > 0 ? unit(hours, "hour") : "",
-      hours > 0 || minutes > 0 ? unit(minutes, "minute") : "",
-      unit(whole % 60, "second"),
-    ].filter((part) => part !== "")
-  );
-};
-
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
  * in the page's language. Damsko knows nothing of Lingui: its components
@@ -38,7 +16,6 @@ const spokenTime = (locale: string, seconds: number): string => {
  */
 export const UiWords = ({ children }: { children: ReactNode }) => {
   const { t, i18n } = useLingui();
-  const { locale } = i18n;
   const catalog: Partial<I18nCatalog> = {
     copyButton: {
       copied: t`Copied`,
@@ -49,53 +26,11 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Failed`,
       loading: t`Working`,
     },
-    action: {
-      agentAsks: t`Does something that needs your yes`,
-      agentPresses: (words) => t`Presses "${words}"`,
-      error: t`Could not finish`,
-      loading: t`Working`,
-      success: t`Done`,
-    },
-    alert: {
-      close: t({ message: "Dismiss", context: "close a notice" }),
-    },
-    alertDialog: {
-      cancel: t`Cancel`,
-    },
-    attachment: {
-      remove: (name) => t`Remove ${name}`,
-    },
-    audioPlayer: {
-      back: t`Back 10 seconds`,
-      error: t`Could not play this file`,
-      forward: t`Forward 10 seconds`,
-      loading: t`Loading the sound`,
-      pause: t`Pause`,
-      play: t`Play`,
-      playbackRate: t({ message: "Speed", context: "how fast a sound plays" }),
-      position: t({ message: "Position", context: "where a sound is at" }),
-      soundOn: t`Turn sound on`,
-      soundOff: t`Turn sound off`,
-      timeOf: (now, length) => {
-        const at = spokenTime(locale, now);
-        const of = spokenTime(locale, length);
-        return t`${at} of ${of}`;
-      },
-    },
     holdButton: {
       ask: (words) => t`${words}?`,
       cancel: t`Cancel`,
       confirm: t`Confirm`,
       holdTo: (words) => t`Press and hold: ${words}`,
-    },
-    input: {
-      hidePassword: t`Hide password`,
-      replace: t({ message: "Replace", context: "type a new secret" }),
-      showPassword: t`Show password`,
-    },
-    keyValue: {
-      copy: (label) => t`Copy ${label}`,
-      loading: t`Loading the value`,
     },
     message: {
       actions: t`Message actions`,
@@ -179,9 +114,16 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     sheet: {
       close: t`Close`,
     },
+    action: {
+      agentAsks: t`Does something that needs your yes`,
+      agentPresses: (words) => t`Presses "${words}"`,
+      error: t`Could not finish`,
+      loading: t`Working`,
+      success: t`Done`,
+    },
   };
   return (
-    <I18nProvider catalog={catalog} locale={locale}>
+    <I18nProvider catalog={catalog} locale={i18n.locale}>
       {children}
     </I18nProvider>
   );

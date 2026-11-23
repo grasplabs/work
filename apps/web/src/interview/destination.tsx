@@ -209,11 +209,9 @@ const SendFoot = ({
       ) : (
         <Button
           disabled={!canSave}
-          errorLabel={t`Not saved`}
           loadingLabel={t`Saving…`}
           onClick={onSave}
           status={saving ? "loading" : "idle"}
-          successLabel={t`Saved`}
         >
           {t`Save where they go`}
         </Button>

@@ -101,7 +101,7 @@ const RemoveLine = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel />
+          <AlertDialogCancel>{t`Cancel`}</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => {
               onRemove(at);

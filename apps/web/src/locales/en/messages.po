@@ -146,10 +146,6 @@ msgstr "{asker} asked to share their skill {name} with the company. Approved, ev
 msgid "{asker} asked to share their skill {name} with the team {team}. Approved, its members' agents use it. Read it on the skills page before you decide."
 msgstr "{asker} asked to share their skill {name} with the team {team}. Approved, its members' agents use it. Read it on the skills page before you decide."
 
-#: src/frame/ui-words.tsx
-msgid "{at} of {of}"
-msgstr "{at} of {of}"
-
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -3105,10 +3101,6 @@ msgstr "Available, via Composio"
 msgid "Back"
 msgstr "Back"
 
-#: src/frame/ui-words.tsx
-msgid "Back 10 seconds"
-msgstr "Back 10 seconds"
-
 #: src/onboarding/setup-frame.tsx
 msgid "Back and forward"
 msgstr "Back and forward"
@@ -3396,6 +3388,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/frame/ui-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/destination.tsx
+#: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/forget-kickoff.tsx
@@ -4358,10 +4351,6 @@ msgstr "Copies"
 msgid "Copy"
 msgstr "Copy"
 
-#: src/frame/ui-words.tsx
-msgid "Copy {label}"
-msgstr "Copy {label}"
-
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Copy as Markdown"
@@ -4435,10 +4424,6 @@ msgstr "Could not finish"
 #: src/frame/ui-words.tsx
 msgid "Could not load suggestions"
 msgstr "Could not load suggestions"
-
-#: src/frame/ui-words.tsx
-msgid "Could not play this file"
-msgstr "Could not play this file"
 
 #: src/frame/ui-words.tsx
 msgid "Could not send. Your message is kept."
@@ -4952,11 +4937,6 @@ msgstr "Dismiss"
 
 #: src/brain/skills-page.tsx
 msgctxt "a skill proposed to you"
-msgid "Dismiss"
-msgstr "Dismiss"
-
-#: src/frame/ui-words.tsx
-msgctxt "close a notice"
 msgid "Dismiss"
 msgstr "Dismiss"
 
@@ -6108,10 +6088,6 @@ msgstr "Forms and surveys"
 msgid "Forward"
 msgstr "Forward"
 
-#: src/frame/ui-words.tsx
-msgid "Forward 10 seconds"
-msgstr "Forward 10 seconds"
-
 #: src/connections/request-app-dialog.tsx
 msgid "Forwarded to our team"
 msgstr "Forwarded to our team"
@@ -6753,10 +6729,6 @@ msgstr "Hide exactly what will be sent"
 msgctxt "hides an opportunity for every admin until its evidence changes"
 msgid "Hide for every admin"
 msgstr "Hide for every admin"
-
-#: src/frame/ui-words.tsx
-msgid "Hide password"
-msgstr "Hide password"
 
 #: src/settings/event-source-activity.tsx
 msgid "Hide what {name} received"
@@ -8125,14 +8097,6 @@ msgstr "Loading"
 msgid "Loading the conversation"
 msgstr "Loading the conversation"
 
-#: src/frame/ui-words.tsx
-msgid "Loading the sound"
-msgstr "Loading the sound"
-
-#: src/frame/ui-words.tsx
-msgid "Loading the value"
-msgstr "Loading the value"
-
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/chat/chat-panel.tsx
@@ -9380,10 +9344,6 @@ msgstr "Not read: no connection"
 msgid "Not requested yet"
 msgstr "Not requested yet"
 
-#: src/interview/destination.tsx
-msgid "Not saved"
-msgstr "Not saved"
-
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Not saved yet. Trying again."
@@ -10386,7 +10346,6 @@ msgstr "Path prefixes it allows, one per line"
 msgid "Paths"
 msgstr "Paths"
 
-#: src/frame/ui-words.tsx
 #: src/settings/stephen-card.tsx
 #: src/voice/sound-controls.tsx
 #: src/workflows/workflow-status.tsx
@@ -10632,7 +10591,6 @@ msgstr "Platform statistics. This App can read run and signal counts for every A
 msgid "Platform update"
 msgstr "Platform update"
 
-#: src/frame/ui-words.tsx
 #: src/voice/sound-controls.tsx
 msgid "Play"
 msgstr "Play"
@@ -10646,11 +10604,6 @@ msgid "Policies, procedures, work instructions. Share whatever you have. Drafts 
 msgstr "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
 
 #: src/activity/audit-log.tsx
-msgid "Position"
-msgstr "Position"
-
-#: src/frame/ui-words.tsx
-msgctxt "where a sound is at"
 msgid "Position"
 msgstr "Position"
 
@@ -11215,7 +11168,6 @@ msgstr "Remove {label}?"
 
 #: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
-#: src/frame/ui-words.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Remove {name}"
 msgstr "Remove {name}"
@@ -11365,11 +11317,6 @@ msgstr "Renames the table {from} to {to}; its records go with it."
 msgctxt "what the Brain remembers about something"
 msgid "Renewal date"
 msgstr "Renewal date"
-
-#: src/frame/ui-words.tsx
-msgctxt "type a new secret"
-msgid "Replace"
-msgstr "Replace"
 
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
@@ -12633,10 +12580,6 @@ msgstr "Show older versions"
 msgid "Show or hide the sidebar"
 msgstr "Show or hide the sidebar"
 
-#: src/frame/ui-words.tsx
-msgid "Show password"
-msgstr "Show password"
-
 #: src/settings/event-source-activity.tsx
 msgid "Show payload"
 msgstr "Show payload"
@@ -13003,11 +12946,6 @@ msgstr "Sparkles"
 msgctxt "the other voice's turn"
 msgid "Speaking"
 msgstr "Speaking"
-
-#: src/frame/ui-words.tsx
-msgctxt "how fast a sound plays"
-msgid "Speed"
-msgstr "Speed"
 
 #: src/sign-in-errors.ts
 msgid "Staff access to this organization isn't open."
@@ -15136,12 +15074,10 @@ msgstr "Turn on"
 msgid "Turn on again"
 msgstr "Turn on again"
 
-#: src/frame/ui-words.tsx
 #: src/voice/sound-controls.tsx
 msgid "Turn sound off"
 msgstr "Turn sound off"
 
-#: src/frame/ui-words.tsx
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Turn sound on"

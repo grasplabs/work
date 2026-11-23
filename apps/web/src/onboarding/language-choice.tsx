@@ -19,6 +19,7 @@ const languages = Object.entries(localeNames).map(([value, label]) => ({
  * Every language, named in its own words, and none chosen yet: the page
  * reads in the browser's language until you pick one, and the way on waits
  * for it. The options themselves stay put, so the keys keep their place.
+ * Stephen asks for it at the end of his greeting, so there is no label above it.
  */
 export const LanguageChoice = ({
   picked,
@@ -30,7 +31,6 @@ export const LanguageChoice = ({
 }) => {
   const { t, i18n } = useLingui();
   return (
-    // Stephen asks for it at the end of his greeting, so there is no label above it.
     <ToggleGroup
       aria-label={t`Choose your language`}
       onValueChange={(value: unknown[]) => {
@@ -41,15 +41,12 @@ export const LanguageChoice = ({
           void chooseLocale(chosen);
         }
       }}
+      size="xs"
       value={picked ? [i18n.locale] : []}
     >
       {languages.map((language) => (
-        <ToggleGroupItem
-          key={language.value}
-          lang={language.value}
-          value={language.value}
-        >
-          {language.label}
+        <ToggleGroupItem key={language.value} value={language.value}>
+          <span lang={language.value}>{language.label}</span>
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
