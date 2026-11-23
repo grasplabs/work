@@ -431,6 +431,40 @@ describe("A project's page", () => {
     });
   });
 
+  it("says Adding while core files it, then Not added and core's reason where core refused, the dialog still open", async () => {
+    const { session } = fakeProjects();
+    const { promise: answer, reject } = Promise.withResolvers<undefined>();
+    session.projects.file = async (): Promise<void> => {
+      await answer;
+    };
+    await shown(session, project("builder"));
+
+    await press(button("Add"));
+    await press(
+      document.querySelector('[role="dialog"] [aria-label="Show the choices"]')
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find(
+        (each) => each.textContent?.trim() === "Quotes"
+      )
+    );
+    await press(inDialog("Add"));
+    const working = inDialog("Adding") !== undefined;
+    await act(async () => {
+      reject(new Error("Quotes is not yours to add."));
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      working,
+      failed: inDialog("Not added") !== undefined,
+      reason: document
+        .querySelector('[role="dialog"]')
+        ?.textContent?.includes("Quotes is not yours to add."),
+    }).toStrictEqual({ working: true, failed: true, reason: true });
+  });
+
   it("adds people and teams in a role, from who core offers when the people open, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
