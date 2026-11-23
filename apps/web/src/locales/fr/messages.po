@@ -1613,7 +1613,7 @@ msgstr "Un projet regroupe des apps et des workflows pour un processus, une équ
 msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "Un outil en Lecture s'exécute sans demander. Un appel d'un outil en Écriture depuis le chat, ou par une personne qui utilise une application, attend que cette personne le confirme. Appuyez sur le badge d'un outil pour le changer. Ne mettez un outil en Lecture que s'il ne modifie rien : mal marqué, il modifie des choses sans demander."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "A receipt for each payment"
 msgstr "Un reçu pour chaque paiement"
 
@@ -2187,12 +2187,12 @@ msgid "AI"
 msgstr "IA"
 
 #: src/routes/_shell.settings.ai-providers.tsx
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 #: src/settings/sections.ts
 msgid "AI and spend"
 msgstr "IA et dépenses"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "AI spend"
 msgstr "Dépenses d’IA"
 
@@ -3161,7 +3161,7 @@ msgstr "API de facturation"
 msgid "Billing email"
 msgstr "E-mail de facturation"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Billing emails"
 msgstr "E-mails de facturation"
 
@@ -3728,12 +3728,12 @@ msgid "Check mark"
 msgstr "Coche"
 
 #: src/chat/thread.tsx
-msgid "Check or replace it in Settings › AI providers"
-msgstr "Vérifiez-la ou remplacez-la dans Paramètres › Fournisseurs d'IA"
+msgid "Check or replace it in Settings › AI and spend"
+msgstr "Vérifiez-la ou remplacez-la dans Paramètres › IA et dépenses"
 
 #: src/frame/ai-key-banner.tsx
-msgid "Check or replace it in Settings › AI providers."
-msgstr "Vérifiez-la ou remplacez-la dans Paramètres › Fournisseurs d'IA."
+msgid "Check or replace it in Settings › AI and spend."
+msgstr "Vérifiez-la ou remplacez-la dans Paramètres › IA et dépenses."
 
 #: src/interview/before.tsx
 msgid "Check sound and microphone"
@@ -4549,7 +4549,7 @@ msgstr "Fichier CSV"
 msgid "Currency"
 msgstr "Devise"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Current plan"
 msgstr "Abonnement actuel"
 
@@ -5238,7 +5238,7 @@ msgstr "Chaque domaine est effacé à part. Un domaine qui échoue est réessay�
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Chaque événement de ce type venant de la source lance une exécution, avec ses données comme entrée."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Chaque facture à votre e-mail de facturation"
 
@@ -5315,7 +5315,7 @@ msgstr "E-mail et agenda"
 msgid "Email and sign-ins"
 msgstr "E-mail et connexions"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Email invoices"
 msgstr "Factures par e-mail"
 
@@ -5323,7 +5323,7 @@ msgstr "Factures par e-mail"
 msgid "Email me a code"
 msgstr "M’envoyer un code par e-mail"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Email payment receipts"
 msgstr "Reçus de paiement par e-mail"
 
@@ -6645,7 +6645,7 @@ msgstr "Grasp a envoyé ce lien à ce compte dans {app}. Reliez-le seulement s�
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Grasp sets it up with you"
 msgstr "Grasp le met en place avec vous"
 
@@ -8561,8 +8561,8 @@ msgid "Models"
 msgstr "Modèles"
 
 #: src/chat/failure.ts
-msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
-msgstr "Aucun modèle n'est encore configuré. Demandez à votre administrateur de connecter un fournisseur d'IA dans Paramètres › Fournisseurs d'IA."
+msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI and spend."
+msgstr "Aucun modèle n'est encore configuré. Demandez à votre administrateur de connecter un fournisseur d'IA dans Paramètres › IA et dépenses."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9364,8 +9364,8 @@ msgstr "Rien de tout cela n’est exact"
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing.tsx
 msgid "None yet"
 msgstr "Rien pour l’instant"
 
@@ -10830,6 +10830,7 @@ msgid "Places"
 msgstr "Emplacements"
 
 #: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Plan"
 msgstr "Abonnement"
 
@@ -14993,8 +14994,8 @@ msgid "This month: {spent} of {limit}."
 msgstr "Ce mois-ci : {spent} sur {limit}."
 
 #: src/chat/failure.ts
-msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
-msgstr "La limite de ce mois pour l’IA de Grasp est atteinte. Votre administrateur peut passer à la propre clé de votre organisation dans Paramètres › Fournisseurs d’IA, ou l’IA de Grasp revient le mois prochain."
+msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI and spend, or Grasp's AI is back next month."
+msgstr "La limite de ce mois pour l’IA de Grasp est atteinte. Votre administrateur peut passer à la propre clé de votre organisation dans Paramètres › IA et dépenses, ou l’IA de Grasp revient le mois prochain."
 
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
@@ -16067,7 +16068,7 @@ msgstr "Ce par quoi commence la conversation d’un créateur sur cette App. Seu
 msgid "What agents read through shared connections"
 msgstr "Ce que les agents lisent via des connexions partagées"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "What AI costs this month"
 msgstr "Ce que coûte l'IA ce mois-ci"
 
@@ -17269,8 +17270,8 @@ msgid "Your AI provider is refusing your key."
 msgstr "Votre fournisseur d'IA refuse votre clé."
 
 #: src/chat/failure.ts
-msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers."
-msgstr "Votre fournisseur d'IA refuse votre clé. Demandez à votre admin de la vérifier ou de la remplacer dans Paramètres › Fournisseurs d'IA."
+msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend."
+msgstr "Votre fournisseur d'IA refuse votre clé. Demandez à votre admin de la vérifier ou de la remplacer dans Paramètres › IA et dépenses."
 
 #: src/chat/failure.ts
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."

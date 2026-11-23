@@ -277,14 +277,14 @@ describe("a failed answer", () => {
 
     const askAdmin = {
       said: [
-        "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+        "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend.",
       ],
       links: [],
     };
     expect(shown).toStrictEqual({
       admin: {
         said: [
-          "Your AI provider is refusing your key. Check or replace it in Settings › AI providers",
+          "Your AI provider is refusing your key. Check or replace it in Settings › AI and spend",
         ],
         links: ["/settings/ai-providers"],
       },

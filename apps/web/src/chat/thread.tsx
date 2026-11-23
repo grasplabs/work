@@ -728,7 +728,7 @@ const KeyFailed = () => {
         className="underline underline-offset-4"
         to="/settings/ai-providers"
       >
-        <Trans>Check or replace it in Settings › AI providers</Trans>
+        <Trans>Check or replace it in Settings › AI and spend</Trans>
       </Link>
     </>
   );

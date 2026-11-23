@@ -175,7 +175,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // (e2e/model-fake.ts): the answer says so once the turn ends, and who can
   // put it right.
   await expect(messages.getByRole("alert")).toContainText(
-    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend.",
     { timeout: 30_000 }
   );
   // It is the first chat in the window, named after the question.
@@ -196,7 +196,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(box).toHaveText(draft);
   // The first try's failure stays where it was; the new one is last.
   await expect(messages.getByRole("alert").last()).toContainText(
-    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend.",
     { timeout: 30_000 }
   );
   await box.fill("");
@@ -450,7 +450,7 @@ test("a followed chat says core can't be reached when it stays out of reach", as
     `Out of reach ${tag}.`
   );
   await expect(messages.getByRole("alert")).toContainText(
-    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend.",
     { timeout: 30_000 }
   );
   // A read of the page's own the drop cuts off fails the page, not the
@@ -580,7 +580,7 @@ test("the chat on every other page carries on the open chat, which is the same c
   const messages = chat.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await expect(messages.getByRole("alert")).toContainText(
-    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend.",
     { timeout: 30_000 }
   );
   // The page stayed where it was.

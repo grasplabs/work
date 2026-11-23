@@ -95,7 +95,7 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
     title = t`${label} is refusing your key since ${since}.`;
     description = (
       <Link to="/settings/ai-providers">
-        <Trans>Check or replace it in Settings › AI providers.</Trans>
+        <Trans>Check or replace it in Settings › AI and spend.</Trans>
       </Link>
     );
   } else if (failing.trouble === "not_answering") {

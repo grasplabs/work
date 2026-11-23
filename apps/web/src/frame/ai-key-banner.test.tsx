@@ -204,7 +204,7 @@ describe("the AI key banner", () => {
 
     expect({ admin, member, staff }).toStrictEqual({
       admin: {
-        said: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
+        said: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI and spend.`,
         links: ["/settings/ai-providers"],
       },
       member: { said: "", links: [] },
@@ -292,8 +292,8 @@ describe("the AI key banner", () => {
     });
 
     expect({ asEntered, reloaded: host.textContent, reads }).toStrictEqual({
-      asEntered: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
-      reloaded: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
+      asEntered: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI and spend.`,
+      reloaded: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI and spend.`,
       reads: 0,
     });
   });

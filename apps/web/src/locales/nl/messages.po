@@ -1613,7 +1613,7 @@ msgstr "Een project groepeert apps en workflows voor een proces, een team of een
 msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "Een tool met Lezen draait zonder te vragen. Een aanroep van een tool met Schrijven vanuit de chat, of door iemand die een app gebruikt, wacht tot die persoon hem bevestigt. Druk op de badge van een tool om dat te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: staat hij er ten onrechte op, dan wijzigt hij dingen zonder te vragen."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "A receipt for each payment"
 msgstr "Een betaalbewijs voor elke betaling"
 
@@ -2187,12 +2187,12 @@ msgid "AI"
 msgstr "AI"
 
 #: src/routes/_shell.settings.ai-providers.tsx
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 #: src/settings/sections.ts
 msgid "AI and spend"
 msgstr "AI en kosten"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "AI spend"
 msgstr "AI-uitgaven"
 
@@ -3161,7 +3161,7 @@ msgstr "Facturatie-API"
 msgid "Billing email"
 msgstr "Factuur-e-mail"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Billing emails"
 msgstr "Factuur-e-mails"
 
@@ -3728,12 +3728,12 @@ msgid "Check mark"
 msgstr "Vinkje"
 
 #: src/chat/thread.tsx
-msgid "Check or replace it in Settings › AI providers"
-msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders"
+msgid "Check or replace it in Settings › AI and spend"
+msgstr "Controleer of vervang hem in Instellingen › AI en kosten"
 
 #: src/frame/ai-key-banner.tsx
-msgid "Check or replace it in Settings › AI providers."
-msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders."
+msgid "Check or replace it in Settings › AI and spend."
+msgstr "Controleer of vervang hem in Instellingen › AI en kosten."
 
 #: src/interview/before.tsx
 msgid "Check sound and microphone"
@@ -4549,7 +4549,7 @@ msgstr "CSV-bestand"
 msgid "Currency"
 msgstr "Valuta"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Current plan"
 msgstr "Huidig abonnement"
 
@@ -5238,7 +5238,7 @@ msgstr "Elk onderdeel wordt apart gewist. Mislukt er een, dan wordt het opnieuw 
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Elke gebeurtenis van dit type uit de bron start een run, met de gegevens ervan als invoer."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Elke factuur naar je factuur-e-mailadres"
 
@@ -5315,7 +5315,7 @@ msgstr "E-mail en agenda"
 msgid "Email and sign-ins"
 msgstr "E-mail en aanmeldingen"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Email invoices"
 msgstr "Facturen per e-mail"
 
@@ -5323,7 +5323,7 @@ msgstr "Facturen per e-mail"
 msgid "Email me a code"
 msgstr "Mail me een code"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Email payment receipts"
 msgstr "Betaalbewijzen per e-mail"
 
@@ -6645,7 +6645,7 @@ msgstr "Grasp stuurde deze link naar dat account in {app}. Koppel het alleen als
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp heeft dit verstuurd, maar het antwoord ging verloren: niemand weet of het effect had. Controleer het op {connection} voordat je antwoordt."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Grasp sets it up with you"
 msgstr "Grasp regelt het samen met je"
 
@@ -8561,8 +8561,8 @@ msgid "Models"
 msgstr "Modellen"
 
 #: src/chat/failure.ts
-msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
-msgstr "Er zijn nog geen modellen ingesteld. Vraag je beheerder om een AI-aanbieder te koppelen in Instellingen › AI-aanbieders."
+msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI and spend."
+msgstr "Er zijn nog geen modellen ingesteld. Vraag je beheerder om een AI-aanbieder te koppelen in Instellingen › AI en kosten."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9364,8 +9364,8 @@ msgstr "Hier klopt niets van"
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing.tsx
 msgid "None yet"
 msgstr "Nog geen"
 
@@ -10830,6 +10830,7 @@ msgid "Places"
 msgstr "Plekken"
 
 #: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Plan"
 msgstr "Abonnement"
 
@@ -14993,8 +14994,8 @@ msgid "This month: {spent} of {limit}."
 msgstr "Deze maand: {spent} van {limit}."
 
 #: src/chat/failure.ts
-msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
-msgstr "De limiet van deze maand voor de AI van Grasp is bereikt. Je beheerder kan in Instellingen › AI-aanbieders overstappen op de eigen sleutel van je organisatie, of de AI van Grasp is er volgende maand weer."
+msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI and spend, or Grasp's AI is back next month."
+msgstr "De limiet van deze maand voor de AI van Grasp is bereikt. Je beheerder kan in Instellingen › AI en kosten overstappen op de eigen sleutel van je organisatie, of de AI van Grasp is er volgende maand weer."
 
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
@@ -16067,7 +16068,7 @@ msgstr "Waar de chat van een bouwer over deze App mee begint. Alleen de bouwers 
 msgid "What agents read through shared connections"
 msgstr "Wat agents via gedeelde verbindingen lezen"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "What AI costs this month"
 msgstr "Wat AI deze maand kost"
 
@@ -17269,8 +17270,8 @@ msgid "Your AI provider is refusing your key."
 msgstr "Je AI-aanbieder weigert je sleutel."
 
 #: src/chat/failure.ts
-msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers."
-msgstr "Je AI-aanbieder weigert je sleutel. Vraag je beheerder hem te controleren of te vervangen in Instellingen › AI-aanbieders."
+msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend."
+msgstr "Je AI-aanbieder weigert je sleutel. Vraag je beheerder hem te controleren of te vervangen in Instellingen › AI en kosten."
 
 #: src/chat/failure.ts
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."

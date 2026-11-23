@@ -1613,7 +1613,7 @@ msgstr "A project groups apps and workflows for a process, a team or a goal. Put
 msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "A receipt for each payment"
 msgstr "A receipt for each payment"
 
@@ -2187,12 +2187,12 @@ msgid "AI"
 msgstr "AI"
 
 #: src/routes/_shell.settings.ai-providers.tsx
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 #: src/settings/sections.ts
 msgid "AI and spend"
 msgstr "AI and spend"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "AI spend"
 msgstr "AI spend"
 
@@ -3161,7 +3161,7 @@ msgstr "Billing API"
 msgid "Billing email"
 msgstr "Billing email"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Billing emails"
 msgstr "Billing emails"
 
@@ -3728,12 +3728,12 @@ msgid "Check mark"
 msgstr "Check mark"
 
 #: src/chat/thread.tsx
-msgid "Check or replace it in Settings › AI providers"
-msgstr "Check or replace it in Settings › AI providers"
+msgid "Check or replace it in Settings › AI and spend"
+msgstr "Check or replace it in Settings › AI and spend"
 
 #: src/frame/ai-key-banner.tsx
-msgid "Check or replace it in Settings › AI providers."
-msgstr "Check or replace it in Settings › AI providers."
+msgid "Check or replace it in Settings › AI and spend."
+msgstr "Check or replace it in Settings › AI and spend."
 
 #: src/interview/before.tsx
 msgid "Check sound and microphone"
@@ -4549,7 +4549,7 @@ msgstr "CSV file"
 msgid "Currency"
 msgstr "Currency"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Current plan"
 msgstr "Current plan"
 
@@ -5238,7 +5238,7 @@ msgstr "Each area is erased on its own. One that fails is tried again until it i
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Each event of this type from the source starts a run, with its data as the input."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Each invoice to your billing email"
 
@@ -5315,7 +5315,7 @@ msgstr "Email and calendar"
 msgid "Email and sign-ins"
 msgstr "Email and sign-ins"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Email invoices"
 msgstr "Email invoices"
 
@@ -5323,7 +5323,7 @@ msgstr "Email invoices"
 msgid "Email me a code"
 msgstr "Email me a code"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Email payment receipts"
 msgstr "Email payment receipts"
 
@@ -6645,7 +6645,7 @@ msgstr "Grasp sent this link to that account in {app}. Link it only if it is you
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Grasp sets it up with you"
 msgstr "Grasp sets it up with you"
 
@@ -8561,8 +8561,8 @@ msgid "Models"
 msgstr "Models"
 
 #: src/chat/failure.ts
-msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
-msgstr "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
+msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI and spend."
+msgstr "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI and spend."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9364,8 +9364,8 @@ msgstr "None of this is right"
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing.tsx
 msgid "None yet"
 msgstr "None yet"
 
@@ -10830,6 +10830,7 @@ msgid "Places"
 msgstr "Places"
 
 #: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "Plan"
 msgstr "Plan"
 
@@ -14993,8 +14994,8 @@ msgid "This month: {spent} of {limit}."
 msgstr "This month: {spent} of {limit}."
 
 #: src/chat/failure.ts
-msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
-msgstr "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
+msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI and spend, or Grasp's AI is back next month."
+msgstr "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI and spend, or Grasp's AI is back next month."
 
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
@@ -16067,7 +16068,7 @@ msgstr "What a builder’s chat about this App starts with. Only its builders re
 msgid "What agents read through shared connections"
 msgstr "What agents read through shared connections"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing.tsx
 msgid "What AI costs this month"
 msgstr "What AI costs this month"
 
@@ -17269,8 +17270,8 @@ msgid "Your AI provider is refusing your key."
 msgstr "Your AI provider is refusing your key."
 
 #: src/chat/failure.ts
-msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers."
-msgstr "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers."
+msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend."
+msgstr "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend."
 
 #: src/chat/failure.ts
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."

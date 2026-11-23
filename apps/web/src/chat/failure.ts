@@ -9,14 +9,14 @@ import { msg } from "@lingui/core/macro";
 
 const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.invalid_call": msg`Grasp couldn't put this question to the model. Try again.`,
-  "model.unconfigured": msg`Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers.`,
+  "model.unconfigured": msg`Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI and spend.`,
   "model.no_provider": msg`No AI provider is connected yet. Ask your admin to connect one.`,
-  "model.provider_key_failed": msg`Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.`,
+  "model.provider_key_failed": msg`Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI and spend.`,
   "model.provider_unavailable": msg`Your AI provider isn't answering. This is usually an outage on their side; try again in a while.`,
   "model.not_allowed": msg`Your organization doesn't allow this model. Pick another one.`,
   "model.rate_limited": msg`Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while.`,
   "model.answer_too_long": msg`This model can't give an answer that long. Pick another model, or ask for less.`,
-  "model.grasp_limit_reached": msg`This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month.`,
+  "model.grasp_limit_reached": msg`This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI and spend, or Grasp's AI is back next month.`,
   "model.failed": msg`The model couldn't answer. Try again.`,
   "model.request_refused": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
