@@ -54,7 +54,6 @@ import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { roleItems } from "./roles.ts";
-import { settingsToast } from "./settings-toast.ts";
 
 // Invitations: an admin names someone's address and the role they get
 // when they first sign in with the organization's account. Grasp sends no
@@ -177,7 +176,7 @@ export const InviteButton = ({ disabled = false }: { disabled?: boolean }) => {
       open={open}
     >
       <DialogTrigger asChild>
-        <Button disabled={disabled} size="xs" variant="secondary">
+        <Button disabled={disabled} size="xs" variant="outline">
           <Icon icon={PlusIcon} />
           {t`Invite`}
         </Button>
@@ -244,49 +243,45 @@ export const InviteButton = ({ disabled = false }: { disabled?: boolean }) => {
   );
 };
 
-/** Copies `email`, and says so; a refused clipboard says that instead. */
-export const copyEmail = async (
-  email: string,
-  words: { copied: string; failed: string }
-): Promise<void> => {
-  const done = await copyText(email);
-  if (done) {
-    settingsToast.success(words.copied, { description: email });
-  } else {
-    settingsToast.error(words.failed);
+/**
+ * Copies `email` for a menu's item: a refused clipboard rejects, so the
+ * item says its own `errorText` and stays open to try again.
+ */
+export const copyEmail = async (email: string): Promise<void> => {
+  if (!(await copyText(email))) {
+    throw new Error("The clipboard refused the address.");
   }
 };
 
 /**
  * What can be done to an invitation nobody has taken up yet, in the people
  * table's last column: a menu to copy the address or withdraw it. Why a
- * withdrawal failed is said in a toast, seen whatever the row's room.
+ * withdrawal failed is said over the people's table (`onRefused`), seen
+ * whatever the row's room.
  */
 export const InvitationActions = ({
   invitation,
+  onRefused,
 }: {
   invitation: Invitation;
+  /** Says why core refused the withdrawal. */
+  onRefused: (failure: string) => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, run } = useCoreAction();
   const { email } = invitation;
   const withdraw = (): void => {
-    void run(
-      async (session) => {
-        await changeThenRefresh(
-          async () => {
-            await session.members.withdrawInvitation(invitation.id);
-          },
-          async () => {
-            await router.invalidate({ sync: true });
-          }
-        );
-      },
-      (failure) => {
-        settingsToast.error(failure);
-      }
-    );
+    void run(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await session.members.withdrawInvitation(invitation.id);
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+    }, onRefused);
   };
   return (
     <DropdownMenu>
@@ -302,12 +297,10 @@ export const InvitationActions = ({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
+          errorText={t`Not copied`}
           icon={CopyIcon}
-          onSelect={() => {
-            void copyEmail(email, {
-              copied: t`Copied`,
-              failed: t`Not copied`,
-            });
+          onSelect={async () => {
+            await copyEmail(email);
           }}
         >
           {t`Copy email`}

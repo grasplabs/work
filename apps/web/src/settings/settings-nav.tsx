@@ -47,8 +47,9 @@ const styles = stylex.create({
   },
   // The group's name, where the links' words start.
   groupName: { marginInline: space[2], marginBlockEnd: space[1] },
+  // The trigger's own display, gone where the list has room.
   control: {
-    display: { default: "block", [settingsLayout.roomForList]: "none" },
+    display: { default: "flex", [settingsLayout.roomForList]: "none" },
   },
 });
 
@@ -82,67 +83,63 @@ export const SettingsNav = ({
   open,
 }: {
   viewer: Viewer;
-  /** The section open now, if it is one of theirs. */
+  /** The section open now, if it is one they may open. */
   open: SettingsSection | undefined;
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
   const groups = groupedSectionsFor(viewer);
+  const listed = groups.flatMap(({ sections }) => sections);
+  // A section they may read but don't find listed (a member's Workspace) is
+  // chosen in neither.
+  const chosen = listed.find(({ id }) => id === open?.id);
   return (
     <>
       <nav aria-label={t`Settings`} {...stylex.props(styles.list)}>
         {groups.map(({ group, sections }) => (
           <div key={group.id} {...stylex.props(styles.group)}>
-            <span {...stylex.props(styles.groupName)}>
-              <Text as="span" color="muted" size="xs">
-                {i18n._(group.title)}
-              </Text>
-            </span>
+            <Text as="span" color="muted" size="xs" style={styles.groupName}>
+              {i18n._(group.title)}
+            </Text>
             {sections.map((section) => (
               <SectionLink
                 key={section.id}
-                open={section.id === open?.id}
+                open={section.id === chosen?.id}
                 section={section}
               />
             ))}
           </div>
         ))}
       </nav>
-      <div {...stylex.props(styles.control)}>
-        <Select
-          items={groups.flatMap(({ sections }) =>
-            sections.map((section) => ({
-              value: section.href,
-              label: i18n._(section.label),
-            }))
-          )}
-          onValueChange={(value) => {
-            const section = groups
-              .flatMap(({ sections }) => sections)
-              .find(({ href }) => href === value);
-            if (section !== undefined) {
-              void navigate({ to: section.href });
-            }
-          }}
-          value={open?.href ?? null}
-        >
-          <SelectTrigger aria-label={t`Settings`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {groups.map(({ group, sections }) => (
-              <SelectGroup key={group.id}>
-                <SelectLabel>{i18n._(group.title)}</SelectLabel>
-                {sections.map((section) => (
-                  <SelectItem key={section.id} value={section.href}>
-                    {i18n._(section.label)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <Select
+        items={listed.map((section) => ({
+          value: section.href,
+          label: i18n._(section.label),
+        }))}
+        onValueChange={(value) => {
+          const section = listed.find(({ href }) => href === value);
+          if (section !== undefined) {
+            void navigate({ to: section.href });
+          }
+        }}
+        value={chosen?.href ?? null}
+      >
+        <SelectTrigger aria-label={t`Settings`} style={styles.control}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {groups.map(({ group, sections }) => (
+            <SelectGroup key={group.id}>
+              <SelectLabel>{i18n._(group.title)}</SelectLabel>
+              {sections.map((section) => (
+                <SelectItem key={section.id} value={section.href}>
+                  {i18n._(section.label)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
+        </SelectContent>
+      </Select>
     </>
   );
 };

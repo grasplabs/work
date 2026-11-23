@@ -36,7 +36,7 @@ import {
 
 const styles = stylex.create({
   two: { display: "grid", gap: space[1] },
-  none: { paddingBlock: space[4], paddingInline: space.tableCellInline },
+  none: { marginBlock: space[4], marginInline: space.tableCellInline },
 });
 
 interface Outcomes {
@@ -49,11 +49,9 @@ const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
   const { listed, people } = outcomes;
   if (listed.length === 0) {
     return (
-      <div {...stylex.props(styles.none)}>
-        <Text color="muted" size="sm">
-          {t`No call of unknown outcome is open.`}
-        </Text>
-      </div>
+      <Text color="muted" size="sm" style={styles.none}>
+        {t`No call of unknown outcome is open.`}
+      </Text>
     );
   }
   return (

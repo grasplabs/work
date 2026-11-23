@@ -9,6 +9,7 @@ import type {
 } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -78,7 +79,6 @@ import {
   SettingsGroup,
   SettingsStack,
 } from "../settings/section.tsx";
-import { settingsToast } from "../settings/settings-toast.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -116,7 +116,18 @@ const styles = stylex.create({
   // The roles compared: each name over what it may do.
   roles: { display: "grid", gap: space[3], margin: 0, padding: 0 },
   roleText: { margin: 0 },
+  // What a change made from a row did, over the table, in the rows' inset.
+  notice: { marginBlock: space[3], marginInline: space.tableCellInline },
 });
+
+/**
+ * What a change made from a row did, or why core refused it: said over
+ * the people's table, as a menu's change has no place of its own.
+ */
+type PeopleNotice = { done: string } | { failure: string };
+
+/** Says a row's change over the people's table. */
+type Say = (notice: PeopleNotice) => void;
 
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
@@ -164,7 +175,7 @@ const whileChanging = async (
 };
 
 /** A member's role, and the question before making them an admin. */
-const MemberRole = ({ member }: { member: Member }) => {
+const MemberRole = ({ member, say }: { member: Member; say: Say }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, run } = useCoreAction();
@@ -187,9 +198,9 @@ const MemberRole = ({ member }: { member: Member }) => {
           );
         });
       },
-      // A menu's change has no place of its own: said as a toast.
+      // A menu's change has no place of its own: said over the table.
       (failure) => {
-        settingsToast.error(failure);
+        say({ failure });
       }
     );
   };
@@ -229,7 +240,7 @@ const MemberRole = ({ member }: { member: Member }) => {
 };
 
 /** The menu of what else may be done to a member: copy, sign out, remove. */
-const MemberMenu = ({ member }: { member: Member }) => {
+const MemberMenu = ({ member, say }: { member: Member; say: Say }) => {
   const { t } = useLingui();
   const core = useCore();
   const router = useRouter();
@@ -253,10 +264,10 @@ const MemberMenu = ({ member }: { member: Member }) => {
       }, refresh);
     } catch (error) {
       // Core's reason, with its reference to quote; the item says it failed.
-      settingsToast.error(failureText(error));
+      say({ failure: failureText(error) });
       throw error;
     }
-    settingsToast.success(t`${name} is signed out everywhere.`);
+    say({ done: t`${name} is signed out everywhere.` });
   };
   // With none to disconnect, the removal alone is said. Outside the `try`
   // below, as the React Compiler can't compile a conditional within one.
@@ -269,12 +280,12 @@ const MemberMenu = ({ member }: { member: Member }) => {
       const { connectionsDisconnected: count } = await core.withSession(
         async ({ members }) => await members.remove(member.userId)
       );
-      settingsToast.success(removedSaid(count));
+      say({ done: removedSaid(count) });
     } catch (error) {
       // Removed, with some connections still to disconnect: the row goes
-      // all the same, and the toast says why. Core's reason, with its
+      // all the same, and the notice says why. Core's reason, with its
       // reference to quote, either way.
-      settingsToast.error(failureText(error));
+      say({ failure: failureText(error) });
       if (memberErrors.codeOf(error) !== "member.connections_pending") {
         await refresh();
         throw error;
@@ -299,12 +310,10 @@ const MemberMenu = ({ member }: { member: Member }) => {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
+            errorText={t`Not copied`}
             icon={CopyIcon}
-            onSelect={() => {
-              void copyEmail(member.email, {
-                copied: t`Copied`,
-                failed: t`Copying didn't work`,
-              });
+            onSelect={async () => {
+              await copyEmail(member.email);
             }}
           >
             {t`Copy email`}
@@ -501,9 +510,11 @@ const PersonCell = ({ name, detail }: { name: string; detail?: string }) => (
 const peopleColumns = ({
   words,
   me,
+  say,
 }: {
   words: PeopleWords;
   me: string;
+  say: Say;
 }): DataTableColumn<PersonRow>[] => [
   {
     id: "name",
@@ -598,7 +609,7 @@ const peopleColumns = ({
           value={row.member.role}
         />
       ) : (
-        <MemberRole member={row.member} />
+        <MemberRole member={row.member} say={say} />
       );
     },
   },
@@ -610,7 +621,14 @@ const peopleColumns = ({
     value: () => "",
     cell: (row) => {
       if (row.invitation !== undefined) {
-        return <InvitationActions invitation={row.invitation} />;
+        return (
+          <InvitationActions
+            invitation={row.invitation}
+            onRefused={(failure) => {
+              say({ failure });
+            }}
+          />
+        );
       }
       if (row.removed !== undefined) {
         return <RemovedActions person={row.removed} />;
@@ -621,7 +639,7 @@ const peopleColumns = ({
       if (row.member === undefined || row.member.userId === me) {
         return null;
       }
-      return <MemberMenu member={row.member} />;
+      return <MemberMenu member={row.member} say={say} />;
     },
   },
 ];
@@ -636,20 +654,18 @@ const PeopleSearch = ({
 }) => {
   const { t } = useLingui();
   return (
-    <div {...stylex.props(styles.search)}>
-      <InputGroup size="sm">
-        <InputGroupAddon>
-          <Icon icon={SearchIcon} />
-        </InputGroupAddon>
-        <InputGroupInput
-          aria-label={t`Search members`}
-          onValueChange={onValueChange}
-          placeholder={t`Search members`}
-          type="search"
-          value={value}
-        />
-      </InputGroup>
-    </div>
+    <InputGroup size="sm" style={styles.search}>
+      <InputGroupAddon>
+        <Icon icon={SearchIcon} />
+      </InputGroupAddon>
+      <InputGroupInput
+        aria-label={t`Search members`}
+        onValueChange={onValueChange}
+        placeholder={t`Search members`}
+        type="search"
+        value={value}
+      />
+    </InputGroup>
   );
 };
 
@@ -675,6 +691,7 @@ const PeopleTable = ({
 }) => {
   const { t } = useLingui();
   const [search, setSearch] = useState("");
+  const [notice, setNotice] = useState<PeopleNotice>();
   const gone = useRemovedPeople(removed);
   const words = usePeopleWords();
   const rows: PersonRow[] = [
@@ -742,9 +759,20 @@ const PeopleTable = ({
       title={t`Team members`}
       wideActions
     >
+      {notice === undefined ? null : (
+        <Alert
+          appearance="subtle"
+          style={styles.notice}
+          variant={"failure" in notice ? "destructive" : "success"}
+        >
+          <AlertDescription>
+            {"failure" in notice ? notice.failure : notice.done}
+          </AlertDescription>
+        </Alert>
+      )}
       <DataTable
         aria-label={t`Members`}
-        columns={peopleColumns({ words, me })}
+        columns={peopleColumns({ words, me, say: setNotice })}
         getRowId={(row) => row.key}
         // Someone invited is not here yet: their row fades toward its end.
         // Someone removed is greyed, their menu kept clear.
@@ -816,7 +844,13 @@ const MembersPending = () => {
     >
       <DataTable
         aria-label={t`Members`}
-        columns={peopleColumns({ words, me: "" })}
+        columns={peopleColumns({
+          words,
+          me: "",
+          say: () => {
+            // No rows yet, so nothing to say.
+          },
+        })}
         getRowId={(row) => row.key}
         loading
         pageSize={pageSize}

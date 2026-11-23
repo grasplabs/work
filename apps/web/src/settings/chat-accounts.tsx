@@ -328,7 +328,7 @@ const ForgetConversations = () => {
         loadingText={t`Deleting`}
         title={t`Delete your conversations in chat apps?`}
         trigger={
-          <Button size="sm" variant="secondary">
+          <Button size="sm" variant="outline">
             {t`Delete`}
           </Button>
         }

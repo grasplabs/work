@@ -61,7 +61,7 @@ const OnboardingPage = () => {
   return (
     <SettingsGroup
       actions={
-        <Button asChild size="xs" variant="secondary">
+        <Button asChild size="xs" variant="outline">
           <Link search={step} to="/setup">
             {t`Open your onboarding`}
             <Icon icon={ArrowRightIcon} />

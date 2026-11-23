@@ -64,7 +64,8 @@ const moved = (
 const styles = stylex.create({
   // The group's choice at a select's own width, on the rows' edge.
   choice: { width: "12rem", maxWidth: "100%" },
-  add: { paddingBlock: space[2], paddingInline: space.tableCellInline },
+  // Under the rows, at their inset.
+  add: { marginBlock: space[2], marginInline: space.tableCellInline },
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -97,29 +98,31 @@ const TeamRow = ({
   ];
   return (
     <FactRow label={name}>
-      <div {...stylex.props(styles.choice)}>
-        <Select
-          disabled={disabled}
-          items={items}
-          onValueChange={(value) => {
-            if (typeof value === "string") {
-              onMove(value);
-            }
-          }}
-          value={inGroup}
+      <Select
+        disabled={disabled}
+        items={items}
+        onValueChange={(value) => {
+          if (typeof value === "string") {
+            onMove(value);
+          }
+        }}
+        value={inGroup}
+      >
+        <SelectTrigger
+          aria-label={t`Group of ${name}`}
+          size="sm"
+          style={styles.choice}
         >
-          <SelectTrigger aria-label={t`Group of ${name}`} size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {items.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </FactRow>
   );
 };
@@ -191,22 +194,21 @@ const TeamGroups = ({
             );
           })}
         </FieldGroup>
-        <div {...stylex.props(styles.add)}>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setGroups([
-                ...groups,
-                { id: newGroupId(), name: t`New group`, teamIds: [] },
-              ]);
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            <Icon icon={PlusIcon} />
-            {t`Add a group`}
-          </Button>
-        </div>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setGroups([
+              ...groups,
+              { id: newGroupId(), name: t`New group`, teamIds: [] },
+            ]);
+          }}
+          size="sm"
+          style={styles.add}
+          variant="ghost"
+        >
+          <Icon icon={PlusIcon} />
+          {t`Add a group`}
+        </Button>
       </SettingsGroup>
       <SettingsGroup
         footer={

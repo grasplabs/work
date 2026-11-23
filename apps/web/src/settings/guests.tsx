@@ -60,12 +60,10 @@ export const GuestActions = ({ guest }: { guest: Guest }) => {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
+            errorText={t`Not copied`}
             icon={CopyIcon}
-            onSelect={() => {
-              void copyEmail(email, {
-                copied: t`Copied`,
-                failed: t`Copying didn't work`,
-              });
+            onSelect={async () => {
+              await copyEmail(email);
             }}
           >
             {t`Copy email`}

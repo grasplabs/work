@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { groupedSectionsFor, hiddenAt, sectionsFor } from "./sections.ts";
+import {
+  groupedSectionsFor,
+  hiddenAt,
+  sectionAt,
+  sectionsFor,
+} from "./sections.ts";
 
 // Who sees which Settings sections: the filter the in-page list and,
 // later, the Sidebar both read.
@@ -80,7 +85,6 @@ describe("Settings sections", () => {
       admin: hidden(admin),
     }).toStrictEqual({
       member: [
-        "/settings/workspace",
         "/settings/members",
         "/settings/brain",
         "/settings/audit/event-1",
@@ -89,5 +93,14 @@ describe("Settings sections", () => {
       staff: ["/settings/instructions", "/settings/members"],
       admin: [],
     });
+  });
+
+  it("opens the Workspace to everyone, read-only, though only admins find it listed", () => {
+    const member = { role: "user", staff: false } as const;
+    expect({
+      listed: ids(member).includes("workspace"),
+      hidden: hiddenAt("/settings/workspace", member),
+      open: sectionAt("/settings/workspace", member)?.id,
+    }).toStrictEqual({ listed: false, hidden: false, open: "workspace" });
   });
 });

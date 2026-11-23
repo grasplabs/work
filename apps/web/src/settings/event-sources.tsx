@@ -815,7 +815,7 @@ export const EventSourcesSettings = ({
         setAdding(true);
       }}
       size="xs"
-      variant="secondary"
+      variant="outline"
     >
       <Icon icon={PlusIcon} />
       {t`Add a source`}

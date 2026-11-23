@@ -73,7 +73,7 @@ import { useTeamChange } from "./use-team-change.ts";
 
 const styles = stylex.create({
   ends: { display: "flex", alignItems: "center", gap: space[3] },
-  empty: { paddingBlock: space[4], paddingInline: space.tableCellInline },
+  empty: { marginBlock: space[4], marginInline: space.tableCellInline },
 });
 
 /** What the page shows: the teams, and the members to put in them. */
@@ -206,7 +206,7 @@ const NewTeamButton = ({
           setOpen(true);
         }}
         size="xs"
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={PlusIcon} />
         {t`New team`}
@@ -355,9 +355,9 @@ const TeamsList = ({
         title={t`Teams`}
       >
         {teams.length === 0 ? (
-          <div {...stylex.props(styles.empty)}>
-            <Text color="muted" size="sm">{t`No teams yet.`}</Text>
-          </div>
+          <Text color="muted" size="sm" style={styles.empty}>
+            {t`No teams yet.`}
+          </Text>
         ) : (
           <ItemList aria-label={t`Teams`}>
             {teams.map((team) => (

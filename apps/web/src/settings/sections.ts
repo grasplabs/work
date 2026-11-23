@@ -24,7 +24,7 @@ import { msg } from "@lingui/core/macro";
 // whatever lists them (the Settings layout's own list today, the sidebar
 // once the frame lists them there). Who may see a section is part of its
 // data, and `sectionsFor` filters by it alone; a link to a section someone
-// may not see leads to their profile (`hiddenAt`, the Settings layout).
+// may not open leads to their profile (`hiddenAt`, the Settings layout).
 // Core checks the role on every call whatever is listed: this only keeps
 // out of sight what someone can't use.
 
@@ -68,7 +68,14 @@ export interface SettingsSection {
   href: SettingsHref;
   group: SettingsGroupId;
   icon: IconData;
+  /** Who finds it in the list, and may open it. */
   audience: SettingsAudience;
+  /**
+   * Who may open it by its address, where more may than find it listed:
+   * the Workspace's values are everyone's to read, though only admins
+   * find the section in the list.
+   */
+  readableBy?: SettingsAudience;
   /**
    * The page runs the page's whole width (a log beside its details);
    * every other section stands in one centred column.
@@ -129,6 +136,9 @@ const settingsSections: readonly SettingsSection[] = [
     group: "workspace",
     icon: BuildingIcon,
     audience: "admins",
+    // Its name, sign-in, data location and time zone, read-only for anyone
+    // but its own admins (core refuses their change).
+    readableBy: "everyone",
   },
   {
     id: "members",
@@ -228,7 +238,12 @@ const maySee = (
   return isAdmin(viewer.role) && (audience === "admins" || !viewer.staff);
 };
 
-/** The sections `viewer` may see, in their order. */
+/** Whether `viewer` may open `section`, listed for them or not. */
+const mayOpen = (section: SettingsSection, viewer: SettingsViewer): boolean =>
+  maySee(section.audience, viewer) ||
+  (section.readableBy !== undefined && maySee(section.readableBy, viewer));
+
+/** The sections `viewer` finds listed, in their order. */
 export const sectionsFor = (viewer: SettingsViewer): SettingsSection[] =>
   settingsSections.filter((section) => maySee(section.audience, viewer));
 
@@ -249,19 +264,21 @@ export const groupedSectionsFor = (
 const opens = (section: SettingsSection, pathname: string): boolean =>
   pathname === section.href || pathname.startsWith(`${section.href}/`);
 
-/** The section open at `pathname`, among those `viewer` may see. */
+/** The section open at `pathname`, among those `viewer` may open. */
 export const sectionAt = (
   pathname: string,
   viewer: SettingsViewer
 ): SettingsSection | undefined =>
-  sectionsFor(viewer).find((section) => opens(section, pathname));
+  settingsSections.find(
+    (section) => opens(section, pathname) && mayOpen(section, viewer)
+  );
 
 /**
- * Whether `pathname` is a section kept out of `viewer`'s sight: someone
- * who follows a link to one goes to their own profile instead, the same
- * for every such section.
+ * Whether `pathname` is a section `viewer` may not open: someone who
+ * follows a link to one goes to their own profile instead, the same for
+ * every such section.
  */
 export const hiddenAt = (pathname: string, viewer: SettingsViewer): boolean =>
   settingsSections.some(
-    (section) => opens(section, pathname) && !maySee(section.audience, viewer)
+    (section) => opens(section, pathname) && !mayOpen(section, viewer)
   );

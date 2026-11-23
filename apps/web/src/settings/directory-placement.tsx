@@ -189,7 +189,7 @@ const AddToTeam = ({
         disabled={picked === null || busy}
         size="sm"
         type="submit"
-        variant="secondary"
+        variant="outline"
       >
         {t`Add`}
       </Button>
@@ -269,7 +269,7 @@ const TakeOff = ({
           );
         }}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         {t`Take off ${name}`}
       </Button>
@@ -369,7 +369,7 @@ const PinRow = ({
           );
         }}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         {t`Let the directory decide`}
       </Button>

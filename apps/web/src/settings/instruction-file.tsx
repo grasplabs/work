@@ -110,7 +110,7 @@ const Actions = ({
         disabled={cannotSave}
         onClick={onSave}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         {t`Save`}
       </Button>

@@ -57,7 +57,7 @@ const styles = stylex.create({
     minWidth: 0,
   },
   // Its words start where the rows' do.
-  head: { paddingInline: space.tableCellInline },
+  head: { marginInline: space.tableCellInline },
   // Buttons too wide to stand beside the title on a phone (a search among
   // them) stand under it there. Damsko's head would keep them beside it
   // and squeeze the title down to nothing, breaking it inside its words
@@ -85,7 +85,8 @@ const styles = stylex.create({
     paddingBlock: space[4],
     paddingInline: space.tableCellInline,
   },
-  pendingHead: { display: "grid", gap: space[2], width: "12rem" },
+  // The title's placeholder at its inset, as wide as a short title.
+  pendingHead: { width: "10rem" },
 });
 
 /** A page's groups, one under the other, a section's gap apart. */
@@ -133,17 +134,15 @@ export const SettingsGroup = ({
   const id = useId();
   return (
     <section aria-labelledby={id} {...stylex.props(styles.group)}>
-      <div {...stylex.props(styles.head)}>
-        <SectionHeader
-          actions={actions}
-          badge={badge}
-          description={description}
-          id={id}
-          {...(wideActions ? { style: styles.headStacked } : {})}
-          title={title}
-          variant="group"
-        />
-      </div>
+      <SectionHeader
+        actions={actions}
+        badge={badge}
+        description={description}
+        id={id}
+        style={[styles.head, wideActions && styles.headStacked]}
+        title={title}
+        variant="group"
+      />
       {empty ? null : (
         <Card size="sm">
           <CardContent flush={flush}>{children}</CardContent>
@@ -326,9 +325,7 @@ export const SettingsPending = ({
   <SettingsStack>
     {groups.map((rows, group) => (
       <div key={group} {...stylex.props(styles.group)}>
-        <div {...stylex.props(styles.head, styles.pendingHead)}>
-          <Skeleton size="lg" />
-        </div>
+        <Skeleton size="lg" style={[styles.head, styles.pendingHead]} />
         <Card size="sm">
           <CardContent flush>
             <LoadingLines lines={rows} />

@@ -260,7 +260,7 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   ).toContainText("Removed");
 });
 
-test("lets an admin rename the workspace and set its time zone, and shows the new name to everyone", async ({
+test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
   context,
   newContext,
   page,
@@ -290,14 +290,21 @@ test("lets an admin rename the workspace and set its time zone, and shows the ne
   await expect(zone).toHaveValue(/^Amsterdam/u);
   await expect(card).toContainText("European Union");
 
-  // A member sees the new name in the frame. The workspace's settings are
-  // not theirs: a link there leads to their own profile.
   const other = await newContext();
   const theirs = await other.newPage();
   await signInTo(other, member);
   await theirs.goto("/settings/workspace");
-  await expect(theirs).toHaveURL(/\/settings\/profile$/u);
-  await expect(theirs.getByText(renamed, { exact: true })).not.toHaveCount(0);
+  const theirCard = theirs.getByRole("region", {
+    name: "Organization",
+    exact: true,
+  });
+  await expect(theirCard.getByRole("heading")).toHaveText(renamed);
+  await expect(
+    theirCard.getByRole("button", { name: "Edit the name" })
+  ).toHaveCount(0);
+  const theirZone = theirs.getByRole("combobox", { name: "Time zone" });
+  await expect(theirZone).toHaveValue(/^Amsterdam/u);
+  await expect(theirZone).not.toBeEditable();
   await other.close();
 
   await rename(before);

@@ -146,11 +146,7 @@ const Name = ({
   loading,
 }: Pick<IdentityProps, "name" | "empty" | "heading" | "loading">) => {
   if (loading === true) {
-    return (
-      <span {...stylex.props(styles.nameWaiting)}>
-        <Skeleton size="lg" />
-      </span>
-    );
+    return <Skeleton size="lg" style={styles.nameWaiting} />;
   }
   if (name === undefined || name === "") {
     return (
@@ -189,12 +185,8 @@ const Facts = ({
   if (loading) {
     return (
       <div aria-hidden="true" {...look}>
-        <span {...stylex.props(styles.factWaiting)}>
-          <Skeleton />
-        </span>
-        <span {...stylex.props(styles.factWaiting)}>
-          <Skeleton />
-        </span>
+        <Skeleton style={styles.factWaiting} />
+        <Skeleton style={styles.factWaiting} />
       </div>
     );
   }

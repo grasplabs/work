@@ -4343,9 +4343,6 @@ msgstr "Copenhagen"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/routes/_shell.settings.members.tsx
-#: src/settings/guests.tsx
-#: src/settings/invitations.tsx
 #: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copied"
@@ -4436,8 +4433,6 @@ msgid "Copy the URL of {name}"
 msgstr "Copy the URL of {name}"
 
 #: src/copy.ts
-#: src/routes/_shell.settings.members.tsx
-#: src/settings/guests.tsx
 msgid "Copying didn't work"
 msgstr "Copying didn't work"
 
@@ -9421,6 +9416,8 @@ msgid "Not connected"
 msgstr "Not connected"
 
 #: src/frame/ui-words.tsx
+#: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Not copied"
 msgstr "Not copied"

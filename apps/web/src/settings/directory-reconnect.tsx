@@ -92,7 +92,7 @@ export const DirectoryReconnect = ({
         }}
         size="sm"
         disabled={state === "starting"}
-        variant="secondary"
+        variant="outline"
       >
         <Trans>Connect {name} again</Trans>
       </Button>

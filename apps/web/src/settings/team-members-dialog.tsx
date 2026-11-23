@@ -257,33 +257,31 @@ export const TeamDialog = ({
                 />
               </InputGroup>
               {/* The list scrolls inside the field, so the dialog keeps its size with forty people. */}
-              <div {...stylex.props(styles.list)}>
-                <ScrollArea aria-label={t`People to tick`}>
-                  {found.length === 0 ? (
-                    <Empty size="sm">
-                      <EmptyHeader>
-                        <EmptyTitle>{t`No one by that name`}</EmptyTitle>
-                        <EmptyDescription>
-                          {t`Invite them from the people list first.`}
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  ) : (
-                    <ul {...stylex.props(styles.rows)}>
-                      {found.map((member) => (
-                        <PersonRow
-                          chosen={chosen.includes(member.userId)}
-                          key={member.userId}
-                          member={member}
-                          onTick={(on) => {
-                            tick(member.userId, on);
-                          }}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                </ScrollArea>
-              </div>
+              <ScrollArea aria-label={t`People to tick`} style={styles.list}>
+                {found.length === 0 ? (
+                  <Empty size="sm">
+                    <EmptyHeader>
+                      <EmptyTitle>{t`No one by that name`}</EmptyTitle>
+                      <EmptyDescription>
+                        {t`Invite them from the people list first.`}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <ul {...stylex.props(styles.rows)}>
+                    {found.map((member) => (
+                      <PersonRow
+                        chosen={chosen.includes(member.userId)}
+                        key={member.userId}
+                        member={member}
+                        onTick={(on) => {
+                          tick(member.userId, on);
+                        }}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
               {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region */}
               <p role="status">
                 <Text as="span" color="muted" size="xs">

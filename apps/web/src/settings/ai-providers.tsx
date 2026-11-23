@@ -172,11 +172,9 @@ type Change = (session: Session) => Promise<unknown>;
 
 /** A note across a card's rows, in their inset. */
 const RowNote = ({ children }: { children: ReactNode }) => (
-  <div {...stylex.props(styles.note)}>
-    <Text color="muted" size="sm">
-      {children}
-    </Text>
-  </div>
+  <Text color="muted" size="sm" style={styles.note}>
+    {children}
+  </Text>
 );
 
 /**
@@ -643,7 +641,7 @@ const AddProvider = ({
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button size="xs" variant="secondary">
+        <Button size="xs" variant="outline">
           <Icon icon={PlusIcon} />
           {t`Add a provider`}
         </Button>
@@ -753,18 +751,17 @@ const NameModel = ({ onName }: { onName: (model: string) => void }) => {
       label={t`Your endpoint's model`}
     >
       <div {...stylex.props(styles.inline)}>
-        <div {...stylex.props(styles.grow)}>
-          <Input
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                add();
-              }
-            }}
-            onValueChange={setName}
-            size="sm"
-            value={name}
-          />
-        </div>
+        <Input
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              add();
+            }
+          }}
+          onValueChange={setName}
+          size="sm"
+          style={styles.grow}
+          value={name}
+        />
         <Button disabled={!valid} onClick={add} size="sm" variant="outline">
           {t`Add`}
         </Button>
@@ -806,11 +803,9 @@ const Fallbacks = ({
           const name = nameOf(model, providers);
           return (
             <li key={model} {...stylex.props(styles.fallback)}>
-              <div {...stylex.props(styles.grow)}>
-                <Text as="span" size="sm">
-                  {name}
-                </Text>
-              </div>
+              <Text as="span" size="sm" style={styles.grow}>
+                {name}
+              </Text>
               {editable ? (
                 <>
                   <Button
@@ -1041,7 +1036,7 @@ const Source = ({
                   onSwitch(onGrasp ? "own" : "grasp");
                 }}
                 size="xs"
-                variant="secondary"
+                variant="outline"
               >
                 {onGrasp ? t`Switch to your own keys` : t`Switch to Grasp’s AI`}
               </Button>

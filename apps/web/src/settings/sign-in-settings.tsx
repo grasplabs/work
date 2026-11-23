@@ -39,11 +39,9 @@ const styles = stylex.create({
 
 /** A note about the rows, across them: something someone should look at. */
 const RowNote = ({ children }: { children: ReactNode }) => (
-  <div {...stylex.props(styles.note)}>
-    <Alert appearance="subtle" variant="warning">
-      <AlertDescription>{children}</AlertDescription>
-    </Alert>
-  </div>
+  <Alert appearance="subtle" style={styles.note} variant="warning">
+    <AlertDescription>{children}</AlertDescription>
+  </Alert>
 );
 
 /** Whose accounts a way to sign in takes, in words; nothing when core doesn't say. */

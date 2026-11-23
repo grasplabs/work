@@ -290,7 +290,7 @@ const TestEvent = ({
         <Textarea onValueChange={setData} value={data} />
       </Field>
       <div>
-        <Button disabled={busy} size="sm" type="submit" variant="secondary">
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
           {t`Send a test event`}
         </Button>
       </div>
