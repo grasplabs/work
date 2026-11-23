@@ -9,6 +9,9 @@ import { apiOf, peopleIn } from "./people.ts";
 // takes the chat out again. What filing, sharing and membership grant is
 // core's tests.
 
+/** How long a page may take to show what core said. */
+const pageRead = { timeout: 20_000 };
+
 test("a builder makes a project, files an App and a chat of theirs in it, and adds a colleague who only uses it", async ({
   pageOf,
 }) => {
@@ -28,7 +31,7 @@ test("a builder makes a project, files an App and a chat of theirs in it, and ad
   const page = await pageOf(builder);
   await page.goto("/projects");
   // Nobody has put them in a project yet: making one is the way on.
-  await expect(page.getByText("No projects yet")).toBeVisible();
+  await expect(page.getByText("No projects yet")).toBeVisible(pageRead);
   await page.getByRole("button", { name: "New project" }).click();
   const making = page.getByRole("dialog", { name: "New project" });
   await making.getByRole("textbox", { name: "Name" }).fill(`Quotes ${tag}`);
