@@ -17,7 +17,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { AppLogo } from "../../connections/app-logo.tsx";
+import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { formatList } from "../../format.ts";
 import { teamOfWork } from "../brain-atlas.ts";
 import { brainLinks } from "../brain-links.ts";
@@ -231,7 +231,11 @@ export const TeamWork = ({
                     to="/brain/$noteId"
                     {...stylex.props(styles.system, focusRing)}
                   >
-                    <AppLogo logo={note.logoSrc} name={note.title} />
+                    <ProviderMark
+                      id={note.id}
+                      logo={note.logoSrc ?? null}
+                      name={note.title}
+                    />
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent>{note.title}</TooltipContent>

@@ -256,23 +256,19 @@ export const StatementLine = ({
         <TooltipContent>{place.source.title}</TooltipContent>
       </Tooltip>
       {onRemove === undefined ? null : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div {...stylex.props(styles.remove)}>
-              <Button
-                aria-label={t`Remove this from the brain`}
-                onClick={() => {
-                  onRemove(statement);
-                }}
-                size="icon-xs"
-                variant="ghost"
-              >
-                <Icon icon={TrashIcon} />
-              </Button>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>{t`Remove from the brain`}</TooltipContent>
-        </Tooltip>
+        <div {...stylex.props(styles.remove)}>
+          <Button
+            aria-label={t`Remove this from the brain`}
+            onClick={() => {
+              onRemove(statement);
+            }}
+            size="icon-xs"
+            tooltip={t`Remove from the brain`}
+            variant="ghost"
+          >
+            <Icon icon={TrashIcon} />
+          </Button>
+        </div>
       )}
     </li>
   );

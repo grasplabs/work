@@ -71,7 +71,7 @@ import type { PageFact, PageOpenQuestion } from "../brain/page-properties.tsx";
 import { placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
-import { AppLogo } from "../connections/app-logo.tsx";
+import { ProviderMark } from "../connections/provider-mark.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatList, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
@@ -746,7 +746,12 @@ const NoteToolbar = ({ note }: { note: Note }) => {
 /** What a tool is, on its banner: its logo. None for any other note, whose banner then shows its part's drawing. */
 const stickerOf = (note: Note): ReactNode =>
   note.kind === "tool" || note.kind === "app" ? (
-    <AppLogo name={note.title} size="lg" />
+    <ProviderMark
+      id={note.id}
+      logo={note.logoSrc ?? null}
+      name={note.title}
+      size="lg"
+    />
   ) : undefined;
 
 /** The statements that name the note without being linked to it, folded at the page's foot. */

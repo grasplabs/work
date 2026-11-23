@@ -1,3 +1,4 @@
+import { BrandIcon } from "@grasp-os/ui/components/brand-icon";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   HoverCard,
@@ -22,7 +23,6 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { AppLogo } from "../connections/app-logo.tsx";
 import { groupOf, kindLabel, statementWords } from "./brain.ts";
 import type { Group, Note, NoteKind } from "./brain.ts";
 import { graph } from "./graph.stylex.ts";
@@ -198,10 +198,14 @@ export const Capped = ({ children }: { children: ReactNode[] }) => {
   );
 };
 
-/** What marks a note in a chip: the logo of a tool or application, else the colour dot of its kind. */
+/**
+ * What marks a note in a chip: a tool's or an application's first letter on BrandIcon's smallest
+ * tile (what the connections' ProviderMark draws without a logo; its own sizes start at 32px,
+ * too tall for a line of text), else the colour dot of its kind.
+ */
 const NoteMark = ({ note }: { note: Note }) => {
   if (note.kind === "tool" || note.kind === "app") {
-    return <AppLogo name={note.title} size="xs" />;
+    return <BrandIcon decorative label={note.title} size="xs" />;
   }
   return <KindDot kind={note.kind} />;
 };

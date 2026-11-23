@@ -1113,9 +1113,11 @@ describe("the Memories page's paged lists, read again", () => {
     await settle();
   };
 
-  it("shares a fact of the person's own exactly as the dialog shows it, with the audience they pick, and reads the page again", async () => {
+  it("shares a fact of the person's own exactly as the dialog shows it, every character nobody sees as an escape and the text sent as stored, with the audience they pick, and reads the page again", async () => {
     const sent: Readonly<Record<string, unknown>>[] = [];
     let reads = 0;
+    // A character nobody sees: the dialog shows its escape (`shows`, `raw`), the share carries it
+    // as stored (`share.shown.statement`).
     const statement = "Initech renews\u200B in March";
     await initechOpen([ownFact("m-own", { statement })], {
       memories: async () => {

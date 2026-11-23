@@ -839,6 +839,7 @@ msgid "{name} isn't ready yet"
 msgstr "{name} is nog niet klaar"
 
 #: src/connections/app-logo.tsx
+#: src/connections/provider-mark.tsx
 msgid "{name} logo"
 msgstr "Logo van {name}"
 
@@ -2094,7 +2095,6 @@ msgid "Agent not found"
 msgstr "Agent niet gevonden"
 
 #: src/agents/agents-overview.tsx
-#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
@@ -3893,7 +3893,6 @@ msgstr "Sluit op {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "De boeken afsluiten en de cijfers maken waar de directie naar kijkt."
 
-#: src/brain/sources-page.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 #: src/guest-sign-in.tsx

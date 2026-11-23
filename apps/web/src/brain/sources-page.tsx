@@ -459,8 +459,6 @@ const useKindHeading = () => {
         message: "Web pages",
         context: "a kind of source of the Brain",
       }),
-      agent: t`Agents`,
-      code: t`Code`,
     })[kind];
 };
 
@@ -979,8 +977,8 @@ const UploadActions = ({
       ) : null}
       {deletes === null ? null : (
         <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <div {...stylex.props(styles.start)}>
+          <div {...stylex.props(styles.start)}>
+            <AlertDialogTrigger asChild>
               <Button
                 aria-label={t`Delete this upload`}
                 disabled={busy}
@@ -990,8 +988,8 @@ const UploadActions = ({
                 <Icon icon={TrashIcon} />
                 {t`Delete`}
               </Button>
-            </div>
-          </AlertDialogTrigger>
+            </AlertDialogTrigger>
+          </div>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t`Delete this upload?`}</AlertDialogTitle>

@@ -7,6 +7,7 @@ import { isAdmin } from "@grasp-os/shared/roles";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -318,7 +319,7 @@ export const useForget = (
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Keep it`}</AlertDialogAction>
+            <AlertDialogCancel>{t`Keep it`}</AlertDialogCancel>
             <AlertDialogAction
               disabled={asking?.preview === undefined}
               onClick={() => {

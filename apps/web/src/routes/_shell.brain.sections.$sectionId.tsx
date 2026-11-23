@@ -36,7 +36,7 @@ import { folderTree, groupLabel } from "../brain/brain.ts";
 import type { Note } from "../brain/brain.ts";
 import { GoalsEditor } from "../brain/goals-editor.tsx";
 import { paneStyles } from "../brain/page-pane.ts";
-import { AppLogo } from "../connections/app-logo.tsx";
+import { ProviderMark } from "../connections/provider-mark.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { SectionTitle } from "../frame/page.tsx";
 
@@ -87,7 +87,12 @@ const NoteBlock = ({
       <CardMedia>
         <Panel group={section.group} short>
           {note.kind === "tool" || note.kind === "app" ? (
-            <AppLogo name={note.title} size="lg" />
+            <ProviderMark
+              id={note.id}
+              logo={note.logoSrc ?? null}
+              name={note.title}
+              size="lg"
+            />
           ) : (
             <span {...stylex.props(styles.tile, tone[section.group].ink)}>
               <Icon icon={section.icon} />

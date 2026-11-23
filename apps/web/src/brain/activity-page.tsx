@@ -32,9 +32,8 @@ import type { LogEntry, LogKind } from "./brain-log.ts";
 import { sourceContents } from "./brain.ts";
 import { paneStyles } from "./page-pane.ts";
 
-// The brain's Activity (activity-log.tsx): what changed since the
-// person last looked (`brain.changes`), the questions still waiting for an
-// answer, then the brain's log this week, last week and before. A line
+// The brain's Activity (activity-log.tsx): the questions still waiting
+// for an answer, then the brain's log this week, last week and before. A line
 // opens beside the page: who gave it and when, what the brain kept of it
 // and the pages it changed; a question that nobody was asked yet can be
 // asked from there, by the company's admins, as core decides.
