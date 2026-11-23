@@ -9,8 +9,8 @@
  *
  * The pin is `packages/ui/damsko.json`: the commit of Damsko, and the items
  * added by name. Damsko's git is the durable form of a version: its site
- * serves its `main` as last deployed, and that one commit under an address
- * of its own, never an older one. So neither command reads the site: both
+ * serves its `main` as last deployed and each released tag at /r/<tag>/,
+ * never a commit between tags. So neither command reads the site: both
  * fetch Damsko at the pinned commit from GitHub.
  *
  * `check` compares with the commit's own files. Damsko's registry gives
