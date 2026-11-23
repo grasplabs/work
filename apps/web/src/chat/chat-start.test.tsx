@@ -207,6 +207,30 @@ const box = (): HTMLElement => {
   return found;
 };
 
+/** The box's Send, or Stop. */
+const submit = (): HTMLElement => {
+  const found = document.querySelector<HTMLElement>(
+    '[data-slot="prompt-input-end"] button'
+  );
+  if (found === null) {
+    throw new Error("No Send");
+  }
+  return found;
+};
+
+/** A button by its name. */
+const buttonNamed = (name: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (each) =>
+      each.getAttribute("aria-label") === name || each.textContent === name
+  );
+
+/** What the lines under the box say. */
+const notes = (): string[] =>
+  [...document.querySelectorAll('[data-slot="prompt-input-note"]')].map(
+    (each) => each.textContent
+  );
+
 /** Each idea's press: its title, stretched over the tile. */
 const tiles = (): HTMLButtonElement[] => [
   ...document.querySelectorAll<HTMLButtonElement>(
@@ -435,6 +459,82 @@ describe("Chat's page from Make something", () => {
         "create What waits on me today? null",
         "send chat-1 What waits on me today?",
       ],
+    });
+  });
+
+  it("lets a question held for the models go unsent once core can't say which there are, says why, and keeps its words", async () => {
+    const models = Promise.withResolvers<string[]>();
+    const { asked } = await shown(undefined, undefined, {
+      models: models.promise,
+    });
+
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const working = submit().getAttribute("aria-busy");
+    // Core out of reach, as the chat says it.
+    const reason = "Grasp can't be reached right now. Try again in a moment.";
+    await act(async () => {
+      models.reject(new Error("The models can't be read"));
+      await models.promise.catch(() => {});
+    });
+    await settled();
+
+    expect({
+      working,
+      asked,
+      box: box().textContent,
+      busy: submit().getAttribute("aria-busy"),
+      // Under the box, and on the page with the way to read them again.
+      notes: notes(),
+      page: document.body.textContent.split(reason).length - 1,
+      retry: buttonNamed("Try again") !== undefined,
+    }).toStrictEqual({
+      working: "true",
+      asked: [],
+      box: "What waits on me today?",
+      busy: null,
+      notes: ["Could not send. Your message is kept.", reason],
+      page: 2,
+      retry: true,
+    });
+  });
+
+  it("lets a question held for the models go unsent on Stop, its words kept", async () => {
+    const models = Promise.withResolvers<string[]>();
+    const { asked } = await shown(undefined, undefined, {
+      models: models.promise,
+    });
+
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    await act(async () => {
+      buttonNamed("Stop")?.click();
+      await Promise.resolve();
+    });
+    await settled();
+    await act(async () => {
+      models.resolve(["openai/gpt-5"]);
+      await models.promise;
+    });
+    await settled();
+
+    expect({ asked, box: box().textContent }).toStrictEqual({
+      asked: [],
+      box: "What waits on me today?",
     });
   });
 

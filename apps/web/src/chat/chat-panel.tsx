@@ -6,17 +6,13 @@ import {
 } from "@grasp-os/app-kit/components/dockable-panel";
 import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
 import { Panel } from "@grasp-os/app-kit/components/panel";
-import { Button } from "@grasp-os/ui/components/button";
 import { Text } from "@grasp-os/ui/components/text";
-import {
-  Icon,
-  Maximize2Icon,
-  PencilIcon,
-  SquareIcon,
-  XIcon,
-} from "@grasp-os/ui/lib/icons";
+import { Icon, Maximize2Icon, PencilIcon, XIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
+// Damsko's icon module has no "exit full screen": Hugeicons' own drawing,
+// Expand's pair (Maximize2Icon is ArrowExpand01Icon), through Damsko's Icon.
+import { ArrowShrink01Icon } from "@hugeicons/core-free-icons";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
@@ -42,8 +38,11 @@ import { ChatTitleMenu } from "./chat-more.tsx";
 import { allows } from "./chat-presence.ts";
 import { HeaderIcon } from "./chat-switcher.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
-import type { ModelsUnavailable } from "./global-chat.tsx";
 import { pendingCard } from "./make-card.tsx";
+import {
+  ModelsUnavailableNotice,
+  unavailableText,
+} from "./models-unavailable.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
 
@@ -61,12 +60,6 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["1"],
     marginInlineStart: "auto",
-  },
-  notice: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["2"],
-    paddingInline: space["1"],
   },
   footer: {
     display: "flex",
@@ -160,7 +153,7 @@ const MoveButtons = () => {
     // Undocking is the grip's: dragged out, or double-clicked (ChatGrip).
     docked: [{ to: "fullscreen", label: t`Full screen`, icon: Maximize2Icon }],
     fullscreen: [
-      { to: "docked", label: t`Exit full screen`, icon: SquareIcon },
+      { to: "docked", label: t`Exit full screen`, icon: ArrowShrink01Icon },
     ],
     // Docking is the grip's: pushed into the dock, or double-clicked.
     floating: [],
@@ -258,32 +251,6 @@ const BrainGaps = () => {
   );
 };
 
-/** Why nothing can be asked yet, under the box, with the way out. */
-const ModelsUnavailableNotice = ({
-  why,
-  onRetry,
-}: {
-  why: ModelsUnavailable;
-  onRetry: (() => void) | undefined;
-}) => {
-  // No provider is the box's own to say: it is covered (composer.tsx).
-  if (why.why === "provider") {
-    return null;
-  }
-  return (
-    <div {...stylex.props(styles.notice)}>
-      <Text color="muted" size="xs">
-        {why.text}
-      </Text>
-      {onRetry === undefined ? null : (
-        <Button onClick={onRetry} size="xs" variant="ghost">
-          <Trans>Try again</Trans>
-        </Button>
-      )}
-    </div>
-  );
-};
-
 /** The box to ask in, or the agent's questions in its place. */
 const Footer = () => {
   const { t } = useLingui();
@@ -303,6 +270,7 @@ const Footer = () => {
     offered,
   } = useGlobalChat();
   const work = workOf(builds);
+  const unavailable = unavailableText(modelsUnavailable);
   // Which of the company's agents answers here, where there are several.
   const agents = offered?.agents ?? [];
   // Under a card that waits for the person, the box is where to change it.
@@ -329,6 +297,7 @@ const Footer = () => {
       <ChatSources names={sourceNames} provenance={view.provenance} />
       <AskOrCompose
         {...composer}
+        {...(unavailable === undefined ? {} : { unavailable })}
         agent={
           summary === undefined ? undefined : (
             <AgentName agentId={summary.agentId} agents={agents} />
@@ -356,9 +325,7 @@ const Footer = () => {
         placeholder={placeholder}
         running={view.running}
       />
-      {modelsUnavailable === undefined ? null : (
-        <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
-      )}
+      <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
     </div>
   );
 };

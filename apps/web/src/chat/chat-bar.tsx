@@ -1,6 +1,6 @@
 import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
 import { Icon, PanelRightIcon } from "@grasp-os/ui/lib/icons";
-import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
@@ -9,10 +9,12 @@ import { shortcutLabel } from "../shortcuts.ts";
 import { useOpenChat } from "./chat-presence.ts";
 import { Composer } from "./composer.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
+import { unavailableText } from "./models-unavailable.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
 // page, centred over it, as one row to ask in (Damsko's PromptInput,
-// compact, with the full box's add menu, model and microphone), which
+// compact: the add menu, the text, the microphone and Send, as on #2503,
+// the model too once something is typed), which
 // sinks away as the chat opens and rises back once it has gone. It mentions with `@` as the chat's box does, and takes files
 // pasted or dropped on it; sending opens the chat where it last was, with
 // the answer coming in, and its last button opens it without asking. What
@@ -23,7 +25,8 @@ import { chatKey, useGlobalChat } from "./global-chat.tsx";
 const styles = stylex.create({
   bar: {
     width: "100%",
-    maxWidth: "36rem",
+    // Damsko's own width for the box, the card's and its margins alike.
+    maxWidth: size.promptInputWidth,
     marginInline: "auto",
     paddingInline: space["2"],
     opacity: 1,
@@ -47,7 +50,9 @@ const styles = stylex.create({
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
   const { t } = useLingui();
-  const { stage, delays, settled, composer, words } = useGlobalChat();
+  const { stage, delays, settled, composer, words, modelsUnavailable } =
+    useGlobalChat();
+  const unavailable = unavailableText(modelsUnavailable);
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
   const open = stage.bar;
@@ -92,6 +97,8 @@ export const ChatBar = () => {
       <Composer
         busy={composer.busy}
         compact
+        // Out of sight while the chat is open: nothing listens from here.
+        dictates={open}
         label={words.title}
         mentions={composer.mentions}
         model={composer.model}
@@ -100,6 +107,7 @@ export const ChatBar = () => {
           composer.onModel(chosen);
         }}
         efforts={composer.efforts}
+        {...(unavailable === undefined ? {} : { unavailable })}
         onEffort={(chosen) => {
           composer.onEffort(chosen);
         }}

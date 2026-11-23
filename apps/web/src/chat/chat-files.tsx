@@ -15,14 +15,10 @@ import { useLingui } from "@lingui/react/macro";
 import { formatBytes } from "../format.ts";
 
 // Files attached to a question (grasplabs/prototype's chat attachments):
-// the picker the composer's add menu opens, each one's card in the box before it is
-// sent, and under the question once it is. Core takes the types
-// `chatFileTypes` names; the box checks the rest (use-ask.ts).
-
-/** What a question may carry: the extensions core takes. */
-export const acceptedFiles = Object.keys(chatFileTypes)
-  .map((extension) => `.${extension}`)
-  .join(",");
+// each one's card in the box before it is sent, and under the question
+// once it is. Core takes the types `chatFileTypes` names; the page checks
+// every file the box hands it against them, and says why one stays out
+// (use-ask.ts).
 
 /** A file's media type, as core takes it by its extension; none for one it doesn't name. */
 const typeOf = (name: string): string | undefined => {

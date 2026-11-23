@@ -39,7 +39,14 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
@@ -59,8 +66,10 @@ import { FailureLine } from "./failure-line.tsx";
 // marked as current, its actions on the row's arrow: Rename, Archive or
 // Restore, Delete; "Archived" last, which lists the archived chats. Typing
 // narrows the chats by their titles at once and asks core what was said
-// (`chats.search`), whose chats show where the words were, marked. The
-// same list, without New chat, stands behind the box's Recents.
+// (`chats.search`), whose chats show where the words were, marked.
+// Renaming takes the window's place with a dialog of its own; as it goes,
+// by Escape, Cancel or once renamed, the window comes back with the chat's
+// row highlighted.
 //
 // Delete still asks first: core deletes a chat for good, with nothing to
 // bring it back, so an Undo after it could not keep its word.
@@ -362,6 +371,7 @@ const useChatItems = ({
   onOpen,
   onNew,
   onDialog,
+  onRenamed,
 }: {
   shown: boolean;
   onOpen: (chatId: string) => void;
@@ -372,6 +382,8 @@ const useChatItems = ({
    * closes, so no dialog opens over another.
    */
   onDialog: () => void;
+  /** Once the Rename dialog has gone, for the chat it renamed: the window comes back to its row. */
+  onRenamed: (chatId: string) => void;
 }) => {
   const { t, i18n } = useLingui();
   const router = useRouter();
@@ -507,7 +519,7 @@ const useChatItems = ({
           chat={renaming}
           onDone={() => {
             setRenaming(undefined);
-            listing.read(archived);
+            onRenamed(renaming.id);
           }}
         />
       )}
@@ -537,6 +549,56 @@ export const useSelectChat = () => {
   };
 };
 
+/** How many frames the window may take to list a chat it comes back to. */
+const rowWaitFrames = 120;
+
+/**
+ * Highlights chat `chatId`'s row once the window lists it, as the arrows
+ * would: Damsko's CommandDialog takes no row to highlight (its Command
+ * highlights the first), so the search field is given an arrow down a
+ * frame at a time until it is that row. Then `done`.
+ */
+const useBackToRow = (
+  chatId: string | undefined,
+  listed: boolean,
+  done: () => void
+) => {
+  useEffect(() => {
+    if (chatId === undefined || !listed) {
+      return () => {
+        // Nothing to come back to yet.
+      };
+    }
+    let frame = 0;
+    let frames = 0;
+    const step = (): void => {
+      frames += 1;
+      const row = document.querySelector<HTMLElement>(
+        `[data-command-value="${CSS.escape(chatId)}"]`
+      );
+      const field = row
+        ?.closest('[role="dialog"]')
+        ?.querySelector<HTMLElement>('[role="combobox"]');
+      if (row?.dataset.highlighted !== undefined || frames > rowWaitFrames) {
+        done();
+        return;
+      }
+      field?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [chatId, listed, done]);
+};
+
 /** The window and what it shows, while it is open. */
 export const ChatWindow = ({
   open,
@@ -547,6 +609,8 @@ export const ChatWindow = ({
 }) => {
   const { t } = useLingui();
   const selectChat = useSelectChat();
+  // The chat a Rename dialog was for, while the window comes back to it.
+  const [backTo, setBackTo] = useState<string>();
   const { command, empty, failure, dialogs, label } = useChatItems({
     shown: open,
     onNew: () => {
@@ -560,7 +624,15 @@ export const ChatWindow = ({
     onDialog: () => {
       onOpenChange(false);
     },
+    onRenamed: (chatId) => {
+      setBackTo(chatId);
+      onOpenChange(true);
+    },
   });
+  const backDone = useCallback(() => {
+    setBackTo(undefined);
+  }, []);
+  useBackToRow(open ? backTo : undefined, !command.loading, backDone);
   return (
     <>
       <CommandDialog

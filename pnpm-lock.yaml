@@ -998,6 +998,9 @@ importers:
       '@grasp-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@hugeicons/core-free-icons':
+        specifier: 'catalog:'
+        version: 4.4.0
       '@lingui/core':
         specifier: 'catalog:'
         version: 6.8.0(@babel/core@7.29.7(supports-color@10.2.2))

@@ -275,6 +275,7 @@ describe("questions in place of the box", () => {
       toWhom,
       answered: answered.map(({ text }) => text),
       typing: typing(),
+      inBox: document.activeElement?.getAttribute("role"),
     }).toStrictEqual({
       second: true,
       first: true,
@@ -282,6 +283,7 @@ describe("questions in place of the box", () => {
       toWhom: [false, false, true],
       answered: ["1. How often? — Daily\n2. To whom? — Finance"],
       typing: true,
+      inBox: "textbox",
     });
   });
 
@@ -311,14 +313,26 @@ describe("questions in place of the box", () => {
     const own = button("Open the chat").type;
     await click(button("Type instead"));
     const boxShown = typing();
+    const inBox = document.activeElement?.getAttribute("role");
     await click(button("Back to the 2 questions"));
     const onSecond = says("To whom?") && !typing();
+    // On the question shown, its first answer.
+    const inQuestion = document.activeElement === choice("Me");
     await click(button("Previous"));
 
-    expect({ own, boxShown, onSecond, kept: picked("Weekly") }).toStrictEqual({
+    expect({
+      own,
+      boxShown,
+      inBox,
+      onSecond,
+      inQuestion,
+      kept: picked("Weekly"),
+    }).toStrictEqual({
       own: "button",
       boxShown: true,
+      inBox: "textbox",
       onSecond: true,
+      inQuestion: true,
       kept: true,
     });
   });

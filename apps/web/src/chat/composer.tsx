@@ -10,6 +10,7 @@ import {
   ModelSelectorInput,
   ModelSelectorItem,
   ModelSelectorList,
+  ModelSelectorLogo,
   ModelSelectorMaker,
   ModelSelectorMakers,
   ModelSelectorName,
@@ -36,6 +37,7 @@ import {
 import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { msg, select } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -43,8 +45,9 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
+import { makerMark } from "../frame/brands.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
-import { acceptedFiles, FileCards } from "./chat-files.tsx";
+import { FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { promptStatusOf } from "./chat-states.ts";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
@@ -61,20 +64,31 @@ import { isEffort } from "./model-choice.ts";
 // Where a question is written, on Damsko's PromptInput: a card that grows
 // with what is typed; at its foot, the add menu (files or photos, also
 // pasted or dropped), the model that answers and how hard it thinks in one
-// Model selector, what the page adds, and Send, which is Stop while Grasp
-// answers (its status from the chat: chat-states.ts). `@` mentions the
+// Model selector; by Send, the microphone (dictation.ts); then Send, which
+// is Stop while Grasp answers (its status from the chat: chat-states.ts),
+// and what the page adds. In one row (the chat's idle bar) the text stands
+// between the add menu and the rest, the model only once something is
+// typed, so the placeholder keeps its room, as on #2503. `@` mentions the
 // agents, Apps, workflows and people (mentions.tsx). The text is the
 // page's (use-ask.ts): the box follows it, and tells it each change. Files
 // are the page's too: whatever is picked, pasted or dropped is handed to
-// it, which checks them and shows each as a card over the text until the
-// question carries them. While the organization has no AI provider, the
-// box takes nothing and its banner says how to connect one. A model is
-// named, never marked: the product draws a maker's mark only for an exact
-// id it has one for (connections/brands.ts), and has none for an AI
-// provider.
+// it, which checks each (a kind it doesn't take is said under the box)
+// and shows each as a card over the text until the question carries them.
+// While the organization has no AI provider, the box takes nothing and its
+// banner says how to connect one. A maker's mark is the product's own only
+// for an AI provider whose id is exactly one it has a mark for
+// (frame/brands.ts), else Damsko's first letter.
 
 const styles = stylex.create({
   agentModel: { display: "inline-flex", alignItems: "center", minWidth: 0 },
+  // The microphone, Send and what the page adds, at the row's end: in the
+  // footer pushed to its end, in one row the card's own end column.
+  end: {
+    flexShrink: 0,
+    marginInlineStart: "auto",
+    gridArea: "end",
+    justifySelf: "end",
+  },
   // The files take the header's whole line, over the subject's: their row
   // takes no width from its files, and would shrink to nothing beside it.
   files: {
@@ -135,6 +149,7 @@ const ModelPicker = ({
   const name = modelName(model);
   const thinks = efforts.length > 0 && onEffort !== undefined;
   const makers = [...new Set(models.map(makerOf))];
+  const chosenMark = makerMark(makerOf(model));
   const level =
     thinks && effort !== undefined ? t(effortNames[effort]) : undefined;
   return (
@@ -165,6 +180,9 @@ const ModelPicker = ({
             : t`Model: ${name}. Change model`
         }
       >
+        {chosenMark === undefined ? null : (
+          <ModelSelectorLogo logo={chosenMark} />
+        )}
         <ModelSelectorName>
           {level === undefined ? name : `${name} · ${level}`}
         </ModelSelectorName>
@@ -173,38 +191,48 @@ const ModelPicker = ({
         <ModelSelectorInput />
         {makers.length > 1 ? (
           <ModelSelectorMakers>
-            {makers.map((maker) => (
-              <ModelSelectorMaker
-                aria-label={makerName(maker)}
-                key={maker}
-                value={maker}
-              />
-            ))}
+            {makers.map((maker) => {
+              const mark = makerMark(maker);
+              return (
+                <ModelSelectorMaker
+                  aria-label={makerName(maker)}
+                  key={maker}
+                  value={maker}
+                  {...(mark === undefined ? {} : { logo: mark })}
+                />
+              );
+            })}
           </ModelSelectorMakers>
         ) : null}
         <ModelSelectorList>
           <ModelSelectorEmpty />
-          {makers.map((maker) => (
-            <ModelSelectorGroup
-              heading={makerName(maker)}
-              key={maker}
-              value={maker}
-            >
-              {models
-                .filter((each) => makerOf(each) === maker)
-                .map((each) => (
-                  <ModelSelectorItem
-                    {...(each === models[0]
-                      ? { description: t`The default` }
-                      : {})}
-                    key={each}
-                    value={each}
-                  >
-                    <ModelSelectorName>{modelName(each)}</ModelSelectorName>
-                  </ModelSelectorItem>
-                ))}
-            </ModelSelectorGroup>
-          ))}
+          {makers.map((maker) => {
+            const mark = makerMark(maker);
+            return (
+              <ModelSelectorGroup
+                heading={makerName(maker)}
+                key={maker}
+                value={maker}
+              >
+                {models
+                  .filter((each) => makerOf(each) === maker)
+                  .map((each) => (
+                    <ModelSelectorItem
+                      {...(each === models[0]
+                        ? { description: t`The default` }
+                        : {})}
+                      key={each}
+                      value={each}
+                    >
+                      {mark === undefined ? null : (
+                        <ModelSelectorLogo logo={mark} />
+                      )}
+                      <ModelSelectorName>{modelName(each)}</ModelSelectorName>
+                    </ModelSelectorItem>
+                  ))}
+              </ModelSelectorGroup>
+            );
+          })}
         </ModelSelectorList>
         {thinks ? (
           <ModelSelectorEffort
@@ -238,9 +266,61 @@ const AgentModel = ({ model }: { model: string }) => {
   );
 };
 
-/** The box's tools at its foot: add, the agent, the model, the microphone, and what the page adds. */
-const ComposerTools = ({
+/** The add menu: files or photos. */
+const AddMenu = () => {
+  const { t } = useLingui();
+  return (
+    <PromptInputActionMenu>
+      <PromptInputActionMenuTrigger aria-label={t`Add`} />
+      <PromptInputActionMenuContent>
+        <PromptInputActionAddAttachments>
+          {t`Add files or photos`}
+        </PromptInputActionAddAttachments>
+      </PromptInputActionMenuContent>
+    </PromptInputActionMenu>
+  );
+};
+
+/**
+ * The box's tools: at the start the add menu and what answers; at the end
+ * the microphone, Send (or Stop) and what the page adds. In one row the
+ * text stands between the two, and what answers comes only once something
+ * is typed, so at rest the placeholder keeps the room.
+ */
+const BoxTools = ({
   attaches,
+  compact,
+  typed,
+  answerer,
+  speech,
+  stop,
+  children,
+}: {
+  attaches: boolean;
+  compact: boolean;
+  typed: boolean;
+  answerer: ReactNode;
+  speech: PromptInputSpeechButtonProps | undefined;
+  stop: (() => void) | undefined;
+  children: ReactNode;
+}) => (
+  <>
+    <PromptInputTools>
+      {attaches ? <AddMenu /> : null}
+      {compact ? null : answerer}
+    </PromptInputTools>
+    {/* oxlint-disable-next-line shadcn/no-inline-styles -- StyleX layout on Damsko's part, which #2611's grasp/no-inline-styles lets through: this line goes on rebase */}
+    <PromptInputTools style={styles.end}>
+      {compact && typed ? answerer : null}
+      {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
+      <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
+      {children}
+    </PromptInputTools>
+  </>
+);
+
+/** What answers: the agent, and the model it answers with, or the one to pick. */
+const Answerer = ({
   agent,
   agentModel,
   models,
@@ -249,11 +329,7 @@ const ComposerTools = ({
   efforts,
   effort,
   onEffort,
-  speech,
-  children,
 }: {
-  /** The box takes files. */
-  attaches: boolean;
   agent: ReactNode;
   agentModel: string | undefined;
   models: readonly string[];
@@ -262,43 +338,25 @@ const ComposerTools = ({
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
-  /** Dictation, where the person can dictate here (dictation.ts). */
-  speech: PromptInputSpeechButtonProps | undefined;
-  children: ReactNode;
-}) => {
-  const { t } = useLingui();
-  return (
-    <PromptInputTools>
-      {attaches ? (
-        <PromptInputActionMenu>
-          <PromptInputActionMenuTrigger aria-label={t`Add`} />
-          <PromptInputActionMenuContent>
-            <PromptInputActionAddAttachments>
-              {t`Add files or photos`}
-            </PromptInputActionAddAttachments>
-          </PromptInputActionMenuContent>
-        </PromptInputActionMenu>
-      ) : null}
-      {agent}
-      {agentModel === undefined ? null : <AgentModel model={agentModel} />}
-      {agentModel === undefined &&
-      models.length > 0 &&
-      model !== undefined &&
-      onModel !== undefined ? (
-        <ModelPicker
-          effort={effort}
-          efforts={efforts}
-          model={model}
-          models={models}
-          onEffort={onEffort}
-          onModel={onModel}
-        />
-      ) : null}
-      {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
-      {children}
-    </PromptInputTools>
-  );
-};
+}) => (
+  <>
+    {agent}
+    {agentModel === undefined ? null : <AgentModel model={agentModel} />}
+    {agentModel === undefined &&
+    models.length > 0 &&
+    model !== undefined &&
+    onModel !== undefined ? (
+      <ModelPicker
+        effort={effort}
+        efforts={efforts}
+        model={model}
+        models={models}
+        onEffort={onEffort}
+        onModel={onModel}
+      />
+    ) : null}
+  </>
+);
 
 /** The files the question will carry, over the text: not removable while it is on its way. */
 const BoxFiles = ({
@@ -315,18 +373,6 @@ const BoxFiles = ({
       <FileCards files={files} onRemove={busy ? undefined : onRemove} />
     </div>
   );
-
-/** Under the box: why dictating stopped, else why the last question didn't go. */
-const BoxNote = ({
-  failure,
-  problem,
-}: {
-  failure: string | undefined;
-  problem: string | undefined;
-}) => {
-  const note = problem ?? failure;
-  return note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>;
-};
 
 /** Where nobody picks a model. */
 export const noModels: readonly string[] = [];
@@ -355,32 +401,33 @@ export const NoModelNotice = ({
     <ConnectAiProvider />
   );
 
-/** No AI provider to call yet: the box's banner, with the way to connect one for whoever can. */
-const NoProviderBanner = () => {
-  const canConnect = useMemberAdmin();
-  return (
-    <PromptInputBanner
-      action={
-        canConnect ? (
-          <Button asChild size="sm" variant="outline">
-            <Link to="/settings/ai-providers">
-              <Trans>Go to AI providers</Trans>
-            </Link>
-          </Button>
-        ) : undefined
-      }
-      variant="warning"
-    >
-      {canConnect ? (
-        <Trans>Connect an AI provider to start asking</Trans>
-      ) : (
-        <Trans>
-          Connect an AI provider to start asking. Ask your admin to connect one.
-        </Trans>
-      )}
-    </PromptInputBanner>
-  );
-};
+/**
+ * No AI provider to call yet: the box's banner, with the way to connect one
+ * for whoever can (`canConnect`). Made by a call, not a component of its
+ * own: PromptInput finds its banner and note among its own children only.
+ */
+const noProviderBanner = (canConnect: boolean) => (
+  <PromptInputBanner
+    action={
+      canConnect ? (
+        <Button asChild size="sm" variant="outline">
+          <Link to="/settings/ai-providers">
+            <Trans>Go to AI providers</Trans>
+          </Link>
+        </Button>
+      ) : undefined
+    }
+    variant="warning"
+  >
+    {canConnect ? (
+      <Trans>Connect an AI provider to start asking</Trans>
+    ) : (
+      <Trans>
+        Connect an AI provider to start asking. Ask your admin to connect one.
+      </Trans>
+    )}
+  </PromptInputBanner>
+);
 
 /**
  * Hands every file picked, pasted or dropped on the box to the page, which
@@ -442,8 +489,11 @@ const valueFor = (text: string, mentions: readonly BoxMention[]): BoxValue => {
 /**
  * Sending from the box: at once where it can; asked before core has said
  * which models there are (`offered` undefined, no `model` yet), held, the
- * box saying it goes, and sent once core has, with no second press. Never
- * while Grasp answers or a question is on its way, nor with nothing typed.
+ * box saying it goes, and sent once core has, with no second press. Stop
+ * lets a held question go unsent; when core can't say which models there
+ * are (`unavailable`, why), it goes unsent too, and the box says why, its
+ * words kept. Never while Grasp answers or a question is on its way, nor
+ * with nothing typed.
  */
 const useSend = ({
   text,
@@ -451,6 +501,7 @@ const useSend = ({
   busy,
   offered,
   model,
+  unavailable,
   onSend,
 }: {
   text: string;
@@ -458,17 +509,34 @@ const useSend = ({
   busy: boolean;
   offered: readonly string[] | undefined;
   model: string | undefined;
+  unavailable: string | undefined;
   onSend: () => void;
-}): { held: boolean; submit: () => void } => {
+}): {
+  held: boolean;
+  /** Why a held question didn't go. */
+  heldFailure: string | undefined;
+  submit: () => void;
+  /** Lets a held question go unsent. */
+  letGo: () => void;
+} => {
   const asked = !running && text.trim() !== "";
   const canSend = asked && !busy && !lacksModel(model);
   const loadingModels = offered === undefined && lacksModel(model);
   const [held, setHeld] = useState(false);
+  const [heldFailure, setHeldFailure] = useState<string>();
   // How many held questions were let go: each sends once, after the render.
   const [released, setReleased] = useState(0);
-  if (held && !loadingModels) {
+  if (held && unavailable !== undefined) {
+    setHeld(false);
+    setHeldFailure(unavailable);
+  } else if (held && !loadingModels) {
     setHeld(false);
     setReleased(released + 1);
+  }
+  // Typing again takes the held question's failure away, as a send's.
+  const [failedOn, setFailedOn] = useState(text);
+  if (heldFailure !== undefined && failedOn !== text) {
+    setHeldFailure(undefined);
   }
   const sendReleased = useEffectEvent(() => {
     if (canSend) {
@@ -482,14 +550,39 @@ const useSend = ({
   }, [released]);
   return {
     held,
+    heldFailure,
     submit: () => {
+      setHeldFailure(undefined);
       if (canSend) {
         onSend();
-      } else if (loadingModels && asked) {
+      } else if (asked && loadingModels && unavailable !== undefined) {
+        setFailedOn(text);
+        setHeldFailure(unavailable);
+      } else if (asked && loadingModels) {
+        setFailedOn(text);
         setHeld(true);
       }
     },
+    letGo: () => {
+      setHeld(false);
+    },
   };
+};
+
+/**
+ * The box's value, which follows the page's words: where the page sets
+ * other words (cleared once sent, a question picked under the box, an
+ * agent named), the box takes them, its mentions as tokens.
+ */
+const useBoxValue = (
+  text: string,
+  mentions: readonly BoxMention[]
+): [BoxValue, (value: BoxValue) => void] => {
+  const [value, setValue] = useState<BoxValue>(() => valueFor(text, mentions));
+  if (textOf(value) !== text) {
+    setValue(valueFor(text, mentions));
+  }
+  return [value, setValue];
 };
 
 /** The box to ask in. Controlled: the page keeps the text and the model. */
@@ -504,12 +597,14 @@ export const Composer = ({
   efforts = noLevels,
   effort,
   onEffort,
+  unavailable,
   running,
   busy,
   failure,
   onSend,
   onStop,
   compact = false,
+  dictates = true,
   label,
   placeholder,
   children,
@@ -519,6 +614,7 @@ export const Composer = ({
   onRemoveFile,
   agent,
   agentModel,
+  style,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -542,6 +638,8 @@ export const Composer = ({
   efforts?: readonly ModelEffort[];
   effort?: ModelEffort;
   onEffort?: (effort: ModelEffort) => void;
+  /** Why core can't say which models there are, while it can't: a question held for them goes unsent. */
+  unavailable?: string;
   /** Whether Grasp is answering in this chat now. */
   running: boolean;
   /** Whether a question or a stop is on its way to core. */
@@ -553,10 +651,12 @@ export const Composer = ({
   onStop?: () => void;
   /** One row, its tools, the text and Send side by side: the chat's idle bar. */
   compact?: boolean;
+  /** Whether it offers dictation now: not while it is out of sight. */
+  dictates?: boolean;
   /** What the box is called; "Your question" without it. */
   label?: string;
   placeholder?: string;
-  /** Among the tools, after the box's own: such as the way to open the chat from its bar. */
+  /** After Send: such as the way to open the chat from its bar. */
   children?: ReactNode;
   /** What the question is about, over the text: a page's subject. */
   subject?: ReactNode;
@@ -576,36 +676,52 @@ export const Composer = ({
    * shown in place of the picker, as core asks it whichever is picked.
    */
   agentModel?: string;
+  /** Layout only: where the box sits and how wide it is (Damsko's PromptInput's own width at most, by default). */
+  style?: LayoutStyle;
 }) => {
   const { t } = useLingui();
   const mentioning = onMentions !== undefined;
-  const [value, setValue] = useState<BoxValue>(() => valueFor(text, mentions));
-  // The page set other words (cleared once sent, a question picked under
-  // the box, an agent named): the box follows.
-  if (textOf(value) !== text) {
-    setValue(valueFor(text, mentions));
-  }
+  const [value, setValue] = useBoxValue(text, mentions);
   const models = offered ?? noModels;
   // No AI provider to call yet: the box takes nothing. Not while the models
   // are still being read, so what is typed then stays.
   const noProvider = offered !== undefined && lacksModel(model);
-  const dictation = useDictation(text, onText);
-  const { held, submit } = useSend({
+  const dictation = useDictation(text, onText, { off: !dictates });
+  const { held, heldFailure, submit, letGo } = useSend({
     text,
     running,
     busy,
     offered,
     model,
+    unavailable,
     onSend,
   });
+  const failed = heldFailure ?? failure;
+  const note = dictation.problem ?? failed;
+  const canConnect = useMemberAdmin();
+  const answerer = (
+    <Answerer
+      agent={agent}
+      agentModel={agentModel}
+      effort={effort}
+      efforts={efforts}
+      model={model}
+      models={models}
+      onEffort={onEffort}
+      onModel={onModel}
+    />
+  );
 
   return (
     <PromptInput
-      accept={acceptedFiles}
       compact={compact}
       disabled={noProvider}
       maxLength={maxQuestionLength}
-      onSubmit={submit}
+      onSubmit={() => {
+        // What this send meets is newer than why dictating stopped before it.
+        dictation.clearProblem();
+        submit();
+      }}
       onValueChange={(next) => {
         setValue(next);
         onText(textOf(next));
@@ -614,12 +730,15 @@ export const Composer = ({
       status={promptStatusOf({
         running,
         busy: busy || held,
-        failed: failure !== undefined,
+        failed: failed !== undefined,
       })}
+      {...(style === undefined ? {} : { style })}
       value={value}
     >
-      {noProvider ? <NoProviderBanner /> : null}
-      <BoxNote failure={failure} problem={dictation.problem} />
+      {noProvider ? noProviderBanner(canConnect) : null}
+      {/* Under the box: why dictating stopped, else why the last question
+          didn't go. Each send clears the first, so the newest shows. */}
+      {note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>}
       {subject === undefined && files.length === 0 ? null : (
         <PromptInputHeader>
           {subject}
@@ -633,21 +752,17 @@ export const Composer = ({
         />
       </PromptInputBody>
       <PromptInputFooter>
-        <ComposerTools
-          speech={dictation.speech}
-          agent={agent}
-          agentModel={agentModel}
+        <BoxTools
+          answerer={answerer}
           attaches={onAttach !== undefined}
-          effort={effort}
-          efforts={efforts}
-          model={model}
-          models={models}
-          onEffort={onEffort}
-          onModel={onModel}
+          compact={compact}
+          speech={dictation.speech}
+          // Stop lets a held question go; else it stops the answer, where one can be.
+          stop={held ? letGo : onStop}
+          typed={text.trim() !== ""}
         >
           {children}
-        </ComposerTools>
-        <PromptInputSubmit {...(onStop === undefined ? {} : { onStop })} />
+        </BoxTools>
       </PromptInputFooter>
       {mentioning ? <BoxMentions /> : null}
       {/* Without a way to attach, what is dropped or pasted goes nowhere. */}

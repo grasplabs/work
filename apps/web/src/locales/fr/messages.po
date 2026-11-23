@@ -210,6 +210,14 @@ msgstr "{connections, plural, one {# connexion} other {# connexions}}"
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
 msgstr "{conversations, plural, one {# conversation} other {# conversations}}"
 
+#: src/frame/ui-words.tsx
+msgid "{count, plural, =0 {no characters} one {# character} other {# characters}}"
+msgstr "{count, plural, =0 {aucun caractère} one {# caractère} other {# caractères}}"
+
+#: src/frame/ui-words.tsx
+msgid "{count, plural, =0 {No results} one {# result} other {# results}}"
+msgstr "{count, plural, =0 {Aucun résultat} one {# résultat} other {# résultats}}"
+
 #: src/brain/brain-log.tsx
 msgid "{count, plural, one {{label}: # thing} other {{label}: # things}}"
 msgstr "{count, plural, one {{label} : # élément} other {{label} : # éléments}}"
@@ -349,10 +357,6 @@ msgstr "{count, plural, one {# personne} other {# personnes}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# remark on tools} other {# remarks on tools}}"
 msgstr "{count, plural, one {# remarque sur les outils} other {# remarques sur les outils}}"
-
-#: src/frame/ui-words.tsx
-msgid "{count, plural, one {# result} other {# results}}"
-msgstr "{count, plural, one {# résultat} other {# résultats}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# rule} other {# rules}}"
@@ -714,18 +718,6 @@ msgstr "{lines, plural, one {# ligne} other {# lignes}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Une tâche est cartographiée et prête pour vous.} other {# tâches sont cartographiées et prêtes pour vous.}}"
-
-#: src/frame/ui-words.tsx
-msgid "{max, plural, one {Close to the limit of # character} other {Close to the limit of # characters}}"
-msgstr "{max, plural, one {Proche de la limite de # caractère} other {Proche de la limite de # caractères}}"
-
-#: src/frame/ui-words.tsx
-msgid "{max, plural, one {The limit of # character is reached} other {The limit of # characters is reached}}"
-msgstr "{max, plural, one {La limite de # caractère est atteinte} other {La limite de # caractères est atteinte}}"
-
-#: src/frame/ui-words.tsx
-msgid "{max, plural, one {What was added was cut at the limit of # character} other {What was added was cut at the limit of # characters}}"
-msgstr "{max, plural, one {L’ajout a été coupé à la limite de # caractère} other {L’ajout a été coupé à la limite de # caractères}}"
 
 #: src/brain/learned-section.tsx
 msgid "{memories, plural, one {# memory from an earlier version is no longer in this source.} other {# memories from earlier versions are no longer in this source.}}"
@@ -4013,8 +4005,8 @@ msgid "Close this question without an answer?"
 msgstr "Fermer cette question sans réponse ?"
 
 #: src/frame/ui-words.tsx
-msgid "Close voice"
-msgstr "Fermer la voix"
+msgid "Close to the limit of {limit}"
+msgstr "Proche de la limite de {limit}"
 
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
@@ -4965,6 +4957,10 @@ msgid "Dictation isn't set up here yet."
 msgstr "La dictée n'est pas encore configurée ici."
 
 #: src/chat/dictation.ts
+msgid "Dictation stopped as you left this tab. What was heard is kept."
+msgstr "La dictée s'est arrêtée car vous avez quitté cet onglet. Ce qui a été entendu est conservé."
+
+#: src/chat/dictation.ts
 msgid "Dictation stopped. What was heard is kept."
 msgstr "La dictée s'est arrêtée. Ce qui a été entendu est conservé."
 
@@ -5323,7 +5319,7 @@ msgid "Edit"
 msgstr "Modifier"
 
 #: src/frame/ui-words.tsx
-msgctxt "edit a name in place"
+msgctxt "edit a value in place"
 msgid "Edit"
 msgstr "Modifier"
 
@@ -8228,19 +8224,10 @@ msgstr "Liens à envoyer"
 msgid "Lisbon"
 msgstr "Lisbonne"
 
+#: src/frame/ui-words.tsx
 #: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "À l’écoute"
-
-#: src/frame/ui-words.tsx
-msgctxt "a voice conversation"
-msgid "Listening"
-msgstr "Écoute"
-
-#: src/frame/ui-words.tsx
-msgctxt "dictation"
-msgid "Listening"
-msgstr "Écoute"
 
 #: src/brain/brain.ts
 msgid "Live, being measured"
@@ -8546,7 +8533,7 @@ msgid "Model"
 msgstr "Modèle"
 
 #: src/frame/ui-words.tsx
-msgctxt "the model that answers"
+msgctxt "the model an answer uses"
 msgid "Model"
 msgstr "Modèle"
 
@@ -12269,7 +12256,7 @@ msgid "Search"
 msgstr "Rechercher"
 
 #: src/frame/ui-words.tsx
-msgctxt "opens a search"
+msgctxt "open the search"
 msgid "Search"
 msgstr "Rechercher"
 
@@ -14378,6 +14365,10 @@ msgstr "La dernière lecture n’a pas pu lister les comptes supprimés dans l�
 msgid "The latest runs, newest first."
 msgstr "Les dernières exécutions, les plus récentes en premier."
 
+#: src/frame/ui-words.tsx
+msgid "The limit of {limit} is reached"
+msgstr "La limite de {limit} est atteinte"
+
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 msgstr "L’intervention est supprimée maintenant, tout comme ce que j’y ai marqué. Ce que j’en ai noté figure dans ce que je vous relis à la fin : retirez-le là, et il sera supprimé pour de bon une fois notre échange terminé. Cette action est irréversible."
@@ -15302,7 +15293,7 @@ msgstr "Essayer"
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-body.tsx
-#: src/chat/chat-panel.tsx
+#: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
@@ -15395,6 +15386,7 @@ msgid "Type a whole number."
 msgstr "Saisissez un nombre entier."
 
 #: src/chat/asked-questions.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Plutôt écrire"
@@ -16448,6 +16440,10 @@ msgstr "Ce qu’il faut montrer des traces"
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
 msgstr "Ce qui vous attend"
+
+#: src/frame/ui-words.tsx
+msgid "What was added was cut at the limit of {limit}"
+msgstr "L’ajout a été coupé à la limite de {limit}"
 
 #: src/frame/ui-words.tsx
 msgid "What was added was left out: no more can be written"

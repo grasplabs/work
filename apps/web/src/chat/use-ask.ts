@@ -255,10 +255,8 @@ export const useAsk = (
     }
     onAsked?.(sent);
   };
-  const stop = async (): Promise<void> => {
-    if (chatId !== undefined) {
-      await run(async (session) => await session.chats.cancel(chatId));
-    }
+  const stop = async (id: string): Promise<void> => {
+    await run(async (session) => await session.chats.cancel(id));
   };
   return {
     composer: {
@@ -289,9 +287,14 @@ export const useAsk = (
         setFileProblem(undefined);
         void ask(text, files, mentions);
       },
-      onStop: () => {
-        void stop();
-      },
+      // Only in a chat: before there is one, nothing is answered to stop.
+      ...(chatId === undefined
+        ? {}
+        : {
+            onStop: () => {
+              void stop(chatId);
+            },
+          }),
     },
     ask,
   };

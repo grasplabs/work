@@ -210,6 +210,14 @@ msgstr "{connections, plural, one {# verbinding} other {# verbindingen}}"
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
 msgstr "{conversations, plural, one {# gesprek} other {# gesprekken}}"
 
+#: src/frame/ui-words.tsx
+msgid "{count, plural, =0 {no characters} one {# character} other {# characters}}"
+msgstr "{count, plural, =0 {geen tekens} one {# teken} other {# tekens}}"
+
+#: src/frame/ui-words.tsx
+msgid "{count, plural, =0 {No results} one {# result} other {# results}}"
+msgstr "{count, plural, =0 {Geen resultaten} one {# resultaat} other {# resultaten}}"
+
 #: src/brain/brain-log.tsx
 msgid "{count, plural, one {{label}: # thing} other {{label}: # things}}"
 msgstr "{count, plural, one {{label}: # item} other {{label}: # items}}"
@@ -349,10 +357,6 @@ msgstr "{count, plural, one {# persoon} other {# personen}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# remark on tools} other {# remarks on tools}}"
 msgstr "{count, plural, one {# opmerking over tools} other {# opmerkingen over tools}}"
-
-#: src/frame/ui-words.tsx
-msgid "{count, plural, one {# result} other {# results}}"
-msgstr "{count, plural, one {# resultaat} other {# resultaten}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# rule} other {# rules}}"
@@ -714,18 +718,6 @@ msgstr "{lines, plural, one {# regel} other {# regels}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Eén stuk werk is in kaart gebracht en staat voor je klaar.} other {# stukken werk zijn in kaart gebracht en staan voor je klaar.}}"
-
-#: src/frame/ui-words.tsx
-msgid "{max, plural, one {Close to the limit of # character} other {Close to the limit of # characters}}"
-msgstr "{max, plural, one {Bijna aan de grens van # teken} other {Bijna aan de grens van # tekens}}"
-
-#: src/frame/ui-words.tsx
-msgid "{max, plural, one {The limit of # character is reached} other {The limit of # characters is reached}}"
-msgstr "{max, plural, one {De grens van # teken is bereikt} other {De grens van # tekens is bereikt}}"
-
-#: src/frame/ui-words.tsx
-msgid "{max, plural, one {What was added was cut at the limit of # character} other {What was added was cut at the limit of # characters}}"
-msgstr "{max, plural, one {Wat erbij kwam, is afgekapt op de grens van # teken} other {Wat erbij kwam, is afgekapt op de grens van # tekens}}"
 
 #: src/brain/learned-section.tsx
 msgid "{memories, plural, one {# memory from an earlier version is no longer in this source.} other {# memories from earlier versions are no longer in this source.}}"
@@ -4013,8 +4005,8 @@ msgid "Close this question without an answer?"
 msgstr "Deze vraag zonder antwoord sluiten?"
 
 #: src/frame/ui-words.tsx
-msgid "Close voice"
-msgstr "Spraak sluiten"
+msgid "Close to the limit of {limit}"
+msgstr "Dicht bij de grens van {limit}"
 
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
@@ -4965,6 +4957,10 @@ msgid "Dictation isn't set up here yet."
 msgstr "Dicteren is hier nog niet ingesteld."
 
 #: src/chat/dictation.ts
+msgid "Dictation stopped as you left this tab. What was heard is kept."
+msgstr "Dicteren is gestopt omdat je dit tabblad verliet. Wat er gehoord is, blijft bewaard."
+
+#: src/chat/dictation.ts
 msgid "Dictation stopped. What was heard is kept."
 msgstr "Het dicteren is gestopt. Wat gehoord is, blijft bewaard."
 
@@ -5323,7 +5319,7 @@ msgid "Edit"
 msgstr "Bewerken"
 
 #: src/frame/ui-words.tsx
-msgctxt "edit a name in place"
+msgctxt "edit a value in place"
 msgid "Edit"
 msgstr "Bewerken"
 
@@ -8228,17 +8224,8 @@ msgstr "Links om te versturen"
 msgid "Lisbon"
 msgstr "Lissabon"
 
+#: src/frame/ui-words.tsx
 #: src/interview/voice-bar.tsx
-msgid "Listening"
-msgstr "Luistert"
-
-#: src/frame/ui-words.tsx
-msgctxt "a voice conversation"
-msgid "Listening"
-msgstr "Luistert"
-
-#: src/frame/ui-words.tsx
-msgctxt "dictation"
 msgid "Listening"
 msgstr "Luistert"
 
@@ -8546,7 +8533,7 @@ msgid "Model"
 msgstr "Model"
 
 #: src/frame/ui-words.tsx
-msgctxt "the model that answers"
+msgctxt "the model an answer uses"
 msgid "Model"
 msgstr "Model"
 
@@ -12269,7 +12256,7 @@ msgid "Search"
 msgstr "Zoeken"
 
 #: src/frame/ui-words.tsx
-msgctxt "opens a search"
+msgctxt "open the search"
 msgid "Search"
 msgstr "Zoeken"
 
@@ -14378,6 +14365,10 @@ msgstr "De laatste uitlezing kon de in de directory verwijderde accounts niet op
 msgid "The latest runs, newest first."
 msgstr "De laatste runs, nieuwste eerst."
 
+#: src/frame/ui-words.tsx
+msgid "The limit of {limit} is reached"
+msgstr "De grens van {limit} is bereikt"
+
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 msgstr "De beurt wordt nu verwijderd, net als wat ik erin heb gemarkeerd. Wat ik eruit heb opgeschreven, staat in wat ik je aan het eind voorlees: haal het daar weg, dan wordt het voorgoed verwijderd zodra ons gesprek klaar is. Dit kan niet ongedaan worden gemaakt."
@@ -15302,7 +15293,7 @@ msgstr "Proberen"
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-body.tsx
-#: src/chat/chat-panel.tsx
+#: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
@@ -15395,6 +15386,7 @@ msgid "Type a whole number."
 msgstr "Typ een heel getal."
 
 #: src/chat/asked-questions.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Liever typen"
@@ -16448,6 +16440,10 @@ msgstr "Wat van de sporen te tonen"
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
 msgstr "Wat op je wacht"
+
+#: src/frame/ui-words.tsx
+msgid "What was added was cut at the limit of {limit}"
+msgstr "Wat is toegevoegd, is afgekapt bij de grens van {limit}"
 
 #: src/frame/ui-words.tsx
 msgid "What was added was left out: no more can be written"

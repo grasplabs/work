@@ -21,6 +21,7 @@
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
+    "@hugeicons/core-free-icons": "catalog:",
     "@lingui/core": "catalog:",
     "@lingui/react": "catalog:",
     "@pierre/diffs": "catalog:",

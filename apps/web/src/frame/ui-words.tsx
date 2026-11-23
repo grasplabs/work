@@ -4,6 +4,14 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
+/** A count of characters: "no characters", "1 character", "120 characters". */
+const characters = (count: number): string =>
+  plural(count, {
+    0: "no characters",
+    one: "# character",
+    other: "# characters",
+  });
+
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
  * in the page's language. Damsko knows nothing of Lingui: its components
@@ -51,7 +59,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     command: {
       dialogPlaceholder: t`Type a command or search`,
-      dialogTrigger: t({ message: "Search", context: "opens a search" }),
+      dialogTrigger: t({ message: "Search", context: "open the search" }),
       empty: t`No results`,
       error: t({ message: "Failed", context: "a search that failed" }),
       expand: (label) => t`More for ${label}`,
@@ -69,7 +77,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`This did not load`,
     },
     inlineEdit: {
-      edit: t({ message: "Edit", context: "edit a name in place" }),
+      edit: t({ message: "Edit", context: "edit a value in place" }),
       error: t`Could not save`,
       saved: (value) => t`Changed to ${value}`,
     },
@@ -112,7 +120,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     modelSelector: {
       empty: t`No models found`,
       search: t`Search models`,
-      trigger: t({ message: "Model", context: "the model that answers" }),
+      trigger: t({ message: "Model", context: "the model an answer uses" }),
       triggerWith: (trigger, model) => t`${trigger}: ${model}`,
       makers: t`Makers`,
       favorites: t`Favourites`,
@@ -130,42 +138,49 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       addAttachments: t`Add files`,
       attachments: t`Files to send`,
       count: (length, max) => t`${length}/${max}`,
-      cut: (max) =>
-        max === 0
+      cut: (max) => {
+        const limit = characters(max);
+        return max === 0
           ? t`What was added was left out: no more can be written`
-          : t`${plural(max, { one: "What was added was cut at the limit of # character", other: "What was added was cut at the limit of # characters" })}`,
+          : t`What was added was cut at the limit of ${limit}`;
+      },
       drop: t`Drop to add`,
       failed: t`Could not send. Your message is kept.`,
       mentionEmpty: t`No matches`,
       mentionsError: t`Could not load suggestions`,
       mentionsFound: (count) =>
-        count === 0
-          ? t`No results`
-          : t`${plural(count, { one: "# result", other: "# results" })}`,
+        plural(count, {
+          0: "No results",
+          one: "# result",
+          other: "# results",
+        }),
       mentionsLoading: t`Looking`,
-      near: (max) =>
-        max === 0
-          ? t`No room left`
-          : t`${plural(max, { one: "Close to the limit of # character", other: "Close to the limit of # characters" })}`,
-      reached: (max) =>
-        max === 0
+      near: (max) => {
+        const limit = characters(max);
+        return max === 0 ? t`No room left` : t`Close to the limit of ${limit}`;
+      },
+      reached: (max) => {
+        const limit = characters(max);
+        return max === 0
           ? t`No more can be written`
-          : t`${plural(max, { one: "The limit of # character is reached", other: "The limit of # characters is reached" })}`,
+          : t`The limit of ${limit} is reached`;
+      },
       speechButton: {
         cancel: t`Cancel dictation`,
         done: t({ message: "Done", context: "end dictation" }),
         label: t`Dictate`,
-        listening: t({ message: "Listening", context: "dictation" }),
+        listening: t`Listening`,
         mute: t`Mute`,
         settling: t`Writing it down`,
       },
       stop: t({ message: "Stop", context: "stop an answer" }),
       submit: t({ message: "Send", context: "send a message" }),
       succeeded: t({ message: "Done", context: "a message sent" }),
+      // Closing a spoken conversation gives the text back.
       voice: {
-        close: t`Close voice`,
+        close: t`Type instead`,
         label: t`Voice conversation`,
-        listening: t({ message: "Listening", context: "a voice conversation" }),
+        listening: t`Listening`,
         speaking: t`Speaking`,
       },
     },

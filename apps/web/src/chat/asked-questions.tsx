@@ -37,7 +37,24 @@ const styles = stylex.create({
   asked: { display: "grid", gap: space["2"] },
   // While the person types instead: kept, with what they answered, unseen.
   away: { display: "none" },
+  // Only a hold for where focus goes: no box of its own in the layout.
+  room: { display: "contents" },
 });
+
+/** Where focus goes as the questions and the box change places. */
+type FocusTo = "box" | "questions";
+
+/** The box's text, or the question shown and its first answer, in `room`. */
+const focusIn = (room: HTMLElement, to: FocusTo): void => {
+  if (to === "box") {
+    room.querySelector<HTMLElement>('[role="textbox"]')?.focus();
+    return;
+  }
+  const answers = room.querySelectorAll<HTMLElement>(
+    "[role=radio], [role=checkbox], textarea"
+  );
+  [...answers].find((answer) => answer.closest("[hidden]") === null)?.focus();
+};
 
 // What the chat's agent asks the person (`askQuestions`), in place of the
 // box to ask in: one question at a time, on Damsko's Questionnaire, each
@@ -267,8 +284,25 @@ export const AskOrCompose = ({
 }) => {
   const [typing, setTyping] = useState<string>();
   const asked = asking !== undefined && typing !== asking.callId;
+  // Type instead (or Escape) takes focus to the box; Back to the question,
+  // to the question; once each is drawn.
+  const room = useRef<HTMLDivElement>(null);
+  const focusTo = useRef<FocusTo | null>(null);
+  useEffect(() => {
+    const to = focusTo.current;
+    // Each once what it goes to is drawn: the questions while asked, else the box.
+    if (
+      to === null ||
+      room.current === null ||
+      (to === "questions") !== asked
+    ) {
+      return;
+    }
+    focusTo.current = null;
+    focusIn(room.current, to);
+  }, [asked]);
   return (
-    <>
+    <div ref={room} {...stylex.props(styles.room)}>
       {asking === undefined ? null : (
         <AskedQuestions
           asked={asking}
@@ -281,6 +315,7 @@ export const AskOrCompose = ({
           onSend={onAnswer}
           onType={() => {
             setTyping(asking.callId);
+            focusTo.current = "box";
           }}
         >
           {asked ? composer.children : null}
@@ -293,12 +328,13 @@ export const AskOrCompose = ({
               asked={asking}
               onBack={() => {
                 setTyping(undefined);
+                focusTo.current = "questions";
               }}
             />
           )}
           <Composer {...composer} />
         </>
       )}
-    </>
+    </div>
   );
 };

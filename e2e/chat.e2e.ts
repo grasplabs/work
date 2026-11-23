@@ -217,7 +217,8 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
 
   // Renamed from the chat's menu in the window, in a dialog of its own,
   // which takes the window's place: Escape keeps the name it had and
-  // Enter keeps the new one.
+  // Enter keeps the new one; either way the window comes back, on the
+  // chat's row.
   chats = await chatsWindow(page);
   await rowActions(chats, question);
   await page.getByRole("menuitem", { name: "Rename" }).click();
@@ -228,15 +229,24 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await name.fill("Never kept");
   await name.press("Escape");
   await expect(renaming).toBeHidden();
-  chats = await chatsWindow(page);
-  await expect(rowOf(chats, question)).toBeVisible();
+  await expect(chats).toBeVisible();
+  const field = chats.getByRole("combobox", { name: "Search chats" });
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute(
+    "aria-activedescendant",
+    (await rowOf(chats, question).getAttribute("id")) ?? "-"
+  );
   await rowActions(chats, question);
   await page.getByRole("menuitem", { name: "Rename" }).click();
   await name.fill(title);
   await name.press("Enter");
   await expect(renaming).toBeHidden();
-  chats = await chatsWindow(page);
+  await expect(chats).toBeVisible();
   await expect(rowOf(chats, title)).toBeVisible();
+  await expect(field).toHaveAttribute(
+    "aria-activedescendant",
+    (await rowOf(chats, title).getAttribute("id")) ?? "-"
+  );
 
   // Found by what was said in it, which its title no longer holds, with
   // the line it was said in under the title; a word nobody said finds
@@ -453,12 +463,13 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await page.getByRole("button", { name: `Remove ${notes}` }).click();
   await expect(page.getByText(notes)).toHaveCount(0);
   await expect(page.getByText(plan)).toBeVisible();
-  // A type core doesn't take stays out of the box.
+  // A type core doesn't take stays out, and the box says why.
   await picker.setInputFiles({
     name: "setup.exe",
     mimeType: "application/octet-stream",
     buffer: Buffer.from("MZ"),
   });
+  await expect(page.getByText(/Only PDF, Word/u)).toBeVisible();
   await expect(page.getByText("setup.exe")).toHaveCount(0);
 
   await page.getByLabel("Your question").fill(question);

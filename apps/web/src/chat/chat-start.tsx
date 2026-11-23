@@ -23,6 +23,10 @@ import { openChat } from "./chat-layout.ts";
 import { ChatSwitcherButton } from "./chat-switcher.tsx";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
+import {
+  ModelsUnavailableNotice,
+  unavailableText,
+} from "./models-unavailable.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. The question
@@ -72,6 +76,11 @@ const styles = stylex.create({
     textAlign: "center",
   },
   words: { display: "grid", gap: space["4"] },
+  // The box takes the column's whole width, wider than its own at most, as
+  // on #2503: 48rem at most.
+  box: { maxWidth: "100%" },
+  // The box and, under it, why nothing can be asked yet.
+  ask: { display: "grid", gap: space["2"] },
 });
 
 /** What Make something offers to start from: an App's blueprints, or a workflow's starting sentences. */
@@ -165,7 +174,8 @@ export const ChatStart = ({
   opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
 }) => {
   const { t, i18n } = useLingui();
-  const { offered } = useGlobalChat();
+  const { offered, modelsUnavailable, retry } = useGlobalChat();
+  const unavailable = unavailableText(modelsUnavailable);
   const { identity } = useRouteContext({ from: "/_shell" });
   const agents = offered?.agents ?? [];
   const named = agents.find(({ id }) => id === agent);
@@ -225,12 +235,21 @@ export const ChatStart = ({
             <div {...stylex.props(styles.greeting)}>
               <Greeting making={make !== undefined} />
             </div>
-            <Composer
-              placeholder={t`Ask anything, or describe a process`}
-              agentModel={agentModelOf(agents, answering)}
-              running={false}
-              {...composer}
-            />
+            <div {...stylex.props(styles.ask)}>
+              <Composer
+                placeholder={t`Ask anything, or describe a process`}
+                agentModel={agentModelOf(agents, answering)}
+                running={false}
+                // oxlint-disable-next-line shadcn/no-inline-styles -- StyleX layout on Damsko's part, which #2611's grasp/no-inline-styles lets through: this line goes on rebase
+                style={styles.box}
+                {...(unavailable === undefined ? {} : { unavailable })}
+                {...composer}
+              />
+              <ModelsUnavailableNotice
+                onRetry={retry}
+                why={modelsUnavailable}
+              />
+            </div>
             {make === undefined ? null : (
               <Making
                 ideas={ideas}
