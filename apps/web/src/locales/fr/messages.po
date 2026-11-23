@@ -151,10 +151,6 @@ msgstr "{asker} a demandé à partager son skill {name} avec l'entreprise. Une f
 msgid "{asker} asked to share their skill {name} with the team {team}. Approved, its members' agents use it. Read it on the skills page before you decide."
 msgstr "{asker} a demandé à partager son skill {name} avec l'équipe {team}. Une fois approuvé, les agents de ses membres l'utilisent. Lisez-le sur la page des skills avant de décider."
 
-#: src/agents/agent-overview.tsx
-msgid "{at}, {zone}"
-msgstr "{at}, {zone}"
-
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -525,10 +521,6 @@ msgstr "{count} sur {total} choisis"
 #: src/frame/part-words.tsx
 msgid "{count} read"
 msgstr "{count} lisent"
-
-#: src/agents/agent-overview.tsx
-msgid "{cron}, {zone}"
-msgstr "{cron}, {zone}"
 
 #: src/settings/team-members-dialog.tsx
 msgid "{current} couldn't be saved. Try again."
@@ -1106,6 +1098,10 @@ msgid "{name}: doesn't run"
 msgstr "{name} : ne s’exécute pas"
 
 #: src/agents/agent-overview.tsx
+msgid "{name}: paused"
+msgstr "{name} : en pause"
+
+#: src/agents/agent-overview.tsx
 msgid "{name}: runs"
 msgstr "{name} : s’exécute"
 
@@ -1325,6 +1321,14 @@ msgstr "{runs} terminées cette semaine"
 #: src/workflows/workflow-rows.tsx
 msgid "{runs} of yours done this week"
 msgstr "{runs} des vôtres terminées cette semaine"
+
+#: src/agents/agent-overview.tsx
+msgid "{runsAt}, {zone}"
+msgstr "{runsAt}, {zone}"
+
+#: src/agents/agent-overview.tsx
+msgid "{runsAt}, {zone}, paused"
+msgstr "{runsAt}, {zone}, en pause"
 
 #: src/agents/agents-overview.tsx
 msgid "{scheduled, plural, one {# schedule} other {# schedules}}"
@@ -6299,6 +6303,10 @@ msgstr "N’a pas conservé un événement de webhook : sa source en conserve d�
 msgid "Didn't keep something noted for the Brain, and recorded why"
 msgstr "N’a pas conservé quelque chose noté pour le Brain, et a enregistré pourquoi"
 
+#: src/agents/agent-overview.tsx
+msgid "Didn't run {when}"
+msgstr "Non exécuté le {when}"
+
 #: src/agents/agent-wakes.tsx
 msgid "Didn't run {when}: no AI provider is connected"
 msgstr "Non exécuté le {when} : aucun fournisseur d’IA n’est connecté"
@@ -10205,10 +10213,6 @@ msgstr "Lu pour la dernière fois {lastRead}"
 #: src/workflows/workflow-rows.tsx
 msgid "Last run {since}"
 msgstr "Dernière exécution {since}"
-
-#: src/agents/agent-overview.tsx
-msgid "Last run {when}"
-msgstr "Dernière exécution : {when}"
 
 #: src/agents/agents-overview.tsx
 msgid "Last run failed"

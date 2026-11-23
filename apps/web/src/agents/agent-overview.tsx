@@ -290,7 +290,7 @@ const StatusLine = ({
     const when = moment(failing.at);
     tone = "danger";
     word = t`Failing`;
-    detail = t`Last run ${when}`;
+    detail = t`Didn't run ${when}`;
   } else if (agent.ownerId !== null) {
     detail = t`Just for you`;
   } else if (wakes.length > 0 && wakesOn(wakes).length === 0) {
@@ -453,10 +453,10 @@ const Instructions = ({
   const { blocks, folded } = foldOf(text, 2);
   const more = whole
     ? t`Show less`
-    : plural(blocks, {
+    : t`${plural(blocks, {
         one: "Show all # paragraph",
         other: "Show all # paragraphs",
-      });
+      })}`;
   const shown = withMentions(whole ? text : folded, named);
   return (
     <SectionCard actions={edit} title={t`Instructions`}>
@@ -565,6 +565,7 @@ const Schedule = ({
       <div {...stylex.props(styles.schedules)}>
         {wakes.map((wake) => {
           const { cron } = wake;
+          const paused = wake.state !== "on" || agent.state !== "on";
           const week = weekOf(cron);
           const zone = formatZone(wake.timeZone);
           const at =
@@ -573,29 +574,29 @@ const Schedule = ({
               : time.format(
                   new Date(Date.UTC(2024, 0, 1, week.hour, week.minute))
                 );
+          const runsAt = at ?? cron;
+          const when = paused
+            ? t`${runsAt}, ${zone}, paused`
+            : t`${runsAt}, ${zone}`;
           return (
             <div key={wake.id} {...stylex.props(styles.schedule)}>
               {week === undefined ? null : (
                 <DayPills
                   days={weekdays.map(({ letter, name }, index) => {
                     const on = week.days[index] === true;
-                    return {
-                      letter,
-                      name: on ? t`${name}: runs` : t`${name}: doesn't run`,
-                      on,
-                    };
+                    let said = t`${name}: doesn't run`;
+                    if (on) {
+                      said = paused ? t`${name}: paused` : t`${name}: runs`;
+                    }
+                    return { letter, name: said, on };
                   })}
                   label={t`Days it runs`}
-                  tone={
-                    wake.state === "on" && agent.state === "on"
-                      ? "on"
-                      : "paused"
-                  }
+                  tone={paused ? "paused" : "on"}
                 />
               )}
               <span {...stylex.props(styles.when)}>
                 <Icon icon={Clock} />
-                {at === undefined ? t`${cron}, ${zone}` : t`${at}, ${zone}`}
+                {when}
               </span>
             </div>
           );

@@ -83,15 +83,15 @@ import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 // column in the page's middle, a card of rows per topic, the controls on
 // one edge. Its Page
 // header holds the agent (picture, name, what it is for, whether it is
-// on) and the things done most: turning it off and on, Chat, and Edit,
-// which changes its name, job, picture and model in a dialog. Its parts
+// on) and the things done most: pausing it, Chat, and Edit, which
+// changes its name, job, picture and model in a dialog. Its parts
 // are rows of the sidebar, which the agent takes over as Settings does
 // (agent-section.tsx), the part in the address (`?tab=`) so a link can
 // lead to an agent's access or its schedule:
 //
-// - Overview: its facts as rows (whom it answers, what it may do, when
-//   it works on its own, its model, this month's use) and what it did
-//   lately (its scheduled runs, and when it was last asked); Delete.
+// - Overview: its own page (agent-overview.tsx): whether it is on and
+//   when it runs next, what it is told, its schedule, and each
+//   schedule's last run.
 // - Instructions: what it is told (its instruction file, as every
 //   instruction file is edited: settings/instruction-file.tsx), the apps
 //   it may use (agent-apps-card.tsx) and the documents it answers from.
