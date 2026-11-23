@@ -7,7 +7,6 @@ import {
 import { Toaster } from "@grasp-os/app-kit/components/toast";
 import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Toaster as DamskoToaster } from "@grasp-os/ui/components/toast";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -77,8 +76,6 @@ export const AppFrame = ({
           </AppShellMain>
           {panels}
         </AppShell>
-        {/* Damsko's toasts, for the pages on Damsko (the Apps). */}
-        <DamskoToaster />
       </TooltipProvider>
     </Toaster>
   );

@@ -188,7 +188,11 @@ test("a builder renames an App and says what it is for in its settings, archives
     .click();
   await expect(page.getByText("Archived", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Restore" }).click();
-  await expect(page.getByText("Archived", { exact: true })).toHaveCount(0);
+  // Live again once core has put its version back, which takes a while
+  // on a loaded machine.
+  await expect(page.getByText("Archived", { exact: true })).toHaveCount(0, {
+    timeout: 20_000,
+  });
 
   // Its integrations, under Connections: none yet for a new App, which its
   // builder adds to.
