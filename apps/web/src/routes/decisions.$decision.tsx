@@ -25,6 +25,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
+import { readWorkflowTitles, titledDecision } from "../workflows/reads.ts";
 
 // Where a decision link leads (`/decisions/<id>`), from notifications, the
 // runs log or mail. Opening it answers nothing (threat model R8): the
@@ -78,10 +79,13 @@ const loadDecision = async (
   }
   try {
     // A connection that answered the status check can still hang here.
-    const found = await readWithin(
-      core,
-      async (session) => await session.decisions.get(decision)
-    );
+    const found = await readWithin(core, async (session) => {
+      const [read, titles] = await Promise.all([
+        session.decisions.get(decision),
+        readWorkflowTitles(session),
+      ]);
+      return titledDecision(read, titles);
+    });
     return { state: "ready", identity, decision: found };
   } catch (error) {
     if (error instanceof CoreTimeoutError) {
@@ -199,7 +203,7 @@ const Decision = () => {
       crumbs={[workflows, source, { label: t`Decision` }]}
       identity={page.identity}
     >
-      <DecisionCard decision={decision} />
+      <DecisionCard decision={decision} where="page" />
     </DecisionInFrame>
   );
 };

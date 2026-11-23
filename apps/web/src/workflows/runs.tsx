@@ -18,8 +18,8 @@ import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { personOf } from "./activity-bar.tsx";
-import type { Names } from "./activity-bar.tsx";
+import { personOf } from "./activity-words.ts";
+import type { Names } from "./activity-words.ts";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
 
 // Runs as the Workflows page and a workflow's page list them, in the
@@ -208,9 +208,8 @@ export const RunsLog = ({
         label={t`Runs`}
         onRowOpen={(run) => {
           void navigate({
-            to: "/workflows/$workflow",
-            params: { workflow: run.workflowId },
-            search: { view: "runs", run: run.id },
+            to: "/workflows/$workflow/runs/$run",
+            params: { workflow: run.workflowId, run: run.id },
           });
         }}
         pageSize={logPageSize}

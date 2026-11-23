@@ -1,4 +1,5 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
+import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {
@@ -12,6 +13,7 @@ import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { readWorkflowTitles, titledDecision } from "../workflows/reads.ts";
 import { readOutcomes } from "./everyones-outcomes.ts";
 import { markShownRead } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
@@ -132,6 +134,32 @@ export const readWaiting = async (
     listOutcomes && decidesRequests(identity)
       ? await readOutcomes(core)
       : undefined;
+  // Workflows by the titles the reader may read, where any item names one.
+  const naming =
+    feed.state === "ready" &&
+    feed.data.items.some(
+      ({ kind }) =>
+        kind === "permissionRequest" ||
+        kind === "heldStart" ||
+        kind === "decision"
+    );
+  const overview = naming
+    ? await loadFromCore(core, readWorkflowTitles)
+    : undefined;
+  const titles: ReadonlyMap<string, string> =
+    overview?.state === "ready" ? overview.data : new Map();
+  const titled = (request: Permission): Permission =>
+    request.workflowNames === undefined
+      ? request
+      : {
+          ...request,
+          workflowNames: Object.fromEntries(
+            Object.entries(request.workflowNames).map(([id, name]) => [
+              id,
+              titles.get(id) ?? name,
+            ])
+          ),
+        };
   return {
     ...(interviews === undefined ? {} : { interviews }),
     ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
@@ -145,12 +173,26 @@ export const readWaiting = async (
     reconnect: partOf(feed, "connections", (read) =>
       ofKind(read, "signInAgain")
     ),
-    requests,
-    heldStarts: partOf(feed, "heldStarts", (read) =>
-      ofKind(read, "heldStart").map(({ start }) => start)
+    requests:
+      requests?.state === "ready"
+        ? {
+            state: "ready",
+            data: {
+              ...requests.data,
+              requests: requests.data.requests.map(titled),
+            },
+          }
+        : requests,
+    heldStarts: partOf(feed, "heldStarts", (listed) =>
+      ofKind(listed, "heldStart").map(({ start }) => ({
+        ...start,
+        workflowName: titles.get(start.workflow) ?? start.workflowName,
+      }))
     ),
-    decisions: partOf(feed, "decisions", (read) =>
-      ofKind(read, "decision").map(({ decision }) => decision)
+    decisions: partOf(feed, "decisions", (listed) =>
+      ofKind(listed, "decision").map(({ decision }) =>
+        titledDecision(decision, titles)
+      )
     ),
     ...(decidesRequests(identity)
       ? {

@@ -43,7 +43,14 @@ import { triggerBlockText } from "./trigger-block.ts";
 const graceSeconds = 5;
 
 const styles = stylex.create({
-  row: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: grasp.space2,
+    rowGap: grasp.space1,
+  },
+  whole: { whiteSpace: "nowrap" },
   countdown: { display: "flex", alignItems: "center", gap: grasp.space3 },
 });
 
@@ -83,12 +90,14 @@ export const WorkflowStatus = ({
           {triggerBlockText(blocked, i18n)}
         </Badge>
         {admin && blocked.why === "waiting" ? (
-          <TextLink render={<Link to="/inbox" />} variant="standalone">
-            {t({
-              message: "Allow it",
-              context: "go to the Inbox to allow a trigger",
-            })}
-          </TextLink>
+          <span {...stylex.props(styles.whole)}>
+            <TextLink render={<Link to="/inbox" />} variant="standalone">
+              {t({
+                message: "Allow it",
+                context: "go to the Inbox to allow a trigger",
+              })}
+            </TextLink>
+          </span>
         ) : null}
       </span>
     );

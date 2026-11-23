@@ -84,7 +84,9 @@ const WorkedLink = ({
     <Link
       {...props}
       params={{ workflow: worked.id }}
-      search={chatId === undefined ? {} : { chat: chatId }}
+      search={
+        chatId === undefined ? { view: "flow" } : { chat: chatId, view: "flow" }
+      }
       to="/workflows/$workflow"
     />
   );
@@ -138,7 +140,7 @@ const AlsoWorkedOn = ({
                     })
                   : navigate({
                       params: { workflow: worked.id },
-                      search,
+                      search: { ...search, view: "flow" },
                       to: "/workflows/$workflow",
                     }));
               }}

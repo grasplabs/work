@@ -280,7 +280,7 @@ const scheduleOf = (
  * A trigger asking to start its workflow: what kind it is, the workflow
  * by its name, and what it listens to. Undefined for any other request.
  */
-const triggerStartOf = ({
+export const triggerStartOf = ({
   trigger,
   object,
   actions,

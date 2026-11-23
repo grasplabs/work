@@ -8,7 +8,7 @@ import { test } from "./csp.ts";
 import { dockedChat } from "./docked-chat.ts";
 import { inboxList, toItem } from "./inbox.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
-import { peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
@@ -100,7 +100,7 @@ const drawnAndPublished = async (
     .getByRole("region", { name: "Here's what Grasp will make" })
     .getByRole("button", { name: "Build it" })
     .click(agentTurn);
-  await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u, agentTurn);
+  await expect(page).toHaveURL(/\/workflows\/[^/?]+\?view=flow$/u, agentTurn);
   await expect(
     page.getByRole("heading", { level: 1, name: planned, exact: true })
   ).toBeAttached(pageRead);
@@ -196,35 +196,39 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     /1 workflow needs you$/u,
     pageRead
   );
-  // Opened beside the list: what it asks, and the way to its own page.
+  // Opened beside the list: what it asks, answered there, with a comment.
   const item = asDecider.getByRole("complementary", { name: "Decision" });
   await expect(
     item.getByRole("heading", { name: "Approve invoice INV-42" })
   ).toBeVisible(pageRead);
-  await item.getByRole("link", { name: "Review and answer" }).click();
-  await expect(
-    asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
-  ).toBeVisible(pageRead);
-  // Its page is the decision's link: opened by anyone else, it only says
-  // it isn't theirs.
-  const link = new URL(asDecider.url()).pathname;
-  expect(link).toMatch(/^\/decisions\/[^/]+$/u);
-  await page.goto(link);
+  // Its own page is the decision's link: opened by anyone else, it only
+  // says it isn't theirs.
+  const { core, api } = apiOf(decider);
+  let asked = "";
+  try {
+    const open = await api.decisions.waiting();
+    asked =
+      open.find(({ description }) => description === "Approve invoice INV-42")
+        ?.id ?? "";
+  } finally {
+    core[Symbol.dispose]();
+  }
+  expect(asked).not.toBe("");
+  await page.goto(`/decisions/${asked}`);
   await expect(
     page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
-  await asDecider.getByLabel("Comment (optional)").fill("Matches the order");
-  await asDecider.getByRole("button", { name: "Approve" }).click();
+  await item.getByRole("button", { name: "Add a comment" }).click();
+  await item.getByLabel("Comment (optional)").fill("Matches the order");
+  await item.getByRole("button", { name: "Approve" }).click();
   await asDecider
     .getByRole("alertdialog", { name: "Confirm your approval" })
     .getByRole("button", { name: "Confirm" })
     .click(pageRead);
+  // Answered, it leaves the list, and needs them no more.
   await expect(
-    asDecider
-      .getByRole("status")
-      .filter({ hasText: /^Approved by Person on /u })
-  ).toBeVisible(pageRead);
-  // Answered, it needs them no more.
+    inboxList(asDecider).getByRole("link").filter({ hasText: name })
+  ).toHaveCount(0, pageRead);
   await asDecider.reload();
   await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
 
@@ -236,11 +240,17 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     await expect(run).toBeVisible(pageRead);
     await expect(run).toContainText("Done", { timeout: 1000 });
   }).toPass(untilItHappens);
+  // Its page, where its builders open the steps it took.
   await run.getByRole("button").first().click();
-  const sheet = page.getByRole("dialog");
-  await expect(sheet).toContainText('"status": "approved"', pageRead);
-  await expect(sheet).toContainText('"comment": "Matches the order"');
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Open its steps" }).click(pageRead);
+  await expect(page.getByRole("main")).toContainText(
+    '"status": "approved"',
+    pageRead
+  );
+  await expect(page.getByRole("main")).toContainText(
+    '"comment": "Matches the order"'
+  );
+  await page.goBack();
 
   // A webhook: an admin adds a source, its secret shown once.
   const sourceName = `Invoices ${randomBytes(4).toString("hex")}`;
@@ -264,14 +274,8 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
 
   // The builder starts the workflow on its invoices, in its Settings'
   // Triggers.
-  await page
-    .getByRole("navigation", { name: "Workflow views" })
-    .getByRole("link", { name: "Settings" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Settings sections" })
-    .getByRole("link", { name: "Triggers" })
-    .click();
+  await page.goto(`/workflows/${workflow}`);
+  await page.getByRole("button", { name: "Open What starts it" }).click();
   await page.getByRole("button", { name: "Add a trigger" }).click();
   const adder = page.getByRole("dialog", { name: "Add a trigger" });
   await adder.getByRole("combobox", { name: "What starts it" }).click();
@@ -293,7 +297,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     new RegExp(sourceName, "u"),
     new RegExp(`^Let ${name} start when its webhook is called\\?$`, "u")
   );
-  await grant.getByRole("button", { name: "Grant it" }).click();
+  await grant.getByRole("button", { name: "Allow" }).click();
   await expect(grant).toHaveCount(0, pageRead);
   await page.goto(`/workflows/${workflow}?view=settings&section=triggers`);
   await expect(
