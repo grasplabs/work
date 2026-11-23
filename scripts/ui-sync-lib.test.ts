@@ -36,6 +36,15 @@ const registry = parseRegistry(
         ],
       },
       {
+        name: "fonts",
+        files: [
+          {
+            path: "src/styles/fonts/geist.woff2",
+            target: "~/src/styles/fonts/geist.woff2.base64",
+          },
+        ],
+      },
+      {
         name: "dialog",
         files: [
           {
@@ -82,6 +91,25 @@ describe("what packages/ui must hold", () => {
     expect([...expected.dependencies].toSorted()).toStrictEqual([
       "@stylexjs/stylex",
       "@ui-sdk/react",
+    ]);
+  });
+
+  it("holds a font as the font, not as the text it travels as", () => {
+    const expected = expectedOf(registry, ["fonts"]);
+    const font = "src/styles/fonts/geist.woff2";
+    expect([...expected.files.keys()]).toStrictEqual([font]);
+    expect(
+      differences(expected, damsko, installed({ [font]: font }, {}))
+    ).toStrictEqual([]);
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({ [`${font}.base64`]: "packed" }, {})
+      ).toSorted()
+    ).toStrictEqual([
+      `${font} is missing`,
+      `${font}.base64 is no file of the installed items`,
     ]);
   });
 

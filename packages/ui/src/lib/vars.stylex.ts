@@ -83,6 +83,12 @@ export const ringInsetMarker = stylex.defineMarker();
 /** The marker of a list popup, so a part inside it can answer the popup's state (`listStyles`). */
 export const listMarker = stylex.defineMarker();
 
+/**
+ * The marker of a side panel's card (a SidePanelSection's), so the `xs` Items in it take the
+ * panel's rhythm: 44px rows of the panel's smaller words, flush, a hairline between them.
+ */
+export const sidePanelCardMarker = stylex.defineMarker();
+
 /** The marker of a menu's panel, so an item can answer what the panel holds (`menuStyles`). */
 export const menuMarker = stylex.defineMarker();
 

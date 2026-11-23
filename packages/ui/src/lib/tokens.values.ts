@@ -40,6 +40,7 @@ export const durations = {
   sliderLevelsSnap: 160,
   toastDuration: 3500,
   toastDurationAction: 8000,
+  promptInputLightIn: 280,
   stepperTravel: 2400,
 } as const;
 

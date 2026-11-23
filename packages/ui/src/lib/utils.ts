@@ -1,7 +1,9 @@
 // Small things every component shares: the style a caller may pass, the live region, a ref
 // helper, a measure after layout, asChild, the words among children, and the system's dither as
 // numbers.
-import type * as stylex from "@stylexjs/stylex";
+import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import { createContext, createElement, isValidElement, lazy, use } from "react";
 import type { ReactElement, ReactNode, Ref } from "react";
 
@@ -71,6 +73,29 @@ export const slotProps = (
   asChild === true && isValidElement<Record<string, unknown>>(children)
     ? { render: children }
     : { children };
+
+/**
+ * The class of some styles, where a part takes a class and not props: UI SDK's `className` (a
+ * string, or a function of the part's state) and an element measured by its class.
+ */
+export const className = (
+  ...parts: stylex.StyleXArray<
+    | stylex.CompiledStyles
+    | readonly [stylex.CompiledStyles, stylex.InlineStyles]
+    | boolean
+    | null
+    | undefined
+  >[]
+) => stylex.props(...parts).className;
+
+/**
+ * Renders a part as `tag` with the component's own slot (`dropdown-menu-item`): UI SDK names its
+ * parts after its own primitive (menu-item), and overwrites a slot given as a prop.
+ */
+export const slotted =
+  (tag: string, slot: string, render?: RenderProp) =>
+  (props: Record<string, unknown>) =>
+    renderElement(tag, { ...props, "data-slot": slot }, render);
 
 /**
  * As `slotProps`, for a part that draws more round its words (an icon, keys, a chevron): with

@@ -58,14 +58,14 @@ export const colors = stylex.defineConsts({
   primaryForeground: "var(--damsko-primary-foreground)",
   primaryDisabled: "var(--damsko-primary-disabled)",
   primaryForegroundDisabled: "var(--damsko-primary-foreground-disabled)",
+  control: "var(--damsko-control)",
+  controlHover: "var(--damsko-control-hover)",
+  controlActive: "var(--damsko-control-active)",
+  accent: "var(--damsko-accent)",
+  accentActive: "var(--damsko-accent-active)",
   secondary: "var(--damsko-secondary)",
   secondaryHover: "var(--damsko-secondary-hover)",
   secondaryActive: "var(--damsko-secondary-active)",
-  accent: "var(--damsko-accent)",
-  accentActive: "var(--damsko-accent-active)",
-  buttonSecondary: "var(--damsko-button-secondary)",
-  buttonSecondaryHover: "var(--damsko-button-secondary-hover)",
-  buttonSecondaryActive: "var(--damsko-button-secondary-active)",
   destructiveFill: "var(--damsko-destructive-fill)",
   destructiveFillForeground: "var(--damsko-destructive-fill-foreground)",
   successFill: "var(--damsko-success-fill)",
@@ -82,7 +82,7 @@ export const colors = stylex.defineConsts({
   // Fields: fields.
   inputBg: "var(--damsko-input-bg)",
   inputBgRead: "var(--damsko-input-bg-read)",
-  inputInkRead: "var(--damsko-input-ink-read)",
+  inputForegroundRead: "var(--damsko-input-foreground-read)",
   inputSelection: "var(--damsko-input-selection)",
   input: "var(--damsko-input)",
   inputBorderHover: "var(--damsko-input-border-hover)",
@@ -111,6 +111,8 @@ export const colors = stylex.defineConsts({
   // Tabs: tabs.
   tabLine: "var(--damsko-tab-line)",
   tabBgSelected: "var(--damsko-tab-bg-selected)",
+  // Badge: badge.
+  badgeSecondary: "var(--damsko-badge-secondary)",
   // Alert: alert.
   alertBgDefault: "var(--damsko-alert-bg-default)",
   // Progress: progress.
@@ -130,12 +132,12 @@ export const colors = stylex.defineConsts({
   // Table: table.
   tableRowBgHover: "var(--damsko-table-row-bg-hover)",
   tableRowBgSelectedMint: "var(--damsko-table-row-bg-selected-mint)",
-  tableHeadText: "var(--damsko-table-head-text)",
+  tableHeadForeground: "var(--damsko-table-head-foreground)",
   // Drawer and sheet: drawer and sheet.
   drawerHandleBg: "var(--damsko-drawer-handle-bg)",
   // Calendar: calendar.
   calendarBgSelected: "var(--damsko-calendar-bg-selected)",
-  calendarTextSelected: "var(--damsko-calendar-text-selected)",
+  calendarForegroundSelected: "var(--damsko-calendar-foreground-selected)",
   calendarBgRange: "var(--damsko-calendar-bg-range)",
   calendarBgToday: "var(--damsko-calendar-bg-today)",
   // Toggle: toggle.
@@ -147,20 +149,22 @@ export const colors = stylex.defineConsts({
   // Resizable: resizable.
   resizableLine: "var(--damsko-resizable-line)",
   resizableLineActive: "var(--damsko-resizable-line-active)",
-  // Tag: tag.
-  tagBg: "var(--damsko-tag-bg)",
   // Table of contents: table of contents.
   tableOfContentsRead: "var(--damsko-table-of-contents-read)",
+  // Prompt input and attachments: prompt input and attachments.
+  promptInputLight: "var(--damsko-prompt-input-light)",
+  promptInputTint: "var(--damsko-prompt-input-tint)",
+  promptInputGlass: "var(--damsko-prompt-input-glass)",
   // Sidebar: sidebar.
   sidebar: "var(--damsko-sidebar)",
   sidebarAccent: "var(--damsko-sidebar-accent)",
   // Sidebar: sidebar colours.
   sidebarCard: "var(--damsko-sidebar-card)",
   sidebarHover: "var(--damsko-sidebar-hover)",
-  sidebarRule: "var(--damsko-sidebar-rule)",
-  sidebarText: "var(--damsko-sidebar-text)",
-  sidebarTextSecondary: "var(--damsko-sidebar-text-secondary)",
-  sidebarTextTertiary: "var(--damsko-sidebar-text-tertiary)",
+  sidebarBorder: "var(--damsko-sidebar-border)",
+  sidebarForeground: "var(--damsko-sidebar-foreground)",
+  sidebarSecondaryForeground: "var(--damsko-sidebar-secondary-foreground)",
+  sidebarTertiaryForeground: "var(--damsko-sidebar-tertiary-foreground)",
   sidebarCardBorder: "var(--damsko-sidebar-card-border)",
   // Carousel: carousel.
   carouselDotBg: "var(--damsko-carousel-dot-bg)",
@@ -189,10 +193,10 @@ export const colors = stylex.defineConsts({
   chartRibbonLit: "var(--damsko-chart-ribbon-lit)",
   chartRibbonMuted: "var(--damsko-chart-ribbon-muted)",
   // Tree: tree.
-  treeViewText: "var(--damsko-tree-view-text)",
+  treeViewForeground: "var(--damsko-tree-view-foreground)",
   treeViewIcon: "var(--damsko-tree-view-icon)",
-  treeViewTextHover: "var(--damsko-tree-view-text-hover)",
-  treeViewTextSelected: "var(--damsko-tree-view-text-selected)",
+  treeViewForegroundHover: "var(--damsko-tree-view-foreground-hover)",
+  treeViewForegroundSelected: "var(--damsko-tree-view-foreground-selected)",
   treeViewBgHover: "var(--damsko-tree-view-bg-hover)",
   treeViewBgSelected: "var(--damsko-tree-view-bg-selected)",
   treeViewBgActive: "var(--damsko-tree-view-bg-active)",
@@ -253,6 +257,8 @@ export const space = stylex.defineConsts({
   menuItemPadding: "var(--damsko-menu-item-padding)",
   // Tabs: tabs.
   tabGap: "var(--damsko-tab-gap)",
+  // Badge: badge.
+  badgeLabelPadding: "var(--damsko-badge-label-padding)",
   // Table: table.
   tableCellBlock: "var(--damsko-table-cell-block)",
   tableCellInline: "var(--damsko-table-cell-inline)",
@@ -265,8 +271,6 @@ export const space = stylex.defineConsts({
   toggleTrackPadding: "var(--damsko-toggle-track-padding)",
   // Kbd: kbd.
   kbdPadding: "var(--damsko-kbd-padding)",
-  // Tag: tag.
-  tagPadding: "var(--damsko-tag-padding)",
   // Section header: section header.
   sectionHeaderGap: "var(--damsko-section-header-gap)",
   // Table of contents: table of contents.
@@ -301,18 +305,14 @@ export const radius = stylex.defineConsts({
   base: "var(--damsko-radius)",
   shape: "var(--damsko-radius-shape)",
   promptInputRadius: "var(--damsko-prompt-input-radius)",
+  row: "var(--damsko-radius-row)",
+  hairline: "var(--damsko-radius-hairline)",
   mark: "var(--damsko-radius-mark)",
   full: "var(--damsko-radius-full)",
   circle: "var(--damsko-radius-circle)",
   // Sidebar: sidebar sizes.
-  sidebarRadius: "var(--damsko-sidebar-radius)",
-  sidebarRadiusLg: "var(--damsko-sidebar-radius-lg)",
   sidebarCardRadius: "var(--damsko-sidebar-card-radius)",
-  // Tree: tree.
-  treeViewRowRadius: "var(--damsko-tree-view-row-radius)",
-  // Icon tile: icon tile.
-  iconTileRadius: "var(--damsko-icon-tile-radius)",
-  iconTileSmRadius: "var(--damsko-icon-tile-sm-radius)",
+  sidebarInsetRadius: "var(--damsko-sidebar-inset-radius)",
 });
 
 export const shadow = stylex.defineConsts({
@@ -343,6 +343,8 @@ export const shadow = stylex.defineConsts({
   menuShadow: "var(--damsko-menu-shadow)",
   // Switch: switch.
   switchThumbShadow: "var(--damsko-switch-thumb-shadow)",
+  // Prompt input and attachments: prompt input and attachments.
+  promptInputHalo: "var(--damsko-prompt-input-halo)",
 });
 
 export const font = stylex.defineConsts({
@@ -446,6 +448,12 @@ export const duration = stylex.defineConsts({
   // Toast: toast.
   toastDuration: "var(--damsko-toast-duration)",
   toastDurationAction: "var(--damsko-toast-duration-action)",
+  // Prompt input and attachments: prompt input and attachments.
+  promptInputHaloTime: "var(--damsko-prompt-input-halo-time)",
+  promptInputLightIn: "var(--damsko-prompt-input-light-in)",
+  promptInputBeam: "var(--damsko-prompt-input-beam)",
+  promptInputBeamFast: "var(--damsko-prompt-input-beam-fast)",
+  promptInputBeamSlow: "var(--damsko-prompt-input-beam-slow)",
   // Confirmation: confirmation.
   confirmationSettle: "var(--damsko-confirmation-settle)",
   // Stepper: stepper.
@@ -485,6 +493,7 @@ export const size = stylex.defineConsts({
   swapScale: "var(--damsko-swap-scale)",
   resultMarkFrom: "var(--damsko-result-mark-from)",
   resultShift: "var(--damsko-result-shift)",
+  resultShake: "var(--damsko-result-shake)",
   // Fields: fields.
   inputInvalid: "var(--damsko-input-invalid)",
   inputFocus: "var(--damsko-input-focus)",
@@ -535,6 +544,8 @@ export const size = stylex.defineConsts({
   badgeHeightSm: "var(--damsko-badge-height-sm)",
   badgePadding: "var(--damsko-badge-padding)",
   badgeIcon: "var(--damsko-badge-icon)",
+  badgeLabelHeight: "var(--damsko-badge-label-height)",
+  badgeLabelHeightSm: "var(--damsko-badge-label-height-sm)",
   severityDot: "var(--damsko-severity-dot)",
   // Empty: empty.
   emptyPage: "var(--damsko-empty-page)",
@@ -632,10 +643,6 @@ export const size = stylex.defineConsts({
   // Resizable: resizable.
   resizableHandleLength: "var(--damsko-resizable-handle-length)",
   resizableHandleWidth: "var(--damsko-resizable-handle-width)",
-  // Tag: tag.
-  tagHeight: "var(--damsko-tag-height)",
-  tagHeightSm: "var(--damsko-tag-height-sm)",
-  tagIcon: "var(--damsko-tag-icon)",
   // Section header: section header.
   sectionHeaderTitleWait: "var(--damsko-section-header-title-wait)",
   // Table of contents: table of contents.
@@ -647,6 +654,9 @@ export const size = stylex.defineConsts({
   attachmentMaxWidth: "var(--damsko-attachment-max-width)",
   attachmentThumb: "var(--damsko-attachment-thumb)",
   promptInputMentionWidth: "var(--damsko-prompt-input-mention-width)",
+  promptInputFieldMin: "var(--damsko-prompt-input-field-min)",
+  promptInputGlassBlur: "var(--damsko-prompt-input-glass-blur)",
+  promptInputLightOpacity: "var(--damsko-prompt-input-light-opacity)",
   // Message: message.
   messageBubbleWidth: "var(--damsko-message-bubble-width)",
   messageText: "var(--damsko-message-text)",
@@ -686,6 +696,7 @@ export const size = stylex.defineConsts({
   formColumn: "var(--damsko-form-column)",
   formWidth: "var(--damsko-form-width)",
   itemGridTile: "var(--damsko-item-grid-tile)",
+  connectTile: "var(--damsko-connect-tile)",
   fieldControlColumn: "var(--damsko-field-control-column)",
   // Confirmation: confirmation.
   confirmationWidth: "var(--damsko-confirmation-width)",

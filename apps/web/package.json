@@ -5,7 +5,9 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
+    "predev": "node ../../packages/ui/src/styles/fonts/unpack.mjs",
     "dev": "vp dev",
+    "prebuild": "node ../../packages/ui/src/styles/fonts/unpack.mjs",
     "build": "vp build",
     "preview": "vp preview",
     "i18n:extract": "lingui extract --clean"

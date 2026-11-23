@@ -31,7 +31,7 @@ test("paints the system's scheme, dark from the start and following a change wit
 // styles from the package into the page's stylesheet, and their colours are
 // Damsko's tokens, which follow the scheme. Under the page's policy, as
 // every test here.
-test("a Damsko button is drawn by its own styles, in the tokens' colours, light and dark", async ({
+test("a Damsko button is drawn by its own styles and font, in the tokens' colours, light and dark", async ({
   page,
 }) => {
   await page.emulateMedia({ colorScheme: "light" });
@@ -64,6 +64,32 @@ test("a Damsko button is drawn by its own styles, in the tokens' colours, light 
       return dark.button === dark.token && dark.token !== light.token;
     })
     .toBeTruthy();
+  const dark = await fills();
+
+  // In Damsko's own Geist, a file this origin serves.
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(() =>
+          [...document.fonts].some(
+            (face) => face.family === "Geist" && face.status === "loaded"
+          )
+        )
+    )
+    .toBeTruthy();
+
+  // A person's own choice of dark, on a system that is light.
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.evaluate(() => {
+    localStorage.setItem("grasp-theme", "dark");
+  });
+  await page.reload();
+  await expect
+    .poll(async () => {
+      const chosen = await fills();
+      return chosen.button;
+    })
+    .toBe(dark.button);
 });
 
 test("a page sidebar folds from the keyboard and stays folded over a reload", async ({

@@ -10,8 +10,8 @@ import type { ReactNode } from "react";
  * catalog, part by part. A part not given here keeps Damsko's English, so
  * each part gets its words in the pull request that first uses it.
  *
- * Inside Lingui's provider, once around the routes. The React Compiler
- * keeps the catalogue the same object until the language changes.
+ * Inside Lingui's provider, once around the routes. Damsko's provider
+ * keeps the words it has until the language or one of them changes.
  */
 export const UiWords = ({ children }: { children: ReactNode }) => {
   const { t, i18n } = useLingui();
@@ -25,7 +25,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Failed`,
       loading: t`Working`,
     },
-    useAction: {
+    action: {
       agentAsks: t`Does something that needs your yes`,
       agentPresses: (words) => t`Presses "${words}"`,
       error: t`Could not finish`,
