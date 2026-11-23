@@ -280,7 +280,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     new RegExp(sourceName, "u"),
     new RegExp(`^Let ${name} start when its webhook is called\\?$`, "u")
   );
-  await grant.getByRole("button", { name: "Grant it" }).click();
+  await grant.getByRole("button", { name: "Allow" }).click();
   await expect(grant).toHaveCount(0, pageRead);
   await page.goto(`/workflows/${workflow}?view=settings&section=triggers`);
   await expect(

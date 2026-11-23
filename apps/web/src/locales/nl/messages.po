@@ -1698,6 +1698,10 @@ msgstr "{words}?"
 msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
 msgstr "{work, plural, one {# stuk werk} other {# stukken werk}}"
 
+#: src/inbox/item-detail.tsx
+msgid "{workflow} · asked by Grasp on {asked}"
+msgstr "{workflow} · gevraagd door Grasp op {asked}"
+
 #: src/settings/ai-spend.tsx
 msgid "{workflow} in {app}"
 msgstr "{workflow} in {app}"
@@ -2666,6 +2670,11 @@ msgstr "Alle stappen klaar"
 #: src/frame/part-words.tsx
 msgid "All tools"
 msgstr "Alle tools"
+
+#: src/inbox/item-detail.tsx
+msgctxt "let a workflow's trigger start it"
+msgid "Allow"
+msgstr "Toestaan"
 
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
@@ -5914,6 +5923,7 @@ msgid "Decline"
 msgstr "Weigeren"
 
 #: src/decision-card.tsx
+#: src/inbox/item-detail.tsx
 msgctxt "a workflow's decision"
 msgid "Decline"
 msgstr "Afwijzen"
@@ -11608,6 +11618,7 @@ msgid "No AI provider is connected yet. Ask your admin to connect one."
 msgstr "Er is nog geen AI-aanbieder gekoppeld. Vraag je beheerder er een te koppelen."
 
 #: src/decision-card.tsx
+#: src/inbox/item-detail.tsx
 msgid "No answer by {date}: it closes."
 msgstr "Geen antwoord vóór {date}: dan sluit het."
 

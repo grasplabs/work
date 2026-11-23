@@ -5,7 +5,11 @@ import { useRouter } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
+import {
+  grantReviewed,
+  reviewedVersion,
+  triggerStartOf,
+} from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { draftOf } from "../chat/held-drafts.ts";
 import {
@@ -17,6 +21,7 @@ import {
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
 import { DecisionCard } from "../decision-card.tsx";
+import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatDateTime } from "../format.ts";
 import {
   AlertDialog,
@@ -48,6 +53,11 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { JsonFields } from "../json-fields.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import {
+  ApprovalAnswers,
+  ApprovalCard,
+  ApprovalSource,
+} from "../workflows/approval-card.tsx";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { InterviewsDetail } from "./interviews-item.tsx";
@@ -480,6 +490,71 @@ const HeldItem = ({
 };
 
 /**
+ * An ask about a workflow, in the shape every workflow approval takes
+ * (workflows/approval-card.tsx): what is asked, the workflow it is about,
+ * what to read, until when it waits, then Decline and the yes. An answer
+ * core refuses stays on the card, with why; one it takes lets the item go.
+ */
+const WorkflowAsk = ({
+  frame,
+  title,
+  said,
+  details,
+  deadline,
+  yes,
+  onApprove,
+  onDecline,
+}: {
+  frame: Frame;
+  title: string;
+  /** The workflow it is about, and who asked when that is known. */
+  said: string;
+  details: ReactNode;
+  deadline?: string;
+  /** What the yes says: what it does. */
+  yes: string;
+  onApprove: (session: Session) => Promise<unknown>;
+  onDecline: (session: Session) => Promise<unknown>;
+}) => {
+  const { t } = useLingui();
+  const { busy, failure, decide } = useDecide(frame.onSaid);
+  return (
+    <div {...stylex.props(styles.item)}>
+      <ApprovalCard
+        deadline={deadline}
+        details={details}
+        source={<ApprovalSource said={said} />}
+        title={title}
+      >
+        <ErrorText>{failure}</ErrorText>
+        <ApprovalAnswers>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void decide(onDecline, t`Declined: ${title}`);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t({ message: "Decline", context: "a workflow's decision" })}
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void decide(onApprove, t`Approved: ${title}`);
+            }}
+            size="sm"
+            variant="quiet"
+          >
+            {yes}
+          </Button>
+        </ApprovalAnswers>
+      </ApprovalCard>
+    </div>
+  );
+};
+
+/**
  * A start of a workflow a chat's agent asked for: approving starts it, as
  * the agent acting for the person, with exactly the input shown.
  */
@@ -492,11 +567,20 @@ const HeldStartItem = ({
 }) => {
   const { t } = useLingui();
   const { start } = source;
+  const { title, body } = frame.item;
+  const workflow = start.workflowName;
+  const asked = formatDateTime(start.requestedAt);
+  const date = formatDateTime(start.expiresAt);
   return (
-    <ApprovalFrame
-      approveLabel={t`Start it`}
+    <WorkflowAsk
+      deadline={t`No answer by ${date}: it closes.`}
       details={
         <>
+          {body.map((paragraph) => (
+            <Text key={paragraph} size="sm" tone="text">
+              {paragraph}
+            </Text>
+          ))}
           <Text size="sm" tone="muted">
             {t`What it starts with`}
           </Text>
@@ -510,6 +594,9 @@ const HeldStartItem = ({
       onDecline={async (session) => {
         await session.heldStarts.decline(start.id);
       }}
+      said={t`${workflow} · asked by Grasp on ${asked}`}
+      title={title}
+      yes={t`Start it`}
     />
   );
 };
@@ -524,6 +611,33 @@ const RequestItem = ({
 }) => {
   const { t } = useLingui();
   const { request, pending } = source;
+  const started = triggerStartOf(request);
+  if (started !== undefined) {
+    return (
+      <WorkflowAsk
+        details={
+          <RequestDetails directory={pending.directory} request={request} />
+        }
+        frame={frame}
+        onApprove={async (session) =>
+          await grantReviewed(
+            session.permissions,
+            request,
+            reviewedVersion(request, pending.directory)
+          )
+        }
+        onDecline={async (session) =>
+          await session.permissions.revoke(request.id)
+        }
+        said={started.workflow}
+        title={frame.item.title}
+        yes={t({
+          message: "Allow",
+          context: "let a workflow's trigger start it",
+        })}
+      />
+    );
+  }
   return (
     <ApprovalFrame
       approveLabel={t`Grant it`}
