@@ -136,7 +136,7 @@ const Detail = ({
   return (
     <div {...stylex.props(styles.detail)}>
       <div {...stylex.props(styles.head)}>
-        <ProviderMark id={app.id} logo={app.logo} name={name} size="md" />
+        <ProviderMark id={app.id} logo={app.logo} name={name} size="default" />
         <Heading level={3} size="default">
           {name}
         </Heading>
