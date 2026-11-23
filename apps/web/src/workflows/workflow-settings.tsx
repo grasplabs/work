@@ -307,7 +307,8 @@ const FactRow = ({
         {info === undefined ? null : <InfoTip>{info}</InfoTip>}
       </span>
     </FieldContent>
-    <Text as="span" size="sm">
+    {/* Where the rows' controls stand, from the start of their column. */}
+    <Text as="span" size="sm" style={styles.control}>
       {children}
     </Text>
   </Field>
