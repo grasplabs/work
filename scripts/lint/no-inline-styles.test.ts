@@ -527,6 +527,24 @@ for (const [file, text] of Object.entries({
     "export const SaveBar = ({ style }) => <div {...stylex.props(style)} />;",
   "own-and-kit.ts":
     'export * from "./own.tsx";\nexport * from "@grasp-os/app-kit/components/button";',
+  "own-ways.tsx": [
+    'import { memo } from "react";',
+    "export function Panel({ style }) { return <div {...stylex.props(style)} />; }",
+    "const Held = memo(({ style }) => <div {...stylex.props(style)} />);",
+    "export { Held };",
+    "export default function Page({ style }) { return <div {...stylex.props(style)} />; }",
+  ].join("\n"),
+  "damsko-member.ts":
+    'import * as Damsko from "@grasp-os/ui/components/button";\nexport const Button = Damsko.Button;',
+  "kit-member.ts":
+    'import * as Kit from "@grasp-os/app-kit/components/button";\nexport const Button = Kit.Button;',
+  "kit-destructured.ts":
+    'import * as Kit from "@grasp-os/app-kit/components/button";\nexport const { Button } = Kit;',
+  "kit-member-local.ts":
+    'import * as Kit from "@grasp-os/app-kit/components/button";\nconst Button = Kit.Button;\nexport { Button };',
+  "kit-made.ts":
+    'import { make } from "@grasp-os/app-kit/components/button";\nexport const Button = make();',
+  "kit-let.ts": "export let Button = () => null;",
 })) {
   mkdirSync(path.dirname(path.join(modules, file)), { recursive: true });
   writeFileSync(path.join(modules, file), `${text}\n`);
@@ -559,6 +577,24 @@ describe("through a relative module", () => {
         filename: page,
       },
       {
+        name: "a component the module declares as a function, a const it exports by name, or its default",
+        code: `import Page, { Panel, Held } from "./own-ways.tsx";${styles}
+  const Shell = () => (
+    <>
+      <Panel style={layout.wide} />
+      <Held style={layout.wide} />
+      <Page style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+      },
+      {
+        name: "a member of Damsko's namespace the module passes on",
+        code: `import { Button } from "./damsko-member.ts";${styles}
+  const Page = () => <Button style={layout.wide} />;`,
+        filename: page,
+      },
+      {
         name: "a component of the module's own beside everything of another package",
         code: `import { SaveBar } from "./own-and-kit.ts";${styles}
   const Page = () => <SaveBar style={layout.wide} />;`,
@@ -586,6 +622,25 @@ describe("through a relative module", () => {
   );`,
         filename: page,
         errors: Array.from({ length: 6 }, () => ({ messageId: "stylexStyle" })),
+      },
+      {
+        name: "something the module holds that is no function or class of its own",
+        code: `import { Button as One } from "./kit-member.ts";
+  import { Button as Two } from "./kit-destructured.ts";
+  import { Button as Three } from "./kit-member-local.ts";
+  import { Button as Four } from "./kit-made.ts";
+  import { Button as Five } from "./kit-let.ts";${styles}
+  const Page = () => (
+    <>
+      <One style={layout.wide} />
+      <Two style={layout.wide} />
+      <Three style={layout.wide} />
+      <Four style={layout.wide} />
+      <Five style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+        errors: Array.from({ length: 5 }, () => ({ messageId: "stylexStyle" })),
       },
     ],
   });
