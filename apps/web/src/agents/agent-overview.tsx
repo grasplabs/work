@@ -226,7 +226,7 @@ const useDates = () => {
     weekday: "short",
     day: "numeric",
     month: "short",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   });
   const day = new Intl.DateTimeFormat(i18n.locale, {
@@ -515,7 +515,7 @@ const Schedule = ({
   const weekdays = useWeekdays();
   const own = agent.ownerId !== null;
   const time = new Intl.DateTimeFormat(i18n.locale, {
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
     timeZone: "UTC",
   });
