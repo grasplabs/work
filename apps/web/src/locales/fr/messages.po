@@ -51,6 +51,12 @@ msgstr "{0, plural, one {# chose qui y a été dite part avec.} other {# choses 
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
 msgstr "{0, plural, one {L’équipe que vous avez laissée de côté} other {Les # équipes que vous avez laissées de côté}}"
 
+#. placeholder {0}: formatNumber(unseen)
+#: src/projects/project-view.tsx
+msgctxt "connections the person can't see"
+msgid "{0} more"
+msgstr ""
+
 #. placeholder {0}: classes.on
 #. placeholder {1}: classes.of
 #: src/agents/agent-page.tsx
@@ -595,6 +601,7 @@ msgstr "{event}, sur {account}"
 msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
 msgstr "{failed, plural, one {Un e-mail n’a pas atteint quelqu’un} other {# e-mails n’ont pas atteint leurs destinataires}}"
 
+#: src/projects/project-view.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "{failed} failed"
 msgstr "{failed} en échec"
@@ -880,6 +887,10 @@ msgstr "{more, plural, one {et # autre} other {et # autres}}"
 msgid "{more, plural, one {Show # more run} other {Show # more runs}}"
 msgstr "{more, plural, one {Afficher # exécution de plus} other {Afficher # exécutions de plus}}"
 
+#: src/projects/project-view.tsx
+msgid "{name} · {count}"
+msgstr ""
+
 #: src/brain/brain-article/team-work.tsx
 msgctxt "the same pain: these teams told it too"
 msgid "{name} · also {teams}"
@@ -1050,6 +1061,10 @@ msgstr "{name} ne fait que lire. Passer en Écriture"
 #: src/drafts/draft-history.tsx
 msgid "{name} restored an earlier state"
 msgstr "{name} a restauré un état antérieur"
+
+#: src/projects/project-view.tsx
+msgid "{name} stopped letting Grasp in"
+msgstr ""
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -1316,10 +1331,12 @@ msgstr "{role}, ni invitation ni entretien pour l’instant"
 msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgstr "{rows, plural, one {# ligne à importer.} other {# lignes à importer.}}"
 
+#: src/projects/project-view.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "{runs} done this week"
 msgstr "{runs} terminées cette semaine"
 
+#: src/projects/project-view.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "{runs} of yours done this week"
 msgstr "{runs} des vôtres terminées cette semaine"
@@ -1626,6 +1643,7 @@ msgstr "{waiting, plural, one {# workflow a besoin de vous} other {# workflows o
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Il utilise # nouveau type d’accès. Un administrateur l’approuve une fois.} other {Il utilise # nouveaux types d’accès. Un administrateur les approuve une fois.}}"
 
+#: src/projects/project-view.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "{waiting} waiting"
 msgstr "{waiting} en attente"
@@ -3462,6 +3480,10 @@ msgstr "Demander à {0}"
 msgid "Ask {name} in any chat"
 msgstr "Demandez à {name} dans n’importe quel chat"
 
+#: src/projects/project-view.tsx
+msgid "Ask {owner} to reconnect it."
+msgstr ""
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Ask {owner} to remove Grasp at {link}."
 msgstr "Demandez à {owner} de retirer Grasp sur {link}."
@@ -3469,6 +3491,10 @@ msgstr "Demandez à {owner} de retirer Grasp sur {link}."
 #: src/connections/revocations-by-hand.tsx
 msgid "Ask {owner} to remove Grasp's access in {app}'s settings for connected apps."
 msgstr "Demandez à {owner} de retirer l’accès de Grasp dans les réglages des applications connectées de {app}."
+
+#: src/projects/project-view.tsx
+msgid "Ask {owner} to set this project up."
+msgstr ""
 
 #: src/frame/part-words.tsx
 msgid "Ask {who}: {question}"
@@ -4255,11 +4281,6 @@ msgctxt "change how it was settled"
 msgid "Change"
 msgstr "Modifier"
 
-#: src/projects/project-view.tsx
-msgctxt "change the project: a menu item"
-msgid "Change"
-msgstr "Modifier"
-
 #: src/onboarding/send-plan-form.tsx
 msgctxt "change which teams"
 msgid "Change"
@@ -4593,6 +4614,7 @@ msgid "Chat with {name}"
 msgstr "Discuter avec {name}"
 
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/projects/project-view.tsx
 msgid "Chats"
 msgstr "Discussions"
 
@@ -9364,6 +9386,7 @@ msgctxt "inbox item kind"
 msgid "Interviews"
 msgstr "Entretiens"
 
+#: src/projects/project-view.tsx
 #: src/settings/invitations.tsx
 msgid "Invite"
 msgstr "Inviter"
@@ -9767,10 +9790,6 @@ msgstr "Ses apps et workflows ne sont pas supprimés, et rien n’y est partagé
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Ses apps et workflows ne sont pas supprimés, mais ne sont plus partagés avec tous ses membres : {who} en perdent l’accès, sauf s’ils leur sont partagés autrement."
 
-#: src/projects/project-view.tsx
-msgid "Its apps and workflows use no connections."
-msgstr "Ses apps et ses workflows n’utilisent aucune connexion."
-
 #: src/agents/agent-apps-card.tsx
 msgid "Its apps couldn't be loaded. Reload the page."
 msgstr "Ses apps n’ont pas pu être chargées. Rechargez la page."
@@ -10149,6 +10168,7 @@ msgstr "Dernière exécution : {when}"
 msgid "Last read {lastRead}"
 msgstr "Lu pour la dernière fois {lastRead}"
 
+#: src/projects/project-view.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "Last run {since}"
 msgstr "Dernière exécution {since}"
@@ -10771,6 +10791,10 @@ msgstr "Générer un nouveau secret"
 msgid "Make a new secret for {name}?"
 msgstr "Créer un nouveau secret pour {name} ?"
 
+#: src/projects/project-view.tsx
+msgid "Make a workflow"
+msgstr ""
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Make admin"
 msgstr "Faire admin"
@@ -10779,6 +10803,10 @@ msgstr "Faire admin"
 #: src/agents/new-agent.tsx
 msgid "Make agent"
 msgstr "Créer l’agent"
+
+#: src/projects/project-view.tsx
+msgid "Make an App"
+msgstr ""
 
 #: src/make/make-ideas.tsx
 msgid "Make an App from the {name} blueprint: {description}"
@@ -11642,10 +11670,6 @@ msgstr "Aucune application ne s’appelle « {asked} »"
 msgid "No apps added yet."
 msgstr "Aucune app ajoutée pour l’instant."
 
-#: src/projects/project-view.tsx
-msgid "No Apps in it yet."
-msgstr "Aucune app pour l’instant."
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "No apps match your search"
 msgstr "Aucune app ne correspond à votre recherche"
@@ -11653,6 +11677,10 @@ msgstr "Aucune app ne correspond à votre recherche"
 #: src/apps/apps-overview.tsx
 msgid "No Apps yet"
 msgstr "Aucune application pour l’instant"
+
+#: src/projects/project-view.tsx
+msgid "No Apps yet, such as a debtor overview."
+msgstr ""
 
 #: src/chat/chat-window.tsx
 msgid "No archived chat called “{query}”"
@@ -11860,6 +11888,7 @@ msgstr "Aucune exécution lancée depuis elle récemment."
 msgid "No runs match these filters."
 msgstr "Aucune exécution ne correspond à ces filtres."
 
+#: src/projects/project-view.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "No runs yet"
 msgstr "Aucune exécution pour l’instant"
@@ -11925,13 +11954,13 @@ msgstr "Aucun workflow n’est encore ouvert aux demandes."
 msgid "No workflow yet"
 msgstr "Pas encore de workflow"
 
-#: src/projects/project-view.tsx
-msgid "No workflows in it yet."
-msgstr "Aucun workflow pour l’instant."
-
 #: src/workflows/workflow-rows.tsx
 msgid "No workflows yet"
 msgstr "Pas encore de workflows"
+
+#: src/projects/project-view.tsx
+msgid "No workflows yet, such as booking invoices."
+msgstr ""
 
 #: src/activity/audit-event.tsx
 msgid "No: it was changed, or doesn't link to the event before it."
@@ -12031,8 +12060,8 @@ msgid "None of this is right"
 msgstr "Rien de tout cela n’est exact"
 
 #: src/projects/project-view.tsx
-msgid "None of your chats are in it. Only you see the chats you put here."
-msgstr "Aucun de vos chats n’y est. Vous seul voyez les chats que vous y mettez."
+msgid "None of your chats are in this project yet."
+msgstr ""
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "None published yet."
@@ -12484,10 +12513,6 @@ msgstr "Rien n’a encore été exécuté."
 msgid "Nothing here"
 msgstr "Rien ici"
 
-#: src/projects/project-view.tsx
-msgid "Nothing in it that you can open."
-msgstr "Rien que vous pouvez ouvrir."
-
 #: src/brain/sources-page.tsx
 msgid "Nothing in the Brain you may read yet"
 msgstr "Rien encore dans le cerveau que vous puissiez lire"
@@ -12917,6 +12942,10 @@ msgstr "Uniquement"
 msgid "Only {accounts}"
 msgstr "Uniquement {accounts}"
 
+#: src/projects/project-view.tsx
+msgid "Only {owner} so far."
+msgstr ""
+
 #: src/inbox/item-detail.tsx
 msgid "Only {person} can say whether it happened."
 msgstr "Seul·e {person} peut dire si cela a eu lieu."
@@ -13074,6 +13103,10 @@ msgstr "Vous seul la voyez. Dites à Grasp dans le chat ce qu’il faut changer,
 #: src/drafts/status-badge.tsx
 msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
+
+#: src/projects/project-view.tsx
+msgid "Only you so far."
+msgstr ""
 
 #: src/apps/apps-overview.tsx
 #: src/brain/activity-page.tsx
@@ -13419,6 +13452,10 @@ msgstr "En dehors de Grasp"
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "Dans les deux prochaines semaines, vous recevrez un court lien personnel pour parler avec Stephen, l’intervieweur IA de Grasp : les responsables pendant environ 20 minutes, les autres 10 à 15. À la voix ou par écrit."
 
+#: src/projects/project-view.tsx
+msgid "Overview"
+msgstr ""
+
 #: src/interview/words.ts
 msgid "Own list or tool"
 msgstr "Liste ou outil personnel"
@@ -13440,6 +13477,7 @@ msgid "Owner"
 msgstr "Propriétaire"
 
 #: src/projects/project-people.tsx
+#: src/projects/project-view.tsx
 msgctxt "a project's owner"
 msgid "Owner"
 msgstr "Propriétaire"
@@ -13630,6 +13668,7 @@ msgstr "Mettre Stephen en pause en dehors de Grasp ?"
 
 #: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
+#: src/projects/project-view.tsx
 #: src/settings/stephen-card.tsx
 msgid "Paused"
 msgstr "En pause"
@@ -13703,6 +13742,7 @@ msgstr "personnes"
 #: src/projects/project-dialog.tsx
 #: src/projects/project-people-stack.tsx
 #: src/projects/project-people.tsx
+#: src/projects/project-view.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "People"
 msgstr "Personnes"
@@ -14071,6 +14111,7 @@ msgstr "Produits"
 msgid "Profile"
 msgstr "Profil"
 
+#: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Project"
 msgstr "Projet"
@@ -14504,6 +14545,14 @@ msgstr "Recommandées"
 msgctxt "the option the assistant would pick"
 msgid "Recommended"
 msgstr "Recommandé"
+
+#: src/projects/project-view.tsx
+msgid "Reconnect"
+msgstr ""
+
+#: src/projects/project-view.tsx
+msgid "Reconnect it so the Apps and workflows that use it work again."
+msgstr ""
 
 #: src/apps/app-data.tsx
 msgid "record"
@@ -16098,6 +16147,7 @@ msgstr "Préparation de {name}…"
 #: src/apps/apps-overview.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 #: src/routes/_shell.settings.workspace.tsx
@@ -18321,6 +18371,14 @@ msgstr "Les administrateurs de l'organisation connectent ici son fournisseur d'I
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "L'origine est https:// et un nom d'hôte public, sans rien après : https://api.example.com."
 
+#: src/projects/project-view.tsx
+msgid "the owner"
+msgstr ""
+
+#: src/projects/project-view.tsx
+msgid "The owner"
+msgstr ""
+
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "Les paquets sont approuvés. Continue."
@@ -19870,6 +19928,10 @@ msgstr "Vue"
 msgctxt "a table's view menu"
 msgid "View"
 msgstr "Affichage"
+
+#: src/projects/project-view.tsx
+msgid "View all"
+msgstr ""
 
 #: src/drafts/draft-history.tsx
 msgid "View changes"
