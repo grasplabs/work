@@ -42,6 +42,18 @@ const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
 };
 
 /**
+ * That the preview says its problem is being fixed, over its corner, in
+ * words on one line: a notice too narrow for them draws them a letter a
+ * line, which a person can't read.
+ */
+const expectFixing = async (preview: Locator): Promise<void> => {
+  const words = preview.getByText("Fixing a problem…");
+  await expect(words).toBeVisible();
+  const box = await words.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan((box?.height ?? 0) * 4);
+};
+
+/**
  * The App's own tally page, released and live, once it shows its
  * count. Its first open builds it, which on a loaded machine takes longer
  * than the default 5 seconds.
@@ -274,7 +286,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
       "server code doesn't build",
       { timeout: 10_000 }
     );
-    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    await expectFixing(preview);
     expect(await preview.locator("iframe").boundingBox()).toStrictEqual(
       shownAt
     );
@@ -410,7 +422,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
       timeout: 30_000,
     });
-    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    await expectFixing(preview);
 
     await askOnceIdle(chat, "Fix the page.");
     await expect(chat.getByText("The tally works now.")).toBeVisible({

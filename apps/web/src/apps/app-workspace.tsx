@@ -240,13 +240,12 @@ const styles = stylex.create({
     position: "absolute",
     insetInlineEnd: space[3],
     insetBlockEnd: space[3],
-    maxWidth: size.toastWidth,
+    // A width of its own, as the frame's notice has (page-frame.tsx).
+    width: `min(${size.toastWidth}, 100% - 2 * ${space[3]})`,
     animationName: { default: fadeIn, [media.reducedMotion]: "none" },
     animationDuration: duration.ui,
     animationTimingFunction: duration.ease,
   },
-  // An alert's action, under its words.
-  below: { display: "flex", marginBlockStart: space[2] },
   // A preview drawn narrower than its room, in the middle of it.
   drawn: { width: "100%", marginInline: "auto" },
   padded: { padding: space[4] },
@@ -506,19 +505,19 @@ const StaleTestData = ({ app }: { app: string }) => {
             Reset the example data in Data to try the change. Your team&apos;s
             records aren&apos;t touched.
           </Trans>
-          <span {...stylex.props(styles.below)}>
-            <Button size="xs" variant="outline" asChild>
-              <Link
-                params={{ app }}
-                replace
-                search={(held) => ({ project: held.project, view: "data" })}
-                to="/apps/$app"
-              >
-                {t`Open Data`}
-              </Link>
-            </Button>
-          </span>
         </AlertDescription>
+        <AlertAction>
+          <Button size="xs" variant="outline" asChild>
+            <Link
+              params={{ app }}
+              replace
+              search={(held) => ({ project: held.project, view: "data" })}
+              to="/apps/$app"
+            >
+              {t`Open Data`}
+            </Link>
+          </Button>
+        </AlertAction>
       </Alert>
     </div>
   );

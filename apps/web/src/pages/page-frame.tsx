@@ -63,13 +63,15 @@ const styles = stylex.create({
     borderBlockEndColor: colors.border,
   },
   // What a bare frame is doing, over its corner: nothing to press, so
-  // clicks go through it to the page.
+  // clicks go through it to the page. A width of its own, a toast's within
+  // the frame: Alert's words are measured by the room they get, so a box
+  // sized by its content would give them none.
   notice: {
     display: { default: "block", [PRINT]: "none" },
     position: "absolute",
     top: space[3],
     insetInlineEnd: space[3],
-    maxWidth: "24rem",
+    width: `min(${size.toastWidth}, 100% - 2 * ${space[3]})`,
     pointerEvents: "none",
   },
   chrome: { gap: space[2], padding: space[3] },
@@ -749,8 +751,6 @@ interface PageFrameProps {
   onReload?: () => void;
   /** Called once the pages failed or their person signed out. */
   onEnded?: PageEnded;
-  /** Called each time the pages started and run. */
-  onRunning?: () => void;
 }
 
 /** How a frame ended: it failed, and why, or its person signed out. */
@@ -774,7 +774,6 @@ export const PageFrame = ({
   bare = false,
   onReload,
   onEnded,
-  onRunning,
 }: PageFrameProps) => {
   const { t } = useLingui();
   return (
@@ -788,7 +787,6 @@ export const PageFrame = ({
       {...(ownPath === undefined ? {} : { ownPath })}
       {...(onReload === undefined ? {} : { onReload })}
       {...(onEnded === undefined ? {} : { onEnded })}
-      {...(onRunning === undefined ? {} : { onRunning })}
     />
   );
 };
