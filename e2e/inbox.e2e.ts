@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
+import { expectNoError } from "./said.ts";
 
 // The inbox, from the nav: what waits on the person as a list, the item
 // chosen beside it with its actions, and what was done. An admin also
@@ -59,9 +60,5 @@ test("a person with nothing waiting finds their inbox from the nav, with nothing
   );
   await page.getByRole("tab", { name: /^Done/u }).click();
   await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
-  // Alerts that say something: until Damsko's fix for its Toaster's empty
-  // role="alert" region (registry gap "two sets of live regions").
-  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
-    0
-  );
+  await expectNoError(page);
 });

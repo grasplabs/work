@@ -6,13 +6,20 @@ import { I18nProvider } from "@lingui/react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { PagePanel, PageWithPanel } from "./page-panel.tsx";
 
-// A page's side panel, as the frame seats it: beside the page on a card
-// wide enough for both, in a sheet on a narrower one, and gone with the
-// page.
+// A page's side panel, as the frame seats it: beside the page where the
+// page keeps its least beside it, in a sheet where it would not, and gone
+// with the page.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -65,6 +72,43 @@ const cardOf = (width: number) => {
   );
 };
 
+/**
+ * The card on a window `width` across, as the frame lays it: the whole
+ * window under 1024px, where the sidebar is a sheet; from there, beside the
+ * sidebar's 240px and two 6px gutters.
+ */
+const windowOf = (width: number) => {
+  cardOf(width < 1024 ? width : width - 252);
+};
+
+/** What watches the card's size: told when the window changes under a drawn frame. */
+const watchers = new Set<() => void>();
+
+/** A ResizeObserver this test tells, as the browser's would be told. */
+class Watching {
+  readonly #told: () => void;
+  constructor(told: () => void) {
+    this.#told = told;
+  }
+  observe() {
+    watchers.add(this.#told);
+  }
+  disconnect() {
+    watchers.delete(this.#told);
+  }
+}
+
+/** The window made `width` across under the drawn frame. */
+const resizedTo = async (width: number): Promise<void> => {
+  windowOf(width);
+  await act(async () => {
+    for (const told of watchers) {
+      told();
+    }
+    await settled();
+  });
+};
+
 /** Draws the harness as `asked`, again on the same root once made. */
 const drawn = async (root: Root, asked: Asked): Promise<void> => {
   await act(async () => {
@@ -92,6 +136,10 @@ describe("a page's side panel", () => {
     return { host, root };
   };
 
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", Watching);
+  });
+
   afterEach(() => {
     act(() => {
       for (const root of roots.splice(0)) {
@@ -99,6 +147,8 @@ describe("a page's side panel", () => {
       }
     });
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    watchers.clear();
     document.body.replaceChildren();
   });
 
@@ -117,8 +167,65 @@ describe("a page's side panel", () => {
     expect(host.querySelector("p")?.textContent).toBe("The page");
   });
 
-  it("is a sheet on a card under a phone's width, closed until the page opens it, and tells the page as it closes", async () => {
-    cardOf(600);
+  // Where the page asks it open (its button), at windows either side of
+  // the reference's switch (892px) and of the sidebar's (1024px).
+  it.each([
+    [640, "sheet"],
+    [891, "sheet"],
+    [892, "beside"],
+    [1024, "sheet"],
+    [1280, "beside"],
+  ])("on a window %ipx across, stands %s", async (width, where) => {
+    windowOf(width);
+    const { root } = mounted();
+    await drawn(root, { open: false });
+    await drawn(root, { open: true });
+    expect(placed()).toBe(where);
+  });
+
+  it("is a sheet sooner for a page that needs more beside it", async () => {
+    // The audit trail's table, 952px whole: at 1440 the card leaves it 768.
+    windowOf(1440);
+    const { root } = mounted();
+    await drawn(root, { open: false, pageMinWidth: 952 });
+    await drawn(root, { open: true, pageMinWidth: 952 });
+    const at1440 = placed();
+    await resizedTo(1920);
+    await drawn(root, { open: false, pageMinWidth: 952 });
+    await drawn(root, { open: true, pageMinWidth: 952 });
+    expect({ at1440, at1920: placed() }).toStrictEqual({
+      at1440: "sheet",
+      at1920: "beside",
+    });
+  });
+
+  it("does not cover the page on a phone's first look, though the page opens with it open", async () => {
+    windowOf(390);
+    const { root } = mounted();
+    await drawn(root, { open: true });
+    const first = placed();
+    await drawn(root, { open: false });
+    await drawn(root, { open: true });
+    expect({ first, asked: placed() }).toStrictEqual({
+      first: "none",
+      asked: "sheet",
+    });
+  });
+
+  it("does not become a sheet over the page as the card narrows under it", async () => {
+    windowOf(1280);
+    const { root } = mounted();
+    await drawn(root, { open: true });
+    const wide = placed();
+    await resizedTo(640);
+    expect({ wide, narrowed: placed() }).toStrictEqual({
+      wide: "beside",
+      narrowed: "none",
+    });
+  });
+
+  it("is closed on a narrow card until the page opens it, and tells the page as it closes", async () => {
+    windowOf(600);
     const { root } = mounted();
     await drawn(root, {});
     const unset = placed();
@@ -126,6 +233,7 @@ describe("a page's side panel", () => {
     const onOpenChange = (open: boolean) => {
       heard.push(open);
     };
+    await drawn(root, { open: false, onOpenChange });
     await drawn(root, { open: true, onOpenChange });
     const opened = placed();
     await act(async () => {
@@ -167,9 +275,10 @@ describe("a page's side panel", () => {
   });
 
   it("keeps the person's choice for the next page that leaves it to the frame", async () => {
-    cardOf(600);
+    windowOf(600);
     const { root } = mounted();
     // The sheet open on one page, and closed by the person.
+    await drawn(root, { open: false });
     await drawn(root, { open: true });
     await act(async () => {
       document.dispatchEvent(
@@ -177,8 +286,8 @@ describe("a page's side panel", () => {
       );
       await settled();
     });
-    // The next page, on a card wide enough, leaves it to the frame.
-    cardOf(1200);
+    // The next page, on a window wide enough, leaves it to the frame.
+    await resizedTo(1440);
     await drawn(root, { shown: false });
     await drawn(root, {});
     expect(placed()).toBe("none");

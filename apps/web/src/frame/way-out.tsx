@@ -10,8 +10,10 @@ import { levelAt } from "./levels.ts";
 // sidebar's own component, which stays as long as the frame does): the
 // levels' rows are drawn anew each time the phone's sheet opens.
 
-/** A page the main level stands beside, to go back to. */
+/** A page the main level stands beside, to go back to, as the person left it. */
 export interface Outside {
+  /** The whole address, its query with it: a new query is a new place. */
+  href: string;
   pathname: string;
   search: Record<string, unknown>;
 }
@@ -22,10 +24,10 @@ export interface Outside {
  * does.
  */
 export const useWayOut = (): Outside | undefined => {
-  const { pathname, search } = useLocation();
+  const { href, pathname, search } = useLocation();
   const [outside, setOutside] = useState<Outside>();
-  if (levelAt(pathname) === "main" && outside?.pathname !== pathname) {
-    setOutside({ pathname, search });
+  if (levelAt(pathname) === "main" && outside?.href !== href) {
+    setOutside({ href, pathname, search });
   }
   return outside;
 };

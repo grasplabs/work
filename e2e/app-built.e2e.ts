@@ -4,6 +4,7 @@ import type { WebSocketRoute } from "@playwright/test";
 import { test } from "./csp.ts";
 import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
+import { toastSaying } from "./said.ts";
 
 // An App, end to end, as a builder makes one: Make something, what they
 // want to get done, Grasp's plan, Build it, and the chat building it (the
@@ -164,7 +165,7 @@ test("a builder makes an App from what they want done, shares it with their team
     .check();
   blip.sharing = true;
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
-  await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  await expect(toastSaying(page, "Shared with Person")).toBeVisible(built);
   // Its read again after sharing lost its connection: Grasp can't be
   // reached, until a connection answers again, when the page reads the
   // App by itself, with no Try again.

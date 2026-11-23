@@ -7,6 +7,7 @@ import { test } from "./csp.ts";
 import { modelScripts, workflowPlanned } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { toastSaying } from "./said.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against grasp-workflow/2 and says what to fix at
@@ -132,7 +133,9 @@ const share = async (page: Page, label: string): Promise<void> => {
     .getByRole("dialog")
     .getByRole("button", { name: "Share", exact: true })
     .click();
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
+    pageRead
+  );
 };
 
 /** A version's label, `YY.MM.N`, as History names it. */

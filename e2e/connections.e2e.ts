@@ -7,6 +7,7 @@ import { seededConnections, seededTools } from "./connections-seed.ts";
 import type { SeededConnection } from "./connections-seed.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
+import { expectErrorsShown } from "./said.ts";
 
 // The Integrations pages: a person finds the account they connected on
 // its integration's page, with where it stands, signs in again to one whose
@@ -200,18 +201,15 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   // A flow that failed comes back refused, and says what to do; a code
   // nobody knows says only the page's own words.
   await page.goto("/integrations?connectionError=connection.already_connected");
-  // Alerts that say something: until Damsko's fix for its Toaster's empty
-  // role="alert" region (registry gap "two sets of live regions").
-  const said = page.getByRole("alert").filter({ hasText: /\S/u });
-  await expect(said).toHaveText(
-    "That account is already connected here. Disconnect it first to connect it again."
-  );
+  await expectErrorsShown(page, [
+    "That account is already connected here. Disconnect it first to connect it again.",
+  ]);
   await page.goto(
     "/integrations?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E"
   );
-  await expect(said).toHaveText(
-    "Connecting didn't work. Try again, or ask an admin."
-  );
+  await expectErrorsShown(page, [
+    "Connecting didn't work. Try again, or ask an admin.",
+  ]);
   // A flow that finished, sent back without a page of its own, says so.
   await page.goto(`/integrations?connection=${mine.id}`);
   await expect(

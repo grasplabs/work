@@ -8,6 +8,7 @@ import { test } from "./csp.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { toastSaying } from "./said.ts";
 import { origin } from "./stack.ts";
 
 // An independent workflow, end to end, as its people make and use it: a
@@ -123,7 +124,9 @@ const drawnAndPublished = async (
     .getByRole("dialog")
     .getByRole("button", { name: "Share", exact: true })
     .click(pageRead);
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
+    pageRead
+  );
   return { workflow, name: newName };
 };
 
@@ -215,9 +218,8 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("alertdialog", { name: "Confirm your approval" })
     .getByRole("button", { name: "Confirm" })
     .click(pageRead);
-  // The page's own status, in its main: until Damsko's fix for its
-  // Toaster's empty live regions (registry gap "two sets of live regions"),
-  // whose role="status" one also holds what was last said politely.
+  // The page's own status, in its main: the toast region's live status
+  // region holds what was last said politely, such as a level's name.
   await expect(asDecider.getByRole("main").getByRole("status")).toHaveText(
     /^Approved by Person on /u,
     pageRead

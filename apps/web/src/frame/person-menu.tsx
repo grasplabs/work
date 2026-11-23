@@ -43,6 +43,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -129,38 +130,51 @@ const themeIcons: Record<ThemeMode, IconData> = {
 };
 
 /**
- * Light, dark or the system's, as a submenu of the person menu: the
- * person's own choice in this browser (theme.ts), on Damsko's modes. The
- * person menu applies it; this mounts only while the menu is open.
+ * One choice of the person menu, its options a radio group: beside the
+ * menu as a submenu, its trigger showing the choice now; `inline`, the
+ * options in the menu itself under the choice's name. On a phone a
+ * submenu has no room beside the menu, and Damsko's does not move into
+ * the window (registry gap "submenus do not shift into the window"), so
+ * the menu holds them there.
  */
-const ThemeMenu = ({ userId }: { userId: string }) => {
-  const { t, i18n } = useLingui();
-  // Read where it is kept, so a choice made in another tab shows here too.
-  const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
+const Choice = ({
+  inline,
+  name,
+  icon,
+  now,
+  value,
+  onValueChange,
+  children,
+}: {
+  inline: boolean;
+  name: string;
+  icon: IconData;
+  /** The choice now, after `name` on the submenu's trigger. */
+  now: ReactNode;
+  value: string;
+  onValueChange: (value: unknown) => void;
+  /** The options, each a DropdownMenuRadioItem. */
+  children: ReactNode;
+}) => {
+  if (inline) {
+    return (
+      <DropdownMenuRadioGroup onValueChange={onValueChange} value={value}>
+        <DropdownMenuLabel>{name}</DropdownMenuLabel>
+        {children}
+      </DropdownMenuRadioGroup>
+    );
+  }
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger icon={themeIcons[theme]}>
+      <DropdownMenuSubTrigger icon={icon}>
         <span {...stylex.props(styles.choice)}>
-          {t`Theme`}
-          <span {...stylex.props(styles.current)}>
-            {i18n._(themeNames[theme])}
-          </span>
+          {name}
+          {now}
         </span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup
-          value={theme}
-          onValueChange={(value: unknown) => {
-            if (isThemeMode(value)) {
-              chooseTheme(userId, value);
-            }
-          }}
-        >
-          {themeModes.map((each) => (
-            <DropdownMenuRadioItem key={each} value={each}>
-              {i18n._(themeNames[each])}
-            </DropdownMenuRadioItem>
-          ))}
+        <DropdownMenuRadioGroup onValueChange={onValueChange} value={value}>
+          {children}
         </DropdownMenuRadioGroup>
       </DropdownMenuSubContent>
     </DropdownMenuSub>
@@ -168,40 +182,71 @@ const ThemeMenu = ({ userId }: { userId: string }) => {
 };
 
 /**
- * The language the product speaks, as a submenu of the person menu. Each
+ * Light, dark or the system's, a choice of the person menu: the person's
+ * own in this browser (theme.ts), on Damsko's modes. The person menu
+ * applies it; this mounts only while the menu is open.
+ */
+const ThemeMenu = ({ userId, inline }: { userId: string; inline: boolean }) => {
+  const { t, i18n } = useLingui();
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
+  return (
+    <Choice
+      icon={themeIcons[theme]}
+      inline={inline}
+      name={t`Theme`}
+      now={
+        <span {...stylex.props(styles.current)}>
+          {i18n._(themeNames[theme])}
+        </span>
+      }
+      onValueChange={(value) => {
+        if (isThemeMode(value)) {
+          chooseTheme(userId, value);
+        }
+      }}
+      value={theme}
+    >
+      {themeModes.map((each) => (
+        <DropdownMenuRadioItem key={each} value={each}>
+          {i18n._(themeNames[each])}
+        </DropdownMenuRadioItem>
+      ))}
+    </Choice>
+  );
+};
+
+/**
+ * The language the product speaks, a choice of the person menu. Each
  * language is named in its own words, so anyone can find theirs.
  */
-const LanguageMenu = () => {
+const LanguageMenu = ({ inline }: { inline: boolean }) => {
   const { t, i18n } = useLingui();
   const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger icon={GlobeIcon}>
-        <span {...stylex.props(styles.choice)}>
-          {t`Language`}
-          {/* The language now, in its own words. */}
-          <span lang={locale} {...stylex.props(styles.current)}>
-            {localeNames[locale]}
-          </span>
+    <Choice
+      icon={GlobeIcon}
+      inline={inline}
+      name={t`Language`}
+      now={
+        // The language now, in its own words.
+        <span lang={locale} {...stylex.props(styles.current)}>
+          {localeNames[locale]}
         </span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup
-          value={locale}
-          onValueChange={(value: unknown) => {
-            if (isLocale(value)) {
-              void chooseLocale(value);
-            }
-          }}
-        >
-          {Object.entries(localeNames).map(([value, label]) => (
-            <DropdownMenuRadioItem key={value} label={label} value={value}>
-              <span lang={value}>{label}</span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+      }
+      onValueChange={(value) => {
+        if (isLocale(value)) {
+          void chooseLocale(value);
+        }
+      }}
+      value={locale}
+    >
+      {Object.entries(localeNames).map(([value, label]) => (
+        <DropdownMenuRadioItem key={value} label={label} value={value}>
+          <span lang={value}>{label}</span>
+        </DropdownMenuRadioItem>
+      ))}
+    </Choice>
   );
 };
 
@@ -274,9 +319,21 @@ export const PersonMenu = ({
                   <Link to="/setup">{t`Your onboarding`}</Link>
                 </DropdownMenuItem>
               ) : null}
-              <LanguageMenu />
-              <ThemeMenu userId={identity.userId} />
+              {isMobile ? null : (
+                <>
+                  <LanguageMenu inline={false} />
+                  <ThemeMenu inline={false} userId={identity.userId} />
+                </>
+              )}
             </DropdownMenuGroup>
+            {isMobile ? (
+              <>
+                <DropdownMenuSeparator />
+                <LanguageMenu inline />
+                <DropdownMenuSeparator />
+                <ThemeMenu inline userId={identity.userId} />
+              </>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               icon={LogOutIcon}

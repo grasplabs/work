@@ -7,6 +7,7 @@ import { z } from "zod";
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
 import { endSession, peopleIn, signInAs, signInTo } from "./people.ts";
+import { expectErrorsShown, toastSaying } from "./said.ts";
 
 /**
  * How long the page may take to show what came of a connection that had to
@@ -208,10 +209,11 @@ for (const [where, path, landed] of [
     await page.getByRole("button", { name: "Person", exact: true }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
 
-    await expect(page.getByText("Signing out didn't work")).toBeVisible();
-    await expect(
-      page.getByText("You're still signed in. Try again in a moment.")
-    ).toBeVisible();
+    const said = toastSaying(page, "Signing out didn't work");
+    await expect(said).toBeVisible();
+    await expect(said).toContainText(
+      "You're still signed in. Try again in a moment."
+    );
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
     await expect(
       page.getByRole("button", { name: "Person", exact: true })
@@ -510,11 +512,9 @@ test("shows the page loading while the members list is slow, then says core can'
   await expect(
     page.getByRole("heading", { name: "This page didn't load" })
   ).toBeVisible({ timeout: 15_000 });
-  // Alerts that say something: until Damsko's fix for its Toaster's empty
-  // role="alert" region (registry gap "two sets of live regions").
-  await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment."
-  );
+  await expectErrorsShown(page, [
+    "Grasp can't be reached right now. Try again in a moment.",
+  ]);
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(nav).toBeVisible();
   await expect(page.getByRole("combobox", { name: /^Role of /u })).toHaveCount(

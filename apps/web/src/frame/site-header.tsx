@@ -173,11 +173,12 @@ export const SiteHeader = ({
   const away = isMobile || state === "collapsed";
   const last = crumbs.length - 1;
   const bar = useRef<HTMLElement>(null);
-  // This bar's trigger opened the sidebar and went as it did: focus goes on
-  // to the fold in the sidebar's head, and never stays on the page. Until
-  // Damsko's SidebarProvider does this itself (the registry gap "the
-  // sidebar gives no focus back when it opens from a trigger that then
-  // goes"); then this goes.
+  // This bar's trigger opened the sidebar (pressed, or held focus as the
+  // shortcut opened it) and went as it did: focus goes on to the fold in
+  // the sidebar's head, and never stays on the page. Until Damsko's
+  // SidebarProvider does this itself (the registry gap "the sidebar gives
+  // no focus back when it opens from a trigger that then goes"); then this
+  // goes.
   const handing = useRef(false);
   useLayoutEffect(() => {
     if (away || !handing.current) {
@@ -194,20 +195,15 @@ export const SiteHeader = ({
     );
     let left = false;
     // Hidden until it has slid in (none of it with reduced motion): the
-    // fold takes focus once the sidebar's own transitions are done, unless
-    // it is folded again first.
-    const slid = Promise.all(
+    // fold takes focus once the sidebar's own transitions are over, done
+    // or cut off, unless it is folded again first.
+    const slid = Promise.allSettled(
       (sidebar?.getAnimations() ?? []).map(
         async ({ finished }) => await finished
       )
     );
     const handOn = async () => {
-      try {
-        await slid;
-      } catch {
-        // Folded again on the way: focus stays where it is.
-        return;
-      }
+      await slid;
       if (!left) {
         fold?.focus();
       }
@@ -218,7 +214,19 @@ export const SiteHeader = ({
     };
   }, [away]);
   return (
-    <header data-slot="site-header" ref={bar} {...stylex.props(styles.bar)}>
+    <header
+      data-slot="site-header"
+      // The trigger holding focus, as the shortcut may open the sidebar.
+      onBlur={() => {
+        handing.current = false;
+      }}
+      onFocus={({ target }) => {
+        handing.current =
+          !isMobile && target.dataset.slot === "sidebar-trigger";
+      }}
+      ref={bar}
+      {...stylex.props(styles.bar)}
+    >
       {away ? (
         <SidebarTrigger
           aria-label={t`Show or hide the sidebar`}

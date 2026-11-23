@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
+import { expectErrorsShown } from "./said.ts";
 
 // The Models page: an admin reads the models the organization allows and
 // the one limit every run has. AI spend, beside it, shows this month's
@@ -41,11 +42,7 @@ test("an admin reads the allowed models and the run limit, and nobody else does"
 
   const refused = await pageOf(builder);
   await refused.goto("/settings/models");
-  // Alerts that say something: until Damsko's fix for its Toaster's empty
-  // role="alert" region (registry gap "two sets of live regions").
-  await expect(
-    refused.getByRole("alert").filter({ hasText: /\S/u })
-  ).toHaveText("Your role doesn't allow that.");
+  await expectErrorsShown(refused, ["Your role doesn't allow that."]);
 });
 
 test("an admin reads this month's AI spend, and nobody else does", async ({
@@ -68,11 +65,7 @@ test("an admin reads this month's AI spend, and nobody else does", async ({
 
   const refused = await pageOf(builder);
   await refused.goto("/settings/spend");
-  // Alerts that say something: until Damsko's fix for its Toaster's empty
-  // role="alert" region (registry gap "two sets of live regions").
-  await expect(
-    refused.getByRole("alert").filter({ hasText: /\S/u })
-  ).toHaveText("Your role doesn't allow that.");
+  await expectErrorsShown(refused, ["Your role doesn't allow that."]);
   await expect(
     refused
       .getByRole("navigation", { name: "Settings" })

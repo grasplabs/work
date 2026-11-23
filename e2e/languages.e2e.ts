@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { Locator } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
@@ -45,6 +46,55 @@ test("follows the browser's language, then the one the person picks", async ({
   await page.reload();
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
+});
+
+/** Presses `option` where it stands, once it is seen whole in a window 390px across. */
+const chosen = async (option: Locator): Promise<void> => {
+  const box = await option.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.x).toBeGreaterThanOrEqual(0);
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+  await option.click();
+};
+
+test("on a phone the person menu holds the languages and the themes, each within the window", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("languages");
+  const page = await pageOf(member, {
+    viewport: { width: 390, height: 844 },
+  });
+  await page.goto("/projects");
+  await expect(
+    page.getByRole("heading", { name: "Projects", exact: true })
+  ).toBeVisible({ timeout: 20_000 });
+  const menu = page.getByRole("menu");
+  /** The person menu, from the sidebar's sheet, named in the page's language. */
+  const opened = async (sidebar: string, toggle: string) => {
+    if (await menu.isVisible()) {
+      return;
+    }
+    const sheet = page.getByRole("dialog", { name: sidebar });
+    if (!(await sheet.isVisible())) {
+      await page
+        .getByRole("main")
+        .getByRole("button", { name: toggle })
+        .click();
+    }
+    await sheet.getByRole("button", { name: "Person", exact: true }).click();
+  };
+
+  // Under their names in the menu itself, no submenu off the window's edge.
+  await opened("Sidebar", "Show or hide the sidebar");
+  await chosen(menu.getByRole("menuitemradio", { name: "Nederlands" }));
+  await expect(page.locator("html")).toHaveAttribute("lang", "nl");
+
+  await opened("Zijbalk", "Zijbalk tonen of verbergen");
+  await expect(
+    menu.getByRole("menuitemradio", { name: "Nederlands" })
+  ).toHaveAttribute("aria-checked", "true");
+  await chosen(menu.getByRole("menuitemradio", { name: "Donker" }));
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
 });
 
 test("signing in speaks the browser's language", async ({ newContext }) => {

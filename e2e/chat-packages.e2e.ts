@@ -6,6 +6,7 @@ import {
   seedDependencyRequest,
 } from "./dependency-request.ts";
 import { apiOf, peopleIn } from "./people.ts";
+import { expectNoError } from "./said.ts";
 
 // The npm packages the chat's agent asked for, on a card in that chat:
 // the App's builder approves them there, in their own session, and the
@@ -51,11 +52,7 @@ test("the App's builder approves the packages its chat's agent asked for, on the
         return approved?.id;
       })
       .toBe(request.id);
-    // Alerts that say something: until Damsko's fix for its Toaster's empty
-    // role="alert" region (registry gap "two sets of live regions").
-    await expect(
-      page.getByRole("alert").filter({ hasText: /\S/u })
-    ).toHaveCount(0);
+    await expectNoError(page);
   } finally {
     core[Symbol.dispose]();
   }

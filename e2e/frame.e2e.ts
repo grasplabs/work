@@ -50,6 +50,20 @@ test("Back in Settings' level leads to the last page outside it, and to Chat aft
     })
   ).toHaveAttribute("aria-current", "page");
 
+  // The same page with only its query changed, in the page (as a Brain
+  // folder is opened), is the place to go back to.
+  await page.goto("/brain?group=one");
+  await page.evaluate(() => {
+    history.pushState({}, "", "/brain?group=two");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page).toHaveURL(/\/brain\?group=two$/u);
+  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings/u);
+  await sidebarOf(page).getByRole("link", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/brain\?group=two$/u);
+
   // Straight into Settings, and the page read again: nothing to go back to
   // but Chat.
   await page.goto("/settings/profile");
@@ -99,7 +113,7 @@ test("a folded sidebar stays folded across a reload, never drawn open first", as
   expect(new Set(states)).toStrictEqual(new Set(["collapsed"]));
 });
 
-test("opened from the page's bar, the sidebar takes the focus to its own fold", async ({
+test("opened from the page's bar, by its button or the shortcut while it has focus, the sidebar takes the focus to its own fold, its slide cut short or not", async ({
   pageOf,
 }) => {
   const { member } = peopleIn("frame");
@@ -107,19 +121,41 @@ test("opened from the page's bar, the sidebar takes the focus to its own fold", 
   await page.setViewportSize(wide);
   await page.goto("/projects");
   const fold = foldOf(page);
-  await fold.click();
-  await expect(page.locator('aside[data-slot="sidebar"]')).toHaveAttribute(
-    "data-state",
-    "collapsed"
-  );
-  // Well past its slide out, so the sidebar is hidden as the bar opens it.
-  await page.waitForTimeout(1000);
   const reopen = page
     .getByRole("main")
     .getByRole("button", { name: "Show or hide the sidebar" });
+  const folded = async () => {
+    await fold.click();
+    await expect(page.locator('aside[data-slot="sidebar"]')).toHaveAttribute(
+      "data-state",
+      "collapsed"
+    );
+    // Well past its slide out, so the sidebar is hidden as the bar opens it.
+    await page.waitForTimeout(1000);
+  };
+
+  await folded();
   await reopen.focus();
   await page.keyboard.press("Enter");
   await expect(reopen).toHaveCount(0);
+  await expect(fold).toBeFocused();
+
+  // The shortcut, while the bar's button has focus: the button goes too.
+  await folded();
+  await reopen.focus();
+  await page.keyboard.press("ControlOrMeta+b");
+  await expect(reopen).toHaveCount(0);
+  await expect(fold).toBeFocused();
+
+  // Its slide in cut off on the way, though it stays open.
+  await folded();
+  await reopen.click();
+  await page.evaluate(() => {
+    const sliding = document.querySelector('[data-slot="sidebar-container"]');
+    for (const animation of sliding?.getAnimations() ?? []) {
+      animation.cancel();
+    }
+  });
   await expect(fold).toBeFocused();
 });
 
