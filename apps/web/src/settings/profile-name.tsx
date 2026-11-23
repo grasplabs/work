@@ -8,7 +8,8 @@ import { SettingRow } from "./section.tsx";
 
 // Settings › Profile's name: the person's own, as Grasp calls them
 // everywhere (`session.setName`). Saved when the field is left, or on
-// Enter; Escape puts it back. Their sign-in set it when they first came
+// Enter, and what was typed stays in the field until core took it;
+// Escape puts it back. Their sign-in set it when they first came
 // in and doesn't again, so what they give stays.
 
 /** The longest name core takes (`personNameSchema`). */
@@ -34,7 +35,10 @@ export const ProfileName = ({ name }: { name: string }) => {
         return true;
       });
       if (done === true) {
+        // What was typed stays in the field until core took it: a failed
+        // save leaves it there, to try again or change.
         setSaved(next);
+        setDraft(null);
         setTried(undefined);
         setStatus("success");
       } else {
@@ -45,11 +49,12 @@ export const ProfileName = ({ name }: { name: string }) => {
   };
   const save = (): void => {
     const next = draft?.trim();
-    // A failed save keeps what was typed in the field, as the row says.
-    if (status !== "error") {
-      setDraft(null);
+    if (next === undefined) {
+      return;
     }
-    if (next === undefined || next === "" || next === saved) {
+    // Nothing to save: the field shows the name core keeps again.
+    if (next === "" || next === saved) {
+      setDraft(null);
       return;
     }
     send(next);
