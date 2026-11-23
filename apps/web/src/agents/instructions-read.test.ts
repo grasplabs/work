@@ -12,15 +12,15 @@ const named: Named[] = [
 describe("an agent's instructions as its page reads them", () => {
   it("links each app and person it names, as written, the longest name first", () => {
     expect(
-      withMentions("Look in exact online, then ask Sanne de Wit.", named)
+      withMentions("Look in Exact Online, then ask Sanne de Wit.", named)
     ).toBe(
-      "Look in [exact online](grasp-mention:app), then ask [Sanne de Wit](grasp-mention:person)."
+      "Look in [Exact Online](grasp-mention:app), then ask [Sanne de Wit](grasp-mention:person)."
     );
   });
 
-  it("finds a name only as a whole word, never in code or in a link", () => {
+  it("finds a name only as written and as a whole word, never in code, a link or a picture's place", () => {
     const source =
-      "Exactly so. `Exact` stays code, [Exact](https://example.com) stays a link.";
+      "Exactly so, exact is a word, Hi!Exact stays text. `Exact` stays code, [Exact](https://example.com) stays a link.";
     expect(withMentions(source, named)).toBe(source);
   });
 

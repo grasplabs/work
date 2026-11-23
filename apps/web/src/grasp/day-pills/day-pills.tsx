@@ -3,18 +3,18 @@
 // A stand-in in work until Damsko has the part (DAMS-4's gap list, "Day pills"); work's agent page
 // is its first user (agents/agent-overview.tsx).
 //
-//   <DayPills days={[{ letter: "M", name: "Monday", on: true }, …]} label="Runs on" />
-//   <DayPills days={days} label="Runs on" tone="paused" />
+//   <DayPills days={[{ letter: "M", name: "Monday: runs", on: true }, …]} label="Days it runs" />
+//   <DayPills days={days} label="Days it runs" tone="paused" />
 //
-// A screen reader hears the label and each day's whole name with whether it is on: the letters
-// alone are drawn. Every value is a token. A caller may set layout only.
+// A screen reader hears the label and each day's words (its whole name and whether it is on): the
+// letters alone are drawn. Every value is a token. A caller may set layout only.
 import * as stylex from "@stylexjs/stylex";
 
 import { visuallyHidden } from "../hidden/hidden";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
-/** One day: its letter as drawn, its whole name as heard, and whether it is one of the days. */
+/** One day: its letter as drawn, what a screen reader hears for it ("Monday: runs"), and whether it is one of the days. */
 export interface DayPill {
   letter: string;
   name: string;
@@ -32,9 +32,6 @@ export interface DayPillsProps {
    * @default "on"
    */
   tone?: "on" | "paused";
-  /** What a screen reader hears after a day that is on, and one that is off. */
-  onLabel: string;
-  offLabel: string;
   /** Layout only: margins and alignment. */
   layout?: LayoutStyle;
 }
@@ -73,8 +70,6 @@ export const DayPills = ({
   days,
   label,
   tone = "on",
-  onLabel,
-  offLabel,
   layout,
 }: DayPillsProps) => (
   <ul
@@ -92,9 +87,7 @@ export const DayPills = ({
         )}
       >
         <span aria-hidden="true">{day.letter}</span>
-        <span {...stylex.props(visuallyHidden)}>
-          {day.name}, {day.on ? onLabel : offLabel}
-        </span>
+        <span {...stylex.props(visuallyHidden)}>{day.name}</span>
       </li>
     ))}
   </ul>

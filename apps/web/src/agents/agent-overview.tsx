@@ -46,6 +46,7 @@ import { SectionCard } from "../grasp/section-card/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { nextWakeAt } from "./agent-facts.tsx";
 import { foldOf, mentionOf, withMentions } from "./instructions-read.ts";
 import type { Named } from "./instructions-read.ts";
 import { weekOf } from "./schedule-read.ts";
@@ -131,6 +132,16 @@ const styles = stylex.create({
     borderBlockEndStyle: "solid",
     borderBlockEndColor: grasp.line,
   },
+  runWords: { display: "grid", minWidth: 0 },
+  // Which schedule ran, when there are several: what it is asked, on one line.
+  runOpening: {
+    overflow: "hidden",
+    color: grasp.muted,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
   runTitle: {
     minWidth: 0,
     color: grasp.ink,
@@ -147,6 +158,7 @@ type Outcome =
   | "agent.not_for_you"
   | "permission.person_inactive"
   | "model.no_provider"
+  | "agent.busy"
   | "other";
 
 const outcomeOf = (code: string): Outcome =>
@@ -154,7 +166,8 @@ const outcomeOf = (code: string): Outcome =>
   code === "agent.paused" ||
   code === "agent.not_for_you" ||
   code === "permission.person_inactive" ||
-  code === "model.no_provider"
+  code === "model.no_provider" ||
+  code === "agent.busy"
     ? code
     : "other";
 
@@ -175,22 +188,23 @@ export const runsOf = (wakes: readonly AgentWake[]): Run[] =>
     )
     .toSorted((a, b) => b.at.localeCompare(a.at));
 
+/** Outcomes that say nothing is wrong with the agent: it ran, was paused, or was busy and tries again. */
+const fine = new Set<Outcome>(["started", "agent.paused", "agent.busy"]);
+
 /**
- * The run that makes the agent failing: the latest, when it didn't start
- * for a reason other than the agent being paused, while the agent is on.
+ * The run that makes the agent failing, while it is on: the latest of its
+ * schedules' last runs that didn't start for a reason of its own. One
+ * schedule that ran since doesn't hide another that failed.
  */
 export const failingRun = (
   agent: Agent,
   wakes: readonly AgentWake[]
-): Run | undefined => {
-  const [latest] = runsOf(wakes.filter(({ state }) => state === "on"));
-  return agent.state === "on" &&
-    latest !== undefined &&
-    latest.outcome !== "started" &&
-    latest.outcome !== "agent.paused"
-    ? latest
+): Run | undefined =>
+  agent.state === "on"
+    ? runsOf(wakes.filter(({ state }) => state === "on")).find(
+        ({ outcome }) => !fine.has(outcome)
+      )
     : undefined;
-};
 
 /** Dates and times as this page writes them. */
 const useDates = () => {
@@ -251,11 +265,7 @@ const StatusLine = ({
 }) => {
   const { t } = useLingui();
   const { moment, day } = useDates();
-  const next = wakes
-    .filter(({ state }) => state === "on")
-    .flatMap(({ nextAt }) => (nextAt === null ? [] : [nextAt]))
-    .toSorted()
-    .at(0);
+  const next = nextWakeAt(wakes);
   const ran = wakes.some(({ lastAt }) => lastAt !== null);
   let tone: "success" | "neutral" | "danger" = "success";
   let word = t`On`;
@@ -552,13 +562,15 @@ const Schedule = ({
             <div key={wake.id} {...stylex.props(styles.schedule)}>
               {week === undefined ? null : (
                 <DayPills
-                  days={weekdays.map((day, index) => ({
-                    ...day,
-                    on: week.days[index] === true,
-                  }))}
-                  label={t`Runs on`}
-                  offLabel={t`off`}
-                  onLabel={t`on`}
+                  days={weekdays.map(({ letter, name }, index) => {
+                    const on = week.days[index] === true;
+                    return {
+                      letter,
+                      name: on ? t`${name}: runs` : t`${name}: doesn't run`,
+                      on,
+                    };
+                  })}
+                  label={t`Days it runs`}
                   tone={
                     wake.state === "on" && agent.state === "on"
                       ? "on"
@@ -583,17 +595,14 @@ const RunHistory = ({ wakes }: { wakes: readonly AgentWake[] }) => {
   const { t } = useLingui();
   const { moment } = useDates();
   const runs = runsOf(wakes);
-  const next = wakes
-    .filter(({ state }) => state === "on")
-    .flatMap(({ nextAt }) => (nextAt === null ? [] : [nextAt]))
-    .toSorted()
-    .at(0);
+  const next = nextWakeAt(wakes);
   const titles: Record<Outcome, string> = {
     started: t`Ran on its schedule`,
     "agent.paused": t`Didn't run: the agent was paused`,
     "agent.not_for_you": t`Didn't run: it isn't set up to answer this person`,
     "permission.person_inactive": t`Didn't run: this person is no longer in the company`,
     "model.no_provider": t`Didn't run: no AI provider is connected`,
+    "agent.busy": t`Didn't run: it was still busy, and tries again shortly`,
     other: t`Didn't run: something went wrong`,
   };
   let empty = t`No runs yet.`;
@@ -621,7 +630,16 @@ const RunHistory = ({ wakes }: { wakes: readonly AgentWake[] }) => {
               >
                 <Icon icon={outcome === "started" ? Done : Failed} />
               </span>
-              <span {...stylex.props(styles.runTitle)}>{titles[outcome]}</span>
+              <span {...stylex.props(styles.runWords)}>
+                <span {...stylex.props(styles.runTitle)}>
+                  {titles[outcome]}
+                </span>
+                {runs.length > 1 ? (
+                  <span {...stylex.props(styles.runOpening)}>
+                    {wake.opening}
+                  </span>
+                ) : null}
+              </span>
               <span {...stylex.props(styles.date)}>{moment(at)}</span>
             </li>
           ))}
@@ -644,14 +662,19 @@ const FailingAlert = ({
   const { t } = useLingui();
   const { moment } = useDates();
   const when = moment(run.at);
-  const why: Record<Exclude<Outcome, "started" | "agent.paused">, string> = {
+  const why: Record<
+    Exclude<Outcome, "started" | "agent.paused" | "agent.busy">,
+    string
+  > = {
     "agent.not_for_you": t`It isn't set up to answer the person its schedule works for.`,
     "permission.person_inactive": t`The person its schedule works for is no longer in the company.`,
     "model.no_provider": t`No AI provider is connected.`,
-    other: t`Something went wrong. It tries again at its next run.`,
+    other: t`Something went wrong. It tries again shortly, then at its next run.`,
   };
   const outcome =
-    run.outcome === "started" || run.outcome === "agent.paused"
+    run.outcome === "started" ||
+    run.outcome === "agent.paused" ||
+    run.outcome === "agent.busy"
       ? "other"
       : run.outcome;
   let action: ReactNode;

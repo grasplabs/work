@@ -384,7 +384,13 @@ const fakeConnections = () => {
       }
     },
   };
-  return { connections, instructions, outOfReach, asked };
+  /** A wake-up firing as core's runner fires it, and how that went. */
+  const fired = (wakeId: string, at: string, outcome: string): void => {
+    wakes = wakes.map((wake) =>
+      wake.id === wakeId ? { ...wake, lastAt: at, lastOutcome: outcome } : wake
+    );
+  };
+  return { connections, instructions, outOfReach, asked, fired };
 };
 
 type Fake = ReturnType<typeof fakeConnections>;
@@ -1140,6 +1146,25 @@ describe("an agent's page", () => {
     await press(button("Pause"));
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
     expect(document.querySelector("header")?.textContent).toContain("Paused");
+  });
+
+  it("says an agent is failing while one of its schedules couldn't run, though another ran since", async () => {
+    const fake = await withClaire();
+    const ask = {
+      cron: "0 9 * * 1-5",
+      personId: "user-anna",
+      opening: "Chase invoices.",
+    };
+    const morning = await fake.connections.makeAgentWake("agent-1", ask);
+    const evening = await fake.connections.makeAgentWake("agent-1", {
+      ...ask,
+      cron: "0 17 * * 1-5",
+    });
+    fake.fired(morning.id, "2026-11-12T08:00:00.000Z", "model.no_provider");
+    fake.fired(evening.id, "2026-11-12T16:00:00.000Z", "started");
+    await shown(fake, { agent: "Claire" });
+    expect(document.querySelector("header")?.textContent).toContain("Failing");
+    expect(document.body.textContent).toContain("No AI provider is connected.");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {

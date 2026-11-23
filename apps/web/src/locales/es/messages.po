@@ -1101,6 +1101,14 @@ msgstr "{name}: {reason}"
 msgid "{name}: busy {from} to {to}"
 msgstr "{name}: ocupado de {from} a {to}"
 
+#: src/agents/agent-overview.tsx
+msgid "{name}: doesn't run"
+msgstr "{name}: no se ejecuta"
+
+#: src/agents/agent-overview.tsx
+msgid "{name}: runs"
+msgstr "{name}: se ejecuta"
+
 #: src/agents/agent-section.tsx
 msgid "{name}'s pages"
 msgstr "Páginas de {name}"
@@ -5868,6 +5876,10 @@ msgstr "Planificador del día"
 msgid "Days"
 msgstr "Días"
 
+#: src/agents/agent-overview.tsx
+msgid "Days it runs"
+msgstr "Días en que se ejecuta"
+
 #: src/activity/audit-log.tsx
 msgctxt "a date's day, as typed"
 msgid "dd"
@@ -6310,6 +6322,10 @@ msgstr "No se ejecutó el {when}: esta persona ya no está en la empresa"
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: it isn't set up to answer this person"
 msgstr "No se ejecutó: no está configurado para esta persona"
+
+#: src/agents/agent-overview.tsx
+msgid "Didn't run: it was still busy, and tries again shortly"
+msgstr "No se ejecutó: seguía ocupado y lo intentará de nuevo en breve"
 
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: no AI provider is connected"
@@ -9962,6 +9978,7 @@ msgstr "Ir a lo más reciente"
 msgid "Just for me"
 msgstr "Solo para mí"
 
+#: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -12742,10 +12759,6 @@ msgstr "Océano"
 msgid "of them wait for a decision"
 msgstr "de ellas esperan una decisión"
 
-#: src/agents/agent-overview.tsx
-msgid "off"
-msgstr "no"
-
 #: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
@@ -12791,10 +12804,6 @@ msgstr "Cambios anteriores"
 #: src/brain/sources-page.tsx
 msgid "Older versions"
 msgstr "Versiones anteriores"
-
-#: src/agents/agent-overview.tsx
-msgid "on"
-msgstr "sí"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
@@ -15469,10 +15478,6 @@ msgstr "Se ejecuta en: {whereItRuns}. Se aplica un límite mensual: cuando se al
 msgid "Runs by workflow"
 msgstr "Ejecuciones por flujo de trabajo"
 
-#: src/agents/agent-overview.tsx
-msgid "Runs on"
-msgstr "Se ejecuta los"
-
 #: src/chat/plan-card.tsx
 msgid "Runs on its own"
 msgstr "Funciona por sí solo"
@@ -16888,8 +16893,8 @@ msgid "Something went wrong."
 msgstr "Algo ha salido mal."
 
 #: src/agents/agent-overview.tsx
-msgid "Something went wrong. It tries again at its next run."
-msgstr "Algo salió mal. Lo intentará de nuevo en la próxima ejecución."
+msgid "Something went wrong. It tries again shortly, then at its next run."
+msgstr "Algo salió mal. Lo intentará de nuevo en breve y, si no, en su próxima ejecución."
 
 #: src/brain/memories-page.tsx
 msgid "something without a name"

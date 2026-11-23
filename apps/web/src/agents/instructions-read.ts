@@ -37,23 +37,25 @@ const closed = new Set([
 ]);
 
 const bracket = /[\\[\]]/gu;
-const letter = /[\p{L}\p{N}]/u;
+const letter = /[\p{L}\p{M}\p{N}]/u;
 
 const escaped = (words: string): string => words.replaceAll(bracket, "\\$&");
 
-/** Each place in text where name stands as a whole word, case aside. */
+/**
+ * Each place in text where name stands as written, as a whole word: a
+ * name is a proper noun, so "Files" the app never takes "files" the word.
+ * Never right after "!", which would make its link a picture.
+ */
 const placesOf = (text: string, name: string): number[] => {
-  const haystack = text.toLocaleLowerCase();
-  const needle = name.toLocaleLowerCase();
   const places: number[] = [];
-  let from = haystack.indexOf(needle);
+  let from = text.indexOf(name);
   while (from !== -1) {
     const before = text.slice(0, from).at(-1) ?? "";
-    const after = text.at(from + needle.length) ?? "";
-    if (!letter.test(before) && !letter.test(after)) {
+    const after = text.at(from + name.length) ?? "";
+    if (!letter.test(before) && !letter.test(after) && before !== "!") {
       places.push(from);
     }
-    from = haystack.indexOf(needle, from + needle.length);
+    from = text.indexOf(name, from + name.length);
   }
   return places;
 };

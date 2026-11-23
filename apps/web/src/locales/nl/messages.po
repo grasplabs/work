@@ -1101,6 +1101,14 @@ msgstr "{name}: {reason}"
 msgid "{name}: busy {from} to {to}"
 msgstr "{name}: bezet van {from} tot {to}"
 
+#: src/agents/agent-overview.tsx
+msgid "{name}: doesn't run"
+msgstr "{name}: draait niet"
+
+#: src/agents/agent-overview.tsx
+msgid "{name}: runs"
+msgstr "{name}: draait"
+
 #: src/agents/agent-section.tsx
 msgid "{name}'s pages"
 msgstr "Pagina's van {name}"
@@ -5868,6 +5876,10 @@ msgstr "Dagplanner"
 msgid "Days"
 msgstr "Dagen"
 
+#: src/agents/agent-overview.tsx
+msgid "Days it runs"
+msgstr "Dagen waarop hij draait"
+
 #: src/activity/audit-log.tsx
 msgctxt "a date's day, as typed"
 msgid "dd"
@@ -6310,6 +6322,10 @@ msgstr "Niet uitgevoerd op {when}: deze persoon zit niet meer in het bedrijf"
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: it isn't set up to answer this person"
 msgstr "Niet gedraaid: niet ingesteld voor deze persoon"
+
+#: src/agents/agent-overview.tsx
+msgid "Didn't run: it was still busy, and tries again shortly"
+msgstr "Niet gedraaid: hij was nog bezig en probeert het zo opnieuw"
 
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: no AI provider is connected"
@@ -9962,6 +9978,7 @@ msgstr "Naar het nieuwste"
 msgid "Just for me"
 msgstr "Alleen voor mij"
 
+#: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -12742,10 +12759,6 @@ msgstr "Oceaan"
 msgid "of them wait for a decision"
 msgstr "daarvan wachten op een beslissing"
 
-#: src/agents/agent-overview.tsx
-msgid "off"
-msgstr "uit"
-
 #: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
@@ -12791,10 +12804,6 @@ msgstr "Oudere wijzigingen"
 #: src/brain/sources-page.tsx
 msgid "Older versions"
 msgstr "Oudere versies"
-
-#: src/agents/agent-overview.tsx
-msgid "on"
-msgstr "aan"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
@@ -15469,10 +15478,6 @@ msgstr "Draait bij: {whereItRuns}. Er geldt een maandlimiet: als die is bereikt,
 msgid "Runs by workflow"
 msgstr "Runs per workflow"
 
-#: src/agents/agent-overview.tsx
-msgid "Runs on"
-msgstr "Draait op"
-
 #: src/chat/plan-card.tsx
 msgid "Runs on its own"
 msgstr "Draait vanzelf"
@@ -16888,8 +16893,8 @@ msgid "Something went wrong."
 msgstr "Er ging iets mis."
 
 #: src/agents/agent-overview.tsx
-msgid "Something went wrong. It tries again at its next run."
-msgstr "Er ging iets mis. Bij de volgende keer probeert hij het opnieuw."
+msgid "Something went wrong. It tries again shortly, then at its next run."
+msgstr "Er ging iets mis. Hij probeert het zo opnieuw, en anders bij de volgende run."
 
 #: src/brain/memories-page.tsx
 msgid "something without a name"
