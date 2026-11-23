@@ -60,6 +60,10 @@
  * a date after today; it names an entry older than 14 days without
  * failing.
  *
+ * `check` also holds packages/ui/LICENSE, the notice that the files under
+ * src/ stay under Damsko's licence, to link that licence at the pin;
+ * `update` moves the link with the pin.
+ *
  * `propose` writes the listed changes as one patch against Damsko's tree
  * at the pin and prints the commands that open the pull request there. It
  * pushes and opens nothing itself.
@@ -86,6 +90,7 @@ import {
   fetchFor,
   fontsUnpack,
   namespace,
+  noticeDifference,
   overdue,
   parseRegistry,
   pinSchema,
@@ -103,6 +108,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const ui = path.join(root, "packages", "ui");
 const pinPath = path.join(ui, "damsko.json");
 const localChangesPath = path.join(ui, "local-changes.json");
+const noticePath = path.join(ui, "LICENSE");
 
 const run = async (
   command: string,
@@ -172,6 +178,7 @@ const damskoFile =
  */
 const check = async (
   damsko: DamskoAt,
+  commit: string,
   local: readonly LocalChange[],
   conflicted: readonly string[] = []
 ): Promise<string[]> => {
@@ -183,6 +190,13 @@ const check = async (
     new Date(),
     conflicted
   );
+  const notice = noticeDifference(
+    existsSync(noticePath) ? readFileSync(noticePath, "utf-8") : undefined,
+    commit
+  );
+  if (notice !== undefined) {
+    found.push(notice);
+  }
   const unpack = readWithin(ui, fontsUnpack);
   if (found.length === 0 && unpack !== undefined) {
     try {
@@ -343,9 +357,16 @@ const main = async (): Promise<boolean> => {
         console.log(`${file}: Damsko's is now the same; its entry is dropped.`);
       }
       ({ conflicts, removed } = updated);
+      // The notice links Damsko's licence at the pin, so it moves with it.
+      if (existsSync(noticePath)) {
+        writeFileSync(
+          noticePath,
+          readFileSync(noticePath, "utf-8").replaceAll(kept.commit, commit)
+        );
+      }
       listed = readLocalChanges(localChangesPath);
     }
-    const found = await check(damsko, listed, conflicts);
+    const found = await check(damsko, commit, listed, conflicts);
     for (const warning of overdue(listed, new Date())) {
       console.warn(`packages/ui: ${warning}`);
     }

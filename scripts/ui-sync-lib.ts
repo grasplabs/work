@@ -330,17 +330,49 @@ const dayMs = 86_400_000;
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 
 /**
- * A line git's merge leaves to resolve: `<<<<<<< here`, `|||||||`,
- * `=======` or `>>>>>>> Damsko`, seven of the sign alone or before a space.
+ * The sign of a line git's merge leaves to resolve: `<<<<<<< here`,
+ * `|||||||`, `=======` or `>>>>>>> Damsko`, seven of the sign alone or
+ * before a space.
  */
-const conflictMarker = /^(?:<{7}|\|{7}|={7}|>{7})(?: |\r?$)/u;
+const markerSign = (line: string): string | undefined =>
+  /^(?:<{7}|\|{7}|={7}|>{7})(?: |\r?$)/u.exec(line)?.[0].charAt(0);
 
-/** Each line of a file that is one of git's conflict markers, numbered from 1. */
-const markerLines = (content: Uint8Array): number[] =>
-  new TextDecoder()
+/** The signs that may follow each in a conflict; none after its end. */
+const markerFollows: ReadonlyMap<string, string> = new Map([
+  ["<", "|="],
+  ["|", "="],
+  ["=", ">"],
+]);
+
+/**
+ * Each line of a file that belongs to one of git's conflicts, numbered from
+ * 1: `<<<<<<<`, then `=======` (a `|||||||` between them, or not), then
+ * `>>>>>>>`, in that order. A marker's line alone, such as `=======` in a
+ * template string, is none.
+ */
+const markerLines = (content: Uint8Array): number[] => {
+  const found: number[] = [];
+  // The lines of the conflict open so far, and the signs that may come next.
+  let open: number[] = [];
+  let next: string | undefined;
+  for (const [index, line] of new TextDecoder()
     .decode(content)
     .split("\n")
-    .flatMap((line, index) => (conflictMarker.test(line) ? [index + 1] : []));
+    .entries()) {
+    const sign = markerSign(line);
+    if (sign === "<") {
+      open = [index + 1];
+      next = markerFollows.get(sign);
+    } else if (sign !== undefined && next?.includes(sign) === true) {
+      open.push(index + 1);
+      next = markerFollows.get(sign);
+      if (sign === ">") {
+        found.push(...open);
+      }
+    }
+  }
+  return found;
+};
 
 /** Each line of a listed file that is one of git's conflict markers, by file and line. */
 const unresolved = (
@@ -440,6 +472,27 @@ export const differences = (
     }
   }
   return found;
+};
+
+/** Damsko's licence at a commit, as packages/ui/LICENSE links it. */
+export const damskoLicence = (commit: string): string =>
+  `https://github.com/grasplabs/damsko/blob/${commit}/LICENSE`;
+
+/**
+ * What is wrong with packages/ui/LICENSE, the notice that the files under
+ * src/ stay under Damsko's licence, if anything: it must link that licence
+ * at the pinned commit, which ui:update moves it to with the pin.
+ */
+export const noticeDifference = (
+  notice: string | undefined,
+  commit: string
+): string | undefined => {
+  if (notice === undefined) {
+    return "LICENSE is missing: it says the files under src/ stay under Damsko's licence";
+  }
+  return notice.includes(damskoLicence(commit))
+    ? undefined
+    : `LICENSE must link Damsko's licence at the pin, ${damskoLicence(commit)}`;
 };
 
 /**
@@ -785,6 +838,10 @@ const swap = (
   let moved = false;
   let placed = false;
   let settled = false;
+  // The files beside src/ this swap has written (or begun to) and not yet
+  // put back: the only ones a way back may tell git to restore, as the
+  // others may hold what isn't committed yet.
+  const written = new Set<string>();
   try {
     cpSync(nodePath.join(stage, "src"), next, {
       recursive: true,
@@ -797,6 +854,7 @@ const swap = (
     rename(next, source);
     placed = true;
     for (const [name, content] of Object.entries(files)) {
+      written.add(name);
       write(ui, name, new TextEncoder().encode(content));
     }
     settled = true;
@@ -808,13 +866,20 @@ const swap = (
       if (moved) {
         rename(before, source);
       }
-      for (const [name, content] of Object.entries(kept)) {
-        write(ui, name, content);
+      for (const name of written) {
+        write(ui, name, kept[name]);
+        written.delete(name);
       }
     } catch (undoError) {
-      const where = existsSync(before)
-        ? `packages/ui/src as it was, listed changes and all, is in ${before}: move it back to ${source} (rm -rf ${source} && mv ${before} ${source}), then git checkout packages/ui/damsko.json packages/ui/local-changes.json`
-        : `packages/ui/src is back as it was; git checkout packages/ui/damsko.json packages/ui/local-changes.json puts the pin and the list back`;
+      const paths = [...written].map((name) => `packages/ui/${name}`);
+      const restore = ["git checkout", ...paths].join(" ");
+      let where = "packages/ui/src is back as it was";
+      if (existsSync(before)) {
+        where = `packages/ui/src as it was, listed changes and all, is in ${before}: move it back to ${source} (rm -rf ${source} && mv ${before} ${source})`;
+      }
+      if (paths.length > 0) {
+        where += `; ${restore} puts back what the update wrote beside it`;
+      }
       throw new Error(
         `${messageOf(error)}\nPutting packages/ui back failed too: ${messageOf(undoError)}\n${where}.`,
         { cause: undoError }
