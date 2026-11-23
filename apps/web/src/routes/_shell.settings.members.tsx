@@ -740,6 +740,7 @@ const PeopleTable = ({
         ) : undefined
       }
       title={t`Team members`}
+      wideActions
     >
       <DataTable
         aria-label={t`Members`}
@@ -810,6 +811,7 @@ const MembersPending = () => {
         </>
       }
       title={t`Team members`}
+      wideActions
     >
       <DataTable
         aria-label={t`Members`}

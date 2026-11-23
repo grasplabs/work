@@ -58,6 +58,13 @@ const styles = stylex.create({
   },
   // Its words start where the rows' do.
   head: { paddingInline: space.tableCellInline },
+  // Buttons too wide to stand beside the title on a phone (a search among
+  // them) stand under it there. Damsko's head would keep them beside it
+  // and squeeze the title down to nothing, breaking it inside its words
+  // (its words' floor is zero; logged in the registry gaps).
+  headStacked: {
+    display: { default: null, "@container settings (width < 30rem)": "grid" },
+  },
   titleLine: {
     display: "flex",
     alignItems: "baseline",
@@ -96,6 +103,7 @@ export const SettingsGroup = ({
   description,
   badge,
   actions,
+  wideActions = false,
   flush = true,
   footer,
   children,
@@ -105,6 +113,8 @@ export const SettingsGroup = ({
   badge?: ReactNode;
   /** xs Buttons, on the title's line. */
   actions?: ReactNode;
+  /** The buttons are too wide to stand beside the title on a phone: there they stand under it. */
+  wideActions?: boolean;
   /**
    * What it holds runs edge to edge, as rows, a list of Items or a Table
    * do; without it the card's room surrounds it (words, an empty state).
@@ -129,6 +139,7 @@ export const SettingsGroup = ({
           badge={badge}
           description={description}
           id={id}
+          {...(wideActions ? { style: styles.headStacked } : {})}
           title={title}
           variant="group"
         />
