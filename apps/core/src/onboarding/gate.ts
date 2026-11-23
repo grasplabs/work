@@ -20,6 +20,7 @@ import type {
 } from "@grasp-os/shared/onboarding-gate";
 import { and, eq, inArray, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
@@ -47,23 +48,60 @@ import { onboardingStore } from "./store.ts";
 // - Opening or closing it without a trace, or by anyone else: only staff
 //   move it, and each move is in the audit log as the staff member.
 //
-// A deployment that never closed it is open: closing it is the first thing
-// staff do for a client that onboards.
+// A deployment whose gate was never moved is open, unless it was made
+// closed: one staff added with an onboarding starts closed
+// (`ONBOARDING_CLOSED_FROM`), so nobody but its admins comes in before
+// staff remember to close it. Any other is open until staff close it.
 
 const gateRow = "gate";
 
-/** The gate as stored: closed since when, and the threshold. */
+/** The env the gate reads: its row, and how the deployment starts. */
+type GateEnv = Pick<Env, "DB" | "ONBOARDING_CLOSED_FROM">;
+
+/** When a deployment that starts closed was made; null for one that starts open. */
+const startsClosedAt = (env: GateEnv): Date | null => {
+  const from = z.iso.datetime().safeParse(env.ONBOARDING_CLOSED_FROM);
+  return from.success ? new Date(from.data) : null;
+};
+
+/**
+ * Whether this deployment starts closed, as the admin's probe asks
+ * before it publishes a new company's address (provision-probe.ts).
+ */
+export const startsClosed = (
+  env: Pick<Env, "ONBOARDING_CLOSED_FROM">
+): boolean => z.iso.datetime().safeParse(env.ONBOARDING_CLOSED_FROM).success;
+
+/**
+ * The gate as stored: closed since when, and the threshold. A deployment
+ * that starts closed has that kept the first time its gate is read, as
+ * closed since it was made: from then on the gate is only what was done
+ * to it, and the deployment's config no longer says anything of it.
+ */
 const stored = async (
-  env: Pick<Env, "DB">
+  env: GateEnv
 ): Promise<{
   closedAt: Date | null;
   openedAt: Date | null;
   threshold: GateThreshold;
 }> => {
-  const [row] = await drizzle(env.DB)
-    .select()
-    .from(onboardingGate)
-    .where(eq(onboardingGate.id, gateRow));
+  const db = drizzle(env.DB);
+  const read = async () => {
+    const [found] = await db
+      .select()
+      .from(onboardingGate)
+      .where(eq(onboardingGate.id, gateRow));
+    return found;
+  };
+  let row = await read();
+  const start = row === undefined ? startsClosedAt(env) : null;
+  if (start !== null) {
+    await db
+      .insert(onboardingGate)
+      .values({ id: gateRow, closedAt: start, threshold: gateThresholdDefault })
+      .onConflictDoNothing();
+    row = await read();
+  }
   const threshold = gateThresholds.find((each) => each === row?.threshold);
   return {
     closedAt: row?.closedAt ?? null,
@@ -74,7 +112,7 @@ const stored = async (
 
 /** Whether `email` may sign in through the company's IdP now. */
 export const mayComeIn = async (
-  env: Pick<Env, "DB">,
+  env: GateEnv,
   config: SignInConfig,
   email?: string
 ): Promise<boolean> => {

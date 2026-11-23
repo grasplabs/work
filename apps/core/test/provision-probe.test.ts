@@ -173,6 +173,8 @@ describe("the console's provisioning probe", () => {
         // Connect's, as connect named it over its binding.
         connectVersion: connectVersionMetadata.id,
         clientId,
+        // Its deploy asked for no closed start.
+        startsClosed: false,
         bindings: {
           DB: true,
           FILES: true,
@@ -337,6 +339,16 @@ describe("the console's provisioning probe", () => {
     const response = await probe(env);
     expect(provisionProbeSchema.parse(await response.json())).toMatchObject({
       clientId: null,
+    });
+  });
+
+  it("says it starts closed where its deploy says since when", async () => {
+    const response = await probe({
+      ...deployed,
+      ONBOARDING_CLOSED_FROM: "2026-11-01T09:00:00.000Z",
+    });
+    expect(provisionProbeSchema.parse(await response.json())).toMatchObject({
+      startsClosed: true,
     });
   });
 });
