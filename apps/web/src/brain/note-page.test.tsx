@@ -111,4 +111,100 @@ describe("a Brain note's page", () => {
       opened: ["https://policy.example/leave"],
     });
   });
+
+  it("asks for a press with a key held and a middle press too, and sends no referrer", async () => {
+    await shown("See [the policy](https://policy.example/leave).");
+    const link = [...document.querySelectorAll("a")].find(
+      (each) => each.textContent === "the policy"
+    );
+    const asks = [];
+    for (const press of [
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+      }),
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        metaKey: true,
+      }),
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        shiftKey: true,
+      }),
+      new MouseEvent("auxclick", {
+        bubbles: true,
+        cancelable: true,
+        button: 1,
+      }),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one press at a time
+      await act(async () => {
+        link?.dispatchEvent(press);
+        await Promise.resolve();
+      });
+      asks.push({
+        followed: !press.defaultPrevented,
+        asked: document.querySelector("[role=alertdialog]") !== null,
+      });
+      const keep = [...document.querySelectorAll("button")].find(
+        (each) => each.textContent.trim() === "Cancel"
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one press at a time
+      await act(async () => {
+        keep?.click();
+        await sleep(0);
+      });
+    }
+    expect({
+      rel: link?.getAttribute("rel"),
+      referrer: link?.getAttribute("referrerpolicy"),
+      asks,
+      opened,
+    }).toStrictEqual({
+      rel: "noopener noreferrer",
+      referrer: "no-referrer",
+      asks: Array.from({ length: 4 }, () => ({ followed: false, asked: true })),
+      opened: [],
+    });
+  });
+
+  it("asks before following a picture's web address too", async () => {
+    await shown("![The chart](https://charts.example/q3.png)");
+    const link = [...document.querySelectorAll("a")].find(
+      (each) => each.textContent === "The chart"
+    );
+    expect({
+      href: link?.getAttribute("href"),
+      referrer: link?.getAttribute("referrerpolicy"),
+    }).toStrictEqual({
+      href: "https://charts.example/q3.png",
+      referrer: "no-referrer",
+    });
+  });
+
+  it("links each place in the brain to its own route: a part, a page, the atlas and a note", async () => {
+    await shown(
+      [
+        "[Vision](/brain/sections/vision)",
+        "[Sources](/brain/sources)",
+        "[the board](/brain?region=frontal)",
+        "[Finance](/brain/team%2Ffinance#st-1)",
+      ].join(" ")
+    );
+    const hrefs = Object.fromEntries(
+      [...document.querySelectorAll("a")].map((each) => [
+        each.textContent,
+        each.getAttribute("href"),
+      ])
+    );
+    expect(hrefs).toStrictEqual({
+      Vision: "/brain/sections/vision",
+      Sources: "/brain/sources",
+      "the board": "/brain?region=frontal",
+      Finance: "/brain/team%2Ffinance#st-1",
+    });
+  });
 });

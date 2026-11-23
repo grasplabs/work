@@ -17,9 +17,11 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { escapeMarkdown } from "./brain-markdown.ts";
+import { brainRoute } from "./brain-route.ts";
+import type { BrainRoute } from "./brain-route.ts";
 import {
   isTeamClaim,
   mentionParts,
@@ -125,29 +127,48 @@ export const onArticle = (note: Note): boolean =>
 
 /**
  * A link out of Grasp in a note's text: it opens in its own tab, without
- * this page as its opener, only once the person says so, as a link in an
- * answer does. A note's text may come from a source or a chat.
+ * this page as its opener or its address as the referrer, only once the
+ * person says so, as a link in an answer does. A note's text may come from
+ * a source or a chat. The question comes however the link is pressed where
+ * the page hears it: a press with or without a key held (Ctrl, Cmd, Shift),
+ * Enter, and a middle press. The browser's own menu on the link (Open in
+ * new tab, Copy link) and dragging it out are the browser's, never the
+ * page's; the link's `rel` and `referrerpolicy` still hold there.
  */
-const LeavingLink = ({ link }: { link: MarkdownLink }) => {
+const LeavingLink = ({
+  href,
+  children,
+}: {
+  href: string;
+  children: ReactNode;
+}) => {
   const { t } = useLingui();
   const [asking, setAsking] = useState(false);
+  const ask = (event: MouseEvent) => {
+    event.preventDefault();
+    setAsking(true);
+  };
   return (
     <>
       <Link
-        href={link.href}
-        onClick={(event) => {
-          event.preventDefault();
-          setAsking(true);
+        href={href}
+        onAuxClick={(event) => {
+          if (event.button === 1) {
+            ask(event);
+          }
         }}
+        onClick={ask}
+        referrerPolicy="no-referrer"
+        rel="noopener noreferrer"
         variant="underline"
       >
-        {link.children}
+        {children}
       </Link>
       <AlertDialog
         onOpenChange={(open, { returnValue }) => {
           setAsking(open);
           if (!open && returnValue === "open") {
-            window.open(link.href, "_blank", "noopener,noreferrer");
+            window.open(href, "_blank", "noopener,noreferrer");
           }
         }}
         open={asking}
@@ -155,7 +176,7 @@ const LeavingLink = ({ link }: { link: MarkdownLink }) => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t`Open external link?`}</AlertDialogTitle>
-            <AlertDialogDescription>{link.href}</AlertDialogDescription>
+            <AlertDialogDescription>{href}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel />
@@ -167,26 +188,60 @@ const LeavingLink = ({ link }: { link: MarkdownLink }) => {
   );
 };
 
+/** The router's own link to where an address in the Brain leads, holding `children`. */
+const brainRouteLink = (route: BrainRoute, children: ReactNode) => {
+  const { hash, search } = route;
+  if (route.to === "/brain/$noteId") {
+    return (
+      <RouterLink
+        hash={hash}
+        params={route.params}
+        search={search}
+        to={route.to}
+      >
+        {children}
+      </RouterLink>
+    );
+  }
+  if (route.to === "/brain/sections/$sectionId") {
+    return (
+      <RouterLink
+        hash={hash}
+        params={route.params}
+        search={search}
+        to={route.to}
+      >
+        {children}
+      </RouterLink>
+    );
+  }
+  return (
+    <RouterLink hash={hash} search={search} to={route.to}>
+      {children}
+    </RouterLink>
+  );
+};
+
 /**
- * The text's links: another note of the brain through the router, in this
- * tab; a web address through its question first; anything else as its words
- * (Markdown's own).
+ * The text's links: a place in the brain (a note, a part, one of its pages)
+ * through the router, in this tab; a web address, a picture's too, through
+ * its question first; anything else as Markdown draws it.
  */
 const noteLink = (link: MarkdownLink): ReactNode => {
-  if (link.type !== "image" && link.href.startsWith(notePrefix)) {
-    const noteId = decodeURIComponent(link.href.slice(notePrefix.length));
+  const route = link.type === "image" ? undefined : brainRoute(link.href);
+  if (route !== undefined) {
     return (
       <Link asChild variant="underline">
-        <RouterLink params={{ noteId }} to="/brain/$noteId">
-          {link.children}
-        </RouterLink>
+        {brainRouteLink(route, link.children)}
       </Link>
     );
   }
-  const web =
-    link.type !== "image" &&
-    (link.scheme === "http" || link.scheme === "https");
-  return web ? <LeavingLink link={link} /> : undefined;
+  if (link.scheme !== "http" && link.scheme !== "https") {
+    return undefined;
+  }
+  const words =
+    link.type === "image" && link.children === "" ? link.href : link.children;
+  return <LeavingLink href={link.href}>{words}</LeavingLink>;
 };
 
 /** No questions wait on the note. */

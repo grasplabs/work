@@ -220,12 +220,15 @@ export const BrainNav = ({
         children: partItems(region, tree),
       };
     });
-  // Where the person is: the overview or a part of it, a page, or a note.
+  // Where the person is: the overview or a part of it, a page, or a note. A part of the brain's
+  // own page (`/brain/sections/teams`) is one of the company's sections: the company is.
   let current: string | null = null;
   if (pathname === "/brain") {
     current = typeof search.region === "string" ? search.region : overview;
   } else if (pages.some((page) => page.value === pathname)) {
     current = pathname;
+  } else if (pathname.startsWith("/brain/sections/")) {
+    current = company?.id ?? null;
   } else if (pathname.startsWith("/brain/")) {
     current = decodeURIComponent(pathname.slice("/brain/".length));
   }

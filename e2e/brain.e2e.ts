@@ -106,6 +106,31 @@ test("a person goes from page to page of the brain from its navigation, which ma
   await expect(here("Activity")).not.toHaveAttribute("aria-current", "page");
 });
 
+test("a person opens a part of the brain from the organization's page, and the navigation marks the organization", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("brain");
+  const page = await pageOf(member);
+  await page.goto("/brain/company");
+
+  // The organization's page names each part of the brain, its name a link to the part's page.
+  const main = page.getByRole("main");
+  await main
+    .getByRole("link", { name: "Vision", exact: true })
+    .click(brainRead);
+  await expect(page).toHaveURL(/\/brain\/sections\/vision$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Vision" })
+  ).toBeVisible();
+  await expect(page.getByText("Note not found")).toHaveCount(0);
+
+  // The part is one of the organization's, so the navigation has the organization current.
+  const pages = page.getByRole("tree", { name: "The Brain's pages" });
+  await expect(
+    pages.getByRole("link", { name: "Organization", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+});
+
 test("a person opens a line of the brain's activity beside it, sees what the brain kept of it, and goes to its page", async ({
   pageOf,
 }) => {
