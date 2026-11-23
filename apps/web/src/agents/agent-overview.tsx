@@ -293,6 +293,8 @@ const StatusLine = ({
     detail = t`Last run ${when}`;
   } else if (agent.ownerId !== null) {
     detail = t`Just for you`;
+  } else if (next === undefined && wakes.length > 0) {
+    detail = t`Its schedule is paused`;
   } else if (next === undefined) {
     detail = t`Runs when asked`;
   } else {
@@ -756,7 +758,10 @@ export const AgentOverview = ({
     ...(apps ?? [])
       .filter(({ state }) => state === "on")
       .map(({ name }) => ({ name, kind: "app" as const })),
-    ...people.map(({ name }) => ({ name, kind: "person" as const })),
+    // A person by their whole name only: one word alone ("May") is too often an ordinary word.
+    ...people
+      .filter(({ name }) => name.trim().includes(" "))
+      .map(({ name }) => ({ name, kind: "person" as const })),
   ];
   return (
     <div {...stylex.props(styles.page)}>

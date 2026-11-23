@@ -9909,6 +9909,10 @@ msgstr "Its runs kept failing to start, so it starts no more until whoever made 
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 
+#: src/agents/agent-overview.tsx
+msgid "Its schedule is paused"
+msgstr "Its schedule is paused"
+
 #: src/workflows/version-source.tsx
 msgid "Its source files"
 msgstr "Its source files"
@@ -12759,7 +12763,6 @@ msgstr "Ocean"
 msgid "of them wait for a decision"
 msgstr "of them wait for a decision"
 
-#: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
 msgstr "Off"
@@ -13699,6 +13702,7 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Pause Stephen outside Grasp?"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx

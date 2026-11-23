@@ -9494,7 +9494,7 @@ msgstr "Es antwortet im Chat, wann immer es gefragt wird."
 
 #: src/agents/agent-page.tsx
 msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
-msgstr "Es antwortet niemandem mehr, und sein Zeitplan und seine Einstellungen werden entfernt. Die Chats, die Menschen mit ihm hatten, bleiben ihre. Um es eine Weile anzuhalten, pausieren Sie es stattdessen."
+msgstr "Er antwortet niemandem mehr, und sein Zeitplan und seine Einstellungen werden entfernt. Die Chats, die Menschen mit ihm hatten, bleiben ihre. Um ihn eine Weile anzuhalten, pausieren Sie ihn stattdessen."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9908,6 +9908,10 @@ msgstr "Seine Läufe konnten immer wieder nicht starten, daher startet er nichts
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Seine Läufe konnten immer wieder nicht starten, deshalb startet er nicht mehr. Beheben Sie, was sie aufgehalten hat, und schalten Sie ihn dann in den Auslösern des Workflows wieder ein: Er macht ab seinem nächsten Termin weiter."
+
+#: src/agents/agent-overview.tsx
+msgid "Its schedule is paused"
+msgstr "Sein Zeitplan ist pausiert"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -12759,7 +12763,6 @@ msgstr "Ozean"
 msgid "of them wait for a decision"
 msgstr "davon warten auf eine Entscheidung"
 
-#: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
 msgstr "Aus"
@@ -13699,6 +13702,7 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Stephen außerhalb von Grasp pausieren?"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx

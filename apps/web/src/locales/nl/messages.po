@@ -9494,7 +9494,7 @@ msgstr "Het antwoordt in een chat, wanneer het gevraagd wordt."
 
 #: src/agents/agent-page.tsx
 msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
-msgstr "Het antwoordt niemand meer, en zijn schema en instellingen worden verwijderd. De chats die mensen ermee hadden blijven van hen. Wil je het even stoppen, pauzeer het dan."
+msgstr "Hij antwoordt niemand meer, en zijn schema en instellingen worden verwijderd. De chats die mensen met hem hadden blijven van hen. Wil je hem even stoppen, pauzeer hem dan."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9908,6 +9908,10 @@ msgstr "Zijn runs konden steeds niet starten, dus hij start niets meer tot wie h
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Zijn runs bleven mislukken bij het starten, dus hij start niet meer. Los op wat ze tegenhield en zet hem daarna weer aan bij de triggers van de workflow: hij gaat verder vanaf zijn volgende moment."
+
+#: src/agents/agent-overview.tsx
+msgid "Its schedule is paused"
+msgstr "Zijn schema is gepauzeerd"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -12759,7 +12763,6 @@ msgstr "Oceaan"
 msgid "of them wait for a decision"
 msgstr "daarvan wachten op een beslissing"
 
-#: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
 msgstr "Uit"
@@ -13699,6 +13702,7 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Stephen buiten Grasp pauzeren?"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx
@@ -16896,7 +16900,7 @@ msgstr "Er ging iets mis."
 
 #: src/agents/agent-overview.tsx
 msgid "Something went wrong. It tries again shortly, then at its next run."
-msgstr "Er ging iets mis. Hij probeert het zo opnieuw, en anders bij de volgende run."
+msgstr "Er ging iets mis. Hij probeert het zo opnieuw, en anders de volgende keer."
 
 #: src/brain/memories-page.tsx
 msgid "something without a name"

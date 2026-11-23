@@ -6325,7 +6325,7 @@ msgstr "Non exécuté : pas configuré pour cette personne"
 
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: it was still busy, and tries again shortly"
-msgstr "Pas exécuté : il était encore occupé et réessaie sous peu"
+msgstr "Non exécuté : il était encore occupé et réessaie sous peu"
 
 #: src/agents/agent-overview.tsx
 msgid "Didn't run: no AI provider is connected"
@@ -9494,7 +9494,7 @@ msgstr "Il répond dans un chat, chaque fois qu’on le lui demande."
 
 #: src/agents/agent-page.tsx
 msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
-msgstr "Il ne répond plus à personne, et son horaire et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, mettez-le plutôt en pause."
+msgstr "Il ne répond plus à personne, et son planning et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, mettez-le plutôt en pause."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -9908,6 +9908,10 @@ msgstr "Ses exécutions n’arrivaient pas à démarrer, il ne démarre donc plu
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Ses exécutions échouaient sans cesse au démarrage, il ne démarre donc plus. Corrigez ce qui les a arrêtées, puis réactivez-le dans les déclencheurs du workflow : il reprend à sa prochaine échéance."
+
+#: src/agents/agent-overview.tsx
+msgid "Its schedule is paused"
+msgstr "Son planning est en pause"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -12759,7 +12763,6 @@ msgstr "Océan"
 msgid "of them wait for a decision"
 msgstr "d’entre elles attendent une décision"
 
-#: src/agents/agent-page.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Off"
 msgstr "Désactivé"
@@ -13699,6 +13702,7 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Mettre Stephen en pause en dehors de Grasp ?"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx

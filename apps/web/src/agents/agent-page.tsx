@@ -474,7 +474,7 @@ const AgentHead = ({
           {on ? (
             <Badge tone="success">{t`On`}</Badge>
           ) : (
-            <Badge tone="attention">{t`Off`}</Badge>
+            <Badge>{t`Paused`}</Badge>
           )}
           {own ? <Badge>{t`Just for you`}</Badge> : null}
         </span>
