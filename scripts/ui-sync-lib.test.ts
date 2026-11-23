@@ -2,14 +2,26 @@
  * What packages/ui must hold for its pin (ui-sync-lib.ts): the added items
  * with what they build on, and each way the package can leave Damsko's.
  */
+import { spawnSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import nodePath from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   carry,
   differences,
   expectedOf,
+  overdue,
   parseRegistry,
-  unproposed,
+  proposal,
 } from "./ui-sync-lib.ts";
 import type { LocalChange } from "./ui-sync-lib.ts";
 
@@ -224,10 +236,10 @@ describe("a change made here on purpose", () => {
     ]);
   });
 
-  it("is named after two weeks with no pull request in Damsko, and never fails for it", () => {
+  it("is named after two weeks, and never fails for it", () => {
     const today = new Date("2026-12-10T12:00:00Z");
     expect(
-      unproposed(
+      overdue(
         [
           listed("src/components/button.tsx", "2026-11-20"),
           {
@@ -240,6 +252,7 @@ describe("a change made here on purpose", () => {
       )
     ).toStrictEqual([
       "local-changes.json: src/components/button.tsx has differed from Damsko's since 2026-11-20 with no pull request there (vp run ui:propose)",
+      "local-changes.json: src/lib/utils.ts has differed from Damsko's since 2026-11-20; once https://github.com/grasplabs/damsko/pull/50 merges, move the pin there (vp run ui:update <commit>)",
     ]);
   });
 });
@@ -298,5 +311,75 @@ describe("a listed change at a new pin", () => {
       kind: "kept",
       content: undefined,
     });
+  });
+});
+
+const git = (cwd: string, ...args: string[]) => {
+  const run = spawnSync(
+    "git",
+    [
+      "-c",
+      "user.name=test",
+      "-c",
+      "user.email=test@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ],
+    { cwd, encoding: "utf-8" }
+  );
+  if (run.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${run.stderr}`);
+  }
+  return run.stdout;
+};
+
+/** Damsko's tree at a pin, as a checkout of one commit. */
+const checkout = (folder: string) => {
+  for (const file of ["src/components/button.tsx", "src/lib.ts"]) {
+    mkdirSync(nodePath.dirname(nodePath.join(folder, file)), {
+      recursive: true,
+    });
+    writeFileSync(nodePath.join(folder, file), `${file}\n`);
+  }
+  git(folder, "init", "--quiet");
+  git(folder, "add", "--all");
+  git(folder, "commit", "--quiet", "--message", "pin");
+};
+
+describe("the listed changes proposed to Damsko", () => {
+  it("is one patch that makes Damsko's files ours, each at its own path: edited, added and removed", () => {
+    const folder = mkdtempSync(nodePath.join(tmpdir(), "ui-sync-test-"));
+    try {
+      const pinned = nodePath.join(folder, "damsko");
+      checkout(pinned);
+      const patch = proposal(
+        pinned,
+        new Map([
+          ["src/components/button.tsx", bytes("edited here\n")],
+          ["src/components/badge.tsx", bytes("added here\n")],
+          ["src/lib.ts", undefined],
+        ])
+      );
+
+      const fresh = nodePath.join(folder, "fresh");
+      checkout(fresh);
+      writeFileSync(nodePath.join(folder, "local.patch"), patch);
+      git(fresh, "apply", nodePath.join(folder, "local.patch"));
+      const read = (file: string) =>
+        readFileSync(nodePath.join(fresh, file), "utf-8");
+      expect(read("src/components/button.tsx")).toBe("edited here\n");
+      expect(read("src/components/badge.tsx")).toBe("added here\n");
+      expect(
+        git(fresh, "status", "--porcelain").split("\n").toSorted()
+      ).toStrictEqual([
+        "",
+        " D src/lib.ts",
+        " M src/components/button.tsx",
+        "?? src/components/badge.tsx",
+      ]);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 });
