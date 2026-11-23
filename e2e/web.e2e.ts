@@ -19,10 +19,12 @@ test("loads the frontend from core, reaches core over RPC, and asks whoever isn'
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Grasp" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Log in" })
+  ).toBeVisible();
   // Only once core answered: without an answer, the page says so instead.
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
@@ -37,6 +39,35 @@ test("shows only its own words for a refused sign-in, never the link's", async (
     "Sign-in didn't work. Try again, or ask an admin."
   );
   await expect(page.getByText(planted)).toHaveCount(0);
+});
+
+test("offers each way in, marks the one used last in this browser, and gives a guest a code from the page's foot", async ({
+  page,
+}) => {
+  await page.goto("/sign-in");
+  const ways = page.getByRole("button", { name: /^Continue with /u });
+  await expect(ways).toHaveCount(2);
+  await expect(ways.first()).toHaveAccessibleName("Continue with Microsoft");
+  await expect(ways.last()).toHaveAccessibleName("Continue with Grasp staff");
+  await expect(page.getByText("Last used")).toHaveCount(0);
+
+  // Chosen, the page leaves for the company's sign-in once the door has
+  // opened, and coming back it marks that way (staff's is never kept).
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await page.goto("/sign-in");
+  await expect(page.getByText("Last used")).toBeVisible();
+  await expect(ways.first()).toHaveAccessibleName("Continue with Microsoft");
+
+  // A guest, from outside the company, asks for a code instead, and can
+  // go back to the company's ways in.
+  await page.getByRole("link", { name: "Sign in with a code" }).click();
+  await expect(page.getByLabel("Your email address")).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("by")).toBe("code");
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Log in" })
+  ).toBeVisible();
 });
 
 test("an interview link nobody made asks to sign in first, then can't be opened with the request ID core refused it under, says nothing was saved, and lets them sign out to sign in again", async ({
@@ -391,7 +422,7 @@ test("shows the members page only to someone signed in, and never signs them out
 }) => {
   await page.goto("/settings/members");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-in");
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(
@@ -435,7 +466,7 @@ test("shows the members page only to someone signed in, and never signs them out
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toHaveCount(0);
 
   // Trying again shows it's trying, then says so again while core fails.
@@ -534,7 +565,7 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await endSession(member);
   await nav.getByRole("link", { name: "Apps" }).click();
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible({
     timeout: reconnectMs,
   });
