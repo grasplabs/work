@@ -127,6 +127,8 @@ const fakeConnections = () => {
   const files = new Map<string, InstructionFileText>();
   // Saves and reads to refuse, as a Brain out of reach would.
   const outOfReach = { saves: 0, reads: 0 };
+  // Calls core refuses, by what they set ("reach"), as core out of reach would.
+  const refused = new Set<string>();
   const instructions: InstructionsApi = {
     read: async (file) => {
       await Promise.resolve();
@@ -318,6 +320,9 @@ const fakeConnections = () => {
       audience: ToolClassAudience
     ) => {
       await Promise.resolve();
+      if (refused.has("reach")) {
+        throw new Error("Core can't be reached. Try again.");
+      }
       asked.push(["reach", id, on, audience]);
       const found = settings.get(id);
       if (found !== undefined) {
@@ -384,7 +389,7 @@ const fakeConnections = () => {
       }
     },
   };
-  return { connections, instructions, outOfReach, asked };
+  return { connections, instructions, outOfReach, refused, asked };
 };
 
 type Fake = ReturnType<typeof fakeConnections>;
@@ -1019,7 +1024,10 @@ const radio = (words: string): HTMLElement => {
  */
 const setUpByHand = async (
   name: string,
-  before: readonly string[] = []
+  before: readonly string[] = [],
+  answering: (question: string) => Promise<void> = async () => {
+    // Every other answer as offered.
+  }
 ): Promise<string[]> => {
   const question = document.querySelector("h1")?.textContent ?? "";
   const questions = [...before, question];
@@ -1027,6 +1035,7 @@ const setUpByHand = async (
   if (question.startsWith("Ready to make") || questions.length > 12) {
     return questions;
   }
+  await answering(question);
   if (question === "What should we call your agent?") {
     await set(field("Name"), name, "input");
   }
@@ -1034,7 +1043,25 @@ const setUpByHand = async (
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
   }
   await press(button("Next"));
-  return await setUpByHand(name, questions);
+  return await setUpByHand(name, questions, answering);
+};
+
+/** The value the review step shows beside `label`. */
+const reviewed = (label: string): string | undefined =>
+  [...document.querySelectorAll("dt")]
+    .find((each) => each.textContent.trim() === label)
+    ?.nextElementSibling?.textContent.trim();
+
+/** Waits out the moment a made agent stands ready before its page opens. */
+const readyShown = async () => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 1800);
+    await promise;
+  });
+  await settled();
 };
 
 describe("an agent's page", () => {
@@ -1587,7 +1614,7 @@ describe("an agent's page", () => {
         "How should Claire work?",
         "Which apps can Claire use?",
         "What can Claire do?",
-        "How hard should Claire think?",
+        "Which model should Claire use?",
         "When should Claire work?",
         "Ready to make Claire?",
       ],
@@ -1602,6 +1629,52 @@ describe("an agent's page", () => {
       true,
       { who: "everyone" },
     ]);
+  });
+
+  it("saves what it may do as the review step says it, and nothing it doesn't say", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    await setUpByHand("Claire", [], async (question) => {
+      if (question === "What can Claire do?") {
+        await press(rowSwitch("Write mail, events and files"));
+      }
+    });
+    const canDo = reviewed("Can do");
+    await press(button("Make Claire"));
+    const classes = asked
+      .filter(([what]) => what === "class")
+      .map((call) => String(call[2]))
+      .toSorted((a, b) => a.localeCompare(b));
+    expect({ canDo, classes }).toStrictEqual({
+      canDo: "Read mail, calendars and files and Write mail, events and files",
+      classes: ["change-company", "change-own", "read-company", "read-own"],
+    });
+  });
+
+  it("opens a new agent's page saying what it couldn't save, once it is made and a later call fails", async () => {
+    const fake = fakeConnections();
+    const { asked, refused } = fake;
+    refused.add("reach");
+    const router = await shown(fake, "new-guided");
+    await setUpByHand("Claire");
+    await press(button("Make Claire"));
+    await readyShown();
+    expect({
+      made: asked.filter(([what]) => what === "make").length,
+      page: router.state.location.pathname,
+      said: document.body.textContent.includes(
+        "Claire was made, but not everything you chose was saved"
+      ),
+      why: document.body.textContent.includes(
+        "Core can't be reached. Try again."
+      ),
+    }).toStrictEqual({
+      made: 1,
+      page: "/agents/agent-1",
+      said: true,
+      why: true,
+    });
   });
 
   it("asks no more of an agent just for its maker, set up by hand, than it keeps, and makes it theirs", async () => {
@@ -1619,7 +1692,7 @@ describe("an agent's page", () => {
         "What should Claire do?",
         "How should Claire work?",
         "Which apps can Claire use?",
-        "How hard should Claire think?",
+        "Which model should Claire use?",
         "Ready to make Claire?",
       ],
       made: ["make own", expect.objectContaining({ name: "Claire" })],

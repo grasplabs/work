@@ -123,13 +123,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       },
     },
     switch: { error: t`Could not save` },
-    trace: {
-      states: {
-        running: t({ message: "Working", context: "a step's state" }),
-        error: t({ message: "Failed", context: "a step's state" }),
-        pending: t({ message: "Waiting", context: "a step's state" }),
-      },
-    },
   };
   return (
     <I18nProvider catalog={catalog} locale={i18n.locale}>

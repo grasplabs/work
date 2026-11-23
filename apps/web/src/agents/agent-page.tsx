@@ -11,6 +11,11 @@ import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
@@ -106,6 +111,7 @@ import { AgentWakes, useLast } from "./agent-wakes.tsx";
 import { FactRow, SettingRow, SettingsCard } from "./settings-card.tsx";
 import { agentTabOf } from "./tabs.tsx";
 import type { AgentTab } from "./tabs.tsx";
+import { forgetUnfinished, unfinishedOf } from "./unfinished-setup.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins, or a person's own agent's,
@@ -147,6 +153,10 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["3"],
   },
+  // A tab's name and its count, a small step apart.
+  counted: { display: "inline-flex", alignItems: "center", gap: space["2"] },
+  // A setting's control at its own width beside its name, on a phone too.
+  control: { display: "block", width: "10rem", maxWidth: "100%" },
   // The header, then the tab shown, as far apart as its cards.
   column: { display: "grid", gap: space["6"], width: "100%" },
   // A part's cards, as far apart as the column sets its own.
@@ -406,23 +416,25 @@ const Access = ({
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
             label={t`Answers`}
           >
-            <AudienceControl
-              editable={can}
-              key={JSON.stringify(settings.audience)}
-              label={t`Who may use ${name}`}
-              offers={["everyone", "teams", "nobody"]}
-              onSave={async (chosen) => {
-                await change(async (session) => {
-                  await session.connections.setAgentReach(
-                    agent.id,
-                    settings.on,
-                    audienceOf(chosen)
-                  );
-                });
-              }}
-              teams={teams}
-              value={chosenOf(settings.audience)}
-            />
+            <span {...stylex.props(styles.control)}>
+              <AudienceControl
+                editable={can}
+                key={JSON.stringify(settings.audience)}
+                label={t`Who may use ${name}`}
+                offers={["everyone", "teams", "nobody"]}
+                onSave={async (chosen) => {
+                  await change(async (session) => {
+                    await session.connections.setAgentReach(
+                      agent.id,
+                      settings.on,
+                      audienceOf(chosen)
+                    );
+                  });
+                }}
+                teams={teams}
+                value={chosenOf(settings.audience)}
+              />
+            </span>
           </SettingRow>
         </FieldGroup>
       </SettingsCard>
@@ -435,24 +447,26 @@ const Access = ({
             const className = i18n._(classNames[toolClass]);
             return (
               <SettingRow key={toolClass} label={className}>
-                <AudienceControl
-                  editable={can}
-                  key={JSON.stringify(audience)}
-                  label={t`${className}, for ${name}`}
-                  offers={["same", "teams", "nobody"]}
-                  onSave={async (chosen) => {
-                    await change(async (session) => {
-                      await session.connections.setAgentToolClass(
-                        agent.id,
-                        toolClass,
-                        appAudienceOf(chosen)
-                      );
-                    });
-                  }}
-                  same={t`As the company has it`}
-                  teams={teams}
-                  value={chosenOf(audience)}
-                />
+                <span {...stylex.props(styles.control)}>
+                  <AudienceControl
+                    editable={can}
+                    key={JSON.stringify(audience)}
+                    label={t`${className}, for ${name}`}
+                    offers={["same", "teams", "nobody"]}
+                    onSave={async (chosen) => {
+                      await change(async (session) => {
+                        await session.connections.setAgentToolClass(
+                          agent.id,
+                          toolClass,
+                          appAudienceOf(chosen)
+                        );
+                      });
+                    }}
+                    same={t`As the company has it`}
+                    teams={teams}
+                    value={chosenOf(audience)}
+                  />
+                </span>
               </SettingRow>
             );
           })}
@@ -720,12 +734,14 @@ const AgentTabRow = ({
       {own ? null : <TabsTrigger value="access">{t`Access`}</TabsTrigger>}
       {own ? null : (
         <TabsTrigger value="schedule">
-          {t`Schedule`}
-          {scheduled === 0 ? null : (
-            <Badge size="sm" variant="secondary">
-              {String(scheduled)}
-            </Badge>
-          )}
+          <span {...stylex.props(styles.counted)}>
+            {t`Schedule`}
+            {scheduled === 0 ? null : (
+              <Badge size="sm" variant="secondary">
+                {String(scheduled)}
+              </Badge>
+            )}
+          </span>
         </TabsTrigger>
       )}
     </TabsList>
@@ -811,6 +827,8 @@ export const AgentPage = ({
   const can = editable && !busy;
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // What a new agent's setup couldn't save once it was made (unfinished-setup.ts).
+  const [unfinished, setUnfinished] = useState(() => unfinishedOf(agent.id));
   const { name } = agent;
   const typed: Typed = {
     name: agent.name,
@@ -898,6 +916,19 @@ export const AgentPage = ({
               />
             )}
             <AgentFailure>{failure}</AgentFailure>
+            {unfinished === undefined ? null : (
+              // What its setup couldn't save once it was made: set here.
+              <Alert
+                onClose={() => {
+                  forgetUnfinished(agent.id);
+                  setUnfinished(undefined);
+                }}
+                variant="warning"
+              >
+                <AlertTitle>{t`${name} was made, but not everything you chose was saved`}</AlertTitle>
+                <AlertDescription>{unfinished}</AlertDescription>
+              </Alert>
+            )}
             <TabsContent keepMounted value="overview">
               <div {...stylex.props(styles.stack)}>
                 <Facts

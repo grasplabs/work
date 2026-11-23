@@ -35,7 +35,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { AppMark } from "../app-mark.tsx";
+import { ProviderMark } from "../../connections/provider-mark.tsx";
 import type { CatalogApp } from "./model.ts";
 
 // The connector picker of New agent's apps step (apps-step.tsx), after
@@ -100,7 +100,7 @@ const Part = ({
             size="xs"
           >
             <ItemMedia>
-              <AppMark logo={app.logo} name={app.name} />
+              <ProviderMark id={app.id} logo={app.logo} name={app.name} />
             </ItemMedia>
             <ItemContent>
               <ItemTitle>{app.name}</ItemTitle>
@@ -136,7 +136,7 @@ const Detail = ({
   return (
     <div {...stylex.props(styles.detail)}>
       <div {...stylex.props(styles.head)}>
-        <AppMark logo={app.logo} name={name} size="default" />
+        <ProviderMark id={app.id} logo={app.logo} name={name} size="md" />
         <Heading level={3} size="default">
           {name}
         </Heading>

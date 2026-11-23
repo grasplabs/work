@@ -497,10 +497,6 @@ msgstr "{each, plural, one {# hora a la semana} other {# horas a la semana}}"
 msgid "{event}, at {account}"
 msgstr "{event}, en {account}"
 
-#: src/agents/agent-activity.tsx
-msgid "{failed, plural, one {{done}; # step failed} other {{done}; # steps failed}}"
-msgstr "{failed, plural, one {{done}; # paso falló} other {{done}; # pasos fallaron}}"
-
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# fallida en los últimos {days} días} other {# fallidas en los últimos {days} días}}"
@@ -861,6 +857,7 @@ msgid "{name} isn't ready yet"
 msgstr "{name} aún no está listo"
 
 #: src/connections/app-logo.tsx
+#: src/connections/provider-mark.tsx
 msgid "{name} logo"
 msgstr "Logotipo de {name}"
 
@@ -899,6 +896,10 @@ msgstr "{name} subido."
 #: src/agents/agent-apps-card.tsx
 msgid "{name} uses only these apps, as far as its kinds of work allow."
 msgstr "{name} usa solo estas apps, en la medida en que lo permitan sus tipos de trabajo."
+
+#: src/agents/agent-page.tsx
+msgid "{name} was made, but not everything you chose was saved"
+msgstr "{name} se ha creado, pero no se guardó todo lo que elegiste"
 
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
@@ -1122,10 +1123,6 @@ msgstr "{scheduled, plural, one {# programación} other {# programaciones}}"
 msgid "{scheduled} on a schedule, next {nextMoment}"
 msgstr "{scheduled} programadas, la próxima {nextMoment}"
 
-#: src/agents/agent-activity.tsx
-msgid "{searches, plural, one {searched once} other {searched # times}}"
-msgstr "{searches, plural, one {buscó una vez} other {buscó # veces}}"
-
 #: src/settings/stephen-card.tsx
 msgid "{share} of questions answered · 30 days"
 msgstr "{share} de las preguntas respondidas · 30 días"
@@ -1311,22 +1308,6 @@ msgstr "{title} en {connection}"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} de # herramienta permitida} other {{count} de # herramientas permitidas}}"
-
-#: src/agents/agent-activity.tsx
-msgid "{touched, plural, =0 {found no sources} one {found # source} other {found # sources}}"
-msgstr "{touched, plural, =0 {no encontró fuentes} one {encontró # fuente} other {encontró # fuentes}}"
-
-#: src/agents/agent-activity.tsx
-msgid "{touched, plural, one {changed # file} other {changed # files}}"
-msgstr "{touched, plural, one {cambió # archivo} other {cambió # archivos}}"
-
-#: src/agents/agent-activity.tsx
-msgid "{touched, plural, one {ran # tool} other {ran # tools}}"
-msgstr "{touched, plural, one {usó # herramienta} other {usó # herramientas}}"
-
-#: src/agents/agent-activity.tsx
-msgid "{touched, plural, one {read # file} other {read # files}}"
-msgstr "{touched, plural, one {leyó # archivo} other {leyó # archivos}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
@@ -5497,10 +5478,6 @@ msgstr "Editando {path}"
 msgid "Editing a workflow"
 msgstr "Editando un flujo de trabajo"
 
-#: src/agents/setup/thinking-step.tsx
-msgid "Effort"
-msgstr "Esfuerzo"
-
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.security.tsx
@@ -6045,10 +6022,6 @@ msgstr "Exportar con el archivo"
 msgid "Exported the audit trail"
 msgstr "Exportó el registro de auditoría"
 
-#: src/agents/setup/words.ts
-msgid "Extra high"
-msgstr "Muy alto"
-
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
@@ -6078,11 +6051,6 @@ msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Fallidas"
 
-#: src/frame/ui-words.tsx
-msgctxt "a step's state"
-msgid "Failed"
-msgstr "Falló"
-
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Failed"
@@ -6099,10 +6067,6 @@ msgstr "Modelos de reserva"
 #: src/settings/ai-providers.tsx
 msgid "Fallbacks, in order"
 msgstr "Modelos de reserva, por orden"
-
-#: src/agents/setup/thinking-step.tsx
-msgid "Fastest. For simple, routine jobs."
-msgstr "El más rápido. Para tareas sencillas y rutinarias."
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -7118,10 +7082,6 @@ msgstr "Ocultar para todos los administradores"
 msgid "Hide what {name} received"
 msgstr "Ocultar lo que recibió {name}"
 
-#: src/agents/setup/words.ts
-msgid "High"
-msgstr "Alto"
-
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "High"
@@ -7183,10 +7143,6 @@ msgstr "¿Cómo quieres crearlo?"
 #: src/chat/composer.tsx
 msgid "How hard it thinks"
 msgstr "Cuánto piensa"
-
-#: src/agents/setup/thinking-step.tsx
-msgid "How hard should {name} think?"
-msgstr "¿Cuánto debe pensar {name}?"
 
 #: src/workflows/item-test.tsx
 msgid "How it went then"
@@ -7625,10 +7581,6 @@ msgstr "Entrada"
 #: src/workflows/start-run.tsx
 msgid "Input, as JSON"
 msgstr "Entrada, en JSON"
-
-#: src/agents/agent-activity.tsx
-msgid "Input: {input}"
-msgstr "Entrada: {input}"
 
 #: src/chat/saved-memory.tsx
 msgid "Instruction"
@@ -8085,6 +8037,10 @@ msgstr "Su próximo inicio se rechaza hasta que un administrador vuelva a aproba
 msgid "Its own address, for whoever may use it while it is live."
 msgstr "Su propia dirección, para quien pueda usarla mientras esté publicada."
 
+#: src/agents/agent-look.tsx
+msgid "Its own shape"
+msgstr "Su propia forma"
+
 #: src/apps/draft-changes.tsx
 msgid "Its pages and server code may hand files people can read to the workflows it binds."
 msgstr "Sus páginas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula."
@@ -8132,10 +8088,6 @@ msgstr "Su URL ya no acepta nada y ningún flujo de trabajo se inicia con sus ev
 #: src/workflows/item-test.tsx
 msgid "Its version"
 msgstr "Su versión"
-
-#: src/agents/setup/thinking-step.tsx
-msgid "Its very best work, and the slowest."
-msgstr "Su mejor trabajo, y el más lento."
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
@@ -8677,14 +8629,6 @@ msgstr "Consultó el acceso que quitar a mano"
 msgid "Looked at the uploads shared with a team or everyone"
 msgstr "Consultó los archivos subidos compartidos con un equipo o con todos"
 
-#: src/agents/setup/words.ts
-msgid "Looks things up online."
-msgstr "Busca cosas en internet."
-
-#: src/agents/setup/words.ts
-msgid "Low"
-msgstr "Bajo"
-
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "Low"
@@ -8884,10 +8828,6 @@ msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
 
-#: src/agents/setup/words.ts
-msgid "Max"
-msgstr "Máximo"
-
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
 msgid "Max"
@@ -8906,10 +8846,6 @@ msgstr "Puede hacer"
 #: src/agents/new-agent.tsx
 msgid "Meadow"
 msgstr "Pradera"
-
-#: src/agents/setup/words.ts
-msgid "Medium"
-msgstr "Medio"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -8982,6 +8918,7 @@ msgstr "Micrófono: {name}"
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
+#: src/agents/setup/review-step.tsx
 #: src/agents/setup/thinking-step.tsx
 #: src/apps/resource-bindings.tsx
 #: src/onboarding/ai-step.tsx
@@ -9668,10 +9605,6 @@ msgstr "Aún no hay ninguna fuente."
 #: src/brain/brain.ts
 msgid "No stakeholder named yet"
 msgstr "Aún no hay responsable designado"
-
-#: src/agents/agent-activity.tsx
-msgid "No steps yet"
-msgstr "Aún no hay pasos"
 
 #: src/apps/app-data.tsx
 msgid "No tables"
@@ -10461,7 +10394,6 @@ msgstr "Activado en {name}"
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
-#: src/agents/setup/abilities-step.tsx
 msgid "On its own"
 msgstr "Por su cuenta"
 
@@ -11595,10 +11527,6 @@ msgstr "Preguntas para empezar"
 msgid "Queued"
 msgstr "En cola"
 
-#: src/agents/setup/thinking-step.tsx
-msgid "Quick and careful. Good for most jobs."
-msgstr "Rápido y cuidadoso. Bueno para la mayoría de tareas."
-
 #: src/agents/agent-templates.ts
 msgid "Quote the document's own words for numbers and dates."
 msgstr "Para cifras y fechas, cita las palabras exactas del documento."
@@ -12327,10 +12255,6 @@ msgctxt "inbox item kind"
 msgid "Result"
 msgstr "Resultado"
 
-#: src/agents/agent-activity.tsx
-msgid "Result: {result}"
-msgstr "Resultado: {result}"
-
 #: src/brain/brain.ts
 msgid "Result: not measured yet"
 msgstr "Resultado: aún sin medir"
@@ -12666,10 +12590,6 @@ msgstr "Ejecuta el borrador con la entrada de tus {most} ejecuciones más recien
 msgid "Runs they started, and their place in the roster"
 msgstr "Ejecuciones que inició y su lugar en la plantilla"
 
-#: src/agents/setup/words.ts
-msgid "Runs your company's workflows."
-msgstr "Ejecuta los flujos de trabajo de tu empresa."
-
 #: src/report/report.ts
 msgid "Runs: {total}"
 msgstr "Ejecuciones: {total}"
@@ -12966,10 +12886,6 @@ msgstr "Buscar en el archivo"
 #: src/brain/sources-page.tsx
 msgid "Search the Brain"
 msgstr "Buscar en el cerebro"
-
-#: src/agents/setup/words.ts
-msgid "Search the web"
-msgstr "Buscar en internet"
 
 #: src/chat/chat-window.tsx
 msgid "Search your chats, and open one."
@@ -13940,10 +13856,6 @@ msgstr "Haz que la persona empiece cada día sabiendo las pocas cosas que más i
 #: src/workflows/start-run.tsx
 msgid "Start the run"
 msgstr "Iniciar la ejecución"
-
-#: src/agents/setup/words.ts
-msgid "Start workflows"
-msgstr "Iniciar flujos de trabajo"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -15531,19 +15443,9 @@ msgstr "Lo encontrarán en Apps y lo verán tal como está ahora."
 msgid "They'll find it under Workflows, and run it as it is now."
 msgstr "Lo encontrarán en Workflows y lo ejecutarán tal como está ahora."
 
-#: src/agents/setup/review-step.tsx
-#: src/agents/setup/thinking-step.tsx
 #: src/chat/thread.tsx
 msgid "Thinking"
 msgstr "Pensando"
-
-#: src/agents/setup/thinking-step.tsx
-msgid "Thinks longer. For tricky questions."
-msgstr "Piensa más. Para preguntas difíciles."
-
-#: src/agents/setup/thinking-step.tsx
-msgid "Thinks much longer. For hard problems."
-msgstr "Piensa mucho más. Para problemas complejos."
 
 #: src/apps/resource-bindings.tsx
 msgid "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
@@ -15839,10 +15741,6 @@ msgstr "Lo marcado con Solo tú es solo tuyo: nadie más lo ve, ni siquiera los 
 #: src/chat/thread.tsx
 msgid "Thought for {time}"
 msgstr "Pensó durante {time}"
-
-#: src/agents/agent-activity.tsx
-msgid "thought it through"
-msgstr "lo pensó bien"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -16401,10 +16299,6 @@ msgstr "Usar otra lista"
 msgid "Use another platform"
 msgstr "Elegir otra plataforma"
 
-#: src/agents/setup/words.ts
-msgid "Use Apps"
-msgstr "Usar Apps"
-
 #: src/apps/app-access-requests.tsx
 msgid "Use capital letters, digits and underscores, starting with a letter, and not a name the platform uses itself."
 msgstr "Use mayúsculas, dígitos y guiones bajos, empezando por una letra, y no un nombre que use la propia plataforma."
@@ -16627,11 +16521,6 @@ msgstr "esperan ahora una decisión"
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"
 msgstr "En espera"
-
-#: src/frame/ui-words.tsx
-msgctxt "a step's state"
-msgid "Waiting"
-msgstr "Esperando"
 
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
@@ -17549,6 +17438,10 @@ msgstr "¿Qué plataforma de RR. HH. usas?"
 msgid "Which language do you want to do this interview in?"
 msgstr "¿En qué idioma quieres hacer esta entrevista?"
 
+#: src/agents/setup/thinking-step.tsx
+msgid "Which model should {name} use?"
+msgstr "¿Qué modelo debe usar {name}?"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "¿Qué herramientas usa realmente la gente?"
@@ -17698,10 +17591,6 @@ msgstr "Por qué"
 #: src/workflows/run-detail.tsx
 msgid "Why it failed"
 msgstr "Por qué falló"
-
-#: src/agents/agent-activity.tsx
-msgid "Why it failed: {result}"
-msgstr "Por qué falló: {result}"
 
 #: src/brain/brain.ts
 msgid "Why now"
@@ -17909,15 +17798,9 @@ msgstr "Flujos de trabajo que inicia la aplicación"
 msgid "Workflows this month"
 msgstr "Flujos de trabajo este mes"
 
-#: src/agents/agent-activity.tsx
 #: src/frame/ui-words.tsx
 msgid "Working"
 msgstr "Trabajando"
-
-#: src/frame/ui-words.tsx
-msgctxt "a step's state"
-msgid "Working"
-msgstr "En curso"
 
 #: src/chat/thread.tsx
 msgid "Working on it"
@@ -17934,10 +17817,6 @@ msgstr "Funciona"
 #: src/brain/brain-article/team-work.tsx
 msgid "Works in"
 msgstr "Trabaja en"
-
-#: src/agents/setup/words.ts
-msgid "Works in your company's Apps."
-msgstr "Trabaja en las Apps de tu empresa."
 
 #: src/routes/_shell.settings.tsx
 msgid "Workspace"

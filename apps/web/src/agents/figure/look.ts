@@ -1,6 +1,7 @@
 import { firstAgentId } from "@grasp-os/shared/agents";
 import { colors } from "@grasp-os/ui/lib/tokens.stylex";
 
+import { brainColors } from "../../brain/brain-colours.stylex.ts";
 import { figureShapes } from "./body.ts";
 import type { FigureShape } from "./body.ts";
 
@@ -33,10 +34,8 @@ export interface AgentFigureLook {
   eye?: boolean;
 }
 
-// The warm lights of ember and amber: the Brain's heat and glow, the same
-// in both themes as the figure stands on its own night.
-const heat = "light-dark(oklch(0.627 0.183 36.26), oklch(0.68 0.19 38))";
-const glow = "oklch(0.843 0.135 83.03)";
+// The warm lights of ember and amber: the Brain's heat and glow.
+const { heat, glow } = brainColors;
 
 /** A mix of two colours in oklch, `share` percent of the first. */
 const mix = (first: string, share: number, second: string): string =>

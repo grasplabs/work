@@ -1,3 +1,4 @@
+import { failureText } from "@grasp-os/shared/errors";
 import {
   instructionFileErrors,
   instructionsMaxLength,
@@ -50,6 +51,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 
+import type { Session } from "../core.ts";
 import { Page } from "../frame/page.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { briefOf, instructionsOf } from "./agent-brief.ts";
@@ -60,6 +62,7 @@ import { AgentFigure, AgentFigureAura } from "./figure/agent-figure.tsx";
 import type { FigureShape } from "./figure/body.ts";
 import { agentFigurePalettes, faceOf, lookFromName } from "./figure/look.ts";
 import type { AgentFigureLook, AgentFigurePalette } from "./figure/look.ts";
+import { keepUnfinished } from "./unfinished-setup.ts";
 import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 /** The shapes the shape question offers: the lit bodies a person can tell apart. */
@@ -675,6 +678,26 @@ export const NewAgent = ({
       : shown.values.length > 0 || (shown.other && shown.words.trim() !== "");
   const ready = !nameTaken && (step === "instructions" || given);
 
+  /** What the answers set once the agent exists: whom it answers and its schedule. */
+  const finish = async (session: Session, agentId: string): Promise<void> => {
+    if (draft.audience === "everyone") {
+      await session.connections.setAgentReach(agentId, true, {
+        who: "everyone",
+      });
+    }
+    const cron =
+      draft.schedule === "asked"
+        ? undefined
+        : cronOf(draft.schedule, scheduledAt);
+    if (cron !== undefined) {
+      await session.connections.makeAgentWake(agentId, {
+        cron,
+        personId,
+        opening: draft.job === "" ? draft.name : draft.job,
+      });
+    }
+  };
+
   const make = async (): Promise<void> => {
     const { instructions } = draft;
     const mine = draft.audience === "me";
@@ -701,21 +724,13 @@ export const NewAgent = ({
       if (mine) {
         return { agent, told };
       }
-      if (draft.audience === "everyone") {
-        await session.connections.setAgentReach(agent.id, true, {
-          who: "everyone",
-        });
-      }
-      const cron =
-        draft.schedule === "asked"
-          ? undefined
-          : cronOf(draft.schedule, scheduledAt);
-      if (cron !== undefined) {
-        await session.connections.makeAgentWake(agent.id, {
-          cron,
-          personId,
-          opening: draft.job === "" ? draft.name : draft.job,
-        });
+      // Whom it answers and its schedule, one call each once it exists:
+      // what fails then is said on its page, as the agent is made and its
+      // name taken (unfinished-setup.ts).
+      try {
+        await finish(session, agent.id);
+      } catch (error) {
+        keepUnfinished(agent.id, failureText(error));
       }
       return { agent, told };
     });

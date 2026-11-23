@@ -15,7 +15,6 @@ import { chatPresence } from "../chat/chat-presence.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
 // A new agent: anyone of the company makes one of their own, while the
@@ -181,37 +180,42 @@ export const Route = createFileRoute("/_shell/agents/new")({
         data: { taken: [], models: [], apps: [], teams: [], ownOn },
       };
     }
-    // The models an agent can be given: without them there is no setup to
-    // show, so the page says core can't be reached, as every page does.
-    const modelsRead = loadFromCore(
-      core,
-      async (session) => await session.chats.models()
-    );
-    const [agents, own, connections, catalog, reach] = await Promise.allSettled(
-      [
-        core.withSession(async (session) => await session.connections.agents()),
-        core.withSession(
-          async (session) => await session.connections.ownAgents()
-        ),
-        core.withSession(async (session) => await session.connections.list()),
-        core.withSession(
-          async (session) => await session.connections.catalog()
-        ),
-        core.withSession(
-          async (session) => await session.connections.stephenReach()
-        ),
-      ]
-    );
-    const models = await modelsRead;
-    if (models.state !== "ready") {
-      return models;
-    }
+    // The names other agents have, which either way needs (core still
+    // refuses a name in use): none where core won't say them.
+    const takenRead = Promise.allSettled([
+      core.withSession(async (session) => await session.connections.agents()),
+      core.withSession(
+        async (session) => await session.connections.ownAgents()
+      ),
+    ]);
     const ownOn = await ownOnRead;
     // Someone who may make neither kind has nothing to make here.
     if (!ownOn && !admin) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/agents", replace: true });
     }
+    const takenNames = await takenRead;
+    const taken = takenNames.flatMap((read) =>
+      read.status === "fulfilled" ? read.value.map(({ name }) => name) : []
+    );
+    // In a chat, Grasp asks for no model, app or team: nothing more to read.
+    if (way === "chat") {
+      return {
+        state: "ready",
+        data: { taken, models: [], apps: [], teams: [], ownOn },
+      };
+    }
+    // Set up by hand: the models an agent can be given (none where core
+    // won't say, and it then takes the one the asker picks), the apps the
+    // company offers, and its teams, each none where core won't say.
+    const [models, connections, catalog, reach] = await Promise.allSettled([
+      core.withSession(async (session) => await session.chats.models()),
+      core.withSession(async (session) => await session.connections.list()),
+      core.withSession(async (session) => await session.connections.catalog()),
+      core.withSession(
+        async (session) => await session.connections.stephenReach()
+      ),
+    ]);
     // An agent is given only an app the company offers.
     const entries =
       catalog.status === "fulfilled"
@@ -238,10 +242,8 @@ export const Route = createFileRoute("/_shell/agents/new")({
     return {
       state: "ready",
       data: {
-        taken: [agents, own].flatMap((read) =>
-          read.status === "fulfilled" ? read.value.map(({ name }) => name) : []
-        ),
-        models: models.data,
+        taken,
+        models: models.status === "fulfilled" ? models.value : [],
         apps,
         teams: reach.status === "fulfilled" ? reach.value.teams : [],
         ownOn,

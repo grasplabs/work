@@ -5,25 +5,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
 import { modelName } from "../../chat/composer.tsx";
 import { SettingRow, SettingsCard } from "../settings-card.tsx";
-import { efforts } from "./model.ts";
-import type { Effort, StepProps } from "./model.ts";
+import type { StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
-import { useSetupWords } from "./words.ts";
 
-// How hard it thinks, on Settings' own parts (Ruben, 21 November: "pick
-// the UI components from settings", the slider was bad): one card with a
-// row each, as AI providers has its models. The model in a picker, the one
-// the person picks in the chat first; the effort as one row of segments,
-// the chosen level's meaning under its name.
+// Which model its turns use, on Settings' own parts (Ruben, 21 November:
+// "pick the UI components from settings"): one card with one row, as AI
+// providers has its models, the one the person picks in the chat first.
+// How hard it thinks is asked once core keeps it for an agent.
 
 /** The value of "the one the person picks in the chat" among the choices. */
 const askersOwn = "asker";
@@ -34,22 +27,14 @@ const styles = stylex.create({
 
 export const ThinkingStep = ({ setup, change, name, models }: StepProps) => {
   const { t } = useLingui();
-  const { effortNames } = useSetupWords();
-  const effortLines: Record<Effort, string> = {
-    low: t`Fastest. For simple, routine jobs.`,
-    medium: t`Quick and careful. Good for most jobs.`,
-    high: t`Thinks longer. For tricky questions.`,
-    extra: t`Thinks much longer. For hard problems.`,
-    max: t`Its very best work, and the slowest.`,
-  };
   const chosen = setup.model ?? askersOwn;
   const options = [
     { value: askersOwn, label: t`Picked in the chat` },
     ...models.map((model) => ({ value: model, label: modelName(model) })),
   ];
   return (
-    <Question title={t`How hard should ${name} think?`}>
-      <SettingsCard aria-label={t`Thinking`}>
+    <Question title={t`Which model should ${name} use?`}>
+      <SettingsCard aria-label={t`Model`}>
         <FieldGroup>
           <SettingRow
             help={
@@ -75,25 +60,6 @@ export const ThinkingStep = ({ setup, change, name, models }: StepProps) => {
                 <SelectContent />
               </Select>
             </span>
-          </SettingRow>
-          <SettingRow help={effortLines[setup.effort]} label={t`Effort`}>
-            <ToggleGroup
-              aria-label={t`Effort`}
-              onValueChange={(values) => {
-                const effort = efforts.find((each) => each === values[0]);
-                if (effort !== undefined) {
-                  change({ effort });
-                }
-              }}
-              size="sm"
-              value={[setup.effort]}
-            >
-              {efforts.map((effort) => (
-                <ToggleGroupItem key={effort} value={effort}>
-                  {effortNames[effort]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
           </SettingRow>
         </FieldGroup>
       </SettingsCard>

@@ -1,4 +1,5 @@
 import { agentAppOf } from "@grasp-os/shared/agents";
+import { failureText } from "@grasp-os/shared/errors";
 import {
   instructionFileErrors,
   instructionsMaxLength,
@@ -45,6 +46,7 @@ import { NameStep } from "./setup/name-step.tsx";
 import { ReviewStep } from "./setup/review-step.tsx";
 import { ScheduleStep } from "./setup/schedule-step.tsx";
 import { ThinkingStep } from "./setup/thinking-step.tsx";
+import { keepUnfinished } from "./unfinished-setup.ts";
 import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 // A new agent, set up by hand (Ruben, 19 Nov 2026): Grasp takes the
@@ -350,54 +352,65 @@ export const ManualAgent = ({
       const agent = mine
         ? await session.connections.makeOwnAgent(input)
         : await session.connections.makeAgent(input);
-      // Its apps, as the catalog names each.
-      await Promise.all(
-        apps
-          .filter(({ id }) => setup.apps.has(id))
-          .map(async ({ source, id }) => {
-            await session.connections.setAgentApp(
-              agent.id,
-              agentAppOf(source, id),
-              true
-            );
+      // The rest is set one call at a time, once it exists: what fails
+      // then is said on its page, where it can be set, as the agent is
+      // made and its name taken (unfinished-setup.ts).
+      let told = true;
+      const finish = async (): Promise<void> => {
+        // Its apps, as the catalog names each.
+        await Promise.all(
+          apps
+            .filter(({ id }) => setup.apps.has(id))
+            .map(async ({ source, id }) => {
+              await session.connections.setAgentApp(
+                agent.id,
+                agentAppOf(source, id),
+                true
+              );
+            })
+        );
+        told =
+          instructions.trim() === "" ||
+          (await saveFirstInstructions(session, agent.id, instructions));
+        if (mine) {
+          return;
+        }
+        // Its kinds of work: core makes it with none; each one on is as the
+        // company has it.
+        const classes = [...setup.abilities].flatMap(
+          (ability) => classesOf[ability]
+        );
+        await Promise.all(
+          classes.map(async (toolClass) => {
+            await session.connections.setAgentToolClass(agent.id, toolClass, {
+              who: "asClass",
+            });
           })
-      );
-      const told =
-        instructions.trim() === "" ||
-        (await saveFirstInstructions(session, agent.id, instructions));
-      if (mine) {
-        return { agent, told };
-      }
-      // Its kinds of work: core makes it with none; each one on is as the
-      // company has it.
-      const classes = [...setup.abilities].flatMap(
-        (ability) => classesOf[ability] ?? []
-      );
-      await Promise.all(
-        classes.map(async (toolClass) => {
-          await session.connections.setAgentToolClass(agent.id, toolClass, {
-            who: "asClass",
+        );
+        if (setup.audience === "everyone") {
+          await session.connections.setAgentReach(agent.id, true, {
+            who: "everyone",
           });
-        })
-      );
-      if (setup.audience === "everyone") {
-        await session.connections.setAgentReach(agent.id, true, {
-          who: "everyone",
-        });
-      }
-      if (setup.audience === "teams") {
-        await session.connections.setAgentReach(agent.id, true, {
-          who: "teams",
-          teams: [...setup.teams],
-        });
-      }
-      const cron = cronOfSchedule(setup.schedule);
-      if (cron !== undefined) {
-        await session.connections.makeAgentWake(agent.id, {
-          cron,
-          personId,
-          opening: job === "" ? name : job,
-        });
+        }
+        if (setup.audience === "teams") {
+          await session.connections.setAgentReach(agent.id, true, {
+            who: "teams",
+            teams: [...setup.teams],
+          });
+        }
+        const cron = cronOfSchedule(setup.schedule);
+        if (cron !== undefined) {
+          await session.connections.makeAgentWake(agent.id, {
+            cron,
+            personId,
+            opening: job === "" ? name : job,
+          });
+        }
+      };
+      try {
+        await finish();
+      } catch (error) {
+        keepUnfinished(agent.id, failureText(error));
       }
       return { agent, told };
     });

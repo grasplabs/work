@@ -32,36 +32,24 @@ export const companySteps: ReadonlySet<Step> = new Set([
   "schedule",
 ]);
 
-/** What it may do: three reaches of its own, and three kinds of work. */
-export const abilities = [
-  "web",
-  "workflows",
-  "apps",
-  "read",
-  "change",
-  "reach",
-] as const;
+/**
+ * What it may do: the kinds of work core keeps for an agent, each a pair of
+ * the company's classes of tools. Nothing else is asked until core keeps
+ * it (the web, workflows and Apps, how hard it thinks): a choice the setup
+ * showed and never saved would tell an admin it is held to what it isn't.
+ */
+export const abilities = ["read", "change", "reach"] as const;
 export type Ability = (typeof abilities)[number];
 
 /** The company's classes each kind of work turns on (core's tool classes). */
-export const classesOf: Partial<Record<Ability, readonly CompanyToolClass[]>> =
-  {
-    read: ["read-own", "read-company"],
-    change: ["change-own", "change-company"],
-    reach: ["reach-others", "read-others"],
-  };
+export const classesOf: Record<Ability, readonly CompanyToolClass[]> = {
+  read: ["read-own", "read-company"],
+  change: ["change-own", "change-company"],
+  reach: ["reach-others", "read-others"],
+};
 
 /** What it may do from the start: reading on, changing and reaching others off (decision 8). */
-const startsWith: ReadonlySet<Ability> = new Set([
-  "web",
-  "workflows",
-  "apps",
-  "read",
-]);
-
-/** How hard it thinks, lowest first. */
-export const efforts = ["low", "medium", "high", "extra", "max"] as const;
-export type Effort = (typeof efforts)[number];
+const startsWith: ReadonlySet<Ability> = new Set(["read"]);
 
 /** How often it works on its own; `asked` is never. */
 export const frequencies = ["asked", "daily", "weekly", "monthly"] as const;
@@ -146,7 +134,6 @@ export interface Setup {
   abilities: ReadonlySet<Ability>;
   /** The model its turns use; null for the one the person picks in the chat. */
   model: string | null;
-  effort: Effort;
   schedule: Schedule;
   audience: Audience;
   teams: ReadonlySet<string>;
@@ -162,7 +149,6 @@ export const blank: Setup = {
   apps: new Set(),
   abilities: startsWith,
   model: null,
-  effort: "medium",
   schedule: {
     frequency: "asked",
     days: new Set([1, 2, 3, 4, 5]),

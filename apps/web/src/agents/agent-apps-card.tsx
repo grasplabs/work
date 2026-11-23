@@ -40,12 +40,12 @@ import { Fragment, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { integrationKey } from "../connections/integrations.ts";
+import { ProviderMark } from "../connections/provider-mark.tsx";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentFailure } from "./agent-facts.tsx";
-import { AppMark } from "./app-mark.tsx";
 import { SettingsCard } from "./settings-card.tsx";
 import { scoreOf, wordsOf } from "./setup/apps-recommend.ts";
 
@@ -523,7 +523,11 @@ const AgentApps = ({
                   <Between index={index} />
                   <Item size="sm">
                     <ItemMedia>
-                      <AppMark logo={app.logo} name={app.name} />
+                      <ProviderMark
+                        id={app.id}
+                        logo={app.logo}
+                        name={app.name}
+                      />
                     </ItemMedia>
                     <ItemContent>
                       <ItemTitle>{appName}</ItemTitle>

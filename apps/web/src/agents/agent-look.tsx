@@ -73,11 +73,10 @@ export const AgentLook = ({
   )
     ? offeredShapes
     : [look.shape, ...offeredShapes];
+  // A shape the agent has from before, outside those offered, is its own.
   const shapeNameOf = (shape: FigureShape): string => {
     const offered = offeredShapes.find((each) => each === shape);
-    return offered === undefined
-      ? `${shape.charAt(0).toUpperCase()}${shape.slice(1)}`
-      : shapeNames[offered];
+    return offered === undefined ? t`Its own shape` : shapeNames[offered];
   };
   const choose = (next: AgentFigureLook): void => {
     void save({ face: faceOf(next) });

@@ -13,7 +13,7 @@ import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Fragment, useState } from "react";
 
-import { AppMark } from "../app-mark.tsx";
+import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { SettingsCard } from "../settings-card.tsx";
 import { AppsPicker } from "./apps-picker.tsx";
 import { recommendedApps } from "./apps-recommend.ts";
@@ -69,7 +69,7 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
               <Fragment key={app.id}>
                 <Item size="xs">
                   <ItemMedia>
-                    <AppMark logo={app.logo} name={appName} />
+                    <ProviderMark id={app.id} logo={app.logo} name={appName} />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{appName}</ItemTitle>
@@ -126,7 +126,11 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
                   {index === 0 ? null : <ItemSeparator />}
                   <Item size="xs">
                     <ItemMedia>
-                      <AppMark logo={app.logo} name={appName} />
+                      <ProviderMark
+                        id={app.id}
+                        logo={app.logo}
+                        name={appName}
+                      />
                     </ItemMedia>
                     <ItemContent>
                       <ItemTitle>{appName}</ItemTitle>

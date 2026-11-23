@@ -7,8 +7,8 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
 import { modelName } from "../../chat/composer.tsx";
+import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { formatList } from "../../format.ts";
-import { AppMark } from "../app-mark.tsx";
 import { AgentFigure, AgentFigureAura } from "../figure/agent-figure.tsx";
 import { lookFromName } from "../figure/look.ts";
 import { abilities } from "./model.ts";
@@ -21,7 +21,7 @@ import { useSetupWords } from "./words.ts";
 // draws it (its light, its figure large and cropped by the corner, its
 // name and job) and, in the same card, what the setup said, each name
 // over its value in plain words: its apps as their marks, what it can do
-// in one line, how it thinks, when it works and who can use it.
+// in one line, its model, when it works and who can use it.
 
 const styles = stylex.create({
   // The portrait beside its facts, clipped to the card's round corners;
@@ -109,7 +109,6 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
     setup.model === null
       ? t`The model picked in the chat`
       : modelName(setup.model);
-  const effort = words.effortNames[setup.effort];
   const own = setup.audience === "me";
   const can = formatList(
     abilities
@@ -156,7 +155,8 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
                     ) : (
                       <span {...stylex.props(styles.marks)}>
                         {chosenApps.map((app) => (
-                          <AppMark
+                          <ProviderMark
+                            id={app.id}
                             key={app.id}
                             logo={app.logo}
                             name={app.name}
@@ -169,11 +169,7 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
                 ...(own || can === ""
                   ? []
                   : [{ id: "can", label: t`Can do`, value: can }]),
-                {
-                  id: "thinking",
-                  label: t`Thinking`,
-                  value: `${thinksWith} · ${effort}`,
-                },
+                { id: "model", label: t`Model`, value: thinksWith },
                 ...(own
                   ? []
                   : [
