@@ -731,12 +731,13 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     )
   ).toBeVisible();
 
-  // Team by team: numbers for Sales, too few for Service, none for Ops.
+  // Team by team: numbers for Sales, too few for Service, none for Ops,
+  // each row its name and count, then whether its lead talked.
   await page.getByRole("button", { name: "By team" }).click();
   const panel = page.getByRole("dialog");
   await expect(panel).toContainText(/Sales\D*5 of 6/u);
-  await expect(panel).toContainText("ServiceLead not yetFewer than 3 of 5");
-  await expect(panel).toContainText("OpsLead talkedUnder 5");
+  await expect(panel).toContainText("ServiceFewer than 3 of 5Lead not yet");
+  await expect(panel).toContainText("OpsUnder 5Lead talked");
   await page.keyboard.press("Escape");
 
   // Everyone's link is out by now: Lea's and the others' after three working days.
