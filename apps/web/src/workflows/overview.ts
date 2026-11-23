@@ -146,8 +146,9 @@ const overviewRows = ({
 
 /**
  * A tool a workflow reaches: an app by its name, with the product's own
- * mark (connections/brands.ts) where its catalog id is exactly a brand's;
- * a tile shows its first letter for the rest.
+ * mark (connections/brands.ts) where core serves it no logo and its
+ * catalog id is exactly a brand's (Grasp's own connectors); a tile shows
+ * its first letter for the rest, as a group can't draw a served logo.
  */
 export interface Tool {
   name: string;
@@ -175,8 +176,9 @@ const toolsByWorkflow = (
     tools.set(workflow, [...(tools.get(workflow) ?? []), tool]);
   };
   for (const integration of integrationsOf(entries, connections)) {
-    const { id, name } = integration;
-    const tool = { name, brand: isBrand(id) ? id : undefined };
+    const { id, name, logo } = integration;
+    // As ProviderMark picks: the product's own mark only where core serves no logo.
+    const tool = { name, brand: logo === null && isBrand(id) ? id : undefined };
     for (const workflow of workflowsOf(integration, uses)) {
       add(workflow.id, tool);
     }

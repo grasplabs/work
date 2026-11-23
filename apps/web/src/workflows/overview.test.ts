@@ -272,6 +272,38 @@ describe("the tools a workflow reaches", () => {
     });
   });
 
+  it("take the product's own mark as ProviderMark does: by the exact id, where core serves no logo", async () => {
+    const brandsWith = async (microsoftLogo: string | null) => {
+      const tools = await readTools(
+        connectionTo({
+          workflows: { byConnection: async () => await Promise.resolve(uses) },
+          connections: {
+            list: async () => await Promise.resolve(connections),
+            catalog: async () =>
+              await Promise.resolve({
+                entries: [
+                  {
+                    ...entry("native", "microsoft", "Microsoft 365"),
+                    logo: microsoftLogo,
+                  },
+                  entry("composio", "acme_crm", "Acme CRM"),
+                ],
+              }),
+          },
+        })
+      );
+      return tools.get("wf-1")?.map(({ brand }) => brand);
+    };
+
+    expect({
+      noLogo: await brandsWith(null),
+      served: await brandsWith("https://logos.example/microsoft.svg"),
+    }).toStrictEqual({
+      noLogo: ["microsoft", undefined],
+      served: [undefined, undefined],
+    });
+  });
+
   it("are left out, never failing the page, when core can't say which connections it uses", async () => {
     const tools = await toolsOf({
       workflows: {
