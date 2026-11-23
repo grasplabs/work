@@ -12,7 +12,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { signInConfig } from "../src/auth/config.ts";
-import { gateView, mayComeIn } from "../src/onboarding/gate.ts";
+import { memberFromDirectory } from "../src/auth/directory-members.ts";
+import { gateView, mayComeIn, memberMayBeIn } from "../src/onboarding/gate.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -25,13 +26,13 @@ import {
   signIn,
   signedIn,
   signedInApi,
+  signedInWithRole,
   staffPerson,
   whoami,
 } from "./sign-in.ts";
 
 // The gate of a deployment that is onboarding (src/onboarding/gate.ts):
-// while it is closed, only the admins named in `SIGN_IN` and Grasp's staff
-// come in. From the threat model (GRA-307, W10), the ways it can fail,
+// while it is closed, only the company's admins and Grasp's staff come in. From the threat model (GRA-307, W10), the ways it can fail,
 // tried here:
 //
 // - Someone in the company signing in before Grasp's go, or keeping a
@@ -63,6 +64,28 @@ const signedInStill = async (cookie: string): Promise<boolean> =>
   (await refusal(whoami(cookie))) === "ok";
 
 const actionsOf = (events: AuditEvent[]) => events.map(({ action }) => action);
+
+/**
+ * A member the directory made before they ever signed in, with `role`:
+ * their user still holds the directory's placeholder address, so only
+ * their Entra object id says who they are.
+ */
+const fromDirectory = async (role: "admin" | "user") => {
+  const person = entraPerson(acmeTenant);
+  const oid = String(person.oid);
+  const member = await memberFromDirectory(env, oid, {
+    id: oid,
+    name: String(person.name),
+    email: String(person.email),
+    department: "",
+    title: "",
+    manager: null,
+  });
+  await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
+    .bind(role, member)
+    .run();
+  return { person, member };
+};
 
 /** Every test leaves the deployment open, as it found it. */
 const reopen = async () => {
@@ -103,6 +126,97 @@ describe("while the company is onboarding", () => {
       admin: true,
       staff: true,
     });
+  });
+
+  it("is every admin's to come in for, whoever made them one or invited them as one, and no other member's", async () => {
+    // Admins the deployment's config doesn't name: one a member already,
+    // one an admin's invitation makes one as they join.
+    const second = await signedInWithRole(idp, "admin");
+    const inviter = await signedInApi(idp, "admin");
+    const invited = entraPerson(acmeTenant);
+    await inviter.api.members.invite(String(invited.email), "admin");
+    const member = await signedInWithRole(idp, "user");
+    await adminCommands().close();
+
+    const again = await signIn(idp, "microsoft", second.person);
+    const joined = await signIn(idp, "microsoft", invited);
+    const waiting = await signIn(idp, "microsoft", member.person);
+    const joinedAs =
+      joined.session === undefined ? undefined : await whoami(joined.session);
+    expect({
+      kept: await signedInStill(second.session),
+      again: again.session !== undefined,
+      joinedAs: joinedAs?.role,
+      member: await signedInStill(member.session),
+      waiting: new URL(
+        waiting.location ?? "",
+        "https://x.test"
+      ).searchParams.get("error"),
+    }).toStrictEqual({
+      kept: true,
+      again: true,
+      joinedAs: "admin",
+      member: false,
+      waiting: "not_open_yet",
+    });
+  });
+
+  it("tells anyone signed in whether the onboarding is behind the company: not until Grasp's go where its people are interviewed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    await adminCommands().close();
+    const waiting = await admin.api.onboarding.behind();
+    await adminCommands().open();
+    // A member, who reads nothing else of the onboarding, reads this.
+    const member = await signedInApi(idp, "user");
+
+    expect({
+      waiting,
+      afterTheGo: await member.api.onboarding.behind(),
+      nothingElse: await outcome(member.api.onboarding.place()),
+    }).toStrictEqual({
+      waiting: false,
+      afterTheGo: true,
+      nothingElse: "role.forbidden",
+    });
+  });
+
+  it("lets in an admin the directory made a member before they ever signed in, by their object id, and no other member it made", async () => {
+    const promoted = await fromDirectory("admin");
+    const plain = await fromDirectory("user");
+    await adminCommands().close();
+
+    const admin = await signIn(idp, "microsoft", promoted.person);
+    const other = await signIn(idp, "microsoft", plain.person);
+    const who =
+      admin.session === undefined ? undefined : await whoami(admin.session);
+    expect({
+      asTheMember: who?.userId === promoted.member,
+      role: who?.role,
+      other: other.session,
+    }).toStrictEqual({ asTheMember: true, role: "admin", other: undefined });
+  });
+
+  it("holds a session, once someone joined, only for who they joined as: an admin while it is closed, anyone once it opens", async () => {
+    // What is asked again after a membership is made: an invitation that
+    // let someone in as an admin, withdrawn before they joined, leaves a
+    // user, whom the closed gate keeps out.
+    const config = signInConfig(env);
+    if (config === undefined) {
+      throw new Error("The tests' deployment has sign-in");
+    }
+    const joinedAsUser = await signedInWithRole(idp, "user");
+    const joinedAsAdmin = await signedInWithRole(idp, "admin");
+    await adminCommands().close();
+    const closed = [
+      await memberMayBeIn(env, config, joinedAsUser.userId),
+      await memberMayBeIn(env, config, joinedAsAdmin.userId),
+    ];
+    await adminCommands().open();
+
+    expect({
+      closed,
+      open: await memberMayBeIn(env, config, joinedAsUser.userId),
+    }).toStrictEqual({ closed: [false, true], open: true });
   });
 
   it("ends the sessions from before it closed, but staff's and the admins'", async () => {
