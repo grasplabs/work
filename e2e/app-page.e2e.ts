@@ -187,6 +187,9 @@ test("a builder renames an App and says what it is for in its settings, archives
     .getByRole("button", { name: "Archive" })
     .click();
   await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+  // Restore once the question has gone, as a person sees it go: while it
+  // leaves, the page under it takes no press.
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Restore" }).click();
   // Live again once core has put its version back, which takes a while
   // on a loaded machine.
