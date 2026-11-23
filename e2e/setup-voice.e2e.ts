@@ -117,12 +117,16 @@ test("the steps at the foot are named, the one at hand marked, and one done goes
   await answerSpeech(page);
   await page.goto("/setup?step=sources");
   const steps = page.getByRole("list", { name: "Onboarding steps" });
-  await expect(steps.locator("[aria-current='step']")).toContainText("Sources");
+  await expect(
+    steps.getByRole("listitem").filter({ hasText: "current step" })
+  ).toContainText("Sources");
   await steps.getByRole("button", { name: /^Company\b/u }).click();
   await expect(
     page.getByRole("heading", { name: "Who’s who at your company?" })
   ).toBeVisible();
-  await expect(steps.locator("[aria-current='step']")).toContainText("Company");
+  await expect(
+    steps.getByRole("listitem").filter({ hasText: "current step" })
+  ).toContainText("Company");
 });
 
 /** Before the admin chose anything; the onboarding's store is the deployment's one. */
