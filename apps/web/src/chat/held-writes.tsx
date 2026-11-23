@@ -62,7 +62,14 @@ const styles = stylex.create({
     overflowWrap: "anywhere",
   },
   list: { margin: 0, paddingInlineStart: 0, listStyleType: "none" },
-  stack: { display: "grid", justifyItems: "start", gap: space["2"] },
+  stack: {
+    display: "grid",
+    justifyItems: "start",
+    gap: space["2"],
+    // A line of its own in the confirmation, under its title.
+    flexBasis: "100%",
+    minWidth: 0,
+  },
   wide: { display: "grid", gap: space["2"], width: "100%" },
   list2: { display: "grid", gap: space["2"] },
   presses: { display: "flex", flexWrap: "wrap", gap: space["2"] },

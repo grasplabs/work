@@ -55,7 +55,14 @@ const readRequests = async (
 };
 
 const styles = stylex.create({
-  details: { display: "grid", justifyItems: "start", gap: space["2"] },
+  details: {
+    display: "grid",
+    justifyItems: "start",
+    gap: space["2"],
+    // A line of its own in the confirmation, under its title.
+    flexBasis: "100%",
+    minWidth: 0,
+  },
   list: { display: "grid", gap: space["2"] },
 });
 

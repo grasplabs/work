@@ -188,18 +188,29 @@ const definitionTools: ReadonlySet<string> = new Set(definitionToolNames);
 /** The tools that read Grasp's docs. */
 const docsTools: ReadonlySet<string> = new Set(["searchDocs", "readDocs"]);
 
-/** Each of Grasp's tools' mark, by what kind of step it is; any other is a tool. */
-const toolIcons: Readonly<Record<string, IconData>> = {
-  readFile: FileIcon,
-  readDocs: FileIcon,
-  writeFile: PencilIcon,
-  editFile: PencilIcon,
-  createApp: PencilIcon,
-  editWorkflow: PencilIcon,
-  remember: PencilIcon,
-  searchFiles: SearchIcon,
-  searchBrain: SearchIcon,
-  searchDocs: SearchIcon,
+/** What kind of step a call is, for its mark and the answer's one line. */
+type StepKind = "search" | "read" | "write" | "tool";
+
+/** What kind of step each of Grasp's tools is; any other is a tool. */
+const toolKinds: Readonly<Record<string, StepKind>> = {
+  readFile: "read",
+  readDocs: "read",
+  writeFile: "write",
+  editFile: "write",
+  createApp: "write",
+  editWorkflow: "write",
+  remember: "write",
+  searchFiles: "search",
+  searchBrain: "search",
+  searchDocs: "search",
+};
+
+/** Each kind of step's mark. */
+const kindIcons: Readonly<Record<StepKind, IconData>> = {
+  search: SearchIcon,
+  read: FileIcon,
+  write: PencilIcon,
+  tool: WrenchIcon,
 };
 
 /** The paths of the files a call writes (`files`, by path), as far as they came. */
@@ -328,7 +339,7 @@ interface AnswerStep {
   id: string;
   /** The tool's own name, as the model called it; `code` for a code step. */
   tool: string;
-  icon: IconData;
+  kind: StepKind;
   /** What it did, in the past once finished; as it goes until then. */
   label: string;
   status: StepStatus;
@@ -362,7 +373,7 @@ const useAnswerSteps = (): ((
           return {
             id: callId,
             tool: step.call.tool,
-            icon: toolIcons[step.call.tool] ?? WrenchIcon,
+            kind: toolKinds[step.call.tool] ?? "tool",
             label: summary(step.call, finished),
             status,
             input: JSON.stringify(step.call.input, null, 2),
@@ -378,7 +389,7 @@ const useAnswerSteps = (): ((
         return {
           id: callId,
           tool: "code",
-          icon: CodeIcon,
+          kind: "tool",
           label,
           status,
           input: step.code.code,
@@ -415,6 +426,32 @@ const useWorkingLabel = (): ((
       writing: t`Writing`,
       working: t`Working on it`,
     }[doing];
+  };
+};
+
+/**
+ * What an answer's steps came to, in a line, as a whole sentence: the
+ * searches, reads, writes or tools when they were all of one kind, else
+ * how many steps; only those that finished count.
+ */
+const useStepsSummary = (): ((steps: readonly AnswerStep[]) => string) => {
+  const { t } = useLingui();
+  return (steps) => {
+    const ran = steps.filter(
+      ({ status }) => stepFinished(status) || status === "failed"
+    );
+    const kinds = new Set(ran.map(({ kind }) => kind));
+    const count = ran.length;
+    const [only] = kinds;
+    if (kinds.size !== 1 || only === undefined) {
+      return t`${plural(count, { one: "# step", other: "# steps" })}`;
+    }
+    return {
+      search: t`${plural(count, { one: "Searched once", other: "Searched # times" })}`,
+      read: t`${plural(count, { one: "Read # file", other: "Read # files" })}`,
+      write: t`${plural(count, { one: "Changed # file", other: "Changed # files" })}`,
+      tool: t`${plural(count, { one: "Ran # tool", other: "Ran # tools" })}`,
+    }[only];
   };
 };
 
@@ -853,7 +890,7 @@ const AnswerSteps = ({
           return (
             <ChainOfThoughtStep
               description={description}
-              icon={step.icon}
+              icon={step.tool === "code" ? CodeIcon : kindIcons[step.kind]}
               key={step.id}
               label={step.label}
               status={chainStatuses[step.status]}
@@ -894,6 +931,7 @@ const AnswerBody = ({
 }) => {
   const { t } = useLingui();
   const saidShort = useSaidShort();
+  const summary = useStepsSummary();
   const { replies, partial, live } = turn;
   const stepped: Stepped[] = partial === null ? replies : [...replies, partial];
   const firstId = replies[0]?.id;
@@ -909,12 +947,22 @@ const AnswerBody = ({
     !context.checking && (context.doing ?? "thinking") === "thinking"
       ? t`Working on it`
       : context.workingLabel;
-  let line: ReactNode = t`What Grasp did`;
+  // Done: what the steps came to, and how long Grasp worked, quieter.
+  let line: ReactNode = (
+    <>
+      {summary(steps)}
+      {seconds === undefined ? null : (
+        <>
+          {" "}
+          <Text as="span" color="muted">
+            {saidShort(seconds)}
+          </Text>
+        </>
+      )}
+    </>
+  );
   if (live) {
     line = <Shimmer>{working}</Shimmer>;
-  } else if (seconds !== undefined) {
-    const time = saidShort(seconds);
-    line = t`Worked for ${time}`;
   }
   return (
     <div {...stylex.props(styles.stack)}>

@@ -358,6 +358,10 @@ msgstr "{count, plural, one {# ejecución} other {# ejecuciones}}"
 msgid "{count, plural, one {# source} other {# sources}}"
 msgstr "{count, plural, one {# fuente} other {# fuentes}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {# step} other {# steps}}"
+msgstr "{count, plural, one {# paso} other {# pasos}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# equipo, con sus roles} other {# equipos, con sus roles}}"
@@ -415,6 +419,10 @@ msgstr "{count, plural, one {Te hizo una pregunta} other {Te hizo # preguntas}}"
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Volver a la pregunta} other {Volver a las # preguntas}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Changed # file} other {Changed # files}}"
+msgstr "{count, plural, one {Cambió # archivo} other {Cambió # archivos}}"
+
 #: src/activity/pending.tsx
 msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded}}"
 msgstr "{count, plural, one {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que el equipo {teamNames} puede leer, en la medida en que la persona para la que trabaja esté en ese equipo, y consultar las entidades y los recuerdos que todos en la empresa pueden leer. Solo las personas de ese equipo pueden usarla, también su propietario y los administradores. Nunca puede escribir en el Brain. Cada lectura queda registrada} other {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que los equipos {teamNames} pueden leer, en la medida en que la persona para la que trabaja esté en ellos, y consultar las entidades y los recuerdos que todos en la empresa pueden leer. Solo las personas que estén en todos ellos pueden usarla, también su propietario y los administradores. Nunca puede escribir en el Brain. Cada lectura queda registrada}}"
@@ -431,9 +439,21 @@ msgstr "{count, plural, one {Aún no se puede compartir: # problema} other {Aún
 msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
 msgstr "{count, plural, one {Empezó sin # valor guardado: la ejecución que lo guardó leyó algo que ya no se puede leer.} other {Empezó sin # valores guardados: las ejecuciones que los guardaron leyeron algo que ya no se puede leer.}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Ran # tool} other {Ran # tools}}"
+msgstr "{count, plural, one {Usó # herramienta} other {Usó # herramientas}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Read # file} other {Read # files}}"
+msgstr "{count, plural, one {Leyó # archivo} other {Leyó # archivos}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Leyendo # flujo de trabajo} other {Leyendo # flujos de trabajo}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Searched once} other {Searched # times}}"
+msgstr "{count, plural, one {Buscó una vez} other {Buscó # veces}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
@@ -16673,10 +16693,6 @@ msgstr "Trabajo del equipo"
 #: src/agents/agent-apps-card.tsx
 msgid "Work out from its instructions"
 msgstr "Deducir de sus instrucciones"
-
-#: src/chat/thread.tsx
-msgid "Worked for {time}"
-msgstr "Trabajó durante {time}"
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"

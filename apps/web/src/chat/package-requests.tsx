@@ -29,7 +29,14 @@ import { DecisionButton } from "./decision-button.tsx";
 import { FailureLine } from "./failure-line.tsx";
 
 const styles = stylex.create({
-  details: { display: "grid", justifyItems: "start", gap: space["2"] },
+  details: {
+    display: "grid",
+    justifyItems: "start",
+    gap: space["2"],
+    // A line of its own in the confirmation, under its title.
+    flexBasis: "100%",
+    minWidth: 0,
+  },
   findings: {
     display: "grid",
     gap: space["1"],

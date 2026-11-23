@@ -358,6 +358,10 @@ msgstr "{count, plural, one {# run} other {# runs}}"
 msgid "{count, plural, one {# source} other {# sources}}"
 msgstr "{count, plural, one {# source} other {# sources}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {# step} other {# steps}}"
+msgstr "{count, plural, one {# step} other {# steps}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
@@ -415,6 +419,10 @@ msgstr "{count, plural, one {Asked you a question} other {Asked you # questions}
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Back to the question} other {Back to the # questions}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Changed # file} other {Changed # files}}"
+msgstr "{count, plural, one {Changed # file} other {Changed # files}}"
+
 #: src/activity/pending.tsx
 msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded}}"
 msgstr "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded}}"
@@ -431,9 +439,21 @@ msgstr "{count, plural, one {It can't be shared yet: # problem} other {It can't 
 msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
 msgstr "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Ran # tool} other {Ran # tools}}"
+msgstr "{count, plural, one {Ran # tool} other {Ran # tools}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Read # file} other {Read # files}}"
+msgstr "{count, plural, one {Read # file} other {Read # files}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Searched once} other {Searched # times}}"
+msgstr "{count, plural, one {Searched once} other {Searched # times}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
@@ -16673,10 +16693,6 @@ msgstr "Work of the team"
 #: src/agents/agent-apps-card.tsx
 msgid "Work out from its instructions"
 msgstr "Work out from its instructions"
-
-#: src/chat/thread.tsx
-msgid "Worked for {time}"
-msgstr "Worked for {time}"
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
