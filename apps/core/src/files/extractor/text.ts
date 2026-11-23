@@ -171,10 +171,14 @@ const readElement = (
   if (tagName === "br") {
     page.pieces.push("\n");
   } else if (tagName === "pre") {
-    breakParagraph(page);
-    page.pieces.push(preMark(page.pre.length));
-    page.pre.push(textOf(childNodes));
-    breakParagraph(page);
+    const written = textOf(childNodes);
+    // An empty block is no text: its fence alone would read as some.
+    if (written.trim() !== "") {
+      breakParagraph(page);
+      page.pieces.push(preMark(page.pre.length));
+      page.pre.push(written);
+      breakParagraph(page);
+    }
   } else if (level !== undefined) {
     breakParagraph(page);
     page.pieces.push(`${"#".repeat(level)} `);

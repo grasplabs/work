@@ -170,6 +170,11 @@ describe("core's extractor", { timeout: 60_000 }, () => {
       ),
     ]);
 
+    // A page that is only an empty preformatted block has no text at all:
+    // no fence of its own that would read as some.
+    await expect(
+      extracted("empty.html", bytesOf("<pre>  </pre>"), "html")
+    ).resolves.toBe("");
     expect({ markdown, latin, wide, csv, json, html, deck }).toStrictEqual({
       markdown: "# Returns\n\nWithin *thirty* days.",
       latin: "Café",
