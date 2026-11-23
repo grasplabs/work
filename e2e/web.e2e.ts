@@ -89,6 +89,33 @@ test("offers each way in, marks the one used last in this browser, and gives a g
   ).toBeVisible();
 });
 
+test("never leaves for the company's sign-in once the person has gone Back while the door opens", async ({
+  page,
+}) => {
+  // Core answers where to sign in only once the person has gone Back.
+  const { promise: wentBack, resolve: answer } = Promise.withResolvers<null>();
+  await page.route("**/api/auth/sign-in/sso", async (route) => {
+    const response = await route.fetch();
+    await wentBack;
+    await route.fulfill({ response });
+  });
+  await page.goto("/sign-in?by=code");
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  await page.goBack();
+  const codePage = page.getByRole("heading", {
+    level: 1,
+    name: "Sign in to Grasp",
+  });
+  await expect(codePage).toBeAttached();
+  answer(null);
+  // Longer than the door takes to open, and than core's answer to arrive.
+  await page.waitForTimeout(1500);
+  await expect(codePage).toBeAttached();
+  expect(new URL(page.url()).searchParams.get("by")).toBe("code");
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+});
+
 test("an interview link nobody made asks to sign in first, then can't be opened with the request ID core refused it under, says nothing was saved, and lets them sign out to sign in again", async ({
   context,
   page,

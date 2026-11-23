@@ -4,9 +4,10 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
-import { signIn } from "./core.ts";
+import { leaveToSignIn, signInAddress } from "./core.ts";
 import { ErrorText } from "./error-text.tsx";
 import { signInErrorMessage } from "./sign-in-errors.ts";
+import { useGone } from "./use-gone.ts";
 
 const styles = stylex.create({
   options: {
@@ -33,6 +34,7 @@ export const SignInOptions = ({
   returnTo?: string;
 }) => {
   const { t } = useLingui();
+  const gone = useGone();
   return (
     <div {...stylex.props(styles.options)}>
       <ErrorText>
@@ -41,9 +43,14 @@ export const SignInOptions = ({
       {options.map(({ providerId, label }, index) => (
         <Button
           key={providerId}
-          // The press works until the page leaves for the IdP.
+          // The press works until the page leaves for the IdP; not once
+          // the person has moved on from this page.
           onClick={async () => {
-            await signIn(providerId, returnTo);
+            const left = gone();
+            const address = await signInAddress(providerId, returnTo);
+            if (!left.aborted) {
+              leaveToSignIn(address);
+            }
           }}
           size="lg"
           variant={index === 0 ? "default" : "outline"}

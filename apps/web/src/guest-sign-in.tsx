@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { CoreConnection } from "./core-connection.ts";
 import { signOut } from "./core-connection.ts";
 import { ErrorText } from "./error-text.tsx";
+import { useGone } from "./use-gone.ts";
 
 // A guest's way in (core's auth/guest-codes.ts): someone outside the
 // company, invited by address, asks for a code by email and signs in with
@@ -84,6 +85,7 @@ export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
+  const gone = useGone();
   const say = (refusal: string): string =>
     i18n._(codeRefusals[refusal] ?? fallback);
   const ask = async (): Promise<void> => {
@@ -103,10 +105,15 @@ export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
   const signIn = async (): Promise<void> => {
     setBusy(true);
     setFailure(undefined);
+    const left = gone();
     const refusal = await post("/sign-in/email-otp", {
       email: email.trim(),
       otp: code.replaceAll(/\s/gu, ""),
     });
+    // The person has moved on meanwhile: they stay where they went.
+    if (left.aborted) {
+      return;
+    }
     if (refusal === null) {
       // Loaded again, signed in: the start page sends a guest here, to
       // what is shared with them.

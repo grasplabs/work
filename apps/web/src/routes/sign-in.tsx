@@ -1,3 +1,4 @@
+import type { SignInOption } from "@grasp-os/shared/rpc";
 import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
 import { LockIcon } from "@grasp-os/ui/lib/icons";
@@ -6,17 +7,17 @@ import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { z } from "zod";
 
 import { forgetActiveChats } from "../chat/active-chat.ts";
 import { GoogleLogo, MicrosoftLogo } from "../connections/brand-logos.ts";
 import { loadCoreStatus } from "../core-connection.ts";
-import { leaveToSignIn, signInAddress } from "../core.ts";
 import { LanguageButton } from "../frame/language-button.tsx";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
 import { SignIn as SignInPage } from "../frame/sign-in/sign-in.tsx";
 import type { SignInNotice } from "../frame/sign-in/sign-in.tsx";
+import { useLeave } from "../frame/sign-in/use-leave.ts";
 import { GuestCodeSignIn, NothingShared } from "../guest-sign-in.tsx";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
 
@@ -101,49 +102,30 @@ const otherSession = async (): Promise<{
   }
 };
 
-/**
- * Where the page leaves for at a press, asked of core then, so it answers
- * while the door opens; null when core would not start the sign-in.
- */
-const useLeave = (returnTo: string) => {
-  const asked = useRef<Promise<string | null> | null>(null);
-  const ask = (id: string): void => {
-    const provider = id === "staff" ? staffProvider : id;
-    asked.current = (async () => {
-      try {
-        return await signInAddress(provider, returnTo);
-      } catch {
-        return null;
-      }
-    })();
-  };
-  /** Leaves for the identity provider; false when the sign-in didn't start. */
-  const leave = async (): Promise<boolean> => {
-    const address = await asked.current;
-    if (address === null) {
-      return false;
-    }
-    leaveToSignIn(address);
-    return true;
-  };
-  return { ask, leave };
-};
+/** What the ways-in page shows: core's answer and the link's. */
+interface WaysInProps {
+  connected: boolean;
+  signInOptions: readonly SignInOption[];
+  interviewOnly: boolean;
+  error: string | undefined;
+  returnTo: string;
+}
 
 /**
  * The website's log-in (frame/sign-in): a button for each way this
  * deployment offers, Grasp staff's own way after them, why the last sign-in
  * was refused over them, and the language at its foot. A chosen way asks
  * core where to go at the press and leaves for its identity provider once
- * the door has opened, coming back to `returnTo`. A guest, from outside the
- * company, signs in with an emailed code (guest-sign-in.tsx), or is in with
- * nothing of theirs to see yet.
+ * the door has opened, coming back to `returnTo`; never once the page has
+ * gone (the person went Back, or to the code).
  */
-const SignIn = () => {
-  const { connected, signInOptions, interviewOnly, guest } =
-    Route.useLoaderData();
-  const { error, returnTo, by } = Route.useSearch();
-  const { core } = Route.useRouteContext();
-  const navigate = Route.useNavigate();
+const WaysIn = ({
+  connected,
+  signInOptions,
+  interviewOnly,
+  error,
+  returnTo,
+}: WaysInProps) => {
   const { t } = useLingui();
   // The way being left for, so the others are out of use meanwhile.
   const [leaving, setLeaving] = useState<string>();
@@ -151,28 +133,6 @@ const SignIn = () => {
   const [tries, setTries] = useState(0);
   const [failed, setFailed] = useState(false);
   const { ask, leave } = useLeave(returnTo);
-  if (guest !== null) {
-    return (
-      <OnboardingFrame>
-        <NothingShared core={core} email={guest} />
-      </OnboardingFrame>
-    );
-  }
-  if (by === "code" && connected) {
-    return (
-      <OnboardingFrame>
-        {/* The page's title, heard and not shown: the form is the whole page. */}
-        <h1 {...stylex.props(visuallyHidden)}>
-          <Trans>Sign in to Grasp</Trans>
-        </h1>
-        <GuestCodeSignIn
-          onBack={() => {
-            void navigate({ search: { returnTo } });
-          }}
-        />
-      </OnboardingFrame>
-    );
-  }
   const code = error ?? (interviewOnly ? "not_open_yet" : undefined);
   const notice = ((): SignInNotice | undefined => {
     if (!connected) {
@@ -210,16 +170,16 @@ const SignIn = () => {
       // The door has opened: leave as soon as core has said where to.
       onChoose={(id) => {
         setLeaving(id);
-        void (async () => {
-          if (!(await leave())) {
-            setLeaving(undefined);
-            setFailed(true);
-            setTries((count) => count + 1);
-          }
-        })();
+        void leave(() => {
+          setLeaving(undefined);
+          setFailed(true);
+          setTries((count) => count + 1);
+        });
       }}
       // Asked at the press, so core answers while the door opens.
-      onPress={ask}
+      onPress={(id) => {
+        ask(id === "staff" ? staffProvider : id);
+      }}
       providers={ways
         .filter(({ providerId }) => providerId !== staffProvider)
         .map(({ providerId, label }) => ({
@@ -228,6 +188,50 @@ const SignIn = () => {
           icon: marks[providerId] ?? LockIcon,
         }))}
       staff={ways.some(({ providerId }) => providerId === staffProvider)}
+    />
+  );
+};
+
+/**
+ * Signing in: the ways in (`WaysIn`), or, for a guest from outside the
+ * company, an emailed code (guest-sign-in.tsx), or a guest signed in with
+ * nothing of theirs to see yet.
+ */
+const SignIn = () => {
+  const { connected, signInOptions, interviewOnly, guest } =
+    Route.useLoaderData();
+  const { error, returnTo, by } = Route.useSearch();
+  const { core } = Route.useRouteContext();
+  const navigate = Route.useNavigate();
+  if (guest !== null) {
+    return (
+      <OnboardingFrame>
+        <NothingShared core={core} email={guest} />
+      </OnboardingFrame>
+    );
+  }
+  if (by === "code" && connected) {
+    return (
+      <OnboardingFrame>
+        {/* The page's title, heard and not shown: the form is the whole page. */}
+        <h1 {...stylex.props(visuallyHidden)}>
+          <Trans>Sign in to Grasp</Trans>
+        </h1>
+        <GuestCodeSignIn
+          onBack={() => {
+            void navigate({ search: { returnTo } });
+          }}
+        />
+      </OnboardingFrame>
+    );
+  }
+  return (
+    <WaysIn
+      connected={connected}
+      error={error}
+      interviewOnly={interviewOnly}
+      returnTo={returnTo}
+      signInOptions={signInOptions}
     />
   );
 };

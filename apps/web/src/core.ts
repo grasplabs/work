@@ -205,11 +205,3 @@ export const signInAddress = async (
 export const leaveToSignIn = (address: string): void => {
   window.location.assign(address);
 };
-
-/** Starts signing in with the IdP `providerId` and leaves for it. */
-export const signIn = async (
-  providerId: string,
-  returnTo = "/"
-): Promise<void> => {
-  leaveToSignIn(await signInAddress(providerId, returnTo));
-};

@@ -17,7 +17,7 @@ export interface Door {
   leave: (box: DOMRect, done: () => void) => void;
   /** The pointer, or `on: false` when it has left the page. */
   pointer: (x: number, y: number, on: boolean) => void;
-  /** Stops drawing. */
+  /** Stops drawing; a way out still playing never calls its `done`. */
   stop: () => void;
 }
 
@@ -256,6 +256,10 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
   const way = { x: 0, y: 0 };
   const opening = { open: 0, start: 0, done: nothing };
   let last = performance.now();
+  // The next frame asked for, and the timer that ends the opening if frames stop: both
+  // cancelled at `stop`, so a door taken down never calls a chosen way's `done`.
+  let frame = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   const paint = (now: number) => {
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -313,12 +317,12 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
       return;
     }
     paint(now);
-    requestAnimationFrame(tick);
+    frame = requestAnimationFrame(tick);
   };
   if (calm) {
     paint(performance.now());
   } else {
-    requestAnimationFrame(tick);
+    frame = requestAnimationFrame(tick);
   }
 
   return {
@@ -340,7 +344,7 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
         }
       };
       opening.done = once;
-      window.setTimeout(once, openMs + 200);
+      timer = setTimeout(once, openMs + 200);
     },
     pointer: (x, y, on) => {
       if (opening.open > 0) {
@@ -354,6 +358,9 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
     },
     stop: () => {
       alive = false;
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      opening.done = nothing;
       resize.disconnect();
     },
   };
