@@ -35,6 +35,7 @@ import type { BrainSection } from "../brain/brain-sections.ts";
 import { folderTree, groupLabel } from "../brain/brain.ts";
 import type { Note } from "../brain/brain.ts";
 import { GoalsEditor } from "../brain/goals-editor.tsx";
+import { paneStyles } from "../brain/page-pane.ts";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { SectionTitle } from "../frame/page.tsx";
@@ -44,7 +45,6 @@ import { SectionTitle } from "../frame/page.tsx";
 // also change the board's goals (goals-editor.tsx).
 
 const styles = stylex.create({
-  scroll: { flex: 1, minHeight: 0, overflowY: "auto" },
   group: { display: "flex", flexDirection: "column", gap: space["3"] },
   // The part's mark on a white tile in the middle of a note's picture, in the part's colour.
   tile: {
@@ -126,7 +126,7 @@ const SectionPage = () => {
   }
 
   return (
-    <div {...stylex.props(styles.scroll)}>
+    <div {...stylex.props(paneStyles.pane)}>
       <Container size="lg">
         <PageHeader
           badge={<Badge icon={section.icon}>{shownCount(folder)}</Badge>}

@@ -301,7 +301,7 @@ const HowSure = ({
         ) : null}
         {known.canAskMore && !known.moreAsked ? (
           <Button
-            variant="secondary"
+            variant="outline"
             disabled={busy}
             onClick={() => {
               void ask();

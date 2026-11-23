@@ -7,6 +7,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
@@ -43,13 +44,15 @@ const Confirmed = ({
 }) => (
   <AlertDialog>
     <AlertDialogTrigger asChild>
-      <Button disabled={busy} size="sm" variant="secondary">
+      <Button disabled={busy} size="sm" variant="outline">
         {label}
       </Button>
     </AlertDialogTrigger>
     <AlertDialogContent>
-      <AlertDialogTitle>{title}</AlertDialogTitle>
-      <AlertDialogDescription>{description}</AlertDialogDescription>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>{description}</AlertDialogDescription>
+      </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel />
         <AlertDialogAction onClick={onConfirm} variant="destructive">

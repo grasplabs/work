@@ -4,8 +4,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
-import { Text } from "@grasp-os/ui/components/text";
-import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -67,6 +72,13 @@ const styles = stylex.create({
     borderTopWidth: size.hairline,
     borderTopStyle: "solid",
     borderTopColor: colors.border,
+  },
+  // A tab's count, quieter, a little after its name.
+  count: {
+    marginInlineStart: space["1"],
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.subtleForeground,
   },
   side: {
     display: { default: "none", [WIDE]: "flex" },
@@ -139,17 +151,12 @@ export const NoteArticle = ({
               tabs.some((tab) => tab.value === side) ? side : tabs[0]?.value
             }
           >
-            <TabsList>
+            <TabsList variant="line">
               {tabs.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value}>
                   {tab.label}
                   {tab.count === undefined ? null : (
-                    <>
-                      {" "}
-                      <Text as="span" size="sm" color="subtle">
-                        {tab.count}
-                      </Text>
-                    </>
+                    <span {...stylex.props(styles.count)}>{tab.count}</span>
                   )}
                 </TabsTrigger>
               ))}

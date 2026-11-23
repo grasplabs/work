@@ -731,7 +731,7 @@ const NoteToolbar = ({ note }: { note: Note }) => {
       </div>
       <div {...stylex.props(styles.toolbarSide)}>
         {/* Back to where this note sits in the brain. */}
-        <Button asChild size="sm" variant="secondary">
+        <Button asChild size="sm" variant="outline">
           <Link search={{ note: note.id }} to="/brain">
             <Icon icon={BrainIcon} />
             {t`Show in the brain`}
@@ -1017,7 +1017,7 @@ const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
       value={knowledge === true ? "knowledge" : "note"}
     >
       <div {...stylex.props(styles.workTabs)}>
-        <TabsList>
+        <TabsList variant="line">
           <TabsTrigger value="note">
             {t({
               message: "Note",

@@ -40,6 +40,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { draftOf, titleOf } from "./opportunity-drafts.ts";
+import { paneStyles } from "./page-pane.ts";
 
 // Opportunities (GRA-1750): what Grasp could automate or improve, from how
 // the company's teams describe their work and how five or more of a team
@@ -70,8 +71,6 @@ const acting = async (
 };
 
 const styles = stylex.create({
-  // A page of the brain: its own pane that scrolls, round the library's page column.
-  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   section: { display: "flex", flexDirection: "column", gap: space["3"] },
   card: { display: "flex", flexDirection: "column", gap: space["4"] },
   head: {
@@ -299,7 +298,7 @@ const DraftLink = ({ opportunity }: { opportunity: Opportunity }) => {
   });
   const { routine } = opportunity;
   return (
-    <Button aria-label={named} asChild size="sm" variant="secondary">
+    <Button aria-label={named} asChild size="sm" variant="outline">
       {draft.kind === "skill" ? (
         <Link search={{ opportunity: routine }} to="/brain/skills">
           {label}
@@ -479,7 +478,7 @@ const Dismissed = ({
                   }}
                   size="sm"
                   type="button"
-                  variant="secondary"
+                  variant="outline"
                 >
                   {t({
                     message: "Show again",
@@ -559,7 +558,7 @@ export const OpportunitiesPage = () => {
 
   return (
     // A page of the brain: the title in the serif, in the library's page column.
-    <div {...stylex.props(styles.pane)}>
+    <div {...stylex.props(paneStyles.pane)}>
       <Container size="lg">
         <PageHeader
           description={<Trans>What Grasp could automate, largest first.</Trans>}
@@ -594,7 +593,7 @@ export const OpportunitiesPage = () => {
               }}
               size="sm"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t({
                 message: "Undo",

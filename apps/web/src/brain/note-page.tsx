@@ -5,6 +5,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Heading } from "@grasp-os/ui/components/heading";
@@ -152,8 +153,10 @@ const LeavingLink = ({ link }: { link: MarkdownLink }) => {
         open={asking}
       >
         <AlertDialogContent>
-          <AlertDialogTitle>{t`Open external link?`}</AlertDialogTitle>
-          <AlertDialogDescription>{link.href}</AlertDialogDescription>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t`Open external link?`}</AlertDialogTitle>
+            <AlertDialogDescription>{link.href}</AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel />
             <AlertDialogAction value="open">{t`Open link`}</AlertDialogAction>

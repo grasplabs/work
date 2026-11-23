@@ -22,6 +22,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
@@ -67,6 +68,7 @@ import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { skillOf, useStartFrom } from "./opportunity-drafts.ts";
+import { paneStyles } from "./page-pane.ts";
 
 // Skills (GRA-1754, GRA-1844): the person's own, which they write, edit
 // and delete, for their own chats alone; asking to share one with the
@@ -133,8 +135,6 @@ The steps.
 `;
 
 const styles = stylex.create({
-  // A page of the brain: its own pane that scrolls, round the library's page column.
-  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   section: { display: "flex", flexDirection: "column", gap: space["3"] },
   stack: { display: "flex", flexDirection: "column", gap: space["2"] },
   unread: {
@@ -271,7 +271,7 @@ const Unread = ({
         onClick={onRetry}
         size="sm"
         type="button"
-        variant="secondary"
+        variant="outline"
       >
         {t`Try again`}
       </Button>
@@ -297,13 +297,15 @@ const Confirmed = ({
 }) => (
   <AlertDialog>
     <AlertDialogTrigger asChild>
-      <Button disabled={disabled} size="sm" variant="secondary">
+      <Button disabled={disabled} size="sm" variant="outline">
         {label}
       </Button>
     </AlertDialogTrigger>
     <AlertDialogContent>
-      <AlertDialogTitle>{title}</AlertDialogTitle>
-      <AlertDialogDescription>{description}</AlertDialogDescription>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>{description}</AlertDialogDescription>
+      </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel />
         <AlertDialogAction
@@ -388,7 +390,7 @@ const ShareWithTeam = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button disabled={disabled} size="sm" variant="secondary">
+        <Button disabled={disabled} size="sm" variant="outline">
           {t`Share with a team`}
         </Button>
       </DropdownMenuTrigger>
@@ -456,7 +458,7 @@ const OwnSkill = ({
           onClick={onEdit}
           size="sm"
           type="button"
-          variant="secondary"
+          variant="outline"
         >
           {t`Edit`}
         </Button>
@@ -467,7 +469,7 @@ const OwnSkill = ({
           }}
           size="sm"
           type="button"
-          variant="secondary"
+          variant="outline"
         >
           <ShareLabel waiting={waiting} />
         </Button>
@@ -585,7 +587,7 @@ const ShareRequest = ({
               onClick={onApprove}
               size="sm"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t`Approve`}
             </Button>
@@ -594,7 +596,7 @@ const ShareRequest = ({
               onClick={onDecline}
               size="sm"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t`Decline`}
             </Button>
@@ -894,7 +896,7 @@ const ProposedSkill = ({
               onClick={onAdd}
               size="sm"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t`Add to your skills`}
             </Button>
@@ -1158,7 +1160,7 @@ export const SkillsPage = ({
 
   return (
     // A page of the brain: the title in the serif, in the library's page column.
-    <div {...stylex.props(styles.pane)}>
+    <div {...stylex.props(paneStyles.pane)}>
       <Container size="lg">
         <PageHeader
           description={

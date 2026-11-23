@@ -1,3 +1,4 @@
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
@@ -38,9 +39,17 @@ const styles = stylex.create({
     flexBasis: 0,
     minHeight: 0,
   },
-  // The brain, a part or a note, over which a note's dots are carried in.
+  // The brain, a part or a note, over which a note's dots are carried in;
+  // in Damsko's ink, which the brain's dots print with at rest. Inset from
+  // the page's edges as App shell insets a page that fills its card: its
+  // inline room, space-7 under the bar, and its room below.
   page: {
     position: "relative",
+    boxSizing: "border-box",
+    paddingInline: size.appShellPageInline,
+    paddingBlockStart: space["7"],
+    paddingBlockEnd: size.appShellPageRoomBelow,
+    color: colors.foreground,
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,

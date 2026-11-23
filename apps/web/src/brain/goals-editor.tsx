@@ -17,6 +17,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -163,9 +164,11 @@ const WordingDialog = ({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
-        <DialogTitle>
-          {goal === undefined ? t`New board goal` : t`Reword the goal`}
-        </DialogTitle>
+        <DialogHeader>
+          <DialogTitle>
+            {goal === undefined ? t`New board goal` : t`Reword the goal`}
+          </DialogTitle>
+        </DialogHeader>
         <DialogBody>
           <form
             id={formId}
@@ -272,7 +275,9 @@ const WorkflowsDialog = ({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
-        <DialogTitle>{t`Workflows that serve ${title}`}</DialogTitle>
+        <DialogHeader>
+          <DialogTitle>{t`Workflows that serve ${title}`}</DialogTitle>
+        </DialogHeader>
         <DialogBody>
           {workflows.length === 0 ? (
             <Text color="muted">{t`There are no workflows to link yet.`}</Text>
@@ -357,7 +362,7 @@ const GoalRow = ({
               onChange({ goal, what: "wording" });
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             <Icon icon={PencilIcon} />
             {t`Reword`}
@@ -369,7 +374,7 @@ const GoalRow = ({
               onChange({ goal, what: "workflows" });
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             <Icon icon={WorkflowIcon} />
             {t`Workflows`}

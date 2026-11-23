@@ -30,6 +30,7 @@ import { useBrainData } from "./brain-data.ts";
 import { brainLog } from "./brain-log.ts";
 import type { LogEntry, LogKind } from "./brain-log.ts";
 import { sourceContents } from "./brain.ts";
+import { paneStyles } from "./page-pane.ts";
 
 // The brain's Activity (activity-log.tsx): what changed since the
 // person last looked (`brain.changes`), the questions still waiting for an
@@ -47,8 +48,6 @@ const icons: Record<LogKind, IconData> = {
 };
 
 const styles = stylex.create({
-  // The brain's own pane that scrolls.
-  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   split: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
@@ -301,7 +300,7 @@ export const ActivityPage = () => {
     );
   };
   return (
-    <div ref={pane} {...stylex.props(styles.pane)}>
+    <div ref={pane} {...stylex.props(paneStyles.pane)}>
       <div
         {...stylex.props(
           styles.split,

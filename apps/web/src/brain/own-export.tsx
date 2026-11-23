@@ -304,7 +304,7 @@ export const OwnExportSection = () => {
               void requestRead("person");
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             <Trans>Try again</Trans>
           </Button>
@@ -323,7 +323,7 @@ export const OwnExportSection = () => {
               void start();
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
           </Button>

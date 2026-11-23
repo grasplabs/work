@@ -22,11 +22,12 @@ import { Card } from "@grasp-os/ui/components/card";
 import { Container } from "@grasp-os/ui/components/container";
 import {
   Dialog,
-  DialogClose,
   DialogBody,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
@@ -71,6 +72,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useAsk, usePaged } from "./memories-asks.ts";
+import { paneStyles } from "./page-pane.ts";
 
 // The Brain's memories, from the new Brain (GRA-1746): the facts sources
 // disagree on, each with its sides and a way to confirm one; the entities
@@ -402,8 +404,6 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 };
 
 const styles = stylex.create({
-  // A page of the brain: its own pane that scrolls, round the library's page column.
-  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   section: { display: "flex", flexDirection: "column", gap: space["3"] },
   stack: { display: "flex", flexDirection: "column", gap: space["3"] },
   form: { display: "flex", flexDirection: "column", gap: space["4"] },
@@ -519,15 +519,17 @@ const CorrectDialog = ({
       open
     >
       <DialogContent>
-        <DialogTitle>
-          <Trans>What is right?</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            Your correction is kept as your own word, for you alone, and shown
-            beside what the Brain holds. What others read stays as it is.
-          </Trans>
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>What is right?</Trans>
+          </DialogTitle>
+          <DialogDescription>
+            <Trans>
+              Your correction is kept as your own word, for you alone, and shown
+              beside what the Brain holds. What others read stays as it is.
+            </Trans>
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <form
             id={formId}
@@ -819,16 +821,18 @@ const ShareDialog = ({
       open
     >
       <DialogContent>
-        <DialogTitle>
-          <Trans>Share this memory?</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            They will read exactly what is below, as someone&apos;s own word,
-            without your name. Your own memory stays yours alone, and you can
-            take the copy back.
-          </Trans>
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>Share this memory?</Trans>
+          </DialogTitle>
+          <DialogDescription>
+            <Trans>
+              They will read exactly what is below, as someone&apos;s own word,
+              without your name. Your own memory stays yours alone, and you can
+              take the copy back.
+            </Trans>
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <form
             id={formId}
@@ -933,7 +937,7 @@ const TakeBackButton = ({
         }}
         size="sm"
         type="button"
-        variant="secondary"
+        variant="outline"
       >
         {t`Take back`}
       </Button>
@@ -983,7 +987,7 @@ const ConfirmButton = ({
         }}
         size="sm"
         type="button"
-        variant="secondary"
+        variant="outline"
       >
         {t`This one is right`}
       </Button>
@@ -1070,7 +1074,7 @@ const ShareActions = ({
           }}
           size="sm"
           type="button"
-          variant="secondary"
+          variant="outline"
         >
           {t`Share…`}
         </Button>
@@ -1161,7 +1165,7 @@ const MemoryLine = ({
                 }}
                 size="sm"
                 type="button"
-                variant="secondary"
+                variant="outline"
               >
                 {t`It's wrong`}
               </Button>
@@ -1731,7 +1735,7 @@ export const MemoriesPage = ({
   return (
     <OwnEntity value={own}>
       {/* A page of the brain: the title in the serif, in the library's page column. */}
-      <div {...stylex.props(styles.pane)}>
+      <div {...stylex.props(paneStyles.pane)}>
         <Container size="lg">
           <PageHeader
             description={

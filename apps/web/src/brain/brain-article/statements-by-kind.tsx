@@ -89,7 +89,7 @@ export const StatementsByKind = ({
         }}
         value={tab}
       >
-        <TabsList>
+        <TabsList variant="line">
           {kern.counts.map(({ kind, count }) => (
             <TabsTrigger key={kind} value={kind}>
               <span {...stylex.props(styles.kind)}>

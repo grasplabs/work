@@ -33,6 +33,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
@@ -50,6 +51,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
@@ -118,6 +120,7 @@ import { useCore } from "../use-core.ts";
 import { given } from "./brain.ts";
 import { LearnedSection } from "./learned-section.tsx";
 import { OwnExportSection } from "./own-export.tsx";
+import { paneStyles } from "./page-pane.ts";
 import { SourceItem, SourceItemParts, sourcesByKind } from "./source-item.tsx";
 import type { SourceKind, SourceRow as Source } from "./source-item.tsx";
 
@@ -299,8 +302,6 @@ interface Row {
 }
 
 const styles = stylex.create({
-  // A page of the brain: its own pane that scrolls, round the library's page column.
-  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   section: { display: "flex", flexDirection: "column", gap: space["3"] },
   stack: { display: "flex", flexDirection: "column", gap: space["4"] },
   list: { display: "flex", flexDirection: "column", gap: space["3"] },
@@ -740,9 +741,11 @@ const UploadForm = ({
   ];
   return (
     <>
-      <DialogTitle>
-        <Trans>Upload a file</Trans>
-      </DialogTitle>
+      <DialogHeader>
+        <DialogTitle>
+          <Trans>Upload a file</Trans>
+        </DialogTitle>
+      </DialogHeader>
       <DialogBody>
         <Form>
           <Field>
@@ -848,7 +851,7 @@ const UploadDialog = ({
   return (
     <Dialog dismissible={!busy} onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button variant="secondary">{t`Upload`}</Button>
+        <Button variant="outline">{t`Upload`}</Button>
       </DialogTrigger>
       <DialogContent>
         <UploadForm
@@ -966,7 +969,7 @@ const UploadActions = ({
             </Field>
           </div>
           <Button
-            variant="secondary"
+            variant="outline"
             disabled={file === undefined || busy}
             type="submit"
           >
@@ -990,12 +993,14 @@ const UploadActions = ({
             </div>
           </AlertDialogTrigger>
           <AlertDialogContent>
-            <AlertDialogTitle>{t`Delete this upload?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deletes === "erase"
-                ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`
-                : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`}
-            </AlertDialogDescription>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t`Delete this upload?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {deletes === "erase"
+                  ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`
+                  : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel />
               <AlertDialogAction
@@ -1755,12 +1760,14 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
-                        <AlertDialogTitle>
-                          {t`Erase this upload for good?`}
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          {t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
-                        </AlertDialogDescription>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            {t`Erase this upload for good?`}
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel />
                           <AlertDialogAction
@@ -1807,7 +1814,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       {listed.state === "ready" && listed.data.next !== null ? (
         <div {...stylex.props(styles.start)}>
           <Button
-            variant="secondary"
+            variant="outline"
             disabled={more?.state === "loading"}
             onClick={() => {
               const { next, uploads } = listed.data;
@@ -2043,7 +2050,7 @@ export const SourcesPage = ({
 
   return (
     // A page of the brain: the title in the serif, in the library's page column.
-    <div {...stylex.props(styles.pane)}>
+    <div {...stylex.props(paneStyles.pane)}>
       <Container size="lg">
         <PageHeader
           actions={

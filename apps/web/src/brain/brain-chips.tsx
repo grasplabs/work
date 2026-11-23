@@ -175,7 +175,7 @@ export const Capped = ({ children }: { children: ReactNode[] }) => {
       {open ? children : children.slice(0, perRow)}
       {open ? (
         <Button
-          variant="secondary"
+          variant="outline"
           aria-expanded
           aria-label={t`Show fewer`}
           onClick={toggle}
@@ -185,7 +185,7 @@ export const Capped = ({ children }: { children: ReactNode[] }) => {
         </Button>
       ) : (
         <Button
-          variant="secondary"
+          variant="outline"
           aria-expanded={false}
           aria-label={t`${plural(hidden, { one: "Show # more", other: "Show # more" })}`}
           onClick={toggle}

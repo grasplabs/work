@@ -10,6 +10,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
@@ -290,28 +291,32 @@ export const useForget = (
         open={asking !== null}
       >
         <AlertDialogContent>
-          <AlertDialogTitle>{t`Remove ${what} from the brain?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            <span {...stylex.props(styles.lines)}>
-              <span {...stylex.props(styles.line)}>
-                <Trans>
-                  It is gone for good and cannot be brought back. The audit
-                  trail keeps that it was removed and by whom, never what it
-                  was.
-                </Trans>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t`Remove ${what} from the brain?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span {...stylex.props(styles.lines)}>
+                <span {...stylex.props(styles.line)}>
+                  <Trans>
+                    It is gone for good and cannot be brought back. The audit
+                    trail keeps that it was removed and by whom, never what it
+                    was.
+                  </Trans>
+                </span>
+                {asking?.preview === undefined ? null : (
+                  <EffectLines asking={asking} preview={asking.preview} />
+                )}
+                {asking?.failure === undefined ? null : (
+                  <span {...stylex.props(styles.failure)}>
+                    {asking.failure}
+                  </span>
+                )}
+                {/* While core says what goes with it, the answer that removes it waits. */}
+                {readingPreview(asking) ? (
+                  <Spinner aria-label={t`Loading`} size="sm" />
+                ) : null}
               </span>
-              {asking?.preview === undefined ? null : (
-                <EffectLines asking={asking} preview={asking.preview} />
-              )}
-              {asking?.failure === undefined ? null : (
-                <span {...stylex.props(styles.failure)}>{asking.failure}</span>
-              )}
-              {/* While core says what goes with it, the answer that removes it waits. */}
-              {readingPreview(asking) ? (
-                <Spinner aria-label={t`Loading`} size="sm" />
-              ) : null}
-            </span>
-          </AlertDialogDescription>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogAction>{t`Keep it`}</AlertDialogAction>
             <AlertDialogAction
