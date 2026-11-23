@@ -27,7 +27,7 @@ const linguiConfig = getConfig({ configPath: linguiConfigPath });
 // stylesheet sets, and without one each colour is invalid.
 const keepLightDark = { exclude: Features.LightDark };
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     tanstackRouter({
       target: "react",
@@ -56,8 +56,9 @@ export default defineConfig({
         ...keepLightDark,
         // A cold start in development asks for the CSS before every file
         // is compiled: what can't be read yet is left out, not an error,
-        // and the whole CSS follows a moment later.
-        errorRecovery: true,
+        // and the whole CSS follows a moment later. A build reads every
+        // file first, so there a CSS error fails it.
+        errorRecovery: command === "serve",
         minify: true,
       },
     }),
@@ -109,4 +110,4 @@ export default defineConfig({
       "/docs": "http://localhost:8787",
     },
   },
-});
+}));

@@ -5704,7 +5704,6 @@ msgid "failed"
 msgstr "fallida"
 
 #: src/chat/thread.tsx
-#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -5716,6 +5715,11 @@ msgstr "Fallida"
 msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Fallidas"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
+msgid "Failed"
+msgstr "Error"
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
