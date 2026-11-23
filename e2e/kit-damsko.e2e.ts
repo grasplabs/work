@@ -46,3 +46,10 @@ test("Damsko's data and content components draw in the product's build", async (
 }) => {
   await drew(page, "Data and content", 9);
 });
+
+test("Damsko's AI components and blocks draw in the product's build", async ({
+  page,
+}) => {
+  await drew(page, "AI", 21);
+  await drew(page, "Blocks", 4);
+});
