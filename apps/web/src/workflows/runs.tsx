@@ -1,4 +1,5 @@
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { runsPageSize } from "@grasp-os/shared/workflows";
 import type {
   ListedRun,
@@ -28,6 +29,20 @@ import { formatDateTime, formatSince } from "../format.ts";
 // waits for), danger where it failed. A run waiting for a decision links
 // to where it is answered. A run says what its workflow's page lists of
 // it: what it returned or why it failed stays on the run.
+
+/**
+ * What a page knows of the workflows its runs belong to, by ID: the name
+ * people see (`workflowLabel`: its title, or its own name), and the
+ * business process it serves. Core's runs and lanes carry only a
+ * workflow's own name, so a page that read the workflows shows theirs.
+ */
+export type KnownWorkflows = ReadonlyMap<
+  string,
+  { label: string; process: BusinessProcess | null }
+>;
+
+/** None known: a workflow goes by the name its runs carry. */
+export const noWorkflows: KnownWorkflows = new Map();
 
 const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
   queued: msg`Queued`,
@@ -145,11 +160,11 @@ const RunOutcome = ({ run }: { run: ListedRun }) => {
   );
 };
 
-/** A run's workflow, opening it. */
-const RunWorkflow = ({ run }: { run: ListedRun }) => (
+/** A run's workflow, by the name people see, opening it. */
+const RunWorkflow = ({ run, name }: { run: ListedRun; name: string }) => (
   <TextLink asChild variant="plain">
     <Link params={{ workflow: run.workflowId }} to="/workflows/$workflow">
-      {run.name}
+      {name}
     </Link>
   </TextLink>
 );
@@ -157,32 +172,37 @@ const RunWorkflow = ({ run }: { run: ListedRun }) => (
 /** The runs log's columns, under their headers' words, for the person `me`. */
 const logColumns = (words: {
   me: string;
+  workflows: KnownWorkflows;
   workflow: string;
   when: string;
   by: string;
   result: string;
-}): DataTableColumn<ListedRun>[] => [
-  {
-    id: "workflow",
-    header: words.workflow,
-    value: (run) => run.name,
-    cell: (run) => <RunWorkflow run={run} />,
-  },
-  {
-    id: "when",
-    header: words.when,
-    value: (run) => run.createdAt,
-    cell: (run) => formatDateTime(run.createdAt),
-  },
-  { id: "by", header: words.by, value: (run) => startedByOf(run, words.me) },
-  {
-    id: "result",
-    header: words.result,
-    value: (run) => runStatusLabel(run.status),
-    cell: (run) => <RunOutcome run={run} />,
-    align: "end",
-  },
-];
+}): DataTableColumn<ListedRun>[] => {
+  const nameOf = (run: ListedRun): string =>
+    words.workflows.get(run.workflowId)?.label ?? run.name;
+  return [
+    {
+      id: "workflow",
+      header: words.workflow,
+      value: nameOf,
+      cell: (run) => <RunWorkflow name={nameOf(run)} run={run} />,
+    },
+    {
+      id: "when",
+      header: words.when,
+      value: (run) => run.createdAt,
+      cell: (run) => formatDateTime(run.createdAt),
+    },
+    { id: "by", header: words.by, value: (run) => startedByOf(run, words.me) },
+    {
+      id: "result",
+      header: words.result,
+      value: (run) => runStatusLabel(run.status),
+      cell: (run) => <RunOutcome run={run} />,
+      align: "end",
+    },
+  ];
+};
 
 /** How many runs a page of the log holds. */
 const logPageSize = 20;
@@ -199,15 +219,19 @@ export const RunsLog = ({
   more,
   me,
   empty,
+  workflows = noWorkflows,
 }: {
   runs: ListedRun[];
   more: boolean;
   me: string;
   empty?: string;
+  /** The workflows the runs belong to, for the names people see. */
+  workflows?: KnownWorkflows;
 }) => {
   const { t } = useLingui();
   const columns = logColumns({
     me,
+    workflows,
     workflow: t`Workflow`,
     when: t({ message: "When", context: "column: when a run happened" }),
     by: t`Started by`,

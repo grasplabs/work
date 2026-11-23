@@ -56,7 +56,7 @@ import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
 import { WorkflowRunsTable } from "./resource-runs.tsx";
-import { RunBeside } from "./run-detail.tsx";
+import { RunBeside, useAddressedRun } from "./run-detail.tsx";
 import { SectionCard } from "./section-card.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
@@ -370,11 +370,15 @@ export const Traces = ({
   onPartChange: (part: TracesPart) => void;
 }) => {
   const { t } = useLingui();
+  const close = (): void => {
+    onCloseRun?.();
+  };
   // The run the address names: one of the table's, or Run's "Open the run".
-  const opened =
-    runs.state === "ready"
-      ? (runs.data.find((run) => run.id === openRun) ?? null)
-      : null;
+  const { opened, notFound, onDismiss } = useAddressedRun(
+    runs.state === "ready" ? runs.data : undefined,
+    openRun,
+    close
+  );
   // The opened run's status, as its followed trace last said it.
   const [traced, setTraced] = useState<{ runId: string; status: string }>();
   const openedId = opened === null ? undefined : opened.id;
@@ -416,9 +420,9 @@ export const Traces = ({
             <RunBeside
               admin={admin}
               names={names}
-              onClose={() => {
-                onCloseRun?.();
-              }}
+              notFound={notFound}
+              onClose={close}
+              onDismissNotFound={onDismiss}
               opened={opened}
               status={
                 traced !== undefined && traced.runId === openedId

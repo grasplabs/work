@@ -1,5 +1,6 @@
 import { runFilterStatuses } from "@grasp-os/shared/run-filter";
 import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   RunActivity,
   RunFilter,
@@ -29,23 +30,18 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { RunFiguresView } from "../workflows/figures.tsx";
+import { isRunFilterStatus, runsSearchOf } from "../workflows/page-search.ts";
+import type { RunsSearch } from "../workflows/page-search.ts";
 import { listRuns, readActivity } from "../workflows/reads.ts";
 import { runFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
+import type { KnownWorkflows } from "../workflows/runs.tsx";
 import { TodayLanes } from "../workflows/today-lanes.tsx";
-import type { LaneProcesses } from "../workflows/today-lanes.tsx";
 
 // Workflows › Runs: the runs of every workflow the person has a role in.
 // Today's runs in time, the figures core counted over the last days, and
 // their runs, waiting ones first, filtered by status. The filter is in the
 // address, so a link can open the runs it means.
-
-interface RunsSearch {
-  status?: RunFilterStatus;
-}
-
-const isStatus = (value: unknown): value is RunFilterStatus =>
-  runFilterStatuses.some((status) => status === value);
 
 const styles = stylex.create({
   // A filter: what it filters, then the choice.
@@ -95,7 +91,9 @@ const StatusFilter = () => {
           items={items}
           onValueChange={(chosen: string | null) => {
             void navigate({
-              search: { status: isStatus(chosen) ? chosen : undefined },
+              search: {
+                status: isRunFilterStatus(chosen) ? chosen : undefined,
+              },
             });
           }}
           value={search.status ?? all}
@@ -171,7 +169,13 @@ interface LogRead {
  * lanes or the figures. What was read stays while the next read comes;
  * before the first, its lines are loading.
  */
-const RunsLogRead = ({ log }: { log: LogRead }) => {
+const RunsLogRead = ({
+  log,
+  workflows,
+}: {
+  log: LogRead;
+  workflows: KnownWorkflows;
+}) => {
   const core = useCore();
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
@@ -220,6 +224,7 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
           me={identity.userId}
           more={read.runs.data.more}
           runs={read.runs.data.runs}
+          workflows={workflows}
         />
       ) : null}
       {current && read.runs.state !== "ready" ? (
@@ -241,12 +246,12 @@ const WorkflowRuns = () => {
       <Page wide>
         <PageHeading title={title} />
         {page.today.state === "ready" ? (
-          <TodayLanes processes={page.processes} today={page.today.data} />
+          <TodayLanes today={page.today.data} workflows={page.workflows} />
         ) : (
           <NotLoadedState page={page.today} />
         )}
         <Figures activity={page.activity} />
-        <RunsLogRead log={page.log} />
+        <RunsLogRead log={page.log} workflows={page.workflows} />
       </Page>
     </>
   );
@@ -272,12 +277,8 @@ const RunsPending = () => {
   );
 };
 
-/** What the address says the page shows, as far as it is valid. */
-const searchOf = (search: Record<string, unknown>): RunsSearch =>
-  isStatus(search.status) ? { status: search.status } : {};
-
 export const Route = createFileRoute("/_shell/workflows/runs")({
-  validateSearch: searchOf,
+  validateSearch: runsSearchOf,
   pendingComponent: RunsPending,
   // Nothing of the address: a filter changed on the page reads the log on
   // its own (RunsLogRead), never today's lanes again. A refresh runs the
@@ -285,7 +286,7 @@ export const Route = createFileRoute("/_shell/workflows/runs")({
   loader: async ({ context: { core }, location }) => {
     // The log's read starts now, beside the others, and isn't waited for:
     // for the filter in the address as the page loads or refreshes.
-    const filter = filterOf(searchOf(location.search));
+    const filter = filterOf(runsSearchOf(location.search));
     const log: LogRead = {
       key: JSON.stringify(filter),
       read: readRuns(core, filter),
@@ -294,19 +295,23 @@ export const Route = createFileRoute("/_shell/workflows/runs")({
     const activity = loadFromCore(core, readActivity);
     const [today, resources] = await Promise.all([
       loadFromCore(core, async (session) => await session.workflows.today()),
-      // The process each workflow serves, for its lane's mark: none shown
-      // where they can't be read.
+      // The name people see each workflow by, and the process it serves,
+      // for the lanes and the log: their own names and no marks where
+      // they can't be read.
       loadFromCore(
         core,
         async (session) => await session.workflowResources.list()
       ),
     ]);
-    const processes: LaneProcesses = new Map(
+    const workflows: KnownWorkflows = new Map(
       resources.state === "ready"
-        ? resources.data.map((workflow) => [workflow.id, workflow.process])
+        ? resources.data.map((workflow) => [
+            workflow.id,
+            { label: workflowLabel(workflow), process: workflow.process },
+          ])
         : []
     );
-    return { today, processes, log, activity };
+    return { today, workflows, log, activity };
   },
   component: WorkflowRuns,
 });

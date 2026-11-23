@@ -47,7 +47,6 @@ import {
   backCrumb,
   ItemBar,
   ItemShell,
-  projectSearchOf,
   readItemProject,
 } from "../frame/item-shell.tsx";
 import {
@@ -63,9 +62,10 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
 import type { Names } from "../workflows/activity-bar.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
+import { workflowSearchOf } from "../workflows/page-search.ts";
+import type { WorkflowView } from "../workflows/page-search.ts";
 import { workflowVersions } from "../workflows/reads.ts";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
-import { workflowSettingsSectionOf } from "../workflows/settings-sections.ts";
 import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
@@ -98,9 +98,6 @@ import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 //   time, as an App's are, History among them.
 //
 // Run, in the bar, starts its live version by hand, in a dialog.
-
-/** What the main area shows. */
-type WorkflowView = "flow" | "runs" | "settings";
 
 // The Flow comes in softly as it is shown again.
 const fadeIn = stylex.keyframes({
@@ -152,12 +149,6 @@ const styles = stylex.create({
     borderBlockEndColor: colors.border,
   },
 });
-
-/** A view named in an address, or none for anything else. */
-const viewOf = (value: unknown): WorkflowView | undefined =>
-  value === "flow" || value === "runs" || value === "settings"
-    ? value
-    : undefined;
 
 /**
  * Whether it is paused, as core answered the last change made on the
@@ -539,16 +530,22 @@ const WorkflowResourceView = ({
       replace: true,
     });
   }, [navigate, resource.id, handedOver]);
-  /** Runs, with `id` open beside the list; none closes it. */
+  /**
+   * Runs, with `id` open beside the list; none closes it, in the view the
+   * page is on. Opening and closing a run both replace the address, as
+   * switching views does (and a run's link in the list): Back never
+   * reopens a run once closed.
+   */
   const runAt = (id?: string): void => {
     void navigate({
       to: "/workflows/$workflow",
       params: { workflow: resource.id },
       search: (held) => ({
         project: held.project,
-        view: "runs",
-        ...(id === undefined ? {} : { run: id }),
+        view: id === undefined ? asked : "runs",
+        run: id,
       }),
+      replace: true,
     });
   };
   const settingsAt = (at: WorkflowSettingsSection): void => {
@@ -735,23 +732,6 @@ const WorkflowResourcePage = () => {
   );
 };
 
-/** What a link to a workflow's page may ask of it. */
-interface WorkflowSearch {
-  /** The view it opens on: Flow for its builders, Runs for anyone else, by default. */
-  view?: WorkflowView;
-  /** In Settings, the section open: General by default. */
-  section?: WorkflowSettingsSection;
-  /** The project it was started or opened from: the way back. */
-  project?: string;
-  /** On Runs, the run open beside the list, by its ID. */
-  run?: string;
-  /**
-   * The chat the person came from, building it in Grasp's chat: the page
-   * makes it the workflow's. Core checks it is theirs on each read.
-   */
-  chat?: string;
-}
-
 /** A workflow's mark, where a page says it wasn't found. */
 const WorkflowMark = () => <Icon icon={WorkflowIcon} />;
 
@@ -759,21 +739,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
   // Grasp's chat has no place here but its builders', about the workflow,
   // docked beside it (chat/chat-subject.ts).
   staticData: { chat: chatPresence.hidden },
-  validateSearch: (search: Record<string, unknown>): WorkflowSearch => {
-    const view = viewOf(search.view);
-    const section = workflowSettingsSectionOf(search.section);
-    const project = projectSearchOf(search);
-    const chat = typeof search.chat === "string" ? search.chat : undefined;
-    return {
-      ...(view === undefined ? {} : { view }),
-      ...(section === undefined ? {} : { section }),
-      ...(chat === undefined ? {} : { chat }),
-      ...(project === undefined ? {} : { project }),
-      ...(typeof search.run === "string" && search.run !== ""
-        ? { run: search.run }
-        : {}),
-    };
-  },
+  validateSearch: workflowSearchOf,
   pendingComponent: PageLoading,
   loaderDeps: ({ search: { project } }) => ({ project }),
   loader: async ({

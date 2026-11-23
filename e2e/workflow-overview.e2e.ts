@@ -9,7 +9,9 @@ import type { Person } from "./people.ts";
 // gathered by the phase it stands in (a live one running, one with no
 // version yet building); its runs a page of their own, Workflows › Runs,
 // filtered by status in the address; and a run opened beside a workflow's
-// runs, which its address keeps open across a reload.
+// runs, which its address keeps open across a reload. An address the
+// pages don't know (a status, a view, a run the person can't open) opens
+// the page as it is without it.
 
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
@@ -96,4 +98,60 @@ test("a builder finds their workflows by phase, their runs on a page of their ow
   await expect(opened).toBeVisible(pageRead);
   await page.reload();
   await expect(opened).toBeVisible(pageRead);
+});
+
+test("an address the workflows pages don't know opens them as they are without it, and a run closed stays closed on Back", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowOverview");
+  const live = await made(builder, "Quote approval", waiting("1 hour"), true);
+  const page = await pageOf(builder);
+
+  // A status the log doesn't filter by: the page, unfiltered, its lanes by
+  // the workflows' titles, as Workflows names them.
+  await page.goto("/workflows/runs?status=nonsense");
+  await expect(page.getByRole("combobox", { name: "Status" })).toHaveText(
+    "All",
+    pageRead
+  );
+  await expect(
+    page
+      .getByRole("region", { name: "Today" })
+      .getByRole("link", { name: "Quote approval" })
+      .first()
+  ).toBeAttached(pageRead);
+
+  // A view the workflow's page doesn't have: its first view, for a builder Flow.
+  await page.goto(`/workflows/${live}?view=bogus`);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workflow views" })
+      .locator('[aria-current="page"]')
+  ).toHaveText("Flow", pageRead);
+
+  // A run it doesn't list: one sentence, whatever the reason, and the
+  // address lets it go.
+  await page.goto(`/workflows/${live}?view=runs&run=not-a-run`);
+  await expect(
+    page.getByText("That run wasn't found, or isn't yours to see.")
+  ).toBeVisible(pageRead);
+  await expect(page).not.toHaveURL(/[?&]run=/u);
+
+  // Opened and closed, Back goes where the person was before, never to the
+  // run again.
+  await page.goto("/workflows");
+  await page.goto(`/workflows/${live}?view=runs`);
+  await page
+    .getByRole("table", { name: "Runs" })
+    .getByRole("link")
+    .first()
+    .click(pageRead);
+  const opened = page.getByRole("complementary", {
+    name: /^The run started/u,
+  });
+  await expect(opened).toBeVisible(pageRead);
+  await opened.getByRole("button", { name: "Close" }).click();
+  await expect(page).not.toHaveURL(/[?&]run=/u);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/workflows$/u);
 });

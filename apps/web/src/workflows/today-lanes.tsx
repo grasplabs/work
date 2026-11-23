@@ -1,4 +1,3 @@
-import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type {
   DecisionAnswerInput,
   DecisionView,
@@ -49,6 +48,8 @@ import {
   placeOf,
 } from "./lanes.ts";
 import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
+import { noWorkflows } from "./runs.tsx";
+import type { KnownWorkflows } from "./runs.tsx";
 
 // Runs › Today (prototype `components/workflows/today-lanes.tsx`): a lane
 // for every workflow that worked today, its runs as dots in time. A dot
@@ -488,21 +489,15 @@ const Dot = ({
   );
 };
 
-/** The business process each lane's workflow serves, by its ID, for their marks. */
-export type LaneProcesses = ReadonlyMap<string, BusinessProcess | null>;
-
-/** None known: lanes without their marks. */
-const noProcesses: LaneProcesses = new Map();
-
 /** A lane's process, by its mark, before its name, as the prototype has it. */
 const LaneMark = ({
   lane,
-  processes,
+  workflows,
 }: {
   lane: Lane;
-  processes: LaneProcesses;
+  workflows: KnownWorkflows;
 }) => {
-  const process = processes.get(lane.of.id);
+  const process = workflows.get(lane.of.id)?.process;
   return process === undefined || process === null ? null : (
     <ProcessGlyph process={process} />
   );
@@ -586,9 +581,9 @@ const Lanes = ({
   lit,
   chosen,
   onChoose,
-  processes,
+  workflows,
 }: {
-  processes: LaneProcesses;
+  workflows: KnownWorkflows;
   day: LaneDay;
   lit: ReadonlySet<string>;
   chosen: string | null;
@@ -602,7 +597,7 @@ const Lanes = ({
       <ul {...stylex.props(styles.names)}>
         {day.lanes.map((lane) => (
           <li key={lane.key} {...stylex.props(styles.name)}>
-            <LaneMark lane={lane} processes={processes} />
+            <LaneMark lane={lane} workflows={workflows} />
             <LaneLink lane={lane} />
           </li>
         ))}
@@ -699,16 +694,16 @@ const ListLane = ({
   lane,
   chosen,
   onChoose,
-  processes,
+  workflows,
 }: {
-  processes: LaneProcesses;
+  workflows: KnownWorkflows;
   lane: Lane;
   chosen: string | null;
   onChoose: (id: string | null) => void;
 }) => (
   <li {...stylex.props(styles.narrowLane)}>
     <span {...stylex.props(styles.row)}>
-      <LaneMark lane={lane} processes={processes} />
+      <LaneMark lane={lane} workflows={workflows} />
       <span {...stylex.props(styles.truncate)}>
         <LaneLink lane={lane} />
       </span>
@@ -979,16 +974,24 @@ const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
 
 export const TodayLanes = ({
   today: loaded,
-  processes = noProcesses,
+  workflows = noWorkflows,
 }: {
   today: WorkflowsToday;
-  /** The process each lane's workflow serves, for its mark. */
-  processes?: LaneProcesses;
+  /** The workflows the lanes are of: their names and processes' marks. */
+  workflows?: KnownWorkflows;
 }) => {
   const today = useLatestToday(loaded);
   const { t } = useLingui();
   const [chosen, setChosen] = useState<string | null>(null);
-  const day = laneDay(today);
+  const read = laneDay(today);
+  // Each lane by the name people see its workflow by, where it is known.
+  const day = {
+    ...read,
+    lanes: read.lanes.map((lane) => ({
+      ...lane,
+      name: workflows.get(lane.of.id)?.label ?? lane.name,
+    })),
+  };
   const all = day.lanes.flatMap((lane) => lane.runs);
   const run = all.find(({ id }) => id === chosen);
   const journey = run === undefined ? [] : journeyOf(day, run.key);
@@ -1015,7 +1018,7 @@ export const TodayLanes = ({
               day={day}
               lit={lit}
               onChoose={setChosen}
-              processes={processes}
+              workflows={workflows}
             />
           </div>
           <ul {...stylex.props(styles.narrow)}>
@@ -1025,7 +1028,7 @@ export const TodayLanes = ({
                 key={lane.key}
                 lane={lane}
                 onChoose={setChosen}
-                processes={processes}
+                workflows={workflows}
               />
             ))}
           </ul>

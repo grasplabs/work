@@ -145,6 +145,32 @@ const choiceButtons = (): HTMLButtonElement[] => [
   ),
 ];
 
+/** Empties the words of the `at`th person field, as a person deletes them. */
+const empty = async (at: number): Promise<void> => {
+  const field = document.querySelectorAll<HTMLInputElement>(
+    '[data-slot="combobox"] input'
+  )[at];
+  await act(async () => {
+    if (field !== undefined) {
+      Reflect.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set?.call(field, "");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await settled();
+  });
+};
+
+/** The headings of the open list's groups, in order. */
+const groupHeadings = (): string[] =>
+  [...document.querySelectorAll('[role="group"]')].map((group) => {
+    const by = group.getAttribute("aria-labelledby");
+    return by === null
+      ? ""
+      : (document.querySelector(`#${by}`)?.textContent.trim() ?? "");
+  });
+
 /** Clicks `element`, and lets what it does settle. */
 const click = async (
   element: HTMLElement | null | undefined
@@ -286,18 +312,18 @@ describe("starting a workflow by hand", () => {
     const offered = [...document.querySelectorAll('[role="option"]')].map(
       (each) => each.textContent.trim()
     );
+    const headings = groupHeadings();
     await choose("Everyone with the Admin role");
     await click(approver);
     await choose("Ada Lovelace");
-    // An optional one picked by mistake is cleared again.
+    // An optional one picked by mistake is cleared again by emptying its
+    // words.
     await click(watcher);
     await choose("Finance");
-    await click(
-      document.querySelector<HTMLButtonElement>('[aria-label="Clear watcher"]')
-    );
+    await empty(1);
     await press("Start the run");
 
-    expect({ unpicked, offered, asked }).toStrictEqual({
+    expect({ unpicked, offered, headings, asked }).toStrictEqual({
       unpicked: { asked: 0, said: true },
       offered: [
         "Ada Lovelace",
@@ -306,6 +332,7 @@ describe("starting a workflow by hand", () => {
         "Everyone with the Builder role",
         "Everyone with the User role",
       ],
+      headings: ["People", "Teams", "Roles"],
       asked: [
         {
           workflow: "workflow-1",
@@ -317,7 +344,7 @@ describe("starting a workflow by hand", () => {
     });
   });
 
-  it("names the person picked apart from someone of the same name", async () => {
+  it("names the person picked apart from someone of the same name, with no Teams heading where the organization has no teams", async () => {
     await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: 3,
       args: {
@@ -338,11 +365,17 @@ describe("starting a workflow by hand", () => {
     });
     await press("Run");
     await click(choiceButtons()[0]);
+    const headings = groupHeadings();
     await choose("Ada Lovelace (ID …222222)");
 
-    expect(
-      document.querySelector<HTMLInputElement>('[role="combobox"]')?.value
-    ).toBe("Ada Lovelace (ID …222222)");
+    expect({
+      headings,
+      value:
+        document.querySelector<HTMLInputElement>('[role="combobox"]')?.value,
+    }).toStrictEqual({
+      headings: ["People", "Roles"],
+      value: "Ada Lovelace (ID …222222)",
+    });
   });
 
   it("offers no Run for a workflow core gives no version to start", async () => {

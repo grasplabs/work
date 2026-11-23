@@ -847,6 +847,7 @@ msgid "{name} isn't ready yet"
 msgstr "{name} isn't ready yet"
 
 #: src/connections/app-logo.tsx
+#: src/connections/provider-mark.tsx
 msgid "{name} logo"
 msgstr "{name} logo"
 
@@ -3847,11 +3848,6 @@ msgstr "Clear"
 msgctxt "empty a table's filter"
 msgid "Clear"
 msgstr "Clear"
-
-#. placeholder {0}: field.name
-#: src/workflows/start-run.tsx
-msgid "Clear {0}"
-msgstr "Clear {0}"
 
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
@@ -13847,6 +13843,10 @@ msgstr "That isn't a link that can be opened."
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "That isn't a value this parameter takes."
+
+#: src/workflows/run-detail.tsx
+msgid "That run wasn't found, or isn't yours to see."
+msgstr "That run wasn't found, or isn't yours to see."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."

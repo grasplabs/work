@@ -15,7 +15,12 @@ import { Link } from "@tanstack/react-router";
 
 import { formatDateTime } from "../format.ts";
 import type { Names } from "./activity-bar.tsx";
-import { RunBeside, RunStatusBadge, useStartedBy } from "./run-detail.tsx";
+import {
+  RunBeside,
+  RunStatusBadge,
+  useAddressedRun,
+  useStartedBy,
+} from "./run-detail.tsx";
 import { WaitingForAiProvider } from "./runs.tsx";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
@@ -187,15 +192,18 @@ export const ResourceRuns = ({
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
 }) => {
+  const close = (): void => {
+    onCloseRun?.();
+  };
   // The run the address names: one of the table's, or Run's "Open the run".
-  const opened = runs.find((run) => run.id === openRun) ?? null;
+  const { opened, notFound, onDismiss } = useAddressedRun(runs, openRun, close);
   return (
     <RunBeside
       admin={admin}
       names={names}
-      onClose={() => {
-        onCloseRun?.();
-      }}
+      notFound={notFound}
+      onClose={close}
+      onDismissNotFound={onDismiss}
       opened={opened}
       workflow={workflow}
     >

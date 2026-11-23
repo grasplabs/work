@@ -17,6 +17,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import type { KnownWorkflows } from "./runs.tsx";
 import { TodayLanes } from "./today-lanes.tsx";
 
 // A run of Today that waits on the reader, as they open it: what its
@@ -85,7 +86,8 @@ const settle = async (): Promise<void> => {
  */
 const opened = async (
   read: () => WorkflowsToday,
-  decisions: Readonly<Record<string, unknown>> = {}
+  decisions: Readonly<Record<string, unknown>> = {},
+  workflows?: KnownWorkflows
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -104,7 +106,9 @@ const opened = async (
     getParentRoute: () => rootRoute,
     path: "/",
     loader: () => read(),
-    component: () => <TodayLanes today={page.useLoaderData()} />,
+    component: () => (
+      <TodayLanes today={page.useLoaderData()} workflows={workflows} />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -185,6 +189,22 @@ describe("a run of Today that waits on the reader", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+  });
+
+  it("names a lane by its workflow's title, as Workflows does, where the page knows it", async () => {
+    await opened(
+      () => todayWith(),
+      {},
+      new Map([["wr-1", { label: "Invoice approval", process: null }]])
+    );
+
+    expect(
+      new Set(
+        [...document.querySelectorAll('a[href="/workflows/wr-1"]')].map(
+          (link) => link.textContent.trim()
+        )
+      )
+    ).toStrictEqual(new Set(["Invoice approval"]));
   });
 
   it("asks what its decision asks, and takes either answer", async () => {

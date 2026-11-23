@@ -3,6 +3,7 @@ import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
 import type { BadgeVariant } from "@grasp-os/ui/components/badge";
 import { IconTile } from "@grasp-os/ui/components/icon-tile";
@@ -28,7 +29,7 @@ import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef, useState, Fragment } from "react";
+import { Fragment, useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
 import { isTransient } from "../core.ts";
@@ -66,6 +67,8 @@ const followMs = 1500;
 const besideFrom = 60 * 16;
 
 const styles = stylex.create({
+  // The note that a run wasn't found, over the list.
+  notFound: { marginBlockEnd: space["4"] },
   // The list and the run opened beside it.
   split: {
     display: "grid",
@@ -435,11 +438,19 @@ const RunPanel = ({
   );
 };
 
-/** Whether the element `holder` holds is wide enough for a run beside its list. */
-const useWide = (holder: { current: HTMLDivElement | null }): boolean => {
-  const [wide, setWide] = useState(true);
-  useEffect(() => {
-    const element = holder.current;
+/**
+ * Whether the list's box (`measure`, its ref) is wide enough for a run
+ * beside it; undefined until it is measured. Measured as the box is
+ * attached, before the first paint, so a run opened by its address mounts
+ * once, where it belongs, and is read once: never beside the list first
+ * on a phone, then again in a Sheet.
+ */
+const useWide = () => {
+  const [wide, setWide] = useState<boolean>();
+  const measure = (element: HTMLDivElement | null) => {
+    if (element !== null) {
+      setWide(element.getBoundingClientRect().width >= besideFrom);
+    }
     const watch =
       element === null || typeof ResizeObserver === "undefined"
         ? undefined
@@ -452,8 +463,57 @@ const useWide = (holder: { current: HTMLDivElement | null }): boolean => {
     return () => {
       watch?.disconnect();
     };
-  }, [holder]);
-  return wide;
+  };
+  return { wide, measure };
+};
+
+/**
+ * The run the address asks to open (`asked`), among `runs` as core lists
+ * them for the reader (undefined while they aren't read). One they don't
+ * list opens nothing: no such run, another workflow's, another person's,
+ * or older than the runs listed, all alike, so nothing says whether it
+ * exists. It leaves the address (`onClear`), and `notFound` says it could
+ * not be opened until a run opens or the person closes the note.
+ */
+export const useAddressedRun = (
+  runs: readonly WorkflowResourceRun[] | undefined,
+  asked: string | undefined,
+  onClear: () => void
+) => {
+  const opened = runs?.find((run) => run.id === asked) ?? null;
+  const missing = runs !== undefined && asked !== undefined && opened === null;
+  const [notFound, setNotFound] = useState(false);
+  if (missing && !notFound) {
+    setNotFound(true);
+  }
+  if (opened !== null && notFound) {
+    setNotFound(false);
+  }
+  const clear = useEffectEvent(onClear);
+  useEffect(() => {
+    if (missing) {
+      clear();
+    }
+  }, [missing]);
+  return {
+    opened,
+    notFound,
+    onDismiss: () => {
+      setNotFound(false);
+    },
+  };
+};
+
+/** Where an address named a run the reader can't open: one sentence, whatever the reason. */
+const RunNotFound = ({ onDismiss }: { onDismiss: () => void }) => {
+  const { t } = useLingui();
+  return (
+    <Alert onClose={onDismiss} style={styles.notFound} variant="info">
+      <AlertDescription>
+        {t`That run wasn't found, or isn't yours to see.`}
+      </AlertDescription>
+    </Alert>
+  );
 };
 
 /**
@@ -470,6 +530,8 @@ export const RunBeside = ({
   steps,
   status,
   children,
+  notFound = false,
+  onDismissNotFound,
 }: {
   workflow: string;
   opened: WorkflowResourceRun | null;
@@ -486,10 +548,13 @@ export const RunBeside = ({
   status?: string | null;
   /** The list the run was opened from. */
   children?: ReactNode;
+  /** Whether the address named a run that isn't listed (`useAddressedRun`). */
+  notFound?: boolean;
+  /** Closes the note that it wasn't found. */
+  onDismissNotFound?: () => void;
 }) => {
   const { t } = useLingui();
-  const holder = useRef<HTMLDivElement>(null);
-  const wide = useWide(holder);
+  const { wide, measure } = useWide();
   const panel = (framed: boolean) =>
     opened === null ? null : (
       <RunPanel
@@ -507,8 +572,15 @@ export const RunBeside = ({
     );
   const openedAt = opened === null ? "" : formatDateTime(opened.createdAt);
   return (
-    <div ref={holder}>
-      {wide && opened !== null ? (
+    <div ref={measure}>
+      {notFound ? (
+        <RunNotFound
+          onDismiss={() => {
+            onDismissNotFound?.();
+          }}
+        />
+      ) : null}
+      {wide === true && opened !== null ? (
         <div {...stylex.props(styles.split)}>
           <div>{children}</div>
           {panel(true)}
@@ -522,14 +594,14 @@ export const RunBeside = ({
             onClose();
           }
         }}
-        open={!wide && opened !== null}
+        open={wide === false && opened !== null}
       >
         {/* The panel draws the title and the close: the sheet names it only. */}
         <SheetContent showCloseButton={false}>
           <span {...stylex.props(visuallyHidden)}>
             <SheetTitle>{t`The run started ${openedAt}`}</SheetTitle>
           </span>
-          {wide ? null : panel(false)}
+          {wide === false ? panel(false) : null}
         </SheetContent>
       </Sheet>
     </div>

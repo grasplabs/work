@@ -33,6 +33,9 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Working`,
       success: t`Done`,
     },
+    alert: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
     alertDialog: {
       cancel: t({ message: "Cancel", context: "leave a question unanswered" }),
     },

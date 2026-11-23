@@ -19,7 +19,7 @@ import {
   FieldStatus,
 } from "@grasp-os/ui/components/field";
 import type { FieldStatusValue } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -217,6 +217,23 @@ const ParamInput = ({
       />
     );
   }
+  const placeholder =
+    replacing ?? (kind === "json" ? t`A JSON value` : undefined);
+  // A sensitive value is a secret: masked, never offered to a password
+  // manager, never read back by an agent.
+  if (param.sensitive) {
+    return (
+      <SecretInput
+        aria-describedby={errorId}
+        aria-invalid={errorId !== undefined}
+        disabled={!editable}
+        inputMode={kind === "number" ? "decimal" : undefined}
+        onValueChange={onText}
+        placeholder={placeholder}
+        value={text}
+      />
+    );
+  }
   return (
     <Input
       aria-describedby={errorId}
@@ -224,8 +241,7 @@ const ParamInput = ({
       disabled={!editable}
       inputMode={kind === "number" ? "decimal" : undefined}
       onValueChange={onText}
-      placeholder={replacing ?? (kind === "json" ? t`A JSON value` : undefined)}
-      type={param.sensitive ? "password" : "text"}
+      placeholder={placeholder}
       value={text}
     />
   );

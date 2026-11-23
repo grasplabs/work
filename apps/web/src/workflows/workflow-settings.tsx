@@ -192,16 +192,12 @@ const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
   return name === undefined ? t`Owned by someone else` : t`Owned by ${name}`;
 };
 
-/** What a title is saved as: its text, trimmed; null when emptied. */
-const savedAs = (draft: string): string | null => {
-  const trimmed = draft.trim();
-  return trimmed === "" ? null : trimmed;
-};
-
 /**
  * The title's field, saved as the person leaves it or presses Enter, as
  * the workspace's name is: emptied, it saves none; Escape puts back what
- * was saved; nothing is sent while it is what was saved.
+ * was saved; nothing is sent while it is what was saved. The settings'
+ * own saved field (settings/saved-field.tsx) does the same on the old
+ * kit; once it is on Damsko, this is that field.
  */
 const TitleInput = ({
   value,
@@ -218,7 +214,8 @@ const TitleInput = ({
       return;
     }
     setDraft(null);
-    const next = savedAs(draft);
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : trimmed;
     if (next !== value) {
       onSave(next);
     }

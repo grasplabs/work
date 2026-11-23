@@ -30,7 +30,7 @@ import {
 } from "@grasp-os/ui/components/select";
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
-import { Icon, PlayIcon, XIcon } from "@grasp-os/ui/lib/icons";
+import { Icon, PlayIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -85,7 +85,6 @@ const styles = stylex.create({
     whiteSpace: { default: null, [narrowBar]: "nowrap" },
   },
   form: { display: "grid", rowGap: space["4"] },
-  person: { display: "flex", alignItems: "center", gap: space["1"] },
 });
 
 /** What is said under a field whose value can't be sent. */
@@ -102,39 +101,41 @@ const useProblemText = () => {
 /**
  * Whom a field that takes a person may name, as a search's items: the
  * people (told apart from a namesake), the teams, and everyone with a
- * role, each under the key a start's input names it by (`subjectKey`).
+ * role, each under the key a start's input names it by (`subjectKey`). A
+ * group with nobody in it (an organization without teams) has no heading.
  */
 const usePickable = () => {
   const { t } = useLingui();
-  return (people: PeopleAndTeams | null, apart: PeopleApart): ComboboxItems => [
-    {
-      type: "group",
-      label: t`People`,
-      items: (people?.people ?? []).map((person) => ({
-        value: subjectKey({ type: "person", id: person.id }),
-        label: apart.named(person),
-      })),
-    },
-    {
-      type: "group",
-      label: t`Teams`,
-      items: (people?.teams ?? []).map((team) => ({
-        value: subjectKey({ type: "team", id: team.id }),
-        label: team.name,
-      })),
-    },
-    {
-      type: "group",
-      label: t`Roles`,
-      items: roleSchema.options.map((role) => {
-        const name = roleLabel(role);
-        return {
-          value: subjectKey({ type: "role", id: role }),
-          label: t`Everyone with the ${name} role`,
-        };
-      }),
-    },
-  ];
+  return (people: PeopleAndTeams | null, apart: PeopleApart): ComboboxItems =>
+    [
+      {
+        type: "group" as const,
+        label: t`People`,
+        items: (people?.people ?? []).map((person) => ({
+          value: subjectKey({ type: "person", id: person.id }),
+          label: apart.named(person),
+        })),
+      },
+      {
+        type: "group" as const,
+        label: t`Teams`,
+        items: (people?.teams ?? []).map((team) => ({
+          value: subjectKey({ type: "team", id: team.id }),
+          label: team.name,
+        })),
+      },
+      {
+        type: "group" as const,
+        label: t`Roles`,
+        items: roleSchema.options.map((role) => {
+          const name = roleLabel(role);
+          return {
+            value: subjectKey({ type: "role", id: role }),
+            label: t`Everyone with the ${name} role`,
+          };
+        }),
+      },
+    ].filter((group) => group.items.length > 0);
 };
 
 /** One input field, as `field` asks for it. */
@@ -157,33 +158,19 @@ const FieldInput = ({
   switch (field.kind) {
     case "person": {
       // Picked from the organization's people, teams and roles, as a
-      // search; for an optional field, a way to pick nobody again. Core
-      // checks the start's input again.
+      // search; emptying its words picks nobody again (the Combobox's
+      // own clearing). Core checks the start's input again.
       return (
-        <div {...stylex.props(styles.person)}>
-          <Combobox
-            items={pickable(people, apart)}
-            onValueChange={(chosen) => {
-              onChange(chosen ?? "");
-            }}
-            placeholder={t`Search people, teams and roles`}
-            value={text === "" ? null : text}
-          >
-            <ComboboxEmpty>{t`Nobody has that name.`}</ComboboxEmpty>
-          </Combobox>
-          {field.required || text === "" ? null : (
-            <Button
-              aria-label={t`Clear ${field.name}`}
-              onClick={() => {
-                onChange("");
-              }}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <Icon icon={XIcon} />
-            </Button>
-          )}
-        </div>
+        <Combobox
+          items={pickable(people, apart)}
+          onValueChange={(chosen) => {
+            onChange(chosen ?? "");
+          }}
+          placeholder={t`Search people, teams and roles`}
+          value={text === "" ? null : text}
+        >
+          <ComboboxEmpty>{t`Nobody has that name.`}</ComboboxEmpty>
+        </Combobox>
       );
     }
     case "yes": {
