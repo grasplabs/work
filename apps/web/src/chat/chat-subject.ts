@@ -18,8 +18,8 @@ import type { ChatSlot } from "./active-chat.ts";
 // finds the person's chat for one, if it has one; what the chat says
 // there is the same for both. The chat is an ordinary one, in the person's list, held in
 // a slot of the tab's own (active-chat.ts), so their other chats stay as
-// they were. There it stays docked open beside the page: the page is
-// where its subject is made, so the chat is part of it, and never closes.
+// they were. There it docks beside the page, which is where its subject is
+// made, and opens and closes as anywhere else.
 //
 // Each question asked there carries the subject to core (`ChatQuestion`),
 // which tells the agent, by name, what "this" and "it" mean.

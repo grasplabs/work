@@ -9,6 +9,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
+import { openChat } from "../chat/chat-layout.ts";
 import { chatLink } from "../chat/chat-link.ts";
 import { slotOf } from "../chat/chat-subject.ts";
 import { useChatAbout, useGlobalChat } from "../chat/global-chat.tsx";
@@ -1345,7 +1346,8 @@ interface WorkspaceAt {
 /**
  * The workspace of App `app`, for one who builds it: Grasp's chat is about
  * the App here, the App's chat, docked beside it; a chat handed over
- * (`handedOver`, building the App in Chat) becomes the App's.
+ * (`handedOver`, building the App in Chat) becomes the App's, and opens
+ * beside it, so the conversation goes on where the App is.
  */
 const Workspace = ({
   handedOver,
@@ -1361,6 +1363,7 @@ const Workspace = ({
       return;
     }
     setActiveChat(handedOver, slotOf({ kind: "app", id: app.id }));
+    openChat("docked");
     // Carried on: the address no longer needs it.
     void navigate({
       to: ".",
