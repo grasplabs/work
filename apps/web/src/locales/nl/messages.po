@@ -5662,7 +5662,6 @@ msgid "failed"
 msgstr "mislukt"
 
 #: src/chat/thread.tsx
-#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -5672,6 +5671,11 @@ msgstr "Mislukt"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Mislukt"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Mislukt"
 
