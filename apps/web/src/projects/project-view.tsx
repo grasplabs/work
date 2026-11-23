@@ -736,6 +736,47 @@ const MakeButton = ({
   </Button>
 );
 
+/** The overview's Apps: three as cards, or its empty line. */
+const AppsPart = ({ project, makes }: { project: Project; makes: boolean }) => {
+  const { t } = useLingui();
+  const apps = project.items.filter(({ type }) => type === "app");
+  return (
+    <section aria-labelledby="project-apps" {...stylex.props(styles.section)}>
+      <SectionHead
+        count={project.counts.apps}
+        end={
+          project.counts.apps === 0 ? null : (
+            <ViewAll project={project} tab="apps" />
+          )
+        }
+        id="project-apps"
+        title={t`Apps`}
+      />
+      {project.counts.apps === 0 ? (
+        <EmptyLine
+          action={
+            makes ? (
+              <MakeButton kind="app" project={project}>
+                {t`Make an App`}
+              </MakeButton>
+            ) : undefined
+          }
+          icon={AppPanels}
+        >
+          {t`No Apps yet, such as a debtor overview.`}
+        </EmptyLine>
+      ) : null}
+      {apps.length === 0 ? null : (
+        <ul {...stylex.props(styles.cards)}>
+          {apps.slice(0, slice).map((item) => (
+            <AppCard item={item} key={item.id} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
+
 /** The overview: three of each part, each with View all, or its empty line. */
 const Overview = ({
   project,
@@ -743,12 +784,15 @@ const Overview = ({
   workflows,
   makes,
   userId,
+  askOwner,
 }: {
   project: Project;
   chats: readonly ChatSummary[];
   workflows: readonly OverviewRow[];
   makes: boolean;
   userId: string;
+  /** The page asks the owner to set the project up: its empty Workflows and Apps say nothing more. */
+  askOwner: boolean;
 }) => {
   const { t } = useLingui();
   const builds = project.role === "builder";
@@ -756,48 +800,53 @@ const Overview = ({
   const filedWorkflows = project.items.filter(
     ({ type }) => type === "workflow"
   );
-  const apps = project.items.filter(({ type }) => type === "app");
   const owner = project.owner.name ?? t`the owner`;
   const people = project.members;
   const ownerIsYou = project.owner.id === userId;
   return (
     <>
-      <section
-        aria-labelledby="project-workflows"
-        {...stylex.props(styles.section)}
-      >
-        <SectionHead
-          count={project.counts.workflows}
-          end={
-            project.counts.workflows === 0 ? null : (
-              <ViewAll project={project} tab="workflows" />
-            )
-          }
-          id="project-workflows"
-          title={t`Workflows`}
-        />
-        {project.counts.workflows === 0 ? (
-          <EmptyLine
-            action={
-              makes ? (
-                <MakeButton kind="workflow" project={project}>
-                  {t`Make a workflow`}
-                </MakeButton>
-              ) : undefined
+      {askOwner ? null : (
+        <section
+          aria-labelledby="project-workflows"
+          {...stylex.props(styles.section)}
+        >
+          <SectionHead
+            count={project.counts.workflows}
+            end={
+              project.counts.workflows === 0 ? null : (
+                <ViewAll project={project} tab="workflows" />
+              )
             }
-            icon={Workflow}
-          >
-            {t`No workflows yet, such as booking invoices.`}
-          </EmptyLine>
-        ) : null}
-        {filedWorkflows.length === 0 ? null : (
-          <ItemGroup separated>
-            {filedWorkflows.slice(0, slice).map((item) => (
-              <WorkflowRow item={item} key={item.id} row={rows.get(item.id)} />
-            ))}
-          </ItemGroup>
-        )}
-      </section>
+            id="project-workflows"
+            title={t`Workflows`}
+          />
+          {project.counts.workflows === 0 ? (
+            <EmptyLine
+              action={
+                makes ? (
+                  <MakeButton kind="workflow" project={project}>
+                    {t`Make a workflow`}
+                  </MakeButton>
+                ) : undefined
+              }
+              icon={Workflow}
+            >
+              {t`No workflows yet, such as booking invoices.`}
+            </EmptyLine>
+          ) : null}
+          {filedWorkflows.length === 0 ? null : (
+            <ItemGroup separated>
+              {filedWorkflows.slice(0, slice).map((item) => (
+                <WorkflowRow
+                  item={item}
+                  key={item.id}
+                  row={rows.get(item.id)}
+                />
+              ))}
+            </ItemGroup>
+          )}
+        </section>
+      )}
       <section
         aria-labelledby="project-chats"
         {...stylex.props(styles.section)}
@@ -827,39 +876,7 @@ const Overview = ({
           </ItemGroup>
         )}
       </section>
-      <section aria-labelledby="project-apps" {...stylex.props(styles.section)}>
-        <SectionHead
-          count={project.counts.apps}
-          end={
-            project.counts.apps === 0 ? null : (
-              <ViewAll project={project} tab="apps" />
-            )
-          }
-          id="project-apps"
-          title={t`Apps`}
-        />
-        {project.counts.apps === 0 ? (
-          <EmptyLine
-            action={
-              makes ? (
-                <MakeButton kind="app" project={project}>
-                  {t`Make an App`}
-                </MakeButton>
-              ) : undefined
-            }
-            icon={AppPanels}
-          >
-            {t`No Apps yet, such as a debtor overview.`}
-          </EmptyLine>
-        ) : null}
-        {apps.length === 0 ? null : (
-          <ul {...stylex.props(styles.cards)}>
-            {apps.slice(0, slice).map((item) => (
-              <AppCard item={item} key={item.id} />
-            ))}
-          </ul>
-        )}
-      </section>
+      {askOwner ? null : <AppsPart makes={makes} project={project} />}
       <section
         aria-labelledby="project-people"
         {...stylex.props(styles.section)}
@@ -1050,7 +1067,8 @@ export const ProjectView = ({
   const makes = builds && canBuild(identity.role);
   const pages = useItemPages(project);
   const owner = project.owner.name ?? t`the owner`;
-  const empty = project.counts.apps === 0 && project.counts.workflows === 0;
+  const askOwner =
+    !builds && project.counts.apps === 0 && project.counts.workflows === 0;
   return (
     <>
       <SiteHeader
@@ -1093,7 +1111,7 @@ export const ProjectView = ({
               connections={connections.connections}
               owner={owner}
             />
-            {!builds && empty ? (
+            {askOwner ? (
               <EmptyLine icon={People}>
                 {t`Ask ${owner} to set this project up.`}
               </EmptyLine>
@@ -1102,6 +1120,7 @@ export const ProjectView = ({
           </div>
           {tab === "overview" ? (
             <Overview
+              askOwner={askOwner}
               chats={chats}
               makes={makes}
               project={project}

@@ -786,6 +786,12 @@ describe("A project's page", () => {
         "Ask Olga to set this project up."
       ),
       make: link("Make an App"),
+      // One line for the project, not one per empty part: only their own
+      // chats are theirs to add.
+      emptyParts: ["No workflows yet", "No Apps yet"].map((said) =>
+        document.body.textContent?.includes(said)
+      ),
+      addChat: button("Add a chat") !== undefined,
     };
     cleared();
     await shown(session, { ...project("builder"), ...empty });
@@ -794,7 +800,12 @@ describe("A project's page", () => {
       user,
       builder: document.body.textContent?.includes("to set this project up"),
     }).toStrictEqual({
-      user: { asks: true, make: undefined },
+      user: {
+        asks: true,
+        make: undefined,
+        emptyParts: [false, false],
+        addChat: true,
+      },
       builder: false,
     });
   });
