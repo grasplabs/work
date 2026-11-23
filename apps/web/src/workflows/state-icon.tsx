@@ -21,6 +21,7 @@ const styles = stylex.create({
   failing: { color: grasp.danger },
   waiting: { color: grasp.attention },
   paused: { color: grasp.muted },
+  blocked: { color: grasp.attention },
   live: { color: grasp.success },
   building: { color: grasp.info },
   // The tick is cut out of the filled circle: the ground shows through it.
@@ -55,6 +56,13 @@ const shapes: Readonly<Record<WorkflowState, () => React.JSX.Element>> = {
     <>
       <path d="M2.5 6.75h4.5l-4.5 5.5h4.5" fill="none" stroke="currentColor" />
       <path d="M9.5 3h3.5l-3.5 4h3.5" fill="none" stroke="currentColor" />
+    </>
+  ),
+  // A clock: live, but nothing starts it until someone allows its trigger.
+  blocked: () => (
+    <>
+      <Ring />
+      <path d="M8 5v3.25l2 1.25" fill="none" stroke="currentColor" />
     </>
   ),
   // The whole circle, ticked: a version of it runs.

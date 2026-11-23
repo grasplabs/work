@@ -3,8 +3,10 @@ import type {
   Permission,
   PermissionSubject,
 } from "@grasp-os/shared/permissions";
+import type { TriggerKind } from "@grasp-os/shared/workflow-triggers";
 import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
+import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 
 import type { Session } from "../core.ts";
@@ -275,9 +277,49 @@ const scheduleOf = (
 };
 
 /**
+ * A trigger asking to start its workflow: what kind it is, the workflow
+ * by its name, and what it listens to. Undefined for any other request.
+ */
+const triggerStartOf = ({
+  trigger,
+  object,
+  actions,
+  workflowNames,
+}: Permission):
+  | { kind: TriggerKind; workflow: string; what: string }
+  | undefined => {
+  const startsWorkflow =
+    object.type === "workflow" &&
+    actions.length === 1 &&
+    actions[0] === "start";
+  if (trigger === undefined || !startsWorkflow) {
+    return undefined;
+  }
+  return {
+    kind: trigger.kind,
+    workflow: workflowNames?.[object.workflowId] ?? object.workflowId,
+    what: triggerDescription(trigger),
+  };
+};
+
+/**
+ * A trigger asking to start its workflow, by its kind and the workflow; a
+ * webhook trigger by its source too (`triggerDescription`), as an admin
+ * may have several. Core's request names no mailbox or connection by
+ * name, so the others say no more.
+ */
+const startAskers = {
+  email: msg({ message: "Email trigger for {workflow}" }),
+  schedule: msg({ message: "Schedule for {workflow}" }),
+  connector: msg({ message: "Connection trigger for {workflow}" }),
+  webhook: msg({ message: "Webhook trigger for {workflow} ({what})" }),
+} as const satisfies Record<TriggerKind, MessageDescriptor>;
+
+/**
  * Who asks, in one line: a schedule asking to start its workflow by what
- * it is ("Schedule for invoice-approval"), never its cron; any other as
- * `subjectOf` names it.
+ * it is ("Schedule for invoice-approval"), never its cron; another trigger
+ * by its kind and its workflow ("Email trigger for invoice-intake"), so
+ * two never read the same; any other as `subjectOf` names it.
  */
 export const requestAsker = (
   request: Permission,
@@ -285,11 +327,18 @@ export const requestAsker = (
   now: Date = new Date()
 ): string => {
   const scheduled = scheduleOf(request, now);
-  if (scheduled === undefined) {
+  if (scheduled !== undefined) {
+    const { workflow } = scheduled;
+    return i18n._(msg`Schedule for ${ph({ workflow })}`);
+  }
+  const started = triggerStartOf(request);
+  if (started === undefined) {
     return subjectOf(request, directory);
   }
-  const { workflow } = scheduled;
-  return i18n._(msg`Schedule for ${ph({ workflow })}`);
+  return i18n._({
+    ...startAskers[started.kind],
+    values: { workflow: started.workflow, what: started.what },
+  });
 };
 
 /**
@@ -337,4 +386,34 @@ export const requestWords = (
   return i18n._(
     msg`${ph({ subject })}: ${ph({ actions })} on ${ph({ object })}`
   );
+};
+
+/** What a trigger asking to start its workflow lets it do, as a question. */
+const startQuestions = {
+  email: msg({ message: "Let {workflow} start when an email arrives?" }),
+  schedule: msg({ message: "Let {workflow} start on its schedule?" }),
+  connector: msg({
+    message: "Let {workflow} start on events from its connection?",
+  }),
+  webhook: msg({ message: "Let {workflow} start when its webhook is called?" }),
+} as const satisfies Record<TriggerKind, MessageDescriptor>;
+
+/**
+ * A request as the question an admin answers: a trigger asking to start
+ * its workflow by which workflow and what lets it start; any other as
+ * "Grant" what it asks (`requestWords`).
+ */
+export const requestQuestion = (
+  request: Permission,
+  directory: Directory
+): string => {
+  const started = triggerStartOf(request);
+  if (started === undefined) {
+    const who = requestWords(request, directory);
+    return i18n._(msg`Grant ${ph({ who })}?`);
+  }
+  return i18n._({
+    ...startQuestions[started.kind],
+    values: { workflow: started.workflow },
+  });
 };

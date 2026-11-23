@@ -429,7 +429,7 @@ const useRunText = (run: LaneRun): string => {
     done: t({ message: "done by itself", context: "a run that ran alone" }),
     failed: t({ message: "failed", context: "a run that ended in failure" }),
     cancelled: t({
-      message: "cancelled",
+      message: "stopped",
       context: "a run someone stopped before its end",
     }),
   };
@@ -485,6 +485,12 @@ export type LaneProcesses = ReadonlyMap<string, BusinessProcess | null>;
 /** None known: lanes without their marks. */
 const noProcesses: LaneProcesses = new Map();
 
+/** Each lane's workflow by the name people see (`workflowLabel`), by its ID. */
+export type LaneNames = ReadonlyMap<string, string>;
+
+/** None known: lanes by their workflows' own names. */
+const noNames: LaneNames = new Map();
+
 /** A lane's process, by its mark, before its name, as the prototype has it. */
 const LaneMark = ({
   lane,
@@ -499,15 +505,15 @@ const LaneMark = ({
   );
 };
 
-/** A lane's name, opening its workflow. */
-const LaneLink = ({ lane }: { lane: Lane }) => (
+/** A lane's name, as people see it where the page knows it, opening its workflow. */
+const LaneLink = ({ lane, names }: { lane: Lane; names: LaneNames }) => (
   <TextLink
     render={
       <Link params={{ workflow: lane.of.id }} to="/workflows/$workflow" />
     }
     variant="standalone"
   >
-    {lane.name}
+    {names.get(lane.of.id) ?? lane.name}
   </TextLink>
 );
 
@@ -581,8 +587,10 @@ const Lanes = ({
   chosen,
   onChoose,
   processes,
+  names,
 }: {
   processes: LaneProcesses;
+  names: LaneNames;
   day: LaneDay;
   lit: ReadonlySet<string>;
   chosen: string | null;
@@ -597,7 +605,7 @@ const Lanes = ({
         {day.lanes.map((lane) => (
           <li key={lane.key} {...stylex.props(styles.name)}>
             <LaneMark lane={lane} processes={processes} />
-            <LaneLink lane={lane} />
+            <LaneLink lane={lane} names={names} />
           </li>
         ))}
       </ul>
@@ -694,8 +702,10 @@ const ListLane = ({
   chosen,
   onChoose,
   processes,
+  names,
 }: {
   processes: LaneProcesses;
+  names: LaneNames;
   lane: Lane;
   chosen: string | null;
   onChoose: (id: string | null) => void;
@@ -704,7 +714,7 @@ const ListLane = ({
     <span {...stylex.props(styles.row)}>
       <LaneMark lane={lane} processes={processes} />
       <span {...stylex.props(styles.truncate)}>
-        <LaneLink lane={lane} />
+        <LaneLink lane={lane} names={names} />
       </span>
       {lane.running ? <WorkingDots /> : null}
     </span>
@@ -977,10 +987,13 @@ const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
 export const TodayLanes = ({
   today: loaded,
   processes = noProcesses,
+  names = noNames,
 }: {
   today: WorkflowsToday;
   /** The process each lane's workflow serves, for its mark. */
   processes?: LaneProcesses;
+  /** Each lane's workflow by the name people see. */
+  names?: LaneNames;
 }) => {
   const today = useLatestToday(loaded);
   const { t } = useLingui();
@@ -1011,6 +1024,7 @@ export const TodayLanes = ({
               chosen={chosen}
               day={day}
               lit={lit}
+              names={names}
               onChoose={setChosen}
               processes={processes}
             />
@@ -1021,6 +1035,7 @@ export const TodayLanes = ({
                 chosen={chosen}
                 key={lane.key}
                 lane={lane}
+                names={names}
                 onChoose={setChosen}
                 processes={processes}
               />

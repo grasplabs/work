@@ -46,7 +46,7 @@ import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
 import { WorkflowRunsTable } from "./resource-runs.tsx";
-import { RunBeside } from "./run-detail.tsx";
+import { RunBeside, useOpenedRun } from "./run-detail.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
@@ -303,6 +303,7 @@ const ActivityList = ({
 
 export const Traces = ({
   workflow,
+  name,
   runs,
   activity,
   names,
@@ -314,6 +315,8 @@ export const Traces = ({
   onCloseRun,
 }: {
   workflow: string;
+  /** The workflow's name, as people see it. */
+  name: string;
   /** The run the address asks to open, by its ID. */
   openRun?: string | undefined;
   /** Clears the run from the address once it is closed. */
@@ -330,10 +333,11 @@ export const Traces = ({
 }) => {
   const { t } = useLingui();
   // The run the address names: one of the table's, or Run's "Open the run".
-  const opened =
-    runs.state === "ready"
-      ? (runs.data.find((run) => run.id === openRun) ?? null)
-      : null;
+  const opened = useOpenedRun(
+    workflow,
+    runs.state === "ready" ? runs.data : undefined,
+    openRun
+  );
   // The opened run's status, as its followed trace last said it.
   const [traced, setTraced] = useState<{ runId: string; status: string }>();
   const openedId = opened === null ? undefined : opened.id;
@@ -375,6 +379,7 @@ export const Traces = ({
             )}
             <RunBeside
               admin={admin}
+              name={name}
               names={names}
               onClose={() => {
                 onCloseRun?.();
@@ -401,6 +406,7 @@ export const Traces = ({
               {runs.state === "ready" ? (
                 <WorkflowRunsTable
                   names={names}
+                  open={openRun}
                   runs={runs.data}
                   workflow={workflow}
                 />

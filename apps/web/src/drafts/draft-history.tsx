@@ -4,7 +4,8 @@ import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { Subject } from "@grasp-os/shared/subject";
-import { plural } from "@lingui/core/macro";
+import { i18n } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
@@ -97,9 +98,16 @@ const pageSize = 100;
 /** Most files a checkpoint's line names before it counts the rest. */
 const namedFiles = 3;
 
-/** What a version is called: its label, or, never live, that it wasn't. */
+/**
+ * What people call a version once it was live: an App's by its label, a
+ * workflow's as everywhere else on its page ("v3"); null while never live.
+ */
+const labelOf = ({ label, kind, version }: Version): string | null =>
+  label === null || kind !== "workflow" ? label : i18n._(msg`v${version}`);
+
+/** What a version is called: `labelOf`, or, never live, that it wasn't. */
 const VersionName = ({ version }: { version: Version }) =>
-  version.label ?? <Trans>Not shared yet</Trans>;
+  labelOf(version) ?? <Trans>Not shared yet</Trans>;
 
 /**
  * The version `version` was made from, to compare it with: an App's
@@ -509,7 +517,7 @@ const MoveDialog = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const label = move?.version.label ?? null;
+  const label = move === null ? null : labelOf(move.version);
   return (
     <AlertDialog onOpenChange={onOpenChange} open={move !== null}>
       <AlertDialogContent>
@@ -654,7 +662,7 @@ const VersionMenu = ({
   const moves =
     builds && version.version !== live && (release?.revokedAt ?? null) === null;
   const rollback = live !== null && version.version < live;
-  const { label } = version;
+  const label = labelOf(version);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger

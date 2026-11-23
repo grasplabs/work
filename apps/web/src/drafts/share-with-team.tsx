@@ -979,6 +979,9 @@ export const ShareWithTeam = ({
     clear();
     setPublishing(true);
   };
+  // Publish rests while there is nothing new to publish; its dialog still
+  // says where it stands.
+  const publishLook = publishable.changing || first ? "ink" : "quiet";
   return (
     <>
       <span {...stylex.props(styles.wide)}>
@@ -996,7 +999,7 @@ export const ShareWithTeam = ({
           disabled={draft === undefined}
           onClick={openPublish}
           size="sm"
-          variant="ink"
+          variant={publishLook}
         >
           {t`Publish`}
         </Button>
@@ -1008,7 +1011,7 @@ export const ShareWithTeam = ({
           icon={Upload}
           onClick={openPublish}
           size="sm"
-          variant="ink"
+          variant={publishLook}
         />
       </span>
       <PublishDialog

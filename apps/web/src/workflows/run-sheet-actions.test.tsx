@@ -82,6 +82,7 @@ const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
     component: () => (
       <RunBeside
         admin={false}
+        name="Invoice intake"
         names={{ people: new Map(), me: "ada" }}
         onClose={() => {}}
         opened={running}
@@ -148,7 +149,7 @@ describe("a run opened beside the page", () => {
     expect({
       asked,
       stopped,
-      cancelled: document.body.textContent.includes("Cancelled"),
+      cancelled: document.body.textContent.includes("Stopped"),
       stopOffered: button("Stop") !== undefined,
     }).toStrictEqual({
       asked: true,

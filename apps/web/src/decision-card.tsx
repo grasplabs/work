@@ -3,6 +3,7 @@ import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import type { Session } from "./core.ts";
@@ -15,14 +16,15 @@ import type { PendingConfirmation } from "./decision-confirmation.tsx";
 import { ErrorText } from "./error-text.tsx";
 import { formatDateTime } from "./format.ts";
 import { Button } from "./grasp/button/index.ts";
-import { CodeBlock } from "./grasp/code-block/index.ts";
 import { Field, FieldLabel } from "./grasp/field/index.ts";
 import { KeyValueList } from "./grasp/key-value/index.ts";
 import type { KeyValueItem } from "./grasp/key-value/index.ts";
+import { Link as TextLink } from "./grasp/link/index.ts";
 import { SectionCard } from "./grasp/section-card/index.ts";
 import { Text } from "./grasp/text/index.ts";
 import { Textarea } from "./grasp/textarea/index.ts";
 import { grasp } from "./grasp/tokens/tokens.stylex.ts";
+import { JsonFields } from "./json-fields.tsx";
 import { useCoreAction } from "./use-core-action.ts";
 
 // A decision as the person who answers it sees it on its own page
@@ -69,14 +71,32 @@ const useFacts = (current: DecisionView, open: boolean): KeyValueItem[] => {
       key: t({ message: "From", context: "where a decision comes from" }),
       value: current.workflow,
     },
-    {
-      key: t({
-        message: "Run",
-        context: "the run of a workflow a decision is for",
-      }),
-      value: current.run,
-      mono: true,
-    },
+    // The run by the way to it, where the reader may open its workflow;
+    // its ID says nothing to a person.
+    ...(current.opens === true
+      ? [
+          {
+            key: t({
+              message: "Run",
+              context: "the run of a workflow a decision is for",
+            }),
+            value: (
+              <TextLink
+                render={
+                  <Link
+                    params={{ workflow: current.workflowResource.id }}
+                    search={{ view: "runs", run: current.run }}
+                    to="/workflows/$workflow"
+                  />
+                }
+                variant="standalone"
+              >
+                {t`Open the run`}
+              </TextLink>
+            ),
+          },
+        ]
+      : []),
     ...(current.input === undefined
       ? []
       : [
@@ -86,13 +106,7 @@ const useFacts = (current: DecisionView, open: boolean): KeyValueItem[] => {
               context:
                 "what a decision is about, as its workflow run passed it",
             }),
-            value: (
-              <CodeBlock
-                code={JSON.stringify(current.input, undefined, 2)}
-                language="json"
-                wrap
-              />
-            ),
+            value: <JsonFields value={current.input} />,
           },
         ]),
     ...(open
