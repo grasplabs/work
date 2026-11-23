@@ -40,3 +40,9 @@ test("Damsko's overlays and navigation draw in the product's build", async ({
 }) => {
   await drew(page, "Overlays and navigation", 25);
 });
+
+test("Damsko's data and content components draw in the product's build", async ({
+  page,
+}) => {
+  await drew(page, "Data and content", 9);
+});

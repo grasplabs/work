@@ -81,6 +81,15 @@
     "side-panel",
     "container",
     "page-header",
-    "section-header"
+    "section-header",
+    "table",
+    "data-table",
+    "data-grid",
+    "chart",
+    "markdown",
+    "code-block",
+    "diff-viewer",
+    "audio-player",
+    "agent-indicator"
   ]
 }

@@ -24,10 +24,18 @@
     "@hugeicons/core-free-icons": "catalog:",
     "@hugeicons/react": "catalog:",
     "@stylexjs/stylex": "catalog:",
+    "@tanstack/react-table": "catalog:",
     "@ui-sdk/core": "catalog:",
-    "@ui-sdk/react": "catalog:"
+    "@ui-sdk/react": "catalog:",
+    "mdast-util-from-markdown": "catalog:",
+    "mdast-util-gfm": "catalog:",
+    "micromark-extension-gfm": "catalog:",
+    "prismjs": "catalog:",
+    "react-is": "catalog:",
+    "recharts": "catalog:"
   },
   "devDependencies": {
+    "@types/prismjs": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "react": "catalog:",

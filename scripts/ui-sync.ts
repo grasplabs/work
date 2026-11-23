@@ -99,8 +99,9 @@ const check = (pin: Pin, damsko: string): string[] => {
   const registry = parseRegistry(
     readFileSync(path.join(damsko, "registry.json"), "utf-8")
   );
+  const packages = z.record(z.string(), z.string());
   const manifest = z
-    .object({ dependencies: z.record(z.string(), z.string()) })
+    .object({ dependencies: packages, devDependencies: packages })
     .parse(JSON.parse(readFileSync(path.join(ui, "package.json"), "utf-8")));
   return differences(
     expectedOf(registry, pin.items),
@@ -111,7 +112,7 @@ const check = (pin: Pin, damsko: string): string[] => {
           ? readFileSync(path.join(ui, file))
           : undefined,
       sources: filesUnder("src"),
-      dependencies: manifest.dependencies,
+      dependencies: { ...manifest.devDependencies, ...manifest.dependencies },
     }
   );
 };
