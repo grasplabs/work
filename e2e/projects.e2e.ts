@@ -116,9 +116,9 @@ test("a builder makes a project, files an App and a chat of theirs in it, and ad
   await expect(
     theirs.getByRole("button", { name: `More for Quotes ${tag}` })
   ).toHaveCount(0);
-  await expect(
-    theirs.getByRole("button", { name: "Add", exact: true })
-  ).toHaveCount(0);
+  await expect(theirs.getByRole("button", { name: "Add people" })).toHaveCount(
+    0
+  );
 
   // Taken out, the chat is theirs alone again, in no project.
   await chats

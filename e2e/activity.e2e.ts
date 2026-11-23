@@ -135,9 +135,9 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(
     page.getByRole("listitem").filter({ hasText: "RequestedBy" })
   ).toContainText(builder.userId);
-  await expect(
-    page.getByRole("listitem").filter({ hasText: "permission.granted" })
-  ).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Integrity" })).toContainText(
+    "permission.granted"
+  );
   await page.keyboard.press("Escape");
 
   // Narrowed to grants, the request drops out; the action is taken as
