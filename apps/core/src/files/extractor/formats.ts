@@ -1,4 +1,4 @@
-import { parse as parseCsv } from "csv-parse/sync";
+import { parse as parseCsv } from "csv-parse/browser/esm/sync";
 import { unzipSync } from "fflate";
 import { extractText } from "unpdf";
 
