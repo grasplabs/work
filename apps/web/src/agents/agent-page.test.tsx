@@ -1137,18 +1137,17 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" });
-    await press(await fromMenu("Turn off"));
+    await press(button("Pause"));
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(document.querySelector("header")?.textContent).toContain("Off");
+    expect(document.querySelector("header")?.textContent).toContain("Paused");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" }, false);
+    const off = isDisabled(button("Pause"));
     const edit = isDisabled(await fromMenu("Edit"));
-    const turnOff = menuItem("Turn off");
-    const off = turnOff !== undefined && isDisabled(turnOff);
     // Closed again before the tabs are pressed.
     await press(moreButton());
     expect({ edit, off }).toStrictEqual({ edit: true, off: true });
@@ -1641,7 +1640,6 @@ describe("an agent's page", () => {
     await openTab("schedule");
     expect({
       alone: text.includes("Just for you"),
-      who: text.includes("Only you"),
       access,
       schedule: [...document.querySelectorAll("button")].some(
         (each) => inView(each) && each.textContent?.trim() === "Add a time"
@@ -1649,7 +1647,6 @@ describe("an agent's page", () => {
       asked,
     }).toStrictEqual({
       alone: true,
-      who: true,
       access: null,
       schedule: false,
       asked: [["change", "agent-1", { ...claire, name: "Clara" }]],

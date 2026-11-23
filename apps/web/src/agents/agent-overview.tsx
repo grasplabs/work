@@ -240,12 +240,14 @@ const StatusLine = ({
   agent,
   wakes,
   failing,
-  changedBy,
+  people,
+  userId,
 }: {
   agent: Agent;
   wakes: readonly AgentWake[];
   failing: Run | undefined;
-  changedBy: string | undefined;
+  people: readonly Member[];
+  userId: string;
 }) => {
   const { t } = useLingui();
   const { moment, day } = useDates();
@@ -266,6 +268,8 @@ const StatusLine = ({
     tone = "danger";
     word = t`Failing`;
     detail = t`Last run ${when}`;
+  } else if (agent.ownerId !== null) {
+    detail = t`Just for you`;
   } else if (next === undefined) {
     detail = t`Runs when asked`;
   } else {
@@ -273,12 +277,18 @@ const StatusLine = ({
     detail = ran ? t`Next run ${when}` : t`First run ${when}`;
   }
   const changedAt = agent.changedAt === null ? undefined : day(agent.changedAt);
+  const changedBy = people.find(
+    ({ userId: id }) => id === agent.changedBy
+  )?.name;
   let changed: string | undefined;
-  if (changedAt !== undefined) {
-    changed =
-      changedBy === undefined
-        ? t`Last updated ${changedAt}`
-        : t`Last updated by ${changedBy} · ${changedAt}`;
+  if (changedAt === undefined) {
+    changed = undefined;
+  } else if (agent.changedBy === userId) {
+    changed = t`Last updated by you · ${changedAt}`;
+  } else if (changedBy === undefined) {
+    changed = t`Last updated ${changedAt}`;
+  } else {
+    changed = t`Last updated by ${changedBy} · ${changedAt}`;
   }
   return (
     <span {...stylex.props(styles.status)}>
@@ -529,7 +539,8 @@ const Schedule = ({
     >
       <div {...stylex.props(styles.schedules)}>
         {wakes.map((wake) => {
-          const week = weekOf(wake.cron);
+          const { cron } = wake;
+          const week = weekOf(cron);
           const zone = formatZone(wake.timeZone);
           const at =
             week === undefined
@@ -557,9 +568,7 @@ const Schedule = ({
               )}
               <span {...stylex.props(styles.when)}>
                 <Icon icon={Clock} />
-                {at === undefined
-                  ? t`${wake.cron}, ${zone}`
-                  : t`${at}, ${zone}`}
+                {at === undefined ? t`${cron}, ${zone}` : t`${at}, ${zone}`}
               </span>
             </div>
           );
@@ -711,10 +720,6 @@ export const AgentOverview = ({
   const own = agent.ownerId !== null;
   const failing = failingRun(agent, wakes);
   const on = agent.state === "on";
-  const changedBy =
-    agent.changedBy === userId
-      ? t`you`
-      : people.find(({ userId: id }) => id === agent.changedBy)?.name;
   const named: Named[] = [
     ...(apps ?? [])
       .filter(({ state }) => state === "on")
@@ -727,8 +732,9 @@ export const AgentOverview = ({
         description={
           <StatusLine
             agent={agent}
-            changedBy={changedBy}
             failing={failing}
+            people={people}
+            userId={userId}
             wakes={wakes}
           />
         }

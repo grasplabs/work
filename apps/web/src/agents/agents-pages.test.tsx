@@ -845,6 +845,7 @@ describe("the company's agents, on pages of their own", () => {
 
     it("offers a chat with an agent that is on and answers the person", async () => {
       await mounted(page(claire, "overview"));
+      await press(moreButton());
       expect(
         document.querySelector("a[href='/?agent=agent-claire']")?.textContent
       ).toBe("Chat");
@@ -852,12 +853,14 @@ describe("the company's agents, on pages of their own", () => {
 
     it("offers no chat with an agent that is paused, or that doesn't answer the person", async () => {
       await mounted(page(milan, "overview"));
+      await press(moreButton());
       const paused = document.querySelector("a[href^='/?agent=']");
       act(() => {
         root?.unmount();
       });
       document.body.replaceChildren();
       await mounted(page(claire, "overview", false));
+      await press(moreButton());
       expect({
         paused: paused === null,
         notTheirs: document.querySelector("a[href^='/?agent=']") === null,
@@ -913,20 +916,6 @@ describe("the company's agents, on pages of their own", () => {
         asked: [["deleted", "agent-claire"]],
         firstOffers: false,
       });
-    });
-
-    it("says what an agent used this month: how much and how often, never what", async () => {
-      await mounted(page(claire, "overview"));
-      const said = document.body.textContent ?? "";
-      expect(
-        [
-          "$12.50",
-          "40 requests to a model",
-          "for 4 people",
-          "$3.00 the month before",
-          "Last asked in a chat",
-        ].map((words) => said.includes(words))
-      ).toStrictEqual([true, true, true, true, true]);
     });
 
     it("says nothing of whom an agent answers where core didn't say it, never that it answers everyone", async () => {
