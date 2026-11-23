@@ -6,10 +6,10 @@ import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import type { BackdropScene } from "../../chat/backdrop/look.ts";
 import { cardMarker } from "./app-card.stylex.ts";
 import { AppCardGround } from "./ground.tsx";
 import type { AppCardGroundHue } from "./ground.tsx";
+import type { Scene } from "./scenes.ts";
 import { styles } from "./styles.ts";
 
 // An App on the Apps page (apps-overview.tsx): a frame on a drawn ground of its own holds a
@@ -67,7 +67,7 @@ export const AppCard = ({
   /** Where it stands, in one line. */
   meta: string;
   /** The scene its ground is drawn from, and the hue it is turned to (`appCardGroundOf`). */
-  scene: BackdropScene;
+  scene: Scene;
   hue: AppCardGroundHue | undefined;
   /** The actions in the "…" menu. */
   actions: readonly AppCardAction[];

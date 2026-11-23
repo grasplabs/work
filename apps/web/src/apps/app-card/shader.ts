@@ -1,29 +1,13 @@
-// Shader backdrops: one WebGL fragment shader drawn on one canvas, each cell a crisp square.
-// Ruben's (the product repo, grasp/field/shader-field.tsx), as he made it. Two families (look.ts):
-//
-// - the scenes (cliffs, wave, aurora, starry, fuji, wanderer): a picture, kept as its light alone
-//   (each from a work in the public domain, named where it is listed below, served as
-//   `<scenes><kind>.jpg`), dithered all over from night to lime: every cell one of two
-//   neighbouring greens by Bayer's threshold, so no cell stands out alone. The silk's light drifts
-//   through it, and it sways a little.
-// - the dithers (dusk, dots, door), from the website's shaders: the light of broad silk, of finer
-//   silk, and of a wave rolling behind reeded glass with the pointer a lamp behind it, drawn
-//   against Bayer's threshold, in a pattern and a colour, on the page's own ground; a mask thins it
-//   towards what stands on the page.
-//
-// Damsko's changes, none to the look: the greens are read from the tokens (light-night to
-// light-paper, and backdrop-tone-* for the flat tones, which have dark values), not written in;
-// under the words on a preview tile a scene is kept dark, so they read at that size (a full scene
-// dims softly round the middle, as the product's does); it is run and held by Backdrop, which stops it out of view. Drawn fifteen to twenty times a second. With less motion
-// it is one still picture. Where WebGL can't run, nothing is drawn. Decorative only. Loaded only
-// when a shader backdrop comes into view.
-import type {
-  BackdropDither,
-  BackdropPattern,
-  BackdropScene,
-  BackdropTone,
-} from "./look.ts";
-import { ditherPatterns, ditherTones, isScene } from "./look.ts";
+// An App card's scene, drawn once as a still picture by one WebGL fragment shader, each cell a
+// crisp square. Ruben's backdrop scenes (the product repo, grasp/field/shader-field.tsx), as he
+// made them, as far as the cards draw them (ground.tsx): a picture (cliffs, wave, aurora, starry,
+// fuji, wanderer), kept as its light alone (each from a work in the public domain, named where it
+// is listed below, served as `<scenes><kind>.jpg`), dithered all over from night to lime: every
+// cell one of two neighbouring greens by Bayer's threshold, so no cell stands out alone, with the
+// silk's light drifting through it. Damsko's change, none to the look: the greens are read from
+// the tokens (brand-night to brand-paper), not written in. Where WebGL 2 can't run, nothing is
+// drawn. Decorative only. Loaded only once a card's ground first comes into view.
+import type { Scene } from "./scenes.ts";
 
 const VERTEX = `
 attribute vec2 a_pos;
@@ -37,12 +21,6 @@ const COMMON = `
 precision highp float;
 uniform vec2 u_res;
 uniform float u_time;
-uniform vec2 u_lamp;
-// How many CSS pixels one of the canvas's pixels is.
-uniform float u_cell;
-// The dither's pattern (0 for none) and tone.
-uniform float u_pattern;
-uniform float u_tone;
 // A scene's picture: its light, its size, the part of it kept when it is
 // cropped to fill the field, and its grade (gamma, gain, sway, drift).
 uniform sampler2D u_image;
@@ -51,19 +29,8 @@ uniform vec2 u_focus;
 uniform vec4 u_grade;
 // 1 where the picture is drawn as its negative.
 uniform float u_invert;
-// How far the picture has arrived, 0 to 1: it comes up from night as arrive.in fades content in.
-uniform float u_arrive;
-// How far the page has gone, 0 to 1 (Backdrop's progress): a dither travels through its silk, its
-// cells gather closer and its ink lays stronger as it rises. 0 draws as before.
-uniform float u_progress;
-// The light's seven stops, night to paper, read from the tokens (light-night to light-paper).
+// The light's seven stops, night to paper, read from the tokens (brand-night to brand-paper).
 uniform vec3 u_palette[7];
-// A flat tone's colour and strength, read from its token (backdrop-tone-*), in this scheme.
-uniform vec4 u_flat;
-// What stands on a scene, in the canvas's pixels from its foot (left, bottom, right, top), and 1
-// where there is something: a preview tile's scene is kept dark under it, so its words read.
-uniform vec4 u_clear;
-uniform float u_hasClear;
 varying vec2 v_uv;
 
 float hash(vec2 p) {
@@ -115,87 +82,10 @@ float bayer4(vec2 a) {
 float bayer8(vec2 a) {
   return bayer4(0.5 * a) * 0.25 + bayer2(a);
 }
-// How much of a cell at "fc" is ink, 0 or 1, for the dither's pattern
-// where the kind's light is "t" (0 to 1): the light against Bayer's
-// threshold for the cell, as Capy's chat does it (Paper's Dithering
-// shader), so where the light is full the cells stand shoulder to
-// shoulder, where there is none the page is bare, and between them the
-// dither shows. In CSS pixels, as the canvas is.
-float shapeOf(vec2 fc, float t) {
-  // Bayer: whole 3px cells.
-  if (u_pattern < 1.5) {
-    return step(bayer8(floor(fc / 3.0)) + 0.002, t);
-  }
-  // Grid: 2px dots on a 4px grid.
-  if (u_pattern < 2.5) {
-    vec2 p = fract(fc / 4.0) * 4.0;
-    float mark = step(p.x, 2.0) * step(p.y, 2.0);
-    return mark * step(bayer8(floor(fc / 4.0)) + 0.002, t);
-  }
-  // Both: 2px dots in the 3px cells, a pixel apart.
-  vec2 p = fract(fc / 3.0) * 3.0;
-  float mark = step(p.x, 2.0) * step(p.y, 2.0);
-  return mark * step(bayer8(floor(fc / 3.0)) + 0.002, t);
-}
-// The ink's colour and how strong it is laid. One flat colour, faint, so
-// a full field reads as a tint (sea, pine, mint, lime or evergreen: u_flat,
-// from the tokens, with a dark value where it needs one); or a
-// run of the glass's greens, laid at full strength, as a northern light:
-// never darker than pine, so it stays green and never greys. The run is
-// the palette's, a sixth apart: pine at 0.33, mint, sea, lime at 0.83.
-// Dark edge: pine at the window's edge to lime by the middle. Light edge:
-// lime at the edge to pine inside, as the glass ran. Aurora: by the kind's
-// own light, pine where it is fullest to lime at its fringes, a little
-// deeper towards the edge.
-vec4 toneOf(float light) {
-  if (u_tone < 4.5) {
-    return u_flat;
-  }
-  // How far out the cell is, along the canvas's own mask (styles.dithered):
-  // 0 where the dither starts to show, 1 where it shows whole.
-  float r = length(vec2((v_uv.x - 0.5) / 1.5, (v_uv.y + 0.1) / 1.35));
-  float out_ = smoothstep(0.46, 0.9, r);
-  if (u_tone < 5.5) {
-    return vec4(palette(mix(0.8, 0.34, out_)), 0.9);
-  }
-  if (u_tone < 6.5) {
-    return vec4(palette(mix(0.36, 0.84, out_)), 0.9);
-  }
-  return vec4(palette(clamp(mix(0.86, 0.4, light) - out_ * 0.08, 0.34, 0.86)), 0.9);
-}
-// What a dither draws: its light as ink in the pattern and colour, clear
-// elsewhere so the page's own ground shows. It covers the whole field and
-// runs on behind what stands on the page; how it thins towards the middle
-// is the canvas's mask (styles.dithered), in strength, never in how many
-// cells there are.
-vec4 finish(float light) {
-  // Progress gathers the cells (more of them lit) and lays the ink stronger.
-  float lit = clamp(light + u_progress * 0.28, 0.0, 1.0);
-  vec4 tone = toneOf(lit);
-  tone.a = min(1.0, tone.a * (1.0 + u_progress * 1.2));
-  float on = shapeOf(gl_FragCoord.xy, lit);
-  float alpha = on * tone.a;
-  vec3 colour = tone.rgb * alpha;
-  // The runs stand on green, as the glass's deep greens stood by its
-  // lighter ones: between their cells, where the kind has any light,
-  // lies the same colour drawn towards mint, so a thin field of deep cells
-  // reads as green, not as grey on the page.
-  if (u_tone > 4.5) {
-    vec3 under = mix(tone.rgb, vec3(0.129, 0.871, 0.643), 0.72);
-    float underAlpha = (1.0 - on) * smoothstep(0.02, 0.4, lit) * 0.45;
-    colour += under * underAlpha;
-    alpha += underAlpha;
-  }
-  return vec4(colour, alpha);
-}
-vec2 field() {
-  // Progress travels down through the silk, so the field moves with the page.
-  return (v_uv - 0.5 + vec2(0.0, u_progress * 0.9)) * vec2(u_res.x / u_res.y, 1.0);
-}
 `;
 
 /** A scene's picture and how it is graded. */
-export interface Picture {
+interface Picture {
   /** The part kept when it is cropped to fill the field, 0 to 1 each way, from the top left. */
   focus: readonly [number, number];
   /** Over 1 deepens its darks, under 1 lifts them. */
@@ -232,130 +122,72 @@ void main() {
   float lum = texture2D(u_image, clamp(uv, 0.0, 1.0)).r;
   lum = mix(lum, 1.0 - lum, u_invert);
   float tone = pow(lum, u_grade.x) * u_grade.y;
-  tone *= u_arrive;
   float light = silk(p * 1.1, u_time * 0.7);
   tone *= 1.0 + u_grade.w * (smoothstep(0.25, 0.75, light) - 0.5) * 2.0;
   vec2 mid = (v_uv - vec2(0.5, 0.53)) * vec2(min(aspect, 1.8) * 0.8, 1.9);
   tone *= mix(0.42, 1.0, smoothstep(0.12, 0.62, length(mid)));
-  // Under what stands on it the scene stays at most this light (Damsko: so a title over a
-  // bright band in a narrow window still reads), easing back to itself a little way off.
-  if (u_hasClear > 0.5) {
-    vec2 fc = gl_FragCoord.xy;
-    vec2 off = max(max(u_clear.xy - fc, fc - u_clear.zw), 0.0);
-    float away = smoothstep(0.0, 16.0, length(off));
-    tone = mix(min(tone, 0.3), tone, away);
-  }
   const float steps = 5.0;
   float q = floor(clamp(tone, 0.0, 1.0) * steps + bayer8(gl_FragCoord.xy)) / steps;
   gl_FragColor = vec4(palette(q * 0.86), 1.0);
 }`;
 
-const sceneOf = (picture: Picture) => ({ picture, source: PICTURE });
-
-const KINDS: Record<
-  BackdropScene | BackdropDither,
-  { picture?: Picture; source: string }
-> = {
+const PICTURES: Record<Scene, Picture> = {
   // The Cosmic Cliffs of the Carina Nebula (NASA, ESA, CSA, STScI; James
   // Webb Space Telescope, 2022): ridges of gas under a field of stars.
-  cliffs: sceneOf({
+  cliffs: {
     focus: [0.5, 0.5],
     gamma: 0.85,
     gain: 1.2,
     invert: false,
     sway: 0.014,
     drift: 0.4,
-  }),
+  },
   // The Great Wave off Kanagawa (Katsushika Hokusai, about 1831), as its
   // negative: the sky is night and the wave's body carries the light.
-  wave: sceneOf({
+  wave: {
     focus: [0.35, 0.45],
     gamma: 1.5,
     gain: 1.15,
     invert: true,
     sway: 0.02,
     drift: 0.3,
-  }),
+  },
   // A northern light from orbit, over Manicouagan's ring (NASA).
-  aurora: sceneOf({
+  aurora: {
     focus: [0.5, 0.4],
     gamma: 1.25,
     gain: 1.25,
     invert: false,
     sway: 0.018,
     drift: 0.45,
-  }),
+  },
   // The Starry Night (Vincent van Gogh, 1889).
-  starry: sceneOf({
+  starry: {
     focus: [0.5, 0.35],
     gamma: 1.6,
     gain: 1.3,
     invert: false,
     sway: 0.022,
     drift: 0.3,
-  }),
+  },
   // Fine Wind, Clear Morning (Katsushika Hokusai, about 1831): Fuji under
   // a mackerel sky.
-  fuji: sceneOf({
+  fuji: {
     focus: [0.6, 0.5],
     gamma: 1.7,
     gain: 1.1,
     invert: false,
     sway: 0.012,
     drift: 0.35,
-  }),
+  },
   // Wanderer above the Sea of Fog (Caspar David Friedrich, about 1818).
-  wanderer: sceneOf({
+  wanderer: {
     focus: [0.5, 0.42],
     gamma: 1.8,
     gain: 1.1,
     invert: false,
     sway: 0.012,
     drift: 0.45,
-  }),
-  // Dusk: the far side of the silk's broad folds.
-  dusk: {
-    source: `
-void main() {
-  vec2 p = field() * 1.4;
-  float broad = smoothstep(0.3, 0.7, silk(p * 0.45 + 4.0, u_time));
-  gl_FragColor = finish(1.0 - broad);
-}`,
-  },
-  // Dots: finer folds of the same silk.
-  dots: {
-    source: `
-void main() {
-  vec2 p = field() * 1.4;
-  gl_FragColor = finish(smoothstep(0.34, 0.7, silk(p * 2.3 + 9.0, u_time)));
-}`,
-  },
-  // Door: the login's glass door. A wave of light rolling behind reeded
-  // glass, every flute a lens, the pointer a lamp behind it; dim in the
-  // middle, where the page's words stand.
-  door: {
-    source: `
-float waveAt(vec2 p) {
-  vec2 a = p / u_res.y;
-  float sway = 0.2 * sin(a.y * 2.4 + u_time * 0.35) + 0.12 * (noise(a * 2.0 + u_time * 0.05) - 0.5);
-  float u = p.x / u_res.x + sway - u_time * 0.075;
-  float crest = 0.5 + 0.5 * cos(6.28318 * u);
-  return pow(crest, 5.0) + 0.16 * pow(crest, 1.6);
-}
-void main() {
-  float width = 30.0 / u_cell;
-  float px = gl_FragCoord.x;
-  float f = fract(px / width);
-  float centre = (floor(px / width) + 0.5) * width;
-  vec2 seen = vec2(centre + (f - 0.5) * width * 5.0, gl_FragCoord.y);
-  float light = waveAt(seen);
-  vec2 d = (seen - u_lamp) / u_res.y;
-  light += exp(-dot(d, d) / 0.02) * 0.75;
-  vec2 g = (v_uv - 0.5) * vec2(u_res.x / u_res.y, 1.0);
-  float clear = smoothstep(0.14, 0.6, length(g * vec2(0.72, 1.0)));
-  light *= mix(0.16, 1.0, clear);
-  gl_FragColor = finish(light);
-}`,
   },
 };
 
@@ -374,13 +206,10 @@ const compile = (
   return shader;
 };
 
-/** The program of `kind`, sent to be linked, not yet asked whether it has: asking waits for it. */
-const linking = (
-  gl: WebGLRenderingContext,
-  kind: BackdropScene | BackdropDither
-): WebGLProgram | null => {
+/** The scenes' program, sent to be linked, not yet asked whether it has: asking waits for it. */
+const linking = (gl: WebGLRenderingContext): WebGLProgram | null => {
   const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
-  const fragment = compile(gl, gl.FRAGMENT_SHADER, COMMON + KINDS[kind].source);
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, COMMON + PICTURE);
   const program = gl.createProgram();
   if (vertex === null || fragment === null || program === null) {
     return null;
@@ -415,16 +244,16 @@ const linked = (
   return program;
 };
 
-/** How large a scene's cell is, in CSS pixels, as Capy's dither's is. */
-const sceneCell = 3;
+/** How large a cell is, in CSS pixels, as Capy's dither's is. */
+const cell = 3;
 
 /** Where the shader's clock starts, so the first picture is already a settled one. */
 const startAt = 8;
 
-/** A CSS colour as sRGB, 0 to 1 with its alpha, as a 2D canvas paints it. */
-const rgbaOf = (() => {
-  const known = new Map<string, readonly [number, number, number, number]>();
-  return (colour: string): readonly [number, number, number, number] => {
+/** A CSS colour as sRGB, 0 to 1, as a 2D canvas paints it. */
+const rgbOf = (() => {
+  const known = new Map<string, readonly [number, number, number]>();
+  return (colour: string): readonly [number, number, number] => {
     const kept = known.get(colour);
     if (kept !== undefined) {
       return kept;
@@ -434,13 +263,12 @@ const rgbaOf = (() => {
     probe.height = 1;
     const ctx = probe.getContext("2d", { willReadFrequently: true });
     if (ctx === null) {
-      return [0, 0, 0, 0];
+      return [0, 0, 0];
     }
     ctx.fillStyle = colour;
     ctx.fillRect(0, 0, 1, 1);
-    const [r = 0, g = 0, b = 0, a = 0] = ctx.getImageData(0, 0, 1, 1).data;
-    // getImageData gives the channels as they were before the alpha was laid on.
-    const found = [r / 255, g / 255, b / 255, a / 255] as const;
+    const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+    const found = [r / 255, g / 255, b / 255] as const;
     known.set(colour, found);
     return found;
   };
@@ -486,14 +314,14 @@ const withScenePicture = (
 };
 
 /**
- * The one context the stills are drawn on while any is waiting, with each kind's program; let go once
- * none is. They are drawn into `target`, a framebuffer of its own, so presenting the canvas never
- * clears a picture before it is read back.
+ * The one context the stills are drawn on while any is waiting, with the scenes' program; let go
+ * once none is. They are drawn into `target`, a framebuffer of its own, so presenting the canvas
+ * never clears a picture before it is read back.
  */
 interface StillCanvas {
   gl: WebGL2RenderingContext;
-  scene: boolean;
-  programs: Map<BackdropScene | BackdropDither, WebGLProgram | null>;
+  /** The program once it has linked (null where it didn't); undefined until then. */
+  program: WebGLProgram | null | undefined;
   texture: WebGLTexture | null;
   target: WebGLRenderbuffer | null;
 }
@@ -502,14 +330,14 @@ const letStillCanvasGo = (): void => {
   stillCanvas?.gl.getExtension("WEBGL_lose_context")?.loseContext();
   stillCanvas = undefined;
 };
-const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
-  if (stillCanvas?.scene === scene && !stillCanvas.gl.isContextLost()) {
+const stillCanvasNow = (): StillCanvas | undefined => {
+  if (stillCanvas !== undefined && !stillCanvas.gl.isContextLost()) {
     return stillCanvas;
   }
   letStillCanvasGo();
   const gl = document
     .createElement("canvas")
-    .getContext("webgl2", { alpha: !scene, antialias: false });
+    .getContext("webgl2", { alpha: false, antialias: false });
   if (gl === null) {
     return undefined;
   }
@@ -531,26 +359,24 @@ const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
     gl.RENDERBUFFER,
     target
   );
-  stillCanvas = { gl, scene, programs: new Map(), texture, target };
+  stillCanvas = { gl, program: undefined, texture, target };
   return stillCanvas;
 };
 
 /**
- * Hands `then` the program of `kind` on `canvas` once it has linked: waited for a task at a time where
- * the browser can say when it has (KHR_parallel_shader_compile), rather than by asking at once.
+ * Hands `then` the program on `canvas` once it has linked: waited for a task at a time where the
+ * browser can say when it has (KHR_parallel_shader_compile), rather than by asking at once.
  */
 const withProgram = (
   canvas: StillCanvas,
-  kind: BackdropScene | BackdropDither,
   then: (program: WebGLProgram | null) => void
 ): void => {
-  const { gl, programs } = canvas;
-  const kept = programs.get(kind);
-  if (kept !== undefined) {
-    then(kept);
+  const { gl } = canvas;
+  if (canvas.program !== undefined) {
+    then(canvas.program);
     return;
   }
-  const program = linking(gl, kind);
+  const program = linking(gl);
   const parallel = gl.getExtension("KHR_parallel_shader_compile");
   whenDone(
     () =>
@@ -560,57 +386,34 @@ const withProgram = (
       gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR) === true,
     () => {
       const ready = linked(gl, program);
-      programs.set(kind, ready);
+      canvas.program = ready;
       then(ready);
     }
   );
 };
 
-/** What a still picture is of: its look, its colours as the tokens resolve where it stands, and its size in canvas pixels. */
+/** What a still picture is of: its scene, its colours as the tokens resolve where it stands, and its size in canvas pixels. */
 interface Still {
-  kind: BackdropScene | BackdropDither;
-  dither: { pattern: BackdropPattern; tone: BackdropTone };
-  address: string | undefined;
+  scene: Scene;
+  address: string;
   width: number;
   height: number;
   palette: readonly string[];
-  flat: string;
 }
 
-/** Sets what `program` draws `still` with, as the running drawing's settled picture has it (Backdrop's `still`). */
+/** Sets what `program` draws `still` with: the drawing's settled picture, at `startAt`. */
 const setUniforms = (
   canvas: StillCanvas,
   program: WebGLProgram,
   still: Still,
-  image: HTMLImageElement | undefined
+  image: HTMLImageElement
 ): void => {
-  const { gl, scene } = canvas;
-  const { width, height, dither } = still;
-  const { picture } = KINDS[still.kind];
+  const { gl } = canvas;
+  const picture = PICTURES[still.scene];
   const uniform = (name: string) => gl.getUniformLocation(program, name);
-  gl.uniform3fv(
-    uniform("u_palette"),
-    still.palette.flatMap((colour) => {
-      const [r, g, b] = rgbaOf(colour);
-      return [r, g, b];
-    })
-  );
-  const [r, g, b, a] = rgbaOf(still.flat);
-  gl.uniform4f(uniform("u_flat"), r, g, b, a);
-  gl.uniform1f(uniform("u_hasClear"), 0);
-  gl.uniform2f(uniform("u_res"), width, height);
-  gl.uniform1f(uniform("u_cell"), scene ? sceneCell : 1);
-  gl.uniform1f(
-    uniform("u_pattern"),
-    scene ? 0 : ditherPatterns.indexOf(dither.pattern) + 1
-  );
-  gl.uniform1f(uniform("u_tone"), scene ? 0 : ditherTones.indexOf(dither.tone));
-  gl.uniform1f(uniform("u_progress"), 0);
+  gl.uniform3fv(uniform("u_palette"), still.palette.flatMap(rgbOf));
+  gl.uniform2f(uniform("u_res"), still.width, still.height);
   gl.uniform1f(uniform("u_time"), startAt);
-  gl.uniform2f(uniform("u_lamp"), width / 2, height / 2);
-  if (picture === undefined || image === undefined) {
-    return;
-  }
   gl.bindTexture(gl.TEXTURE_2D, canvas.texture);
   gl.texImage2D(
     gl.TEXTURE_2D,
@@ -631,39 +434,24 @@ const setUniforms = (
     picture.drift
   );
   gl.uniform1f(uniform("u_invert"), picture.invert ? 1 : 0);
-  gl.uniform1f(uniform("u_arrive"), 1);
 };
 
 /** The picture on `gl`'s canvas, `width` by `height`, as a PNG data address. */
 const pictureOn = (
   gl: WebGL2RenderingContext,
   width: number,
-  height: number,
-  scene: boolean
+  height: number
 ): string => {
   const row = width * 4;
   const read = new Uint8Array(row * height);
   gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, read);
-  // Read from the foot up, as WebGL counts; a picture runs from the top. With alpha (a dither) the
-  // channels come back multiplied by it, as a canvas keeps them, and a picture wants them without.
+  // Read from the foot up, as WebGL counts; a picture runs from the top.
   const pixels = new ImageData(width, height);
   for (let line = 0; line < height; line += 1) {
     pixels.data.set(
       read.subarray((height - 1 - line) * row, (height - line) * row),
       line * row
     );
-  }
-  if (!scene) {
-    for (let pixel = 0; pixel < pixels.data.length; pixel += 4) {
-      const alpha = pixels.data[pixel + 3] ?? 255;
-      if (alpha > 0 && alpha < 255) {
-        for (let channel = pixel; channel < pixel + 3; channel += 1) {
-          pixels.data[channel] = Math.round(
-            ((pixels.data[channel] ?? 0) * 255) / alpha
-          );
-        }
-      }
-    }
   }
   const flat = document.createElement("canvas");
   flat.width = width;
@@ -673,21 +461,21 @@ const pictureOn = (
 };
 
 /**
- * Draws `still` with the scene's picture `image` (none for a dither), and hands its picture to
- * `keepPicture`, read back only once the GPU has signalled that it has finished: read back at once,
- * the page would wait for the drawing itself, tens of ms where it is drawn in software.
+ * Draws `still` with its scene's picture `image`, and hands its picture to `keepPicture`, read back
+ * only once the GPU has signalled that it has finished: read back at once, the page would wait for
+ * the drawing itself, tens of ms where it is drawn in software.
  */
 const drawWith = (
   still: Still,
-  image: HTMLImageElement | undefined,
+  image: HTMLImageElement,
   keepPicture: KeepPicture
 ): void => {
-  const canvas = stillCanvasFor(isScene(still.kind));
+  const canvas = stillCanvasNow();
   if (canvas === undefined) {
     keepPicture(null);
     return;
   }
-  withProgram(canvas, still.kind, (program) => {
+  withProgram(canvas, (program) => {
     const { gl } = canvas;
     if (program === null || gl.isContextLost()) {
       keepPicture(null);
@@ -697,12 +485,7 @@ const drawWith = (
     const position = gl.getAttribLocation(program, "a_pos");
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-    gl.renderbufferStorage(
-      gl.RENDERBUFFER,
-      canvas.scene ? gl.RGB8 : gl.RGBA8,
-      still.width,
-      still.height
-    );
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGB8, still.width, still.height);
     gl.viewport(0, 0, still.width, still.height);
     setUniforms(canvas, program, still, image);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -716,9 +499,7 @@ const drawWith = (
       () => {
         gl.deleteSync(fence);
         keepPicture(
-          gl.isContextLost()
-            ? null
-            : pictureOn(gl, still.width, still.height, canvas.scene)
+          gl.isContextLost() ? null : pictureOn(gl, still.width, still.height)
         );
       }
     );
@@ -727,10 +508,6 @@ const drawWith = (
 
 /** Draws `still` and hands its picture to `keepPicture`; none where WebGL 2 won't draw it. */
 const drawStill = (still: Still, keepPicture: KeepPicture): void => {
-  if (still.address === undefined) {
-    drawWith(still, undefined, keepPicture);
-    return;
-  }
   withScenePicture(still.address, (image) => {
     if (image === null) {
       keepPicture(null);
@@ -772,38 +549,28 @@ const drawNextStill = (): void => {
 };
 
 /**
- * Hands `keepPicture` the settled picture of the shader backdrop `kind` on a box `width` by `height`
- * CSS pixels, in `palette` (the light's seven stops, night to paper) and `flat` (the flat tone's
- * colour), as a PNG data address: drawn the first time it is asked for, the page never waiting on
- * the GPU, and the same address for each box after; none where WebGL 2 won't draw it. Its context is
- * let go once no still waits.
+ * Hands `keepPicture` the settled picture of `scene` on a box `width` by `height` CSS pixels, in
+ * `palette` (the light's seven stops, night to paper), as a PNG data address: drawn the first time
+ * it is asked for, the page never waiting on the GPU, and the same address for each box after;
+ * none where WebGL 2 won't draw it. Its context is let go once no still waits.
  */
 export const stillPictureOf = (
-  kind: BackdropScene | BackdropDither,
-  dither: { pattern: BackdropPattern; tone: BackdropTone },
+  scene: Scene,
   options: {
+    /** Where the scenes' pictures are served. */
     scenes: string;
-    small: boolean;
     width: number;
     height: number;
     palette: readonly string[];
-    flat: string;
   },
   keepPicture: KeepPicture
 ): void => {
-  const scene = isScene(kind);
-  const ratio = scene ? 1 / sceneCell : 1;
   const still: Still = {
-    kind,
-    dither: scene ? { pattern: "bayer", tone: "light" } : dither,
-    address:
-      KINDS[kind].picture === undefined
-        ? undefined
-        : `${options.scenes}${kind}${options.small ? ".small" : ""}.jpg`,
-    width: Math.max(1, Math.round(options.width * ratio)),
-    height: Math.max(1, Math.round(options.height * ratio)),
+    scene,
+    address: `${options.scenes}${scene}.jpg`,
+    width: Math.max(1, Math.round(options.width / cell)),
+    height: Math.max(1, Math.round(options.height / cell)),
     palette: options.palette,
-    flat: options.flat,
   };
   const key = JSON.stringify(still);
   const entry = stills.get(key);

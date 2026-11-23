@@ -3,10 +3,10 @@ import { motionVars } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 
-import { sceneKinds } from "../../chat/backdrop/look.ts";
-import type { BackdropScene } from "../../chat/backdrop/look.ts";
+import { sceneKinds } from "./scenes.ts";
+import type { Scene } from "./scenes.ts";
 
-// An App card's drawn ground: one of the backdrop's scenes (chat/backdrop/shader.ts), dithered
+// An App card's drawn ground: one of the backdrop's scenes (shader.ts), dithered
 // from night to lime and turned to a hue of its own, drawn once as a still picture when the card
 // first comes into view and never again. The page's grounds draw one at a time, so they hold one
 // WebGL context at most.
@@ -107,14 +107,14 @@ const useInView = (box: Element | null) => {
 
 /**
  * The light's seven stops as they resolve on `box`, turned to the hue it carries (each stop keeping
- * its lightness and chroma), and its text colour: the colours a drawing on it takes.
+ * its lightness and chroma): the colours a drawing on it takes.
  */
-const coloursOf = (box: HTMLElement) => {
+const paletteOf = (box: HTMLElement): string[] => {
   const style = getComputedStyle(box);
   const given = style.getPropertyValue("--app-card-ground-hue").trim();
   const hue = Number(given);
   const turned = given !== "" && Number.isFinite(hue);
-  const palette = STOPS.map((stop) => {
+  return STOPS.map((stop) => {
     const value = style.getPropertyValue(`--damsko-brand-${stop}`).trim();
     const parts =
       /^oklch\(\s*(?<lightness>[\d.]+)\s+(?<chroma>[\d.]+)\s+(?<own>[\d.]+)/u.exec(
@@ -130,22 +130,20 @@ const coloursOf = (box: HTMLElement) => {
     }
     return `oklch(${parts.lightness} ${parts.chroma} ${hue + Number(parts.own) - MINT_HUE})`;
   });
-  return { palette, flat: style.color };
 };
 
 /** Hands `keepPicture` the still picture of `scene` on `box`; none if it drew nothing. */
 const drawGround = async (
   box: HTMLElement,
-  scene: BackdropScene,
+  scene: Scene,
   keepPicture: (picture: string | null) => void
 ) => {
   // Loaded only once a ground first comes into view.
-  const { stillPictureOf } = await import("../../chat/backdrop/shader.ts");
+  const { stillPictureOf } = await import("./shader.ts");
   const { width, height } = box.getBoundingClientRect();
   stillPictureOf(
     scene,
-    { pattern: "bayer", tone: "aurora" },
-    { scenes: SCENES, small: true, width, height, ...coloursOf(box) },
+    { scenes: SCENES, width, height, palette: paletteOf(box) },
     keepPicture
   );
 };
@@ -155,7 +153,7 @@ export const AppCardGround = ({
   scene,
   hue,
 }: {
-  scene: BackdropScene;
+  scene: Scene;
   hue: AppCardGroundHue | undefined;
 }) => {
   const [box, setBox] = useState<HTMLSpanElement | null>(null);
@@ -202,7 +200,7 @@ export const AppCardGround = ({
 /** A ground for each App, kept by its ID: one of the six scenes in one of five ramps (the green and the four hues). */
 export const appCardGroundOf = (
   id: string
-): { scene: BackdropScene; hue: AppCardGroundHue | undefined } => {
+): { scene: Scene; hue: AppCardGroundHue | undefined } => {
   let hash = 0;
   for (const letter of id) {
     hash = (hash * 31 + (letter.codePointAt(0) ?? 0)) % 2_147_483_647;
