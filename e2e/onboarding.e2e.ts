@@ -720,8 +720,9 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
   });
   await page.goto("/setup?step=listening");
   await expect(page.getByText("Day 7 of 14")).toBeVisible();
+  // Each figure is a Damsko Stat: plain HTML, found by its part's name.
   const figure = (label: string) =>
-    page.locator("div.rounded-xl").filter({ hasText: label });
+    page.locator('[data-slot="stat"]').filter({ hasText: label });
   await expect(figure("team leads talked")).toContainText("2 of 3");
   await expect(figure("colleagues talked")).toContainText("5");
   await expect(
