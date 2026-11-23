@@ -1,5 +1,6 @@
 import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import type { I18nCatalog } from "@grasp-os/ui/lib/i18n";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
@@ -31,6 +32,103 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Could not finish`,
       loading: t`Working`,
       success: t`Done`,
+    },
+    alertDialog: { cancel: t`Cancel` },
+    dialog: { close: t`Close` },
+    drawer: { handle: t`Resize` },
+    dropdownMenu: { expand: t`More actions` },
+    empty: { error: t`This did not load` },
+    field: {
+      statusError: t`Could not save. Your choice is kept.`,
+      statusLoading: t`Saving`,
+      statusRetry: t`Try again`,
+      statusSuccess: t`Saved`,
+    },
+    fileUpload: {
+      added: (count) =>
+        plural(count, { one: "# file added", other: "# files added" }),
+      doneLine: (size) => t`${size}, uploaded`,
+      drop: t`Drop files here, or`,
+      error: t`Could not upload`,
+      files: t`Files`,
+      limits: (types, maxSize) => {
+        const kinds = new Intl.ListFormat(i18n.locale, {
+          type: "disjunction",
+        }).format(types);
+        if (maxSize === undefined) {
+          return kinds;
+        }
+        return kinds === ""
+          ? t`Up to ${maxSize}`
+          : t`${kinds}, up to ${maxSize}`;
+      },
+      notSent: (name) => t`Could not upload ${name}.`,
+      refused: (name, reason) => {
+        if (reason === "file-too-large") {
+          return t`${name} is too large.`;
+        }
+        if (reason === "file-too-small") {
+          return t`${name} is empty.`;
+        }
+        if (reason === "too-many-files") {
+          return t`${name} is one file too many.`;
+        }
+        return t`${name} is not a kind of file this takes.`;
+      },
+      remove: (name) => t`Remove ${name}`,
+      removed: (names) => {
+        const [only] = names;
+        const removed = names.length;
+        return removed === 1 && only !== undefined
+          ? t`${only} removed`
+          : plural(removed, {
+              one: "# file removed",
+              other: "# files removed",
+            });
+      },
+      retry: t`Try again`,
+      select: t`Choose files`,
+      sent: (name) => t`${name} uploaded.`,
+      uploading: (percent) => t`Uploading, ${percent}%`,
+      uploadingName: (name) => t`Uploading ${name}`,
+    },
+    keyValue: {
+      copy: (label) => t`Copy ${label}`,
+      loading: t`Loading the value`,
+    },
+    questionnaire: {
+      error: t`Could not send the answer`,
+      next: t`Next`,
+      other: t`Other`,
+      previous: t`Previous`,
+      progress: (current, total) => t`Question ${current} of ${total}`,
+      progressLabel: t`Progress`,
+      step: (current, total) => t`${current} of ${total}`,
+      recommended: t`Recommended`,
+      required: t`Answer this question to go on`,
+      skip: t`Skip`,
+      submit: t`Send answer`,
+    },
+    stepper: {
+      count: (step, total) => t`Step ${step} of ${total}`,
+      current: (step, total, label) => t`Step ${step} of ${total}: ${label}`,
+      finished: t`All steps done`,
+      navBack: t`Back`,
+      navNext: t`Next`,
+      states: {
+        complete: t({ message: "done", context: "a step's state" }),
+        active: t`current step`,
+        pending: t`not started`,
+        error: t({ message: "failed", context: "a step's state" }),
+      },
+    },
+    switch: { error: t`Could not save` },
+    trace: {
+      states: {
+        running: t({ message: "Working", context: "a step's state" }),
+        error: t({ message: "Failed", context: "a step's state" }),
+        pending: t({ message: "Waiting", context: "a step's state" }),
+      },
     },
   };
   return (

@@ -1,13 +1,16 @@
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { BotIcon } from "lucide-react";
 
-import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
-import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
+import { AgentPage } from "../agents/agent-page.tsx";
+import type { FirstAgentAccess } from "../agents/agent-page.tsx";
+import { AgentSkeleton } from "../agents/agents-skeleton.tsx";
+import { agentTabOf } from "../agents/tabs.tsx";
+import type { AgentTab } from "../agents/tabs.tsx";
 import { agentInstructionsFor } from "../agents/unsaved-instructions.ts";
 import type { Session } from "../core.ts";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { readManaged } from "./_shell.agents.index.tsx";
@@ -46,7 +49,6 @@ const AgentRoutePage = () => {
     return (
       <PageNotLoaded
         crumbs={[...crumbs, { label: t`Agent` }]}
-        icon={BotIcon}
         notFound={t`Agent not found`}
         page={page}
       />
@@ -75,7 +77,6 @@ const AgentRoutePage = () => {
     return (
       <PageNotLoaded
         crumbs={[...crumbs, { label: t`Agent` }]}
-        icon={BotIcon}
         notFound={t`Agent not found`}
         page={{ state: "missing" }}
       />
@@ -116,8 +117,27 @@ const AgentRoutePage = () => {
   );
 };
 
+/**
+ * An agent's page before it arrives: its crumbs, then the settings
+ * skeleton as its Overview stands, in the page's own column: the Details
+ * card's seven rows and Recent activity's one.
+ */
+const AgentLoading = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader
+        crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`Agent` }]}
+      />
+      <Page>
+        <AgentSkeleton />
+      </Page>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/agents/$agent")({
-  pendingComponent: PageLoading,
+  pendingComponent: AgentLoading,
   component: AgentRoutePage,
   validateSearch: (
     search: Record<string, unknown>
@@ -145,7 +165,7 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
       const [listed] = await Promise.allSettled([session.members.list()]);
       // The agent's documents: not shown when core won't say, and the
       // page still shows the agent.
-      const [kept, apps, catalog, told] = await Promise.allSettled([
+      const [kept, apps, catalog, told, linked] = await Promise.allSettled([
         session.connections.agentDocuments(params.agent),
         session.connections.agentApps(params.agent),
         session.connections.catalog(),
@@ -158,6 +178,9 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
           params.agent,
           mine || isMemberAdmin(identity)
         ),
+        // Which apps are connected, so a suggested app says whether it
+        // still needs connecting.
+        session.connections.list(),
       ]);
       return {
         managed,
@@ -174,6 +197,12 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
           offered:
             catalog.status === "fulfilled"
               ? catalog.value.entries.filter(({ offered }) => offered)
+              : [],
+          connected:
+            linked.status === "fulfilled"
+              ? linked.value
+                  .filter(({ status }) => status === "active")
+                  .map(({ provider }) => provider)
               : [],
         },
         firstAccess:

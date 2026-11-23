@@ -1,21 +1,28 @@
-import { Card } from "@grasp-os/app-kit/components/card";
-import { Switch } from "@grasp-os/app-kit/components/switch";
 import type { OwnAgentsUsage } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import { FieldGroup } from "@grasp-os/ui/components/field";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useId } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { dollars } from "../settings/money.ts";
-import { Row } from "../settings/stephen-settings.tsx";
+import type { Session } from "../core.ts";
+import { formatDollars } from "../format.ts";
+import { orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AgentFailure } from "./agent-facts.tsx";
+import { FactRow, SettingRow, SettingsCard } from "./settings-card.tsx";
 
-// People's own agents, on the Agents page for the company's admins
-// (agents-overview.tsx): whether people may have agents of their own
-// (core's own-agents-switch.ts), and per person who has any, how many
-// and what they cost this month. Never what they are called or told:
-// those are their owners' alone.
+// People's own agents, for the company's admins: whether people may have
+// agents of their own (core's own-agents-switch.ts), and per person who
+// has any, how many and what they cost this month. Never what they are
+// called or told: those are their owners' alone. A settings card of rows:
+// the switch first, then a fact row per person.
 
 /** What an admin reads of people's own agents. */
 export interface OwnAgentsAdmin {
@@ -27,7 +34,28 @@ export interface OwnAgentsAdmin {
   people: readonly Member[] | undefined;
 }
 
-/** One row per person with agents of their own, or why there are none to show. */
+/**
+ * Reads what an admin sees of people's own agents: the switch, what each
+ * person's cost, and the people to name them by. The cost and the people
+ * are left out where core won't say them, and the card still shows the
+ * rest.
+ */
+export const readOwnAgentsAdmin = async (
+  session: Session
+): Promise<OwnAgentsAdmin> => {
+  const [setting, usage, people] = await Promise.all([
+    session.orgSettings.ownAgents(),
+    orNull(async () => await session.connections.ownAgentsUsage()),
+    orNull(async () => await session.members.list()),
+  ]);
+  return {
+    on: setting.on,
+    usage: usage ?? undefined,
+    people: people ?? undefined,
+  };
+};
+
+/** A row per person with agents of their own, or why there are none to show. */
 const UsageRows = ({
   usage,
   nameOf,
@@ -36,35 +64,39 @@ const UsageRows = ({
   nameOf: (personId: string) => string;
 }) => {
   const { t } = useLingui();
-  if (usage === undefined) {
+  if (usage === undefined || usage.length === 0) {
     return (
-      <li className="text-muted-foreground border-t px-5 py-4">
-        {t`What they cost couldn't be loaded.`}
-      </li>
-    );
-  }
-  if (usage.length === 0) {
-    return (
-      <li className="text-muted-foreground border-t px-5 py-4">
-        {t`Nobody has an agent of their own yet.`}
-      </li>
-    );
-  }
-  return usage.map((each) => {
-    const spent = dollars(each.spent);
-    const count = each.agents;
-    return (
-      <Row
-        description={t`${spent} this month`}
-        key={each.personId}
-        name={nameOf(each.personId)}
+      <Empty
+        size="sm"
+        variant={usage === undefined ? "destructive" : "default"}
       >
-        <span className="text-muted-foreground text-sm">
-          <Plural one="# agent" other="# agents" value={count} />
-        </span>
-      </Row>
+        <EmptyHeader>
+          <EmptyDescription>
+            {usage === undefined
+              ? t`What they cost couldn't be loaded.`
+              : t`Nobody has an agent of their own yet.`}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
-  });
+  }
+  return (
+    <>
+      {usage.map((each) => {
+        const spent = formatDollars(each.spent);
+        const count = each.agents;
+        return (
+          <FactRow
+            help={t`${spent} this month`}
+            key={each.personId}
+            label={nameOf(each.personId)}
+          >
+            {plural(count, { one: "# agent", other: "# agents" })}
+          </FactRow>
+        );
+      })}
+    </>
+  );
 };
 
 /** The card of people's own agents; `editable` for the company's own admins. */
@@ -77,7 +109,6 @@ export const OwnAgentsCard = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
-  const switchId = useId();
   const { busy, failure, run } = useCoreAction();
   const nameOf = (personId: string): string => {
     // Without the company's people, nobody is said to have left.
@@ -91,35 +122,24 @@ export const OwnAgentsCard = ({
     return found.name === "" ? found.email : found.name;
   };
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-col gap-0.5">
-        <h2 className="font-medium">
-          <Trans>People&apos;s own agents</Trans>
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Agents people make for themselves. Only their owner sees and asks
-            them, and they do at most what Grasp may do for that person. You see
-            how many each person has and what they cost, never what they are
-            told.
-          </Trans>
-        </p>
-      </div>
-      <Card variant="panel">
-        <ul className="[&>li:first-child]:border-t-0">
-          <Row
-            description={
+    <>
+      <SettingsCard
+        // Behind the info mark: what an admin sees of them, and never.
+        info={t`Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told.`}
+        title={t`People's own agents`}
+      >
+        <FieldGroup>
+          <SettingRow
+            info={
               admin.on
                 ? t`Anyone in the company can make agents of their own.`
                 : t`Nobody can make one, and those people have don't answer until you turn this back on.`
             }
-            name={t`Let people make agents of their own`}
+            label={t`Let people make agents of their own`}
           >
             <Switch
-              aria-label={t`Let people make agents of their own`}
               checked={admin.on}
               disabled={!editable || busy}
-              id={switchId}
               onCheckedChange={(next) => {
                 void run(async (session) => {
                   await session.orgSettings.updateOwnAgents({ on: next });
@@ -127,11 +147,11 @@ export const OwnAgentsCard = ({
                 });
               }}
             />
-          </Row>
+          </SettingRow>
           <UsageRows nameOf={nameOf} usage={admin.usage} />
-        </ul>
-      </Card>
-      <ErrorText>{failure}</ErrorText>
-    </section>
+        </FieldGroup>
+      </SettingsCard>
+      <AgentFailure>{failure}</AgentFailure>
+    </>
   );
 };

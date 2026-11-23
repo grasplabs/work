@@ -1,224 +1,840 @@
-import { failureText } from "@grasp-os/shared/errors";
 import {
   instructionFileErrors,
   instructionsMaxLength,
   instructionsTooLong,
 } from "@grasp-os/shared/instruction-files";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardDescription,
+  CardMedia,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import {
+  Drawer,
+  DrawerBody,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from "@grasp-os/ui/components/drawer";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import {
+  Questionnaire,
+  QuestionnaireActions,
+  QuestionnaireChoice,
+  QuestionnaireChoiceDescription,
+  QuestionnaireChoices,
+  QuestionnaireInput,
+  QuestionnaireItem,
+  QuestionnaireSkip,
+  QuestionnaireSubmit,
+  QuestionnaireTitle,
+} from "@grasp-os/ui/components/questionnaire";
+import { Text } from "@grasp-os/ui/components/text";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { Fragment, useState } from "react";
 
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { Page, PageHeading } from "../frame/page.tsx";
-import { SettingsSection } from "../settings/settings-parts.tsx";
+import { Page } from "../frame/page.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { workOutQuietly } from "./agent-apps-card.tsx";
-import { AgentForm } from "./agent-form.tsx";
-import type { Typed } from "./agent-form.tsx";
-import { keepUnsaved } from "./unsaved-instructions.ts";
+import { briefOf, instructionsOf } from "./agent-brief.ts";
+import { AgentFailure } from "./agent-facts.tsx";
+import { agentTemplates } from "./agent-templates.ts";
+import { cronOf } from "./agent-wakes.tsx";
+import { AgentFigure, AgentFigureAura } from "./figure/agent-figure.tsx";
+import type { FigureShape } from "./figure/body.ts";
+import { agentFigurePalettes, faceOf, lookFromName } from "./figure/look.ts";
+import type { AgentFigureLook, AgentFigurePalette } from "./figure/look.ts";
+import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
-// A new agent: one of the company's, for its own admins, or one of the
-// person's own, for anyone (core's agents.ts). Its name, what it is for, its
-// picture, its model and its instructions, said once. Core makes it on, reaching nobody and with
-// nothing it may do (agent-builder.ts), so the page it then opens is the
-// agent's Access tab: an agent nobody may ask is not yet any use. One of
-// a person's own is theirs to ask at once, so its page opens as it is.
-// Its instructions are measured as their save measures them first, so
-// ones it would refuse make nothing; then they are saved as its
-// instruction file's first version. Should that save fail all the same,
-// the agent is made, and its page opens on Instructions with what was
-// typed as an unsaved draft and why it wasn't saved
+/** The shapes the shape question offers: the lit bodies a person can tell apart. */
+const offeredShapes = [
+  "orb",
+  "trio",
+  "pair",
+  "swarm",
+  "prism",
+  "crystal",
+  "planet",
+] as const satisfies readonly FigureShape[];
+
+// A new agent: one of the company's, for its own admins, or one of the person's own, for anyone
+// (core's agents.ts). Grasp asks what it should be, one question at a time,
+// on Damsko's Questionnaire, the way a chat asks: what it should do (a starting point or the
+// person's own words), what to call it, its shape and its colours, who may ask it, whether it
+// works on its own and what it should always know. Above the questions the agent itself takes
+// form as they are answered: its figure on its own night (figure/), changing shape and colour as
+// a choice is pointed at, and its name and job under it. The answers so far stand under it, each
+// a line. Once the last is answered, the whole agent waits in a Drawer, each answer with Change,
+// and Make agent makes it. Core makes one of the company's on, reaching nobody and with nothing it
+// may do (agent-builder.ts); the answers then set who may ask it and its schedule, and its page
+// opens. One of the person's own ("Just for me") is theirs to ask at once, and is never asked who
+// may ask it or when it works. Its instructions are saved as its instruction file once it is made;
+// should that fail, its page opens on Instructions with them as an unsaved draft
 // (unsaved-instructions.ts).
 
-/** A new agent before anything is said of it. */
-const blank: Typed = {
-  name: "",
+/** The questions, in the order they are asked. */
+const steps = [
+  "job",
+  "name",
+  "shape",
+  "palette",
+  "audience",
+  "schedule",
+  "instructions",
+] as const;
+type Step = (typeof steps)[number];
+
+/** How often it may work on its own, as the first question about it offers. */
+const schedules = ["asked", "weekdays", "daily", "mondays"] as const;
+type Schedule = (typeof schedules)[number];
+
+/** The hour a schedule chosen here runs at, in the company's time zone. */
+const scheduledAt = "09:00";
+
+/** The agent as the answers so far have it. */
+interface Draft {
+  /** The starting point chosen, by its key; undefined for the person's own words. */
+  template: string | undefined;
+  job: string;
+  name: string;
+  look: AgentFigureLook;
+  /** `me`: one of the person's own. */
+  audience: "everyone" | "nobody" | "me";
+  schedule: Schedule;
+  instructions: string;
+}
+
+const blank: Draft = {
+  template: undefined,
   job: "",
+  name: "",
+  look: { shape: "orb", palette: "evergreen" },
+  audience: "nobody",
+  schedule: "asked",
   instructions: "",
-  face: "stephen",
-  model: null,
+};
+
+/** One choice a question offers. */
+interface Option {
+  value: string;
+  label: string;
+  description?: string;
+  recommended?: boolean;
+}
+
+/** What a question asks: one choice of its options, or the person's own words. */
+interface Asked {
+  question: string;
+  kind: "single" | "text";
+  options?: Option[];
+  /** Whether the person may also answer in words of their own. @default true */
+  other?: boolean;
+  otherLabel?: string;
+  columns?: 1 | 2;
+  placeholder?: string;
+}
+
+/** The answer a question holds: a choice, or the person's own words. */
+interface Answer {
+  values: string[];
+  /** Whether the words are the answer, not a choice. */
+  other: boolean;
+  words: string;
+}
+
+const styles = stylex.create({
+  column: {
+    display: "grid",
+    gap: space["5"],
+    width: "100%",
+    maxWidth: "44rem",
+    marginInline: "auto",
+  },
+  stage: {
+    position: "relative",
+    display: "grid",
+    placeItems: "center",
+    aspectRatio: { default: "16 / 7", [media.maxSm]: "4 / 3" },
+    isolation: "isolate",
+  },
+  words: { display: "grid", gap: space["1"], marginBlockStart: space["3"] },
+  // Back at the start of the question's actions, its way on at the end.
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["2"],
+    width: "100%",
+  },
+  end: { display: "flex", alignItems: "center", gap: space["2"] },
+});
+
+/** The words each question, choice and answer is said in. */
+const useWording = () => {
+  const { t } = useLingui();
+  const shapeNames: Partial<Record<FigureShape, string>> = {
+    orb: t`Orb`,
+    trio: t`Three circling`,
+    pair: t`Pair in orbit`,
+    swarm: t`Swarm`,
+    prism: t`Triangle`,
+    crystal: t`Crystal`,
+    planet: t`Planet`,
+  };
+  const paletteNames: Record<AgentFigurePalette, string> = {
+    evergreen: t`Evergreen`,
+    meadow: t`Meadow`,
+    ember: t`Ember`,
+    amber: t`Amber`,
+    ocean: t`Ocean`,
+    moon: t`Moon`,
+  };
+  const scheduleNames: Record<Schedule, string> = {
+    asked: t`Only when asked`,
+    weekdays: t`Every weekday at 9:00`,
+    daily: t`Every day at 9:00`,
+    mondays: t`Every Monday at 9:00`,
+  };
+  const audienceNames: Record<Draft["audience"], string> = {
+    everyone: t`Everyone in the company`,
+    nobody: t`Nobody yet`,
+    me: t`Just for me`,
+  };
+  const short: Record<Step, string> = {
+    job: t`What it does`,
+    name: t`Name`,
+    shape: t`Shape`,
+    palette: t`Colours`,
+    audience: t`Who may ask it`,
+    schedule: t`On its own`,
+    instructions: t`What it always knows`,
+  };
+  const answerOf = (step: Step, draft: Draft): string => {
+    const byStep: Record<Step, () => string> = {
+      job: () => draft.job,
+      name: () => draft.name,
+      shape: () => shapeNames[draft.look.shape] ?? "",
+      palette: () => paletteNames[draft.look.palette],
+      audience: () => audienceNames[draft.audience],
+      schedule: () => scheduleNames[draft.schedule],
+      instructions: () =>
+        draft.instructions === "" ? t`Nothing more` : draft.instructions,
+    };
+    return byStep[step]();
+  };
+  return {
+    shapeNames,
+    paletteNames,
+    scheduleNames,
+    audienceNames,
+    short,
+    answerOf,
+  };
+};
+
+/** The agent taking form: its figure on its own night, and its name and job once said. */
+const Forming = ({ draft }: { draft: Draft }) => {
+  const { t } = useLingui();
+  return (
+    <Card>
+      <CardMedia>
+        <span {...stylex.props(styles.stage)}>
+          <AgentFigureAura ground="page" look={draft.look} />
+          <AgentFigure
+            follow
+            aria-label={draft.name === "" ? t`The new agent` : draft.name}
+            look={draft.look}
+            size="xl"
+            state="idle"
+          />
+        </span>
+      </CardMedia>
+      {draft.name === "" && draft.job === "" ? null : (
+        <span {...stylex.props(styles.words)}>
+          {draft.name === "" ? null : <CardTitle>{draft.name}</CardTitle>}
+          {draft.job === "" ? null : (
+            <CardDescription>{draft.job}</CardDescription>
+          )}
+        </span>
+      )}
+    </Card>
+  );
 };
 
 /**
- * Saves `instructions` as the new agent `agentId`'s instruction file, and
- * then works out the apps they call for: whether they were saved. Not
- * saved, they are kept for its page with why (`keepUnsaved`).
+ * One question, as a chat asks it: its choices as cards, with words of the
+ * person's own where they may give them, Back to the question before, and
+ * the way on. Mounted anew for each question, so its answer starts from
+ * what the agent already holds.
  */
-const saveFirstInstructions = async (
-  session: Session,
-  agentId: string,
-  instructions: string
-): Promise<boolean> => {
-  const change = crypto.randomUUID();
-  try {
-    await session.instructions.save({
-      file: { scope: "agent", agentId },
-      change,
-      text: instructions,
-      after: 0,
-    });
-  } catch (error) {
-    keepUnsaved(agentId, {
-      text: instructions,
-      change,
-      failure: failureText(error),
-    });
-    return false;
-  }
-  await workOutQuietly(session, agentId);
-  return true;
-};
-
-/** Whose a new agent is: the company's, or the person's own. */
-type Whose = "company" | "own";
-
-/**
- * The page a new agent is made on; `models`, the ones the organization
- * chose. `company`: whether the person may make one for the company, its
- * own admins alone; anyone makes one of their own.
- */
-export const NewAgent = ({
-  models,
-  company,
-  own = true,
+const Asking = ({
+  question,
+  answer,
+  keep,
+  submit,
+  back,
+  skip,
+  ready,
+  waitingWhy,
+  index,
+  count,
+  last,
 }: {
-  models: readonly string[];
-  company: boolean;
-  /** Whether the company lets people have agents of their own. */
-  own?: boolean;
+  question: Asked;
+  answer: Answer;
+  keep: (answer: Answer) => void;
+  submit: () => void;
+  back: (() => void) | undefined;
+  skip: (() => void) | undefined;
+  ready: boolean;
+  waitingWhy: string;
+  index: number;
+  count: number;
+  last: boolean;
 }) => {
   const { t } = useLingui();
+  const options = question.options ?? [];
+  const typed = question.kind === "text";
+  const ownWords = typed || question.other !== false;
+  const position = index + 1;
+  return (
+    <Questionnaire
+      aria-label={t`New agent`}
+      onSubmit={() => {
+        submit();
+      }}
+    >
+      <Text color="muted" size="sm">
+        {t`${position} of ${count}`}
+      </Text>
+      <QuestionnaireItem name="answer" required={skip === undefined}>
+        <QuestionnaireTitle>{question.question}</QuestionnaireTitle>
+        {options.length === 0 ? null : (
+          <QuestionnaireChoices columns={question.columns ?? 1}>
+            {options.map((option) => (
+              <QuestionnaireChoice
+                checked={!answer.other && answer.values.includes(option.value)}
+                key={option.value}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    keep({ values: [option.value], other: false, words: "" });
+                  }
+                }}
+                recommended={option.recommended ?? false}
+                value={option.value}
+              >
+                {option.label}
+                {option.description === undefined ? null : (
+                  <QuestionnaireChoiceDescription>
+                    {option.description}
+                  </QuestionnaireChoiceDescription>
+                )}
+              </QuestionnaireChoice>
+            ))}
+          </QuestionnaireChoices>
+        )}
+        {ownWords ? (
+          <QuestionnaireInput
+            aria-label={typed ? question.question : question.otherLabel}
+            onValueChange={(words) => {
+              keep({ values: [], other: !typed && words !== "", words });
+            }}
+            placeholder={typed ? question.placeholder : question.otherLabel}
+            value={typed || answer.other ? answer.words : ""}
+          />
+        ) : null}
+      </QuestionnaireItem>
+      <QuestionnaireActions>
+        <span {...stylex.props(styles.actions)}>
+          {back === undefined ? (
+            <span />
+          ) : (
+            <Button onClick={back} size="sm" variant="ghost">
+              {t`Back`}
+            </Button>
+          )}
+          <span {...stylex.props(styles.end)}>
+            {skip === undefined ? null : (
+              <QuestionnaireSkip
+                onClick={(event) => {
+                  event.preventDefault();
+                  skip();
+                }}
+              />
+            )}
+            <QuestionnaireSubmit disabled={!ready} disabledReason={waitingWhy}>
+              {last ? t`Review` : t`Next`}
+            </QuestionnaireSubmit>
+          </span>
+        </span>
+      </QuestionnaireActions>
+    </Questionnaire>
+  );
+};
+
+/** The new agent's page: the questions, the agent taking form, and the summary in a Drawer. */
+export const NewAgent = ({
+  personId,
+  taken,
+  company,
+  own,
+}: {
+  /** The person making it: a schedule chosen here works for them. */
+  personId: string;
+  /** The names other agents have: core keeps each name to one agent, in any case or accent. */
+  taken: readonly string[];
+  /** Whether they may make one for the company: its own admins. */
+  company: boolean;
+  /** Whether the company lets people have agents of their own. */
+  own: boolean;
+}) => {
+  const { t, i18n } = useLingui();
+  const words = useWording();
   const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
-  const choiceId = useId();
-  const [whose, setWhose] = useState<Whose>(company ? "company" : "own");
-  const choices: { value: Whose; label: string; line: string }[] = [
-    {
-      value: "company",
-      label: t`For the company`,
-      line: t`You choose who may ask it and what it may do.`,
-    },
-    {
-      value: "own",
-      label: t`Just for me`,
-      line: t`Only you see and ask it. It does at most what Grasp may do for you.`,
-    },
-  ];
+  const { failure, run } = useCoreAction();
+  const [draft, setDraft] = useState<Draft>({
+    ...blank,
+    // An admin's starts as the company's, as the guided setup's does.
+    audience: company ? "everyone" : "me",
+  });
+  const [at, setAt] = useState(0);
+  const [answers, setAnswers] = useState<Partial<Record<Step, Answer>>>({});
+  const [reviewing, setReviewing] = useState(false);
+  // Only one of the company's is asked who may ask it and when it works.
+  const asked = steps.filter(
+    (each) =>
+      (each !== "audience" || company) &&
+      (each !== "schedule" || draft.audience !== "me")
+  );
+  const step: Step = asked[at] ?? "instructions";
+  const answer = answers[step];
+  const template = agentTemplates.find(({ key }) => key === draft.template);
+  const last = at === asked.length - 1;
+  const isTaken = (name: string): boolean =>
+    taken.some(
+      (other) =>
+        other.localeCompare(name.trim(), undefined, { sensitivity: "base" }) ===
+        0
+    );
+  /** The names the starting point suggests that no other agent has. */
+  const freeNames = (from: typeof template): string[] =>
+    (from?.names ?? [])
+      .map((name) => i18n._(name))
+      .filter((name) => !isTaken(name));
+
+  const keep = (next: Answer) => {
+    setAnswers({ ...answers, [step]: next });
+    // The figure answers a choice as it is pointed at, before Next.
+    const [value] = next.values;
+    const shape = offeredShapes.find((each) => each === value);
+    const palette = agentFigurePalettes.find((each) => each === value);
+    if (step === "shape" && shape !== undefined) {
+      setDraft({ ...draft, look: { ...draft.look, shape } });
+    }
+    if (step === "palette" && palette !== undefined) {
+      setDraft({ ...draft, look: { ...draft.look, palette } });
+    }
+  };
+
+  const forward = () => {
+    if (last) {
+      setReviewing(true);
+    } else {
+      setAt(at + 1);
+    }
+  };
+
+  /** What this step's answer makes of the agent. */
+  const take = (given: Answer): Draft => {
+    const [value] = given.values;
+    const typed = given.words.trim();
+    const byStep: Record<Step, () => Draft> = {
+      job: () => {
+        const chosen = agentTemplates.find(({ key }) => key === value);
+        if (chosen === undefined || given.other) {
+          return { ...draft, template: undefined, job: typed };
+        }
+        // Another starting point brings its own name, unless this one's was kept.
+        const name =
+          chosen.key === draft.template && draft.name !== ""
+            ? draft.name
+            : (freeNames(chosen)[0] ?? "");
+        // A look of its own from the start, so two agents made in a row differ,
+        // until a shape or colours were chosen.
+        const chosenLook =
+          answers.shape !== undefined || answers.palette !== undefined;
+        return {
+          ...draft,
+          template: chosen.key,
+          job: i18n._(chosen.job),
+          name,
+          look: chosenLook ? draft.look : lookFromName(name),
+          instructions: instructionsOf(briefOf(chosen, i18n), i18n),
+        };
+      },
+      name: () => ({
+        ...draft,
+        name: given.other || value === undefined ? typed : value,
+      }),
+      audience: () => ({
+        ...draft,
+        audience: value === "everyone" || value === "me" ? value : "nobody",
+      }),
+      schedule: () => ({
+        ...draft,
+        schedule: schedules.find((each) => each === value) ?? "asked",
+      }),
+      instructions: () => ({ ...draft, instructions: given.words.trim() }),
+      // The look follows the choice as it is pointed at (keep).
+      shape: () => draft,
+      palette: () => draft,
+    };
+    return byStep[step]();
+  };
+
+  // Each question, as the Questionnaire below asks it.
+  const question = (() => {
+    const byStep: Record<Step, () => Asked> = {
+      job: () => ({
+        question: t`What should the agent do? Pick a starting point or say it in your own words.`,
+        kind: "single" as const,
+        options: agentTemplates.map(({ key, label, description }): Option => ({
+          value: key,
+          label: i18n._(label),
+          description: i18n._(description),
+        })),
+        otherLabel: t`Something else`,
+      }),
+      name: (): Asked => {
+        const free = freeNames(template);
+        if (free.length === 0) {
+          return {
+            question: t`What should we call it?`,
+            kind: "text" as const,
+            placeholder: t`Invoice chaser`,
+          };
+        }
+        return {
+          question: t`What should we call it?`,
+          kind: "single" as const,
+          options: free.map((name, index): Option => ({
+            value: name,
+            label: name,
+            recommended: index === 0,
+          })),
+          otherLabel: t`Another name`,
+        };
+      },
+      shape: () => ({
+        question: t`What shape should it take?`,
+        kind: "single" as const,
+        options: offeredShapes.map((shape): Option => ({
+          value: shape,
+          label: words.shapeNames[shape] ?? shape,
+        })),
+        other: false,
+        columns: 2 as const,
+      }),
+      palette: () => ({
+        question: t`Which colours should it have?`,
+        kind: "single" as const,
+        options: agentFigurePalettes.map((palette): Option => ({
+          value: palette,
+          label: words.paletteNames[palette],
+        })),
+        other: false,
+        columns: 2 as const,
+      }),
+      audience: () => ({
+        question: t`Who may ask it?`,
+        kind: "single" as const,
+        options: [
+          {
+            value: "everyone",
+            label: words.audienceNames.everyone,
+            description: t`Everyone in the company can ask it.`,
+            recommended: true,
+          },
+          {
+            value: "nobody",
+            label: words.audienceNames.nobody,
+            description: t`You choose people and teams on its page`,
+          },
+          ...(own
+            ? [
+                {
+                  value: "me",
+                  label: words.audienceNames.me,
+                  description: t`Only you see and ask it. It does at most what Grasp may do for you.`,
+                },
+              ]
+            : []),
+        ],
+        other: false,
+      }),
+      schedule: () => ({
+        question: t`Should it work on its own?`,
+        kind: "single" as const,
+        options: schedules.map((each): Option => ({
+          value: each,
+          label: words.scheduleNames[each],
+          ...(each === "asked" ? { recommended: true } : {}),
+          ...(each === "asked"
+            ? {}
+            : {
+                description: t`It reads, and what it wants to change waits for you`,
+              }),
+        })),
+        other: false,
+      }),
+      instructions: () => ({
+        question: t`Anything it should always know?`,
+        kind: "text" as const,
+        placeholder: t`What it should know and how it should work.`,
+      }),
+    };
+    return byStep[step]();
+  })();
+
+  // Where the answer was never touched, the card starts from what the draft already holds.
+  const startingAnswer = (): Answer => {
+    const byStep: Record<Step, () => Answer> = {
+      job: () =>
+        draft.template === undefined
+          ? { values: [], other: draft.job !== "", words: draft.job }
+          : { values: [draft.template], other: false, words: "" },
+      name: () => {
+        const offered = freeNames(template);
+        if (offered.length === 0) {
+          return { values: [], other: false, words: draft.name };
+        }
+        return offered.includes(draft.name)
+          ? { values: [draft.name], other: false, words: "" }
+          : { values: [], other: draft.name !== "", words: draft.name };
+      },
+      shape: () => ({ values: [draft.look.shape], other: false, words: "" }),
+      palette: () => ({
+        values: [draft.look.palette],
+        other: false,
+        words: "",
+      }),
+      audience: () => ({ values: [draft.audience], other: false, words: "" }),
+      schedule: () => ({ values: [draft.schedule], other: false, words: "" }),
+      instructions: () => ({
+        values: [],
+        other: false,
+        words: draft.instructions,
+      }),
+    };
+    return byStep[step]();
+  };
+
+  // What the card shows, touched or not, is what Next takes.
+  const shown = answer ?? startingAnswer();
+  const submit = () => {
+    setDraft(take(shown));
+    forward();
+  };
+  const named =
+    shown.other || shown.values.length === 0
+      ? shown.words
+      : (shown.values[0] ?? "");
+  const nameTaken = step === "name" && isTaken(named);
+  const given =
+    question.kind === "text"
+      ? shown.words.trim() !== ""
+      : shown.values.length > 0 || (shown.other && shown.words.trim() !== "");
+  const ready = !nameTaken && (step === "instructions" || given);
+
+  const make = async (): Promise<void> => {
+    const { instructions } = draft;
+    const mine = draft.audience === "me";
+    const made = await run(async (session) => {
+      // Refused before anything is made, as their save would be.
+      if (instructionsTooLong(instructions)) {
+        throw instructionFileErrors.create("instructions.too_large", {
+          maxLength: instructionsMaxLength,
+        });
+      }
+      const input = {
+        name: draft.name,
+        job: draft.job,
+        face: faceOf(draft.look),
+        model: null,
+        modelRole: null,
+      };
+      const agent = mine
+        ? await session.connections.makeOwnAgent(input)
+        : await session.connections.makeAgent(input);
+      const told =
+        instructions.trim() === "" ||
+        (await saveFirstInstructions(session, agent.id, instructions));
+      if (mine) {
+        return { agent, told };
+      }
+      if (draft.audience === "everyone") {
+        await session.connections.setAgentReach(agent.id, true, {
+          who: "everyone",
+        });
+      }
+      const cron =
+        draft.schedule === "asked"
+          ? undefined
+          : cronOf(draft.schedule, scheduledAt);
+      if (cron !== undefined) {
+        await session.connections.makeAgentWake(agent.id, {
+          cron,
+          personId,
+          opening: draft.job === "" ? draft.name : draft.job,
+        });
+      }
+      return { agent, told };
+    });
+    if (made === undefined) {
+      // The button says it failed; why stands in the Drawer, from core.
+      throw new Error("The agent wasn't made.");
+    }
+    let tab: "instructions" | "access" | undefined;
+    if (!made.told) {
+      // Its instructions didn't save: its page opens where they wait.
+      tab = "instructions";
+    } else if (draft.audience === "nobody") {
+      // Nobody may ask it yet: its page opens where that is chosen.
+      tab = "access";
+    }
+    await navigate({
+      to: "/agents/$agent",
+      params: { agent: made.agent.id },
+      search: tab === undefined ? {} : { tab },
+    });
+  };
+
+  const answered = asked.slice(0, reviewing ? asked.length : at);
+  const making = async (): Promise<void> => {
+    await make();
+  };
   return (
     <Page>
-      <PageHeading
-        description={
-          whose === "company" ? (
-            <Trans>
-              It starts on, reaching nobody and with nothing it may do. You say
-              who may ask it right after.
-            </Trans>
-          ) : (
-            <Trans>
-              An agent of your own, for a job you do often. Only you see and ask
-              it, in Grasp&apos;s chat.
-            </Trans>
-          )
-        }
-        title={<Trans>New agent</Trans>}
-      />
-      {company && own ? (
-        <SettingsSection
-          description={t`An agent for the company, or one only you use.`}
-          title={t`Who it is for`}
-        >
-          <fieldset className="flex flex-col gap-3">
-            <legend className="sr-only">{t`Who it is for`}</legend>
-            {choices.map(({ value, label, line }) => (
-              <div className="flex items-start gap-3" key={value}>
-                <input
-                  aria-describedby={`${choiceId}-${value}-line`}
-                  checked={whose === value}
-                  className="mt-1"
-                  disabled={busy}
-                  id={`${choiceId}-${value}`}
-                  name="whose"
-                  onChange={() => {
-                    setWhose(value);
-                  }}
-                  type="radio"
-                  value={value}
-                />
-                <span className="flex flex-col gap-0.5">
-                  <label htmlFor={`${choiceId}-${value}`}>{label}</label>
-                  <span
-                    className="text-muted-foreground"
-                    id={`${choiceId}-${value}-line`}
-                  >
-                    {line}
-                  </span>
-                </span>
-              </div>
-            ))}
-          </fieldset>
-        </SettingsSection>
-      ) : null}
-      <SettingsSection
-        description={
-          whose === "company"
-            ? t`Its name, job and picture show where people pick an agent. Its instructions are for the agent alone.`
-            : t`Its name, job and picture show where you pick an agent. Its instructions are for the agent alone.`
-        }
-        title={t`What it is`}
+      <PageHeader title={t`New agent`} />
+      <div {...stylex.props(styles.column)}>
+        <Forming draft={draft} />
+        {answered.length === 0 ? null : (
+          <KeyValueList
+            items={answered.map((each) => ({
+              id: each,
+              label: words.short[each],
+              value: words.answerOf(each, draft),
+            }))}
+            orientation="horizontal"
+          />
+        )}
+        {/* While the Drawer holds the whole agent, no question stands under it. */}
+        {reviewing ? null : (
+          <Asking
+            answer={shown}
+            back={
+              at === 0
+                ? undefined
+                : () => {
+                    setAt(at - 1);
+                  }
+            }
+            count={asked.length}
+            index={at}
+            key={step}
+            keep={keep}
+            last={last}
+            question={question}
+            ready={ready}
+            skip={
+              step === "instructions"
+                ? () => {
+                    setDraft({ ...draft, instructions: "" });
+                    setReviewing(true);
+                  }
+                : undefined
+            }
+            submit={submit}
+            waitingWhy={
+              nameTaken
+                ? t`Another agent has this name`
+                : t`Choose or write an answer first`
+            }
+          />
+        )}
+      </div>
+      <Drawer
+        onOpenChange={(open) => {
+          setReviewing(open);
+        }}
+        open={reviewing}
       >
-        <AgentForm
-          can={!busy}
-          initial={blank}
-          models={models}
-          onSave={async (said) => {
-            // Every part is this form's, so all are said.
-            const { instructions = "", ...typed } = {
-              ...blank,
-              ...said,
-              modelRole: null,
-            };
-            await run(async (session) => {
-              // Refused before anything is made, as their save would be.
-              if (instructionsTooLong(instructions)) {
-                throw instructionFileErrors.create("instructions.too_large", {
-                  maxLength: instructionsMaxLength,
-                });
-              }
-              const made =
-                whose === "own"
-                  ? await session.connections.makeOwnAgent(typed)
-                  : await session.connections.makeAgent(typed);
-              const told =
-                instructions.trim() === "" ||
-                (await saveFirstInstructions(session, made.id, instructions));
-              if (!told) {
-                await navigate({
-                  to: "/agents/$agent",
-                  params: { agent: made.id },
-                  search: { tab: "instructions" },
-                });
-                return;
-              }
-              if (whose === "own") {
-                await navigate({
-                  to: "/agents/$agent",
-                  params: { agent: made.id },
-                });
-                return;
-              }
-              await navigate({
-                to: "/agents/$agent",
-                params: { agent: made.id },
-                search: { tab: "access" },
-              });
-            });
-          }}
-          parts={["name", "job", "face", "model", "instructions"]}
-          submit={t`Make agent`}
-        />
-      </SettingsSection>
-      <ErrorText>{failure}</ErrorText>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>{draft.name}</DrawerTitle>
+            <DrawerDescription>{draft.job}</DrawerDescription>
+          </DrawerHeader>
+          <DrawerBody>
+            {/* Why it wasn't made, from core, above what to change. */}
+            <AgentFailure>{failure}</AgentFailure>
+            <ItemGroup aria-label={t`The new agent`}>
+              {asked.map((each, index) => (
+                <Fragment key={each}>
+                  {index === 0 ? null : <ItemSeparator />}
+                  <Item size="sm">
+                    <ItemContent>
+                      <ItemTitle>{words.short[each]}</ItemTitle>
+                      <ItemDescription>
+                        {words.answerOf(each, draft)}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button
+                        onClick={() => {
+                          setReviewing(false);
+                          setAt(index);
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {t`Change`}
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                </Fragment>
+              ))}
+            </ItemGroup>
+          </DrawerBody>
+          <DrawerFooter>
+            <DrawerClose>{t`Keep editing`}</DrawerClose>
+            <Button
+              errorLabel={t`Couldn't make it`}
+              loadingLabel={t`Making`}
+              onClick={making}
+              size="sm"
+            >
+              {t`Make agent`}
+            </Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
     </Page>
   );
 };

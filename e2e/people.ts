@@ -576,6 +576,7 @@ const cast = {
   settings: { admin: "admin", member: "user" },
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },
+  agents: { admin: "admin", member: "user" },
   activityAgain: { admin: "admin", builder: "builder" },
   chat: { user: "user" },
   globalChat: { user: "user" },
