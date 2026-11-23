@@ -134,7 +134,7 @@ const RefreshFailed = ({
             }
           }}
           size="xs"
-          variant="secondary"
+          variant="outline"
         >
           {t`Try again`}
         </Button>
@@ -269,7 +269,7 @@ const PuttingAway = ({ app }: { app: App }) => {
           onClick={() => {
             move("restore");
           }}
-          variant="secondary"
+          variant="outline"
         >
           {t`Restore`}
         </Button>
@@ -279,7 +279,7 @@ const PuttingAway = ({ app }: { app: App }) => {
           onClick={() => {
             setArchiving(true);
           }}
-          variant="secondary"
+          variant="outline"
         >
           <Icon icon={ArchiveIcon} />
           {app.currentVersion === null
@@ -357,7 +357,7 @@ const OwnLink = ({ app }: { app: App }) => {
           setOpen(true);
         }}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={LinkIcon} />
         {t`Set the link`}

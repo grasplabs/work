@@ -99,7 +99,7 @@ const AddPicker = ({
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
-        <Button disabled={disabled} size="sm" variant="secondary">
+        <Button disabled={disabled} size="sm" variant="outline">
           <Icon icon={PlusIcon} />
           {t`Add an integration`}
         </Button>

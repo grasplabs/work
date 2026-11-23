@@ -288,7 +288,7 @@ const AddIndex = ({
               disabled={disabled || !ready}
               style={styles.start}
               type="submit"
-              variant="secondary"
+              variant="outline"
             >
               {searching ? t`Add search` : t`Add index`}
             </Button>

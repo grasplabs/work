@@ -419,7 +419,7 @@ const PublishPlan = ({
           setOpen(true);
         }}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         {t`${plural(changeCount, {
           one: "# change to publish",
@@ -548,7 +548,7 @@ export const AppDataModel = ({
             setCreating(true);
           }}
           size="sm"
-          variant="secondary"
+          variant="outline"
         >
           <Icon icon={PlusIcon} />
           {t`New table`}

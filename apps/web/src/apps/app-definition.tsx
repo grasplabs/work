@@ -79,7 +79,7 @@ export const ExportDefinition = ({
         }}
         status={save.status}
         successLabel={save.labels.success}
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={DownloadIcon} />
         {t`Export definition`}

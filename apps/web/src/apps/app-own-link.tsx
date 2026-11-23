@@ -137,7 +137,7 @@ export const AppLinkDialog = ({
               onClick={() => {
                 save(null);
               }}
-              variant="secondary"
+              variant="outline"
             >
               {t`Remove link`}
             </Button>

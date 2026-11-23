@@ -66,7 +66,7 @@ export const ResetAppData = ({ app }: { app: App }) => {
       open={open}
     >
       <DialogTrigger asChild>
-        <Button variant="secondary">
+        <Button variant="outline">
           <Icon icon={RefreshCwIcon} />
           {t`Reset data`}
         </Button>

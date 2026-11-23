@@ -89,7 +89,7 @@ export const AppOwner = ({
           <Alert appearance="subtle" variant="destructive">
             <AlertTitle>{t`Couldn't load who may answer for it.`}</AlertTitle>
           </Alert>
-          <Button onClick={onRetry} size="sm" variant="secondary">
+          <Button onClick={onRetry} size="sm" variant="outline">
             {t`Try again`}
           </Button>
         </div>

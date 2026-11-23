@@ -362,7 +362,7 @@ const RecordHistory = ({
           style={styles.start}
           onClick={onOlder}
           size="sm"
-          variant="secondary"
+          variant="outline"
         >
           {t`Older changes`}
         </Button>
@@ -804,7 +804,7 @@ const RecordNotes = ({
                 void router.invalidate();
               }}
               size="xs"
-              variant="secondary"
+              variant="outline"
             >
               {t`Reload`}
             </Button>

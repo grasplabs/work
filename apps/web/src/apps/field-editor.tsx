@@ -492,7 +492,7 @@ const ChoiceOptions = ({
           disabled={disabled || typed.trim() === ""}
           onClick={add}
           type="button"
-          variant="secondary"
+          variant="outline"
         >
           <Icon icon={PlusIcon} />
           {t`Add option`}

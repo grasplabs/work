@@ -413,7 +413,7 @@ const RequestsView = ({
                   setAsking(true);
                 }}
                 size="sm"
-                variant="secondary"
+                variant="outline"
               >
                 <Icon icon={KeyIcon} />
                 {t`Ask for access`}

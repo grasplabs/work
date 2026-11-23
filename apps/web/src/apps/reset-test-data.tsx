@@ -52,7 +52,7 @@ export const ResetTestData = ({
           setAsking(true);
         }}
         size="sm"
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={RefreshCwIcon} />
         {t`Reset test data`}

@@ -138,7 +138,7 @@ const AddWebhook = ({
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="secondary">
+        <Button size="sm" variant="outline">
           <Icon icon={PlusIcon} />
           {t`Add webhook`}
         </Button>

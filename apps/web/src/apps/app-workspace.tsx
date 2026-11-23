@@ -507,7 +507,7 @@ const StaleTestData = ({ app }: { app: string }) => {
             records aren&apos;t touched.
           </Trans>
           <span {...stylex.props(styles.below)}>
-            <Button size="xs" variant="secondary" asChild>
+            <Button size="xs" variant="outline" asChild>
               <Link
                 params={{ app }}
                 replace
@@ -638,7 +638,7 @@ const ReadOnlyBar = ({
                   setAsked({ kind: "restore", number: shown.point });
                 }}
                 size="xs"
-                variant="secondary"
+                variant="outline"
               >
                 {t`Restore`}
               </Button>

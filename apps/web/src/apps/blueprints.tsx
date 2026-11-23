@@ -59,7 +59,7 @@ export const SaveAsBlueprint = ({
           setSaved(false);
           setOpen(true);
         }}
-        variant="secondary"
+        variant="outline"
       >
         <Icon icon={FloorPlanIcon} />
         {t`Save as blueprint`}
