@@ -144,6 +144,14 @@ export const matching = (
   );
 };
 
+/** The kinds `@` offers, in this order: who answers first, then what and whom to name. */
+const offeredKinds: readonly ChatMentionKind[] = [
+  "agent",
+  "app",
+  "workflow",
+  "person",
+];
+
 const isMentionKind = (kind: string): kind is ChatMentionKind =>
   chatMentionKinds.some((each) => each === kind);
 
@@ -174,7 +182,7 @@ export const useMentionTriggers = (
       char: "@",
       type: "mention",
       description: t`mention`,
-      kinds: chatMentionKinds.map((kind) => ({
+      kinds: offeredKinds.map((kind) => ({
         value: kind,
         label: kinds[kind].label,
         icon: kinds[kind].icon,
