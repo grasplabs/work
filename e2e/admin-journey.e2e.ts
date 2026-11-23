@@ -20,16 +20,39 @@ import { origin } from "./stack.ts";
 // (playwright.config.ts): sending a link tells the team, and nothing
 // undoes that.
 
-// Today as the page and core read it alike: core plans in UTC.
-test.use({ timezoneId: "UTC" });
+// Today as the page and core read it alike: core plans in UTC. The admin
+// is in the UK: their browser reads a typed day day first, as their own
+// date fields do.
+test.use({ timezoneId: "UTC", locale: "en-GB" });
 
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-/** A day ("2026-11-23") as a person types it in the page's English ("11/23/2026"). */
+/** A day ("2026-11-23") as a person in the UK types it ("23/11/2026"). */
 const typed = (day: string): string => {
   const [year, month, date] = day.split("-");
-  return `${month}/${date}/${year}`;
+  return `${date}/${month}/${year}`;
+};
+
+const months = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** A day of this year as the page's English says it ("23 Nov"). */
+const said = (day: string): string => {
+  const [, month = 1, date = 1] = day.split("-").map(Number);
+  return `${date} ${months[month - 1] ?? ""}`;
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -209,17 +232,28 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
       name: "Before I reach out, let your team know",
     })
   ).toBeVisible();
-  // Typed, the day counts once it is committed (Enter), as a person does.
+  // Typed, the day counts once it is committed (Enter), as a person does:
+  // day first, as the field shows ("For example 31/12/…"). Month first is
+  // no day here, and the plan waits until it is put right.
   const day = page.getByLabel("Another day");
+  await expect(page.getByText(/^For example 31\/12\/\d{4}$/u)).toBeVisible();
+  await day.fill("12/31/2026");
+  await day.press("Enter");
+  await expect(
+    page.getByText(/^I can’t plan that day\. Type one like 31\/12\//u)
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "I sent it" })).toBeDisabled();
   await day.fill(typed(today()));
   await day.press("Enter");
   await expect(day).toHaveValue(typed(today()));
+  await expect(page.getByText(/^I can’t plan that day/u)).toHaveCount(0);
   await page.getByLabel("at", { exact: true }).fill("00:00");
+  // What it says is the day it saves: the links due today go out below.
   await expect(
     page
       .getByRole("status")
       .filter({ hasText: "What happens next" })
-      .getByText(/^Leads get their link on \d+ \w+ at 0:00\./u)
+      .getByText(`Leads get their link on ${said(today())} at 0:00.`)
   ).toBeVisible();
   await readOn(page, page.getByRole("button", { name: "I sent it" }));
   await page.getByRole("button", { name: "I sent it" }).click();
