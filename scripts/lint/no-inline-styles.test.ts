@@ -1,7 +1,12 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { RuleTester } from "oxlint/plugins-dev";
-import { describe, it } from "vite-plus/test";
+import { afterAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import grasp from "./grasp-plugin.ts";
 
@@ -501,4 +506,120 @@ const Save = () => <Button style={{ width: 120 }} />;`,
       errors: [{ messageId: "inlineStyle" }],
     },
   ],
+});
+
+// A component of a relative module is the feature's own only where that
+// module declares it, or passes it on from Damsko or another such module:
+// the rule reads the modules it is passed on through, from disk.
+const modules = mkdtempSync(path.join(tmpdir(), "no-inline-styles-"));
+
+for (const [file, text] of Object.entries({
+  "kit.ts": 'export { Button } from "@grasp-os/app-kit/components/button";',
+  "kit-renamed.ts":
+    'import { Button as KitButton } from "@grasp-os/app-kit/components/button";\nexport { KitButton as Button };',
+  "kit-held.ts":
+    'import { Button as KitButton } from "@grasp-os/app-kit/components/button";\nexport const Button = KitButton;',
+  "kit-all.ts": 'export * from "@grasp-os/app-kit/components/button";',
+  "kit-again.ts": 'export { Button } from "./kit.ts";',
+  "damsko.ts": 'export { Button } from "@grasp-os/ui/components/button";',
+  "damsko-all/index.ts": 'export * from "@grasp-os/ui/components/button";',
+  "own.tsx":
+    "export const SaveBar = ({ style }) => <div {...stylex.props(style)} />;",
+  "own-and-kit.ts":
+    'export * from "./own.tsx";\nexport * from "@grasp-os/app-kit/components/button";',
+})) {
+  mkdirSync(path.dirname(path.join(modules, file)), { recursive: true });
+  writeFileSync(path.join(modules, file), `${text}\n`);
+}
+const page = path.join(modules, "page.tsx");
+
+describe("through a relative module", () => {
+  afterAll(() => {
+    rmSync(modules, { recursive: true, force: true });
+  });
+
+  tester.run("grasp/no-inline-styles, through a relative module", rule, {
+    valid: [
+      {
+        name: "a component the module declares",
+        code: `import { SaveBar } from "./own.tsx";${styles}
+  const Page = () => <SaveBar style={layout.wide} />;`,
+        filename: page,
+      },
+      {
+        name: "a component the module passes on from Damsko, by name or all at once",
+        code: `import { Button } from "./damsko.ts";
+  import * as Parts from "./damsko-all";${styles}
+  const Page = () => (
+    <>
+      <Button style={layout.wide} />
+      <Parts.Button style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+      },
+      {
+        name: "a component of the module's own beside everything of another package",
+        code: `import { SaveBar } from "./own-and-kit.ts";${styles}
+  const Page = () => <SaveBar style={layout.wide} />;`,
+        filename: page,
+      },
+    ],
+    invalid: [
+      {
+        name: "the kit's component, passed on by a relative module in each way",
+        code: `import { Button as One } from "./kit.ts";
+  import { Button as Two } from "./kit-renamed.ts";
+  import { Button as Three } from "./kit-held.ts";
+  import { Button as Four } from "./kit-all.ts";
+  import { Button as Five } from "./kit-again.ts";
+  import * as Kit from "./kit.ts";${styles}
+  const Page = () => (
+    <>
+      <One style={layout.wide} />
+      <Two style={layout.wide} />
+      <Three style={layout.wide} />
+      <Four style={layout.wide} />
+      <Five style={layout.wide} />
+      <Kit.Button style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+        errors: Array.from({ length: 6 }, () => ({ messageId: "stylexStyle" })),
+      },
+    ],
+  });
+});
+
+// RuleTester binds no globals, the repository's config does (`undefined`
+// among them): the forms that hold `undefined` once more, in a file linted
+// by the repository's own `vp lint`, as `vp check` lints it. A disable
+// comment there for an inline style object, which an unused one fails,
+// shows the rule ran.
+describe("grasp/no-inline-styles under the repository's config", () => {
+  const root = path.join(import.meta.dirname, "../..");
+  const report = z.object({
+    diagnostics: z.array(z.object({ code: z.string(), message: z.string() })),
+  });
+
+  it("lets undefined through beside StyleX styles: in a condition, an array and after ??", async () => {
+    // `vp lint` exits 1 on any report, and prints its JSON all the same.
+    const lint = spawn(
+      path.join(root, "node_modules/.bin/vp"),
+      [
+        "lint",
+        "--format",
+        "json",
+        "apps/web/src/lint-fixtures/style-or-nothing.tsx",
+      ],
+      { cwd: root, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    lint.stdout.setEncoding("utf-8");
+    let stdout = "";
+    lint.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    await once(lint, "close");
+    expect(report.parse(JSON.parse(stdout)).diagnostics).toStrictEqual([]);
+  }, 60_000);
 });
