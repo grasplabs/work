@@ -11,6 +11,7 @@ import { appFor } from "./apps.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import {
+  declinePermission,
   grantPermission,
   requestPermission,
   revokePermission,
@@ -58,6 +59,13 @@ export class PermissionsRpc extends CoreRpcTarget implements PermissionsApi {
     return await withPerson(
       this.#check,
       async (person) => await revokePermission(this.#env, person, id)
+    );
+  }
+
+  async decline(id: string): Promise<Permission> {
+    return await withPerson(
+      this.#check,
+      async (person) => await declinePermission(this.#env, person, id)
     );
   }
 

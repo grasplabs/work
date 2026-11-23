@@ -142,6 +142,7 @@ describe("permissions", () => {
       await Promise.all([
         outcome(grantReviewed(api, id)),
         outcome(api.permissions.revoke(id)),
+        outcome(api.permissions.decline(id)),
       ]);
     const refused = {
       builder: await grantAndRevoke(builder.api),
@@ -158,9 +159,9 @@ describe("permissions", () => {
       ...refused,
       status: listed.map(({ status }) => status),
     }).toStrictEqual({
-      builder: ["role.forbidden", "role.forbidden"],
-      user: ["role.forbidden", "role.forbidden"],
-      staff: ["role.forbidden", "role.forbidden"],
+      builder: ["role.forbidden", "role.forbidden", "role.forbidden"],
+      user: ["role.forbidden", "role.forbidden", "role.forbidden"],
+      staff: ["role.forbidden", "role.forbidden", "role.forbidden"],
       userAsks: "role.forbidden",
       userLists: "role.forbidden",
       staffAsks: "role.forbidden",
@@ -217,6 +218,58 @@ describe("permissions", () => {
     }).toStrictEqual({
       outcomes: ["ok", "permission.not_requested"],
       events: ["permission.granted"],
+    });
+  });
+
+  it("are declined only while requested: a decline that comes after a grant is refused, and the grant stays", async () => {
+    const builder = await permissionApi("builder");
+    const granting = await permissionApi("admin");
+    const declining = await permissionApi("admin");
+    const app = await newApp(builder.api);
+    const authority = actingFor(app, builder.userId);
+    // Both admins have the request in front of them; one grants it, then
+    // the other's decline, read before the grant, arrives.
+    const { id } = await builder.api.permissions.request(outlook(app.appId));
+    const declined = await builder.api.permissions.request(
+      outlook(app.appId, "DECLINED")
+    );
+    await grantReviewed(granting.api, id);
+    let late = "";
+    const events = await auditedDuring(async () => {
+      late = await outcome(declining.api.permissions.decline(id));
+    });
+    const listed = await builder.api.permissions.list(app);
+    const lateStatus = listed.find(
+      (permission) => permission.id === id
+    )?.status;
+    const stillReached = await callThrough(authority, "OUTLOOK");
+    // A request that still waits is declined, once: declined again, nothing
+    // changes and nothing more is recorded; and it can't be granted after.
+    const declines = await auditedDuring(async () => {
+      await declining.api.permissions.decline(declined.id);
+      await declining.api.permissions.decline(declined.id);
+    });
+    const thenGranted = await outcome(grantReviewed(granting.api, declined.id));
+    // Revoking what is active still works, where an admin takes access away.
+    const revoked = await granting.api.permissions.revoke(id);
+    expect({
+      late,
+      events,
+      lateStatus,
+      stillReached,
+      declines: declines.map(({ action, target }) => [action, target?.id]),
+      thenGranted,
+      revoked: revoked.status,
+      afterRevoke: await callThrough(authority, "OUTLOOK"),
+    }).toStrictEqual({
+      late: "permission.not_requested",
+      events: [],
+      lateStatus: "active",
+      stillReached: reached,
+      declines: [["permission.revoked", declined.id]],
+      thenGranted: "permission.not_requested",
+      revoked: "revoked",
+      afterRevoke: "no binding",
     });
   });
 

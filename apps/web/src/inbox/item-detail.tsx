@@ -480,7 +480,7 @@ const RequestItem = ({
         )
       }
       onDecline={async (session) =>
-        await session.permissions.revoke(request.id)
+        await session.permissions.decline(request.id)
       }
     />
   );
