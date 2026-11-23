@@ -2,7 +2,6 @@ import type {
   Agent,
   AgentDocument,
   AgentSettings,
-  AgentUsage,
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ToolClassSetting } from "@grasp-os/shared/connect";
@@ -10,16 +9,13 @@ import type { InstructionFileText } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
-import { formatDollars } from "../format.ts";
 import { Page } from "../frame/page.tsx";
 import {
   AlertDialog,
@@ -48,29 +44,16 @@ import {
   EmptyTitle,
 } from "../grasp/empty/index.ts";
 import {
-  CalendarIcon,
   Conversation,
   Edit,
   Pause,
   Play,
   Trash,
 } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
 import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  FactRow,
-  SettingRow,
-  SettingsRows,
-} from "../grasp/setting-row/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import {
@@ -85,18 +68,13 @@ import { useCoreAction } from "../use-core-action.ts";
 import { AgentAppsPanel, workOutQuietly } from "./agent-apps-card.tsx";
 import type { AgentAppsShown } from "./agent-apps-card.tsx";
 import { AgentDocuments } from "./agent-documents.tsx";
-import {
-  AgentFailure,
-  classesOn,
-  nextWakeAt,
-  useAudienceLine,
-  wakesOn,
-} from "./agent-facts.tsx";
+import { AgentFailure } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
 import { AgentLook } from "./agent-look.tsx";
+import { AgentOverview } from "./agent-overview.tsx";
 import { ShareAgent } from "./agent-share.tsx";
-import { AgentWakes, useLast } from "./agent-wakes.tsx";
+import { AgentWakes } from "./agent-wakes.tsx";
 import type { AgentTab } from "./tabs.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
@@ -146,209 +124,6 @@ const styles = stylex.create({
   // The `hidden` attribute alone loses to the stack's own display.
   hidden: { display: "none" },
 });
-
-/** A date and time as people read it here. */
-const useMoment = () => {
-  const { i18n } = useLingui();
-  return (iso: string): string =>
-    new Intl.DateTimeFormat(i18n.locale, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(iso));
-};
-
-/** A month such as `2026-11`, as people read it: November 2026. */
-const useMonthName = () => {
-  const { i18n } = useLingui();
-  return (month: string): string => {
-    const [year = 0, of = 1] = month.split("-").map(Number);
-    return new Intl.DateTimeFormat(i18n.locale, {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    }).format(new Date(Date.UTC(year, of - 1, 1)));
-  };
-};
-
-/**
- * Whom an agent answers and how much it may do, in a few words. The
- * first agent's is the company's own, set under Access. Another agent's
- * that core didn't say (as it won't for Grasp's staff) is said to be not
- * shown, never passed off as anyone's.
- */
-const useAccessWords = (
-  first: boolean,
-  settings: AgentSettings | undefined,
-  teams: StephenReach["teams"],
-  own: boolean
-): { who: string; may: string } => {
-  const { t } = useLingui();
-  const audienceLine = useAudienceLine(teams);
-  if (own) {
-    // A person's own agent has no settings of either: core holds both.
-    return { who: t`Only you`, may: t`What Grasp may do for you` };
-  }
-  if (first) {
-    return { who: t`Everyone with Grasp`, may: t`Set for each app` };
-  }
-  if (settings === undefined) {
-    return { who: t`Not shown`, may: t`Not shown` };
-  }
-  const classes = classesOn(settings);
-  return {
-    who: audienceLine(settings.audience),
-    may:
-      classes.on === 0
-        ? t`Nothing yet`
-        : t`${classes.on} of ${classes.of} kinds of work`,
-  };
-};
-
-/** What the agent used this month, as a fact row: how much and how often, never what. */
-const UsageRow = ({ usage }: { usage: AgentUsage }) => {
-  const { t } = useLingui();
-  const monthName = useMonthName();
-  const { requests, people } = usage;
-  const before = formatDollars(usage.spentBefore);
-  return (
-    <FactRow
-      info={[
-        plural(requests, {
-          one: "# request to a model",
-          other: "# requests to a model",
-        }),
-        plural(people, { one: "for # person", other: "for # people" }),
-        t`${before} the month before`,
-      ].join(" · ")}
-      label={monthName(usage.month)}
-    >
-      {formatDollars(usage.spent)}
-    </FactRow>
-  );
-};
-
-/**
- * The agent's facts, as rows of a settings card: what it is for, whom it
- * answers, how much it may do, when it works on its own, its model and
- * this month's use, every value on one edge, as Settings has its facts.
- */
-const Facts = ({
-  agent,
-  first,
-  settings,
-  teams,
-  wakes,
-  usage,
-}: {
-  agent: Agent;
-  first: boolean;
-  settings: AgentSettings | undefined;
-  teams: StephenReach["teams"];
-  wakes: readonly AgentWake[];
-  usage: AgentUsage | undefined;
-}) => {
-  const { t } = useLingui();
-  const moment = useMoment();
-  const own = agent.ownerId !== null;
-  const { who, may } = useAccessWords(first, settings, teams, own);
-  const scheduled = wakesOn(wakes).length;
-  const next = nextWakeAt(wakes);
-  const nextMoment = next === undefined ? "" : moment(next);
-  return (
-    <SectionCard variant="grouped" density="compact" flush title={t`Details`}>
-      {/* The control column, not each value's own width: a job is a
-          sentence, which would leave its name no room on a phone. */}
-      <SettingsRows>
-        <FactRow
-          label={t`Answers`}
-          {...(own ? { info: t`In Grasp's chat` } : {})}
-        >
-          {who}
-        </FactRow>
-        <FactRow
-          label={t`May do`}
-          {...(own ? { info: t`As your company has set it, never more` } : {})}
-        >
-          {may}
-        </FactRow>
-        <FactRow label={t`On its own`}>
-          {scheduled === 0
-            ? t`Only when asked`
-            : t`${scheduled} on a schedule, next ${nextMoment}`}
-        </FactRow>
-        <FactRow label={t`Model`}>
-          {agent.model === null ? t`The asker's` : modelName(agent.model)}
-        </FactRow>
-        {usage === undefined ? null : <UsageRow usage={usage} />}
-        {agent.changedAt === null ? null : (
-          <FactRow label={t`Changed`}>{moment(agent.changedAt)}</FactRow>
-        )}
-      </SettingsRows>
-    </SectionCard>
-  );
-};
-
-/**
- * What the agent did lately: each schedule's last run and how it went,
- * and when someone last asked it. Core keeps no more of its runs for
- * this page (agent-wakes.ts, agent-usage.ts).
- */
-const RecentActivity = ({
-  wakes,
-  usage,
-}: {
-  wakes: readonly AgentWake[];
-  usage: AgentUsage | undefined;
-}) => {
-  const { t } = useLingui();
-  const moment = useMoment();
-  const lastLine = useLast();
-  const ran = wakes
-    .flatMap((wake) =>
-      wake.lastAt === null ? [] : [{ ...wake, lastAt: wake.lastAt }]
-    )
-    .toSorted((a, b) => b.lastAt.localeCompare(a.lastAt));
-  const asked = usage?.lastAt ?? null;
-  return (
-    <SectionCard
-      variant="grouped"
-      density="compact"
-      flush
-      title={t`Recent activity`}
-    >
-      {ran.length === 0 && asked === null ? (
-        <Empty size="sm">
-          <EmptyHeader>
-            <EmptyDescription>{t`Nothing yet. What it does shows here.`}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ItemGroup separated>
-          {asked === null ? null : (
-            <Item size="sm">
-              <ItemMedia icon={Conversation} iconLook="inline" />
-              <ItemContent>
-                <ItemTitle>{t`Last asked in a chat`}</ItemTitle>
-                <ItemDescription>{moment(asked)}</ItemDescription>
-              </ItemContent>
-            </Item>
-          )}
-          {ran.map((wake) => (
-            <Item key={wake.id} size="sm">
-              <ItemMedia icon={CalendarIcon} iconLook="inline" />
-              <ItemContent>
-                <ItemTitle>{wake.opening}</ItemTitle>
-                <ItemDescription>
-                  {lastLine(wake) ?? moment(wake.lastAt)}
-                </ItemDescription>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-      )}
-    </SectionCard>
-  );
-};
 
 /** What the first agent's access is read from, as Settings › Stephen read it. */
 export interface FirstAgentAccess {
@@ -512,6 +287,7 @@ const AgentInstructions = ({
 /** Edit: the agent's name, job, picture and model, in a dialog the head's menu opens. */
 const EditAgent = ({
   agent,
+  first,
   typed,
   models,
   can,
@@ -522,6 +298,8 @@ const EditAgent = ({
   open: boolean;
   setOpen: (open: boolean) => void;
   agent: Agent;
+  /** The company's first agent, whose look is fixed. */
+  first: boolean;
   typed: Typed;
   models: readonly string[];
   can: boolean;
@@ -550,6 +328,9 @@ const EditAgent = ({
               }}
               parts={parts}
             />
+          ) : null}
+          {open && !first ? (
+            <AgentLook agent={agent} can={can} save={save} />
           ) : null}
         </DialogBody>
         <DialogFooter>
@@ -721,7 +502,7 @@ export const AgentPage = ({
   people,
   editable,
   usable,
-  usage,
+  userId,
   firstAccess,
   models,
   tab,
@@ -752,8 +533,8 @@ export const AgentPage = ({
   editable: boolean;
   /** Whether the person may talk to it themselves. */
   usable: boolean;
-  /** What it used of the models this month; none where core didn't say. */
-  usage: AgentUsage | undefined;
+  /** Who reads the page. */
+  userId: string;
   /**
    * The first agent's access: who reaches it in each chat app, what it
    * may do in each app, and the workflows people start by asking it. None
@@ -829,21 +610,24 @@ export const AgentPage = ({
   return (
     <Page>
       <PageColumn measure="settings">
-        <AgentHead
-          agent={agent}
-          can={can}
-          change={change}
-          first={first}
-          onDelete={() => {
-            setDeleting(true);
-          }}
-          onEdit={() => {
-            setEditing(true);
-          }}
-          usable={usable}
-        />
+        {shownTab === "overview" ? null : (
+          <AgentHead
+            agent={agent}
+            can={can}
+            change={change}
+            first={first}
+            onDelete={() => {
+              setDeleting(true);
+            }}
+            onEdit={() => {
+              setEditing(true);
+            }}
+            usable={usable}
+          />
+        )}
         <EditAgent
           agent={agent}
+          first={first}
           can={can}
           models={models}
           open={editing}
@@ -862,25 +646,33 @@ export const AgentPage = ({
         <AgentFailure>{failure}</AgentFailure>
         {/* Every tab stays mounted, the others hidden: what is typed and
           not yet saved on one stays while another is looked at. */}
-        <div
-          hidden={shownTab !== "overview"}
-          {...stylex.props(
-            styles.stack,
-            shownTab !== "overview" && styles.hidden
-          )}
-        >
-          <Facts
+        {shownTab === "overview" ? (
+          <AgentOverview
             agent={agent}
+            apps={apps?.apps}
+            can={can}
+            editable={editable}
             first={first}
-            settings={settings}
-            teams={teams}
-            usage={usage}
+            instructions={instructions}
+            onDelete={() => {
+              setDeleting(true);
+            }}
+            onEdit={() => {
+              setEditing(true);
+            }}
+            pause={(paused: boolean) => {
+              void change(async (session) => {
+                await session.connections.setAgentPaused(agent.id, paused);
+              });
+            }}
+            people={people}
+            usable={usable}
+            userId={userId}
             wakes={wakes}
-          />
-          {first ? null : <AgentLook agent={agent} can={can} save={save} />}
-          <RecentActivity usage={usage} wakes={wakes} />
-          <ShareAgent agent={agent} can={can} change={change} />
-        </div>
+          >
+            <ShareAgent agent={agent} can={can} change={change} />
+          </AgentOverview>
+        ) : null}
         <div
           hidden={shownTab !== "instructions"}
           {...stylex.props(

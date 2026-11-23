@@ -383,7 +383,7 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     tab={tab}
     teams={teams}
     usable={usable}
-    usage={managed.usage[agent.id]}
+    userId="user-admin"
     wakes={managed.wakes[agent.id] ?? []}
   />
 );
@@ -832,7 +832,7 @@ describe("the company's agents, on pages of their own", () => {
           tab="overview"
           teams={teams}
           usable
-          usage={undefined}
+          userId="user-admin"
           wakes={[{ ...failedWake, agentId: claire.id }]}
         />
       );
@@ -965,7 +965,7 @@ describe("the company's agents, on pages of their own", () => {
           tab="access"
           teams={teams}
           usable={false}
-          usage={undefined}
+          userId="user-admin"
           wakes={[]}
         />
       );
