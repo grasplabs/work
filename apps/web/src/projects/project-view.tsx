@@ -297,7 +297,7 @@ const Items = ({
               void pages.readMore();
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             <Trans>Show more</Trans>
           </Button>

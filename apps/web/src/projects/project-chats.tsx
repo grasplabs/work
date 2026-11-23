@@ -181,7 +181,7 @@ export const AddChat = ({
                                     void add(chat.id);
                                   }}
                                   size="sm"
-                                  variant="secondary"
+                                  variant="outline"
                                 >
                                   <Icon icon={PlusIcon} />
                                   <Trans context="put in a project">Add</Trans>

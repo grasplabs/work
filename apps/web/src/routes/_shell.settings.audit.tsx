@@ -3,13 +3,8 @@ import type {
   AuditRecord,
   FullVerification,
 } from "@grasp-os/shared/audit-log";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
+import { Card, CardContent } from "@grasp-os/ui/components/card";
+import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import {
   Sheet,
   SheetContent,
@@ -20,7 +15,7 @@ import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { EventInspector } from "../activity/audit-event.tsx";
 import { LogBar, LogRecords, readLog } from "../activity/audit-log.tsx";
@@ -54,6 +49,15 @@ import { SettingsError } from "../settings/settings-parts.tsx";
 const WIDE = 64 * 16;
 
 const styles = stylex.create({
+  // The events' title over their card, on the page's ground, a small step
+  // above it, its words where the rows' start.
+  group: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    rowGap: space["2"],
+    minWidth: 0,
+  },
+  head: { paddingInline: space.tableCellInline },
   // The table, and the details beside it while an event is open.
   split: {
     display: "grid",
@@ -159,49 +163,56 @@ const AuditTrail = () => {
   const { box, wide } = useWide();
   const directory = log.state === "ready" ? log.data.directory : undefined;
   const beside = open !== undefined && directory !== undefined && wide;
+  const titleId = useId();
   return (
     <>
       <ChainBroken ended={endedOf(own, last)} />
       <div ref={box} {...stylex.props(styles.split, beside && styles.open)}>
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle level={2}>
-              {filters.archive === true ? (
-                <Trans>Archived events</Trans>
+        <section aria-labelledby={titleId} {...stylex.props(styles.group)}>
+          <div {...stylex.props(styles.head)}>
+            <SectionHeader
+              actions={
+                <IntegrityDialog last={last} onChecked={setOwn} own={own}>
+                  <RetentionRows />
+                </IntegrityDialog>
+              }
+              id={titleId}
+              title={
+                filters.archive === true ? (
+                  <Trans>Archived events</Trans>
+                ) : (
+                  <Trans>Events</Trans>
+                )
+              }
+              variant="group"
+            />
+          </div>
+          <Card size="sm">
+            <CardContent flush>
+              {log.state === "ready" ? (
+                <>
+                  {/* The bar starts again from new filters. */}
+                  <LogBar
+                    directory={log.data.directory}
+                    key={JSON.stringify(filters)}
+                    search={filters}
+                  />
+                  <LogRecords
+                    beside={beside}
+                    directory={log.data.directory}
+                    first={log.data.page}
+                    key={logKey(filters, log.data.page)}
+                    onDetails={setOpen}
+                    open={open?.seq}
+                    search={filters}
+                  />
+                </>
               ) : (
-                <Trans>Events</Trans>
+                <NotLoadedState heading="h3" page={log} />
               )}
-            </CardTitle>
-            <CardAction>
-              <IntegrityDialog last={last} onChecked={setOwn} own={own}>
-                <RetentionRows />
-              </IntegrityDialog>
-            </CardAction>
-          </CardHeader>
-          <CardContent flush>
-            {log.state === "ready" ? (
-              <>
-                {/* The bar starts again from new filters. */}
-                <LogBar
-                  directory={log.data.directory}
-                  key={JSON.stringify(filters)}
-                  search={filters}
-                />
-                <LogRecords
-                  beside={beside}
-                  directory={log.data.directory}
-                  first={log.data.page}
-                  key={logKey(filters, log.data.page)}
-                  onDetails={setOpen}
-                  open={open?.seq}
-                  search={filters}
-                />
-              </>
-            ) : (
-              <NotLoadedState heading="h3" page={log} />
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </section>
         {open === undefined || directory === undefined ? null : (
           <Details
             directory={directory}

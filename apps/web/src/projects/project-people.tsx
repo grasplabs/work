@@ -244,7 +244,6 @@ const AddRow = ({
               };
             }),
           ]}
-          media={<Icon icon={UsersIcon} />}
           onValueChange={setPicked}
           placeholder={t`Search people and teams`}
           value={picked}
@@ -487,7 +486,7 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
               void pages.readMore();
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             <Trans>Show more</Trans>
           </Button>

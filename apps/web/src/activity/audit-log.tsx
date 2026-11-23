@@ -221,6 +221,11 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["2"],
   },
+  // A control in a cell, a line tall: it may stand out above and below.
+  control: {
+    display: "inline-flex",
+    marginBlock: `calc(-1 * ${space["1"]})`,
+  },
   // Who did it: a face (or what kind of actor it is) before the name.
   who: {
     display: "inline-flex",
@@ -390,7 +395,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
       }}
     >
       <PopoverTrigger asChild>
-        <Button size="sm" variant="secondary">
+        <Button size="sm" variant="outline">
           <Icon icon={SlidersHorizontalIcon} />
           {set === 0
             ? t`Filters`
@@ -523,7 +528,7 @@ const LogExport = ({ search }: { search: LogSearch }) => {
     <span {...stylex.props(styles.end)}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="secondary">
+          <Button size="sm" variant="outline">
             <Icon icon={DownloadIcon} />
             <Trans>Export</Trans>
             <Icon icon={ChevronDownIcon} />
@@ -803,7 +808,9 @@ export const LogRecords = ({
                 <Trans>Type</Trans>
               </TableHead>
             )}
-            <TableHead align="end" aria-label={t`Details`} />
+            <TableHead align="end">
+              <Trans>Details</Trans>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -837,16 +844,19 @@ export const LogRecords = ({
                   </TableCell>
                 )}
                 <TableCell align="end">
-                  <Button
-                    aria-label={t`Details of event ${seq}`}
-                    onClick={() => {
-                      onDetails(record);
-                    }}
-                    size="icon-xs"
-                    variant="ghost"
-                  >
-                    <Icon icon={ChevronRightIcon} />
-                  </Button>
+                  {/* The button within the row's line, so the row keeps its height. */}
+                  <span {...stylex.props(styles.control)}>
+                    <Button
+                      aria-label={t`Details of event ${seq}`}
+                      onClick={() => {
+                        onDetails(record);
+                      }}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <Icon icon={ChevronRightIcon} />
+                    </Button>
+                  </span>
                 </TableCell>
               </TableRow>
             );
