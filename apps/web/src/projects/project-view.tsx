@@ -98,7 +98,8 @@ import { ProjectPeople } from "./project-people.tsx";
 // drawing of a page. A part with nothing in it says so on one dashed line,
 // with its one action for whoever may take it. Knowledge in a project, a
 // project's own pause and when an App was last opened wait on core
-// (handoffs/core-needs.md 84 to 86), so the page leaves them out.
+// (handoffs/core-needs.md 84 to 86), so the page leaves them out. As drawn,
+// the project's description stands only in its Settings.
 
 /** The project page's tabs, by the name the address carries. */
 export const projectTabs = [
@@ -900,7 +901,7 @@ const Overview = ({
         ) : (
           <ItemGroup separated>
             <PersonRow
-              name={owner}
+              name={project.owner.name ?? project.owner.id}
               role={t({ message: "Owner", context: "a project's owner" })}
               team={false}
             />
