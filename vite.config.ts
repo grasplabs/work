@@ -478,6 +478,13 @@ export default defineConfig({
         },
       },
       {
+        // Damsko's Markdown ends its switch over mdast's phrasing nodes in
+        // a default: in Damsko, its docs' packages add node types of their
+        // own to that union, which this copy never sees.
+        files: ["packages/ui/src/components/markdown/markdown.tsx"],
+        rules: { "typescript/switch-exhaustiveness-check": "off" },
+      },
+      {
         files: [
           "packages/app-kit/src/components/**",
           // Damsko's, installed the same way and held to these settings

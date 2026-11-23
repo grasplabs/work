@@ -142,8 +142,9 @@ const readDamsko = (damsko: string, file: string): Content =>
     : undefined;
 
 const check = (pin: Pin, damsko: string, local: LocalChange[]): string[] => {
+  const packages = z.record(z.string(), z.string());
   const manifest = z
-    .object({ dependencies: z.record(z.string(), z.string()) })
+    .object({ dependencies: packages, devDependencies: packages })
     .parse(JSON.parse(readFileSync(path.join(ui, "package.json"), "utf-8")));
   return differences(
     expectedAt(damsko, pin),
@@ -151,7 +152,7 @@ const check = (pin: Pin, damsko: string, local: LocalChange[]): string[] => {
     {
       read: readOurs,
       sources: filesUnder("src"),
-      dependencies: manifest.dependencies,
+      dependencies: { ...manifest.devDependencies, ...manifest.dependencies },
     },
     local
   );

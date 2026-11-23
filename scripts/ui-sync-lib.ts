@@ -34,6 +34,7 @@ const registrySchema = z.object({
     z.object({
       name: z.string(),
       dependencies: z.array(z.string()).default([]),
+      devDependencies: z.array(z.string()).default([]),
       registryDependencies: z.array(z.string()).default([]),
       files: z.array(z.object({ path: z.string(), target: z.string() })),
     })
@@ -88,7 +89,7 @@ export const expectedOf = (
       }
       files.set(installedPath(file.target), file.path);
     }
-    for (const dependency of item.dependencies) {
+    for (const dependency of [...item.dependencies, ...item.devDependencies]) {
       dependencies.add(dependency);
     }
     for (const dependency of item.registryDependencies) {
@@ -108,7 +109,7 @@ export interface Installed {
   readonly read: (path: string) => Uint8Array | undefined;
   /** Every file under `packages/ui/src`, by its path in `packages/ui`. */
   readonly sources: readonly string[];
-  /** `packages/ui/package.json`'s dependencies, each with its version. */
+  /** `packages/ui/package.json`'s dependencies, its dev ones too, each with its version. */
   readonly dependencies: Readonly<Record<string, string>>;
 }
 

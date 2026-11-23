@@ -45,6 +45,10 @@ catalog:
   typedoc: 0.28.20
   typedoc-plugin-markdown: 4.14.1
   mdast-util-from-markdown: 2.1.0
+  # Damsko's Markdown (packages/ui): tables, task lists and the rest of
+  # GitHub's flavour, on the parser above, at the versions Damsko pins.
+  mdast-util-gfm: 3.1.0
+  micromark-extension-gfm: 3.0.0
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs).
   parse5: 8.1.0
@@ -286,6 +290,10 @@ catalog:
   # An App's Code tab: its files and a draft's changes, virtualised and
   # highlighted by the library's own highlighter (Highlights).
   "@pierre/diffs": 1.6.2
+  # Damsko's code block (packages/ui): its highlighter, each language's
+  # grammar loaded when a block first shows it.
+  prismjs: 1.30.0
+  "@types/prismjs": 1.26.6
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0
