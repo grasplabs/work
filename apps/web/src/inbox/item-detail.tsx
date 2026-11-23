@@ -16,6 +16,7 @@ import {
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
+import { DecisionCard } from "../decision-card.tsx";
 import { formatDate, formatDateTime } from "../format.ts";
 import {
   AlertDialog,
@@ -810,13 +811,39 @@ const GapItem = ({
   );
 };
 
+/**
+ * A decision a workflow's run waits for: answered here, in the one shape
+ * every approval takes (decision-card.tsx); the Inbox reads again once it
+ * is answered, and the item goes.
+ */
+const DecisionItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "decision" }>;
+}) => {
+  const router = useRouter();
+  return (
+    <div {...stylex.props(styles.item)}>
+      <DecisionCard
+        decision={source.decision}
+        onAnswered={(said) => {
+          frame.onSaid(said);
+          void router.invalidate();
+        }}
+        where="inbox"
+      />
+    </div>
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
   const { item } = frame;
   const labels: Partial<Record<InboxSource["type"], string>> = {
     reconnect: t`Sign in again`,
-    decision: t`Review and answer`,
     stoppedEvents: t`Open the connection`,
     appMessage: t`Open the App`,
   };
@@ -925,6 +952,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "gap") {
     return <GapItem frame={frame} source={source} />;
+  }
+  if (source.type === "decision") {
+    return <DecisionItem frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };

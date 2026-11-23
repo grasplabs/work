@@ -200,10 +200,12 @@ export const RunPage = ({
     { label: title },
   ];
   const going = run.endedAt === null;
+  const { version } = run;
   const waits = decision !== undefined && decision.status === "open";
   const shown = waits ? "waiting" : run.status;
   const steps = updates(run, waits);
   const seesResult = run.principal === names.me || admin;
+  const started = formatSince(run.createdAt);
   const took =
     run.endedAt === null
       ? undefined
@@ -227,7 +229,7 @@ export const RunPage = ({
                   {took === undefined
                     ? formatSince(run.createdAt)
                     : t({
-                        message: `${formatSince(run.createdAt)} · took ${took}`,
+                        message: `${started} · took ${took}`,
                         context:
                           "when a workflow run started, and how long it took",
                       })}
@@ -286,7 +288,7 @@ export const RunPage = ({
                   })}
                 </Heading>
                 <Text size="sm" tone="muted">
-                  {t`Version ${run.version} ran this. Only builders see this.`}
+                  {t`Version ${version} ran this. Only builders see this.`}
                 </Text>
               </div>
               <Collapsible title={t`Open its steps`}>

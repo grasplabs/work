@@ -131,10 +131,13 @@ const Source = ({
 export const DecisionCard = ({
   decision,
   where,
+  onAnswered,
 }: {
   decision: DecisionView;
   /** Where it stands: the decision's own page, the Inbox, its workflow's page or its run's. */
   where: DecisionCardWhere;
+  /** Called once an answer is recorded, with how it was said: the Inbox lets the item go. */
+  onAnswered?: (said: string) => void;
 }) => {
   const { t } = useLingui();
   // What the card learned of the decision since it was given it, shown
@@ -232,6 +235,9 @@ export const DecisionCard = ({
     });
     if (answered !== undefined) {
       setCurrent(answered);
+      if (answered.status !== "open") {
+        onAnswered?.(outcomeOf(answered));
+      }
     }
   };
   return (

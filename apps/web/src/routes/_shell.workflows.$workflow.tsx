@@ -584,8 +584,8 @@ const WorkflowResourceView = ({
     : undefined;
   const view = shownView(asked, builder);
   const label = workflowLabel(resource);
-  // Grasp's chat about it, docked beside it for its builders, draws it.
-  const chat = useChatAbout(built, label);
+  // Grasp's chat about it, docked beside its Flow for its builders, draws it.
+  const chat = useChatAbout(view === "flow" ? built : undefined, label);
   const { draft: shared, reread } = useDraft(built, chat.worked);
   const { draft: latest, onDraft } = useWorkflowDraft(
     resource.id,

@@ -90,6 +90,7 @@ const RunRow = ({
   const title = useRunTitle()(run);
   const startedBy = useStartedBy(names);
   const who = startedBy(run.principal);
+  const ended = run.endedAt === null ? "" : formatSince(run.endedAt);
   return (
     <Item
       render={
@@ -106,7 +107,7 @@ const RunRow = ({
           {run.endedAt === null
             ? t({ message: `By ${who}`, context: "who started a workflow run" })
             : t({
-                message: `By ${who} · ended ${formatSince(run.endedAt)}`,
+                message: `By ${who} · ended ${ended}`,
                 context: "who started a workflow run, and when it ended",
               })}
         </ItemDescription>
@@ -204,32 +205,35 @@ const Workshop = ({
         </Button>
       </div>
       <ItemGroup aria-label={label}>
-        {rows.map((row) => (
-          <Item key={row.id} size="sm" variant="outline">
-            <ItemContent>
-              <ItemTitle>{row.title}</ItemTitle>
-              <ItemDescription>{row.description}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Button
-                aria-label={t({
-                  message: `Open ${row.title}`,
-                  context: "open a workflow's builder tool",
-                })}
-                onClick={() => {
-                  open(row.to);
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t({
-                  message: "Open",
-                  context: "open a workflow's builder tool",
-                })}
-              </Button>
-            </ItemActions>
-          </Item>
-        ))}
+        {rows.map((row) => {
+          const tool = row.title;
+          return (
+            <Item key={row.id} size="sm" variant="outline">
+              <ItemContent>
+                <ItemTitle>{row.title}</ItemTitle>
+                <ItemDescription>{row.description}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  aria-label={t({
+                    message: `Open ${tool}`,
+                    context: "open a workflow's builder tool",
+                  })}
+                  onClick={() => {
+                    open(row.to);
+                  }}
+                  size="sm"
+                  variant="ghost"
+                >
+                  {t({
+                    message: "Open",
+                    context: "open a workflow's builder tool",
+                  })}
+                </Button>
+              </ItemActions>
+            </Item>
+          );
+        })}
       </ItemGroup>
     </section>
   );
