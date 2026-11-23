@@ -1,32 +1,42 @@
 /**
  * Keeps `packages/ui` equal to Damsko (github.com/grasplabs/damsko), whose
- * components it holds as source, installed with the shadcn CLI. A file
- * there changes only in Damsko, then by a sync here; it is never edited in
- * place.
+ * components it holds as source, installed with the shadcn CLI, except the
+ * files changed here on purpose, which `packages/ui/local-changes.json`
+ * lists and which go back to Damsko as a pull request there.
  *
- *   node scripts/ui-sync.ts check             every file is Damsko's, byte for byte
+ *   node scripts/ui-sync.ts check             every file is Damsko's, byte for byte, or listed
  *   node scripts/ui-sync.ts update [commit]   install every item again, at the pin or a new commit
+ *   node scripts/ui-sync.ts propose           the listed changes as a patch for Damsko
  *
  * The pin is `packages/ui/damsko.json`: the commit of Damsko, and the items
  * added by name. Damsko's git is the durable form of a version: its site
  * serves its `main` as last deployed and each released tag at /r/<tag>/,
- * never a commit between tags. So neither command reads the site: both
- * fetch Damsko at the pinned commit from GitHub.
+ * never a commit between tags. So no command reads the site: each fetches
+ * Damsko at the pinned commit from GitHub.
  *
  * `check` compares with the commit's own files. Damsko's registry gives
  * every file as it stands in its tree, at the same path under `src/`, and
  * its CI holds an install to that byte for byte (its check-install.ts), so
  * the tree at the commit is what the CLI installs. A font is held as the
  * font: it travels as base64 text, which Damsko's own script, installed
- * beside it, unpacks; the check runs that script's `--check` too.
+ * beside it, unpacks; the check runs that script's `--check` too. A listed
+ * file may differ; one that no longer does fails, and one listed for two
+ * weeks with no pull request in Damsko is named, without failing.
  *
  * `update` builds the registry from that commit as Damsko does
  * (`pnpm install`, then its scripts/registry-dist.ts), serves it on
  * 127.0.0.1 and adds every item with `shadcn add --overwrite`, all at
  * once, into an emptied `src/`: what Damsko dropped goes, too. Then it
- * unpacks the fonts. For the run alone, components.json names the local
- * registry in place of the site. Review `git diff` after it; never
- * `shadcn add --all`, which reads shadcn's own registry.
+ * unpacks the fonts, and carries each listed change to the new version:
+ * dropped once Damsko's file is the same, else applied again on top, or
+ * left with git's conflict markers to resolve by hand. For the run alone,
+ * components.json names the local registry in place of the site. Review
+ * `git diff` after it; never `shadcn add --all`, which reads shadcn's own
+ * registry.
+ *
+ * `propose` writes the listed changes as one patch against Damsko's tree
+ * at the pin and prints the commands that open the pull request there. It
+ * pushes and opens nothing itself.
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -45,32 +55,45 @@ import path from "node:path";
 import { z } from "zod";
 
 import {
+  carry,
   differences,
   expectedOf,
   fontsUnpack,
   namespace,
   parseRegistry,
   pinSchema,
+  readLocalChanges,
+  unproposed,
 } from "./ui-sync-lib.ts";
-import type { Pin } from "./ui-sync-lib.ts";
+import type { Content, Expected, LocalChange, Pin } from "./ui-sync-lib.ts";
 
 const damskoRepository = "https://github.com/grasplabs/damsko.git";
 const ui = path.resolve("packages/ui");
 const pinPath = path.join(ui, "damsko.json");
 const componentsPath = path.join(ui, "components.json");
+const localChangesPath = path.join(ui, "local-changes.json");
 
 const run = async (
   command: string,
   args: readonly string[],
-  cwd: string
-): Promise<void> => {
-  const child = spawn(command, args, { cwd, stdio: "inherit" });
+  cwd: string,
+  output: "inherit" | "capture" = "inherit"
+): Promise<string> => {
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ["ignore", output === "capture" ? "pipe" : "inherit", "inherit"],
+  });
+  const chunks: Buffer[] = [];
+  child.stdout?.on("data", (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
   await once(child, "close");
   if (child.exitCode !== 0) {
     throw new Error(
       `${command} ${args.join(" ")} exited ${String(child.exitCode)}.`
     );
   }
+  return Buffer.concat(chunks).toString("utf-8");
 };
 
 /** Damsko's tree at a commit, in a folder of its own. */
@@ -95,24 +118,42 @@ const filesUnder = (folder: string): string[] =>
       )
     : [];
 
-const check = (pin: Pin, damsko: string): string[] => {
-  const registry = parseRegistry(
-    readFileSync(path.join(damsko, "registry.json"), "utf-8")
+/** A file of `packages/ui`, or undefined without one. */
+const readOurs = (file: string): Content =>
+  existsSync(path.join(ui, file))
+    ? readFileSync(path.join(ui, file))
+    : undefined;
+
+/** What the pinned items install, from Damsko's tree at its commit. */
+const expectedAt = (damsko: string, pin: Pin): Expected =>
+  expectedOf(
+    parseRegistry(readFileSync(path.join(damsko, "registry.json"), "utf-8")),
+    pin.items
   );
+
+/** Damsko's file for one of `packages/ui`: by the registry's map, else at the same path. */
+const damskoPath = (expected: Expected, file: string): string =>
+  expected.files.get(file) ?? file;
+
+/** Damsko's file in a checkout, or undefined where it has none. */
+const readDamsko = (damsko: string, file: string): Content =>
+  existsSync(path.join(damsko, file))
+    ? readFileSync(path.join(damsko, file))
+    : undefined;
+
+const check = (pin: Pin, damsko: string, local: LocalChange[]): string[] => {
   const manifest = z
     .object({ dependencies: z.record(z.string(), z.string()) })
     .parse(JSON.parse(readFileSync(path.join(ui, "package.json"), "utf-8")));
   return differences(
-    expectedOf(registry, pin.items),
+    expectedAt(damsko, pin),
     (file) => readFileSync(path.join(damsko, file)),
     {
-      read: (file) =>
-        existsSync(path.join(ui, file))
-          ? readFileSync(path.join(ui, file))
-          : undefined,
+      read: readOurs,
       sources: filesUnder("src"),
       dependencies: manifest.dependencies,
-    }
+    },
+    local
   );
 };
 
@@ -147,7 +188,7 @@ const serve = async (
   };
 };
 
-const update = async (pin: Pin, damsko: string): Promise<void> => {
+const install = async (pin: Pin, damsko: string): Promise<void> => {
   const site = path.join(path.dirname(damsko), "site");
   await run("pnpm", ["install", "--frozen-lockfile"], damsko);
   await run("node", ["scripts/registry-dist.ts", site], damsko);
@@ -179,44 +220,171 @@ const update = async (pin: Pin, damsko: string): Promise<void> => {
     writeFileSync(componentsPath, components);
     served.close();
   }
-  writeFileSync(pinPath, `${JSON.stringify(pin, null, 2)}\n`);
+};
+
+const writeOurs = (file: string, content: Content): void => {
+  if (content === undefined) {
+    rmSync(path.join(ui, file), { force: true });
+  } else {
+    writeFileSync(path.join(ui, file), content);
+  }
+};
+
+/**
+ * Installs the pin, then carries each listed change over: the file as it
+ * was here, Damsko's at the old pin and at the new one. Returns the paths
+ * left in conflict.
+ */
+const update = async (
+  pin: Pin,
+  kept: Pin,
+  damsko: string,
+  local: LocalChange[]
+): Promise<string[]> => {
+  const ours = new Map(local.map(({ path: file }) => [file, readOurs(file)]));
+  let was = damsko;
+  if (local.length > 0 && kept.commit !== pin.commit) {
+    was = path.join(path.dirname(damsko), "pinned");
+    await fetchDamsko(kept.commit, was);
+  }
+  const wasExpected = local.length > 0 ? expectedAt(was, kept) : undefined;
+  await install(pin, damsko);
+  if (pin.commit !== kept.commit) {
+    writeFileSync(pinPath, `${JSON.stringify(pin, null, 2)}\n`);
+  }
+  if (wasExpected === undefined) {
+    return [];
+  }
+  const nowExpected = expectedAt(damsko, pin);
+  const conflicts: string[] = [];
+  const remaining = local.filter(({ path: file }) => {
+    const carried = carry({
+      was: readDamsko(was, damskoPath(wasExpected, file)),
+      now: readDamsko(damsko, damskoPath(nowExpected, file)),
+      ours: ours.get(file),
+    });
+    if (carried.kind === "dropped") {
+      console.log(`${file}: Damsko's is now the same; its entry is dropped.`);
+      return false;
+    }
+    writeOurs(file, carried.content);
+    if (carried.kind === "conflict") {
+      conflicts.push(file);
+    }
+    return true;
+  });
+  writeFileSync(localChangesPath, `${JSON.stringify(remaining, null, 2)}\n`);
+  return conflicts;
+};
+
+/** The listed changes as one patch against Damsko's tree at the pin. */
+const propose = async (
+  pin: Pin,
+  damsko: string,
+  local: LocalChange[]
+): Promise<void> => {
+  if (local.length === 0) {
+    console.log("packages/ui/local-changes.json lists no change to propose.");
+    return;
+  }
+  const expected = expectedAt(damsko, pin);
+  for (const { path: file } of local) {
+    const target = path.join(damsko, damskoPath(expected, file));
+    const content = readOurs(file);
+    if (content === undefined) {
+      rmSync(target, { force: true });
+    } else {
+      writeFileSync(target, content);
+    }
+  }
+  await run("git", ["add", "--all"], damsko);
+  const patch = await run(
+    "git",
+    ["diff", "--cached", "--binary"],
+    damsko,
+    "capture"
+  );
+  const out = path.join(
+    tmpdir(),
+    `damsko-local-changes-${pin.commit.slice(0, 8)}.patch`
+  );
+  writeFileSync(out, patch);
+  console.log(
+    [
+      `Wrote ${out}: ${local.length} listed ${local.length === 1 ? "change" : "changes"} against Damsko at ${pin.commit}.`,
+      "",
+      "In a checkout of github.com/grasplabs/damsko:",
+      "",
+      "  git fetch origin",
+      "  git switch --create fix/<what-it-changes> origin/main",
+      `  git apply --3way ${out}`,
+      "  git add --all",
+      '  git commit --message "fix(<component>): <what and why>"',
+      "  git push --set-upstream origin HEAD",
+      "  gh pr create --fill",
+      "",
+      "Then put the pull request's address in packages/ui/local-changes.json, as pullRequest.",
+    ].join("\n")
+  );
 };
 
 const [command, commit] = process.argv.slice(2);
-if (command !== "check" && command !== "update") {
-  throw new Error("Usage: node scripts/ui-sync.ts check | update [commit]");
+if (command !== "check" && command !== "update" && command !== "propose") {
+  throw new Error(
+    "Usage: node scripts/ui-sync.ts check | update [commit] | propose"
+  );
 }
 const kept = pinSchema.parse(JSON.parse(readFileSync(pinPath, "utf-8")));
 const pin =
   command === "update" && commit !== undefined
     ? pinSchema.parse({ ...kept, commit })
     : kept;
+const local = readLocalChanges(localChangesPath);
 
 const scratch = mkdtempSync(path.join(tmpdir(), "damsko-"));
 try {
   const damsko = path.join(scratch, "damsko");
   await fetchDamsko(pin.commit, damsko);
-  if (command === "update") {
-    await update(pin, damsko);
-  }
-  const found = check(pin, damsko);
-  // Damsko's own check of its fonts: none still packed, and every file
-  // its stylesheet names there.
-  if (existsSync(path.join(ui, fontsUnpack))) {
-    await run("node", [fontsUnpack, "--check"], ui);
-  }
-  if (found.length > 0) {
-    for (const difference of found) {
-      console.error(`packages/ui: ${difference}`);
-    }
-    console.error(
-      `\npackages/ui is not Damsko's at ${pin.commit}. Change a component in Damsko, then sync: node scripts/ui-sync.ts update <commit>.`
-    );
-    process.exitCode = 1;
+  if (command === "propose") {
+    await propose(pin, damsko, local);
   } else {
-    console.log(
-      `packages/ui: ${pin.items.join(", ")} and what they build on, byte for byte Damsko's at ${pin.commit}.`
-    );
+    const conflicts =
+      command === "update" ? await update(pin, kept, damsko, local) : [];
+    const listed =
+      command === "update" ? readLocalChanges(localChangesPath) : local;
+    const found = check(pin, damsko, listed);
+    // Damsko's own check of its fonts: none still packed, and every file
+    // its stylesheet names there.
+    if (existsSync(path.join(ui, fontsUnpack))) {
+      await run("node", [fontsUnpack, "--check"], ui);
+    }
+    for (const warning of unproposed(listed, new Date())) {
+      console.warn(`packages/ui: ${warning}`);
+    }
+    for (const file of conflicts) {
+      console.error(
+        `packages/ui: ${file} is a listed change that conflicts with Damsko's at ${pin.commit}: resolve git's markers in it by hand.`
+      );
+    }
+    if (found.length > 0) {
+      for (const difference of found) {
+        console.error(`packages/ui: ${difference}`);
+      }
+      console.error(
+        `\npackages/ui is not Damsko's at ${pin.commit}. List a change made here on purpose in packages/ui/local-changes.json, or restore Damsko's files with vp run ui:update.`
+      );
+    }
+    if (found.length > 0 || conflicts.length > 0) {
+      process.exitCode = 1;
+    } else {
+      const changed =
+        listed.length > 0
+          ? `, but the ${listed.length} listed in local-changes.json,`
+          : "";
+      console.log(
+        `packages/ui: ${pin.items.join(", ")} and what they build on${changed} byte for byte Damsko's at ${pin.commit}.`
+      );
+    }
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
