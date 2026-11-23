@@ -65,6 +65,14 @@ const startsClosedAt = (env: GateEnv): Date | null => {
 };
 
 /**
+ * Whether this deployment starts closed, as the admin's probe asks
+ * before it publishes a new company's address (provision-probe.ts).
+ */
+export const startsClosed = (
+  env: Pick<Env, "ONBOARDING_CLOSED_FROM">
+): boolean => z.iso.datetime().safeParse(env.ONBOARDING_CLOSED_FROM).success;
+
+/**
  * The gate as stored: closed since when, and the threshold. A deployment
  * that starts closed has that kept the first time its gate is read, as
  * closed since it was made: from then on the gate is only what was done
