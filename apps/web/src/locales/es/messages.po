@@ -2273,14 +2273,6 @@ msgstr "También trabajó en"
 msgid "Also works on its own"
 msgstr "También trabaja por su cuenta"
 
-#: src/frame/ui-words.tsx
-msgid "Always dark"
-msgstr "Siempre oscuro"
-
-#: src/frame/ui-words.tsx
-msgid "Always light"
-msgstr "Siempre claro"
-
 #: src/workflows/resource-params.tsx
 msgid "Amount"
 msgstr "Importe"
@@ -2864,10 +2856,6 @@ msgstr "Como lo tiene la empresa"
 #: src/agents/agent-page.tsx
 msgid "As your company has set it, never more"
 msgstr "Como lo ha fijado tu empresa, nunca más"
-
-#: src/frame/ui-words.tsx
-msgid "As your device"
-msgstr "Como tu dispositivo"
 
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b"

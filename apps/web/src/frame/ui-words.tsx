@@ -175,17 +175,19 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       invalid: t`not valid`,
     },
     themeToggle: {
-      dark: { name: t`Dark`, line: t`Always dark` },
+      // No line under a mode's tile: each is drawn as what it is, and its
+      // name says the rest.
+      dark: { name: t`Dark`, line: "" },
       icon: (label, current, next) =>
         t`${label}, ${current}. Switch to ${next}`,
       label: t`Theme`,
-      light: { name: t`Light`, line: t`Always light` },
+      light: { name: t`Light`, line: "" },
       // Said to an agent that asks for a mode or theme there is none of: English, as the agent reads it.
       noMode: (mode, modes) =>
         `No mode "${mode}" in Theme. Its modes: ${modes.join(", ")}.`,
       noTheme: (theme, known) =>
         `No theme "${theme}" in Theme. Its themes: ${known.join(", ")}.`,
-      system: { name: t`System`, line: t`As your device` },
+      system: { name: t`System`, line: "" },
       themes: t`Colours`,
     },
     copyButton: {

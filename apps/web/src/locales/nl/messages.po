@@ -2273,14 +2273,6 @@ msgstr "Ook aan gewerkt"
 msgid "Also works on its own"
 msgstr "Werkt ook zelfstandig"
 
-#: src/frame/ui-words.tsx
-msgid "Always dark"
-msgstr "Altijd donker"
-
-#: src/frame/ui-words.tsx
-msgid "Always light"
-msgstr "Altijd licht"
-
 #: src/workflows/resource-params.tsx
 msgid "Amount"
 msgstr "Bedrag"
@@ -2864,10 +2856,6 @@ msgstr "Zoals het bedrijf het heeft"
 #: src/agents/agent-page.tsx
 msgid "As your company has set it, never more"
 msgstr "Zoals je bedrijf het heeft ingesteld, nooit meer"
-
-#: src/frame/ui-words.tsx
-msgid "As your device"
-msgstr "Zoals je apparaat"
 
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b"
