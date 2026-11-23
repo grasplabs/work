@@ -277,9 +277,12 @@ const styles = stylex.create({
   // The track's room above and below holds each tab's 44px target on a touch screen, so the row's scrolling never cuts it.
   listDefault: {
     gap: space["1"],
-    padding: {
+    // Written as the two long forms: the base list's own inline padding is a long form, which a
+    // short `padding` here would not replace, and the track would be wider at its sides.
+    paddingInline: space["1"],
+    paddingBlock: {
       default: space["1"],
-      [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2) ${space["1"]}`,
+      [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
     },
     backgroundImage: "none",
     boxShadow: "none",
