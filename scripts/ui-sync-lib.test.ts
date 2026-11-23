@@ -10,6 +10,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -24,6 +25,8 @@ import {
   differences,
   expectedOf,
   fetchDamsko,
+  fetchFor,
+  serveFolder,
   localChangesSchema,
   overdue,
   parseRegistry,
@@ -280,6 +283,41 @@ describe("a change made here on purpose", () => {
     ]);
   });
 
+  it("fails for a listed file still holding git's conflict markers, by file and line", () => {
+    const resolved = "one\nTWO\nthree\n";
+    const conflicted =
+      "one\n<<<<<<< here\nTWO\n=======\nTwo\n>>>>>>> Damsko\nthree\n";
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({
+          ...inStep,
+          "src/components/button.tsx": conflicted,
+          "src/lib/extra.ts": "a\r\n|||||||\r\nb\r\n",
+        }),
+        [listed("src/components/button.tsx"), listed("src/lib/extra.ts")]
+      )
+    ).toStrictEqual([
+      "src/components/button.tsx:2 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
+      "src/components/button.tsx:4 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
+      "src/components/button.tsx:6 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
+      "src/lib/extra.ts:2 holds one of git's conflict markers: resolve the conflict, keeping what the change here needs",
+    ]);
+    // Eight of a sign, or one inside a line, is no marker.
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({
+          ...inStep,
+          "src/components/button.tsx": `${resolved}========\nconst arrow = "<<<<<<< x";\n`,
+        }),
+        [listed("src/components/button.tsx")]
+      )
+    ).toStrictEqual([]);
+  });
+
   it("fails for an entry dated after today anywhere, which would put off its warning", () => {
     expect(
       differences(
@@ -371,6 +409,13 @@ describe("a listed change at a new pin", () => {
     expect(text("content" in carried ? carried.content : undefined)).toContain(
       "<<<<<<< here\nTWO\n"
     );
+  });
+
+  it("is kept as this repository's own, for someone to decide, where Damsko removed the file", () => {
+    expect(carry({ was: pinned, ours })).toStrictEqual({
+      kind: "removed",
+      content: ours,
+    });
   });
 
   it("keeps a file added here, and a file removed here stays removed", () => {
@@ -731,6 +776,93 @@ describe("the pin fetched", () => {
   });
 });
 
+/** What a checkout of the Damsko of its own holds: its commit's message. */
+const registryAt = (folder: string) =>
+  readFileSync(nodePath.join(folder, "registry.json"), "utf-8");
+
+describe("the pins a command reads", () => {
+  it("holds check and propose to a pin on Damsko's main or a release tag", () => {
+    const { remote, merged, unmerged } = damskoRemote();
+    expect(
+      fetchFor(remote, "check", merged, undefined, scratchFolder())
+    ).toMatchObject({
+      commit: merged,
+    });
+    for (const command of ["check", "propose"] as const) {
+      expect(() =>
+        fetchFor(remote, command, unmerged, merged, scratchFolder())
+      ).toThrow(
+        `${unmerged} is neither on Damsko's main nor a release tag of it`
+      );
+    }
+  });
+
+  it("lets an update move off a pin that is no longer on main, holding only the new one", () => {
+    const { remote, merged, unmerged, experiment } = damskoRemote();
+    for (const [from, to] of [
+      [unmerged, merged],
+      [experiment, "v0.2.0"],
+    ] as const) {
+      const fetched = fetchFor(remote, "update", from, to, scratchFolder());
+      expect(registryAt(fetched.checkout)).toBe(
+        to === merged ? "merged" : "released"
+      );
+      expect(registryAt(fetched.pinned)).toBe(
+        from === unmerged ? "unmerged" : "experiment"
+      );
+    }
+    expect(() =>
+      fetchFor(remote, "update", merged, unmerged, scratchFolder())
+    ).toThrow(
+      `${unmerged} is neither on Damsko's main nor a release tag of it`
+    );
+    // Again at the pin: the pin is the new one, so it is held.
+    expect(() =>
+      fetchFor(remote, "update", unmerged, undefined, scratchFolder())
+    ).toThrow(
+      `${unmerged} is neither on Damsko's main nor a release tag of it`
+    );
+  });
+});
+
+describe("the registry served to the CLI", () => {
+  it("serves its folder's files, and nothing through a link or outside it", async () => {
+    const site = scratchFolder();
+    const outside = scratchFolder();
+    plant(site, { "r/button.json": '{"name":"button"}' });
+    plant(outside, { "secret.json": "secret" });
+    symlinkSync(
+      nodePath.join(outside, "secret.json"),
+      nodePath.join(site, "r", "linked.json")
+    );
+    symlinkSync(outside, nodePath.join(site, "out"));
+    const served = await serveFolder(site);
+    onTestFinished(served.close);
+    const get = async (path: string) => {
+      const response = await fetch(`${served.url}${path}`);
+      return { status: response.status, body: await response.text() };
+    };
+    await expect(get("/r/button.json")).resolves.toStrictEqual({
+      status: 200,
+      body: '{"name":"button"}',
+    });
+    const refused = [
+      "/r/linked.json",
+      "/out/secret.json",
+      "/r/%2e%2e/%2e%2e/secret.json",
+      "/r/..%2fsecret.json",
+      "/r",
+      "/r/missing.json",
+    ];
+    await expect(Promise.all(refused.map(get))).resolves.toStrictEqual(
+      refused.map(() => ({ status: 404, body: "" }))
+    );
+  });
+});
+
+/** What a full disk's write or rename throws. */
+const ioError = (path: string) => new Error(`EIO: i/o error, ${path}`);
+
 /** An install that writes Damsko's files at the new pin into the stage, as the CLI does. */
 const installs =
   (now: DamskoAt) =>
@@ -805,7 +937,7 @@ describe("the update", () => {
       pin: '{ "commit": "new" }\n',
       dependencies: { "@stylexjs/stylex": "catalog:" },
     });
-    expect(updated).toStrictEqual({ conflicts: [], dropped: [] });
+    expect(updated).toStrictEqual({ conflicts: [], removed: [], dropped: [] });
     expect(snapshot(ui)).toStrictEqual({
       "damsko.json": '{ "commit": "new" }\n',
       "local-changes.json": `${JSON.stringify(local, null, 2)}\n`,
@@ -896,6 +1028,108 @@ describe("the update", () => {
       "local-changes.json",
       "src",
     ]);
+  });
+
+  it("keeps a listed file Damsko removed, as this repository's own, and says so", async () => {
+    const { ui, old, local } = setUp();
+    const now = damskoWith({ "src/lib/utils.ts": "utils\n" });
+    const updated = await updateTree({
+      ui,
+      install: installs(now),
+      was: old,
+      now,
+      local,
+      pin: '{ "commit": "new" }\n',
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+    });
+    expect(updated).toStrictEqual({
+      conflicts: [],
+      removed: ["src/components/button.tsx"],
+      dropped: [],
+    });
+    expect(
+      readFileSync(nodePath.join(ui, "src/components/button.tsx"), "utf-8")
+    ).toBe("one\nTWO\nthree\nfour\nfive\n");
+  });
+
+  /**
+   * An update whose install and check pass, so that only the swap can
+   * fail: the writes and renames `fails` picks fail as a full disk would.
+   */
+  const swapping = (fails: {
+    write?: (relative: string) => boolean;
+    rename?: (from: string) => boolean;
+  }) => {
+    const { ui, old, local } = setUp();
+    const now = damskoWith({
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nFIVE\n",
+      "src/lib/utils.ts": "utils\n",
+    });
+    return {
+      ui,
+      before: snapshot(ui),
+      update: async () =>
+        await updateTree({
+          ui,
+          install: installs(now),
+          was: old,
+          now,
+          local,
+          pin: '{ "commit": "new" }\n',
+          dependencies: { "@stylexjs/stylex": "catalog:" },
+          files: {
+            rename: (from, to) => {
+              if (fails.rename?.(from) === true) {
+                throw ioError(from);
+              }
+              renameSync(from, to);
+            },
+            write: (root, relative, content) => {
+              if (fails.write?.(relative) === true) {
+                throw ioError(relative);
+              }
+              writeWithin(root, relative, content);
+            },
+          },
+        }),
+    };
+  };
+
+  it("puts packages/ui back, src/ and all, when writing damsko.json fails after src/ moved", async () => {
+    // The new pin's write fails, not the old one's put back after it.
+    let writes = 0;
+    const { ui, before, update } = swapping({
+      write: (relative) => relative === "damsko.json" && (writes += 1) === 1,
+    });
+    await expect(update()).rejects.toThrow("EIO: i/o error, damsko.json");
+    expect(writes).toBe(2);
+    expect(snapshot(ui)).toStrictEqual(before);
+    expect(readdirSync(ui).toSorted()).toStrictEqual([
+      "damsko.json",
+      "local-changes.json",
+      "src",
+    ]);
+  });
+
+  it("keeps the old src/ and says where when putting it back fails too", async () => {
+    const { ui, before, update } = swapping({
+      write: (relative) => relative === "damsko.json",
+      rename: (from) => from.endsWith(`${nodePath.sep}before`),
+    });
+    const failure = await update().catch((error: unknown) => error);
+    const aside = readdirSync(ui).find((name) => name.startsWith(".update-"));
+    const kept = nodePath.join(ui, aside ?? "", "before");
+    expect(failure instanceof Error ? failure.message : failure).toContain(
+      `EIO: i/o error, damsko.json\nPutting packages/ui back failed too: EIO: i/o error, ${kept}\npackages/ui/src as it was, listed changes and all, is in ${kept}: move it back`
+    );
+    // The only copy of what src/ held, the listed edit and the added file
+    // among it.
+    const src = Object.fromEntries(
+      Object.entries(before).flatMap(([file, content]) =>
+        file.startsWith("src/") ? [[file.slice(4), content]] : []
+      )
+    );
+    expect(snapshot(kept)).toStrictEqual(src);
   });
 
   const noDependencies: Record<string, string> = {};
