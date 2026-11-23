@@ -34,12 +34,13 @@ test("the admin goes through empty steps and back, with the sound on and off", a
 
   // Sound on: the welcome is said warmly, in the page's language.
   await page.goto("/setup?step=welcome");
-  // Focus is on the step's title, so a screen reader starts there.
+  // Focus is on the step's title, so a screen reader starts there: on the
+  // title's own box until Damsko's Heading takes focus itself (damsko#53).
   await expect(
     page
-      .locator(":focus")
       .getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
-  ).toBeVisible();
+      .locator("xpath=..")
+  ).toBeFocused();
   await expect
     .poll(() =>
       asked.find((line) =>
