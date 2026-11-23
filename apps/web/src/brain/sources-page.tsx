@@ -1,40 +1,4 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Card, CardContent } from "@grasp-os/app-kit/components/card";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-} from "@grasp-os/app-kit/components/item";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import type { Connection } from "@grasp-os/shared/brain";
+import type { Connection, Source as BrainSource } from "@grasp-os/shared/brain";
 import type {
   BrainFoundBy,
   BrainMemoryFoundBy,
@@ -62,21 +26,107 @@ import {
   uploadMaxBytes,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import { Container } from "@grasp-os/ui/components/container";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "@grasp-os/ui/components/dialog";
+import { Empty, EmptyHeader, EmptyTitle } from "@grasp-os/ui/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { FileUpload } from "@grasp-os/ui/components/file-upload";
+import { Form } from "@grasp-os/ui/components/form";
+import { Heading } from "@grasp-os/ui/components/heading";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupClear,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import {
+  SidePanel,
+  SidePanelContent,
+  SidePanelHeader,
+  SidePanelSection,
+  SidePanelText,
+} from "@grasp-os/ui/components/side-panel";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, LinkIcon, SearchIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  media,
+  size as sizes,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { i18n } from "@lingui/core";
+import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-import { Confirmed } from "../confirmed.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatBytes, formatDateTime, formatList } from "../format.ts";
+import { formatBytes, formatDate, formatDay, formatList } from "../format.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { given } from "./brain.ts";
 import { LearnedSection } from "./learned-section.tsx";
 import { OwnExportSection } from "./own-export.tsx";
+import { SourceItem, SourceItemParts, sourcesByKind } from "./source-item.tsx";
+import type { SourceKind, SourceRow as Source } from "./source-item.tsx";
 
-// The Brain's sources, from the new Brain (GRA-1734): what the person may
-// read, a page at a time, newest first; one source's versions and text;
-// search, which is recall as that person, shown as recall packs it (no
+// The Brain's sources, a section per kind on the library's rows: the
+// interviews, documents, chats, imports and run logs the Brain learned
+// from (each opens its own page, an interview on the library's Interview),
+// and what the new Brain keeps that the person may read (GRA-1734), a page
+// at a time, newest first; one kept source's versions and text, in an
+// inspector beside the list; search, which is recall as that person, shown as recall packs it (no
 // ranking of the page's own), its memories each with where it came from,
 // and everything the pack holds shown, as its budget was spent on it; and
 // how each of their connections feeds the Brain today. Core answers each
@@ -97,7 +147,7 @@ interface Team {
   name: string;
 }
 
-type Sources = Session["brainSources"];
+type CoreSources = Session["brainSources"];
 
 /** What a read from core came to. */
 type Read<T> =
@@ -106,16 +156,35 @@ type Read<T> =
   | { state: "ready"; data: T };
 
 /**
- * What `read` answers on the person's session, or why not. Outside the
- * components, as the React Compiler can't compile `try`.
+ * What `read` answers on the person's session, or why not, as every read
+ * from core is (`loadFromCore`): within its deadline, and out of reach or
+ * not found said in the person's language, with the reference to quote.
  */
 const readFrom = async <T,>(
   core: CoreConnection,
-  read: (sources: Sources) => Promise<T>
+  read: (sources: CoreSources) => Promise<T>
+): Promise<Read<T>> => {
+  const loaded = await loadFromCore(
+    core,
+    async (session) => await read(session.brainSources)
+  );
+  return loaded.state === "ready"
+    ? loaded
+    : { state: "refused", message: notLoadedText(loaded, i18n) ?? "" };
+};
+
+/**
+ * What `change` answers on the person's session, or why not, with core's
+ * code for an upload it refused. Outside the components, as the React
+ * Compiler can't compile `try`.
+ */
+const changeIn = async <T,>(
+  core: CoreConnection,
+  change: (sources: CoreSources) => Promise<T>
 ): Promise<Read<T>> => {
   try {
     const data = await core.withSession(
-      async (session) => await read(session.brainSources)
+      async (session) => await change(session.brainSources)
     );
     return { state: "ready", data };
   } catch (error) {
@@ -191,67 +260,207 @@ const sameSource = (one: BrainSourceRef, other: BrainSourceRef): boolean =>
 /** A source's key, for React. */
 const keyOf = ({ producer, id }: BrainSourceRef): string => `${producer}:${id}`;
 
-const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
-  const { t } = useLingui();
-  const label = {
-    upload: t({ message: "Upload", context: "a source of the Brain" }),
-    chat: t({ message: "Chat", context: "a source of the Brain" }),
-    run: t({ message: "Workflow run", context: "a source of the Brain" }),
-    capture: t({
-      message: "Fetched from a connection",
-      context: "a source of the Brain",
-    }),
-    interview: t({ message: "Interview", context: "a source of the Brain" }),
-    claim: t({
-      message: "What your team said",
-      context: "a source of the Brain",
-    }),
-    drawing: t({
-      message: "How a team works",
-      context: "a source of the Brain",
-    }),
-    opinion: t({
-      message: "What people across the company say",
-      context: "a source of the Brain",
-    }),
-    kickoff: t({
-      message: "The company's vision",
-      context: "a source of the Brain",
-    }),
-    roster: t({
-      message: "The company's teams",
-      context: "a source of the Brain",
-    }),
-    connected: t({
-      message: "Read from a shared connection",
-      context: "a source of the Brain",
-    }),
-    sync: t({
-      message: "Copied from a connected system",
-      context: "a source of the Brain",
-    }),
-  }[producer];
-  return <Badge variant="outline">{label}</Badge>;
+/** The library's kind for what added a source to the new Brain. */
+const producerKind: Record<BrainSourceProducer, SourceKind> = {
+  upload: "file",
+  chat: "message",
+  run: "workflow",
+  capture: "record",
+  interview: "meeting",
+  claim: "person",
+  drawing: "file",
+  opinion: "person",
+  kickoff: "meeting",
+  roster: "table",
+  connected: "record",
+  sync: "record",
 };
 
-const FoundBadge = ({ found }: { found: BrainFoundBy }) => {
+/** The library's kind for each of the Brain's own sources. */
+const sourceKind: Record<BrainSource["kind"], SourceKind> = {
+  interview: "meeting",
+  chat: "message",
+  document: "file",
+  import: "record",
+  runLog: "workflow",
+};
+
+/** A section of the inspector beside the list: its words, or what stands in for them. */
+type InspectorSection = { id: string; label: string } & (
+  | { text: ReactNode; content?: never }
+  | { content: ReactNode; text?: never }
+);
+
+/** One row of the list: its key, the source, and what opening it does when it is no link. */
+interface Row {
+  key: string;
+  item: Source;
+  open?: () => void;
+}
+
+const styles = stylex.create({
+  // A page of the brain: its own pane that scrolls, round the library's page column.
+  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  section: { display: "flex", flexDirection: "column", gap: space["3"] },
+  stack: { display: "flex", flexDirection: "column", gap: space["4"] },
+  list: { display: "flex", flexDirection: "column", gap: space["3"] },
+  group: { display: "flex", flexDirection: "column", gap: space["2"] },
+  versions: { display: "flex", flexDirection: "column", gap: space["1"] },
+  grow: { flexGrow: 1, minWidth: 0 },
+  start: { alignSelf: "flex-start" },
+  // The upload's fields side by side where there is room, the button at their foot.
+  fields: {
+    display: "flex",
+    flexDirection: { default: "column", [media.md]: "row" },
+    alignItems: { default: "stretch", [media.md]: "flex-end" },
+    gap: space["3"],
+  },
+  // The opened source beside the list, or under it where there is no
+  // room for both.
+  split: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    gap: space["6"],
+    minWidth: 0,
+  },
+  listed: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    flexGrow: 1,
+    flexBasis: "24rem",
+    minWidth: 0,
+  },
+  inspector: {
+    flexShrink: 0,
+    width: `min(${sizes.sidePanelWidth}, 100%)`,
+  },
+  // What a section of the inspector holds, other than its rows and its
+  // text: at the panel's own inset, as the text is.
+  cardBody: {
+    paddingBlock: space["3"],
+    paddingInline: space.sidePanelPadding,
+  },
+  // The list's sections, one per kind.
+  groups: { display: "flex", flexDirection: "column", gap: space["6"] },
+  // Search's passages, each its source's row with the passage under it.
+  passages: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  passage: { marginInline: space["4"] },
+  // A row's facts: its kind, how it was found, its version.
+  facts: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  // The words of its source a memory rests on, set off by a line.
+  quote: {
+    margin: 0,
+    paddingInlineStart: space["3"],
+    borderInlineStartWidth: sizes.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: colors.border,
+  },
+  // Texts are shown as text, with their own line breaks.
+  plain: { whiteSpace: "pre-wrap" },
+});
+
+/** What added a source to the Brain, in a few words. */
+const useProducerLabel = () => {
   const { t } = useLingui();
-  const label = {
-    exact: t({ message: "Exact match", context: "how search found a passage" }),
-    words: t({
-      message: "By its words",
-      context: "how search found a passage",
-    }),
-    "stop words": t({
-      message: "By common words only",
-      context: "how search found a passage",
-    }),
-    meaning: t({
-      message: "By meaning",
-      context: "how search found a passage",
-    }),
-  }[found];
-  return <Badge variant="secondary">{label}</Badge>;
+  return (producer: BrainSourceProducer): string =>
+    ({
+      upload: t({ message: "Upload", context: "a source of the Brain" }),
+      chat: t({ message: "Chat", context: "a source of the Brain" }),
+      run: t({ message: "Workflow run", context: "a source of the Brain" }),
+      capture: t({
+        message: "Fetched from a connection",
+        context: "a source of the Brain",
+      }),
+      interview: t({ message: "Interview", context: "a source of the Brain" }),
+      claim: t({
+        message: "What your team said",
+        context: "a source of the Brain",
+      }),
+      drawing: t({
+        message: "How a team works",
+        context: "a source of the Brain",
+      }),
+      opinion: t({
+        message: "What people across the company say",
+        context: "a source of the Brain",
+      }),
+      kickoff: t({
+        message: "The company's vision",
+        context: "a source of the Brain",
+      }),
+      roster: t({
+        message: "The company's teams",
+        context: "a source of the Brain",
+      }),
+      connected: t({
+        message: "Read from a shared connection",
+        context: "a source of the Brain",
+      }),
+      sync: t({
+        message: "Copied from a connected system",
+        context: "a source of the Brain",
+      }),
+    })[producer];
+};
+
+/** How recall found a passage, in a few words. */
+const useFoundLabel = () => {
+  const { t } = useLingui();
+  return (found: BrainFoundBy): string =>
+    ({
+      exact: t({
+        message: "Exact match",
+        context: "how search found a passage",
+      }),
+      words: t({
+        message: "By its words",
+        context: "how search found a passage",
+      }),
+      "stop words": t({
+        message: "By common words only",
+        context: "how search found a passage",
+      }),
+      meaning: t({
+        message: "By meaning",
+        context: "how search found a passage",
+      }),
+    })[found];
+};
+
+/** A group of the list's heading: the kind of its sources, in a word. */
+const useKindHeading = () => {
+  const { t } = useLingui();
+  return (kind: SourceKind): string =>
+    ({
+      meeting: t`Meetings`,
+      file: t`Documents`,
+      message: t`Messages`,
+      record: t({ message: "Records", context: "a table's records" }),
+      workflow: t`Workflows`,
+      person: t`People`,
+      table: t`Tables`,
+      memory: t({ message: "Memories", context: "the Brain's memories page" }),
+      web: t({
+        message: "Web pages",
+        context: "a kind of source of the Brain",
+      }),
+      agent: t`Agents`,
+      code: t`Code`,
+    })[kind];
 };
 
 const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
@@ -270,7 +479,11 @@ const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
       context: "how search found a memory",
     }),
   }[found];
-  return <Badge variant="secondary">{label}</Badge>;
+  return (
+    <Badge size="sm" variant="outline">
+      {label}
+    </Badge>
+  );
 };
 
 /** Whose word a memory is, as its producer said it. */
@@ -283,7 +496,11 @@ const SaidBadge = ({ said }: { said: BrainSearchMemory["said"] }) => {
     agent: t`An agent's word`,
     system: t`A system's word`,
   }[said];
-  return <Badge variant="outline">{label}</Badge>;
+  return (
+    <Badge size="sm" variant="secondary">
+      {label}
+    </Badge>
+  );
 };
 
 /**
@@ -298,65 +515,71 @@ const MemoryResult = ({
   memory: BrainSearchMemory;
   onOpen: (source: BrainSourceRef, version: number) => void;
 }) => {
+  const { t } = useLingui();
+  const producerLabel = useProducerLabel();
   const { source, context } = memory;
   const version = source?.version;
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
-        <span className="text-sm">{memory.statement}</span>
+        <ItemTitle>{memory.statement}</ItemTitle>
         {memory.quote === null ? null : (
-          <blockquote className="text-muted-foreground border-l-2 pl-3 text-sm whitespace-pre-wrap">
-            {memory.quote}
+          <blockquote {...stylex.props(styles.quote)}>
+            <Text size="sm" color="muted">
+              <span {...stylex.props(styles.plain)}>{memory.quote}</span>
+            </Text>
           </blockquote>
         )}
         {context === null ? null : (
-          <Collapsible>
-            <CollapsibleTrigger render={<Button size="xs" variant="ghost" />}>
-              <Trans>The passage around it</Trans>
-            </CollapsibleTrigger>
+          <Collapsible fitContent>
+            <CollapsibleTrigger>{t`The passage around it`}</CollapsibleTrigger>
             <CollapsibleContent>
-              <p className="text-muted-foreground text-sm whitespace-pre-wrap">
-                {context.text}
-              </p>
+              <Text size="sm" color="muted">
+                <span {...stylex.props(styles.plain)}>{context.text}</span>
+              </Text>
             </CollapsibleContent>
           </Collapsible>
         )}
-        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-          <SaidBadge said={memory.said} />
-          {source === null ? null : (
-            <>
-              <ProducerBadge producer={source.source.producer} />
-              <Button
-                onClick={() => {
-                  onOpen(source.source, source.version);
-                }}
-                size="xs"
-                type="button"
-                variant="link"
-              >
-                <Trans>Open version {version}</Trans>
-              </Button>
-            </>
-          )}
-          {memory.store === "own" ? (
-            <Badge variant="outline">
-              <Trans context="a memory nobody else may read">Only you</Trans>
-            </Badge>
-          ) : null}
-          {/* A saved memory is taken as correct: a confirmation is shown
-              only where it settled a disagreement. */}
-          {memory.confirmed && memory.contested ? (
-            <Badge variant="passed">
-              <Trans context="a memory a person confirmed">Confirmed</Trans>
-            </Badge>
-          ) : null}
-          {memory.contested ? (
-            <Badge variant="attention">
-              <Trans>Sources disagree</Trans>
-            </Badge>
-          ) : null}
-          <MemoryFoundBadge found={memory.found} />
-        </span>
+        <ItemDescription>
+          <span {...stylex.props(styles.facts)}>
+            <SaidBadge said={memory.said} />
+            {source === null ? null : (
+              <>
+                <Badge size="sm" variant="secondary">
+                  {producerLabel(source.source.producer)}
+                </Badge>
+                <Button
+                  onClick={() => {
+                    onOpen(source.source, source.version);
+                  }}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  {t`Open version ${version}`}
+                </Button>
+              </>
+            )}
+            {memory.store === "own" ? (
+              <Badge size="sm" variant="outline">
+                <Trans context="a memory nobody else may read">Only you</Trans>
+              </Badge>
+            ) : null}
+            {/* A saved memory is taken as correct: a confirmation is shown
+                only where it settled a disagreement. */}
+            {memory.confirmed && memory.contested ? (
+              <Badge size="sm" variant="success">
+                <Trans context="a memory a person confirmed">Confirmed</Trans>
+              </Badge>
+            ) : null}
+            {memory.contested ? (
+              <Badge size="sm" variant="warning">
+                <Trans>Sources disagree</Trans>
+              </Badge>
+            ) : null}
+            <MemoryFoundBadge found={memory.found} />
+          </span>
+        </ItemDescription>
       </ItemContent>
     </Item>
   );
@@ -365,102 +588,254 @@ const MemoryResult = ({
 /** The pack, as recall gave it: its memories and passages in its order, what it didn't find, and whether it was cut short. */
 const SearchResults = ({
   pack,
+  titleOf,
   onOpen,
 }: {
   pack: BrainSearchPack;
+  /** A kept source's first line, once the list has read it. */
+  titleOf: (source: BrainSourceRef) => string | undefined;
   onOpen: (source: BrainSourceRef, version: number) => void;
 }) => {
-  const missing = formatList(pack.notFound);
+  const { t } = useLingui();
+  const producerLabel = useProducerLabel();
+  const foundLabel = useFoundLabel();
   const heading = useId();
-  const nothing = pack.items.length === 0 && pack.memories.length === 0;
+  const passagesHeading = useId();
+  const missing = formatList(pack.notFound);
+  if (pack.items.length === 0 && pack.memories.length === 0) {
+    return (
+      <Text size="sm" color="muted">
+        <Trans>Nothing you may read matched.</Trans>
+      </Text>
+    );
+  }
+  const remembers = pack.memories.length > 0;
+  const passages = pack.items.map((item) => {
+    const { version } = item;
+    const producer = producerLabel(item.source.producer);
+    const first = titleOf(item.source);
+    const source: Source = {
+      kind: producerKind[item.source.producer],
+      title: given(first) ? first : producer,
+      origin: [
+        given(first) ? producer : undefined,
+        t`Version ${version}`,
+        foundLabel(item.found),
+        item.whole ? undefined : t`The best part of its passage`,
+      ]
+        .filter(given)
+        .join(" · "),
+    };
+    return { item, source };
+  });
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
-        <Trans>Results</Trans>
-      </h2>
-      {nothing ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>Nothing you may read matched.</Trans>
-        </p>
+    // With memories, the Results hold two parts: what the Brain remembers,
+    // then the passages.
+    <section
+      aria-labelledby={remembers ? heading : undefined}
+      {...stylex.props(styles.list)}
+    >
+      {remembers ? (
+        <Heading id={heading} level={2} size="2xs">
+          <Trans>Results</Trans>
+        </Heading>
       ) : null}
-      {pack.memories.length === 0 ? null : (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-muted-foreground text-xs font-medium">
+      {remembers ? (
+        <div {...stylex.props(styles.group)}>
+          <Heading level={3} size="2xs">
             <Trans>What the Brain remembers</Trans>
-          </h3>
-          <ItemGroup render={<ol />} spacing="tight">
+          </Heading>
+          <ItemGroup>
             {pack.memories.map((memory) => (
-              <li key={`${memory.store}:${memory.id}`}>
-                <MemoryResult memory={memory} onOpen={onOpen} />
-              </li>
+              <MemoryResult
+                key={`${memory.store}:${memory.id}`}
+                memory={memory}
+                onOpen={onOpen}
+              />
             ))}
           </ItemGroup>
         </div>
-      )}
-      {pack.items.length === 0 ? null : (
-        <div className="flex flex-col gap-2">
-          {pack.memories.length === 0 ? null : (
-            <h3 className="text-muted-foreground text-xs font-medium">
-              <Trans>Passages</Trans>
-            </h3>
-          )}
-          <ItemGroup render={<ol />} spacing="tight">
-            {pack.items.map((item) => {
+      ) : null}
+      {passages.length === 0 ? null : (
+        <section
+          aria-labelledby={passagesHeading}
+          {...stylex.props(styles.group)}
+        >
+          <Heading id={passagesHeading} level={remembers ? 3 : 2} size="2xs">
+            {remembers ? <Trans>Passages</Trans> : <Trans>Results</Trans>}
+          </Heading>
+          <ul {...stylex.props(styles.passages)}>
+            {passages.map(({ item, source }) => {
               const { version } = item;
               return (
-                <li key={`${keyOf(item.source)}@${version}#${item.position}`}>
-                  <Item
-                    onClick={() => {
-                      onOpen(item.source, version);
-                    }}
-                    render={
-                      // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the passage and its labels are its words, as the Item's children
-                      <button type="button" />
-                    }
-                    size="sm"
-                  >
-                    <ItemContent>
-                      <span className="text-sm whitespace-pre-wrap">
-                        {item.text}
-                      </span>
-                      <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                        <ProducerBadge producer={item.source.producer} />
-                        <FoundBadge found={item.found} />
-                        <span>
-                          <Trans>Version {version}</Trans>
-                        </span>
-                        {item.whole ? null : (
-                          <span>
-                            <Trans>The best part of its passage</Trans>
-                          </span>
-                        )}
-                      </span>
-                    </ItemContent>
+                <li
+                  key={`${keyOf(item.source)}@${version}#${item.position}`}
+                  {...stylex.props(styles.group)}
+                >
+                  <Item size="sm">
+                    <SourceItemParts source={source} />
+                    <ItemActions>
+                      <Button
+                        onClick={() => {
+                          onOpen(item.source, version);
+                        }}
+                        size="xs"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {t`Open version ${version}`}
+                      </Button>
+                    </ItemActions>
                   </Item>
+                  <blockquote {...stylex.props(styles.quote, styles.passage)}>
+                    <Text size="sm" color="muted">
+                      <span {...stylex.props(styles.plain)}>{item.text}</span>
+                    </Text>
+                  </blockquote>
                 </li>
               );
             })}
-          </ItemGroup>
-        </div>
+          </ul>
+        </section>
       )}
-      {/* What wasn't found only beside what was: a search that found
-          nothing says so once, above. */}
-      {nothing || pack.notFound.length === 0 ? null : (
-        <p className="text-muted-foreground text-sm">
+      {pack.notFound.length === 0 ? null : (
+        <Text size="sm" color="muted">
           <Trans>Nothing you may read holds {missing}.</Trans>
-        </p>
+        </Text>
       )}
       {pack.truncated ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" color="muted">
           <Trans>More was found than fits: these are the best of it.</Trans>
-        </p>
+        </Text>
       ) : null}
     </section>
   );
 };
 
-/** Uploading a file into the Brain: the file, and who may read it. */
+/** Uploading a file into the Brain: the file, and who may read it, then Upload. */
 const UploadForm = ({
+  teams,
+  onUploaded,
+  onBusy,
+}: {
+  teams: Team[];
+  onUploaded: (source: BrainSourceRef) => void;
+  /** Whether it uploads now: the dialog stays open meanwhile. */
+  onBusy: (busy: boolean) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  // The upload's id, minted for the file chosen and sent again when it is
+  // retried, so a retry after a lost answer is the same upload.
+  const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
+  const [choice, setChoice] = useState("me");
+  const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
+  const busy = sent?.state === "loading";
+  // The limit, from core's own.
+  const size = formatBytes(uploadMaxBytes);
+  const readers = [
+    { value: "me", label: t`Only me` },
+    ...teams.map(({ id, name }) => ({ value: id, label: t`Team ${name}` })),
+    { value: "everyone", label: t`Everyone` },
+  ];
+  return (
+    <>
+      <DialogTitle>
+        <Trans>Upload a file</Trans>
+      </DialogTitle>
+      <DialogBody>
+        <Form>
+          <Field>
+            <FieldLabel>
+              <Trans>File</Trans>
+            </FieldLabel>
+            <FileUpload
+              accept={uploadAccept}
+              // Out of reach while a file uploads: the dialog closes when
+              // it is done, which would drop a file chosen meanwhile.
+              disabled={busy}
+              onValueChange={([chosen]) => {
+                setFile(
+                  chosen === undefined
+                    ? undefined
+                    : { chosen, uploadId: crypto.randomUUID() }
+                );
+              }}
+              variant="button"
+            />
+            <FieldDescription>
+              <Trans>PDF, Word, Excel or transcripts, up to {size}.</Trans>
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>
+              <Trans context="a file uploaded into the Brain">
+                Who may read it
+              </Trans>
+            </FieldLabel>
+            <Select
+              items={readers}
+              onValueChange={(value) => {
+                if (value !== null) {
+                  setChoice(value);
+                }
+              }}
+              value={choice}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </Field>
+          {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
+        </Form>
+      </DialogBody>
+      <DialogFooter>
+        <DialogClose disabled={busy}>{t`Cancel`}</DialogClose>
+        {/* While it uploads the dialog stays open, whatever closes it
+            otherwise, so the form keeps the file, the upload's id and
+            what core answers. */}
+        <Button
+          disabled={file === undefined || busy}
+          errorLabel={t`Couldn't upload`}
+          loadingLabel={t`Uploading…`}
+          onClick={async () => {
+            if (file === undefined) {
+              return;
+            }
+            setSent({ state: "loading" });
+            onBusy(true);
+            const answer = await changeIn(
+              core,
+              async (sources) =>
+                await sources.upload(
+                  await fileOf(file.chosen),
+                  readersOf(choice),
+                  file.uploadId
+                )
+            );
+            setSent(answer);
+            onBusy(false);
+            if (answer.state !== "ready") {
+              throw new Error("Not uploaded");
+            }
+            onUploaded(answer.data.source);
+          }}
+          size="sm"
+        >
+          {t`Upload`}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+};
+
+/**
+ * The page's Upload, in its head: a dialog with the upload's form, which
+ * starts afresh each time it opens and closes once the file is uploaded.
+ */
+const UploadDialog = ({
   teams,
   onUploaded,
 }: {
@@ -468,112 +843,24 @@ const UploadForm = ({
   onUploaded: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
-  const core = useCore();
-  const fileId = useId();
-  const readersId = useId();
-  // The upload's id, minted for the file chosen and sent again when it is
-  // retried, so a retry after a lost answer is the same upload.
-  const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
-  const [choice, setChoice] = useState("me");
-  const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
-  const busy = sent?.state === "loading";
-  // What an upload takes, from core's own limits.
-  const types = formatList(Object.keys(uploadTypes).map((type) => `.${type}`));
-  const size = formatBytes(uploadMaxBytes);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   return (
-    <form
-      className="flex flex-col gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (file === undefined || busy) {
-          return;
-        }
-        const form = event.currentTarget;
-        setSent({ state: "loading" });
-        void (async () => {
-          const answer = await readFrom(
-            core,
-            async (sources) =>
-              await sources.upload(
-                await fileOf(file.chosen),
-                readersOf(choice),
-                file.uploadId
-              )
-          );
-          setSent(answer);
-          if (answer.state === "ready") {
-            form.reset();
-            setFile(undefined);
-            onUploaded(answer.data.source);
-          }
-        })();
-      }}
-    >
-      <FieldGroup className="sm:flex-row sm:items-end">
-        <Field>
-          <FieldLabel htmlFor={fileId}>
-            <Trans>File</Trans>
-          </FieldLabel>
-          <Input
-            accept={uploadAccept}
-            // Out of reach while a file uploads: the form is reset when it
-            // is done, which would drop a file chosen meanwhile.
-            disabled={busy}
-            id={fileId}
-            onChange={(event) => {
-              const chosen = event.target.files?.[0];
-              setFile(
-                chosen === undefined
-                  ? undefined
-                  : { chosen, uploadId: crypto.randomUUID() }
-              );
-            }}
-            type="file"
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={readersId}>
-            <Trans context="a file uploaded into the Brain">
-              Who may read it
-            </Trans>
-          </FieldLabel>
-          <NativeSelect
-            id={readersId}
-            onChange={(event) => {
-              setChoice(event.target.value);
-            }}
-            value={choice}
-          >
-            <NativeSelectOption value="me">{t`Only me`}</NativeSelectOption>
-            {teams.map(({ id, name }) => (
-              <NativeSelectOption key={id} value={id}>
-                {t`Team ${name}`}
-              </NativeSelectOption>
-            ))}
-            <NativeSelectOption value="everyone">
-              {t`Everyone`}
-            </NativeSelectOption>
-          </NativeSelect>
-        </Field>
-        <Button disabled={file === undefined || busy} type="submit">
-          {busy ? (
-            <>
-              <Spinner aria-hidden="true" />
-              <Trans>Uploading…</Trans>
-            </>
-          ) : (
-            <Trans>Upload</Trans>
-          )}
-        </Button>
-      </FieldGroup>
-      <FieldDescription>
-        <Trans>
-          It takes {types} files of up to {size}. Who may read it stays as you
-          choose: to share it with others, upload it again for them.
-        </Trans>
-      </FieldDescription>
-      {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
-    </form>
+    <Dialog dismissible={!busy} onOpenChange={setOpen} open={open}>
+      <DialogTrigger asChild>
+        <Button variant="secondary">{t`Upload`}</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <UploadForm
+          onBusy={setBusy}
+          onUploaded={(source) => {
+            setOpen(false);
+            onUploaded(source);
+          }}
+          teams={teams}
+        />
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -605,59 +892,36 @@ const ReadersLine = ({
  */
 const UploadActions = ({
   source,
+  upload,
   teams,
   onChanged,
   onDeleted,
 }: {
   source: BrainSourceRef;
+  /** What core says the person may do to it. */
+  upload: BrainUpload;
   teams: Team[];
   onChanged: (source: BrainSourceRef) => void;
   onDeleted: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const fileId = useId();
-  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
-    state: "loading",
-  });
   // The new version's id, minted for the file chosen and sent again when
   // it is retried, so a retry after a lost answer is the same version.
   const [file, setFile] = useState<{ chosen: File; versionId: string }>();
   const [acting, setActing] = useState<Read<unknown>>();
   // Which action is under way: a new version shows it uploads.
   const [uploading, setUploading] = useState(false);
-  useEffect(() => {
-    let left = false;
-    const read = async (): Promise<void> => {
-      const answer = await readFrom(
-        core,
-        async (sources) => await sources.uploadOf(source.id)
-      );
-      if (!left) {
-        setUpload(answer);
-      }
-    };
-    void read();
-    return () => {
-      left = true;
-    };
-  }, [core, source]);
-  if (upload.state === "refused") {
-    return <ErrorText>{upload.message}</ErrorText>;
-  }
-  if (upload.state !== "ready" || upload.data === null) {
-    return null;
-  }
-  const { readers, mayAddVersion, deletes } = upload.data;
+  const { readers, mayAddVersion, deletes } = upload;
   const busy = acting?.state === "loading";
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">
+    <div {...stylex.props(styles.stack, styles.cardBody)}>
+      <Text size="sm" color="muted">
         <ReadersLine readers={readers} teams={teams} />
-      </p>
+      </Text>
       {mayAddVersion ? (
         <form
-          className="flex flex-col gap-2 sm:flex-row sm:items-end"
+          {...stylex.props(styles.fields)}
           onSubmit={(event) => {
             event.preventDefault();
             if (file === undefined || busy) {
@@ -666,7 +930,7 @@ const UploadActions = ({
             setActing({ state: "loading" });
             setUploading(true);
             void (async () => {
-              const answer = await readFrom(
+              const answer = await changeIn(
                 core,
                 async (sources) =>
                   await sources.uploadVersion(
@@ -683,73 +947,87 @@ const UploadActions = ({
             })();
           }}
         >
-          <Field>
-            <FieldLabel htmlFor={fileId}>
-              <Trans>New version</Trans>
-            </FieldLabel>
-            <Input
-              accept={uploadAccept}
-              id={fileId}
-              onChange={(event) => {
-                const chosen = event.target.files?.[0];
-                setFile(
-                  chosen === undefined
-                    ? undefined
-                    : { chosen, versionId: crypto.randomUUID() }
-                );
-              }}
-              type="file"
-            />
-          </Field>
+          <div {...stylex.props(styles.grow)}>
+            <Field>
+              <FieldLabel>
+                <Trans>New version</Trans>
+              </FieldLabel>
+              <FileUpload
+                accept={uploadAccept}
+                onValueChange={([chosen]) => {
+                  setFile(
+                    chosen === undefined
+                      ? undefined
+                      : { chosen, versionId: crypto.randomUUID() }
+                  );
+                }}
+                variant="button"
+              />
+            </Field>
+          </div>
           <Button
+            variant="secondary"
             disabled={file === undefined || busy}
             type="submit"
-            variant="outline"
           >
-            {uploading ? (
-              <>
-                <Spinner aria-hidden="true" />
-                <Trans>Uploading…</Trans>
-              </>
-            ) : (
-              <Trans>Upload new version</Trans>
-            )}
+            {uploading ? t`Uploading…` : t`Upload new version`}
           </Button>
         </form>
       ) : null}
       {deletes === null ? null : (
-        <Confirmed
-          busy={busy}
-          button={t`Delete`}
-          confirm={deletes === "erase" ? t`Delete for good` : t`Delete`}
-          description={
-            deletes === "erase"
-              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`
-              : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`
-          }
-          label={t`Delete this upload`}
-          onConfirm={() => {
-            setActing({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(core, async (sources) => {
-                await sources.deleteUpload(source.id);
-              });
-              if (answer.state === "ready") {
-                setActing(undefined);
-                onDeleted(source);
-                return;
-              }
-              if (notFound(answer)) {
-                // Read again: gone, or still there without Delete.
-                setActing(undefined);
-                onChanged(source);
-                return;
-              }
-              setActing(answer);
-            })();
-          }}
-          title={t`Delete this upload?`}
-        />
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <div {...stylex.props(styles.start)}>
+              <Button
+                aria-label={t`Delete this upload`}
+                disabled={busy}
+                size="sm"
+                variant="ghost"
+              >
+                <Icon icon={TrashIcon} />
+                {t`Delete`}
+              </Button>
+            </div>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogTitle>{t`Delete this upload?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletes === "erase"
+                ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`
+                : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`}
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel />
+              <AlertDialogAction
+                // It closes at once and confirms nothing while the delete
+                // runs; what goes wrong shows under the actions.
+                action={() => {
+                  setActing({ state: "loading" });
+                  void (async () => {
+                    const answer = await changeIn(core, async (sources) => {
+                      await sources.deleteUpload(source.id);
+                    });
+                    if (answer.state === "ready") {
+                      setActing(undefined);
+                      onDeleted(source);
+                      return;
+                    }
+                    if (notFound(answer)) {
+                      // Read again: gone, or still there without Delete.
+                      setActing(undefined);
+                      onChanged(source);
+                      return;
+                    }
+                    setActing(answer);
+                  })();
+                }}
+                variant="destructive"
+              >
+                {deletes === "erase" ? t`Delete for good` : t`Delete`}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
       {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
     </div>
@@ -758,19 +1036,19 @@ const UploadActions = ({
 
 /** Search: the question, and recall's pack for it. */
 const Search = ({
+  titleOf,
   onOpen,
 }: {
+  titleOf: (source: BrainSourceRef) => string | undefined;
   onOpen: (source: BrainSourceRef, version: number) => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const id = useId();
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<Read<BrainSearchPack>>();
   return (
-    <div className="flex flex-col gap-4">
+    <div {...stylex.props(styles.stack)}>
       <form
-        className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           const asked = question.trim();
@@ -789,31 +1067,36 @@ const Search = ({
           })();
         }}
       >
-        <label className="sr-only" htmlFor={id}>
-          <Trans>Search the Brain</Trans>
-        </label>
-        <Input
-          id={id}
-          onChange={(event) => {
-            setQuestion(event.target.value);
-          }}
-          maxLength={brainQuestionMaxLength}
-          placeholder={t`Ask what you're looking for`}
-          type="search"
-          value={question}
-        />
-        <Button
-          disabled={result?.state === "loading" || question.trim() === ""}
-          type="submit"
-        >
-          <Trans>Search</Trans>
-        </Button>
+        <InputGroup>
+          <InputGroupAddon>
+            <Icon icon={SearchIcon} />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label={t`Search the Brain`}
+            maxLength={brainQuestionMaxLength}
+            onValueChange={(value) => {
+              setQuestion(value);
+            }}
+            placeholder={t`Ask what you're looking for`}
+            type="search"
+            value={question}
+          />
+          <InputGroupClear aria-label={t`Clear`} />
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              disabled={result?.state === "loading" || question.trim() === ""}
+              type="submit"
+            >
+              {t`Search`}
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
       </form>
       {result?.state === "refused" ? (
         <ErrorText>{result.message}</ErrorText>
       ) : null}
       {result?.state === "ready" ? (
-        <SearchResults onOpen={onOpen} pack={result.data} />
+        <SearchResults onOpen={onOpen} pack={result.data} titleOf={titleOf} />
       ) : null}
     </div>
   );
@@ -829,32 +1112,36 @@ const Search = ({
  */
 const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
   const heading = useId();
+  // With no connection there is nothing to say how it feeds the Brain.
+  if (connections.length === 0) {
+    return null;
+  }
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>How your connections feed the Brain</Trans>
-      </h2>
-      {connections.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>You have no connections yet.</Trans>
-        </p>
-      ) : (
-        <>
-          <p className="text-muted-foreground text-sm">
-            <Trans>
-              When an agent reads for you through an account you connected
-              yourself, the Brain keeps what it read for you alone, while that
-              account stays connected: one Gmail message or attachment, one
-              OneNote page, or the answer of a read in another app, the
-              company’s records included. Everything else agents search live
-              when you ask, and the Brain keeps nothing of it.
-            </Trans>
-          </p>
-          <ul className="flex flex-col gap-2 text-sm">
-            {connections.map(({ name, keepsReads, activityGap }) => (
-              <li className="flex flex-col" key={name}>
-                <span>{name}</span>
-                <span className="text-muted-foreground">
+      </Heading>
+      <Text size="sm" color="muted">
+        <Trans>
+          When an agent reads for you through an account you connected yourself,
+          the Brain keeps what it read for you alone, while that account stays
+          connected: one Gmail message or attachment, one OneNote page, or the
+          answer of a read in another app, the company’s records included.
+          Everything else agents search live when you ask, and the Brain keeps
+          nothing of it.
+        </Trans>
+      </Text>
+      <ItemGroup>
+        {connections.map(({ name, keepsReads, activityGap }, index) => (
+          <Fragment key={name}>
+            {index === 0 ? null : <ItemSeparator />}
+            <Item size="xs">
+              <ItemMedia>
+                <Icon icon={LinkIcon} />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{name}</ItemTitle>
+                <ItemDescription>
                   {keepsReads === true ? (
                     <Trans>
                       The Brain may keep, for you alone, some of what an agent
@@ -864,20 +1151,20 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
                   ) : (
                     <Trans>Searched live, nothing kept.</Trans>
                   )}
-                </span>
+                </ItemDescription>
                 {activityGap === true ? (
-                  <span className="text-muted-foreground">
+                  <Text size="sm" color="muted">
                     <Trans>
                       A gap: this connection can’t tell Grasp what changed in
                       it, so Grasp sees only what is done there through Grasp.
                     </Trans>
-                  </span>
+                  </Text>
                 ) : null}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+              </ItemContent>
+            </Item>
+          </Fragment>
+        ))}
+      </ItemGroup>
     </section>
   );
 };
@@ -898,39 +1185,53 @@ const SharedConnectionReads = ({
     return null;
   }
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>What agents read through shared connections</Trans>
-      </h2>
-      <p className="text-muted-foreground text-sm">
+      </Heading>
+      <Text size="sm" color="muted">
         <Trans>
           The Brain keeps what agents read through these connections an admin
           shared, for the people the admin chose. It is what each system said
           when it was read, not kept up to date.
         </Trans>
-      </p>
-      <ul className="flex flex-col gap-2 text-sm">
+      </Text>
+      <ItemGroup>
         {connected.map(
-          ({ connectionId, name, account, records, lastReadAt }) => {
-            const lastRead = formatDateTime(lastReadAt);
+          ({ connectionId, name, account, records, lastReadAt }, index) => {
+            const lastRead = formatDate(lastReadAt);
             return (
-              <li className="flex flex-col" key={connectionId}>
-                <span>{account === null ? name : `${name} (${account})`}</span>
-                <span className="text-muted-foreground">
-                  <Plural
-                    one="# record kept"
-                    other="# records kept"
-                    value={records}
-                  />
-                </span>
-                <span className="text-muted-foreground">
-                  <Trans>Last read {lastRead}</Trans>
-                </span>
-              </li>
+              <Fragment key={connectionId}>
+                {index === 0 ? null : <ItemSeparator />}
+                <Item size="xs">
+                  <ItemMedia>
+                    <Icon icon={LinkIcon} />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>
+                      {account === null ? name : `${name} (${account})`}
+                    </ItemTitle>
+                    <ItemDescription>
+                      <span {...stylex.props(styles.facts)}>
+                        <span>
+                          <Plural
+                            one="# record kept"
+                            other="# records kept"
+                            value={records}
+                          />
+                        </span>
+                        <span>
+                          <Trans>Last read {lastRead}</Trans>
+                        </span>
+                      </span>
+                    </ItemDescription>
+                  </ItemContent>
+                </Item>
+              </Fragment>
             );
           }
         )}
-      </ul>
+      </ItemGroup>
     </section>
   );
 };
@@ -941,194 +1242,25 @@ const connectionOfSource = (source: BrainSourceRef): string | undefined =>
 
 /**
  * Where and when a kept read was read (a `connected` source): its
- * system's name, when known, and its version's time. Nothing for any
- * other source.
+ * system's name, when known, and its version's time.
  */
 const ReadFrom = ({
-  source,
+  connectionId,
   read,
   names,
 }: {
-  source: BrainSourceRef;
+  connectionId: string;
   read: BrainSourceText;
   names: ReadonlyMap<string, string>;
 }) => {
-  const connectionId = connectionOfSource(source);
-  if (connectionId === undefined) {
-    return null;
-  }
   const name = names.get(connectionId);
-  const readOn = formatDateTime(read.addedAt);
-  return (
-    <p className="text-muted-foreground text-sm">
-      {name === undefined ? (
-        <Trans>Read from a shared connection on {readOn}</Trans>
-      ) : (
-        <Trans>
-          Read from {name} on {readOn}
-        </Trans>
-      )}
-    </p>
-  );
-};
-
-const SourceLine = ({
-  listed,
-  picked,
-  onPick,
-}: {
-  listed: BrainSourceListed;
-  picked: boolean;
-  onPick: () => void;
-}) => {
-  const { versions } = listed;
-  const lastRead =
-    listed.readAt === undefined ? undefined : formatDateTime(listed.readAt);
-  return (
-    <Item
-      onClick={onPick}
-      render={
-        // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the source's first line and labels are its words, as the Item's children
-        <button aria-pressed={picked} type="button" />
-      }
-      size="sm"
-    >
-      <ItemContent>
-        <span className="min-w-0 text-sm">
-          {listed.firstLine === "" ? (
-            <span className="text-muted-foreground">
-              <Trans>No first line</Trans>
-            </span>
-          ) : (
-            listed.firstLine
-          )}
-        </span>
-        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-          <ProducerBadge producer={listed.source.producer} />
-          {listed.personal ? (
-            <Badge variant="outline">
-              <Trans context="a source nobody else may read">Only you</Trans>
-            </Badge>
-          ) : null}
-          <span>{formatDateTime(listed.addedAt)}</span>
-          {lastRead === undefined ? null : (
-            <span>
-              <Trans>Last read {lastRead}</Trans>
-            </span>
-          )}
-          <span>
-            <Plural one="# version" other="# versions" value={versions} />
-          </span>
-        </span>
-      </ItemContent>
-    </Item>
-  );
-};
-
-/** The sources the person may read, newest first, a page at a time. */
-const SourceList = ({
-  picked,
-  onPick,
-}: {
-  picked: BrainSourceRef | undefined;
-  onPick: (source: BrainSourceRef) => void;
-}) => {
-  const core = useCore();
-  const [listed, setListed] = useState<Read<BrainSourcePage>>({
-    state: "loading",
-  });
-  const [more, setMore] = useState<Read<BrainSourcePage>>();
-  useEffect(() => {
-    let left = false;
-    const read = async (): Promise<void> => {
-      const answer = await readFrom(
-        core,
-        async (sources) => await sources.list()
-      );
-      if (!left) {
-        setListed(answer);
-      }
-    };
-    void read();
-    return () => {
-      left = true;
-    };
-  }, [core]);
-  if (listed.state === "refused") {
-    return <ErrorText>{listed.message}</ErrorText>;
-  }
-  if (listed.state === "loading") {
-    return null;
-  }
-  const { sources, next } = listed.data;
-  if (sources.length === 0) {
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyTitle>
-            <Trans>Nothing in the Brain you may read yet</Trans>
-          </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Documents and workflow runs show here once they reach the Brain.
-            </Trans>
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">
-        <Trans>
-          Those marked Only you are yours alone: nobody else sees them, admins
-          included.
-        </Trans>
-      </p>
-      <ItemGroup render={<ul />} spacing="tight">
-        {sources.map((each) => (
-          <li key={keyOf(each.source)}>
-            <SourceLine
-              listed={each}
-              onPick={() => {
-                onPick(each.source);
-              }}
-              picked={picked !== undefined && sameSource(picked, each.source)}
-            />
-          </li>
-        ))}
-      </ItemGroup>
-      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
-      {next === null ? null : (
-        <Button
-          className="self-start"
-          disabled={more?.state === "loading"}
-          onClick={() => {
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (read) => await read.list(next)
-              );
-              setMore(answer.state === "refused" ? answer : undefined);
-              if (answer.state === "ready") {
-                setListed({
-                  state: "ready",
-                  data: {
-                    sources: [...sources, ...answer.data.sources],
-                    next: answer.data.next,
-                  },
-                });
-              }
-            })();
-          }}
-          type="button"
-          variant="outline"
-        >
-          <Trans>Show more</Trans>
-        </Button>
-      )}
-    </div>
+  const readOn = formatDate(read.addedAt);
+  return name === undefined ? (
+    <Trans>Read from a shared connection on {readOn}</Trans>
+  ) : (
+    <Trans>
+      Read from {name} on {readOn}
+    </Trans>
   );
 };
 
@@ -1146,66 +1278,199 @@ const VersionList = ({
   onChoose: (version: number) => void;
   onMore: (page: BrainSourceVersionPage) => void;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
   const [more, setMore] = useState<Read<BrainSourceVersionPage>>();
   const { before } = page;
   return (
-    <div className="flex flex-col gap-1">
-      <h4 className="text-muted-foreground text-xs font-medium">
-        <Trans>Versions</Trans>
-      </h4>
-      <ItemGroup render={<ul />} spacing="tight">
+    <div {...stylex.props(styles.versions)}>
+      <ItemGroup>
         {page.versions.map(({ version, addedAt }) => {
-          const added = formatDateTime(addedAt);
+          const added = formatDate(addedAt);
           return (
-            <li key={version}>
-              <Item
+            <Item active={version === shown} asChild key={version} size="xs">
+              <button
+                aria-label={t`Version ${version}, added ${added}`}
+                aria-pressed={version === shown}
                 onClick={() => {
                   onChoose(version);
                 }}
-                render={
-                  // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the version and its date are its words, as the Item's children
-                  <button aria-pressed={version === shown} type="button" />
-                }
-                size="xs"
+                type="button"
               >
-                <Trans>
-                  Version {version}, added {added}
-                </Trans>
-              </Item>
-            </li>
+                <ItemContent>
+                  <ItemTitle>
+                    <Trans>
+                      Version {version}, added {added}
+                    </Trans>
+                  </ItemTitle>
+                </ItemContent>
+              </button>
+            </Item>
           );
         })}
       </ItemGroup>
-      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
-      {before === null ? null : (
-        <Button
-          className="self-start"
-          disabled={more?.state === "loading"}
-          onClick={() => {
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (sources) => await sources.versions(source, before)
-              );
-              setMore(answer.state === "refused" ? answer : undefined);
-              if (answer.state === "ready") {
-                onMore(answer.data);
-              }
-            })();
-          }}
-          type="button"
-          variant="outline"
-        >
-          <Trans>Older versions</Trans>
-        </Button>
-      )}
+      {more?.state === "refused" || before !== null ? (
+        <div {...stylex.props(styles.versions, styles.cardBody)}>
+          {more?.state === "refused" ? (
+            <ErrorText>{more.message}</ErrorText>
+          ) : null}
+          {before === null ? null : (
+            <div {...stylex.props(styles.start)}>
+              <Button
+                disabled={more?.state === "loading"}
+                onClick={() => {
+                  setMore({ state: "loading" });
+                  void (async () => {
+                    const answer = await readFrom(
+                      core,
+                      async (sources) => await sources.versions(source, before)
+                    );
+                    setMore(answer.state === "refused" ? answer : undefined);
+                    if (answer.state === "ready") {
+                      onMore(answer.data);
+                    }
+                  })();
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <Trans>Older versions</Trans>
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 };
 
-/** One source: its versions the person may read, and the text of the one in hand. */
+/** What the panel says of a source it can't show, under its name: nothing for one it can. */
+const aboutOf = (versions: Read<BrainSourceVersionPage>): ReactNode => {
+  if (versions.state === "refused") {
+    return <ErrorText>{versions.message}</ErrorText>;
+  }
+  if (versions.state === "ready" && versions.data.versions.length === 0) {
+    return <Trans>You can&apos;t read this source.</Trans>;
+  }
+  return undefined;
+};
+
+/** The version's text for its section, a placeholder while it is read, or why it isn't there. */
+const saidOf = (
+  text: Read<BrainSourceText | null>
+):
+  | { text: ReactNode; content?: never }
+  | { content: ReactNode; text?: never } => {
+  if (text.state === "refused") {
+    return {
+      content: (
+        <div {...stylex.props(styles.cardBody)}>
+          <ErrorText>{text.message}</ErrorText>
+        </div>
+      ),
+    };
+  }
+  if (text.state === "loading") {
+    return {
+      content: (
+        <div {...stylex.props(styles.cardBody)}>
+          <Skeleton />
+        </div>
+      ),
+    };
+  }
+  return text.data === null
+    ? {
+        content: (
+          <div {...stylex.props(styles.cardBody)}>
+            <Text size="sm" color="muted">
+              <Trans>You can&apos;t read this version.</Trans>
+            </Text>
+          </div>
+        ),
+      }
+    : {
+        text: <span {...stylex.props(styles.plain)}>{text.data.text}</span>,
+      };
+};
+
+/**
+ * What the person may do to an upload, as core says, as the panel's
+ * section: none for any other source, or an upload they may not change.
+ */
+const useUploadSection = (
+  source: BrainSourceRef,
+  {
+    teams,
+    onChanged,
+    onDeleted,
+  }: {
+    teams: Team[];
+    onChanged: (source: BrainSourceRef) => void;
+    onDeleted: (source: BrainSourceRef) => void;
+  }
+): InspectorSection[] => {
+  const core = useCore();
+  const producerLabel = useProducerLabel();
+  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
+    state: "loading",
+  });
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.uploadOf(source.id)
+      );
+      if (!left) {
+        setUpload(answer);
+      }
+    };
+    if (source.producer === "upload") {
+      void read();
+    }
+    return () => {
+      left = true;
+    };
+  }, [core, source]);
+  if (upload.state === "refused") {
+    return [
+      {
+        id: "upload",
+        label: producerLabel("upload"),
+        content: (
+          <div {...stylex.props(styles.cardBody)}>
+            <ErrorText>{upload.message}</ErrorText>
+          </div>
+        ),
+      },
+    ];
+  }
+  if (upload.state === "loading" || upload.data === null) {
+    return [];
+  }
+  return [
+    {
+      id: "upload",
+      label: producerLabel("upload"),
+      content: (
+        <UploadActions
+          onChanged={onChanged}
+          onDeleted={onDeleted}
+          source={source}
+          teams={teams}
+          upload={upload.data}
+        />
+      ),
+    },
+  ];
+};
+
+/**
+ * One source, in an inspector: its first line, its versions the person may
+ * read, the text of the one in hand, and what they may do to an upload.
+ */
 const SourcePanel = ({
   source,
   version: asked,
@@ -1213,6 +1478,7 @@ const SourcePanel = ({
   connectedNames,
   onChanged,
   onDeleted,
+  onClose,
 }: {
   source: BrainSourceRef;
   /** The version to show first: the newest they may read when left out. */
@@ -1224,8 +1490,11 @@ const SourcePanel = ({
   onChanged: (source: BrainSourceRef) => void;
   /** It was deleted. */
   onDeleted: (source: BrainSourceRef) => void;
+  onClose: () => void;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
+  const producerLabel = useProducerLabel();
   const [versions, setVersions] = useState<Read<BrainSourceVersionPage>>({
     state: "loading",
   });
@@ -1236,6 +1505,11 @@ const SourcePanel = ({
     version: number;
     answer: Read<BrainSourceText | null>;
   }>();
+  const uploadSection = useUploadSection(source, {
+    teams,
+    onChanged,
+    onDeleted,
+  });
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
@@ -1274,71 +1548,103 @@ const SourcePanel = ({
     };
   }, [core, source, shown]);
 
-  if (versions.state === "refused") {
-    return <ErrorText>{versions.message}</ErrorText>;
-  }
   const text: Read<BrainSourceText | null> =
     readOf !== undefined && readOf.version === shown
       ? readOf.answer
       : { state: "loading" };
-  const read = text.state === "ready" ? text.data : undefined;
+  const read =
+    text.state === "ready" && text.data !== null ? text.data : undefined;
+  const version = read?.version;
+  const connectionId = connectionOfSource(source);
+  const said = saidOf(text);
+  const sections: InspectorSection[] = [];
+  if (shown !== undefined) {
+    sections.push({
+      id: "text",
+      label: t({ message: "Text", context: "a version of a source's text" }),
+      ...said,
+    });
+  }
+  if (versions.state === "ready" && versions.data.versions.length > 0) {
+    sections.push({
+      id: "versions",
+      label: t`Versions`,
+      content: (
+        <VersionList
+          onChoose={setChosen}
+          page={versions.data}
+          shown={shown}
+          source={source}
+          onMore={(page) => {
+            setVersions({
+              state: "ready",
+              data: {
+                versions: [...versions.data.versions, ...page.versions],
+                before: page.before,
+              },
+            });
+          }}
+        />
+      ),
+    });
+  }
+  // A source whose versions core refused shows only why.
+  if (versions.state !== "refused") {
+    sections.push(...uploadSection);
+  }
+  const title =
+    read === undefined
+      ? producerLabel(source.producer)
+      : firstLineOf(read.text) || t`No first line`;
   return (
-    <Card render={<section />} size="sm">
-      <CardContent>
-        {versions.state === "ready" && versions.data.versions.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            <Trans>You can&apos;t read this source.</Trans>
-          </p>
-        ) : null}
-        {read === undefined || read === null ? null : (
-          <>
-            <h3 className="text-sm font-medium">
-              {firstLineOf(read.text) || <Trans>No first line</Trans>}
-            </h3>
-            <ReadFrom names={connectedNames} read={read} source={source} />
-            <p className="text-sm whitespace-pre-wrap">{read.text}</p>
-            <LearnedSection
-              key={`${keyOf(source)}#${read.version}`}
-              source={source}
-              version={read.version}
-            />
-          </>
+    <SidePanel aria-label={title}>
+      <SidePanelHeader
+        description={aboutOf(versions)}
+        loading={
+          versions.state === "loading" ||
+          (shown !== undefined && text.state === "loading")
+        }
+        meta={
+          read === undefined
+            ? undefined
+            : [
+                t`Version ${version}`,
+                ...(connectionId === undefined
+                  ? []
+                  : [
+                      <ReadFrom
+                        connectionId={connectionId}
+                        key="read"
+                        names={connectedNames}
+                        read={read}
+                      />,
+                    ]),
+              ]
+        }
+        onClose={onClose}
+        title={title}
+      />
+      <SidePanelContent>
+        {sections.map((section) => (
+          <SidePanelSection key={section.id} title={section.label}>
+            {section.text === undefined ? (
+              section.content
+            ) : (
+              <SidePanelText aria-label={t`Show the whole text`}>
+                {section.text}
+              </SidePanelText>
+            )}
+          </SidePanelSection>
+        ))}
+        {read === undefined ? null : (
+          <LearnedSection
+            key={`${keyOf(source)}#${read.version}`}
+            source={source}
+            version={read.version}
+          />
         )}
-        {text.state === "ready" && text.data === null ? (
-          <p className="text-muted-foreground text-sm">
-            <Trans>You can&apos;t read this version.</Trans>
-          </p>
-        ) : null}
-        {text.state === "refused" ? (
-          <ErrorText>{text.message}</ErrorText>
-        ) : null}
-        {versions.state === "ready" && versions.data.versions.length > 0 ? (
-          <VersionList
-            onChoose={setChosen}
-            page={versions.data}
-            shown={shown}
-            source={source}
-            onMore={(page) => {
-              setVersions({
-                state: "ready",
-                data: {
-                  versions: [...versions.data.versions, ...page.versions],
-                  before: page.before,
-                },
-              });
-            }}
-          />
-        ) : null}
-        {source.producer === "upload" ? (
-          <UploadActions
-            onChanged={onChanged}
-            onDeleted={onDeleted}
-            source={source}
-            teams={teams}
-          />
-        ) : null}
-      </CardContent>
-    </Card>
+      </SidePanelContent>
+    </SidePanel>
   );
 };
 
@@ -1376,92 +1682,122 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
   }, [core]);
   const busy = acting?.state === "loading";
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>Shared uploads</Trans>
-      </h2>
-      <p className="text-muted-foreground text-sm">
+      </Heading>
+      <Text size="sm" color="muted">
         <Trans>
-          Uploads shared with a team or everyone, those their uploader removed
-          among them. Only an admin can erase one, for everyone and for good.
-          Its text isn&apos;t shown here.
+          Uploads shared with a team or everyone, which only an admin can erase.
         </Trans>
-      </p>
+      </Text>
       {listed.state === "refused" ? (
         <ErrorText>{listed.message}</ErrorText>
       ) : null}
       {listed.state === "ready" && listed.data.uploads.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" color="muted">
           <Trans>No uploads are shared with a team or everyone.</Trans>
-        </p>
+        </Text>
       ) : null}
       {listed.state === "ready" && listed.data.uploads.length > 0 ? (
-        <ItemGroup render={<ul />} spacing="tight">
-          {listed.data.uploads.map((upload) => {
+        <ItemGroup>
+          {listed.data.uploads.map((upload, index) => {
             const { uploaderName, teamName, readers } = upload;
             // Named only for an admin who may read it; else told apart by
-            // its team, uploader and the minute it was uploaded.
+            // its team, uploader and the day it was uploaded.
             const { name } = upload;
-            const uploaded = formatDateTime(upload.uploadedAt);
+            const uploaded = formatDate(upload.uploadedAt);
             const removed =
-              upload.removedAt === null
-                ? null
-                : formatDateTime(upload.removedAt);
+              upload.removedAt === null ? null : formatDate(upload.removedAt);
             let readBy = t`Everyone`;
             if (readers.kind === "team") {
               readBy =
                 teamName === null ? t`A deleted team` : t`Team ${teamName}`;
             }
             return (
-              <li key={upload.source.id}>
+              <Fragment key={upload.source.id}>
+                {index === 0 ? null : <ItemSeparator />}
                 <Item size="sm">
                   <ItemContent>
-                    <span className="min-w-0 text-sm">
-                      {name ?? t`An upload`}
-                    </span>
-                    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                      <Badge variant="outline">{readBy}</Badge>
-                      <span>
-                        <Trans>
-                          Uploaded by {uploaderName}, {uploaded}
-                        </Trans>
-                      </span>
-                      {removed === null ? null : (
-                        <Badge variant="secondary">
-                          <Trans>Removed by its uploader, {removed}</Trans>
+                    <ItemTitle>{name ?? t`An upload`}</ItemTitle>
+                    <ItemDescription>
+                      <span {...stylex.props(styles.facts)}>
+                        <Badge size="sm" variant="outline">
+                          {readBy}
                         </Badge>
-                      )}
-                    </span>
+                        <span>
+                          <Trans>
+                            Uploaded by {uploaderName}, {uploaded}
+                          </Trans>
+                        </span>
+                        {removed === null ? null : (
+                          <Badge size="sm" variant="secondary">
+                            <Trans>Removed by its uploader, {removed}</Trans>
+                          </Badge>
+                        )}
+                      </span>
+                    </ItemDescription>
                   </ItemContent>
-                  <Confirmed
-                    busy={busy}
-                    button={t`Erase for good`}
-                    confirm={t`Erase for good`}
-                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
-                    label={
-                      name === null
-                        ? t`Erase this upload for good`
-                        : t`Erase ${name} for good`
-                    }
-                    onConfirm={() => {
-                      setActing({ state: "loading" });
-                      void (async () => {
-                        const answer = await readFrom(core, async (sources) => {
-                          await sources.deleteUpload(upload.source.id);
-                        });
-                        // Not found: read the lists again, which show what
-                        // is there (or that they may no longer list it).
-                        if (answer.state !== "ready" && !notFound(answer)) {
-                          setActing(answer);
-                          return;
-                        }
-                        onErased();
-                      })();
-                    }}
-                    title={t`Erase this upload for good?`}
-                  />
+                  <ItemActions>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          aria-label={
+                            name === null
+                              ? t`Erase this upload for good`
+                              : t`Erase ${name} for good`
+                          }
+                          disabled={busy}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t`Erase for good`}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogTitle>
+                          {t`Erase this upload for good?`}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
+                        </AlertDialogDescription>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel />
+                          <AlertDialogAction
+                            // It closes at once; what goes wrong shows under the list.
+                            action={() => {
+                              setActing({ state: "loading" });
+                              void (async () => {
+                                const answer = await changeIn(
+                                  core,
+                                  async (sources) => {
+                                    await sources.deleteUpload(
+                                      upload.source.id
+                                    );
+                                  }
+                                );
+                                // Not found: read the lists again, which show what
+                                // is there (or that they may no longer list it).
+                                if (
+                                  answer.state !== "ready" &&
+                                  !notFound(answer)
+                                ) {
+                                  setActing(answer);
+                                  return;
+                                }
+                                onErased();
+                              })();
+                            }}
+                            variant="destructive"
+                          >
+                            {t`Erase for good`}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </ItemActions>
                 </Item>
-              </li>
+              </Fragment>
             );
           })}
         </ItemGroup>
@@ -1469,45 +1805,49 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
       {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
       {listed.state === "ready" && listed.data.next !== null ? (
-        <Button
-          className="self-start"
-          disabled={more?.state === "loading"}
-          onClick={() => {
-            const { next, uploads } = listed.data;
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (sources) => await sources.sharedUploads(next)
-              );
-              setMore(answer.state === "refused" ? answer : undefined);
-              if (answer.state === "ready") {
-                setListed({
-                  state: "ready",
-                  data: {
-                    uploads: [...uploads, ...answer.data.uploads],
-                    next: answer.data.next,
-                  },
-                });
-              }
-            })();
-          }}
-          type="button"
-          variant="outline"
-        >
-          <Trans>Show more</Trans>
-        </Button>
+        <div {...stylex.props(styles.start)}>
+          <Button
+            variant="secondary"
+            disabled={more?.state === "loading"}
+            onClick={() => {
+              const { next, uploads } = listed.data;
+              setMore({ state: "loading" });
+              void (async () => {
+                const answer = await readFrom(
+                  core,
+                  async (sources) => await sources.sharedUploads(next)
+                );
+                setMore(answer.state === "refused" ? answer : undefined);
+                if (answer.state === "ready") {
+                  setListed({
+                    state: "ready",
+                    data: {
+                      uploads: [...uploads, ...answer.data.uploads],
+                      next: answer.data.next,
+                    },
+                  });
+                }
+              })();
+            }}
+            type="button"
+          >
+            <Trans>Show more</Trans>
+          </Button>
+        </div>
       ) : null}
     </section>
   );
 };
 
-/** The Brain's sources page: search, how connections feed it, and the sources. */
+/** The Brain's sources page: Upload in its head, search, then every source, newest first; the connections and the person's own export last. */
 export const SourcesPage = ({
+  sources,
   connections,
   teams,
   admin,
 }: {
+  /** The Brain's own sources, as `brain.read` gave them. */
+  sources: BrainSource[];
   /** The person's connections, each one they have connected. */
   connections: Connection[];
   /** The teams the person is in, whom they may upload for. */
@@ -1515,6 +1855,11 @@ export const SourcesPage = ({
   /** Whether they are an admin, who erases shared uploads. */
   admin: boolean;
 }) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const producerLabel = useProducerLabel();
+  const kindHeading = useKindHeading();
+  const listHeading = useId();
   // Each opening counts, so opening a source again (a search result
   // citing a version, after another was picked in its panel) starts its
   // panel afresh at what was asked.
@@ -1523,11 +1868,41 @@ export const SourcesPage = ({
     version?: number;
     opening: number;
   }>();
-  const heading = useId();
-  const uploadHeading = useId();
-  const core = useCore();
-  // Each change to the sources counts, so the list reads them again.
+  // Each change to the sources counts, so the shared uploads read them again.
   const [listing, setListing] = useState(0);
+  const [listed, setListed] = useState<Read<BrainSourcePage>>({
+    state: "loading",
+  });
+  const [more, setMore] = useState<Read<BrainSourcePage>>();
+  // The list's reads, counted, so only the latest one's answer is shown.
+  const reads = useRef(0);
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(core, async (kept) => await kept.list());
+      if (!left) {
+        setListed(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  // After a change to the sources, the list and the shared uploads read
+  // them again from the start.
+  const relist = () => {
+    setListing((before) => before + 1);
+    reads.current += 1;
+    const mine = reads.current;
+    void (async () => {
+      const answer = await readFrom(core, async (kept) => await kept.list());
+      if (mine === reads.current) {
+        setListed(answer);
+        setMore(undefined);
+      }
+    })();
+  };
   const [connected, setConnected] = useState<Read<BrainConnectedSource[]>>({
     state: "loading",
   });
@@ -1536,7 +1911,7 @@ export const SourcesPage = ({
     const read = async (): Promise<void> => {
       const answer = await readFrom(
         core,
-        async (sources) => await sources.connections()
+        async (kept) => await kept.connections()
       );
       if (!left) {
         setConnected(answer);
@@ -1561,7 +1936,7 @@ export const SourcesPage = ({
   // state as it is then, as the person may have opened another source
   // meanwhile, which stays open.
   const changed = (source: BrainSourceRef) => {
-    setListing((before) => before + 1);
+    relist();
     setOpened((current) =>
       current !== undefined && sameSource(current.source, source)
         ? { source, opening: current.opening + 1 }
@@ -1569,53 +1944,228 @@ export const SourcesPage = ({
     );
   };
   const deleted = (source: BrainSourceRef) => {
-    setListing((before) => before + 1);
+    relist();
     setOpened((current) =>
       current !== undefined && sameSource(current.source, source)
         ? undefined
         : current
     );
   };
+  const kept: BrainSourceListed[] =
+    listed.state === "ready" ? listed.data.sources : [];
+  const next = listed.state === "ready" ? listed.data.next : null;
+  const titleOf = (source: BrainSourceRef): string | undefined =>
+    kept.find((each) => sameSource(each.source, source))?.firstLine;
+  const sourceWord = {
+    interview: t({ message: "Interview", context: "a source of the Brain" }),
+    chat: t({ message: "Chat", context: "a source of the Brain" }),
+    document: t({ message: "Document", context: "a source of the Brain" }),
+    import: t({ message: "Import", context: "a source of the Brain" }),
+    runLog: t({ message: "Run log", context: "a source of the Brain" }),
+  };
+
+  // Newest first, whoever added them. A source taken out of the brain is
+  // no longer one.
+  const dated: { at: string; row: Row }[] = [
+    ...sources
+      .filter((source) => source.removedAt === undefined)
+      .map((source) => ({
+        at: source.date,
+        row: {
+          key: `note:${source.id}`,
+          item: {
+            kind:
+              source.transcriptTurns === undefined
+                ? sourceKind[source.kind]
+                : "meeting",
+            title: source.title,
+            origin: [
+              source.transcriptTurns === undefined
+                ? sourceWord[source.kind]
+                : t({
+                    message: "Transcript",
+                    context: "a source of the Brain",
+                  }),
+              source.who,
+              source.how,
+            ]
+              .filter(given)
+              .join(" · "),
+            when: formatDay(source.date),
+            noteId: source.id,
+          },
+        },
+      })),
+    ...kept.map((each) => {
+      const { versions } = each;
+      const lastRead =
+        each.readAt === undefined ? undefined : formatDate(each.readAt);
+      return {
+        at: each.addedAt,
+        row: {
+          key: keyOf(each.source),
+          item: {
+            kind: producerKind[each.source.producer],
+            title: each.firstLine === "" ? t`No first line` : each.firstLine,
+            origin: [
+              producerLabel(each.source.producer),
+              each.personal
+                ? t({
+                    message: "Only you",
+                    context: "a source nobody else may read",
+                  })
+                : undefined,
+              lastRead === undefined ? undefined : t`Last read ${lastRead}`,
+              versions > 1
+                ? t`${plural(versions, { one: "# version", other: "# versions" })}`
+                : undefined,
+            ]
+              .filter(given)
+              .join(" · "),
+            when: formatDate(each.addedAt),
+          },
+          open: () => {
+            open(each.source);
+          },
+        },
+      };
+    }),
+  ];
+  // While core has older kept sources to give, the Brain's own sources
+  // older than the last one given wait for them, so each kind's section
+  // stays newest first as "Show more" adds older ones.
+  const rows: Row[] = dated
+    .filter(({ at }) => next === null || at >= next.addedAt)
+    .toSorted((a, b) => Number(a.at < b.at) - Number(a.at > b.at))
+    .map(({ row }) => row);
+  // Each source's row, as sourcesByKind gives the sources back.
+  const rowOf = new Map(rows.map((row) => [row.item, row]));
+
   return (
-    // A page of the brain: the title in the serif, in the brain's column,
-    // with room at the foot for the chat.
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
-            <Trans context="the Brain's sources page">Sources</Trans>
-          </PageHeaderTitle>
-          <PageHeaderDescription>
-            <Trans>
-              What the Brain keeps that you may read, and search through it as
-              your agents recall it.
-            </Trans>
-          </PageHeaderDescription>
-        </PageHeader>
-        <Search onOpen={open} />
-        <section
-          aria-labelledby={uploadHeading}
-          className="flex flex-col gap-3"
-        >
-          <h2 className="text-sm font-medium" id={uploadHeading}>
-            <Trans>Upload a file</Trans>
-          </h2>
-          <UploadForm
-            onUploaded={(source) => {
-              setListing((before) => before + 1);
-              open(source);
-            }}
-            teams={teams}
-          />
-        </section>
+    // A page of the brain: the title in the serif, in the library's page column.
+    <div {...stylex.props(styles.pane)}>
+      <Container size="lg">
+        <PageHeader
+          actions={
+            <UploadDialog
+              onUploaded={(source) => {
+                relist();
+                open(source);
+              }}
+              teams={teams}
+            />
+          }
+          title={<Trans context="the Brain's sources page">Sources</Trans>}
+        />
+        <Search onOpen={open} titleOf={titleOf} />
+        {listed.state === "refused" ? (
+          <ErrorText>{listed.message}</ErrorText>
+        ) : null}
+        {listed.state === "ready" && rows.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle level={2}>
+                <Trans>Nothing in the Brain you may read yet</Trans>
+              </EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : null}
+        {opened === undefined &&
+        (listed.state === "loading" || rows.length === 0) ? null : (
+          <div {...stylex.props(styles.split)}>
+            <div {...stylex.props(styles.listed)}>
+              {rows.length === 0 ? null : (
+                <section
+                  aria-labelledby={listHeading}
+                  {...stylex.props(styles.section)}
+                >
+                  <Heading id={listHeading} level={2} size="2xs">
+                    <Trans>Sources you may read</Trans>
+                  </Heading>
+                  <div {...stylex.props(styles.groups)}>
+                    {sourcesByKind(rows.map(({ item }) => item)).map(
+                      ({ kind, sources: ofKind }) => (
+                        <SidePanelSection
+                          key={kind}
+                          level={3}
+                          title={kindHeading(kind)}
+                        >
+                          <ItemGroup aria-label={kindHeading(kind)}>
+                            {ofKind.map((item) => (
+                              <SourceItem
+                                key={rowOf.get(item)?.key}
+                                onOpen={rowOf.get(item)?.open}
+                                source={item}
+                              />
+                            ))}
+                          </ItemGroup>
+                        </SidePanelSection>
+                      )
+                    )}
+                  </div>
+                </section>
+              )}
+              {more?.state === "refused" ? (
+                <ErrorText>{more.message}</ErrorText>
+              ) : null}
+              {next === null ? null : (
+                <div {...stylex.props(styles.start)}>
+                  <Button
+                    disabled={more?.state === "loading"}
+                    onClick={() => {
+                      setMore({ state: "loading" });
+                      void (async () => {
+                        const answer = await readFrom(
+                          core,
+                          async (read) => await read.list(next)
+                        );
+                        setMore(
+                          answer.state === "refused" ? answer : undefined
+                        );
+                        if (answer.state === "ready") {
+                          setListed({
+                            state: "ready",
+                            data: {
+                              sources: [...kept, ...answer.data.sources],
+                              next: answer.data.next,
+                            },
+                          });
+                        }
+                      })();
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trans>Show more</Trans>
+                  </Button>
+                </div>
+              )}
+            </div>
+            {opened === undefined ? null : (
+              <div {...stylex.props(styles.inspector)}>
+                <SourcePanel
+                  connectedNames={connectedNames}
+                  key={`panel-${opened.opening}`}
+                  onChanged={changed}
+                  onClose={() => {
+                    setOpened(undefined);
+                  }}
+                  onDeleted={deleted}
+                  source={opened.source}
+                  teams={teams}
+                  version={opened.version}
+                />
+              </div>
+            )}
+          </div>
+        )}
         {admin ? (
           <SharedUploads
             // Read again from the start whenever the sources are (an
-            // upload, a new version, a delete), as the list below is.
+            // upload, a new version, a delete), as the list above is.
             key={`shared-${listing}`}
-            onErased={() => {
-              setListing((before) => before + 1);
-            }}
+            onErased={relist}
           />
         ) : null}
         <ConnectionFeeds connections={connections} />
@@ -1624,33 +2174,8 @@ export const SourcesPage = ({
         ) : (
           <SharedConnectionReads connected={connectedList} />
         )}
-        <section aria-labelledby={heading} className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium" id={heading}>
-            <Trans>Sources you may read</Trans>
-          </h2>
-          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-            <SourceList
-              key={`list-${listing}`}
-              onPick={(source) => {
-                open(source);
-              }}
-              picked={opened?.source}
-            />
-            {opened === undefined ? null : (
-              <SourcePanel
-                key={`panel-${opened.opening}`}
-                onChanged={changed}
-                onDeleted={deleted}
-                connectedNames={connectedNames}
-                source={opened.source}
-                teams={teams}
-                version={opened.version}
-              />
-            )}
-          </div>
-        </section>
         <OwnExportSection />
-      </div>
+      </Container>
     </div>
   );
 };

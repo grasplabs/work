@@ -1,63 +1,199 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   HoverCard,
   HoverCardContent,
+  HoverCardDescription,
+  HoverCardTitle,
   HoverCardTrigger,
-} from "@grasp-os/app-kit/components/hover-card";
+} from "@grasp-os/ui/components/hover-card";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, MinusIcon } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  font,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { MinusIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
-import { dotClass, tintClass } from "./brain-colors.ts";
-import { kindLabel, statementWords } from "./brain.ts";
-import type { Note } from "./brain.ts";
+import { groupOf, kindLabel, statementWords } from "./brain.ts";
+import type { Group, Note, NoteKind } from "./brain.ts";
+import { graph } from "./graph.stylex.ts";
 
 // Notes named on a page, and rows of them, as the prototype draws them
 // (`components/brain-chips.tsx`).
+
+/**
+ * The brain's own hue for each group (graph.stylex.ts), light and dark.
+ */
+const hue = {
+  vision: graph.vision,
+  teams: graph.teams,
+  tools: graph.tools,
+  statements: graph.statements,
+  candidates: graph.candidates,
+  gaps: graph.gaps,
+  sources: graph.sources,
+} as const;
+
+/** A group's hue as a soft fill behind words, so a name shows what it is before it is read. */
+const soft = (colour: string, share: string): string =>
+  `color-mix(in oklch, ${colour} ${share}, transparent)`;
+
+/** The dot of each group: filled in its hue; gaps hollow, like unresolved links in Obsidian. */
+const dots = stylex.create({
+  dot: {
+    display: "inline-block",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: size.severityDot,
+    height: size.severityDot,
+    borderRadius: radius.circle,
+  },
+  company: { backgroundColor: colors.foreground },
+  vision: { backgroundColor: hue.vision },
+  teams: { backgroundColor: hue.teams },
+  tools: { backgroundColor: hue.tools },
+  statements: { backgroundColor: hue.statements },
+  candidates: { backgroundColor: hue.candidates },
+  gaps: { boxShadow: `inset 0 0 0 ${size.hairline} ${hue.gaps}` },
+  sources: { backgroundColor: hue.sources },
+  // An application nobody named is hollow too.
+  app: { boxShadow: `inset 0 0 0 ${size.hairline} ${hue.tools}` },
+});
+
+/** The same hue as a soft fill, for a kind's label. */
+const tints = stylex.create({
+  company: { backgroundColor: colors.muted },
+  vision: { backgroundColor: soft(hue.vision, "15%") },
+  teams: { backgroundColor: soft(hue.teams, "15%") },
+  tools: { backgroundColor: soft(hue.tools, "15%") },
+  statements: { backgroundColor: soft(hue.statements, "20%") },
+  candidates: { backgroundColor: soft(hue.candidates, "15%") },
+  gaps: { backgroundColor: soft(hue.gaps, "15%") },
+  sources: { backgroundColor: soft(hue.sources, "30%") },
+});
+
+const dotOf = (kind: NoteKind) =>
+  kind === "app" ? dots.app : dots[groupOf[kind]];
+
+/** The soft fill of `kind`'s group, for a label or a passage marked in it. */
+const tintOf = (kind: NoteKind): (typeof tints)[Group] => tints[groupOf[kind]];
+
+/** The colour dot of a note's kind. */
+const KindDot = ({ kind }: { kind: NoteKind }) => (
+  <span aria-hidden="true" {...stylex.props(dots.dot, dotOf(kind))} />
+);
+
+const styles = stylex.create({
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+  },
+  // A kind's name in its group's soft fill, its dot in front.
+  kind: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    paddingBlock: space["1"],
+    paddingInline: space["2"],
+    borderRadius: radius.mark,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    fontWeight: font.weightMedium,
+    color: colors.foreground,
+  },
+  chip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+    maxWidth: "100%",
+    verticalAlign: "baseline",
+  },
+  name: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  preview: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+  },
+  kindLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  reason: {
+    paddingTop: space["2"],
+    borderTopWidth: size.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
+  },
+});
+
+/** A note's kind as a label: its dot and its name in its group's soft fill. */
+export const KindTag = ({ kind }: { kind: NoteKind }) => {
+  const { i18n } = useLingui();
+  return (
+    <span {...stylex.props(styles.kind, tintOf(kind))}>
+      <KindDot kind={kind} />
+      {i18n._(kindLabel[kind])}
+    </span>
+  );
+};
 
 /** How many items a row of links shows before the rest folds behind a count. */
 const perRow = 3;
 
 /** A row of links, the first three shown and the rest behind "+N", which opens the row in place and closes it again. */
-export const Capped = ({
-  children,
-  className = "gap-1.5",
-}: {
-  children: ReactNode[];
-  className?: string;
-}) => {
+export const Capped = ({ children }: { children: ReactNode[] }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const hidden = children.length - perRow;
   if (hidden <= 0) {
-    return (
-      <span className={`flex flex-wrap items-center ${className}`}>
-        {children}
-      </span>
-    );
+    return <span {...stylex.props(styles.row)}>{children}</span>;
   }
+  const toggle = () => {
+    setOpen(!open);
+  };
   return (
-    <span className={`flex flex-wrap items-center ${className}`}>
+    <span {...stylex.props(styles.row)}>
       {open ? children : children.slice(0, perRow)}
-      <Button
-        aria-expanded={open}
-        aria-label={
-          open
-            ? t`Show fewer`
-            : t`${plural(hidden, { one: "Show # more", other: "Show # more" })}`
-        }
-        onClick={() => {
-          setOpen(!open);
-        }}
-        size="xs"
-        variant="secondary"
-      >
-        {open ? <MinusIcon /> : `+${hidden}`}
-      </Button>
+      {open ? (
+        <Button
+          variant="secondary"
+          aria-expanded
+          aria-label={t`Show fewer`}
+          onClick={toggle}
+          size="icon-xs"
+        >
+          <Icon icon={MinusIcon} />
+        </Button>
+      ) : (
+        <Button
+          variant="secondary"
+          aria-expanded={false}
+          aria-label={t`${plural(hidden, { one: "Show # more", other: "Show # more" })}`}
+          onClick={toggle}
+          size="xs"
+        >
+          {`+${hidden}`}
+        </Button>
+      )}
     </span>
   );
 };
@@ -67,11 +203,7 @@ const NoteMark = ({ note }: { note: Note }) => {
   if (note.kind === "tool" || note.kind === "app") {
     return <AppLogo name={note.title} size="xs" />;
   }
-  return (
-    <span
-      className={`size-1.5 flex-none rounded-full ${dotClass(note.kind)}`}
-    />
-  );
+  return <KindDot kind={note.kind} />;
 };
 
 /** A note named on a page: its colour dot and name, and a preview on hover, with why it is here when the page says. */
@@ -88,35 +220,34 @@ export const NoteChip = ({
   const { i18n } = useLingui();
   return (
     <HoverCard>
-      <HoverCardTrigger
-        render={
-          <Link
-            className={`inline-flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 align-baseline leading-tight ${tintClass(note.kind)}`}
-            params={{ noteId: note.id }}
-            to="/brain/$noteId"
-          />
-        }
-      >
-        <NoteMark note={note} />
-        <span className="truncate">{label ?? note.title}</span>
+      {/* The router's own link: a press moves within the app, a new tab opens one. */}
+      <HoverCardTrigger asChild>
+        <Link params={{ noteId: note.id }} to="/brain/$noteId">
+          <span {...stylex.props(styles.chip)}>
+            <NoteMark note={note} />
+            <span {...stylex.props(styles.name)}>{label ?? note.title}</span>
+          </span>
+        </Link>
       </HoverCardTrigger>
       <HoverCardContent align="start">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-muted-foreground flex items-center gap-2 text-xs">
-            <span className={`size-1.5 rounded-full ${dotClass(note.kind)}`} />
-            {i18n._(kindLabel[note.kind])}
-          </span>
-          <span className="font-medium">
+        <div {...stylex.props(styles.preview)}>
+          <Text as="span" size="xs" color="muted">
+            <span {...stylex.props(styles.kindLine)}>
+              <KindDot kind={note.kind} />
+              {i18n._(kindLabel[note.kind])}
+            </span>
+          </Text>
+          <HoverCardTitle>
             {note.kind === "statement"
               ? statementWords(note.id, note.title)
               : note.title}
-          </span>
-          <span className="text-muted-foreground line-clamp-3">
-            {note.summary}
-          </span>
+          </HoverCardTitle>
+          <HoverCardDescription>{note.summary}</HoverCardDescription>
           {/* Why the note is linked from where it is shown, where the place says. */}
           {reason === undefined ? null : (
-            <span className="border-t pt-1.5 text-xs">{reason}</span>
+            <div {...stylex.props(styles.reason)}>
+              <Text size="xs">{reason}</Text>
+            </div>
           )}
         </div>
       </HoverCardContent>

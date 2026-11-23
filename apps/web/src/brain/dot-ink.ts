@@ -1,5 +1,7 @@
+import { graph } from "./graph.stylex.ts";
+
 /**
- * The ink the dot brain prints with, shared with the buddy on Home: how its dots look and move,
+ * The ink the dot brain prints with: how its dots look and move,
  * and every colour a dot can have, by warmth and ink, from the brain tokens in the kit's styles.css. Ported
  * from the prototype (grasplabs/prototype, packages/grasp: components/onboarding/dot-ink.ts).
  */
@@ -181,19 +183,28 @@ const mix = (
 ];
 
 /**
- * A theme token's value where `element` stands, as the kit's stylesheet
- * resolves it for light or dark: a canvas paints with what the theme says,
- * never with a copy of its colours.
+ * A theme colour where `element` stands, resolved for light or dark: a canvas
+ * paints with what the theme says, never with a copy of its colours. The
+ * theme's colours are `light-dark()` pairs, which a custom property hands on
+ * unresolved and a canvas can't paint (it paints black), so the colour is read
+ * from an element that uses it, as the browser computes it. `colour` is a
+ * token's value as StyleX hands it on (`colors.background`, `graph.heat`).
  */
-export const token = (element: Element, name: string): string =>
-  getComputedStyle(element).getPropertyValue(name).trim();
+export const token = (element: Element, colour: string): string => {
+  const sample = document.createElement("span");
+  sample.style.setProperty("color", colour);
+  (element.parentElement ?? element).append(sample);
+  const { color } = getComputedStyle(sample);
+  sample.remove();
+  return color;
+};
 
 /** Every colour a dot can have, in bucket order: warmth × ALPHAS + ink. */
 export const palette = (element: HTMLElement): string[] => {
   // A dot at rest is the text's own colour where it stands: the ink on a page, the canvas on the sidebar.
   const ink = rgb(getComputedStyle(element).color);
-  const heat = rgb(token(element, "--brain-heat"));
-  const glow = rgb(token(element, "--brain-glow"));
+  const heat = rgb(token(element, graph.heat));
+  const glow = rgb(token(element, graph.glow));
   const styles: string[] = [];
   for (let h = 0; h < HEATS; h += 1) {
     const w = h / (HEATS - 1);

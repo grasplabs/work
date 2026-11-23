@@ -1,3 +1,5 @@
+import { colors } from "@grasp-os/ui/lib/tokens.stylex";
+
 import {
   atlasBody,
   atlasCount,
@@ -133,7 +135,7 @@ const at = (values: ArrayLike<number>, index: number): number =>
 /** Every colour a dot can have: the brain's ink and warmth, and one row in the attention colour. */
 const inks = (element: HTMLElement): string[] => {
   const styles = palette(element);
-  const [r, g, b] = rgb(token(element, "--status-attention"));
+  const [r, g, b] = rgb(token(element, colors.warning));
   for (let a = 0; a < ALPHAS; a += 1) {
     styles.push(`rgba(${r}, ${g}, ${b}, ${(a / (ALPHAS - 1)).toFixed(3)})`);
   }

@@ -307,7 +307,9 @@ const section = (heading: string): string =>
 
 /** Types `text` into the dialog's box and saves it. */
 const correctWith = async (text: string): Promise<void> => {
-  const box = document.querySelector("textarea");
+  const box = document.querySelector<HTMLTextAreaElement>(
+    '[role="dialog"] textarea'
+  );
   const form = box?.closest("form");
   if (!box || !form) {
     throw new TypeError("No correction box");
@@ -388,6 +390,14 @@ describe(MemoriesPage, () => {
     const { calls } = await shown();
     await press("Show more");
     const listed = section("What the Brain remembers");
+    // The mark is said with the row, not only seen.
+    const globex = [...document.querySelectorAll("button")].find((button) =>
+      button.textContent.startsWith("Globex")
+    );
+    const globexSaid = (globex?.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.querySelector(`#${id}`)?.textContent ?? "")
+      .join(" ");
     await press("Acme");
     await press("Show more");
     const opened = section("What the Brain remembers");
@@ -400,6 +410,7 @@ describe(MemoriesPage, () => {
         "Without a name",
         "Something you corrected, which you can no longer read",
       ].map((text) => listed.includes(text)),
+      globexSaid,
       opened: [
         "Status: Paying",
         "Contact: You",
@@ -411,6 +422,7 @@ describe(MemoriesPage, () => {
       calls: calls.slice(1),
     }).toStrictEqual({
       listed: [true, true, true, true, true],
+      globexSaid: "Only you",
       opened: [true, true, true, true, true, true],
       calls: [
         "entities customer",
@@ -423,13 +435,18 @@ describe(MemoriesPage, () => {
 
   it("names the person's own entity as them, and another without a name as such", async () => {
     await shown();
-    const kind = document.querySelector("select");
+    const kind = document.querySelector<HTMLElement>('[role="combobox"]');
     if (!kind) {
       throw new TypeError("No kind to pick");
     }
     await act(async () => {
-      kind.value = "person";
-      kind.dispatchEvent(new Event("change", { bubbles: true }));
+      kind.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>('[role="option"][id$="-option-person"]')
+        ?.click();
       await Promise.resolve();
     });
     await settle();

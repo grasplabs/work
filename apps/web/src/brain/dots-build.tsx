@@ -1,3 +1,6 @@
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useLayoutEffect, useRef } from "react";
 
 import {
@@ -141,7 +144,7 @@ const play = (
   element.height = Math.round(height * dpr);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const styles = palette(element);
-  const background = rgb(token(element, "--background"));
+  const background = rgb(token(element, colors.background));
   const ground = `rgb(${background.join(", ")})`;
 
   const brain = from ?? disc(width / 2, height / 2);
@@ -568,7 +571,10 @@ export const DotsBuild = ({
 }: {
   /** The dots to take over, where they are in this layer; without any, a soft disc in its middle. */
   from: BrainDots | null;
-  /** Where the layer lies and what it covers. */
+  /**
+   * Where the layer lies and what it covers: the caller's class names (a
+   * StyleX style's, or a page's still laid out with the kit's classes).
+   */
   className: string;
   /** What is happening, for a screen reader. */
   label: string;
@@ -610,7 +616,7 @@ export const DotsBuild = ({
   return (
     <>
       <canvas aria-hidden="true" className={className} ref={canvas} />
-      <output className="sr-only">{label}</output>
+      <output {...stylex.props(visuallyHidden)}>{label}</output>
     </>
   );
 };

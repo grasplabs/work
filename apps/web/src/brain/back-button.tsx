@@ -1,7 +1,7 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Trans } from "@lingui/react/macro";
+import { Button } from "@grasp-os/ui/components/button";
+import { Icon, ArrowLeftIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
-import { ArrowLeftIcon } from "lucide-react";
 
 /**
  * Back to where you came from, as the browser's own back button: from a note to the part of the
@@ -9,6 +9,7 @@ import { ArrowLeftIcon } from "lucide-react";
  * in the app to go back to. From the prototype's `components/back-button.tsx`.
  */
 export const BackButton = () => {
+  const { t } = useLingui();
   const router = useRouter();
   const canGoBack = useCanGoBack();
   if (!canGoBack) {
@@ -22,8 +23,8 @@ export const BackButton = () => {
       size="sm"
       variant="ghost"
     >
-      <ArrowLeftIcon />
-      <Trans>Back</Trans>
+      <Icon icon={ArrowLeftIcon} />
+      {t`Back`}
     </Button>
   );
 };

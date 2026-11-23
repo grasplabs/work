@@ -1,577 +1,237 @@
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  PageSidebarRailButton,
-  PageSidebarRailDivider,
-  PageSidebarRailExpand,
-} from "@grasp-os/app-kit/components/page-sidebar";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute, useRouteContext } from "@tanstack/react-router";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { TreeView } from "@grasp-os/ui/components/tree-view";
+import type { TreeNode } from "@grasp-os/ui/components/tree-view";
 import {
-  ActivityIcon,
   BrainIcon,
-  Building2Icon,
-  ChevronDownIcon,
+  BuildingIcon,
+  ChartColumnIcon,
+  FolderIcon,
   InboxIcon,
-  LibraryIcon,
-  LightbulbIcon,
-  BookOpenIcon,
+  RocketIcon,
   SparklesIcon,
-  TargetIcon,
+  StickyNoteIcon,
   UsersIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+  WandSparklesIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useLocation } from "@tanstack/react-router";
 
-import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
-import { LOBES, TEAM_FOLDER } from "./brain-atlas.ts";
+import { TEAM_FOLDER } from "./brain-atlas.ts";
 import type { Atlas, AtlasRegion, RegionId } from "./brain-atlas.ts";
-import { dotClass } from "./brain-colors.ts";
 import { findFolder } from "./brain-sections.ts";
-import { countNotes, folderTree } from "./brain.ts";
+import { folderTree } from "./brain.ts";
 import type { Brain, Folder, Note } from "./brain.ts";
 
-// The brain's navigation, as the prototype has it (`components/brain-nav.tsx`):
-// the brain's regions, not the Playbook's six parts, which keep their own
-// pages (/brain/sections) for whoever links to them.
+// The Brain's own navigation, as the prototype's section of the sidebar has
+// it: the Brain's overview, its own pages, and each part of the brain as a
+// tree, what it holds a branch under it, on Damsko's TreeView. It stands as
+// a column of its own beside the Brain's pages from a tablet's width, as the
+// old one did, until the app's sidebar takes it as its level, as it takes
+// Settings. What it shows is what the brain's layout read: no read of its own.
 
-/** Where the parts and folders the reader opened are kept, so a reload shows them as they were. */
-const opened = "grasp.brain.open";
+const styles = stylex.create({
+  nav: {
+    display: { default: "none", [media.md]: "flex" },
+    flexDirection: "column",
+    gap: space["2"],
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: size.sidebarWidth,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingBlock: space["2"],
+    paddingInline: space["2"],
+    backgroundColor: colors.sidebar,
+    borderInlineEndWidth: size.hairline,
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: colors.sidebarBorder,
+  },
+  // The parts' label, as a sidebar group's.
+  label: {
+    margin: 0,
+    paddingBlockStart: space["2"],
+    paddingBlockEnd: space["1"],
+    paddingInline: space["2"],
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    fontWeight: font.weightMedium,
+    color: colors.sidebarSecondaryForeground,
+  },
+});
 
-// The folder keys the reader left open, or none where there are none yet or storage is refused.
-const readOpened = (): Set<string> => {
-  try {
-    const kept: unknown = JSON.parse(localStorage.getItem(opened) ?? "[]");
-    return new Set(
-      Array.isArray(kept)
-        ? kept.filter((key): key is string => typeof key === "string")
-        : []
-    );
-  } catch {
-    return new Set();
-  }
-};
-
-const saveOpened = (open: Set<string>): void => {
-  try {
-    localStorage.setItem(opened, JSON.stringify([...open]));
-  } catch {
-    // See `readOpened`.
-  }
-};
-
-/** The set with the key added when it was missing, removed when it was there. */
-const flip = (previous: Set<string>, key: string): Set<string> => {
-  const next = new Set(previous);
-  if (next.has(key)) {
-    next.delete(key);
-  } else {
-    next.add(key);
-  }
-  return next;
-};
-
-/** The folder keys on the way to a note, so its section and sub-folders can open. */
-const pathKeys = (note: Note): string[] =>
-  note.path.map((_, depth) => note.path.slice(0, depth + 1).join("/"));
-
-const chevron = (expanded: boolean): string =>
-  expanded
-    ? "text-muted-foreground size-3.5 transition-transform"
-    : "text-muted-foreground size-3.5 -rotate-90 transition-transform";
-
-const NoteItem = ({ note }: { note: Note }) => (
-  <Link
-    className="text-muted-foreground hover:bg-accent hover:text-foreground data-[status=active]:bg-accent data-[status=active]:text-foreground flex items-center gap-2 rounded-md px-2 py-1 text-sm data-[status=active]:font-medium"
-    params={{ noteId: note.id }}
-    // A piece of work opens on what Grasp knows about it.
-    search={note.kind === "candidate" ? { knowledge: true } : {}}
-    title={note.title}
-    to="/brain/$noteId"
-  >
-    <span
-      aria-hidden="true"
-      className="flex size-3 flex-none items-center justify-center"
-    >
-      <span className={`size-1.5 rounded-full ${dotClass(note.kind)}`} />
-    </span>
-    <span className="min-w-0 flex-1 truncate">{note.title}</span>
-    {/* A source shows how many statements were tagged in it, since statements live there. */}
-    {note.kind === "source" && note.statementIds.length > 0 ? (
-      <span className="text-xs tabular-nums">{note.statementIds.length}</span>
-    ) : null}
-  </Link>
-);
-
-interface Opening {
-  isOpen: (key: string) => boolean;
-  toggle: (key: string) => void;
-}
-
-/** A group in a part, as a heading with its count; what it holds, while open, under it. */
-const Group = ({
-  folder,
-  opening,
-  children,
-}: {
-  folder: Folder;
-  opening: Opening;
-  children: ReactNode;
-}) => {
-  const { t } = useLingui();
-  const expanded = opening.isOpen(folder.key);
-  const page = folder.note;
-  const name = page?.title ?? folder.name;
-  const heading =
-    "text-foreground min-w-0 flex-1 truncate text-left text-sm data-[status=active]:font-medium";
-  return (
-    <div className="flex flex-col gap-0.5 pt-1">
-      <div className="hover:bg-accent has-data-[status=active]:bg-accent flex items-center gap-1 rounded-md px-2 py-1">
-        {page ? (
-          // A group with its own page, such as a source folder, opens it from its name; the arrow folds it.
-          <Link
-            className={heading}
-            params={{ noteId: page.id }}
-            to="/brain/$noteId"
-          >
-            {name}
-          </Link>
-        ) : (
-          <button
-            aria-expanded={expanded}
-            className={heading}
-            onClick={() => {
-              opening.toggle(folder.key);
-            }}
-            type="button"
-          >
-            {name}
-          </button>
-        )}
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {countNotes(folder) - (page ? 1 : 0)}
-        </span>
-        <button
-          aria-expanded={expanded}
-          aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
-          className="flex size-5 flex-none items-center justify-center rounded-sm"
-          onClick={() => {
-            opening.toggle(folder.key);
-          }}
-          type="button"
-        >
-          <ChevronDownIcon className={chevron(expanded)} />
-        </button>
-      </div>
-      {children}
-    </div>
-  );
-};
-
-/**
- * What a part holds, along its one guide line: its notes, and its groups as headings over theirs.
- * There is one kind of heading and one level of it, so the list reads in two styles only: a group
- * in full colour and a note in the quieter one, all in the same size. A group that only holds other
- * groups, such as Conversations, steps aside for them. Nothing indents further, so every title
- * starts in the same place.
- */
-const Entries = ({ folder, opening }: { folder: Folder; opening: Opening }) => (
-  <>
-    {folder.notes.map((note) => (
-      <NoteItem key={note.id} note={note} />
-    ))}
-    {folder.folders.map((child) =>
-      child.notes.length === 0 && child.folders.length > 0 ? (
-        <Entries folder={child} key={child.key} opening={opening} />
-      ) : (
-        <Group folder={child} key={child.key} opening={opening}>
-          {opening.isOpen(child.key) ? (
-            <Entries folder={child} opening={opening} />
-          ) : null}
-        </Group>
-      )
-    )}
-  </>
-);
-
-const topLinkClass =
-  "group hover:bg-accent data-[status=active]:bg-accent flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm data-[status=active]:font-medium";
-
-const TopLinkContent = ({
-  icon: Icon,
-  label,
-}: {
-  icon: LucideIcon;
-  label: string;
-}) => (
-  <>
-    <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
-    <span className="min-w-0 flex-1 truncate">{label}</span>
-  </>
-);
-
-/** The home and the web, above the parts: an icon and a name. Without a note it is the web. */
-const TopLink = ({
-  to,
-  icon,
-  label,
-}: {
-  to?: string;
-  icon: LucideIcon;
-  label: string;
-}) =>
-  to === undefined ? (
-    <Link activeOptions={{ exact: true }} className={topLinkClass} to="/brain">
-      <TopLinkContent icon={icon} label={label} />
-    </Link>
-  ) : (
-    <Link className={topLinkClass} params={{ noteId: to }} to="/brain/$noteId">
-      <TopLinkContent icon={icon} label={label} />
-    </Link>
-  );
-
-/** The key a region is opened by in the navigation. */
-const regionKey = (id: RegionId): string => `region:${id}`;
-
-/** Each region's icon: the board's goals, the teams in a lobe, and what came in. */
-const regionIcon = (id: RegionId): LucideIcon => {
+/** Each part's icon: the board's goals, the teams in a lobe, and what came in. */
+const partIcon = (id: RegionId): IconData => {
   if (id === "frontal") {
-    return TargetIcon;
+    return RocketIcon;
   }
   return id === "stem" ? InboxIcon : UsersIcon;
 };
 
+/** A note as an item under its part: it opens the note's page. */
+const noteItem = (note: Note): TreeNode => ({
+  value: note.id,
+  label: note.title,
+  render: <Link params={{ noteId: note.id }} to="/brain/$noteId" />,
+});
+
 /**
- * What a region holds, as the navigation lists it. In front, the vision and the goals; in a lobe,
- * each team as a group that opens its page from its name, its work under it; at the stem, the
- * folders of what came in.
+ * What a part holds, as its items: in front, the vision and the goals; in a
+ * lobe, each team; at the stem, the folders of what came in, each opening
+ * its own page where it has one.
  */
-const regionFolder = (region: AtlasRegion, tree: Folder): Folder => {
-  const key = regionKey(region.id);
+const partItems = (region: AtlasRegion, tree: Folder): TreeNode[] => {
   if (region.id === "stem") {
-    return {
-      key,
-      name: region.name,
-      folders: findFolder(tree, "Sources")?.folders ?? [],
-      notes: [],
-    };
-  }
-  if (region.id === "frontal") {
-    return { key, name: region.name, folders: [], notes: region.notes };
-  }
-  const teams = region.notes.filter((each) => each.kind === "team");
-  const workOf = (team: Note) =>
-    region.notes.filter(
-      (each) =>
-        each.kind !== "team" &&
-        each.path[0] === TEAM_FOLDER &&
-        each.path[1] === team.id
+    const folders = findFolder(tree, "Sources")?.folders ?? [];
+    return folders.flatMap((folder) =>
+      folder.note === undefined ? [] : [noteItem(folder.note)]
     );
-  const [only] = teams;
-  // A group of one team named after it: the team's page first, then its work, said once.
-  if (teams.length === 1 && only?.title === region.name) {
-    return {
-      key,
-      name: region.name,
-      folders: [],
-      notes: [only, ...workOf(only)],
-    };
   }
-  return {
-    key,
-    name: region.name,
-    notes: [],
-    folders: teams.map((team) => ({
-      key: `team:${team.id}`,
-      name: team.title,
-      note: team,
-      folders: [],
-      notes: workOf(team),
-    })),
-  };
+  const shown = region.notes.filter(
+    (note) => note.kind === "team" || note.path[0] !== TEAM_FOLDER
+  );
+  return shown.map((note) => noteItem(note));
 };
 
-/** The keys on the way to a note in the navigation: its region, the team whose work it is, and the folders of what came in. */
-const wayTo = (note: Note, atlas: Atlas): string[] => {
-  const home = atlas.home.get(note.id);
-  if (home === undefined) {
-    return [];
-  }
-  const shown = atlas.regions
-    .find((each) => each.id === home)
-    ?.notes.find((each) => each.id === note.id);
-  const team =
-    shown?.path[0] === TEAM_FOLDER ? [`team:${shown.path[1] ?? ""}`] : [];
-  const folders = home === "stem" ? pathKeys(note) : [];
-  return [regionKey(home), ...team, ...folders];
-};
+/** The Brain's own pages, each an item of the navigation, by its address. */
+type BrainPage =
+  | "/brain/activity"
+  | "/brain/memories"
+  | "/brain/opportunities"
+  | "/brain/skills"
+  | "/brain/sources";
+
+const pageItem = (to: BrainPage, label: string, icon: IconData): TreeNode => ({
+  value: to,
+  label,
+  icon,
+  render: <Link to={to} />,
+});
+
+/** The overview's item: the brain as an atlas. */
+const overview = "overview";
 
 /**
- * The brain's navigation, as the prototype has it: the home and the brain itself, its log, then
- * the brain's regions: the board, each of the company's groups of teams, and what came in. A
- * region opens in place along a thin guide line: a group's teams, each opening to its work. It
- * folds to a rail of icons to give the page more room: by itself on a window too narrow to hold
- * it open beside the brain, and whenever you fold it. It stays folded or open as the reader left
- * it, and so do the regions and teams opened in it.
+ * The Brain's pages and parts. Opportunities are an admin's (GRA-1750):
+ * nobody else gets the item.
  */
 export const BrainNav = ({
-  brain,
   atlas,
-  note,
-  region: shownRegion,
+  brain,
+  identity,
 }: {
-  brain: Brain;
   atlas: Atlas;
-  note?: Note | undefined;
-  region?: RegionId | undefined;
+  brain: Brain;
+  identity: Identity;
 }) => {
   const { t } = useLingui();
-  const [collapsed, setCollapsed] = usePageSidebarFold("brain");
-  const [open, setOpen] = useState(readOpened);
-  // What is open is kept for the next visit, as the folding is.
-  useEffect(() => {
-    saveOpened(open);
-  }, [open]);
-  const [revealed, setRevealed] = useState<string | undefined>();
-  const company = brain.notes.find((candidate) => candidate.kind === "company");
-  const activityLabel = t({ message: "Activity", context: "the brain's log" });
-  // Which of the brain's own pages is open, for the folded rail: the open
-  // panel's links mark themselves, a rail button is told.
-  const matchRoute = useMatchRoute();
-  const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
-  const onSources = Boolean(matchRoute({ to: "/brain/sources" }));
-  const onMemories = Boolean(matchRoute({ to: "/brain/memories" }));
-  const memoriesLabel = t({
-    message: "Memories",
-    context: "the Brain's memories page",
-  });
-  const sourcesLabel = t({
-    message: "Sources",
-    context: "the Brain's sources page",
-  });
-  const onSkills = Boolean(matchRoute({ to: "/brain/skills" }));
-  const skillsLabel = t({
-    message: "Skills",
-    context: "the Brain's skills page",
-  });
-  // Opportunities are an admin's (GRA-1750): nobody else gets the link.
-  const { identity } = useRouteContext({ from: "/_shell" });
-  const admin = isMemberAdmin(identity);
-  const onOpportunities = Boolean(matchRoute({ to: "/brain/opportunities" }));
-  const opportunitiesLabel = t({
-    message: "Opportunities",
-    context: "the Brain's opportunities page",
-  });
-  const onBrain = Boolean(matchRoute({ to: "/brain" }));
-  let here = new Set<string>();
-  if (note) {
-    here = new Set(wayTo(note, atlas));
-  } else if (shownRegion) {
-    here = new Set([regionKey(shownRegion)]);
-  }
-
-  // Opening a note opens the way to it once, so you can see where you are. After that it closes
-  // like anything else. A region open in the brain opens here too, once.
-  const reveal =
-    note?.id ??
-    (shownRegion === undefined ? undefined : regionKey(shownRegion));
-  if (reveal !== undefined && revealed !== reveal) {
-    setRevealed(reveal);
-    setOpen((previous) => new Set([...previous, ...here]));
-  }
-
+  const { pathname, search } = useLocation();
   const tree = folderTree(brain.notes);
-  const opening: Opening = {
-    isOpen: (key) => open.has(key),
-    toggle: (key) => {
-      setOpen((previous) => flip(previous, key));
+  const company = brain.notes.find((note) => note.kind === "company");
+  const pages: TreeNode[] = [
+    // The overview stands first, by the Brain's own name.
+    {
+      value: overview,
+      label: t`Brain`,
+      icon: BrainIcon,
+      render: <Link to="/brain" />,
     },
-  };
-  // The board first, then the company's groups in its own order, then what came in.
-  const order: RegionId[] = ["frontal", ...LOBES, "stem"];
-  const regions = order.flatMap((id) =>
-    atlas.regions
-      .filter(
-        (each) => each.id === id && each.name !== "" && each.notes.length > 0
-      )
-      .map((each) => ({
-        region: each,
-        folder: regionFolder(each, tree),
-        Icon: regionIcon(each.id),
-      }))
-  );
-
-  if (collapsed) {
-    return (
-      <PageSidebar folded label={t`The brain`}>
-        <PageSidebarRailExpand
-          label={t`Expand the navigation`}
-          onExpand={() => {
-            setCollapsed(false);
-          }}
-        />
-        <PageSidebarRailDivider />
-        {company ? (
-          <PageSidebarRailButton
-            active={note?.id === company.id}
-            label={company.title}
-            render={
-              <Link params={{ noteId: company.id }} to="/brain/$noteId" />
+    ...(company === undefined
+      ? []
+      : [{ ...noteItem(company), icon: BuildingIcon }]),
+    pageItem(
+      "/brain/activity",
+      t({ message: "Activity", context: "the brain's log" }),
+      ChartColumnIcon
+    ),
+    pageItem(
+      "/brain/sources",
+      t({ message: "Sources", context: "the Brain's sources page" }),
+      FolderIcon
+    ),
+    pageItem(
+      "/brain/memories",
+      t({ message: "Memories", context: "the Brain's memories page" }),
+      StickyNoteIcon
+    ),
+    pageItem(
+      "/brain/skills",
+      t({ message: "Skills", context: "the Brain's skills page" }),
+      WandSparklesIcon
+    ),
+    ...(isMemberAdmin(identity)
+      ? [
+          pageItem(
+            "/brain/opportunities",
+            t({
+              message: "Opportunities",
+              context: "the Brain's opportunities page",
+            }),
+            SparklesIcon
+          ),
+        ]
+      : []),
+  ];
+  const parts: TreeNode[] = atlas.regions
+    .filter((region) => region.notes.length > 0 || region.id === "stem")
+    .map((region) => {
+      const open = region.open.length;
+      return {
+        value: region.id,
+        label: region.name,
+        icon: partIcon(region.id),
+        render: <Link search={{ region: region.id }} to="/brain" />,
+        ...(open > 0
+          ? {
+              badge: (
+                <Badge aria-label={t`${open} still open`} size="sm">
+                  {open}
+                </Badge>
+              ),
             }
-          >
-            <Building2Icon />
-          </PageSidebarRailButton>
-        ) : null}
-        <PageSidebarRailButton
-          active={onBrain && shownRegion === undefined}
-          label={t`Brain`}
-          render={<Link activeOptions={{ exact: true }} to="/brain" />}
-        >
-          <BrainIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onActivity}
-          label={activityLabel}
-          render={<Link to="/brain/activity" />}
-        >
-          <ActivityIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onSources}
-          label={sourcesLabel}
-          render={<Link to="/brain/sources" />}
-        >
-          <LibraryIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onMemories}
-          label={memoriesLabel}
-          render={<Link to="/brain/memories" />}
-        >
-          <LightbulbIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onSkills}
-          label={skillsLabel}
-          render={<Link to="/brain/skills" />}
-        >
-          <BookOpenIcon />
-        </PageSidebarRailButton>
-        {admin ? (
-          <PageSidebarRailButton
-            active={onOpportunities}
-            label={opportunitiesLabel}
-            render={<Link to="/brain/opportunities" />}
-          >
-            <SparklesIcon />
-          </PageSidebarRailButton>
-        ) : null}
-        {regions.map(({ region, Icon }) => (
-          <PageSidebarRailButton
-            active={here.has(regionKey(region.id))}
-            key={region.id}
-            label={region.name}
-            render={<Link search={{ region: region.id }} to="/brain" />}
-          >
-            <Icon />
-          </PageSidebarRailButton>
-        ))}
-      </PageSidebar>
-    );
+          : {}),
+        children: partItems(region, tree),
+      };
+    });
+  // Where the person is: the overview or a part of it, a page, or a note.
+  let current: string | null = null;
+  if (pathname === "/brain") {
+    current = typeof search.region === "string" ? search.region : overview;
+  } else if (pages.some((page) => page.value === pathname)) {
+    current = pathname;
+  } else if (pathname.startsWith("/brain/")) {
+    current = decodeURIComponent(pathname.slice("/brain/".length));
   }
-
   return (
-    <PageSidebar folded={false} label={t`The brain`}>
-      {/* The home, with the way to fold the navigation beside it: out of the way, where the panel begins. */}
-      <PageSidebarTop
-        fold={{
-          label: t`Fold the navigation`,
-          onFold: () => {
-            setCollapsed(true);
-          },
-        }}
-        joined
-      >
-        {company ? (
-          <TopLink icon={Building2Icon} label={company.title} to={company.id} />
-        ) : (
-          <TopLink icon={BrainIcon} label={t`Brain`} />
-        )}
-      </PageSidebarTop>
-      <PageSidebarBody joined>
-        {company ? <TopLink icon={BrainIcon} label={t`Brain`} /> : null}
-        <Link className={topLinkClass} to="/brain/activity">
-          <TopLinkContent icon={ActivityIcon} label={activityLabel} />
-        </Link>
-        <Link className={topLinkClass} to="/brain/sources">
-          <TopLinkContent icon={LibraryIcon} label={sourcesLabel} />
-        </Link>
-        <Link className={topLinkClass} to="/brain/memories">
-          <TopLinkContent icon={LightbulbIcon} label={memoriesLabel} />
-        </Link>
-        <Link className={topLinkClass} to="/brain/skills">
-          <TopLinkContent icon={BookOpenIcon} label={skillsLabel} />
-        </Link>
-        {admin ? (
-          <Link className={topLinkClass} to="/brain/opportunities">
-            <TopLinkContent icon={SparklesIcon} label={opportunitiesLabel} />
-          </Link>
-        ) : null}
-        <span aria-hidden="true" className="bg-border my-2 h-px" />
-
-        {regions.map(({ region, folder, Icon }) => {
-          const key = regionKey(region.id);
-          const expanded = opening.isOpen(key);
-          const current = here.has(key);
-          const { name } = region;
-          return (
-            <div className="flex flex-col" key={key}>
-              <div className="hover:bg-accent has-data-[status=active]:bg-accent flex items-center rounded-md">
-                {/* The region's name goes to it in the brain; the arrow opens what it holds here. */}
-                <Link
-                  activeOptions={{ includeSearch: true }}
-                  className={
-                    current
-                      ? "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm font-medium"
-                      : "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm data-[status=active]:font-medium"
-                  }
-                  search={{ region: region.id }}
-                  to="/brain"
-                >
-                  <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
-                  <span className="min-w-0 flex-1 truncate">{name}</span>
-                  {region.group?.confirmed === false ? (
-                    <span className="text-muted-foreground text-xs font-normal">
-                      <Trans context="a group of teams Grasp proposed that no admin confirmed yet">
-                        Proposed
-                      </Trans>
-                    </span>
-                  ) : null}
-                </Link>
-                <button
-                  aria-expanded={expanded}
-                  aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
-                  className="flex size-7 flex-none items-center justify-center rounded-md"
-                  onClick={() => {
-                    opening.toggle(key);
-                  }}
-                  type="button"
-                >
-                  <ChevronDownIcon className={chevron(expanded)} />
-                </button>
-              </div>
-              {expanded ? (
-                <div className="my-1 ml-4 flex flex-col gap-0.5 border-l pl-2">
-                  <Entries folder={folder} opening={opening} />
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </PageSidebarBody>
-    </PageSidebar>
+    <aside aria-label={t`The brain`} {...stylex.props(styles.nav)}>
+      <TreeView
+        aria-label={t`The Brain's pages`}
+        current={current}
+        items={pages}
+        selectionMode="none"
+      />
+      <p aria-hidden="true" {...stylex.props(styles.label)}>
+        {t`In the brain`}
+      </p>
+      <TreeView
+        aria-label={t`In the brain`}
+        current={current}
+        defaultExpandedValue={parts.map((part) => part.value)}
+        expandOnPress={false}
+        items={parts}
+        selectionMode="none"
+        showIndentGuides
+      />
+    </aside>
   );
 };

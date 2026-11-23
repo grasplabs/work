@@ -282,7 +282,9 @@ describe("the person's own export", () => {
     const faked = route(null);
     await shown(faked, () => buttonNamed("Export") !== undefined, "Export");
     await press("Export", () => said().includes(writingSaid), "writing");
-    const focused = document.activeElement?.tagName;
+    // Focus lands on the part's heading, where the button that went stood.
+    const focused =
+      document.activeElement?.querySelector("h2")?.textContent ?? undefined;
     faked.shown = exported("done", twoFiles);
     await later(followEveryMs, () => said() === readySaid, "done");
     // Its reads' deadlines run out; nothing else is left to fire.
@@ -295,7 +297,7 @@ describe("the person's own export", () => {
       again: buttonOf("Export again").disabled,
       timers: vi.getTimerCount(),
     }).toStrictEqual({
-      focused: "H2",
+      focused: "Export what only you may read",
       links: [
         [
           "manifest.json",

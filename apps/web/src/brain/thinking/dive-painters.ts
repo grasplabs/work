@@ -1,6 +1,9 @@
+import { colors } from "@grasp-os/ui/lib/tokens.stylex";
+
 import { LIGHT } from "../atlas-map.ts";
 import { rgb, token } from "../dot-ink.ts";
 import { brainCloud } from "../dot-shapes.ts";
+import { graph } from "../graph.stylex.ts";
 import { seeded } from "../reveal-motion.ts";
 import { focal } from "./dive-scene.ts";
 import type { Plane, Pose, Vec3 } from "./dive-scene.ts";
@@ -21,7 +24,7 @@ export const MOST_DOTS = 60_000;
 const SURFACE_KEEP = 0.34;
 
 /** What a frame paints: the camera, how far inside it is, the plane the print stands on, and how many dots it has. */
-export interface DiveFrame {
+interface DiveFrame {
   matrix: Float32Array;
   pose: Pose;
   inside: number;
@@ -30,7 +33,7 @@ export interface DiveFrame {
 }
 
 /** A painter: the dots to fill, how to paint them, and whether it is the 2D canvas, which has no flight. */
-export interface DivePainter {
+interface DivePainter {
   flat: boolean;
   dots: Float32Array;
   paint: (frame: DiveFrame) => void;
@@ -54,8 +57,8 @@ const unit = (color: string): Vec3 => {
 // dot ink's (dot-ink.ts); the rest are the theme's tokens, never a copy.
 const inksOf = (element: HTMLElement): Inks => ({
   ink: unit(getComputedStyle(element).color),
-  warm: unit(token(element, "--brain-heat")),
-  open: unit(token(element, "--status-attention")),
+  warm: unit(token(element, graph.heat)),
+  open: unit(token(element, colors.warning)),
 });
 
 /** The colours as they are now, read again when the theme changes. */
