@@ -8,7 +8,7 @@ import type { StartFacts } from "../src/admin/getting-started.ts";
 
 /** A company just added with the whole onboarding: closed, its admin named, nothing else yet. */
 const added: StartFacts = {
-  window: { open: false, pending: false },
+  window: { open: false, live: false },
   gate: { open: false, openedAt: null },
   admins: ["ada@acme.test"],
   interviews: true,
@@ -16,6 +16,7 @@ const added: StartFacts = {
   plan: false,
   agreed: false,
   told: false,
+  paused: false,
 };
 
 /** Each item's standing, by its id. */
@@ -39,10 +40,10 @@ describe("getting a company started", () => {
     });
   });
 
-  it("counts a staff window as open only once its settings are applied", () => {
+  it("counts a staff window as open only once the company's Grasp has it", () => {
     expect([
-      standing({ ...added, window: { open: true, pending: true } }).window,
-      standing({ ...added, window: { open: true, pending: false } }).window,
+      standing({ ...added, window: { open: true, live: false } }).window,
+      standing({ ...added, window: { open: true, live: true } }).window,
       standing({ ...added, window: null }).window,
     ]).toStrictEqual(["todo", "done", "todo"]);
   });
@@ -63,11 +64,20 @@ describe("getting a company started", () => {
       linksOf({ ...added, roster: true }),
       linksOf({ ...added, roster: true, plan: true }),
       linksOf({ ...added, roster: true, plan: true, agreed: true }),
+      // Paused, nothing goes out, whatever else is in.
+      linksOf({
+        ...added,
+        roster: true,
+        plan: true,
+        agreed: true,
+        paused: true,
+      }),
     ]).toStrictEqual([
       "Wait for the staff list.",
       "Wait for the plan.",
       "Wait for the agreements: they go out the moment those are in.",
       "Each goes out by email on its day.",
+      "The interviews are paused: no link goes out until they run again.",
     ]);
   });
 
@@ -78,13 +88,20 @@ describe("getting a company started", () => {
       notTold: started({ ...added, roster: true, plan: true, agreed: true }),
       quietItems: Object.keys(standing(quiet)),
       quietWaiting: started(quiet),
-      quietReady: started({ ...quiet, window: { open: true, pending: false } }),
+      quietReady: started({ ...quiet, window: { open: true, live: true } }),
+      // Its flow opened it once its admin finished: nothing asks to close it.
+      quietOpened: started({
+        ...quiet,
+        window: { open: true, live: true },
+        gate: { open: true, openedAt: "2026-11-22T10:00:00.000Z" },
+      }),
     }).toStrictEqual({
       told: true,
       notTold: false,
       quietItems: ["window", "closed", "admin"],
       quietWaiting: false,
       quietReady: true,
+      quietOpened: true,
     });
   });
 });

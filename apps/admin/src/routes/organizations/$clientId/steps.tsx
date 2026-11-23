@@ -54,7 +54,7 @@ const Steps = () => {
                   ? null
                   : {
                       open: setup.staffWindow.open,
-                      pending: setup.configPending,
+                      live: setup.staffWindow.live,
                     },
               gate: snapshot.gate,
               admins: snapshot.company.admins,
@@ -66,6 +66,7 @@ const Steps = () => {
               plan: snapshot.plan !== null,
               agreed: snapshot.agreed,
               told: snapshot.told,
+              paused: snapshot.paused,
             }}
           />
           <OrgSteps

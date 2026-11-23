@@ -28,8 +28,8 @@ export interface StartItem {
 
 /** What the items are read from: the admin's own record, and the company's Grasp. */
 export interface StartFacts {
-  /** Grasp's staff window: open now, and whether its settings still wait for a deploy. Null when it couldn't be read. */
-  window: { open: boolean; pending: boolean } | null;
+  /** Grasp's staff window: open now, and whether the company's Grasp has it. Null when it couldn't be read. */
+  window: { open: boolean; live: boolean } | null;
   /** The gate: open to the company's people now, and when Grasp gave its go. */
   gate: { open: boolean; openedAt: string | null };
   /** Who the deployment makes its admins when they first sign in. */
@@ -40,6 +40,8 @@ export interface StartFacts {
   plan: boolean;
   agreed: boolean;
   told: boolean;
+  /** The interviews are paused: no link goes out until they run again. */
+  paused: boolean;
 }
 
 const windowItem = (window: StartFacts["window"]): StartItem => {
@@ -52,7 +54,7 @@ const windowItem = (window: StartFacts["window"]): StartItem => {
       detail: "Not read just now. See it under Setup.",
     };
   }
-  if (window.open && !window.pending) {
+  if (window.live) {
     return {
       id: "window",
       state: "done",
@@ -80,14 +82,21 @@ const closedItem = ({ open, openedAt }: StartFacts["gate"]): StartItem => {
       detail: "Only its admins and Grasp’s staff come in until it opens.",
     };
   }
+  // Opened since, on Grasp's go or as its flow says: nothing left to close.
+  if (openedAt !== null) {
+    return {
+      id: "closed",
+      state: "done",
+      title,
+      detail: "It was, and has opened since: everyone at the company is in.",
+    };
+  }
   return {
     id: "closed",
     state: "todo",
     title,
     detail:
-      openedAt === null
-        ? "It is open to everyone at the company. Close it, so only its admins come in while it onboards."
-        : "Grasp gave its go: it is open to everyone at the company.",
+      "It is open to everyone at the company. Close it, so only its admins come in while it onboards.",
   };
 };
 
@@ -108,7 +117,11 @@ const linksDetail = ({
   roster,
   plan,
   agreed,
-}: Pick<StartFacts, "roster" | "plan" | "agreed">): string => {
+  paused,
+}: Pick<StartFacts, "roster" | "plan" | "agreed" | "paused">): string => {
+  if (paused) {
+    return "The interviews are paused: no link goes out until they run again.";
+  }
   if (!roster) {
     return "Wait for the staff list.";
   }
