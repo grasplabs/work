@@ -18,6 +18,7 @@ export const durations = {
   resultFollow: 80,
   work: 1200,
   hold: 1600,
+  loadingDelay: 1000,
   spin: 1500,
   pressAndHold: 1000,
   releaseSwallow: 600,

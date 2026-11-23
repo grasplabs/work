@@ -3,7 +3,8 @@
 //
 //   segmented  Light, Dark, System, with icons; the pill moves (the default, for a header or a menu)
 //   icon       one button that cycles them, for a dense toolbar
-//   picker     tiles that are real miniatures of the interface, modes and themes, for settings
+//   picker     tiles that are real miniatures of the interface, modes and themes, for settings;
+//              resting on a theme's tile tells the caller, which shows it until the pointer leaves
 //
 //   <ThemeToggle mode={mode} onModeChange={setMode} />
 //
@@ -82,6 +83,12 @@ export interface ThemeToggleProps {
   theme?: ThemeId;
   /** Called with the theme a person or an agent chose; the caller applies and keeps it. */
   onThemeChange?: (theme: ThemeId) => void;
+  /**
+   * Called with a theme while the pointer rests on its tile in the picker or focus is on it, and
+   * with nothing when it leaves: show that theme meanwhile, and the chosen one again after. Shown is
+   * not chosen: `theme` stays the caller's.
+   */
+  onThemePreview?: (theme: ThemeId | undefined) => void;
   /** The themes the picker offers under the modes, each with its name. None: modes only. */
   themes?: readonly Theme[];
   /**
@@ -713,6 +720,8 @@ interface TileProps {
   name: string;
   line: string;
   onChoose: () => void;
+  /** A theme's tile: called as the pointer or focus comes to it, and as it leaves. */
+  onPreview?: (on: boolean) => void;
   children?: ReactNode;
 }
 
@@ -726,9 +735,18 @@ const Tile = ({
   name,
   line,
   onChoose,
+  onPreview,
   children,
 }: TileProps) => (
-  <label {...stylex.props(styles.tile, focusWithin)}>
+  <label
+    onPointerEnter={() => {
+      onPreview?.(true);
+    }}
+    onPointerLeave={() => {
+      onPreview?.(false);
+    }}
+    {...stylex.props(styles.tile, focusWithin)}
+  >
     <input
       type="radio"
       name={group}
@@ -736,6 +754,12 @@ const Tile = ({
       checked={chosen}
       onChange={onChoose}
       onKeyDown={toEnds}
+      onFocus={() => {
+        onPreview?.(true);
+      }}
+      onBlur={() => {
+        onPreview?.(false);
+      }}
       {...stylex.props(styles.native)}
     />
     <span aria-hidden="true" {...stylex.props(styles.frame)}>
@@ -778,6 +802,7 @@ const Picker = ({
   words,
   onChooseMode,
   onChooseTheme,
+  onPreviewTheme,
 }: {
   mode: ThemeMode;
   theme: ThemeId | undefined;
@@ -788,6 +813,7 @@ const Picker = ({
   words: (mode: ThemeMode) => ModeWords;
   onChooseMode: (mode: ThemeMode) => void;
   onChooseTheme: (theme: ThemeId) => void;
+  onPreviewTheme: ((theme: ThemeId | undefined) => void) | undefined;
 }) => {
   const modesName = useId();
   const themesName = useId();
@@ -876,6 +902,9 @@ const Picker = ({
                 onChoose={() => {
                   onChooseTheme(each.id);
                 }}
+                onPreview={(on) => {
+                  onPreviewTheme?.(on ? each.id : undefined);
+                }}
               />
             ))}
           </div>
@@ -893,6 +922,7 @@ export const ThemeToggle = ({
   onModeChange,
   theme,
   onThemeChange,
+  onThemePreview,
   themes = noThemes,
   showThemes = true,
   tileSize = "fill",
@@ -946,6 +976,7 @@ export const ThemeToggle = ({
           words={wordsOf}
           onChooseMode={onModeChange}
           onChooseTheme={chooseTheme}
+          onPreviewTheme={onThemePreview}
         />
       );
     }

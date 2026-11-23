@@ -413,6 +413,7 @@ export const duration = stylex.defineConsts({
   resultFollow: "var(--damsko-result-follow)",
   work: "var(--damsko-duration-work)",
   hold: "var(--damsko-duration-hold)",
+  loadingDelay: "var(--damsko-loading-delay)",
   spin: "var(--damsko-duration-spin)",
   pressAndHold: "var(--damsko-duration-press-and-hold)",
   releaseSwallow: "var(--damsko-duration-release-swallow)",
