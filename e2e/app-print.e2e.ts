@@ -5,7 +5,7 @@ import { apiOf, peopleIn, release } from "./people.ts";
 import { tallyFiles } from "./tally-app.ts";
 
 // An App's page, printed: the page alone, without Grasp's bar over it
-// (apps/web/src/pages/page-frame.tsx), its frame filling one sheet of A4,
+// (its heading, the App's name), its frame filling one sheet of A4,
 // and in the light theme's colours, as paper is light, though printed
 // from the dark theme.
 
@@ -20,28 +20,28 @@ test("someone prints an App's page: the page alone, on one sheet, in light colou
 }) => {
   const { builder } = peopleIn("appPrint");
   const { core, api } = apiOf(builder);
+  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   let app: string;
   try {
-    ({ id: app } = await api.apps.create({
-      name: `Tally ${crypto.randomUUID().slice(0, 8)}`,
-    }));
+    ({ id: app } = await api.apps.create({ name }));
     await release(api, app, tallyFiles("in the App"));
   } finally {
     core[Symbol.dispose]();
   }
 
   const page = await pageOf(builder);
+  const bar = page.getByRole("heading", { name, level: 1 });
   await page.goto(`/apps/${app}/full`);
   const appPage = page.frameLocator('iframe[title="App"]');
   // The first open builds it, which takes a while on a loaded machine.
   await expect(appPage.getByRole("status")).toHaveText("0 in the App", {
     timeout: 30_000,
   });
-  await expect(page.getByText("App page")).toBeVisible();
+  await expect(bar).toBeVisible();
 
   await page.setViewportSize(a4);
   await page.emulateMedia({ media: "print" });
-  await expect(page.getByText("App page")).toBeHidden();
+  await expect(bar).toBeHidden();
   await expect(appPage.getByRole("status")).toBeVisible();
   const frame = page
     .frames()

@@ -1,17 +1,20 @@
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import {
   Alert,
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+} from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   Empty,
   EmptyContent,
@@ -19,30 +22,35 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import type { App, ViewedApp } from "@grasp-os/shared/apps";
-import type { Draft } from "@grasp-os/shared/drafts";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { SubjectMember } from "@grasp-os/shared/subject-members";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useNavigate, useRouter } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/empty";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import {
   ArchiveIcon,
   CodeIcon,
   DatabaseIcon,
+  EllipsisIcon,
   EyeIcon,
+  Icon,
   LayoutGridIcon,
   LinkIcon,
   Maximize2Icon,
-  MoreHorizontalIcon,
-  PanelRightIcon,
+  MessageCircleIcon,
   SettingsIcon,
   SparklesIcon,
-  TriangleAlertIcon,
   UsersIcon,
-  XIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  duration,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -59,13 +67,7 @@ import {
 import { memberNames, useMembersRead } from "../drafts/sharing.tsx";
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { hasChanges, useDraft } from "../drafts/use-draft.ts";
-import { ErrorText } from "../error-text.tsx";
-import {
-  ItemBar,
-  ItemShell,
-  ItemSwitch,
-  ItemSwitchLink,
-} from "../frame/item-shell.tsx";
+import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
@@ -74,17 +76,28 @@ import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
+import { AppBuilding } from "./app-building/app-building.tsx";
 import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog } from "./app-own-link.tsx";
 import { sharesApp } from "./app-role.ts";
 import { AppSettings, Read } from "./app-settings.tsx";
-import type { AppSettingsSection } from "./app-settings.tsx";
 import { AppStart } from "./app-start.tsx";
 import { useStatusMove } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
+import {
+  PreviewControls,
+  previewWidths,
+  usePreviewControls,
+  WidthSwitch,
+} from "./preview-controls.tsx";
+import type {
+  PreviewControlsProps,
+  PreviewWidth,
+} from "./preview-controls.tsx";
+import type { AppSettingsSection } from "./settings-sections.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
@@ -97,9 +110,11 @@ const AppCode = lazy(async () => {
 // An App's workspace, where its builders change it, at the App's own
 // address (/apps/$app): its people get the App itself there. One bar, the
 // App's (frame/item-shell.tsx): back to the Apps, its name and where it
-// stands in plain words ("Only you see this", or who uses it), then what
-// the main area shows (Preview, Code, Data, Settings), "…" and Share with
-// your team, the page's one lime action (drafts/share-with-team.tsx). The main area
+// stands in plain words ("Only you see this", or who uses it), the
+// preview's own controls, "…", Share, and Publish, the page's one main
+// action (drafts/share-with-team.tsx). What the main area shows (the
+// App, Code, Data, Settings' sections) are rows of the sidebar's section,
+// the App's while its workspace is open (app-section.tsx). The main area
 // always shows the App: an App with no page yet asks what it should do
 // (app-start.tsx), and one just made says what to do next, once
 // (made-tip.ts).
@@ -118,13 +133,15 @@ const AppCode = lazy(async () => {
 // about this App (chat/chat-subject.ts): the App's chat, docked open
 // beside the workspace.
 //
-// Sharing is what gives the team the changes: Share with your team asks
-// who gets it and shares the changes with them in one step; once shared,
-// a line under the bar says how many changes only its builders see, with
-// Share changes and Undo (drafts/share-with-team.tsx). The chat's agent never shares.
+// Publishing is what gives the team the changes, and sharing is who the
+// team is: Share asks who gets the App, Publish says where it stands and
+// makes the changes live; once shared and live, a line under the bar says
+// how many changes only its builders see, with Undo
+// (drafts/share-with-team.tsx). The
+// chat's agent never publishes or shares.
 // History, in Settings, steps the changes back and goes back to an
-// earlier version (drafts/draft-history.tsx); its Preview opens a checkpoint or a
-// version here, read-only (`?point=`, `?version=`).
+// earlier version (drafts/draft-history.tsx); its Preview opens a
+// checkpoint or a version here, read-only (`?point=`, `?version=`).
 
 /** What the main area shows. */
 export type WorkspaceView = "preview" | "code" | "data" | "settings";
@@ -143,49 +160,109 @@ const shownKey = (shown: ReadOnlyShown | undefined): string => {
   return "point" in shown ? `point:${shown.point}` : `version:${shown.version}`;
 };
 
-/** The switch's entries, in order. */
-const views = [
-  { view: "preview", icon: EyeIcon },
-  { view: "code", icon: CodeIcon },
-  { view: "data", icon: DatabaseIcon },
-  { view: "settings", icon: SettingsIcon },
-] as const;
+// What comes over the preview comes in softly.
+const fadeIn = stylex.keyframes({
+  from: { opacity: 0 },
+  to: { opacity: 1 },
+});
 
-/** Preview | Code | Data | Settings: links, so each is an address of its own. */
-const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
-  const { t } = useLingui();
-  const labels: Record<WorkspaceView, string> = {
-    preview: t({ message: "App", context: "an app's workspace view" }),
-    code: t({ message: "Code", context: "an app's workspace view" }),
-    data: t({ message: "Data", context: "an app's workspace view" }),
-    settings: t({ message: "Settings", context: "an app's workspace view" }),
-  };
-  return (
-    <ItemSwitch label={t`Workspace views`}>
-      {views.map(({ view: each, icon: Icon }) => (
-        <ItemSwitchLink
-          current={each === view}
-          icon={<Icon data-icon="inline-start" />}
-          key={each}
-          label={labels[each]}
-          renderLink={(look) => (
-            <Link
-              {...look}
-              params={{ app }}
-              replace
-              search={(held) => ({
-                env: held.env,
-                project: held.project,
-                ...(each === "preview" ? {} : { view: each }),
-              })}
-              to="/apps/$app"
-            />
-          )}
-        />
-      ))}
-    </ItemSwitch>
-  );
-};
+const styles = stylex.create({
+  // A state in place of the preview, on the page's soft ground.
+  place: {
+    display: "flex",
+    flexGrow: 1,
+    minHeight: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: space[6],
+    backgroundColor: colors.muted,
+  },
+  // The first build, filling the preview's place.
+  building: {
+    display: "flex",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  // Where App building stands: the whole room, its own grid inside (a
+  // layout only places it, never sets how it lays itself out).
+  buildingPlace: {
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  fill: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
+    minWidth: 0,
+  },
+  hidden: { display: "none" },
+  // Over the preview: the first build, or a write that broke it mid-turn.
+  over: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  stage: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  // Running unseen while Grasp sets it up, so it is there to fade in.
+  frame: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    opacity: 1,
+    transitionProperty: {
+      default: "opacity",
+      "@media (prefers-reduced-motion: reduce)": "none",
+    },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  unseen: { opacity: 0 },
+  strip: { flexShrink: 0 },
+  // Over the preview's bottom corner, fading in: nothing under the
+  // person's pointer moves for it.
+  corner: {
+    position: "absolute",
+    insetInlineEnd: space[3],
+    insetBlockEnd: space[3],
+    maxWidth: size.toastWidth,
+    animationName: { default: fadeIn, [media.reducedMotion]: "none" },
+    animationDuration: duration.ui,
+    animationTimingFunction: duration.ease,
+  },
+  // An alert's action, under its words.
+  below: { display: "flex", marginBlockStart: space[2] },
+  // A preview drawn narrower than its room, in the middle of it.
+  drawn: { width: "100%", marginInline: "auto" },
+  padded: { padding: space[4] },
+  // How wide the preview is drawn, over it at its end.
+  // A phone has none: its preview is as wide as the phone.
+  widths: {
+    display: { default: "flex", [media.maxSm]: "none" },
+    justifyContent: "flex-end",
+    flexShrink: 0,
+    paddingBlock: space[2],
+    paddingInline: space[4],
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+});
 
 /**
  * The rest, under "…": the App's own link, what its team sees (here, and
@@ -203,66 +280,50 @@ const MoreMenu = ({
 }) => {
   const { t } = useLingui();
   const [linking, setLinking] = useState(false);
+  const live = app.currentVersion !== null && !app.archived;
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button aria-label={t`More`} size="icon-sm" variant="ghost" />
-          }
-        >
-          <MoreHorizontalIcon />
+        <DropdownMenuTrigger asChild>
+          <Button aria-label={t`More`} variant="ghost" size="icon">
+            <Icon icon={EllipsisIcon} />
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {app.archived ? null : (
             <DropdownMenuItem
-              onClick={() => {
+              icon={LinkIcon}
+              onSelect={() => {
                 setLinking(true);
               }}
             >
-              <LinkIcon />
-              <Trans>Link</Trans>
+              {t`Link`}
             </DropdownMenuItem>
           )}
-          {app.currentVersion === null || app.archived || !changing ? null : (
-            <DropdownMenuItem
-              render={
-                <Link
-                  from="/apps/$app"
-                  params={{ app: app.id }}
-                  replace
-                  search={(held) => ({
-                    project: held.project,
-                    env: "live" as const,
-                  })}
-                  to="/apps/$app"
-                />
-              }
-            >
-              <UsersIcon />
-              <Trans>See what your team sees</Trans>
+          {live && changing ? (
+            <DropdownMenuItem asChild icon={UsersIcon}>
+              <Link
+                from="/apps/$app"
+                params={{ app: app.id }}
+                replace
+                search={(held) => ({ project: held.project, env: "live" })}
+                to="/apps/$app"
+              >
+                {t`See what your team sees`}
+              </Link>
             </DropdownMenuItem>
-          )}
-          {app.currentVersion === null || app.archived ? null : (
-            <DropdownMenuItem
-              render={
-                // Outside the shell: a document of its own.
-                <a
-                  aria-label={t`Open full page`}
-                  href={`/apps/${app.id}/full`}
-                />
-              }
-            >
-              <Maximize2Icon />
-              <Trans>Open full page</Trans>
+          ) : null}
+          {live ? (
+            <DropdownMenuItem asChild icon={Maximize2Icon}>
+              {/* Outside the shell: a document of its own. */}
+              <a href={`/apps/${app.id}/full`}>{t`Open full page`}</a>
             </DropdownMenuItem>
-          )}
+          ) : null}
           {chatId === undefined ? null : (
-            <DropdownMenuItem
-              render={<Link search={{ chat: chatId }} to="/" />}
-            >
-              <PanelRightIcon />
-              <Trans>Open the chat in Chat</Trans>
+            <DropdownMenuItem asChild icon={MessageCircleIcon}>
+              <Link search={{ chat: chatId }} to="/">
+                {t`Open the chat in Chat`}
+              </Link>
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -272,7 +333,50 @@ const MoreMenu = ({
   );
 };
 
-/** The workspace's bar: the App's one bar, with its views and Share with your team. */
+/** The workspace's views, each an address of its own (`?view=`). */
+const views = [
+  { view: "preview", icon: EyeIcon },
+  { view: "code", icon: CodeIcon },
+  { view: "data", icon: DatabaseIcon },
+  { view: "settings", icon: SettingsIcon },
+] as const;
+
+/**
+ * The views in the bar: tabs that are links, so each opens in a new tab
+ * too. In the reference's frame they are the sidebar's rows of the App's
+ * section; until the frame is on Damsko they stay in the bar.
+ */
+const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
+  const { t } = useLingui();
+  const labels: Record<WorkspaceView, string> = {
+    preview: t({ message: "App", context: "an app's workspace view" }),
+    code: t({ message: "Code", context: "an app's workspace view" }),
+    data: t({ message: "Data", context: "an app's workspace view" }),
+    settings: t({ message: "Settings", context: "an app's workspace view" }),
+  };
+  return (
+    <TabsNav aria-label={t`Workspace views`} size="sm">
+      {views.map(({ view: each, icon }) => (
+        <TabsLink asChild current={each === view} icon={icon} key={each}>
+          <Link
+            params={{ app }}
+            replace
+            search={(held) => ({
+              env: held.env,
+              project: held.project,
+              ...(each === "preview" ? {} : { view: each }),
+            })}
+            to="/apps/$app"
+          >
+            {labels[each]}
+          </Link>
+        </TabsLink>
+      ))}
+    </TabsNav>
+  );
+};
+
+/** The workspace's bar: the App's one bar, with the preview's controls, Share and Publish. */
 const WorkspaceBar = ({
   app,
   back,
@@ -285,10 +389,13 @@ const WorkspaceBar = ({
   settingUp = false,
   chatId,
   onShared,
+  preview,
 }: {
   app: ViewedApp;
   back: Crumb;
   view: WorkspaceView;
+  /** The preview's own controls, beside the views while it shows. */
+  preview?: PreviewControlsProps | undefined;
   identity: Pick<Identity, "staff">;
   /** The App's changes, as read last; none while they are read, or archived. */
   draft: Draft | undefined;
@@ -302,10 +409,11 @@ const WorkspaceBar = ({
   settingUp?: boolean;
   /** The App's chat; none while it is found, or for an archived App. */
   chatId?: string | undefined;
-  /** Told once it was shared from here. */
+  /** Told once it was shared or published from here. */
   onShared?: () => void;
 }) => {
   const { archived } = app;
+  const shares = sharesApp(app, identity);
   if (settingUp) {
     return <SettingUpBar back={back} name={app.name} />;
   }
@@ -314,8 +422,13 @@ const WorkspaceBar = ({
       actions={
         <>
           <ViewSwitch app={app.id} view={view} />
+          {/* The preview's own controls stand with the actions, never on a
+              row of their own: they give way first where the bar narrows. */}
+          {view === "preview" && preview !== undefined ? (
+            <PreviewControls {...preview} />
+          ) : null}
           <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
-          {sharesApp(app, identity) ? (
+          {shares ? (
             <ShareWithTeam
               draft={draft}
               members={members ?? []}
@@ -337,7 +450,7 @@ const WorkspaceBar = ({
       state={
         members === undefined && !archived ? undefined : (
           <StatusBadge
-            archived={app.archived}
+            archived={archived}
             live={app.currentVersion}
             who={memberNames(members ?? [])}
           />
@@ -353,16 +466,18 @@ const PreviewState = ({
   title,
   children,
   action,
+  variant = "default",
 }: {
-  icon: ReactNode;
-  title: ReactNode;
+  icon?: IconData;
+  title: string;
   children: ReactNode;
   action?: ReactNode;
+  variant?: "default" | "destructive";
 }) => (
-  <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
-    <Empty>
+  <div {...stylex.props(styles.place)}>
+    <Empty variant={variant}>
       <EmptyHeader>
-        <EmptyMedia variant="icon">{icon}</EmptyMedia>
+        {icon === undefined ? null : <EmptyMedia icon={icon} />}
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{children}</EmptyDescription>
       </EmptyHeader>
@@ -380,34 +495,51 @@ const PreviewState = ({
  * write, so a row would move the page under their pointer each time; a
  * corner leaves the rest of the page's foot to use.
  */
-const StaleTestData = ({ app }: { app: string }) => (
-  <div className="animate-in fade-in-0 absolute right-3 bottom-3 max-w-sm motion-reduce:animate-none">
-    <Alert variant="attention">
-      <TriangleAlertIcon />
-      <AlertTitle>
-        <Trans>The example data doesn&apos;t fit the change</Trans>
-      </AlertTitle>
-      <AlertDescription>
-        <Trans>
-          Your change reshapes the App&apos;s data in a way the example records
-          can&apos;t follow. Reset the example data in Data to try it. What your
-          team entered isn&apos;t touched.
-        </Trans>
-      </AlertDescription>
-      <AlertAction placement="below">
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          params={{ app }}
-          replace
-          search={(held) => ({ project: held.project, view: "data" })}
-          to="/apps/$app"
-        >
-          <Trans>Open Data</Trans>
-        </Link>
-      </AlertAction>
-    </Alert>
-  </div>
-);
+const StaleTestData = ({ app }: { app: string }) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.corner)}>
+      <Alert variant="warning">
+        <AlertTitle>{t`The example data doesn't fit the change`}</AlertTitle>
+        <AlertDescription>
+          <Trans>
+            Reset the example data in Data to try the change. Your team&apos;s
+            records aren&apos;t touched.
+          </Trans>
+          <span {...stylex.props(styles.below)}>
+            <Button size="xs" variant="secondary" asChild>
+              <Link
+                params={{ app }}
+                replace
+                search={(held) => ({ project: held.project, view: "data" })}
+                to="/apps/$app"
+              >
+                {t`Open Data`}
+              </Link>
+            </Button>
+          </span>
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+};
+
+/**
+ * The first build: Grasp's cursors assembling an App in the preview's
+ * place (app-building/), until there is something to see.
+ */
+const FirstBuild = () => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.building)}>
+      <AppBuilding
+        aria-label={t`Grasp is building`}
+        style={styles.buildingPlace}
+        step={t`It shows here as soon as there is something to see.`}
+      />
+    </div>
+  );
+};
 
 /** Whether the App has no page to preview yet: nothing written to it and no version. */
 const hasNoPage = (app: App, draft: Draft): boolean =>
@@ -417,19 +549,8 @@ const hasNoPage = (app: App, draft: Draft): boolean =>
  * An App with no page yet: Grasp building it, or, before anything was
  * asked, what it should do (app-start.tsx).
  */
-const NoPageYet = ({ app, running }: { app: string; running: boolean }) => {
-  const { t } = useLingui();
-  return running ? (
-    <PreviewState
-      icon={<Spinner aria-label={t`Building…`} />}
-      title={<Trans>Grasp is building</Trans>}
-    >
-      <Trans>It shows here as soon as there is something to see.</Trans>
-    </PreviewState>
-  ) : (
-    <AppStart app={app} />
-  );
-};
+const NoPageYet = ({ app, running }: { app: string; running: boolean }) =>
+  running ? <FirstBuild /> : <AppStart app={app} />;
 
 /** The label of the App's version `version`, read to name it. */
 const useVersionLabel = (
@@ -445,21 +566,17 @@ const useVersionLabel = (
 };
 
 /** What the read-only preview shows: an earlier state, or a version by its label. */
-const ShownBadge = ({
-  shown,
-  label,
-}: {
-  shown: ReadOnlyShown;
-  label: string | undefined;
-}) => {
+const useShownTitle = (
+  shown: ReadOnlyShown,
+  label: string | undefined
+): string => {
+  const { t } = useLingui();
   if ("point" in shown) {
-    return <Trans>An earlier state, read-only</Trans>;
+    return t`An earlier state, read-only`;
   }
-  return label === undefined ? (
-    <Trans>This version, read-only</Trans>
-  ) : (
-    <Trans>{label}, read-only</Trans>
-  );
+  return label === undefined
+    ? t`This version, read-only`
+    : t`${label}, read-only`;
 };
 
 /**
@@ -476,12 +593,14 @@ const ReadOnlyBar = ({
   shown: ReadOnlyShown;
   onChanged: () => void;
 }) => {
+  const { t } = useLingui();
   const navigate = useNavigate();
   const [asked, setAsked] = useState<Asked>();
   const label = useVersionLabel(
     draft.subject.id,
     "version" in shown ? shown.version : undefined
   );
+  const title = useShownTitle(shown, label);
   const back = (): void => {
     void navigate({
       to: ".",
@@ -502,27 +621,34 @@ const ReadOnlyBar = ({
     }
   );
   return (
-    <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
-      <Badge variant="attention">
-        <ShownBadge label={label} shown={shown} />
-      </Badge>
-      <span className="flex-1" />
-      <ErrorText>{failure}</ErrorText>
-      <Button onClick={back} size="sm" variant="ghost">
-        <Trans>Back to your version</Trans>
-      </Button>
-      {"point" in shown ? (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setAsked({ kind: "restore", number: shown.point });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Restore</Trans>
-        </Button>
-      ) : null}
+    <>
+      <Alert
+        appearance="banner"
+        style={styles.strip}
+        variant={failure === undefined ? "default" : "destructive"}
+      >
+        <AlertTitle>{title}</AlertTitle>
+        <AlertDescription>{failure}</AlertDescription>
+        <AlertAction>
+          <>
+            {"point" in shown ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setAsked({ kind: "restore", number: shown.point });
+                }}
+                size="xs"
+                variant="secondary"
+              >
+                {t`Restore`}
+              </Button>
+            ) : null}
+            <Button onClick={back} size="xs" variant="ghost">
+              {t`Back to your version`}
+            </Button>
+          </>
+        </AlertAction>
+      </Alert>
       <ConfirmChange
         asked={asked}
         onCancel={() => {
@@ -533,7 +659,7 @@ const ReadOnlyBar = ({
           void change(confirmed);
         }}
       />
-    </div>
+    </>
   );
 };
 
@@ -541,28 +667,31 @@ const ReadOnlyBar = ({
  * Over the main area while it shows what the team sees (`?env=live`,
  * from "See what your team sees"): what it is, and the way back.
  */
-const TeamViewBar = ({ app }: { app: string }) => (
-  <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
-    <Badge variant="passed">
-      <Trans>What your team sees</Trans>
-    </Badge>
-    <span className="flex-1" />
-    <Link
-      className={buttonVariants({ size: "sm", variant: "ghost" })}
-      from="/apps/$app"
-      params={{ app }}
-      replace
-      search={(held) => ({
-        view: held.view,
-        project: held.project,
-        env: undefined,
-      })}
-      to="/apps/$app"
-    >
-      <Trans>Back to your version</Trans>
-    </Link>
-  </div>
-);
+const TeamViewBar = ({ app }: { app: string }) => {
+  const { t } = useLingui();
+  return (
+    <Alert appearance="banner" icon={UsersIcon} style={styles.strip}>
+      <AlertTitle>{t`What your team sees`}</AlertTitle>
+      <AlertAction>
+        <Button size="xs" variant="ghost" asChild>
+          <Link
+            from="/apps/$app"
+            params={{ app }}
+            replace
+            search={(held) => ({
+              view: held.view,
+              project: held.project,
+              env: undefined,
+            })}
+            to="/apps/$app"
+          >
+            {t`Back to your version`}
+          </Link>
+        </Button>
+      </AlertAction>
+    </Alert>
+  );
+};
 
 /**
  * Over the preview of an App just made (made-tip.ts), until dismissed:
@@ -575,36 +704,32 @@ const MadeTip = ({ app }: { app: string }) => {
     return null;
   }
   return (
-    <div className="flex-none border-b p-3">
-      <Alert>
-        <SparklesIcon />
-        <AlertTitle>
-          <Trans>This is your new App, with example data.</Trans>
-        </AlertTitle>
-        <AlertDescription>
-          <Trans>
-            Try it out: only you see it, and the example data is just for
-            trying. To change anything, tell Grasp in the chat. When it&apos;s
-            right, share it with your team.
-          </Trans>
-        </AlertDescription>
-        <AlertAction>
-          <Button
-            aria-label={t`Dismiss the tip`}
-            onClick={() => {
-              dismissMadeTip(app);
-              setShown(false);
-            }}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <XIcon />
-          </Button>
-        </AlertAction>
-      </Alert>
-    </div>
+    <Alert
+      appearance="banner"
+      icon={SparklesIcon}
+      style={styles.strip}
+      onClose={() => {
+        dismissMadeTip(app);
+        setShown(false);
+      }}
+    >
+      <AlertTitle>{t`This is your new App, with example data.`}</AlertTitle>
+      <AlertDescription>
+        <Trans>
+          Only you see it. Tell Grasp in the chat what to change, then share it
+          with your team.
+        </Trans>
+      </AlertDescription>
+    </Alert>
   );
 };
+
+/** In the preview's place while a new App is set up: its first build, or that it isn't ready. */
+const SetUpOver = ({ failed, name }: { failed: boolean; name: string }) => (
+  <div {...stylex.props(styles.over)}>
+    {failed ? <SettingUp failed name={name} /> : <FirstBuild />}
+  </div>
+);
 
 /**
  * The main area's preview of the builders' working version: the App as
@@ -618,6 +743,8 @@ const MadeTip = ({ app }: { app: string }) => {
  */
 const PreviewArea = ({
   app,
+  at,
+  width,
   draft,
   shown,
   running,
@@ -626,6 +753,9 @@ const PreviewArea = ({
   onChanged,
 }: {
   app: App;
+  /** The page it shows; its first while none was picked. */
+  at: string | undefined;
+  width: PreviewWidth;
   /** The App's draft; none until it is read. */
   draft: Draft | undefined;
   shown: ReadOnlyShown | undefined;
@@ -650,8 +780,8 @@ const PreviewArea = ({
   // The draft is read first: the preview follows its revisions.
   if (draft === undefined) {
     return (
-      <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
-        <Spinner aria-label={t`Loading…`} />
+      <div {...stylex.props(styles.place)}>
+        <Spinner aria-label={t`Loading…`} size="lg" />
       </div>
     );
   }
@@ -677,7 +807,7 @@ const PreviewArea = ({
     );
   };
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.stage)}>
       {shown === undefined ? null : (
         <ReadOnlyBar draft={draft} onChanged={onChanged} shown={shown} />
       )}
@@ -689,14 +819,15 @@ const PreviewArea = ({
       {/* Running unseen while Grasp sets it up, so it is there to fade
         in once its first version runs; nothing of it reached before. */}
       <div
-        className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 data-[ready=false]:opacity-0 motion-reduce:transition-none"
-        data-ready={ready}
         inert={!ready}
+        {...stylex.props(styles.frame, !ready && styles.unseen)}
       >
         <DraftPreview
           app={app.id}
+          at={at}
           draft={draft}
           key={tries}
+          width={width}
           name={name}
           onEnded={(end) => {
             if (end.status === "failed") {
@@ -717,14 +848,10 @@ const PreviewArea = ({
       {staleAt === revision && shown === undefined && ready ? (
         <StaleTestData app={app.id} />
       ) : null}
-      {ready ? null : (
-        <div className="absolute inset-0 flex flex-col">
-          <SettingUp failed={setUp === "failed"} name={name} />
-        </div>
-      )}
+      {ready ? null : <SetUpOver failed={setUp === "failed"} name={name} />}
       {/* Broken mid-turn: never the error while Grasp still works on it. */}
       {ready && running && failedAt === revision ? (
-        <div className="absolute inset-0 flex flex-col">
+        <div {...stylex.props(styles.over)}>
           <Updating name={name} />
         </div>
       ) : null}
@@ -741,9 +868,14 @@ const PreviewArea = ({
  */
 const LivePreview = ({
   app,
+  at,
+  width,
   building,
 }: {
   app: App;
+  /** The page it shows; its first while none was picked. */
+  at: string | undefined;
+  width: PreviewWidth;
   building?: { running: boolean };
 }) => {
   const { t } = useLingui();
@@ -756,10 +888,7 @@ const LivePreview = ({
   }
   if (app.currentVersion === null) {
     return (
-      <PreviewState
-        icon={<LayoutGridIcon />}
-        title={<Trans>Your team has nothing yet</Trans>}
-      >
+      <PreviewState icon={LayoutGridIcon} title={t`Your team has nothing yet`}>
         <Trans>They see it once you share it with them.</Trans>
       </PreviewState>
     );
@@ -767,10 +896,11 @@ const LivePreview = ({
   return (
     <section
       aria-label={t`${name}, as your team sees it`}
-      className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden"
+      {...stylex.props(styles.column, styles.drawn, previewWidths[width])}
     >
       <PageFrame
         app={app.id}
+        at={at}
         bare
         embedded
         onEnded={(end) => {
@@ -790,7 +920,7 @@ const LivePreview = ({
 const LiveData = ({ app }: { app: string }) => {
   const read = useAppRead(app, readTables);
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.column)}>
       <Read read={read}>
         {({ version, tables }) => (
           <AppData
@@ -860,17 +990,15 @@ const MainArea = ({
   /** The draft the Data view changes; none without one. */
   modelDraft?: ModelDraft;
 }) => (
-  <div className="flex h-full min-h-0 min-w-0 flex-col">
-    <div
-      className={view === "preview" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
-    >
+  <div {...stylex.props(styles.fill)}>
+    <div {...stylex.props(view === "preview" ? styles.column : styles.hidden)}>
       {preview}
     </div>
     {view === "code" ? (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div {...stylex.props(styles.column)}>
         <Suspense
           fallback={
-            <div className="p-4">
+            <div {...stylex.props(styles.padded)}>
               <LoadingLines lines={6} />
             </div>
           }
@@ -880,7 +1008,7 @@ const MainArea = ({
       </div>
     ) : null}
     {view === "data" ? (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div {...stylex.props(styles.column)}>
         <DataArea app={app.id} env={env} modelDraft={modelDraft} />
       </div>
     ) : null}
@@ -1104,6 +1232,11 @@ const Building = ({
     members: membersRead,
     mine: !theirs && sharesApp(app, identity),
   });
+  const { controls, width, page, reloads } = usePreviewControls(
+    app,
+    theirs,
+    draft
+  );
   return (
     <ItemShell
       bar={
@@ -1119,6 +1252,7 @@ const Building = ({
             setShares((before) => before + 1);
           }}
           pending={changesLine}
+          preview={controls}
           running={busy}
           settingUp={settingUp}
           view={view}
@@ -1126,6 +1260,11 @@ const Building = ({
       }
     >
       {env === "live" && changing ? <TeamViewBar app={app.id} /> : null}
+      {view === "preview" ? (
+        <div {...stylex.props(styles.widths)}>
+          <WidthSwitch />
+        </div>
+      ) : null}
       {changesLine && draft !== undefined ? (
         <UnpublishedChanges draft={draft} onChanged={reread} running={busy} />
       ) : null}
@@ -1144,12 +1283,20 @@ const Building = ({
         identity={identity}
         preview={
           theirs ? (
-            <LivePreview app={app} building={{ running }} key="live" />
+            <LivePreview
+              app={app}
+              at={page}
+              building={{ running }}
+              key={`live/${reloads}`}
+              width={width}
+            />
           ) : (
             <PreviewArea
               app={app}
+              at={page}
               draft={previewed}
-              key={`${shownKey(shown)}/${resets}`}
+              key={`${shownKey(shown)}/${resets}/${reloads}`}
+              width={width}
               onChanged={reread}
               onFrame={onFrame}
               running={running}
@@ -1180,6 +1327,7 @@ const Archived = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
 }) => {
+  const { t } = useLingui();
   const { busy, failure, move } = useStatusMove(app.id);
   return (
     <ItemShell
@@ -1201,26 +1349,21 @@ const Archived = ({
         preview={
           <PreviewState
             action={
-              <div className="flex flex-col items-center gap-2">
-                <Button
-                  disabled={busy}
-                  onClick={() => {
-                    move("restore");
-                  }}
-                  variant="outline"
-                >
-                  <Trans>Restore</Trans>
-                </Button>
-                <ErrorText>{failure}</ErrorText>
-              </div>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  move("restore");
+                }}
+                variant="default"
+              >
+                {t`Restore`}
+              </Button>
             }
-            icon={<ArchiveIcon />}
-            title={<Trans>This App is archived</Trans>}
+            icon={ArchiveIcon}
+            title={t`This App is archived`}
+            variant={failure === undefined ? "default" : "destructive"}
           >
-            <Trans>
-              It is kept as it was, and nobody works on it. Restore it to change
-              it again.
-            </Trans>
+            {failure ?? <Trans>Restore it to change it again.</Trans>}
           </PreviewState>
         }
         section={section}

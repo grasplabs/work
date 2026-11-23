@@ -449,7 +449,9 @@ test("a page that loads another document in its frame is stopped", async ({
   const page = await pageOf(builder);
   await open(page, pagePath(attacking, "/wandering"));
 
-  await expect(page.getByText(left)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(left, { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   // Emptied: whatever the frame went to is no longer on the page.
   await expect(frameOf(page)).not.toHaveAttribute("src");
@@ -461,7 +463,9 @@ test("a page that sends more than its port takes is stopped, and the page says s
   const page = await pageOf(builder);
   await open(page, pagePath(attacking, "/oversized"));
 
-  await expect(page.getByText(disconnected)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(disconnected, { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(frameOf(page)).not.toHaveAttribute("src");
 });
@@ -493,10 +497,10 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
   );
   // The frame has only just loaded, so its ten seconds have only begun.
   await stopClock(page);
-  await expect(page.getByText(timedOut)).toHaveCount(0);
+  await expect(page.getByText(timedOut, { exact: true })).toHaveCount(0);
 
   await page.clock.runFor(10_000);
-  await expect(page.getByText(timedOut)).toBeVisible();
+  await expect(page.getByText(timedOut, { exact: true })).toBeVisible();
   await expect(frameOf(page)).not.toHaveAttribute("src");
 
   // Trying again is a new frame, which starts as any other.
@@ -508,7 +512,7 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
       .frameLocator('iframe[title="App"]')
       .getByRole("heading", { name: "Notes" })
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(timedOut)).toHaveCount(0);
+  await expect(page.getByText(timedOut, { exact: true })).toHaveCount(0);
 });
 
 test("a page that never renders is given up on after ten seconds, whatever it says", async ({
@@ -526,10 +530,10 @@ test("a page that never renders is given up on after ten seconds, whatever it sa
   // The page was only just handed over, so its ten seconds have only
   // begun.
   await stopClock(page);
-  await expect(page.getByText(timedOut)).toHaveCount(0);
+  await expect(page.getByText(timedOut, { exact: true })).toHaveCount(0);
 
   await page.clock.runFor(10_000);
-  await expect(page.getByText(timedOut)).toBeVisible();
+  await expect(page.getByText(timedOut, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(frameOf(page)).not.toHaveAttribute("src");
 });

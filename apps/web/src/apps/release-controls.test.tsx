@@ -256,11 +256,21 @@ const press = async (element: Element | undefined) => {
   await settled();
 };
 
+/** What an element says, without what it keeps hidden (a button's working words, a required mark). */
+const words = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
 const button = (name: string) =>
   [...document.querySelectorAll("button")].find(
-    (each) =>
-      each.textContent?.trim() === name ||
-      each.getAttribute("aria-label") === name
+    (each) => words(each) === name || each.getAttribute("aria-label") === name
   );
 
 /** The menu of `number`'s actions, opened: what it offers. */
@@ -283,10 +293,10 @@ const menuItem = (name: string) =>
 /** Types `text` into the field labelled `label`. */
 const type = async (label: string, text: string): Promise<void> => {
   const field = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+    (each) => words(each) === label
   );
   const box = [...document.querySelectorAll("textarea, input")].find(
-    (each) => each.id === field?.htmlFor
+    (each) => each.id !== "" && each.id === field?.htmlFor
   );
   if (
     !(box instanceof HTMLTextAreaElement || box instanceof HTMLInputElement)
@@ -307,6 +317,7 @@ const type = async (label: string, text: string): Promise<void> => {
 /** Each version listed, by the number in its label, and what it is marked. */
 const listed = (): string[] =>
   [...document.querySelectorAll('li [data-slot="item-title"]')].map(
+    // Its label, then its badges.
     (title) => title.textContent?.trim().replace("26.10.", "") ?? ""
   );
 

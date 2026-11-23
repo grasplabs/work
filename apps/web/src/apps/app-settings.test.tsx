@@ -20,7 +20,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppSettings } from "./app-settings.tsx";
-import type { AppSettingsSection } from "./app-settings.tsx";
+import type { AppSettingsSection } from "./settings-sections.ts";
 
 // An App's settings against core's `apps` and `pages` as the page
 // reaches them over RPC (the boundary from the web app), faked: the
@@ -188,6 +188,9 @@ const opened = async (
         connections: typeof connections;
       }) => Promise<T>
     ): Promise<T> => await action({ apps, pages, permissions, connections }),
+    // A section that didn't load reads again once core is back: never, here.
+    connected: false,
+    onConnected: () => () => {},
   };
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),
@@ -230,10 +233,29 @@ const opened = async (
 };
 
 /** The App's name field, in General. */
-const nameField = (): HTMLInputElement | null =>
-  document.querySelector<HTMLInputElement>("#app-name");
+/** The field its label names `label`, as a person finds it. */
+const fieldLabelled = (label: string): HTMLInputElement | null => {
+  const named = [...document.querySelectorAll("label")].find(
+    (each) => each.firstChild?.textContent?.trim() === label
+  );
+  const id = named?.htmlFor;
+  return id === undefined || id === ""
+    ? null
+    : document.querySelector<HTMLInputElement>(`[id="${id}"]`);
+};
 
-const nameOf = (element: HTMLElement): string => element.textContent.trim();
+const nameField = (): HTMLInputElement | null => fieldLabelled("Name");
+
+/** What an element says, without a button's hidden words for working or failed. */
+const nameOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (copy instanceof HTMLElement) {
+    for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+      hidden.remove();
+    }
+  }
+  return copy.textContent?.trim() ?? "";
+};
 
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
@@ -275,8 +297,8 @@ describe(AppSettings, () => {
     document.body.replaceChildren();
   });
 
-  it("lists to its builders the sections only they read, linked within the workspace", async () => {
-    await opened(fakeCore("builder"), "workspace");
+  it("lists to its builders the sections only they read", async () => {
+    await opened(fakeCore("builder"));
     const builder = sections();
     act(() => {
       root?.unmount();
@@ -288,22 +310,22 @@ describe(AppSettings, () => {
       builder: [
         {
           name: "General",
-          to: "/apps/invoice-desk?view=settings&section=general",
+          to: "/apps/invoice-desk/settings?section=general",
           open: true,
         },
         {
           name: "Sharing",
-          to: "/apps/invoice-desk?view=settings&section=sharing",
+          to: "/apps/invoice-desk/settings?section=sharing",
           open: false,
         },
         {
           name: "History",
-          to: "/apps/invoice-desk?view=settings&section=history",
+          to: "/apps/invoice-desk/settings?section=history",
           open: false,
         },
         {
           name: "Webhooks",
-          to: "/apps/invoice-desk?view=settings&section=webhooks",
+          to: "/apps/invoice-desk/settings?section=webhooks",
           open: false,
         },
       ],
@@ -325,7 +347,7 @@ describe(AppSettings, () => {
   it("shows someone who uses the App its settings to read, and nothing to change", async () => {
     await opened(fakeCore("user"));
 
-    const name = document.querySelector<HTMLInputElement>("#app-name");
+    const name = nameField();
     expect({
       name: name?.value,
       readOnly: name?.readOnly,
@@ -363,6 +385,7 @@ describe(AppSettings, () => {
     await opened(fake, "page", "sharing");
     const before = document.body.textContent.includes("Ann");
 
+    // Sharing is the drafts' own (drafts/sharing.tsx), as it stands on main.
     await press("Stop sharing with Ann");
     await press("Stop sharing");
 
@@ -400,7 +423,7 @@ describe(AppSettings, () => {
     await opened(fakeCore("builder", { surfacesRefused: true }));
 
     expect({
-      name: document.querySelector<HTMLInputElement>("#app-name")?.value,
+      name: nameField()?.value,
       sections: sections().map(({ name }) => name),
     }).toStrictEqual({
       name: "Invoices",

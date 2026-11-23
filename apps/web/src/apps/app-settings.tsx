@@ -1,13 +1,3 @@
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import type {
   App,
@@ -20,13 +10,44 @@ import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import {
+  Field,
+  FieldContent,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@grasp-os/ui/components/field";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { ArchiveIcon, Icon, LinkIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ArchiveIcon, LinkIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { HttpConnectionItem } from "../connections/http-connections.tsx";
@@ -42,19 +63,14 @@ import { readPeople } from "../directory.ts";
 import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
 import { StatusBadge } from "../drafts/status-badge.tsx";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { InfoTip } from "../frame/info-tip.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+/* DAMSKO? setting-row#SettingRow -> components/field: <Field orientation="responsive"><FieldContent><FieldLabel/><FieldDescription/></FieldContent>{control}<FieldError/><FieldStatus/></Field> */
 import { decidesRequests } from "../inbox/waiting.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
-import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AppAccessRequests } from "./app-access-requests.tsx";
 import { ExportDefinition } from "./app-definition.tsx";
@@ -70,6 +86,13 @@ import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
 import { ResourceBindings } from "./resource-bindings.tsx";
 import type { ResourcesPage } from "./resource-bindings.tsx";
+import {
+  optionsOf,
+  readSurfaces,
+  sectionLabels,
+  shownSections,
+} from "./settings-sections.ts";
+import type { AppSettingsSection } from "./settings-sections.ts";
 import { useAppRead } from "./use-app-read.ts";
 import type { AppRead } from "./use-app-read.ts";
 
@@ -84,39 +107,6 @@ import type { AppRead } from "./use-app-read.ts";
 // section reads what it shows as it opens (use-app-read.ts), so one
 // that is slow or refused leaves the others; core checks every change.
 
-/** The sections, in the order the list shows them. */
-const appSettingsSections = [
-  "general",
-  "sharing",
-  "history",
-  "connections",
-  "webhooks",
-  "options",
-] as const;
-
-export type AppSettingsSection = (typeof appSettingsSections)[number];
-
-/** A section named in an address, or none for anything else. */
-export const settingsSectionOf = (
-  value: unknown
-): AppSettingsSection | undefined =>
-  appSettingsSections.find((section) => section === value);
-
-const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
-  general: msg({ message: "General", context: "an app's settings section" }),
-  sharing: msg({ message: "Sharing", context: "an app's settings section" }),
-  history: msg({ message: "History", context: "an app's settings section" }),
-  connections: msg({
-    message: "Connections",
-    context: "an app's settings section",
-  }),
-  webhooks: msg({ message: "Webhooks", context: "an app's settings section" }),
-  options: msg({
-    message: "Options",
-    context: "the settings an app offers itself",
-  }),
-};
-
 /**
  * That a section shows what was read before, a latest re-read of one of
  * its `reads` having failed: why, and a way to read every failed one
@@ -127,35 +117,29 @@ const RefreshFailed = ({
 }: {
   reads: readonly (AppRead<unknown> | undefined)[];
 }) => {
+  const { t } = useLingui();
   const failed = reads.flatMap((read) => read?.refresh ?? []);
   const [first] = failed;
   if (first === undefined) {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-3 text-sm">
-      <TriangleAlertIcon
-        aria-hidden="true"
-        className="text-status-attention size-4 flex-none"
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="font-medium">
-          <Trans>Couldn&apos;t refresh. This may be out of date.</Trans>
-        </p>
-        <NotLoaded page={first.failure} />
-      </div>
-      <Button
-        onClick={() => {
-          for (const { retry } of failed) {
-            retry();
-          }
-        }}
-        size="sm"
-        variant="outline"
-      >
-        <Trans>Try again</Trans>
-      </Button>
-    </div>
+    <Alert variant="warning" appearance="banner">
+      <AlertTitle>{t`Couldn't refresh. This may be out of date.`}</AlertTitle>
+      <AlertAction>
+        <Button
+          onClick={() => {
+            for (const { retry } of failed) {
+              retry();
+            }
+          }}
+          size="xs"
+          variant="secondary"
+        >
+          {t`Try again`}
+        </Button>
+      </AlertAction>
+    </Alert>
   );
 };
 
@@ -177,7 +161,8 @@ export const Read = <T,>({
     return <LoadingLines />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    // The section reads again as the router does (useAppRead): Try again's own.
+    return <NotLoadedState heading="h3" page={read} />;
   }
   return (
     <>
@@ -187,21 +172,79 @@ export const Read = <T,>({
   );
 };
 
-/** A section's heading and what it is for. */
-const SectionHeading = ({
-  title,
-  description,
-}: {
-  title: string;
-  description?: ReactNode;
-}) => (
-  <div className="flex flex-col gap-1">
-    <h2 className="text-lg font-medium">{title}</h2>
-    {description === undefined ? null : (
-      <p className="text-muted-foreground">{description}</p>
-    )}
-  </div>
-);
+// How wide a section's column grows: Damsko has no token for a
+// settings page's measure.
+const SETTINGS_MEASURE = "56rem";
+const INTEGRATION_MIN = "20rem";
+// How tall the App's own settings stand at least, so its page has room.
+const OPTIONS_TALL = "24rem";
+
+const styles = stylex.create({
+  settings: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    gap: space[2],
+    paddingTop: space[2],
+  },
+  scroll: { flexGrow: 1, minHeight: 0, minWidth: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[4],
+    width: "100%",
+    maxWidth: SETTINGS_MEASURE,
+    marginInline: "auto",
+    paddingBlock: space[6],
+    paddingInline: space[4],
+    boxSizing: "border-box",
+  },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    gap: space[2],
+  },
+  line: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space[3],
+    minWidth: 0,
+  },
+  fact: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space[1],
+  },
+  sections: { display: "flex", flexDirection: "column", gap: space[8] },
+  section: { display: "flex", flexDirection: "column", gap: space[3] },
+  // Two columns once there is room for both: Damsko has no token for a
+  // list item's measure.
+  integrations: {
+    display: "grid",
+    gridTemplateColumns: `repeat(auto-fill, minmax(min(${INTEGRATION_MIN}, 100%), 1fr))`,
+    columnGap: space[10],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[3],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  options: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: OPTIONS_TALL,
+  },
+});
 
 // --- General -------------------------------------------------------------
 
@@ -212,84 +255,23 @@ const nobody = "nobody";
 const refValue = ({ type, id }: { type: string; id: string }): string =>
   `${type}:${id}`;
 
-/** A text setting, saved when the field is left, or on Enter for one line. */
-const SavedText = ({
-  id,
-  value,
-  disabled,
-  readOnly,
-  multiline = false,
-  maxLength,
-  onSave,
-}: {
-  id: string;
-  value: string;
-  disabled: boolean;
-  /** Shown to read, not to change: for someone who doesn't build it. */
-  readOnly: boolean;
-  multiline?: boolean;
-  maxLength: number;
-  onSave: (next: string) => void;
-}) => {
-  const [draft, setDraft] = useState<string | null>(null);
-  const save = (): void => {
-    const next = draft?.trim();
-    setDraft(null);
-    // A name can't be emptied; a purpose can.
-    if (next !== undefined && next !== value && (multiline || next !== "")) {
-      onSave(next);
-    }
-  };
-  const shared = {
-    disabled,
-    id,
-    maxLength,
-    onBlur: save,
-    readOnly,
-    value: draft ?? value,
-  };
-  return multiline ? (
-    <Textarea
-      {...shared}
-      onChange={(event) => {
-        setDraft(event.target.value);
-      }}
-      rows={2}
-    />
-  ) : (
-    <Input
-      {...shared}
-      onChange={(event) => {
-        setDraft(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        }
-        if (event.key === "Escape") {
-          setDraft(null);
-        }
-      }}
-    />
-  );
-};
-
 /** Archive (asking first) or Restore, for its builders. */
 const PuttingAway = ({ app }: { app: App }) => {
+  const { t } = useLingui();
   const { busy, failure, move } = useStatusMove(app.id);
   const [archiving, setArchiving] = useState(false);
   const { archived } = app;
   return (
-    <div className="flex flex-col items-start gap-2 border-t px-5 py-4 sm:items-end">
+    <div {...stylex.props(styles.actions)}>
       {archived ? (
         <Button
           disabled={busy}
           onClick={() => {
             move("restore");
           }}
-          variant="outline"
+          variant="secondary"
         >
-          <Trans>Restore</Trans>
+          {t`Restore`}
         </Button>
       ) : (
         <Button
@@ -297,17 +279,19 @@ const PuttingAway = ({ app }: { app: App }) => {
           onClick={() => {
             setArchiving(true);
           }}
-          variant="outline"
+          variant="secondary"
         >
-          <ArchiveIcon data-icon="inline-start" />
-          {app.currentVersion === null ? (
-            <Trans>Archive</Trans>
-          ) : (
-            <Trans>Archive and take offline</Trans>
-          )}
+          <Icon icon={ArchiveIcon} />
+          {app.currentVersion === null
+            ? t`Archive`
+            : t`Archive and take offline`}
         </Button>
       )}
-      <ErrorText>{failure}</ErrorText>
+      {failure === undefined ? null : (
+        <Alert variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
       <ArchiveDialog
         name={app.name}
         onArchive={() => {
@@ -361,21 +345,22 @@ const readGeneralAsMember = readGeneral(false);
 
 /** The App's own address, and setting it, for its builders. */
 const OwnLink = ({ app }: { app: App }) => {
+  const { t } = useLingui();
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <span className="text-muted-foreground min-w-0 flex-1 truncate">
-        {app.link === null ? <Trans>None yet</Trans> : linkAddress(app.link)}
-      </span>
+    <div {...stylex.props(styles.line)}>
+      <Text as="span" size="sm" color="muted">
+        {app.link === null ? t`None yet` : linkAddress(app.link)}
+      </Text>
       <Button
         onClick={() => {
           setOpen(true);
         }}
         size="sm"
-        variant="outline"
+        variant="secondary"
       >
-        <LinkIcon data-icon="inline-start" />
-        <Trans>Set the link</Trans>
+        <Icon icon={LinkIcon} />
+        {t`Set the link`}
       </Button>
       <AppLinkDialog app={app} onOpenChange={setOpen} open={open} />
     </div>
@@ -391,23 +376,30 @@ const AppInstructions = ({ app }: { app: ViewedApp }) => {
   const { t } = useLingui();
   const read = useAppRead(app.id, readAppInstructions);
   return (
-    <SettingsSection
-      description={t`What a builder’s chat about this App starts with. Only its builders read and change it.`}
-      title={t`Instructions`}
-    >
-      <SettingsBody>
-        <Read read={read}>
-          {(saved) => (
-            <InstructionFileEditor
-              description={t`How this App is built and what to keep in mind when changing it.`}
-              file={{ scope: "app", appId: app.id }}
-              label={t`Instructions for this App`}
-              saved={saved}
-            />
-          )}
-        </Read>
-      </SettingsBody>
-    </SettingsSection>
+    <Card asChild>
+      <section aria-label={t`Instructions`}>
+        <CardHeader>
+          <CardTitle>
+            {t`Instructions`}{" "}
+            <InfoTip
+              label={t`More about its instructions`}
+            >{t`What a builder’s chat about this App starts with. Only its builders read and change it.`}</InfoTip>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Read read={read}>
+            {(saved) => (
+              <InstructionFileEditor
+                description={t`How this App is built and what to keep in mind when changing it.`}
+                file={{ scope: "app", appId: app.id }}
+                label={t`Instructions for this App`}
+                saved={saved}
+              />
+            )}
+          </Read>
+        </CardContent>
+      </section>
+    </Card>
   );
 };
 
@@ -425,48 +417,142 @@ const ForBuilders = ({
     <>
       {/* Archived, it is read-only: its file waits for a restore. */}
       {app.archived ? null : <AppInstructions app={app} />}
-      <SettingsSection
-        description={t`Its definition to keep or move, and a blueprint others can start from.`}
-        title={t`Copies`}
-      >
-        <SettingsBody>
-          <div className="flex flex-wrap items-start gap-2">
-            <ExportDefinition app={app} identity={identity} />
-            {canBuild(identity.role) && currentVersion !== null ? (
-              <SaveAsBlueprint
-                app={app.id}
-                name={app.name}
-                version={currentVersion}
-              />
-            ) : null}
-            {currentVersion === null ? (
-              <p className="text-muted-foreground">
-                <Trans>Once it has a version, it can be copied.</Trans>
-              </p>
-            ) : null}
-          </div>
-        </SettingsBody>
-      </SettingsSection>
+      <Card asChild>
+        <section aria-label={t`Copies`}>
+          <CardHeader>
+            <CardTitle>
+              {t`Copies`}{" "}
+              <InfoTip
+                label={t`More about copies`}
+              >{t`Its definition to keep or move, and a blueprint others can start from.`}</InfoTip>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div {...stylex.props(styles.actions)}>
+              <ExportDefinition app={app} identity={identity} />
+              {canBuild(identity.role) && currentVersion !== null ? (
+                <SaveAsBlueprint
+                  app={app.id}
+                  name={app.name}
+                  version={currentVersion}
+                />
+              ) : null}
+              {currentVersion === null ? (
+                <Text size="sm" color="muted">
+                  {t`Once it has a version, it can be copied.`}
+                </Text>
+              ) : null}
+            </div>
+          </CardContent>
+        </section>
+      </Card>
       {app.archived || identity.staff || !isAdmin(identity.role) ? null : (
-        <SettingsSection
-          description={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
-          title={t`Its data`}
-        >
-          <SettingsBody>
-            <ResetAppData app={app} />
-          </SettingsBody>
-        </SettingsSection>
+        <Card asChild>
+          <section aria-label={t`Its data`}>
+            <CardHeader>
+              <CardTitle>
+                {t`Its data`}{" "}
+                <InfoTip
+                  label={t`More about its data`}
+                >{t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}</InfoTip>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResetAppData app={app} />
+            </CardContent>
+          </section>
+        </Card>
       )}
-      <SettingsSection
-        description={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
-        title={t`Putting it away`}
-      >
-        <PuttingAway app={app} />
-        <div className="flex justify-end px-5 pb-4 empty:hidden">
-          <RemoveApp app={app} identity={identity} />
-        </div>
-      </SettingsSection>
+      <Card asChild>
+        <section aria-label={t`Putting it away`}>
+          <CardHeader>
+            <CardTitle>
+              {t`Putting it away`}{" "}
+              <InfoTip
+                label={t`More about putting it away`}
+              >{t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}</InfoTip>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PuttingAway app={app} />
+            <RemoveApp app={app} identity={identity} />
+          </CardContent>
+        </section>
+      </Card>
     </>
+  );
+};
+
+/** What a field is saved as: its text, trimmed; null when emptied. */
+const savedAs = (draft: string): string | null => {
+  const trimmed = draft.trim();
+  return trimmed === "" ? null : trimmed;
+};
+
+/**
+ * A setting's text, saved as the person leaves the field (or presses
+ * Enter in a one-line field): an emptied field saves none, Escape puts
+ * back what was saved, and nothing is sent while it is what was saved.
+ * Read-only for whoever may not change it. The Field round it names it.
+ */
+const SavedText = ({
+  value,
+  readOnly,
+  multiline = false,
+  maxLength,
+  onSave,
+}: {
+  value: string;
+  readOnly: boolean;
+  multiline?: boolean;
+  maxLength: number;
+  onSave: (value: string | null) => void;
+}) => {
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = (): void => {
+    if (draft === null) {
+      return;
+    }
+    setDraft(null);
+    const next = savedAs(draft);
+    if (next !== value) {
+      onSave(next);
+    }
+  };
+  const shown = draft ?? value;
+  if (multiline) {
+    return (
+      <Textarea
+        maxLength={maxLength}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setDraft(null);
+          }
+        }}
+        onValueChange={setDraft}
+        readOnly={readOnly}
+        rows={3}
+        value={shown}
+      />
+    );
+  }
+  return (
+    <Input
+      maxLength={maxLength}
+      onBlur={save}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          setDraft(null);
+        }
+      }}
+      onValueChange={setDraft}
+      readOnly={readOnly}
+      value={shown}
+    />
   );
 };
 
@@ -541,135 +627,155 @@ const GeneralForm = ({
   const date = formatDateTime(app.createdAt);
   return (
     <>
-      <p className="text-muted-foreground">
-        {person === undefined ? (
-          <Trans>Made on {date}.</Trans>
-        ) : (
-          <Trans>
-            Made by {person} on {date}.
-          </Trans>
-        )}
-      </p>
-      <SettingsSection
-        description={t`What the App is called and what it is for.`}
-        title={t`About`}
-      >
-        <SettingsRow htmlFor="app-name" label={t`Name`}>
-          <SavedText
-            disabled={busy}
-            id="app-name"
-            maxLength={appLimits.nameLength}
-            readOnly={!builds}
-            onSave={(name) => {
-              change({ name });
-            }}
-            value={app.name}
-          />
-        </SettingsRow>
-        <SettingsRow
-          htmlFor="app-purpose"
-          label={t({
-            message: "What it is for",
-            context: "what an app is for, in a sentence",
+      <Text size="sm" color="muted">
+        {person === undefined
+          ? t`Made on ${date}.`
+          : t`Made by ${person} on ${date}.`}
+      </Text>
+      <Card asChild>
+        <section aria-label={t`About`}>
+          <CardHeader>
+            <CardTitle>{t`About`}</CardTitle>
+          </CardHeader>
+          <CardContent flush>
+            <FieldGroup>
+              <Field orientation="responsive">
+                <FieldContent>
+                  <FieldLabel>{t`Name`}</FieldLabel>
+                </FieldContent>
+                <SavedText
+                  maxLength={appLimits.nameLength}
+                  onSave={(name) => {
+                    // A name can't be emptied.
+                    if (name !== null) {
+                      change({ name });
+                    }
+                  }}
+                  readOnly={!builds || busy}
+                  value={app.name}
+                />
+              </Field>
+              <Field orientation="responsive">
+                <FieldContent>
+                  <FieldLabel>
+                    {t({
+                      message: "What it is for",
+                      context: "what an app is for, in a sentence",
+                    })}
+                  </FieldLabel>
+                </FieldContent>
+                <SavedText
+                  maxLength={appLimits.descriptionLength}
+                  multiline
+                  onSave={(description) => {
+                    change({ description: description ?? "" });
+                  }}
+                  readOnly={!builds || busy}
+                  value={app.description}
+                />
+              </Field>
+              <Field orientation="responsive">
+                <FieldContent>
+                  <FieldTitle>{t`Status`}</FieldTitle>
+                </FieldContent>
+                <div {...stylex.props(styles.fact)}>
+                  <StatusBadge
+                    archived={app.archived}
+                    live={app.currentVersion}
+                  />
+                  <StatusNote app={app} />
+                </div>
+              </Field>
+              <Field orientation="responsive">
+                <FieldContent>
+                  <FieldLabel>
+                    {t`Made for`}{" "}
+                    <InfoTip>{t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}</InfoTip>
+                  </FieldLabel>
+                </FieldContent>
+                <Select
+                  disabled={disabled}
+                  items={audiences}
+                  onValueChange={(value: unknown) => {
+                    if (typeof value !== "string") {
+                      return;
+                    }
+                    const member = audienceMembers.find(
+                      (each) => refValue(each) === value
+                    );
+                    change({
+                      audience:
+                        member === undefined
+                          ? null
+                          : { type: member.type, id: member.id },
+                    });
+                  }}
+                  value={current}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent />
+                </Select>
+              </Field>
+              {builds && !app.archived ? (
+                <Field orientation="responsive">
+                  <FieldContent>
+                    <FieldTitle>{t`Link`}</FieldTitle>
+                  </FieldContent>
+                  <OwnLink app={app} />
+                </Field>
+              ) : null}
+              {failure === undefined ? null : (
+                <Alert variant="destructive">
+                  <AlertDescription>{failure}</AlertDescription>
+                </Alert>
+              )}
+            </FieldGroup>
+          </CardContent>
+        </section>
+      </Card>
+      <Card asChild>
+        <section
+          aria-label={t({
+            message: "Owner",
+            context: "who answers for an app",
           })}
         >
-          <SavedText
-            disabled={busy}
-            id="app-purpose"
-            maxLength={appLimits.descriptionLength}
-            readOnly={!builds}
-            multiline
-            onSave={(description) => {
-              change({ description });
-            }}
-            value={app.description}
-          />
-        </SettingsRow>
-        <SettingsRow label={t`Status`}>
-          <div className="flex flex-col items-start gap-1">
-            <StatusBadge archived={app.archived} live={app.currentVersion} />
-            <StatusNote app={app} />
-          </div>
-        </SettingsRow>
-        <SettingsRow
-          description={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
-          htmlFor="app-audience"
-          label={t`Made for`}
-        >
-          <Select
-            disabled={disabled}
-            items={audiences}
-            onValueChange={(value: unknown) => {
-              if (typeof value !== "string") {
-                return;
-              }
-              const member = audienceMembers.find(
-                (each) => refValue(each) === value
-              );
-              change({
-                audience:
-                  member === undefined
-                    ? null
-                    : { type: member.type, id: member.id },
-              });
-            }}
-            value={current}
-          >
-            <SelectTrigger className="w-full" id="app-audience">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {audiences.map((audience) => (
-                <SelectItem key={audience.value} value={audience.value}>
-                  {audience.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-        {builds && !app.archived ? (
-          <SettingsRow
-            description={t`Its own address, for whoever may use it while it is live.`}
-            label={t`Link`}
-          >
-            <OwnLink app={app} />
-          </SettingsRow>
-        ) : null}
-        {failure === undefined ? null : (
-          <div className="border-t px-5 py-3">
-            <ErrorText>{failure}</ErrorText>
-          </div>
-        )}
-      </SettingsSection>
-      <SettingsSection
-        description={t`Who answers for the App: who is asked about it and decides what changes.`}
-        title={t({ message: "Owner", context: "who answers for an app" })}
-      >
-        {/* The platform's one owner control, as a workflow's line has it. */}
-        <SettingsBody>
-          <AppOwner
-            // Not read for someone who doesn't build it, who only looks.
-            answerers={builds ? eligible : (eligible ?? [])}
-            disabled={disabled}
-            onPick={(responsible) => {
-              change({ responsible });
-            }}
-            onRetry={() => {
-              void router.invalidate();
-            }}
-            owner={{
-              id: app.responsible,
-              name: personName(app.responsible),
-            }}
-          />
-        </SettingsBody>
-      </SettingsSection>
+          <CardHeader>
+            <CardTitle>
+              {t({ message: "Owner", context: "who answers for an app" })}{" "}
+              <InfoTip
+                label={t`More about the owner`}
+              >{t`Who answers for the App: who is asked about it and decides what changes.`}</InfoTip>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {/* The platform's one owner control, as a workflow's line has it. */}
+            <AppOwner
+              // Not read for someone who doesn't build it, who only looks.
+              answerers={builds ? eligible : (eligible ?? [])}
+              disabled={disabled}
+              onPick={(responsible) => {
+                change({ responsible });
+              }}
+              onRetry={() => {
+                void router.invalidate();
+              }}
+              owner={{
+                id: app.responsible,
+                name: personName(app.responsible),
+              }}
+            />
+          </CardContent>
+        </section>
+      </Card>
       {builds ? (
         <ForBuilders app={app} identity={identity} />
       ) : (
-        <p className="text-muted-foreground">
-          <Trans>Only its builders change these settings.</Trans>
-        </p>
+        <Text size="sm" color="muted">
+          {t`Only its builders change these settings.`}
+        </Text>
       )}
     </>
   );
@@ -816,7 +922,7 @@ const Connections = ({
     decides ? readResourcesAsAdmin : readResourcesAsBuilder
   );
   return (
-    <div className="flex flex-col gap-8">
+    <div {...stylex.props(styles.sections)}>
       <RefreshFailed reads={[declared, used, resources]} />
       <Read notedAbove read={declared}>
         {({ integrations, catalog }) => (
@@ -828,21 +934,21 @@ const Connections = ({
           />
         )}
       </Read>
-      <section aria-labelledby="app-used" className="flex flex-col gap-3">
-        <h3 className="font-medium" id="app-used">
+      <section aria-labelledby="app-used" {...stylex.props(styles.section)}>
+        <Heading id="app-used" level={3} size="xs">
           <Trans>Connections in use</Trans>
-        </h3>
+        </Heading>
         <Read notedAbove read={used}>
           {({ integrations, http }) =>
             integrations.length === 0 && http.length === 0 ? (
-              <p className="text-muted-foreground">
+              <Text size="sm" color="muted">
                 <Trans>This App doesn&apos;t use a connection yet.</Trans>
-              </p>
+              </Text>
             ) : (
               <>
                 {integrations.length === 0 ? null : (
-                  <div className="@container">
-                    <ul className="grid grid-cols-1 gap-x-10 @2xl:grid-cols-2">
+                  <div>
+                    <ul {...stylex.props(styles.integrations)}>
                       {integrations.map((integration) => (
                         <IntegrationRow
                           identity={identity}
@@ -854,7 +960,7 @@ const Connections = ({
                   </div>
                 )}
                 {http.length === 0 ? null : (
-                  <ul className="flex flex-col gap-3">
+                  <ul {...stylex.props(styles.list)}>
                     {http.map((listed) => (
                       // Revoked from Integrations, never from an App.
                       <HttpConnectionItem
@@ -904,17 +1010,6 @@ const Webhooks = ({
 
 // --- Options -------------------------------------------------------------
 
-const readSurfaces = async (session: Session, app: string) =>
-  await session.pages.surfaces(app);
-
-/** The App's settings surface (spec 34.1), if it declares one. */
-const optionsOf = (
-  surfaces: Loaded<SurfaceSummary[]> | undefined
-): SurfaceSummary | undefined =>
-  surfaces?.state === "ready"
-    ? surfaces.data.find(({ kind }) => kind === "settings")
-    : undefined;
-
 /**
  * The App's own settings: its pages, at its settings surface's route,
  * with the person's own access and no more. Its router moves within the
@@ -927,31 +1022,12 @@ const Options = ({
   app: string;
   surface: SurfaceSummary;
 }) => (
-  <div className="flex min-h-96 flex-col">
+  <div {...stylex.props(styles.options)}>
     <PageFrame app={app} at={surface.path} embedded key={surface.path} />
   </div>
 );
 
 // --- The settings --------------------------------------------------------
-
-/** The sections `identity` sees of `app`, with Options once core says it declares them. */
-const shownSections = (
-  app: ViewedApp,
-  identity: Identity,
-  { options }: { options: boolean }
-): AppSettingsSection[] => {
-  const builder = app.role === "builder";
-  const shown: Record<AppSettingsSection, boolean> = {
-    general: true,
-    sharing: true,
-    // Core lists versions and webhooks to its builders alone.
-    history: builder,
-    connections: canBuild(identity.role),
-    webhooks: builder,
-    options,
-  };
-  return appSettingsSections.filter((section) => shown[section]);
-};
 
 /** Options: the App's own settings page, once core says it declares one. */
 const OptionsSection = ({
@@ -970,9 +1046,11 @@ const OptionsSection = ({
     return <LoadingLines />;
   }
   return options.state === "ready" ? (
-    <p className="text-muted-foreground">{t`This App offers no options.`}</p>
+    <Text size="sm" color="muted">
+      {t`This App offers no options.`}
+    </Text>
   ) : (
-    <NotLoaded page={options} />
+    <NotLoadedState heading="h3" page={options} />
   );
 };
 
@@ -1014,15 +1092,7 @@ const SectionBody = ({
   return <OptionsSection app={app.id} options={options} />;
 };
 
-const sectionDescriptions = {
-  sharing: msg`Who opens the App besides you, and as what.`,
-  history: msg`What changed, unpublished and published, which version is live, and going back to one.`,
-  connections: msg`The integrations, connections and resources the App uses, and asking for more.`,
-  webhooks: msg`Where Grasp sends the App's events.`,
-  options: msg`The settings the App offers itself.`,
-} satisfies Partial<Record<AppSettingsSection, MessageDescriptor>>;
-
-/** A section's link in the list: the workspace's or the settings page's. */
+/** A section's tab: the workspace's address or the settings page's. */
 const SectionLink = ({
   app,
   section,
@@ -1034,43 +1104,36 @@ const SectionLink = ({
   section: AppSettingsSection;
   current: boolean;
   within: "workspace" | "page";
-  children: ReactNode;
-}) => {
-  const className = `${buttonVariants({
-    size: "sm",
-    variant: current ? "secondary" : "ghost",
-  })} w-full md:justify-start`;
-  const marked = current ? ("page" as const) : undefined;
-  return within === "workspace" ? (
-    <Link
-      aria-current={marked}
-      className={className}
-      params={{ app }}
-      replace
-      search={(held) => ({
-        chat: held.chat,
-        env: held.env,
-        project: held.project,
-        view: "settings",
-        section,
-      })}
-      to="/apps/$app"
-    >
-      {children}
-    </Link>
-  ) : (
-    <Link
-      aria-current={marked}
-      className={className}
-      params={{ app }}
-      replace
-      search={{ section }}
-      to="/apps/$app/settings"
-    >
-      {children}
-    </Link>
-  );
-};
+  children: string;
+}) => (
+  <TabsLink asChild current={current}>
+    {within === "workspace" ? (
+      <Link
+        params={{ app }}
+        replace
+        search={(held) => ({
+          chat: held.chat,
+          env: held.env,
+          project: held.project,
+          view: "settings",
+          section,
+        })}
+        to="/apps/$app"
+      >
+        {children}
+      </Link>
+    ) : (
+      <Link
+        params={{ app }}
+        replace
+        search={{ section }}
+        to="/apps/$app/settings"
+      >
+        {children}
+      </Link>
+    )}
+  </TabsLink>
+);
 
 /**
  * An App's settings: the sections `identity` sees as a list, and the one
@@ -1098,31 +1161,23 @@ export const AppSettings = ({
   // Options waits on whether the App declares them; anything else opens
   // General.
   const section = asked ?? "general";
-  const title = i18n._(sectionLabels[section]);
-  const description =
-    section === "general" ? undefined : i18n._(sectionDescriptions[section]);
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-      <nav
-        aria-label={t`Settings sections`}
-        className="flex flex-none gap-1 overflow-x-auto border-b p-2 md:w-52 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-r md:border-b-0 md:p-3"
-      >
+    <div {...stylex.props(styles.settings)}>
+      <TabsNav aria-label={t`Settings sections`} variant="line">
         {sections.map((each) => (
-          <span className="flex-none" key={each}>
-            <SectionLink
-              app={app.id}
-              current={each === section}
-              section={each}
-              within={within}
-            >
-              {i18n._(sectionLabels[each])}
-            </SectionLink>
-          </span>
+          <SectionLink
+            app={app.id}
+            current={each === section}
+            key={each}
+            section={each}
+            within={within}
+          >
+            {i18n._(sectionLabels[each])}
+          </SectionLink>
         ))}
-      </nav>
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-6 md:px-8">
-          <SectionHeading description={description} title={title} />
+      </TabsNav>
+      <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
           <SectionBody
             app={app}
             builds={builds}

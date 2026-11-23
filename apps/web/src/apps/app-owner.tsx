@@ -1,8 +1,23 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Button } from "@grasp-os/ui/components/button";
+import { Combobox } from "@grasp-os/ui/components/combobox";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
-import { ErrorText } from "../error-text.tsx";
-import { PersonPicker } from "../people/person-picker.tsx";
+import { usePeopleApart } from "../people/people-apart.ts";
+
+const styles = stylex.create({
+  owner: { display: "flex", flexDirection: "column", gap: space[2] },
+  // Why it can't be changed, and the way to read it again, on one line.
+  failed: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space[2],
+  },
+});
 
 /** Someone who may answer for an App, as the picker lists them. */
 interface Answerer {
@@ -42,25 +57,40 @@ export const AppOwner = ({
             [...answerers, owner].map((each) => [each.id, each] as const)
           ).values(),
         ];
+  const apart = usePeopleApart(people);
   return (
-    <div className="flex flex-col gap-2">
-      <div className="-ml-2.5">
-        <PersonPicker
-          align="start"
-          disabled={disabled || answerers === null}
-          onPick={(picked) => {
-            onPick(picked.id);
-          }}
-          owner={owner.name}
-          ownerId={owner.id}
-          people={people}
-        />
-      </div>
+    <div {...stylex.props(styles.owner)}>
+      <Combobox
+        aria-label={t({ message: "Owner", context: "who answers for an app" })}
+        disabled={disabled || answerers === null}
+        items={people.map((person) => {
+          // A namesake is told apart by the end of their ID.
+          const detail = apart.hint(person);
+          return {
+            value: person.id,
+            label: person.name,
+            media: (
+              <Avatar decorative name={person.name} size="xs">
+                <AvatarFallback />
+              </Avatar>
+            ),
+            ...(detail === undefined ? {} : { description: detail }),
+          };
+        })}
+        onValueChange={(id) => {
+          if (id !== null && id !== owner.id) {
+            onPick(id);
+          }
+        }}
+        value={owner.id}
+      />
       {answerers === null ? (
-        <div className="flex items-center gap-2">
-          <ErrorText>{t`Couldn't load who may answer for it.`}</ErrorText>
-          <Button onClick={onRetry} size="sm" variant="outline">
-            <Trans>Try again</Trans>
+        <div {...stylex.props(styles.failed)}>
+          <Alert appearance="subtle" variant="destructive">
+            <AlertTitle>{t`Couldn't load who may answer for it.`}</AlertTitle>
+          </Alert>
+          <Button onClick={onRetry} size="sm" variant="secondary">
+            {t`Try again`}
           </Button>
         </div>
       ) : null}

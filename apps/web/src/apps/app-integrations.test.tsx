@@ -124,11 +124,14 @@ const buttonNamed = (name: string): HTMLButtonElement | undefined =>
       (each.getAttribute("aria-label") ?? each.textContent?.trim()) === name
   );
 
-/** Every button's accessible name: its label, else its text. */
+/** Every button's accessible name, its label else its text, but the card's info mark. */
 const buttons = (): string[] =>
-  [...document.querySelectorAll("button")].map(
-    (each) => each.getAttribute("aria-label") ?? each.textContent?.trim() ?? ""
-  );
+  [...document.querySelectorAll("button")]
+    .map(
+      (each) =>
+        each.getAttribute("aria-label") ?? each.textContent?.trim() ?? ""
+    )
+    .filter((name) => name !== "More about this section");
 
 describe("an App's integrations in its settings", () => {
   afterEach(() => {
@@ -182,12 +185,12 @@ describe("an App's integrations in its settings", () => {
     });
 
     expect({
-      // Each listed by its logo's initial and its name.
+      // Each listed by its name.
       offered: offered.map((each) => each.textContent?.trim()),
       changes: asked.changes,
       readAgain: asked.loads > before,
     }).toStrictEqual({
-      offered: ["JJira"],
+      offered: ["Jira"],
       changes: [["add", "app-1", { source: "composio", id: "jira" }]],
       readAgain: true,
     });

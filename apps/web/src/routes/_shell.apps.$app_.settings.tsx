@@ -1,9 +1,11 @@
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
-import { LayoutGridIcon } from "lucide-react";
 
-import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
-import type { AppSettingsSection } from "../apps/app-settings.tsx";
+import { AppSettings } from "../apps/app-settings.tsx";
+import { settingsSectionOf } from "../apps/settings-sections.ts";
+import type { AppSettingsSection } from "../apps/settings-sections.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -23,7 +25,6 @@ const AppSettingsPage = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
-        icon={LayoutGridIcon}
         notFound={t`App not found`}
         page={page}
       />
@@ -40,8 +41,8 @@ const AppSettingsPage = () => {
           { label: t`Settings` },
         ]}
       />
-      {/* The page's heading: the section's heads what is open. */}
-      <h1 className="sr-only">
+      {/* The page's heading, for a screen reader: the tabs show what is open. */}
+      <h1 {...stylex.props(visuallyHidden)}>
         <Trans>Settings of {appName}</Trans>
       </h1>
       <AppSettings

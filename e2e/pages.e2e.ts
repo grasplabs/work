@@ -101,8 +101,8 @@ test("two people see each other's notes live, in their theme, and a failing page
     openPage(second, app),
   ]);
 
-  // The page marks what the App draws as the App's, around the frame.
-  await expect(first.getByText("App page", { exact: true })).toBeVisible();
+  // The page marks what the App draws as the App's: its name heads the
+  // chrome around the frame.
   await expect(first.getByRole("heading", { name: "Notes" })).toBeVisible();
 
   // The page follows its page's theme.

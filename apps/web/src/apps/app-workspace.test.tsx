@@ -2197,7 +2197,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("sets a new App up calmly while Grasp builds it: its name, Share off, nothing of the App or its tip until it works", async () => {
+  it("sets a new App up calmly while Grasp builds it: its name, Grasp building it in the preview's place, Share off, nothing of the App or its tip until it works", async () => {
     markMade("invoice-desk");
     const core = new PreviewingCore("page.build_failed");
     socketsTo(core);
@@ -2228,11 +2228,12 @@ describe(AppWorkspace, () => {
     const share = button("Share with your team");
 
     expect({
-      setting: says("Setting up Invoices…"),
-      calm: says("Grasp is building it. This takes a minute or two."),
+      building:
+        document.querySelector('[aria-label="Grasp is building"]') !== null,
+      calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
-      views: document.querySelector('nav[aria-label="Workspace views"]'),
+      controls: document.querySelector('[aria-label="Reload"]'),
       // The preview that failed under it never shows, nor the tip.
       failure: [...document.querySelectorAll("body *")].some(
         (each) =>
@@ -2243,11 +2244,11 @@ describe(AppWorkspace, () => {
       fix: reachable("Fix with Grasp") !== undefined,
       tip: says("This is your new App, with example data."),
     }).toStrictEqual({
-      setting: true,
+      building: true,
       calm: true,
       state: true,
       shareOff: true,
-      views: null,
+      controls: null,
       failure: false,
       fix: false,
       tip: false,
@@ -2345,7 +2346,7 @@ describe(AppWorkspace, () => {
     await opened(fakeApps().apps);
     await settled();
     const first = says(tip);
-    await press(button("Dismiss the tip"));
+    await press(button("Dismiss"));
     const dismissed = says(tip);
     takenDown();
     await opened(fakeApps().apps);

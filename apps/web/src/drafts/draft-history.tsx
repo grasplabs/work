@@ -54,7 +54,7 @@ import { FileChanges } from "../apps/draft-changes.tsx";
 import {
   ReleaseBadges,
   ReleaseDialog,
-  ReleaseMenuItems,
+  useReleaseActions,
 } from "../apps/release-controls.tsx";
 import type { ReleaseAction } from "../apps/release-controls.tsx";
 import type { CoreConnection } from "../core-connection.ts";
@@ -666,6 +666,25 @@ const SeeVersion = ({ app, version }: { app: string; version: number }) => (
   </DropdownMenuItem>
 );
 
+/** A release's actions in its version's menu, for an admin. */
+const ReleaseItems = ({
+  release,
+  onAsk,
+}: {
+  release: AppRelease;
+  onAsk: (action: ReleaseAction) => void;
+}) =>
+  useReleaseActions(release).map(({ label, action }) => (
+    <DropdownMenuItem
+      key={label}
+      onClick={() => {
+        onAsk(action);
+      }}
+    >
+      {label}
+    </DropdownMenuItem>
+  ));
+
 /** A version's menu: its changes, its preview, rolling back, its release. */
 const VersionMenu = ({
   subject,
@@ -740,7 +759,7 @@ const VersionMenu = ({
         {release === undefined ? null : (
           <>
             <DropdownMenuSeparator />
-            <ReleaseMenuItems onAsk={onAsk} release={release} />
+            <ReleaseItems onAsk={onAsk} release={release} />
           </>
         )}
       </DropdownMenuContent>

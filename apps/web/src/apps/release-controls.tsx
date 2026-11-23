@@ -1,21 +1,22 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { AppRelease } from "@grasp-os/shared/apps";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
+  DialogBody,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import { DropdownMenuItem } from "@grasp-os/app-kit/components/dropdown-menu";
-import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import type { AppRelease } from "@grasp-os/shared/apps";
+} from "@grasp-os/ui/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What the organization's own admins do to an App's sealed releases, on
@@ -34,60 +35,47 @@ export type ReleaseAction =
   | { kind: "lift"; version: number; hold: string };
 
 /** Whether a release was revoked, and its legal holds. */
-export const ReleaseBadges = ({ release }: { release: AppRelease }) => (
-  <>
-    {release.revokedAt === null ? null : (
-      <Badge>
-        <Trans>Revoked</Trans>
-      </Badge>
-    )}
-    {release.holds.map(({ hold }) => (
-      <Badge key={hold} variant="attention">
-        <Trans>Legal hold: {hold}</Trans>
-      </Badge>
-    ))}
-  </>
-);
-
-/** A release's actions in its version's menu, for an admin. */
-export const ReleaseMenuItems = ({
-  release,
-  onAsk,
-}: {
-  release: AppRelease;
-  onAsk: (action: ReleaseAction) => void;
-}) => {
-  const { version } = release;
+export const ReleaseBadges = ({ release }: { release: AppRelease }) => {
+  const { t } = useLingui();
   return (
     <>
-      {release.revokedAt === null ? (
-        <DropdownMenuItem
-          onClick={() => {
-            onAsk({ kind: "revoke", version });
-          }}
-        >
-          <Trans>Revoke this version</Trans>
-        </DropdownMenuItem>
-      ) : null}
-      <DropdownMenuItem
-        onClick={() => {
-          onAsk({ kind: "hold", version });
-        }}
-      >
-        <Trans>Place a legal hold</Trans>
-      </DropdownMenuItem>
+      {release.revokedAt === null ? null : <Badge>{t`Revoked`}</Badge>}
       {release.holds.map(({ hold }) => (
-        <DropdownMenuItem
-          key={hold}
-          onClick={() => {
-            onAsk({ kind: "lift", version, hold });
-          }}
-        >
-          <Trans>Lift the legal hold {hold}</Trans>
-        </DropdownMenuItem>
+        <Badge key={hold} variant="warning">
+          {t`Legal hold: ${hold}`}
+        </Badge>
       ))}
     </>
   );
+};
+
+/**
+ * A release's actions in its version's menu, for an admin: each with its
+ * words, for the menu that holds them (drafts/draft-history.tsx).
+ */
+export const useReleaseActions = (
+  release: AppRelease
+): { label: string; action: ReleaseAction }[] => {
+  const { t } = useLingui();
+  const { version } = release;
+  return [
+    ...(release.revokedAt === null
+      ? [
+          {
+            label: t`Revoke this version`,
+            action: { kind: "revoke", version } as const,
+          },
+        ]
+      : []),
+    {
+      label: t`Place a legal hold`,
+      action: { kind: "hold", version },
+    },
+    ...release.holds.map(({ hold }) => ({
+      label: t`Lift the legal hold ${hold}`,
+      action: { kind: "lift", version, hold } as const,
+    })),
+  ];
 };
 
 /**
@@ -162,15 +150,15 @@ const ActionText = ({
   );
 };
 
-/** The confirm button of `action`. */
-const ActionLabel = ({ action }: { action: ReleaseAction }) => {
-  if (action.kind === "revoke") {
-    return <Trans>Revoke</Trans>;
-  }
-  if (action.kind === "hold") {
-    return <Trans>Place hold</Trans>;
-  }
-  return <Trans>Lift hold</Trans>;
+/** The confirm button's words for `action`. */
+const useActionLabel = () => {
+  const { t } = useLingui();
+  return (action: ReleaseAction): string => {
+    if (action.kind === "revoke") {
+      return t`Revoke`;
+    }
+    return action.kind === "hold" ? t`Place hold` : t`Lift hold`;
+  };
 };
 
 /**
@@ -192,11 +180,10 @@ export const ReleaseDialog = ({
   onChanged: (release: AppRelease) => void;
 }) => {
   const { t } = useLingui();
+  const labelOf = useActionLabel();
   const { busy, failure, run } = useCoreAction();
   const [reason, setReason] = useState("");
   const [hold, setHold] = useState("");
-  const reasonId = useId();
-  const holdId = useId();
   const asksReason = action.kind !== "lift";
   const ready =
     action.kind === "lift" ||
@@ -215,10 +202,11 @@ export const ReleaseDialog = ({
       }
       return await session.apps.releases.releaseHold(app, version, action.hold);
     });
-    if (changed !== undefined) {
-      onChanged(changed);
-      onClose();
+    if (changed === undefined) {
+      // The dialog stays, and says why below.
+      throw new Error("The release did not change.");
     }
+    onChanged(changed);
   };
   return (
     <Dialog
@@ -231,55 +219,52 @@ export const ReleaseDialog = ({
       }}
       open
     >
-      <DialogContent closeLabel={t`Close`}>
-        <header className="flex flex-col gap-1 pr-8">
-          <ActionText action={action} label={label} />
-        </header>
-        {action.kind === "hold" ? (
-          <Field>
-            <FieldLabel htmlFor={holdId}>
-              <Trans>Name of the hold, such as a case reference</Trans>
-            </FieldLabel>
-            <Input
-              id={holdId}
-              maxLength={256}
-              onChange={(event) => {
-                setHold(event.target.value);
-              }}
-              required
-              value={hold}
-            />
-          </Field>
-        ) : null}
-        {asksReason ? (
-          <Field>
-            <FieldLabel htmlFor={reasonId}>
-              <Trans>Why</Trans>
-            </FieldLabel>
-            <Textarea
-              id={reasonId}
-              maxLength={500}
-              onChange={(event) => {
-                setReason(event.target.value);
-              }}
-              required
-              value={reason}
-            />
-          </Field>
-        ) : null}
-        <ErrorText>{failure}</ErrorText>
+      <DialogContent>
+        <ActionText action={action} label={label} />
+        {action.kind === "lift" ? null : (
+          <DialogBody>
+            {action.kind === "hold" ? (
+              <Field>
+                <FieldLabel>{t`Name of the hold, such as a case reference`}</FieldLabel>
+                <Input
+                  maxLength={256}
+                  onValueChange={setHold}
+                  required
+                  value={hold}
+                />
+              </Field>
+            ) : null}
+            {asksReason ? (
+              <Field>
+                <FieldLabel>{t`Why`}</FieldLabel>
+                <Textarea
+                  maxLength={500}
+                  onValueChange={setReason}
+                  required
+                  value={reason}
+                />
+              </Field>
+            ) : null}
+          </DialogBody>
+        )}
+        {failure === undefined ? null : (
+          <Alert variant="destructive">
+            <AlertTitle>{failure}</AlertTitle>
+          </Alert>
+        )}
         <DialogFooter>
-          <Button disabled={busy} onClick={onClose} variant="outline">
-            <Trans>Cancel</Trans>
-          </Button>
+          <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            disabled={busy || !ready}
-            onClick={() => {
-              void confirm();
+            disabled={!ready}
+            errorLabel={t`Didn't work`}
+            onClick={async () => {
+              await confirm();
+              onClose();
             }}
+            size="sm"
             variant={action.kind === "revoke" ? "destructive" : "default"}
           >
-            <ActionLabel action={action} />
+            {labelOf(action)}
           </Button>
         </DialogFooter>
       </DialogContent>
