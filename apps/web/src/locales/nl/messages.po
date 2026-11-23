@@ -4901,6 +4901,10 @@ msgstr "Pakketten geweigerd"
 msgid "Deny"
 msgstr "Weigeren"
 
+#: src/chat/connection-requests.tsx
+msgid "Deny {name}"
+msgstr "{name} weigeren"
+
 #: src/chat/package-requests.tsx
 msgid "Deny the packages for {subject}"
 msgstr "Pakketten voor {subject} weigeren"
@@ -6499,6 +6503,10 @@ msgstr "Begrepen."
 #: src/chat/connection-requests.tsx
 msgid "Grant"
 msgstr "Toestaan"
+
+#: src/chat/connection-requests.tsx
+msgid "Grant {name}"
+msgstr "{name} toestaan"
 
 #: src/inbox/items.ts
 msgid "Grant {who}?"

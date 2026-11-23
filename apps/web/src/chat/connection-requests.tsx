@@ -8,7 +8,6 @@ import {
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Confirmation,
-  ConfirmationAction,
   ConfirmationActions,
   ConfirmationRequest,
   ConfirmationTitle,
@@ -25,6 +24,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { DecisionButton } from "./decision-button.tsx";
 import { FailureLine } from "./failure-line.tsx";
 
 // The connections the chat's agent asked to use in this chat (core's
@@ -143,19 +143,26 @@ const ConnectionRequest = ({
         <RequestDetails request={request} />
         <FailureLine>{failure}</FailureLine>
         <ConfirmationActions>
-          <ConfirmationAction disabled={busy} onClick={deny} variant="outline">
-            {t`Deny`}
-          </ConfirmationAction>
-          <ConfirmationAction
+          {/* Named for what each decides, so several requests read apart. */}
+          <DecisionButton
             disabled={busy}
-            onClick={async () => {
+            label={t`Deny ${name}`}
+            onPress={deny}
+            variant="outline"
+          >
+            {t`Deny`}
+          </DecisionButton>
+          <DecisionButton
+            disabled={busy}
+            label={t`Grant ${name}`}
+            onPress={async () => {
               await decide(async (session) => {
                 await session.chats.grantConnection(chatId, request.id);
               });
             }}
           >
             {t`Grant`}
-          </ConfirmationAction>
+          </DecisionButton>
         </ConfirmationActions>
       </Confirmation>
     );

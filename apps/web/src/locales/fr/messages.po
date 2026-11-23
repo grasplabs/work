@@ -4901,6 +4901,10 @@ msgstr "A refusé des paquets"
 msgid "Deny"
 msgstr "Refuser"
 
+#: src/chat/connection-requests.tsx
+msgid "Deny {name}"
+msgstr "Refuser {name}"
+
 #: src/chat/package-requests.tsx
 msgid "Deny the packages for {subject}"
 msgstr "Refuser les paquets pour {subject}"
@@ -6499,6 +6503,10 @@ msgstr "Compris."
 #: src/chat/connection-requests.tsx
 msgid "Grant"
 msgstr "Accorder"
+
+#: src/chat/connection-requests.tsx
+msgid "Grant {name}"
+msgstr "Accorder {name}"
 
 #: src/inbox/items.ts
 msgid "Grant {who}?"
