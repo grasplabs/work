@@ -4,6 +4,7 @@ import type {
   FileItem,
   NewProjectMember,
   Project,
+  ProjectConnections,
   ProjectCursor,
   ProjectItemCandidate,
   ProjectItemsPage,
@@ -24,7 +25,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import type { OverviewRow } from "../workflows/overview.ts";
 import { ProjectView } from "./project-view.tsx";
+import type { ProjectTab } from "./project-view.tsx";
 
 // A project's page against core's projects API as the page reaches it
 // over RPC (the boundary from the web app), faked: it keeps what is filed
@@ -195,11 +198,21 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The page of `shownProject`, on what `session` holds. */
+/** The page of `shownProject`, on what `session` holds, on `tab`. */
 const shown = async (
   session: ReturnType<typeof fakeProjects>["session"],
   shownProject: Project,
-  chatsInIt: ChatSummary[] = []
+  {
+    chatsInIt = [],
+    tab = "overview",
+    connections = { connections: [], unseen: 0 },
+    workflows = [],
+  }: {
+    chatsInIt?: ChatSummary[];
+    tab?: ProjectTab;
+    connections?: ProjectConnections;
+    workflows?: OverviewRow[];
+  } = {}
 ) => {
   const core = {
     withSession: async <T,>(
@@ -210,9 +223,11 @@ const shown = async (
     component: () => (
       <ProjectView
         chats={chatsInIt}
-        connections={{ connections: [], unseen: 0 }}
-        identity={{ role: "builder" }}
+        connections={connections}
+        identity={{ role: "builder", userId: "user-ada" }}
         project={shownProject}
+        tab={tab}
+        workflows={workflows}
       />
     ),
   });
@@ -252,13 +267,6 @@ const button = (name: string) =>
     (each) =>
       each.textContent?.trim() === name ||
       each.getAttribute("aria-label") === name
-  );
-
-/** The faces in the header, which open the project's people. */
-const peopleButton = () =>
-  [...document.querySelectorAll("button")].find(
-    (each) =>
-      each.getAttribute("aria-label")?.startsWith("People in it") === true
   );
 
 /** A button inside the open dialog, by its words. */
@@ -340,20 +348,23 @@ const choose = async (choice: string): Promise<void> => {
   );
 };
 
-describe("A project's page", () => {
-  afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.replaceChildren();
+/** Takes the page away, as leaving it does. */
+const cleared = (): void => {
+  act(() => {
+    root?.unmount();
   });
+  root = undefined;
+  document.body.replaceChildren();
+};
 
-  it("makes something in the project from Make something, making nothing until asked, with the project carried along", async () => {
+describe("A project's page", () => {
+  afterEach(cleared);
+
+  it("makes an App in the project from its empty line, making nothing until asked, with the project carried along", async () => {
     const { session, asked } = fakeProjects();
     const router = await shown(session, project("builder"));
 
-    await press(link("Make something"));
+    await press(link("Make an App"));
 
     expect({
       asked,
@@ -368,7 +379,7 @@ describe("A project's page", () => {
 
   it("adds a workflow without sharing it unless asked, and names who would gain access", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, project("builder"));
+    await shown(session, project("builder"), { tab: "workflows" });
 
     await press(button("Add"));
     // Found by name in the list, as a person picks it.
@@ -407,10 +418,9 @@ describe("A project's page", () => {
 
   it("adds people and teams in a role, from who core offers when the people open, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, project("builder"));
+    await shown(session, project("builder"), { tab: "people" });
 
     const before = [...asked];
-    await press(peopleButton());
     await openPicker();
     const names = optionLines();
     // Every ID holds an "s" ("user-…", "team-…"): only names are searched.
@@ -421,10 +431,10 @@ describe("A project's page", () => {
     await pickOption("Sales (team)");
     await press(button("Role in the project"));
     await choose("Builder");
-    await press(inDialog("Add"));
+    await press(button("Add"));
     await openPicker();
     await pickOption("Cy");
-    await press(inDialog("Add"));
+    await press(button("Add"));
 
     expect({
       before,
@@ -433,7 +443,8 @@ describe("A project's page", () => {
       asked,
       refused: document.body.textContent?.includes("Cy can't be added."),
     }).toStrictEqual({
-      before: [],
+      // Opening the People tab is opening the people.
+      before: [["shareCandidates"]],
       names: ["Bo", "Cy", "Sales (team)"],
       found: ["Sales (team)"],
       asked: [
@@ -454,8 +465,7 @@ describe("A project's page", () => {
       { id: "user-ada-222222", name: "Ada" },
       { id: "user-bo", name: "Bo" },
     ]);
-    await shown(session, project("builder"));
-    await press(peopleButton());
+    await shown(session, project("builder"), { tab: "people" });
 
     await openPicker();
     const options = optionLines();
@@ -476,11 +486,14 @@ describe("A project's page", () => {
     if (ada === undefined) {
       throw new TypeError("No member to copy");
     }
-    await shown(session, {
-      ...project("builder"),
-      members: [ada, { ...ada, id: "user-ada-222222" }],
-    });
-    await press(peopleButton());
+    await shown(
+      session,
+      {
+        ...project("builder"),
+        members: [ada, { ...ada, id: "user-ada-222222" }],
+      },
+      { tab: "people" }
+    );
 
     expect([
       button("Access for Ada (ID …er-ada)") !== undefined,
@@ -490,8 +503,7 @@ describe("A project's page", () => {
 
   it("changes someone's role, and takes them out only once they confirm, naming what they lose", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, project("builder"));
-    await press(peopleButton());
+    await shown(session, project("builder"), { tab: "people" });
 
     await press(button("Access for Ada"));
     await choose("Builder");
@@ -528,7 +540,7 @@ describe("A project's page", () => {
 
   it("names who loses access before taking a shared workflow out", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, project("builder"));
+    await shown(session, project("builder"), { tab: "workflows" });
 
     await press(button("Take Invoices out of the project"));
     const warning =
@@ -547,8 +559,7 @@ describe("A project's page", () => {
 
   it("lets someone who only uses the project change nothing", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, project("user"));
-    await press(peopleButton());
+    await shown(session, project("user"), { tab: "people" });
     const people = {
       picker: field(),
       roles: button("Access for Ada"),
@@ -557,14 +568,15 @@ describe("A project's page", () => {
       ].map(words),
       asked: [...asked],
     };
-    await press(button("Close"));
+    cleared();
+    await shown(session, project("user"), { tab: "workflows" });
 
     expect({
       people,
       add: button("Add"),
       remove: button("Take Invoices out of the project"),
-      change: button("Change"),
-      delete: button("Delete"),
+      change: button("Settings"),
+      delete: button("More for Sell & get paid"),
       listed: document.body.textContent?.includes("Invoices"),
     }).toStrictEqual({
       people: {
@@ -583,11 +595,15 @@ describe("A project's page", () => {
 
   it("shows a project bigger than one page a page at a time, reading the next after the last shown", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, {
-      ...project("user"),
-      moreItems: true,
-      counts: { apps: 1, workflows: 1, connections: 0 },
-    });
+    await shown(
+      session,
+      {
+        ...project("user"),
+        moreItems: true,
+        counts: { apps: 1, workflows: 1, connections: 0 },
+      },
+      { tab: "apps" }
+    );
 
     const before = document.body.textContent?.includes("Desk");
     await press(button("Show more"));
@@ -610,24 +626,27 @@ describe("A project's page", () => {
       { items: [invoicesMoved], more: true },
       { items: [desk], more: false },
     ]);
-    await shown(session, {
-      ...project("user"),
-      moreItems: true,
-      counts: { apps: 1, workflows: 1, connections: 0 },
-    });
+    await shown(
+      session,
+      {
+        ...project("user"),
+        moreItems: true,
+        counts: { apps: 1, workflows: 1, connections: 0 },
+      },
+      { tab: "workflows" }
+    );
 
     await press(button("Show more"));
     await press(button("Show more"));
-    const deskShown = document.body.textContent?.includes("Desk");
 
     expect({
-      desk: deskShown,
+      showMore: button("Show more"),
       invoicesShown: [...document.querySelectorAll("li")].filter((row) =>
         row.textContent?.includes("Invoices")
       ).length,
       asked,
     }).toStrictEqual({
-      desk: true,
+      showMore: undefined,
       invoicesShown: 1,
       asked: [
         ["items", "workflow", "wf-invoices", "2026-11-01T10:00:00.000Z"],
@@ -638,7 +657,10 @@ describe("A project's page", () => {
 
   it("lists only the person's own chats in it, adds one of theirs not in it yet, and takes one out", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, project("user"), [accruals]);
+    await shown(session, project("user"), {
+      chatsInIt: [accruals],
+      tab: "chats",
+    });
 
     const listed = document.body.textContent?.includes("Accruals");
     await press(button("Add a chat"));

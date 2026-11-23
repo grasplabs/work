@@ -1607,10 +1607,6 @@ msgstr "{unnamed} sur {total} vues en usage, jamais citées"
 msgid "{unseen, plural, one {# more run today, of a workflow you can't see} other {# more runs today, of workflows you can't see}}"
 msgstr "{unseen, plural, one {# exécution de plus aujourd’hui, d’un workflow que vous ne pouvez pas voir} other {# exécutions de plus aujourd’hui, de workflows que vous ne pouvez pas voir}}"
 
-#: src/projects/project-connections.tsx
-msgid "{unseen, plural, one {# more that you can't see} other {# more that you can't see}}"
-msgstr "{unseen, plural, one {# de plus que vous ne pouvez pas voir} other {# de plus que vous ne pouvez pas voir}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} sur {total} citées, pas vues en usage"
@@ -2349,10 +2345,6 @@ msgstr "Ajouter des paquets npm à {subject}"
 #: src/apps/field-editor.tsx
 msgid "Add option"
 msgstr "Ajouter une option"
-
-#: src/projects/project-people-stack.tsx
-msgid "Add people"
-msgstr "Ajouter des personnes"
 
 #: src/frame/part-words.tsx
 msgid "Add people or groups"
@@ -4879,7 +4871,6 @@ msgstr "Falaises"
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-chats.tsx
-#: src/projects/project-people-stack.tsx
 #: src/routes/_shell.settings.audit.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-chain.tsx
@@ -5310,7 +5301,6 @@ msgid "Connection trigger for {workflow}"
 msgstr "Déclencheur de connexion de {workflow}"
 
 #: src/brain/brain.ts
-#: src/projects/project-connections.tsx
 #: src/projects/project-view.tsx
 msgid "Connections"
 msgstr "Connexions"
@@ -13740,7 +13730,6 @@ msgstr "personnes"
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-people-stack.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 #: src/settings/team-members-dialog.tsx
@@ -13773,10 +13762,6 @@ msgstr "« {name} » se fait de deux façons"
 #: src/settings/teams.tsx
 msgid "People in {name}"
 msgstr "Personnes dans {name}"
-
-#: src/projects/project-people-stack.tsx
-msgid "People in it: {count}"
-msgstr "Personnes dedans : {count}"
 
 #: src/chat/agent-draft-card.tsx
 msgid "People in these teams: {named}"
