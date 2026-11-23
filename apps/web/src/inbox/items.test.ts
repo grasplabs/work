@@ -560,7 +560,7 @@ describe(inboxItems, () => {
 
     // A schedule says what it is, never its cron.
     const scheduled = titles.filter(
-      (title): boolean => title === "Grant Schedule for workflow-1?"
+      (title): boolean => title === "Let workflow-1 start on its schedule?"
     );
     expect({
       scheduled: scheduled.length,
@@ -571,8 +571,8 @@ describe(inboxItems, () => {
       cron: false,
       others: [
         "Grant Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1?",
-        "Grant Email trigger (When an email arrives at its own address): start on Workflow workflow-1?",
-        "Grant Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1?",
+        "Let workflow-1 start when an email arrives?",
+        "Let workflow-1 start when its webhook is called?",
         "Grant Trigger unknown-1: start on Workflow workflow-1?",
       ].toSorted(),
     });

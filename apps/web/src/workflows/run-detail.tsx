@@ -292,6 +292,52 @@ const useFollowedRun = (
   return { run, failure, builder, stop };
 };
 
+/**
+ * The run the address opens (`id`): one of `runs` (the list's, once read),
+ * or, past the newest the list holds, read on its own, so a link to an
+ * older run (the Runs log, a decision) opens it too. None while it is read,
+ * and none where core won't show it to the reader.
+ */
+export const useOpenedRun = (
+  workflow: string,
+  runs: readonly WorkflowResourceRun[] | undefined,
+  id: string | undefined
+): WorkflowResourceRun | null => {
+  const core = useCore();
+  const listed =
+    id === undefined ? undefined : runs?.find((run) => run.id === id);
+  const unlisted =
+    id !== undefined && runs !== undefined && listed === undefined
+      ? id
+      : undefined;
+  const [read, setRead] = useState<WorkflowResourceRun | null>(null);
+  useEffect(() => {
+    let left = false;
+    const load = async (run: string): Promise<void> => {
+      try {
+        const found = await core.withSession(
+          async (session) => await session.workflowResources.run(workflow, run)
+        );
+        if (!left) {
+          setRead(found);
+        }
+      } catch {
+        // Not one the reader may open: nothing opens.
+      }
+    };
+    if (unlisted !== undefined) {
+      void load(unlisted);
+    }
+    return () => {
+      left = true;
+    };
+  }, [core, unlisted, workflow]);
+  if (listed !== undefined) {
+    return listed;
+  }
+  return read !== null && read.id === id ? read : null;
+};
+
 /** Who started a run, in words, by its person's ID. */
 export const useStartedBy = (names: Names) => {
   const { t } = useLingui();

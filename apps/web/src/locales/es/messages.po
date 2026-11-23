@@ -753,10 +753,6 @@ msgstr "{kind} ({what})"
 msgid "{kind} at {time}"
 msgstr "{kind} en {time}"
 
-#: src/activity/pending.tsx
-msgid "{kind} for {workflow}"
-msgstr "{kind} de {workflow}"
-
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
@@ -5261,6 +5257,10 @@ msgstr "Solicitudes de conexión"
 msgid "Connection trigger"
 msgstr "Disparador de conexión"
 
+#: src/activity/pending.tsx
+msgid "Connection trigger for {workflow}"
+msgstr "Disparador de conexión de {workflow}"
+
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
 #: src/projects/project-view.tsx
@@ -6824,6 +6824,10 @@ msgstr "Recibos de pago por correo"
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "Disparador de correo"
+
+#: src/activity/pending.tsx
+msgid "Email trigger for {workflow}"
+msgstr "Disparador de correo de {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -19616,6 +19620,7 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/drafts/draft-history.tsx
+#: src/workflows/version-source.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "v{version}"
 msgstr "v{version}"
@@ -19685,7 +19690,6 @@ msgstr "Versión"
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/drafts/share-with-team.tsx
-#: src/workflows/version-source.tsx
 msgid "Version {version}"
 msgstr "Versión {version}"
 
@@ -20051,6 +20055,10 @@ msgstr "Páginas web"
 #: src/workflows/trigger-description.ts
 msgid "Webhook trigger"
 msgstr "Disparador de webhook"
+
+#: src/activity/pending.tsx
+msgid "Webhook trigger for {workflow}"
+msgstr "Disparador de webhook de {workflow}"
 
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"

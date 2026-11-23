@@ -753,10 +753,6 @@ msgstr "{kind} ({what})"
 msgid "{kind} at {time}"
 msgstr "{kind} op {time}"
 
-#: src/activity/pending.tsx
-msgid "{kind} for {workflow}"
-msgstr "{kind} voor {workflow}"
-
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
@@ -1327,7 +1323,7 @@ msgstr "{runs} klaar deze week"
 
 #: src/workflows/workflow-rows.tsx
 msgid "{runs} of yours done this week"
-msgstr "{runs} van jou klaar deze week"
+msgstr "{runs} van jouw runs deze week klaar"
 
 #: src/agents/agents-overview.tsx
 msgid "{scheduled, plural, one {# schedule} other {# schedules}}"
@@ -5261,6 +5257,10 @@ msgstr "Verzoeken om koppelingen"
 msgid "Connection trigger"
 msgstr "Koppelingstrigger"
 
+#: src/activity/pending.tsx
+msgid "Connection trigger for {workflow}"
+msgstr "Verbindingstrigger voor {workflow}"
+
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
 #: src/projects/project-view.tsx
@@ -6824,6 +6824,10 @@ msgstr "Betaalbewijzen per e-mail"
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "E-mailtrigger"
+
+#: src/activity/pending.tsx
+msgid "Email trigger for {workflow}"
+msgstr "E-mailtrigger voor {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -19616,6 +19620,7 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/drafts/draft-history.tsx
+#: src/workflows/version-source.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "v{version}"
 msgstr "v{version}"
@@ -19685,7 +19690,6 @@ msgstr "Versie"
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/drafts/share-with-team.tsx
-#: src/workflows/version-source.tsx
 msgid "Version {version}"
 msgstr "Versie {version}"
 
@@ -20051,6 +20055,10 @@ msgstr "Webpagina's"
 #: src/workflows/trigger-description.ts
 msgid "Webhook trigger"
 msgstr "Webhooktrigger"
+
+#: src/activity/pending.tsx
+msgid "Webhook trigger for {workflow}"
+msgstr "Webhooktrigger voor {workflow}"
 
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"

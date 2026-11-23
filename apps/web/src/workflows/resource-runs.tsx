@@ -15,7 +15,12 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import type { Names } from "./activity-bar.tsx";
 import { listRuns } from "./reads.ts";
-import { RunBeside, RunStatusBadge, useStartedBy } from "./run-detail.tsx";
+import {
+  RunBeside,
+  RunStatusBadge,
+  useOpenedRun,
+  useStartedBy,
+} from "./run-detail.tsx";
 import { WaitingForAiProvider } from "./runs.tsx";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
@@ -36,7 +41,9 @@ const styles = stylex.create({
     gap: grasp.space1,
   },
   table: { display: "grid", rowGap: grasp.space2 },
-  // A link in a row that opens: over the row's press area, so it stays its own.
+  // Decide, under its status, over the row's press area so it stays its
+  // own. Not the column's `control`: that holds one line, and this cell
+  // holds two.
   above: { position: "relative", zIndex: 1 },
 });
 
@@ -69,15 +76,19 @@ const noDecisions: Decisions = new Map();
 
 /**
  * The decisions `runs` of `workflow` wait for that the reader may answer,
- * read only while one of them hasn't ended: the Runs log's waiting
- * runs, which name them. None where that read fails.
+ * read while any of them hasn't ended, and again as that changes: the
+ * Runs log's waiting runs, which name them. None where that read fails.
  */
 const useDecisions = (
   workflow: string,
   runs: readonly WorkflowResourceRun[]
 ): Decisions => {
   const core = useCore();
-  const held = runs.some(({ endedAt }) => endedAt === null);
+  // Read again whenever which runs are going changes: one may have ended.
+  const going = runs
+    .filter(({ endedAt }) => endedAt === null)
+    .map(({ id }) => id)
+    .join(" ");
   const [decisions, setDecisions] = useState<Decisions>(noDecisions);
   useEffect(() => {
     let left = false;
@@ -101,14 +112,14 @@ const useDecisions = (
         // The runs say they wait, without the way to the decision.
       }
     };
-    if (held) {
+    if (going !== "") {
       void read();
     }
     return () => {
       left = true;
     };
-  }, [core, held, workflow]);
-  return held ? decisions : noDecisions;
+  }, [core, going, workflow]);
+  return going === "" ? noDecisions : decisions;
 };
 
 /**
@@ -181,7 +192,12 @@ const runColumns = (words: {
     header: words.status,
     value: (run) => run.status,
     cell: (run) => (
-      <RunStatus decision={words.decisions.get(run.id)} run={run} />
+      <RunStatus
+        decision={
+          run.endedAt === null ? words.decisions.get(run.id) : undefined
+        }
+        run={run}
+      />
     ),
     align: "end",
   },
@@ -281,8 +297,9 @@ export const ResourceRuns = ({
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
 }) => {
-  // The run the address names: one of the table's, or Run's "Open the run".
-  const opened = runs.find((run) => run.id === openRun) ?? null;
+  // The run the address names: one of the table's, Run's "Open the run",
+  // or an older one a link names.
+  const opened = useOpenedRun(workflow, runs, openRun);
   return (
     <RunBeside
       admin={admin}

@@ -19,6 +19,7 @@ import {
 } from "../connections/integrations.ts";
 import { brandOf } from "../connections/provider-mark.tsx";
 import type { CoreConnection } from "../core-connection.ts";
+import { timeoutMs, withTimeout } from "../core.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -49,19 +50,21 @@ export const phaseOf = (workflow: {
   waiting: number;
   failed: number;
   paused?: boolean;
-  /** Whether its triggers can't start it (`TriggerBlock`). */
-  blocked?: boolean;
+  /** Why its triggers can't start it (`TriggerBlock`), if they can't. */
+  blocked?: TriggerBlock["why"] | null;
   /** Whether the reader is an admin, who allows a trigger. */
   admin?: boolean;
 }): Phase => {
-  const { blocked = false, paused = false } = workflow;
+  const { blocked = null, paused = false } = workflow;
   if (workflow.waiting > 0 || workflow.failed > 0) {
     return "needsYou";
   }
-  if (blocked && workflow.admin === true) {
+  // Only a trigger waiting for one is an admin's to allow: a refused or
+  // stopped one waits on its builders.
+  if (blocked === "waiting" && workflow.admin === true && !paused) {
     return "needsYou";
   }
-  return workflow.live && !paused && !blocked ? "running" : "building";
+  return workflow.live && !paused && blocked === null ? "running" : "building";
 };
 
 /**
@@ -314,13 +317,18 @@ const rowTrigger = (trigger: WorkflowTrigger): RowTrigger => ({
 
 /**
  * Why a workflow whose enabled triggers are `own` starts nothing: when it
- * has some and none of them can start it, by the first; null otherwise.
+ * has some and none of them can start it, by the first that waits for an
+ * admin (allowing it would start the workflow), else by the first; null
+ * otherwise.
  */
 const blockOfRows = (own: readonly RowTrigger[]): TriggerBlock | null => {
-  const [first] = own;
-  return first !== undefined && own.every((each) => each.blocked !== null)
-    ? { kind: first.kind, why: first.blocked ?? "waiting" }
-    : null;
+  if (own.length === 0 || own.some(({ blocked }) => blocked === null)) {
+    return null;
+  }
+  const named = own.find(({ blocked }) => blocked === "waiting") ?? own[0];
+  return named === undefined || named.blocked === null
+    ? null
+    : { kind: named.kind, why: named.blocked };
 };
 
 /** Why a workflow with `triggers` (all it has) starts nothing (`blockOfRows`). */
@@ -351,7 +359,7 @@ export const withTriggers = (
           waiting: row.waiting,
           failed: row.failed,
           paused: row.paused,
-          blocked: blocked !== null,
+          blocked: blocked?.why ?? null,
           admin,
         }),
       };
@@ -378,8 +386,14 @@ export const readTriggers = async (
           async (id) =>
             [
               id,
+              // Half a page's limit each: one slow read leaves its row
+              // unread rather than holding the page.
               await orNull(
-                async () => await session.workflowResources.triggers.list(id)
+                async () =>
+                  await withTimeout(
+                    session.workflowResources.triggers.list(id),
+                    timeoutMs / 2
+                  )
               ),
             ] as const
         )

@@ -753,10 +753,6 @@ msgstr "{kind} ({what})"
 msgid "{kind} at {time}"
 msgstr "{kind} bei {time}"
 
-#: src/activity/pending.tsx
-msgid "{kind} for {workflow}"
-msgstr "{kind} für {workflow}"
-
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
@@ -1323,11 +1319,11 @@ msgstr "{rows, plural, one {# Zeile zum Importieren.} other {# Zeilen zum Import
 
 #: src/workflows/workflow-rows.tsx
 msgid "{runs} done this week"
-msgstr "{runs} erledigt diese Woche"
+msgstr "{runs} diese Woche erledigt"
 
 #: src/workflows/workflow-rows.tsx
 msgid "{runs} of yours done this week"
-msgstr "{runs} von Ihnen erledigt diese Woche"
+msgstr "{runs} Ihrer Läufe diese Woche erledigt"
 
 #: src/agents/agents-overview.tsx
 msgid "{scheduled, plural, one {# schedule} other {# schedules}}"
@@ -5261,6 +5257,10 @@ msgstr "Verbindungsanfragen"
 msgid "Connection trigger"
 msgstr "Verbindungsauslöser"
 
+#: src/activity/pending.tsx
+msgid "Connection trigger for {workflow}"
+msgstr "Verbindungsauslöser für {workflow}"
+
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
 #: src/projects/project-view.tsx
@@ -6824,6 +6824,10 @@ msgstr "Zahlungsbelege per E-Mail"
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "E-Mail-Auslöser"
+
+#: src/activity/pending.tsx
+msgid "Email trigger for {workflow}"
+msgstr "E-Mail-Auslöser für {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -19616,6 +19620,7 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/drafts/draft-history.tsx
+#: src/workflows/version-source.tsx
 #: src/workflows/workflow-rows.tsx
 msgid "v{version}"
 msgstr "v{version}"
@@ -19685,7 +19690,6 @@ msgstr "Version"
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/drafts/share-with-team.tsx
-#: src/workflows/version-source.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
 
@@ -20051,6 +20055,10 @@ msgstr "Webseiten"
 #: src/workflows/trigger-description.ts
 msgid "Webhook trigger"
 msgstr "Webhook-Auslöser"
+
+#: src/activity/pending.tsx
+msgid "Webhook trigger for {workflow}"
+msgstr "Webhook-Auslöser für {workflow}"
 
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"

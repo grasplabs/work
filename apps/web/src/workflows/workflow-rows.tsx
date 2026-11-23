@@ -148,7 +148,7 @@ const styles = stylex.create({
     flexShrink: 0,
     justifyItems: "end",
     rowGap: grasp.space1,
-    width: { default: "11rem", [PHONE]: "auto" },
+    width: { default: "13rem", [PHONE]: "auto" },
     marginInlineStart: "auto",
     textAlign: "end",
   },
@@ -280,7 +280,9 @@ const WorkflowRow = ({
   const needs = state === "failing" || state === "waiting";
   // Where its triggers can't start it, why, in place of how it stands.
   const standing =
-    row.blocked === null ? stands : triggerBlockText(row.blocked, i18n);
+    state === "blocked" && row.blocked !== null
+      ? triggerBlockText(row.blocked, i18n)
+      : stands;
   const line = [
     row.owner,
     version === null ? null : t`v${version}`,

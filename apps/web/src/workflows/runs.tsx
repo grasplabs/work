@@ -38,7 +38,9 @@ const styles = stylex.create({
     gap: grasp.space1,
   },
   log: { display: "grid", rowGap: grasp.space2 },
-  // A link in a row that opens: over the row's press area, so it stays its own.
+  // Decide, under the result, over the row's press area so it stays its
+  // own. Not the column's `control`: that holds one line, and this cell
+  // holds two.
   above: { position: "relative", zIndex: 1 },
 });
 

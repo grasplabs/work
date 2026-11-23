@@ -64,12 +64,15 @@ const useValueText = () => {
 /** `value` as labelled fields: an object's fields one by one, anything else as one line. */
 export const JsonFields = ({ value }: { value: Json }) => {
   const text = useValueText();
-  if (!isObject(value)) {
-    return <Text size="sm">{text(value)}</Text>;
+  const fields = isObject(value) ? fieldsOf(value) : [];
+  if (fields.length === 0) {
+    return <Text size="sm">{isObject(value) ? "–" : text(value)}</Text>;
   }
   return (
     <KeyValueList
-      items={fieldsOf(value).map(([key, each]) => ({
+      items={fields.map(([key, each]) => ({
+        // By the field's own name: two can read the same in words.
+        id: key,
         key: fieldLabel(key),
         value: text(each),
       }))}

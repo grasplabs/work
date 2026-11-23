@@ -34,12 +34,13 @@ export const runStatusLabels: Readonly<
 };
 
 /**
- * How a run's status stands as a Badge: attention where it waits on
- * someone or something, success once done, danger where it failed, a plain
- * fact while it goes on or after it was stopped.
+ * How a run's status stands as a Badge: attention only where it waits for
+ * someone's decision, success once done, danger where it failed, a plain
+ * fact while it goes on, waits on its own (a timer, an event) or after it
+ * was stopped.
  */
 export const runToneOf = (status: AnyRunStatus): BadgeTone => {
-  if (status === "waiting" || status === "paused") {
+  if (status === "waiting") {
     return "attention";
   }
   if (status === "completed") {

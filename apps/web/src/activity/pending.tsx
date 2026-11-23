@@ -299,6 +299,14 @@ const triggerStartOf = ({
   };
 };
 
+/** A trigger asking to start its workflow, by its kind and the workflow. */
+const startAskers = {
+  email: msg({ message: "Email trigger for {workflow}" }),
+  schedule: msg({ message: "Schedule for {workflow}" }),
+  connector: msg({ message: "Connection trigger for {workflow}" }),
+  webhook: msg({ message: "Webhook trigger for {workflow}" }),
+} as const satisfies Record<TriggerKind, MessageDescriptor>;
+
 /**
  * Who asks, in one line: a schedule asking to start its workflow by what
  * it is ("Schedule for invoice-approval"), never its cron; another trigger
@@ -319,9 +327,10 @@ export const requestAsker = (
   if (started === undefined) {
     return subjectOf(request, directory);
   }
-  const kind = i18n._(kindLabels[started.kind]);
-  const { workflow } = started;
-  return i18n._(msg`${ph({ kind })} for ${ph({ workflow })}`);
+  return i18n._({
+    ...startAskers[started.kind],
+    values: { workflow: started.workflow },
+  });
 };
 
 /**

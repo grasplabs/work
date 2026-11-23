@@ -267,7 +267,11 @@ const WorkflowRuns = () => {
       <Page>
         <PageHeading title={title} />
         {page.today.state === "ready" ? (
-          <TodayLanes processes={page.processes} today={page.today.data} />
+          <TodayLanes
+            names={page.named.workflows}
+            processes={page.processes}
+            today={page.today.data}
+          />
         ) : (
           <NotLoadedState page={page.today} />
         )}

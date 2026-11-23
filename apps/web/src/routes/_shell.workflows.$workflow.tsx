@@ -811,7 +811,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
     params: { workflow },
     deps: { project },
   }) => {
-    // Names only, and not waited for: IDs stand in until they come.
+    // Names only, and not waited for: "Someone else" stands in until they come.
     const people = loadFromCore(
       core,
       async (session): Promise<People> => await readWorkflowNames(session)
