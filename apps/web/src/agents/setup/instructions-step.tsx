@@ -31,6 +31,7 @@ export const InstructionsStep = ({ setup, change, name }: StepProps) => {
         <span {...stylex.props(styles.document)}>
           <Textarea
             aria-label={t`Instructions`}
+            autoFocus
             maxLength={instructionsMaxLength}
             onValueChange={(value) => {
               change({ instructions: value, instructionsTouched: true });

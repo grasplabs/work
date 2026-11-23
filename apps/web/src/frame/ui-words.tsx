@@ -4,6 +4,8 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
+import { formatList } from "../format.ts";
+
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
  * in the page's language. Damsko knows nothing of Lingui: its components
@@ -52,9 +54,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Could not upload`,
       files: t`Files`,
       limits: (types, maxSize) => {
-        const kinds = new Intl.ListFormat(i18n.locale, {
-          type: "disjunction",
-        }).format(types);
+        const kinds = formatList(types, "disjunction");
         if (maxSize === undefined) {
           return kinds;
         }

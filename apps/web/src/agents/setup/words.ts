@@ -1,6 +1,7 @@
 import { useLingui } from "@lingui/react/macro";
 
-import type { Ability, Audience, Frequency } from "./model.ts";
+import type { Frequency } from "../schedule.ts";
+import type { Ability, Audience } from "./model.ts";
 
 // The words New agent's setup says its choices in, shared by the step that
 // asks each one and the last step that sums them up.

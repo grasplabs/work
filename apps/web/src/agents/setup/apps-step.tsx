@@ -26,8 +26,8 @@ import { Question } from "./question.tsx";
 // slim rows, each app's mark, name and state, one quiet action at its end.
 // First the apps on it, with Add connector in the card's head, which opens
 // the whole catalog (apps-picker.tsx); then the ones that suit it,
-// recommended from its job and name, each with Add. Core keeps no apps on an agent yet: grants are per
-// chat (.context/core-needs.md, item 45).
+// recommended from its job and name, each with Add. Core keeps them as the
+// agent's apps once it is made (`setAgentApp`, finish-setup.ts).
 
 /** What an app's row says under its name: connected as whom, or not yet. */
 const useStanding = () => {

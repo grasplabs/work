@@ -1,7 +1,5 @@
 import type { AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
-import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -137,14 +135,7 @@ const AgentsLoading = () => {
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
       <Page>
         <AgentsSkeleton
-          actions={
-            identity.staff ? undefined : (
-              <Button size="sm">
-                <Icon icon={PlusIcon} />
-                {t`New agent`}
-              </Button>
-            )
-          }
+          action={!identity.staff}
           cards={4}
           toolbar={admin ? <AgentTabsWaiting tab={tab} /> : undefined}
         />

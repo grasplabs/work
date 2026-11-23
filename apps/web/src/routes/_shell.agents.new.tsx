@@ -60,17 +60,18 @@ const NewAgentPage = () => {
         </Page>
       ) : null}
       {way === "manual" ? (
-        <Page>
-          <ManualAgent
-            apps={apps}
-            company={company}
-            models={models}
-            own={ownOn}
-            personId={identity.userId}
-            taken={taken}
-            teams={teams}
-          />
-        </Page>
+        // Straight in the frame's column, no page round it: the setup takes
+        // the height left under the header, so its way on stays in view
+        // and the page never scrolls (manual-agent.tsx).
+        <ManualAgent
+          apps={apps}
+          company={company}
+          models={models}
+          own={ownOn}
+          personId={identity.userId}
+          taken={taken}
+          teams={teams}
+        />
       ) : null}
       {way === "chat" ? (
         <NewAgent

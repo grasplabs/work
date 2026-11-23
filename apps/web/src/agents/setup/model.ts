@@ -2,6 +2,8 @@ import type { CompanyToolClass } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 
 import type { AgentTemplate } from "../agent-templates.ts";
+import { weekdays } from "../schedule.ts";
+import type { Schedule } from "../schedule.ts";
 
 // What New agent's guided setup knows (manual-agent.tsx): its steps, the
 // agent as the answers so far have it, and what every step is handed.
@@ -51,50 +53,6 @@ export const classesOf: Record<Ability, readonly CompanyToolClass[]> = {
 /** What it may do from the start: reading on, changing and reaching others off (decision 8). */
 const startsWith: ReadonlySet<Ability> = new Set(["read"]);
 
-/** How often it works on its own; `asked` is never. */
-export const frequencies = ["asked", "daily", "weekly", "monthly"] as const;
-export type Frequency = (typeof frequencies)[number];
-
-/** When it works on its own: how often, on which days, at what time. */
-export interface Schedule {
-  frequency: Frequency;
-  /** For `weekly`: the days it works, 0 for Sunday to 6 for Saturday. */
-  days: ReadonlySet<number>;
-  /** For `monthly`: the day of the month, 1 to 28 so every month has it. */
-  dayOfMonth: number;
-  /** The time, `HH:MM`, in the company's time zone. */
-  time: string;
-}
-
-const timeOfDay = /^(?<hour>[01]\d|2[0-3]):(?<minute>[0-5]\d)$/u;
-
-/**
- * The schedule as core keeps it, five cron fields; undefined when it never
- * runs on its own, or when it can't run (no time, no day).
- */
-export const cronOfSchedule = (schedule: Schedule): string | undefined => {
-  const { hour, minute } = timeOfDay.exec(schedule.time)?.groups ?? {};
-  if (
-    schedule.frequency === "asked" ||
-    hour === undefined ||
-    minute === undefined
-  ) {
-    return undefined;
-  }
-  const at = `${String(Number(minute))} ${String(Number(hour))}`;
-  if (schedule.frequency === "daily") {
-    return `${at} * * *`;
-  }
-  if (schedule.frequency === "monthly") {
-    return `${at} ${String(schedule.dayOfMonth)} * *`;
-  }
-  if (schedule.days.size === 0) {
-    return undefined;
-  }
-  const days = [...schedule.days].toSorted((a, b) => a - b).join(",");
-  return `${at} * * ${days}`;
-};
-
 /** Who may use it: `me` makes one of the person's own (core's `makeOwnAgent`). */
 export const audiences = ["me", "teams", "everyone"] as const;
 export type Audience = (typeof audiences)[number];
@@ -125,8 +83,6 @@ export interface Setup {
    * (a heading a part), as Grasp proposed them and the person changed them.
    */
   instructions: string;
-  /** Its goal, as proposed: the summary's first row. */
-  goal: string;
   /** Whether the instructions were changed by hand, so a new job leaves them be. */
   instructionsTouched: boolean;
   /** The apps it may use, by their catalog id. */
@@ -144,14 +100,13 @@ export const blank: Setup = {
   name: "",
   job: "",
   instructions: "",
-  goal: "",
   instructionsTouched: false,
   apps: new Set(),
   abilities: startsWith,
   model: null,
   schedule: {
     frequency: "asked",
-    days: new Set([1, 2, 3, 4, 5]),
+    days: weekdays,
     dayOfMonth: 1,
     time: "09:00",
   },

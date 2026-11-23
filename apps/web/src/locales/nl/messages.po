@@ -897,9 +897,9 @@ msgstr "{name} geüpload."
 msgid "{name} uses only these apps, as far as its kinds of work allow."
 msgstr "{name} gebruikt alleen deze apps, voor zover zijn soorten werk dat toestaan."
 
-#: src/agents/agent-page.tsx
-msgid "{name} was made, but not everything you chose was saved"
-msgstr "{name} is gemaakt, maar niet alles wat je koos is opgeslagen"
+#: src/agents/setup-left.tsx
+msgid "{name} was made, but not all of it was saved"
+msgstr "{name} is gemaakt, maar niet alles is opgeslagen"
 
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
@@ -1774,6 +1774,7 @@ msgid "About tools"
 msgstr "Over tools"
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/drafts/share-with-team.tsx
 msgid "Access"
 msgstr "Toegang"
@@ -2327,7 +2328,6 @@ msgid "Always uses this model"
 msgstr "Gebruikt altijd dit model"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Amber"
 msgstr "Amber"
 
@@ -4676,7 +4676,6 @@ msgid "Cron fields"
 msgstr "Cron-velden"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Crystal"
 msgstr "Kristal"
 
@@ -4746,7 +4745,7 @@ msgstr "Datum"
 msgid "Day {day} of {days}"
 msgstr "Dag {day} van {days}"
 
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Day {day} of every month at {time}"
 msgstr "Dag {day} van elke maand om {time}"
 
@@ -5508,7 +5507,6 @@ msgid "Email trigger"
 msgstr "E-mailtrigger"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Ember"
 msgstr "Gloed"
 
@@ -5673,11 +5671,10 @@ msgid "Events older than the audit trail keeps, moved to the archive. The search
 msgstr "Gebeurtenissen die ouder zijn dan de audittrail bewaart, verplaatst naar het archief. De zoekopdracht en de export gebruiken de filters hierboven."
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Evergreen"
 msgstr "Groenblijvend"
 
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Every {days} at {time}"
 msgstr "Elke {days} om {time}"
 
@@ -5690,14 +5687,9 @@ msgstr "Elke vraag of klacht van een klant, van het eerste bericht tot ze is opg
 msgid "Every day"
 msgstr "Elke dag"
 
-#: src/agents/agent-wakes.tsx
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Every day at {time}"
 msgstr "Elke dag om {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every day at 9:00"
-msgstr "Elke dag om 9:00"
 
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
@@ -5714,14 +5706,6 @@ msgstr "Elk uitgenodigd team geïnterviewd"
 #: src/agents/agent-wakes.tsx
 msgid "Every Monday"
 msgstr "Elke maandag"
-
-#: src/agents/agent-wakes.tsx
-msgid "Every Monday at {time}"
-msgstr "Elke maandag om {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every Monday at 9:00"
-msgstr "Elke maandag om 9:00"
 
 #: src/agents/setup/words.ts
 msgid "Every month"
@@ -5776,13 +5760,9 @@ msgstr "Elke week"
 msgid "Every weekday"
 msgstr "Elke werkdag"
 
-#: src/agents/agent-wakes.tsx
+#: src/agents/schedule.ts
 msgid "Every weekday at {time}"
 msgstr "Elke werkdag om {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every weekday at 9:00"
-msgstr "Elke werkdag om 9:00"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
@@ -7592,6 +7572,7 @@ msgid "Instruction"
 msgstr "Instructie"
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/agents/setup/instructions-step.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
@@ -7959,6 +7940,10 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: apps en agents houden hun toestemmingen ervoor."
 
+#: src/agents/setup-left.tsx
+msgid "its apps"
+msgstr "zijn apps"
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "De apps en workflows erin worden niet verwijderd, en niets erin is met het project gedeeld, dus niemand verliest toegang."
@@ -8004,6 +7989,10 @@ msgstr "De gegevens ervan, als JSON"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "De definitie om te bewaren of te verhuizen, en een blauwdruk waarmee anderen kunnen beginnen."
+
+#: src/agents/setup-left.tsx
+msgid "its instructions"
+msgstr "zijn instructies"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
@@ -8060,6 +8049,10 @@ msgstr "Zijn runs konden steeds niet starten, dus hij start niets meer tot wie h
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Zijn runs bleven mislukken bij het starten, dus hij start niet meer. Los op wat ze tegenhield en zet hem daarna weer aan bij de triggers van de workflow: hij gaat verder vanaf zijn volgende moment."
+
+#: src/agents/setup-left.tsx
+msgid "its schedule"
+msgstr "zijn schema"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -8843,7 +8836,6 @@ msgid "May do"
 msgstr "Mag doen"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Meadow"
 msgstr "Weide"
 
@@ -8975,7 +8967,6 @@ msgid "Monthly budget for AI"
 msgstr "Maandbudget voor AI"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Moon"
 msgstr "Maan"
 
@@ -9260,7 +9251,6 @@ msgstr "Nieuw"
 
 #: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
-#: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "New agent"
 msgstr "Nieuwe agent"
@@ -9952,6 +9942,10 @@ msgstr "Niet gelezen: geen verbinding"
 msgid "Not requested yet"
 msgstr "Nog niet aangevraagd"
 
+#: src/agents/setup-left.tsx
+msgid "Not saved"
+msgstr "Niet opgeslagen"
+
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Nog niet opgeslagen. Nieuwe poging volgt."
@@ -9963,6 +9957,14 @@ msgstr "Nog niet opgeslagen. Tot dan tellen de regels die je verplaatste nergens
 #: src/interview/destination.tsx
 msgid "Not saved yet. Until it is, your lines still go where they went before."
 msgstr "Nog niet opgeslagen. Tot dan gaan je regels nog waar ze eerst heen gingen."
+
+#: src/agents/setup-left.tsx
+msgid "Not saved: {what}. {failure}"
+msgstr "Niet opgeslagen: {what}. {failure}"
+
+#: src/agents/setup-left.tsx
+msgid "Not saved: {what}. {failure} What you typed waits on Instructions, to save there."
+msgstr "Niet opgeslagen: {what}. {failure} Wat je typte staat klaar onder Instructies, om daar op te slaan."
 
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
@@ -10266,7 +10268,6 @@ msgid "Number"
 msgstr "Getal"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Ocean"
 msgstr "Oceaan"
 
@@ -10582,6 +10583,7 @@ msgstr "Alleen wat je bedrijf toestaat."
 msgid "Only when asked"
 msgstr "Alleen als het gevraagd wordt"
 
+#: src/agents/schedule.ts
 #: src/agents/setup/words.ts
 msgid "Only when someone asks"
 msgstr "Alleen als iemand het vraagt"
@@ -10670,6 +10672,10 @@ msgstr "Openen"
 #: src/brain/brain-nav.tsx
 msgid "Open {name}"
 msgstr "{name} openen"
+
+#: src/agents/setup-left.tsx
+msgid "Open {tab}"
+msgstr "{tab} openen"
 
 #: src/settings/where-stephen.tsx
 msgid "Open a chat with Stephen, or search for him in Teams’ apps."
@@ -10842,7 +10848,6 @@ msgid "Or write it yourself"
 msgstr "Of schrijf het zelf"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Orb"
 msgstr "Bol"
 
@@ -10918,6 +10923,7 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "In de komende twee weken krijg je een korte persoonlijke link om met Stephen te praten, de AI-interviewer van Grasp: teamleiders zo’n 20 minuten, de rest 10 tot 15. Met je stem of door te typen."
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Overzicht"
@@ -11002,7 +11008,6 @@ msgid "Pages"
 msgstr "Pagina’s"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Pair in orbit"
 msgstr "Paar in een baan"
 
@@ -11316,7 +11321,6 @@ msgid "Plan the day"
 msgstr "De dag plannen"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Planet"
 msgstr "Planeet"
 
@@ -12728,6 +12732,7 @@ msgstr "Plekken opslaan"
 msgid "Save where they go"
 msgstr "Opslaan waar ze naartoe gaan"
 
+#: src/agents/setup-left.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -12759,6 +12764,10 @@ msgstr "Opgeslagen in je geheugen"
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
 msgstr "Bewaard, maar het doorstaat de controle nog niet: onder Definitie staat wat je moet oplossen."
 
+#: src/agents/setup-left.tsx
+msgid "Saved: {savedList}."
+msgstr "Opgeslagen: {savedList}."
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/resource-params.tsx
 msgid "Saved."
@@ -12772,6 +12781,7 @@ msgstr "Bezig met opslaan"
 msgid "Saving to your memory"
 msgstr "Opslaan in je geheugen"
 
+#: src/agents/setup-left.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
 msgid "Saving…"
@@ -12811,6 +12821,7 @@ msgstr "Zeg wat je wilt bouwen, en Grasp bouwt het."
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
+#: src/agents/setup-left.tsx
 msgid "Schedule"
 msgstr "Schema"
 
@@ -14152,7 +14163,6 @@ msgid "Suspended"
 msgstr "Geschorst"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Swarm"
 msgstr "Zwerm"
 
@@ -15743,7 +15753,6 @@ msgid "Thought for {time}"
 msgstr "Heeft {time} nagedacht"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Drie cirkelend"
 
@@ -15940,7 +15949,6 @@ msgid "Transcript"
 msgstr "Transcript"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Driehoek"
 
@@ -15970,6 +15978,7 @@ msgstr "Geldt tot {until}"
 msgid "Try"
 msgstr "Proberen"
 
+#: src/agents/setup-left.tsx
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
@@ -16943,6 +16952,10 @@ msgstr "Waarvoor hij is"
 msgid "What it may also do"
 msgstr "Wat het ook mag doen"
 
+#: src/agents/setup-left.tsx
+msgid "what it may do"
+msgstr "wat hij mag doen"
+
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it may do"
@@ -17485,6 +17498,10 @@ msgstr "Wie kan records in {name} zien?"
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
 msgstr "Wie met hem kan praten"
+
+#: src/agents/setup-left.tsx
+msgid "who can use it"
+msgstr "wie hem kan gebruiken"
 
 #: src/agents/setup/audience-step.tsx
 #: src/agents/setup/review-step.tsx

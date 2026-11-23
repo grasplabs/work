@@ -2,17 +2,18 @@ import { Card, CardDescription } from "@grasp-os/ui/components/card";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import { media, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
-import type { I18n } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
 import { modelName } from "../../chat/composer.tsx";
 import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { formatList } from "../../format.ts";
+import { goalOf } from "../agent-brief.ts";
 import { AgentFigure, AgentFigureAura } from "../figure/agent-figure.tsx";
 import { lookFromName } from "../figure/look.ts";
+import { useScheduleWords } from "../schedule.ts";
 import { abilities } from "./model.ts";
-import type { Schedule, StepProps } from "./model.ts";
+import type { StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
@@ -67,41 +68,10 @@ const styles = stylex.create({
   },
 });
 
-/** A weekday's name: a known Sunday (4 Jan 2026) and the days after it. */
-const weekdayName = (day: number, i18n: I18n): string =>
-  new Intl.DateTimeFormat(i18n.locale, { weekday: "long" }).format(
-    new Date(Date.UTC(2026, 0, 4 + day, 12))
-  );
-
-/** When it works, in a few words: "Every Monday and Friday at 09:00". */
-const useScheduleLine = () => {
+export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
   const { t, i18n } = useLingui();
   const words = useSetupWords();
-  return (schedule: Schedule): string => {
-    const { time } = schedule;
-    if (schedule.frequency === "daily") {
-      return t`Every day at ${time}`;
-    }
-    if (schedule.frequency === "monthly") {
-      const day = schedule.dayOfMonth;
-      return t`Day ${day} of every month at ${time}`;
-    }
-    if (schedule.frequency === "weekly") {
-      const days = formatList(
-        [...schedule.days]
-          .toSorted((a, b) => a - b)
-          .map((day) => weekdayName(day, i18n))
-      );
-      return t`Every ${days} at ${time}`;
-    }
-    return words.frequencyNames.asked;
-  };
-};
-
-export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
-  const { t } = useLingui();
-  const words = useSetupWords();
-  const scheduleLine = useScheduleLine();
+  const schedule = useScheduleWords();
   const look = lookFromName(name);
   const chosenApps = apps.filter(({ id }) => setup.apps.has(id));
   const chosenTeams = teams.filter(({ teamId }) => setup.teams.has(teamId));
@@ -119,7 +89,8 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
     setup.audience === "teams"
       ? formatList(chosenTeams.map((team) => team.name))
       : words.audienceNames[setup.audience];
-  const goal = setup.goal.trim();
+  // As the instructions say it now, edited by hand or not.
+  const goal = goalOf(setup.instructions, i18n);
   return (
     <Question
       line={t`You can change all of this later.`}
@@ -176,7 +147,7 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
                       {
                         id: "works",
                         label: t`Works`,
-                        value: scheduleLine(setup.schedule),
+                        value: schedule.of(setup.schedule),
                       },
                     ]),
                 { id: "who", label: t`Who can use it`, value: who },

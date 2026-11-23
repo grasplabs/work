@@ -2,7 +2,7 @@ import { Card, CardContent } from "@grasp-os/ui/components/card";
 import { Container } from "@grasp-os/ui/components/container";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -18,6 +18,8 @@ const waits = stylex.create({
   name: { width: "8rem" },
   job: { width: "12rem", maxWidth: "100%" },
   fact: { width: "5rem" },
+  // New agent's place in the header, as large as its small button.
+  action: { display: "grid", width: "7.5rem", height: size.controlSm },
   // A settings card's rows, as an agent's page has them.
   column: { display: "grid", gap: space["8"], width: "100%" },
   group: { display: "grid", rowGap: space["2"] },
@@ -41,17 +43,27 @@ const waits = stylex.create({
 /** The Agents page before its agents arrive: its header, its tabs, then still portrait cards. */
 export const AgentsSkeleton = ({
   cards = 8,
-  actions,
+  action = false,
   toolbar,
 }: {
   cards?: number;
-  /** The page's actions, as the loaded page has them (they need no data). */
-  actions?: ReactNode;
+  /** Whether the loaded page has New agent in its header: its place, still, never a live button. */
+  action?: boolean;
   /** What stands between the header and the cards, such as the tabs. */
   toolbar?: ReactNode;
 }) => (
   <div aria-busy="true" {...stylex.props(agentCardStyles.page)}>
-    <PageHeader actions={actions} loading title="" />
+    <PageHeader
+      actions={
+        action ? (
+          <span {...stylex.props(waits.action)}>
+            <Skeleton variant="rectangular" />
+          </span>
+        ) : undefined
+      }
+      loading
+      title=""
+    />
     {toolbar}
     <ul aria-hidden="true" {...stylex.props(agentCardStyles.grid)}>
       {Array.from({ length: cards }, (_, index) => (

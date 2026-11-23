@@ -11,11 +11,6 @@ import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
@@ -83,6 +78,7 @@ import { modelName } from "../chat/composer.tsx";
 import type { Session } from "../core.ts";
 import { formatDollars } from "../format.ts";
 import { Page } from "../frame/page.tsx";
+import { failureWords } from "../load-from-core.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import {
   AudienceControl,
@@ -108,10 +104,22 @@ import type { Part, Typed } from "./agent-form.tsx";
 import { AgentLook } from "./agent-look.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
-import { FactRow, SettingRow, SettingsCard } from "./settings-card.tsx";
+import {
+  finishSetup,
+  forgetOutcome,
+  keepOutcome,
+  outcomeOf,
+} from "./finish-setup.ts";
+import {
+  FactRow,
+  SettingRow,
+  SettingsCard,
+  useRowSave,
+} from "./settings-card.tsx";
+import type { Change } from "./settings-card.tsx";
+import { SetupLeft } from "./setup-left.tsx";
 import { agentTabOf } from "./tabs.tsx";
 import type { AgentTab } from "./tabs.tsx";
-import { forgetUnfinished, unfinishedOf } from "./unfinished-setup.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins, or a person's own agent's,
@@ -142,9 +150,6 @@ import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 // and holds every agent to it from the next message (agent-builder.ts,
 // agent-reach.ts, agent-wakes.ts). Every control saves at once and reads
 // the page again.
-
-/** What a page change asks of core, then the page read again. */
-type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 const styles = stylex.create({
   actions: {
@@ -377,6 +382,24 @@ export interface FirstAgentAccess {
 }
 
 /** Whom an agent but the first answers and what it may do, a row each. */
+/** One row of Access, its control saving as it changes and saying so beside it. */
+const AccessRow = ({
+  label,
+  info,
+  children,
+}: {
+  label: string;
+  info?: string;
+  children: (save: ReturnType<typeof useRowSave>["save"]) => ReactNode;
+}) => {
+  const { status, save } = useRowSave();
+  return (
+    <SettingRow info={info} label={label} saving={status}>
+      <span {...stylex.props(styles.control)}>{children(save)}</span>
+    </SettingRow>
+  );
+};
+
 const Access = ({
   agent,
   settings,
@@ -412,30 +435,33 @@ const Access = ({
           row doesn't name the agent again under the page's title. */}
       <SettingsCard title={t`Who may use it`}>
         <FieldGroup controls="fit">
-          <SettingRow
+          <AccessRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
             label={t`Answers`}
           >
-            <span {...stylex.props(styles.control)}>
+            {(save) => (
               <AudienceControl
                 editable={can}
                 key={JSON.stringify(settings.audience)}
                 label={t`Who may use ${name}`}
                 offers={["everyone", "teams", "nobody"]}
                 onSave={async (chosen) => {
-                  await change(async (session) => {
-                    await session.connections.setAgentReach(
-                      agent.id,
-                      settings.on,
-                      audienceOf(chosen)
-                    );
-                  });
+                  await save(
+                    async () =>
+                      await change(async (session) => {
+                        await session.connections.setAgentReach(
+                          agent.id,
+                          settings.on,
+                          audienceOf(chosen)
+                        );
+                      })
+                  );
                 }}
                 teams={teams}
                 value={chosenOf(settings.audience)}
               />
-            </span>
-          </SettingRow>
+            )}
+          </AccessRow>
         </FieldGroup>
       </SettingsCard>
       <SettingsCard
@@ -446,28 +472,31 @@ const Access = ({
           {settings.classes.map(({ toolClass, audience }) => {
             const className = i18n._(classNames[toolClass]);
             return (
-              <SettingRow key={toolClass} label={className}>
-                <span {...stylex.props(styles.control)}>
+              <AccessRow key={toolClass} label={className}>
+                {(save) => (
                   <AudienceControl
                     editable={can}
                     key={JSON.stringify(audience)}
                     label={t`${className}, for ${name}`}
                     offers={["same", "teams", "nobody"]}
                     onSave={async (chosen) => {
-                      await change(async (session) => {
-                        await session.connections.setAgentToolClass(
-                          agent.id,
-                          toolClass,
-                          appAudienceOf(chosen)
-                        );
-                      });
+                      await save(
+                        async () =>
+                          await change(async (session) => {
+                            await session.connections.setAgentToolClass(
+                              agent.id,
+                              toolClass,
+                              appAudienceOf(chosen)
+                            );
+                          })
+                      );
                     }}
                     same={t`As the company has it`}
                     teams={teams}
                     value={chosenOf(audience)}
                   />
-                </span>
-              </SettingRow>
+                )}
+              </AccessRow>
             );
           })}
         </FieldGroup>
@@ -808,12 +837,12 @@ export const AgentPage = ({
   /** Puts the tab chosen in the address. */
   onTab: (tab: AgentTab) => void;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const router = useRouter();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
   const change: Change = async (action) => {
-    await run(async (session) => {
+    const done = await run(async (session) => {
       await changeThenRefresh(
         async () => {
           await action(session);
@@ -822,13 +851,48 @@ export const AgentPage = ({
           await router.invalidate({ sync: true });
         }
       );
+      return true;
     });
+    return done === true;
   };
   const can = editable && !busy;
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // What a new agent's setup couldn't save once it was made (unfinished-setup.ts).
-  const [unfinished, setUnfinished] = useState(() => unfinishedOf(agent.id));
+  // What a new agent's setup couldn't save once it was made (finish-setup.ts).
+  const [setupLeft, setSetupLeft] = useState(() => outcomeOf(agent.id));
+  // Sets again what it couldn't, and says what it still couldn't.
+  const retrySetup = async (): Promise<void> => {
+    if (setupLeft === undefined) {
+      return;
+    }
+    const again = await run(async (session) => {
+      const outcome = await finishSetup(
+        session,
+        agent.id,
+        setupLeft.left,
+        (error) => failureWords(error, i18n)
+      );
+      await router.invalidate({ sync: true });
+      return outcome;
+    });
+    if (again === undefined) {
+      throw new Error("The setup wasn't tried again.");
+    }
+    const next = {
+      saved: [...setupLeft.saved, ...again.saved],
+      // Unsaved instructions are saved from their editor, never here.
+      unsaved: [
+        ...setupLeft.unsaved.filter(({ part }) => part === "instructions"),
+        ...again.unsaved,
+      ],
+      left: again.left,
+    };
+    keepOutcome(agent.id, next);
+    setSetupLeft(next);
+    if (again.unsaved.length > 0) {
+      throw new Error("Not all of the setup was saved.");
+    }
+  };
   const { name } = agent;
   const typed: Typed = {
     name: agent.name,
@@ -916,18 +980,21 @@ export const AgentPage = ({
               />
             )}
             <AgentFailure>{failure}</AgentFailure>
-            {unfinished === undefined ? null : (
+            {setupLeft === undefined ? null : (
               // What its setup couldn't save once it was made: set here.
-              <Alert
+              <SetupLeft
+                instructionsSaved={
+                  instructions !== null && instructions !== undefined
+                }
+                name={name}
                 onClose={() => {
-                  forgetUnfinished(agent.id);
-                  setUnfinished(undefined);
+                  forgetOutcome(agent.id);
+                  setSetupLeft(undefined);
                 }}
-                variant="warning"
-              >
-                <AlertTitle>{t`${name} was made, but not everything you chose was saved`}</AlertTitle>
-                <AlertDescription>{unfinished}</AlertDescription>
-              </Alert>
+                onTab={onTab}
+                outcome={setupLeft}
+                retry={retrySetup}
+              />
             )}
             <TabsContent keepMounted value="overview">
               <div {...stylex.props(styles.stack)}>

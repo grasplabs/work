@@ -17,10 +17,10 @@ import { useRouter } from "@tanstack/react-router";
 import { Fragment } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentFailure } from "./agent-facts.tsx";
 import { SettingRow, SettingsCard } from "./settings-card.tsx";
+import type { Change } from "./settings-card.tsx";
 
 // A person's own agent offered to the company (core's agent-builder.ts,
 // `offerOwnAgent`, `adoptAgent`): its owner offers it from its page, and
@@ -31,9 +31,6 @@ import { SettingRow, SettingsCard } from "./settings-card.tsx";
 // read by them alone: neither the offer nor taking it on carries it
 // (core's instruction-files.ts). Both are settings cards, as the agent's
 // page has its other parts.
-
-/** What a page change asks of core, then the page read again. */
-type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 /**
  * On a person's own agent's page: offering it to the company, or taking
@@ -78,10 +75,14 @@ export const ShareAgent = ({
           <Switch
             checked={offered}
             disabled={!can}
-            onCheckedChange={(next) => {
-              void change(async (session) => {
+            // A spinner while it saves; failed, it stays and says so.
+            onSave={async (next) => {
+              const done = await change(async (session) => {
                 await session.connections.offerOwnAgent(agent.id, next);
               });
+              if (!done) {
+                throw new Error("The offer wasn't saved.");
+              }
             }}
           />
         </SettingRow>

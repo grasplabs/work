@@ -140,11 +140,16 @@ export const OwnAgentsCard = ({
             <Switch
               checked={admin.on}
               disabled={!editable || busy}
-              onCheckedChange={(next) => {
-                void run(async (session) => {
+              // A spinner while it saves; failed, it stays and says so.
+              onSave={async (next) => {
+                const done = await run(async (session) => {
                   await session.orgSettings.updateOwnAgents({ on: next });
                   await router.invalidate({ sync: true });
+                  return true;
                 });
+                if (done !== true) {
+                  throw new Error("The setting wasn't saved.");
+                }
               }}
             />
           </SettingRow>

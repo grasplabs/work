@@ -1,5 +1,4 @@
 import { agentAppOf } from "@grasp-os/shared/agents";
-import { failureText } from "@grasp-os/shared/errors";
 import {
   instructionFileErrors,
   instructionsMaxLength,
@@ -19,7 +18,7 @@ import { useState } from "react";
 import type { ComponentType, SubmitEvent } from "react";
 
 import { wait } from "../core.ts";
-import { orNull } from "../load-from-core.tsx";
+import { failureWords, orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { briefOf, instructionsOf, ownBrief } from "./agent-brief.ts";
 import { AgentFailure } from "./agent-facts.tsx";
@@ -27,6 +26,8 @@ import { agentTemplates } from "./agent-templates.ts";
 import type { AgentTemplate } from "./agent-templates.ts";
 import { AgentFigure, AgentFigureAura } from "./figure/agent-figure.tsx";
 import { faceOf, lookFromName } from "./figure/look.ts";
+import { finishSetup, keepOutcome } from "./finish-setup.ts";
+import { cronOfSchedule } from "./schedule.ts";
 import { AbilitiesStep } from "./setup/abilities-step.tsx";
 import { AppsStep } from "./setup/apps-step.tsx";
 import { arrive } from "./setup/arrive.ts";
@@ -38,7 +39,6 @@ import {
   blank,
   classesOf,
   companySteps,
-  cronOfSchedule,
   steps,
 } from "./setup/model.ts";
 import type { CatalogApp, Setup, Step, StepProps } from "./setup/model.ts";
@@ -46,8 +46,6 @@ import { NameStep } from "./setup/name-step.tsx";
 import { ReviewStep } from "./setup/review-step.tsx";
 import { ScheduleStep } from "./setup/schedule-step.tsx";
 import { ThinkingStep } from "./setup/thinking-step.tsx";
-import { keepUnfinished } from "./unfinished-setup.ts";
-import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 // A new agent, set up by hand (Ruben, 19 Nov 2026): Grasp takes the
 // person by the hand, one question at a time, never a page of blocks.
@@ -66,10 +64,11 @@ import { saveFirstInstructions } from "./unsaved-instructions.ts";
 // company. Who may use it is asked first, and only where there is a
 // choice, so the questions after it are the ones its answer leaves: what
 // it may do and when it works only for one of the company's. An admin's
-// starts as the company's, for everyone. The rest (web, workflows and
-// Apps access, its effort) is asked as Ruben decided and waits on core.
-// Should its instructions not save once it is made, its page opens on
-// Instructions with them as an unsaved draft (unsaved-instructions.ts).
+// starts as the company's, for everyone. Nothing core doesn't keep is
+// asked (the web, workflows, how hard it thinks): a choice shown and never
+// saved would say it is held to what it isn't. Once it is made, the rest is
+// set part by part, its instructions first, and its page says what wasn't
+// saved (finish-setup.ts).
 
 /** Each step's question. */
 const questions: Record<Step, ComponentType<StepProps>> = {
@@ -82,6 +81,18 @@ const questions: Record<Step, ComponentType<StepProps>> = {
   schedule: ScheduleStep,
   audience: AudienceStep,
   review: ReviewStep,
+};
+
+/**
+ * Each question takes focus as it comes in: its field where it has one to
+ * type in (autoFocus, which runs first), else the question itself, so
+ * Enter goes on and Tab leads into its choices; never the page's body, as
+ * a pressed card that went with its question would leave it.
+ */
+const arrived = (shown: HTMLDivElement | null) => {
+  if (shown !== null && !shown.contains(document.activeElement)) {
+    shown.querySelector<HTMLElement>("[data-question]")?.focus();
+  }
 };
 
 /** The figure before it has a name: Grasp's own orb, waiting for one. */
@@ -305,7 +316,7 @@ export const ManualAgent = ({
       template !== undefined && i18n._(template.job) === job
         ? briefOf(template, i18n)
         : ownBrief(job, i18n);
-    return { instructions: instructionsOf(brief, i18n), goal: brief.goal };
+    return { instructions: instructionsOf(brief, i18n) };
   };
   const forward = () => {
     // Leaving what it is for: Grasp proposes the brief from it, unless it
@@ -352,67 +363,36 @@ export const ManualAgent = ({
       const agent = mine
         ? await session.connections.makeOwnAgent(input)
         : await session.connections.makeAgent(input);
-      // The rest is set one call at a time, once it exists: what fails
-      // then is said on its page, where it can be set, as the agent is
-      // made and its name taken (unfinished-setup.ts).
-      let told = true;
-      const finish = async (): Promise<void> => {
-        // Its apps, as the catalog names each.
-        await Promise.all(
-          apps
+      // The rest is set part by part once it exists, its instructions
+      // first: what fails then is said on its page, where it can be set,
+      // as the agent is made and its name taken (finish-setup.ts).
+      const cron = cronOfSchedule(setup.schedule);
+      const reach =
+        setup.audience === "everyone"
+          ? { who: "everyone" as const }
+          : { who: "teams" as const, teams: [...setup.teams] };
+      const outcome = await finishSetup(
+        session,
+        agent.id,
+        {
+          instructions,
+          apps: apps
             .filter(({ id }) => setup.apps.has(id))
-            .map(async ({ source, id }) => {
-              await session.connections.setAgentApp(
-                agent.id,
-                agentAppOf(source, id),
-                true
-              );
-            })
-        );
-        told =
-          instructions.trim() === "" ||
-          (await saveFirstInstructions(session, agent.id, instructions));
-        if (mine) {
-          return;
-        }
-        // Its kinds of work: core makes it with none; each one on is as the
-        // company has it.
-        const classes = [...setup.abilities].flatMap(
-          (ability) => classesOf[ability]
-        );
-        await Promise.all(
-          classes.map(async (toolClass) => {
-            await session.connections.setAgentToolClass(agent.id, toolClass, {
-              who: "asClass",
-            });
-          })
-        );
-        if (setup.audience === "everyone") {
-          await session.connections.setAgentReach(agent.id, true, {
-            who: "everyone",
-          });
-        }
-        if (setup.audience === "teams") {
-          await session.connections.setAgentReach(agent.id, true, {
-            who: "teams",
-            teams: [...setup.teams],
-          });
-        }
-        const cron = cronOfSchedule(setup.schedule);
-        if (cron !== undefined) {
-          await session.connections.makeAgentWake(agent.id, {
-            cron,
-            personId,
-            opening: job === "" ? name : job,
-          });
-        }
-      };
-      try {
-        await finish();
-      } catch (error) {
-        keepUnfinished(agent.id, failureText(error));
-      }
-      return { agent, told };
+            .map(({ source, id }) => agentAppOf(source, id)),
+          // One of their own has no kinds of work, reach or schedule of its own.
+          classes: mine
+            ? []
+            : [...setup.abilities].flatMap((ability) => classesOf[ability]),
+          reach: mine ? undefined : reach,
+          wake:
+            mine || cron === undefined
+              ? undefined
+              : { cron, personId, opening: job === "" ? name : job },
+        },
+        (error) => failureWords(error, i18n)
+      );
+      keepOutcome(agent.id, outcome);
+      return { agent, outcome };
     });
     if (made === undefined) {
       // Back to the last question: the button says it failed, and why
@@ -423,7 +403,11 @@ export const ManualAgent = ({
     setPhase("made");
     const agent = made.agent.id;
     // Its instructions didn't save: its page opens where they wait.
-    const search = made.told ? {} : { tab: "instructions" as const };
+    const search = made.outcome.unsaved.some(
+      ({ part }) => part === "instructions"
+    )
+      ? { tab: "instructions" as const }
+      : {};
     // Its page is read while it stands ready, so the page comes whole, with
     // no loading step between (Ruben, 21 November: "very smooth"); one
     // that can't be read now loads as any page does.
@@ -445,6 +429,9 @@ export const ManualAgent = ({
       to: "/agents/$agent",
       params: { agent },
       search,
+      // The setup is done: Back leads to where it was opened from, never
+      // to a blank setup again.
+      replace: true,
       viewTransition: true,
     });
   };
@@ -500,8 +487,8 @@ export const ManualAgent = ({
         </div>
         <div {...stylex.props(styles.middle)}>
           <AgentFailure>{failure}</AgentFailure>
-          {/* Keyed by step: each question comes in fresh, its first field taking focus. */}
-          <div key={step} {...stylex.props(arrive.in)}>
+          {/* Keyed by step: each question comes in fresh, taking focus. */}
+          <div key={step} ref={arrived} {...stylex.props(arrive.in)}>
             <Asked
               apps={apps}
               audiences={offered}

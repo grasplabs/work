@@ -110,6 +110,15 @@ const models = ["anthropic/claude-sonnet-4-5"];
 const saysOutOfReach = (): boolean =>
   document.body.textContent.includes("The Brain can't be reached. Try again.");
 
+/** The Brain out of reach, as core says it: in words, with its code. */
+const brainOutOfReach = (): Error =>
+  Object.assign(new Error("The Brain can't be reached. Try again."), {
+    code: "brain.unavailable",
+  });
+
+/** A connection to core that broke under a call, in the socket's own words. */
+const socketClosed = (): Error => new Error("Peer closed WebSocket: 0");
+
 /** The agent whose instruction file `file` is. */
 const agentOf = (file: InstructionFileRef): string =>
   file.scope === "agent" ? file.agentId : "not an agent's";
@@ -127,14 +136,17 @@ const fakeConnections = () => {
   const files = new Map<string, InstructionFileText>();
   // Saves and reads to refuse, as a Brain out of reach would.
   const outOfReach = { saves: 0, reads: 0 };
-  // Calls core refuses, by what they set ("reach"), as core out of reach would.
+  // Calls whose connection breaks, once each, by what they set ("told",
+  // "app", "class", "reach", "wake"), as a socket that drops under them.
   const refused = new Set<string>();
+  // Documents whose upload waits until let go, by name.
+  const held = new Map<string, PromiseWithResolvers<boolean>>();
   const instructions: InstructionsApi = {
     read: async (file) => {
       await Promise.resolve();
       if (outOfReach.reads > 0) {
         outOfReach.reads -= 1;
-        throw new Error("The Brain can't be reached. Try again.");
+        throw brainOutOfReach();
       }
       return files.get(agentOf(file)) ?? null;
     },
@@ -143,7 +155,10 @@ const fakeConnections = () => {
       asked.push(["told", agentOf(file), text]);
       if (outOfReach.saves > 0) {
         outOfReach.saves -= 1;
-        throw new Error("The Brain can't be reached. Try again.");
+        throw brainOutOfReach();
+      }
+      if (refused.delete("told")) {
+        throw socketClosed();
       }
       // As core refuses a save over a version it didn't start from.
       const now = files.get(agentOf(file));
@@ -246,6 +261,9 @@ const fakeConnections = () => {
     ): Promise<AgentWake> => {
       await Promise.resolve();
       asked.push(["wake", agentId, input]);
+      if (refused.delete("wake")) {
+        throw socketClosed();
+      }
       // As core refuses what isn't a wake-up.
       if (input.opening === "refuse this") {
         throw new Error("That isn't a wake-up.");
@@ -288,6 +306,7 @@ const fakeConnections = () => {
       file: { name: string; bytes: Uint8Array }
     ): Promise<AgentDocument> => {
       await Promise.resolve();
+      await held.get(file.name)?.promise;
       asked.push([
         "document",
         agentId,
@@ -320,10 +339,10 @@ const fakeConnections = () => {
       audience: ToolClassAudience
     ) => {
       await Promise.resolve();
-      if (refused.has("reach")) {
-        throw new Error("Core can't be reached. Try again.");
-      }
       asked.push(["reach", id, on, audience]);
+      if (refused.delete("reach")) {
+        throw socketClosed();
+      }
       const found = settings.get(id);
       if (found !== undefined) {
         settings.set(id, { ...found, on, audience });
@@ -336,6 +355,9 @@ const fakeConnections = () => {
     setAgentApp: async (agentId: string, app: string, on: boolean) => {
       await Promise.resolve();
       asked.push(["app", agentId, app, on]);
+      if (refused.delete("app")) {
+        throw socketClosed();
+      }
       const rest = (apps.get(agentId) ?? []).filter((each) => each.app !== app);
       apps.set(agentId, [
         ...rest,
@@ -378,6 +400,9 @@ const fakeConnections = () => {
     ) => {
       await Promise.resolve();
       asked.push(["class", id, toolClass, audience]);
+      if (refused.delete("class")) {
+        throw socketClosed();
+      }
       const found = settings.get(id);
       if (found !== undefined) {
         settings.set(id, {
@@ -389,7 +414,7 @@ const fakeConnections = () => {
       }
     },
   };
-  return { connections, instructions, outOfReach, refused, asked };
+  return { connections, instructions, outOfReach, refused, held, asked };
 };
 
 type Fake = ReturnType<typeof fakeConnections>;
@@ -436,7 +461,18 @@ const Page = ({
   if (open === "new-guided") {
     return (
       <ManualAgent
-        apps={[]}
+        apps={[
+          {
+            id: "google",
+            source: "native",
+            name: "Google Workspace",
+            logo: null,
+            description: "Mail, calendar and documents",
+            categories: ["email"],
+            connected: true,
+            account: "anna@example.com",
+          },
+        ]}
         company={editable}
         models={models}
         own
@@ -918,6 +954,17 @@ const settingSwitch = (words: string): HTMLElement => {
 const documentsListed = (): string =>
   document.querySelector("ul[aria-label='Documents']")?.textContent ?? "";
 
+/** The drop zone's list of files, not what it says to a screen reader. */
+const zone = (): string =>
+  document.querySelector("[data-slot='file-upload'] [aria-label='Files']")
+    ?.textContent ?? "";
+
+/** Which of the three files the uploads give `text` names. */
+const namedIn = (text: string): string[] =>
+  ["Close checklist.md", "Terms.txt", "Prices.csv"].filter((name) =>
+    text.includes(name)
+  );
+
 /** Picks `files` in the documents' file picker, as a person does. */
 const pick = async (...files: File[]) => {
   const input = document.querySelector(
@@ -1046,6 +1093,18 @@ const setUpByHand = async (
   return await setUpByHand(name, questions, answering);
 };
 
+/** The question shown, and what has focus: the question, or the field it names. */
+const focus = () => {
+  const on = document.activeElement;
+  return {
+    question: document.querySelector("h1")?.textContent,
+    on:
+      on?.closest("[data-question]") === null
+        ? (on.getAttribute("aria-label") ?? on.tagName)
+        : "the question",
+  };
+};
+
 /** The value the review step shows beside `label`. */
 const reviewed = (label: string): string | undefined =>
   [...document.querySelectorAll("dt")]
@@ -1064,7 +1123,9 @@ const readyShown = async () => {
   await settled();
 };
 
-describe("an agent's page", () => {
+// A made agent stands ready 1.6 s before its page opens, and a setup is a
+// dozen presses: more than the default's 5 s beside other test files.
+describe("an agent's page", { timeout: 20_000 }, () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -1122,7 +1183,7 @@ describe("an agent's page", () => {
     await press(button("Next"));
     await press(answer("Everyone in the company"));
     await press(button("Next"));
-    await press(answer("Every weekday at 9:00"));
+    await press(answer("Every weekday at 9:00 AM"));
     await press(button("Next"));
     await press(button("Review"));
     await press(button("Make agent"));
@@ -1134,17 +1195,18 @@ describe("an agent's page", () => {
       rest: [
         // Its starting point's instructions, as its file's first version.
         ["told", "agent-1", expect.any(String)],
-        ["work out", "agent-1"],
         ["reach", "agent-1", true, { who: "everyone" }],
         [
           "wake",
           "agent-1",
           {
-            cron: "0 9 * * 1-5",
+            cron: "0 9 * * 1,2,3,4,5",
             personId: anna.userId,
             opening: "Chases unpaid invoices and drafts the reminders.",
           },
         ],
+        // Last, once it has what it was given.
+        ["work out", "agent-1"],
       ],
     });
     // Its page opens where it was made, not on its access: that is chosen already.
@@ -1271,25 +1333,25 @@ describe("an agent's page", () => {
         "wake",
         "organization",
         {
-          cron: "30 7 * * 1-5",
+          cron: "30 7 * * 1,2,3,4,5",
           personId: "user-anna",
           opening: "Look for invoices that are overdue.",
         },
       ],
     ]);
     // Shown in words, for whom and with what it is asked.
-    expect(document.body.textContent).toContain("Every weekday at 07:30");
+    expect(document.body.textContent).toContain("Every weekday at 7:30 AM");
     expect(document.body.textContent).toContain(
       "For Anna de Vries: Look for invoices that are overdue."
     );
 
-    await press(rowSwitch("Every weekday at 07:30"));
-    await press(button("Remove Every weekday at 07:30, for Anna de Vries"));
+    await press(rowSwitch("Every weekday at 7:30 AM"));
+    await press(button("Remove Every weekday at 7:30 AM, for Anna de Vries"));
     expect(asked.slice(1)).toStrictEqual([
       ["wake paused", "wake-1", true],
       ["wake deleted", "wake-1"],
     ]);
-    expect(document.body.textContent).not.toContain("Every weekday at 07:30");
+    expect(document.body.textContent).not.toContain("Every weekday at 7:30 AM");
   });
 
   it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
@@ -1315,7 +1377,7 @@ describe("an agent's page", () => {
     await set(field("What to ask it each time"), "Check the inbox.", "input");
     await press(exactButton("Add"));
     const row = [...document.querySelectorAll("li")].find((each) =>
-      each.textContent?.includes("Every weekday at 09:00")
+      each.textContent?.includes("Every weekday at 9:00 AM")
     );
     // Europe/Amsterdam, as the page's language names it.
     expect(row?.textContent).toContain("Central European Time");
@@ -1377,6 +1439,41 @@ describe("an agent's page", () => {
       listed: [true, true],
       after: [false, true],
       warned: true,
+    });
+  });
+
+  it("keeps each file on its way in the drop zone while another is kept, and moves each to the documents once kept", async () => {
+    const fake = await withClaire();
+    const second = Promise.withResolvers<boolean>();
+    const third = Promise.withResolvers<boolean>();
+    fake.held.set("Terms.txt", second);
+    fake.held.set("Prices.csv", third);
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    await pick(
+      new File(["# Close"], "Close checklist.md"),
+      new File(["Net 30."], "Terms.txt"),
+      new File(["a,b"], "Prices.csv")
+    );
+    const whileOn = { zone: zone(), listed: documentsListed() };
+    await act(async () => {
+      second.resolve(true);
+      third.resolve(true);
+      await Promise.resolve();
+    });
+    await settled();
+    expect({
+      whileOn: { zone: namedIn(whileOn.zone), listed: namedIn(whileOn.listed) },
+      after: { zone: namedIn(zone()), listed: namedIn(documentsListed()) },
+    }).toStrictEqual({
+      // The first kept, a document; the two on their way still in the zone.
+      whileOn: {
+        zone: ["Terms.txt", "Prices.csv"],
+        listed: ["Close checklist.md"],
+      },
+      after: {
+        zone: [],
+        listed: ["Close checklist.md", "Terms.txt", "Prices.csv"],
+      },
     });
   });
 
@@ -1652,29 +1749,156 @@ describe("an agent's page", () => {
     });
   });
 
-  it("opens a new agent's page saying what it couldn't save, once it is made and a later call fails", async () => {
+  // Each call after the agent is made, refused in turn: the rest is still
+  // saved, and its page says in plain words what was and what wasn't.
+  const parts = [
+    { call: "told", part: "its instructions" },
+    { call: "app", part: "its apps" },
+    { call: "class", part: "what it may do" },
+    { call: "reach", part: "who can use it" },
+    { call: "wake", part: "its schedule" },
+  ] as const;
+  /** Instructions as long as a person writes them. */
+  const typed = "## Goal\nChase every invoice.\n\n".repeat(30).trim();
+  /** Sets up an agent with every part to save, the call `call` failing once it is made. */
+  const madeRefusing = async (call: (typeof parts)[number]["call"]) => {
     const fake = fakeConnections();
-    const { asked, refused } = fake;
-    refused.add("reach");
+    fake.refused.add(call);
+    const router = await shown(fake, "new-guided");
+    await setUpByHand("Claire", [], async (question) => {
+      if (question === "How should Claire work?") {
+        await set(field("Instructions"), typed, "input");
+      }
+      if (question === "Which apps can Claire use?") {
+        await press(button("Add Google Workspace"));
+      }
+      if (question === "When should Claire work?") {
+        await press(radio("On a schedule"));
+      }
+    });
+    await press(button("Make Claire"));
+    await readyShown();
+    return { asked: fake.asked, router };
+  };
+  const unfinished = "Claire was made, but not all of it was saved";
+
+  it.each(parts)(
+    "saves all but $part when that call fails once it is made, and says on its page what was and wasn't saved",
+    async ({ call, part }) => {
+      const { asked, router } = await madeRefusing(call);
+      const said = document.body.textContent;
+      const others = parts
+        .filter((each) => each.call !== call)
+        .map((each) => each.part);
+      expect({
+        made: asked.filter(([what]) => what === "make").length,
+        // Every part was tried, the instructions first.
+        tried: [
+          ...new Set(
+            asked
+              .map(([what]) => String(what))
+              .filter((what) => parts.some((each) => each.call === what))
+          ),
+        ],
+        page: router.state.location.pathname,
+        title: said.includes(unfinished),
+        saved: said.includes(
+          `Saved: ${new Intl.ListFormat("en", { type: "conjunction" }).format(others)}.`
+        ),
+        notSaved: said.includes(
+          `Not saved: ${part}. Grasp can't be reached right now. Try again in a moment.`
+        ),
+        // Never the socket's own words.
+        raw: said.includes("Peer closed"),
+      }).toStrictEqual({
+        made: 1,
+        tried: ["told", "app", "class", "reach", "wake"],
+        page: "/agents/agent-1",
+        title: true,
+        saved: true,
+        notSaved: true,
+        raw: false,
+      });
+    }
+  );
+
+  it("keeps instructions it couldn't save as their editor's draft, opened where they wait", async () => {
+    const { router } = await madeRefusing("told");
+    expect({
+      tab: router.state.location.href,
+      draft: field("Instructions").value,
+    }).toStrictEqual({ tab: "/agents/agent-1?tab=instructions", draft: typed });
+  });
+
+  it.each(parts.filter(({ call }) => call !== "told"))(
+    "sets $part again on Try again, and nothing else, and then says nothing more",
+    async ({ call }) => {
+      const { asked } = await madeRefusing(call);
+      const before = asked.length;
+      await press(button("Try again"));
+      expect({
+        again: asked.slice(before).map(([what]) => what),
+        said: document.body.textContent.includes(unfinished),
+      }).toStrictEqual({ again: [call], said: false });
+    }
+  );
+
+  it("leads from a part its setup couldn't save to the tab where it is set", async () => {
+    const fake = fakeConnections();
+    fake.refused.add("reach");
     const router = await shown(fake, "new-guided");
     await setUpByHand("Claire");
     await press(button("Make Claire"));
     await readyShown();
+    await press(exactButton("Open Access"));
+    expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
+  });
+
+  it("puts the made agent's page in the setup's place, so Back never leads to its questions again", async () => {
+    const fake = fakeConnections();
+    const router = await shown(fake, "new-guided");
+    const entries = router.history.length;
+    await setUpByHand("Claire");
+    await press(button("Make Claire"));
+    await readyShown();
     expect({
-      made: asked.filter(([what]) => what === "make").length,
       page: router.state.location.pathname,
-      said: document.body.textContent.includes(
-        "Claire was made, but not everything you chose was saved"
-      ),
-      why: document.body.textContent.includes(
-        "Core can't be reached. Try again."
-      ),
-    }).toStrictEqual({
-      made: 1,
-      page: "/agents/agent-1",
-      said: true,
-      why: true,
+      entries: router.history.length,
+    }).toStrictEqual({ page: "/agents/agent-1", entries });
+  });
+
+  it("moves focus into each question as it comes in, and Enter goes on from one with no field", async () => {
+    const fake = fakeConnections();
+    await shown(fake, "new-guided");
+    const first = focus();
+    await act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+      );
+      await Promise.resolve();
     });
+    await settled();
+    const named = focus();
+    await set(field("Name"), "Claire", "input");
+    await press(button("Next"));
+    const job = focus();
+    const card = document.querySelector<HTMLElement>(
+      "[aria-label='Starting points'] button, [aria-label='Starting points'] [role='button']"
+    );
+    if (card === null) {
+      throw new TypeError("No starting point");
+    }
+    await press(card);
+    const told = focus();
+    await press(button("Next"));
+    const apps = focus();
+    expect([first, named, job, told, apps]).toStrictEqual([
+      { question: "Who can use it?", on: "the question" },
+      { question: "What should we call your agent?", on: "Name" },
+      { question: "What should Claire do?", on: "What it is for" },
+      { question: "How should Claire work?", on: "Instructions" },
+      { question: "Which apps can Claire use?", on: "the question" },
+    ]);
   });
 
   it("asks no more of an agent just for its maker, set up by hand, than it keeps, and makes it theirs", async () => {

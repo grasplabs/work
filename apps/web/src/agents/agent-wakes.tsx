@@ -54,7 +54,14 @@ import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 
-import type { Session } from "../core.ts";
+import {
+  cronOfSchedule,
+  rhythms,
+  scheduleOfRhythm,
+  useScheduleWords,
+} from "./schedule.ts";
+import type { Rhythm } from "./schedule.ts";
+import type { Change } from "./settings-card.tsx";
 
 // An agent's wake-ups, on its page's Schedule tab (agent-page.tsx): when it takes a
 // turn nobody asked for, for whom, and what it is asked. An admin picks
@@ -64,9 +71,6 @@ import type { Session } from "../core.ts";
 // agent wants to change waits for the person it works for, in their chat.
 // Each wake-up says how its last one went. A card of Damsko's Items, a
 // new one asked for in a dialog.
-
-/** What a page change asks of core, then the page read again. */
-type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 /**
  * A time zone's name as the page's language says it ("Central European
@@ -86,61 +90,6 @@ const formatZone = (timeZone: string, locale: string): string => {
     // A zone this browser doesn't know.
     return timeZone;
   }
-};
-
-/** How often a wake-up made here fires. */
-const rhythms = ["weekdays", "daily", "mondays"] as const;
-type Rhythm = (typeof rhythms)[number];
-
-/** The cron field for the days each rhythm names. */
-const daysOf = { weekdays: "1-5", daily: "*", mondays: "1" } as const;
-
-const timePattern = /^(?<hour>[01]\d|2[0-3]):(?<minute>[0-5]\d)$/u;
-
-/** The schedule for `rhythm` at `time` (`HH:MM`), as core keeps it; undefined for no time. */
-export const cronOf = (rhythm: Rhythm, time: string): string | undefined => {
-  const { hour, minute } = timePattern.exec(time)?.groups ?? {};
-  return hour === undefined || minute === undefined
-    ? undefined
-    : `${Number(minute)} ${Number(hour)} * * ${daysOf[rhythm]}`;
-};
-
-const cronPattern = /^(?<minute>\d{1,2}) (?<hour>\d{1,2}) \* \* (?<days>\S+)$/u;
-
-/**
- * The rhythm and time a schedule made here names; undefined for any other,
- * which is shown as core keeps it.
- */
-export const readCron = (
-  cron: string
-): { rhythm: Rhythm; time: string } | undefined => {
-  const { minute, hour, days } = cronPattern.exec(cron)?.groups ?? {};
-  const rhythm = rhythms.find((each) => daysOf[each] === days);
-  if (minute === undefined || hour === undefined || rhythm === undefined) {
-    return undefined;
-  }
-  return {
-    rhythm,
-    time: `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`,
-  };
-};
-
-/** When a wake-up fires, in words. */
-const useWhen = () => {
-  const { t } = useLingui();
-  return (wake: Pick<AgentWake, "cron">): string => {
-    const read = readCron(wake.cron);
-    if (read === undefined) {
-      return wake.cron;
-    }
-    const { time } = read;
-    if (read.rhythm === "weekdays") {
-      return t`Every weekday at ${time}`;
-    }
-    return read.rhythm === "daily"
-      ? t`Every day at ${time}`
-      : t`Every Monday at ${time}`;
-  };
 };
 
 /** How a wake-up's last one went, in words; undefined before its first. */
@@ -185,6 +134,11 @@ const NewWake = ({
   change: Change;
 }) => {
   const { t } = useLingui();
+  const rhythmNames: Record<Rhythm, string> = {
+    weekdays: t`Every weekday`,
+    daily: t`Every day`,
+    mondays: t`Every Monday`,
+  };
   const formId = useId();
   const [open, setOpen] = useState(false);
   const [rhythm, setRhythm] = useState<Rhythm>("weekdays");
@@ -197,7 +151,7 @@ const NewWake = ({
       ""
   );
   const [opening, setOpening] = useState("");
-  const cron = cronOf(rhythm, time);
+  const cron = cronOfSchedule(scheduleOfRhythm(rhythm, time));
   const ready = cron !== undefined && person !== "" && opening.trim() !== "";
   return (
     <>
@@ -251,11 +205,10 @@ const NewWake = ({
                 <Field disabled={!can}>
                   <FieldLabel>{t`How often`}</FieldLabel>
                   <Select
-                    items={[
-                      { value: "weekdays", label: t`Every weekday` },
-                      { value: "daily", label: t`Every day` },
-                      { value: "mondays", label: t`Every Monday` },
-                    ]}
+                    items={rhythms.map((each) => ({
+                      value: each,
+                      label: rhythmNames[each],
+                    }))}
                     onValueChange={(value) => {
                       const next = rhythms.find((one) => one === value);
                       if (next !== undefined) {
@@ -343,7 +296,7 @@ export const AgentWakes = ({
   change: Change;
 }) => {
   const { t, i18n } = useLingui();
-  const whenOf = useWhen();
+  const schedule = useScheduleWords();
   const lastOf = useLast();
   const { name } = agent;
   const nameOf = (userId: string): string => {
@@ -366,7 +319,7 @@ export const AgentWakes = ({
         ) : (
           <ItemGroup>
             {wakes.map((wake, index) => {
-              const when = whenOf(wake);
+              const when = schedule.ofCron(wake.cron);
               const person = nameOf(wake.personId);
               const last = lastOf(wake);
               const { opening } = wake;
@@ -398,13 +351,17 @@ export const AgentWakes = ({
                         <Switch
                           aria-label={t`${when}, for ${person}, is on`}
                           checked={wake.state === "on"}
-                          onCheckedChange={(next) => {
-                            void change(async (session) => {
+                          // A spinner while it saves; failed, it stays and says so.
+                          onSave={async (next) => {
+                            const done = await change(async (session) => {
                               await session.connections.setAgentWakePaused(
                                 wake.id,
                                 !next
                               );
                             });
+                            if (!done) {
+                              throw new Error("The wake-up wasn't changed.");
+                            }
                           }}
                         />
                       </Field>

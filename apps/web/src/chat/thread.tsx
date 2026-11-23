@@ -1037,7 +1037,7 @@ const AnswerBy = ({ agent }: { agent: ChatAgent | undefined }) => {
   const name = agent?.name ?? t`An agent you can no longer ask`;
   return (
     <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
-      <AgentAvatar face={agent?.face ?? "stephen"} size="default" />
+      <AgentAvatar agent={agent} size="default" />
       {name}
     </p>
   );

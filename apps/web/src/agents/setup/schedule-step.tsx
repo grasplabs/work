@@ -35,9 +35,10 @@ import { Fragment } from "react";
 
 import { AgentFigure } from "../figure/agent-figure.tsx";
 import { lookFromName } from "../figure/look.ts";
+import { dayName, frequencies, timeName } from "../schedule.ts";
+import type { Schedule } from "../schedule.ts";
 import { ChoiceCards } from "./choice-cards.tsx";
-import { frequencies } from "./model.ts";
-import type { Schedule, StepProps } from "./model.ts";
+import type { StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
@@ -65,8 +66,6 @@ const halfHours = Array.from({ length: 48 }, (_, at) => {
 });
 /** The days of the month offered: 1 to 28, so every month has the day. */
 const monthDays = Array.from({ length: 28 }, (_, at) => at + 1);
-/** A Sunday, from which each weekday's name is read. */
-const aSunday = new Date(2026, 10, 15);
 const daysOfWeek = [0, 1, 2, 3, 4, 5, 6] as const;
 
 const styles = stylex.create({
@@ -104,20 +103,6 @@ const weekStart = (locale: string): number => {
   const first = said.getWeekInfo?.().firstDay ?? said.weekInfo?.firstDay ?? 1;
   // Intl counts Monday 1 to Sunday 7; cron and Date count Sunday 0.
   return first % 7;
-};
-
-/** The day `day` (0 Sunday) is named, short or long. */
-const dayName = (locale: string, day: number, width: "short" | "long") =>
-  new Intl.DateTimeFormat(locale, { weekday: width }).format(
-    new Date(aSunday.getFullYear(), aSunday.getMonth(), aSunday.getDate() + day)
-  );
-
-/** A time such as `09:00` as the page's language writes it. */
-const timeName = (locale: string, time: string) => {
-  const [hour = 0, minute = 0] = time.split(":").map(Number);
-  return new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(
-    new Date(2026, 0, 1, hour, minute)
-  );
 };
 
 /** Whether the schedule runs on `date`'s day. */

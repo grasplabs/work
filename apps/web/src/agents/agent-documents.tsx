@@ -36,11 +36,11 @@ import { FileIcon, Icon, TrashIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 
-import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
 import { SettingsCard } from "./settings-card.tsx";
+import type { Change } from "./settings-card.tsx";
 
 // An agent's documents, on its page's Instructions part (agent-page.tsx):
 // files an admin gives it to answer from, such as a checklist or a policy
@@ -52,9 +52,6 @@ import { SettingsCard } from "./settings-card.tsx";
 // File upload's drop zone, with a line on what to give it and why: each
 // file is sent to core as it is dropped or chosen, said on its row in the
 // zone, and once core keeps it, it is a document's row.
-
-/** What a page change asks of core, then the page read again. */
-type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 const styles = stylex.create({
   // The drop zone, inset in the flush card above the documents.
@@ -83,7 +80,9 @@ export const AgentDocuments = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
-  const kept = documents?.length ?? 0;
+  // The files in the drop zone: those on their way, or that failed. One
+  // core kept leaves it, a document's row now; the others stay as they are.
+  const [files, setFiles] = useState<File[]>([]);
   const added = (at: string): string =>
     new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
       new Date(at)
@@ -111,6 +110,7 @@ export const AgentDocuments = ({
     if (!sent) {
       throw new Error(t`Not added`);
     }
+    setFiles((now) => now.filter((each) => each !== file));
   };
   const editing = editable && documents !== undefined;
   return (
@@ -127,12 +127,11 @@ export const AgentDocuments = ({
           <FileUpload
             accept={accepted}
             description={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each.`}
-            disabled={!can}
-            // Each file a new list: those core kept are documents' rows.
-            key={kept}
             maxFileSize={chatFileMaxBytes}
             multiple
             onUpload={send}
+            onValueChange={setFiles}
+            value={files}
           />
         </div>
       ) : null}

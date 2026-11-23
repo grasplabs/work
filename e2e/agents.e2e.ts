@@ -95,6 +95,72 @@ test("an admin sets up an agent for everyone by hand, turns it off from its page
   ).toHaveCount(0);
 });
 
+test("an admin sets up an agent by keyboard alone, each question taking focus as it comes in", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("agents");
+  const name = named("Keys");
+  const page = await pageOf(admin);
+  await page.goto("/agents/new?way=manual");
+  /** Where focus is, never the page's body: the question, or the field it names. */
+  const focused = async (): Promise<string> =>
+    await page.evaluate(() => {
+      const on = document.activeElement;
+      if (on === null || on === document.body) {
+        return "the page";
+      }
+      return on.closest("[data-question]") === null
+        ? (on.getAttribute("aria-label") ?? on.tagName)
+        : "the question";
+    });
+  const question = page.getByRole("heading", { level: 1 });
+
+  // Who can use it: the question has focus, and Enter goes on.
+  await expect(question).toHaveText("Who can use it?");
+  await expect.poll(focused).toBe("the question");
+  await page.keyboard.press("Enter");
+
+  await expect(question).toHaveText("What should we call your agent?");
+  await expect.poll(focused).toBe("Name");
+  await page.keyboard.type(name);
+  await page.keyboard.press("Enter");
+
+  // A starting point by Tab and Enter: the card goes with its question,
+  // and focus goes to the next question's field, never the page.
+  await expect(question).toHaveText(`What should ${name} do?`);
+  await expect.poll(focused).toBe("What it is for");
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await expect(question).toHaveText(`How should ${name} work?`);
+  await expect.poll(focused).toBe("Instructions");
+  // In a field of several lines, Mod+Enter goes on.
+  await page.keyboard.press("ControlOrMeta+Enter");
+
+  // Its apps, what it may do, its model and when it works, as offered.
+  for (const asked of [
+    `Which apps can ${name} use?`,
+    `What can ${name} do?`,
+    `Which model should ${name} use?`,
+    `When should ${name} work?`,
+  ]) {
+    // oxlint-disable-next-line no-await-in-loop -- one question after another
+    await expect(question).toHaveText(asked);
+    // oxlint-disable-next-line no-await-in-loop -- one question after another
+    await expect.poll(focused).toBe("the question");
+    // oxlint-disable-next-line no-await-in-loop -- one question after another
+    await page.keyboard.press("Enter");
+  }
+  await expect(question).toHaveText(`Ready to make ${name}?`);
+  await expect.poll(focused).toBe("the question");
+  await page.keyboard.press("Enter");
+
+  await expect(page).toHaveURL(/\/agents\/[^/?]+$/u, { timeout: 30_000 });
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  // Made, its page took the setup's place: Back leads to where it began.
+  await page.goBack();
+  await expect(page).not.toHaveURL(/way=manual/u);
+});
+
 test("someone who isn't an admin makes an agent of their own in a chat, and only they see it", async ({
   pageOf,
 }) => {

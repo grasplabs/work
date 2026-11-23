@@ -897,9 +897,9 @@ msgstr "{name} subido."
 msgid "{name} uses only these apps, as far as its kinds of work allow."
 msgstr "{name} usa solo estas apps, en la medida en que lo permitan sus tipos de trabajo."
 
-#: src/agents/agent-page.tsx
-msgid "{name} was made, but not everything you chose was saved"
-msgstr "{name} se ha creado, pero no se guardó todo lo que elegiste"
+#: src/agents/setup-left.tsx
+msgid "{name} was made, but not all of it was saved"
+msgstr "{name} se creó, pero no se guardó todo"
 
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
@@ -1774,6 +1774,7 @@ msgid "About tools"
 msgstr "Sobre herramientas"
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/drafts/share-with-team.tsx
 msgid "Access"
 msgstr "Acceso"
@@ -2327,7 +2328,6 @@ msgid "Always uses this model"
 msgstr "Usa siempre este modelo"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Amber"
 msgstr "Ámbar"
 
@@ -4676,7 +4676,6 @@ msgid "Cron fields"
 msgstr "Campos cron"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Crystal"
 msgstr "Cristal"
 
@@ -4746,7 +4745,7 @@ msgstr "Fecha"
 msgid "Day {day} of {days}"
 msgstr "Día {day} de {days}"
 
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Day {day} of every month at {time}"
 msgstr "El día {day} de cada mes a las {time}"
 
@@ -5508,7 +5507,6 @@ msgid "Email trigger"
 msgstr "Disparador de correo"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Ember"
 msgstr "Brasa"
 
@@ -5673,11 +5671,10 @@ msgid "Events older than the audit trail keeps, moved to the archive. The search
 msgstr "Eventos más antiguos de lo que conserva el registro de auditoría, trasladados al archivo. La búsqueda y la exportación usan los filtros de arriba."
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Evergreen"
 msgstr "Perenne"
 
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Every {days} at {time}"
 msgstr "Cada {days} a las {time}"
 
@@ -5690,14 +5687,9 @@ msgstr "Cada pregunta o queja de un cliente, desde el primer mensaje hasta que s
 msgid "Every day"
 msgstr "Todos los días"
 
-#: src/agents/agent-wakes.tsx
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Every day at {time}"
 msgstr "Todos los días a las {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every day at 9:00"
-msgstr "Todos los días a las 9:00"
 
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
@@ -5714,14 +5706,6 @@ msgstr "Entrevistados todos los equipos invitados"
 #: src/agents/agent-wakes.tsx
 msgid "Every Monday"
 msgstr "Todos los lunes"
-
-#: src/agents/agent-wakes.tsx
-msgid "Every Monday at {time}"
-msgstr "Todos los lunes a las {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every Monday at 9:00"
-msgstr "Todos los lunes a las 9:00"
 
 #: src/agents/setup/words.ts
 msgid "Every month"
@@ -5776,13 +5760,9 @@ msgstr "Cada semana"
 msgid "Every weekday"
 msgstr "Todos los días laborables"
 
-#: src/agents/agent-wakes.tsx
+#: src/agents/schedule.ts
 msgid "Every weekday at {time}"
 msgstr "Todos los días laborables a las {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every weekday at 9:00"
-msgstr "Cada día laborable a las 9:00"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
@@ -7592,6 +7572,7 @@ msgid "Instruction"
 msgstr "Instrucción"
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/agents/setup/instructions-step.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
@@ -7959,6 +7940,10 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "Su acceso ha caducado. Vuelve a iniciar sesión con la misma cuenta: las aplicaciones y los agentes conservan sus permisos sobre ella."
 
+#: src/agents/setup-left.tsx
+msgid "its apps"
+msgstr "sus apps"
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "Sus apps y flujos de trabajo no se eliminan, y nada en él está compartido con el proyecto, así que nadie pierde el acceso."
@@ -8004,6 +7989,10 @@ msgstr "Sus datos, en JSON"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Su definición para guardarla o moverla, y una plantilla desde la que otros pueden empezar."
+
+#: src/agents/setup-left.tsx
+msgid "its instructions"
+msgstr "sus instrucciones"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
@@ -8060,6 +8049,10 @@ msgstr "Sus ejecuciones no lograban iniciarse, así que no inicia nada más hast
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Sus ejecuciones fallaban una y otra vez al iniciarse, así que ya no se inicia. Corrige lo que las detuvo y vuelve a activarlo en los disparadores del flujo de trabajo: sigue a partir de su próxima vez."
+
+#: src/agents/setup-left.tsx
+msgid "its schedule"
+msgstr "su horario"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -8843,7 +8836,6 @@ msgid "May do"
 msgstr "Puede hacer"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Meadow"
 msgstr "Pradera"
 
@@ -8975,7 +8967,6 @@ msgid "Monthly budget for AI"
 msgstr "Presupuesto mensual para IA"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Moon"
 msgstr "Luna"
 
@@ -9260,7 +9251,6 @@ msgstr "Nuevo"
 
 #: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
-#: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "New agent"
 msgstr "Nuevo agente"
@@ -9952,6 +9942,10 @@ msgstr "Sin leer: sin conexión"
 msgid "Not requested yet"
 msgstr "Aún no solicitado"
 
+#: src/agents/setup-left.tsx
+msgid "Not saved"
+msgstr "No guardado"
+
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Aún no guardado. Se intenta de nuevo."
@@ -9963,6 +9957,14 @@ msgstr "Todavía no se ha guardado. Hasta entonces, las líneas que moviste no c
 #: src/interview/destination.tsx
 msgid "Not saved yet. Until it is, your lines still go where they went before."
 msgstr "Todavía no se ha guardado. Hasta entonces, tus líneas siguen yendo adonde iban antes."
+
+#: src/agents/setup-left.tsx
+msgid "Not saved: {what}. {failure}"
+msgstr "Sin guardar: {what}. {failure}"
+
+#: src/agents/setup-left.tsx
+msgid "Not saved: {what}. {failure} What you typed waits on Instructions, to save there."
+msgstr "Sin guardar: {what}. {failure} Lo que escribiste te espera en Instrucciones, para guardarlo allí."
 
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
@@ -10266,7 +10268,6 @@ msgid "Number"
 msgstr "Número"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Ocean"
 msgstr "Océano"
 
@@ -10582,6 +10583,7 @@ msgstr "Solo lo que tu empresa permite."
 msgid "Only when asked"
 msgstr "Solo cuando se le pregunta"
 
+#: src/agents/schedule.ts
 #: src/agents/setup/words.ts
 msgid "Only when someone asks"
 msgstr "Solo cuando alguien lo pide"
@@ -10670,6 +10672,10 @@ msgstr "Abrir"
 #: src/brain/brain-nav.tsx
 msgid "Open {name}"
 msgstr "Abrir {name}"
+
+#: src/agents/setup-left.tsx
+msgid "Open {tab}"
+msgstr "Abrir {tab}"
 
 #: src/settings/where-stephen.tsx
 msgid "Open a chat with Stephen, or search for him in Teams’ apps."
@@ -10842,7 +10848,6 @@ msgid "Or write it yourself"
 msgstr "O escríbelo tú"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Orb"
 msgstr "Esfera"
 
@@ -10918,6 +10923,7 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "En las próximas dos semanas recibirás un enlace personal breve para hablar con Stephen, el entrevistador de IA de Grasp: los responsables unos 20 minutos, los demás de 10 a 15. Hablando o escribiendo."
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Resumen"
@@ -11002,7 +11008,6 @@ msgid "Pages"
 msgstr "Páginas"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Pair in orbit"
 msgstr "Pareja en órbita"
 
@@ -11316,7 +11321,6 @@ msgid "Plan the day"
 msgstr "Planificar el día"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Planet"
 msgstr "Planeta"
 
@@ -12728,6 +12732,7 @@ msgstr "Guardar los lugares"
 msgid "Save where they go"
 msgstr "Guardar adónde van"
 
+#: src/agents/setup-left.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -12759,6 +12764,10 @@ msgstr "Guardado en tu memoria"
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
 msgstr "Guardado, pero todavía no pasa la comprobación: en Definición se indica qué corregir."
 
+#: src/agents/setup-left.tsx
+msgid "Saved: {savedList}."
+msgstr "Guardado: {savedList}."
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/resource-params.tsx
 msgid "Saved."
@@ -12772,6 +12781,7 @@ msgstr "Guardando"
 msgid "Saving to your memory"
 msgstr "Guardando en tu memoria"
 
+#: src/agents/setup-left.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
 msgid "Saving…"
@@ -12811,6 +12821,7 @@ msgstr "Di qué quieres construir y Grasp lo construye."
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
+#: src/agents/setup-left.tsx
 msgid "Schedule"
 msgstr "Horario"
 
@@ -14152,7 +14163,6 @@ msgid "Suspended"
 msgstr "Suspendido"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Swarm"
 msgstr "Enjambre"
 
@@ -15743,7 +15753,6 @@ msgid "Thought for {time}"
 msgstr "Pensó durante {time}"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Tres en círculo"
 
@@ -15940,7 +15949,6 @@ msgid "Transcript"
 msgstr "Transcripción"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Triángulo"
 
@@ -15970,6 +15978,7 @@ msgstr "Válido hasta {until}"
 msgid "Try"
 msgstr "Intentar"
 
+#: src/agents/setup-left.tsx
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
@@ -16943,6 +16952,10 @@ msgstr "Para qué sirve"
 msgid "What it may also do"
 msgstr "Qué más puede hacer"
 
+#: src/agents/setup-left.tsx
+msgid "what it may do"
+msgstr "lo que puede hacer"
+
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it may do"
@@ -17485,6 +17498,10 @@ msgstr "¿Quién puede ver los registros de {name}?"
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
 msgstr "Quién puede hablar con él"
+
+#: src/agents/setup-left.tsx
+msgid "who can use it"
+msgstr "quién puede usarlo"
 
 #: src/agents/setup/audience-step.tsx
 #: src/agents/setup/review-step.tsx

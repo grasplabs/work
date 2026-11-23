@@ -177,18 +177,6 @@ export const lookOf = ({
   return keptLook(face) ?? lookFromName(name);
 };
 
-/**
- * The look of an agent known by its `face` alone, as a chat names the
- * agent that answered: the look it keeps, Stephen's for his own face
- * (`stephen`, the first agent's), and one drawn from the face otherwise.
- */
-export const lookOfFace = (face: string): AgentFigureLook => {
-  if (face === "stephen") {
-    return stephensLook;
-  }
-  return keptLook(face) ?? lookFromName(face);
-};
-
 /** The `face` core keeps for a look. */
 export const faceOf = (look: AgentFigureLook): string =>
   `figure-${look.shape}-${look.palette}`;

@@ -103,6 +103,16 @@ export const orNull = async <T,>(read: () => Promise<T>): Promise<T | null> => {
 const unreachable = msg`Grasp can't be reached right now. Try again in a moment.`;
 const missing = msg`Not found. It may have been renamed or removed.`;
 
+/**
+ * Why a change failed, in words: core's own reason, or that Grasp can't
+ * be reached where the connection failed or broke under it, whose own
+ * words ("Peer closed WebSocket: 0") are nobody's to read.
+ */
+export const failureWords = (error: unknown, i18n: I18n): string =>
+  error instanceof CoreTimeoutError || isConnectionFailure(error)
+    ? i18n._(unreachable)
+    : failureText(error);
+
 /** Why a read from core has no data, in words; nothing once it has. */
 export const notLoadedText = (
   page: Loaded<unknown>,

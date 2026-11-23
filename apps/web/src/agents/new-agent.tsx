@@ -1,4 +1,3 @@
-import { failureText } from "@grasp-os/shared/errors";
 import {
   instructionFileErrors,
   instructionsMaxLength,
@@ -51,30 +50,23 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 
-import type { Session } from "../core.ts";
 import { Page } from "../frame/page.tsx";
+import { failureWords } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { briefOf, instructionsOf } from "./agent-brief.ts";
 import { AgentFailure } from "./agent-facts.tsx";
+import { offeredShapes, useLookWords } from "./agent-look.tsx";
 import { agentTemplates } from "./agent-templates.ts";
-import { cronOf } from "./agent-wakes.tsx";
 import { AgentFigure, AgentFigureAura } from "./figure/agent-figure.tsx";
-import type { FigureShape } from "./figure/body.ts";
 import { agentFigurePalettes, faceOf, lookFromName } from "./figure/look.ts";
-import type { AgentFigureLook, AgentFigurePalette } from "./figure/look.ts";
-import { keepUnfinished } from "./unfinished-setup.ts";
-import { saveFirstInstructions } from "./unsaved-instructions.ts";
-
-/** The shapes the shape question offers: the lit bodies a person can tell apart. */
-const offeredShapes = [
-  "orb",
-  "trio",
-  "pair",
-  "swarm",
-  "prism",
-  "crystal",
-  "planet",
-] as const satisfies readonly FigureShape[];
+import type { AgentFigureLook } from "./figure/look.ts";
+import { finishSetup, keepOutcome } from "./finish-setup.ts";
+import {
+  cronOfSchedule,
+  rhythms,
+  scheduleOfRhythm,
+  useScheduleWords,
+} from "./schedule.ts";
 
 // A new agent: one of the company's, for its own admins, or one of the person's own, for anyone
 // (core's agents.ts). Grasp asks what it should be, one question at a time,
@@ -104,8 +96,8 @@ const steps = [
 type Step = (typeof steps)[number];
 
 /** How often it may work on its own, as the first question about it offers. */
-const schedules = ["asked", "weekdays", "daily", "mondays"] as const;
-type Schedule = (typeof schedules)[number];
+const schedules = ["asked", ...rhythms] as const;
+type Cadence = (typeof schedules)[number];
 
 /** The hour a schedule chosen here runs at, in the company's time zone. */
 const scheduledAt = "09:00";
@@ -119,7 +111,7 @@ interface Draft {
   look: AgentFigureLook;
   /** `me`: one of the person's own. */
   audience: "everyone" | "nobody" | "me";
-  schedule: Schedule;
+  schedule: Cadence;
   instructions: string;
 }
 
@@ -198,29 +190,12 @@ const styles = stylex.create({
 /** The words each question, choice and answer is said in. */
 const useWording = () => {
   const { t } = useLingui();
-  const shapeNames: Partial<Record<FigureShape, string>> = {
-    orb: t`Orb`,
-    trio: t`Three circling`,
-    pair: t`Pair in orbit`,
-    swarm: t`Swarm`,
-    prism: t`Triangle`,
-    crystal: t`Crystal`,
-    planet: t`Planet`,
-  };
-  const paletteNames: Record<AgentFigurePalette, string> = {
-    evergreen: t`Evergreen`,
-    meadow: t`Meadow`,
-    ember: t`Ember`,
-    amber: t`Amber`,
-    ocean: t`Ocean`,
-    moon: t`Moon`,
-  };
-  const scheduleNames: Record<Schedule, string> = {
-    asked: t`Only when asked`,
-    weekdays: t`Every weekday at 9:00`,
-    daily: t`Every day at 9:00`,
-    mondays: t`Every Monday at 9:00`,
-  };
+  const { shapeNameOf, paletteNames } = useLookWords();
+  const schedule = useScheduleWords();
+  const scheduleNameOf = (cadence: Cadence): string =>
+    cadence === "asked"
+      ? t`Only when asked`
+      : schedule.of(scheduleOfRhythm(cadence, scheduledAt));
   const audienceNames: Record<Draft["audience"], string> = {
     everyone: t`Everyone in the company`,
     nobody: t`Nobody yet`,
@@ -239,19 +214,19 @@ const useWording = () => {
     const byStep: Record<Step, () => string> = {
       job: () => draft.job,
       name: () => draft.name,
-      shape: () => shapeNames[draft.look.shape] ?? "",
+      shape: () => shapeNameOf(draft.look.shape),
       palette: () => paletteNames[draft.look.palette],
       audience: () => audienceNames[draft.audience],
-      schedule: () => scheduleNames[draft.schedule],
+      schedule: () => scheduleNameOf(draft.schedule),
       instructions: () =>
         draft.instructions === "" ? t`Nothing more` : draft.instructions,
     };
     return byStep[step]();
   };
   return {
-    shapeNames,
+    shapeNameOf,
     paletteNames,
-    scheduleNames,
+    scheduleNameOf,
     audienceNames,
     short,
     answerOf,
@@ -562,7 +537,7 @@ export const NewAgent = ({
         kind: "single" as const,
         options: offeredShapes.map((shape): Option => ({
           value: shape,
-          label: words.shapeNames[shape] ?? shape,
+          label: words.shapeNameOf(shape),
         })),
         other: false,
         columns: 2 as const,
@@ -609,7 +584,7 @@ export const NewAgent = ({
         kind: "single" as const,
         options: schedules.map((each): Option => ({
           value: each,
-          label: words.scheduleNames[each],
+          label: words.scheduleNameOf(each),
           ...(each === "asked" ? { recommended: true } : {}),
           ...(each === "asked"
             ? {}
@@ -678,26 +653,6 @@ export const NewAgent = ({
       : shown.values.length > 0 || (shown.other && shown.words.trim() !== "");
   const ready = !nameTaken && (step === "instructions" || given);
 
-  /** What the answers set once the agent exists: whom it answers and its schedule. */
-  const finish = async (session: Session, agentId: string): Promise<void> => {
-    if (draft.audience === "everyone") {
-      await session.connections.setAgentReach(agentId, true, {
-        who: "everyone",
-      });
-    }
-    const cron =
-      draft.schedule === "asked"
-        ? undefined
-        : cronOf(draft.schedule, scheduledAt);
-    if (cron !== undefined) {
-      await session.connections.makeAgentWake(agentId, {
-        cron,
-        personId,
-        opening: draft.job === "" ? draft.name : draft.job,
-      });
-    }
-  };
-
   const make = async (): Promise<void> => {
     const { instructions } = draft;
     const mine = draft.audience === "me";
@@ -718,28 +673,43 @@ export const NewAgent = ({
       const agent = mine
         ? await session.connections.makeOwnAgent(input)
         : await session.connections.makeAgent(input);
-      const told =
-        instructions.trim() === "" ||
-        (await saveFirstInstructions(session, agent.id, instructions));
-      if (mine) {
-        return { agent, told };
-      }
-      // Whom it answers and its schedule, one call each once it exists:
+      // The rest part by part once it exists, its instructions first:
       // what fails then is said on its page, as the agent is made and its
-      // name taken (unfinished-setup.ts).
-      try {
-        await finish(session, agent.id);
-      } catch (error) {
-        keepUnfinished(agent.id, failureText(error));
-      }
-      return { agent, told };
+      // name taken (finish-setup.ts). One of their own is never asked
+      // whom it answers or when it works.
+      const cron =
+        mine || draft.schedule === "asked"
+          ? undefined
+          : cronOfSchedule(scheduleOfRhythm(draft.schedule, scheduledAt));
+      const outcome = await finishSetup(
+        session,
+        agent.id,
+        {
+          instructions,
+          apps: [],
+          classes: [],
+          reach:
+            draft.audience === "everyone" ? { who: "everyone" } : undefined,
+          wake:
+            cron === undefined
+              ? undefined
+              : {
+                  cron,
+                  personId,
+                  opening: draft.job === "" ? draft.name : draft.job,
+                },
+        },
+        (error) => failureWords(error, i18n)
+      );
+      keepOutcome(agent.id, outcome);
+      return { agent, outcome };
     });
     if (made === undefined) {
       // The button says it failed; why stands in the Drawer, from core.
       throw new Error("The agent wasn't made.");
     }
     let tab: "instructions" | "access" | undefined;
-    if (!made.told) {
+    if (made.outcome.unsaved.some(({ part }) => part === "instructions")) {
       // Its instructions didn't save: its page opens where they wait.
       tab = "instructions";
     } else if (draft.audience === "nobody") {
@@ -750,6 +720,9 @@ export const NewAgent = ({
       to: "/agents/$agent",
       params: { agent: made.agent.id },
       search: tab === undefined ? {} : { tab },
+      // Made: Back leads to where New agent was opened from, never to
+      // its questions again.
+      replace: true,
     });
   };
 

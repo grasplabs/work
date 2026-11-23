@@ -897,9 +897,9 @@ msgstr "{name} uploaded."
 msgid "{name} uses only these apps, as far as its kinds of work allow."
 msgstr "{name} uses only these apps, as far as its kinds of work allow."
 
-#: src/agents/agent-page.tsx
-msgid "{name} was made, but not everything you chose was saved"
-msgstr "{name} was made, but not everything you chose was saved"
+#: src/agents/setup-left.tsx
+msgid "{name} was made, but not all of it was saved"
+msgstr "{name} was made, but not all of it was saved"
 
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
@@ -1774,6 +1774,7 @@ msgid "About tools"
 msgstr "About tools"
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/drafts/share-with-team.tsx
 msgid "Access"
 msgstr "Access"
@@ -2327,7 +2328,6 @@ msgid "Always uses this model"
 msgstr "Always uses this model"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Amber"
 msgstr "Amber"
 
@@ -4676,7 +4676,6 @@ msgid "Cron fields"
 msgstr "Cron fields"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Crystal"
 msgstr "Crystal"
 
@@ -4746,7 +4745,7 @@ msgstr "Date"
 msgid "Day {day} of {days}"
 msgstr "Day {day} of {days}"
 
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Day {day} of every month at {time}"
 msgstr "Day {day} of every month at {time}"
 
@@ -5508,7 +5507,6 @@ msgid "Email trigger"
 msgstr "Email trigger"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Ember"
 msgstr "Ember"
 
@@ -5673,11 +5671,10 @@ msgid "Events older than the audit trail keeps, moved to the archive. The search
 msgstr "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Evergreen"
 msgstr "Evergreen"
 
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Every {days} at {time}"
 msgstr "Every {days} at {time}"
 
@@ -5690,14 +5687,9 @@ msgstr "Every client question or complaint, from the first message until it is s
 msgid "Every day"
 msgstr "Every day"
 
-#: src/agents/agent-wakes.tsx
-#: src/agents/setup/review-step.tsx
+#: src/agents/schedule.ts
 msgid "Every day at {time}"
 msgstr "Every day at {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every day at 9:00"
-msgstr "Every day at 9:00"
 
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
@@ -5714,14 +5706,6 @@ msgstr "Every invited team interviewed"
 #: src/agents/agent-wakes.tsx
 msgid "Every Monday"
 msgstr "Every Monday"
-
-#: src/agents/agent-wakes.tsx
-msgid "Every Monday at {time}"
-msgstr "Every Monday at {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every Monday at 9:00"
-msgstr "Every Monday at 9:00"
 
 #: src/agents/setup/words.ts
 msgid "Every month"
@@ -5776,13 +5760,9 @@ msgstr "Every week"
 msgid "Every weekday"
 msgstr "Every weekday"
 
-#: src/agents/agent-wakes.tsx
+#: src/agents/schedule.ts
 msgid "Every weekday at {time}"
 msgstr "Every weekday at {time}"
-
-#: src/agents/new-agent.tsx
-msgid "Every weekday at 9:00"
-msgstr "Every weekday at 9:00"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
@@ -7592,6 +7572,7 @@ msgid "Instruction"
 msgstr "Instruction"
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/agents/setup/instructions-step.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
@@ -7959,6 +7940,10 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 
+#: src/agents/setup-left.tsx
+msgid "its apps"
+msgstr "its apps"
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
@@ -8004,6 +7989,10 @@ msgstr "Its data, as JSON"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Its definition to keep or move, and a blueprint others can start from."
+
+#: src/agents/setup-left.tsx
+msgid "its instructions"
+msgstr "its instructions"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
@@ -8060,6 +8049,10 @@ msgstr "Its runs kept failing to start, so it starts no more until whoever made 
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
 msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time."
+
+#: src/agents/setup-left.tsx
+msgid "its schedule"
+msgstr "its schedule"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -8843,7 +8836,6 @@ msgid "May do"
 msgstr "May do"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Meadow"
 msgstr "Meadow"
 
@@ -8975,7 +8967,6 @@ msgid "Monthly budget for AI"
 msgstr "Monthly budget for AI"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Moon"
 msgstr "Moon"
 
@@ -9260,7 +9251,6 @@ msgstr "New"
 
 #: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
-#: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "New agent"
 msgstr "New agent"
@@ -9952,6 +9942,10 @@ msgstr "Not read: no connection"
 msgid "Not requested yet"
 msgstr "Not requested yet"
 
+#: src/agents/setup-left.tsx
+msgid "Not saved"
+msgstr "Not saved"
+
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Not saved yet. Trying again."
@@ -9963,6 +9957,14 @@ msgstr "Not saved yet. Until it is, the lines you moved count nowhere."
 #: src/interview/destination.tsx
 msgid "Not saved yet. Until it is, your lines still go where they went before."
 msgstr "Not saved yet. Until it is, your lines still go where they went before."
+
+#: src/agents/setup-left.tsx
+msgid "Not saved: {what}. {failure}"
+msgstr "Not saved: {what}. {failure}"
+
+#: src/agents/setup-left.tsx
+msgid "Not saved: {what}. {failure} What you typed waits on Instructions, to save there."
+msgstr "Not saved: {what}. {failure} What you typed waits on Instructions, to save there."
 
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
@@ -10266,7 +10268,6 @@ msgid "Number"
 msgstr "Number"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Ocean"
 msgstr "Ocean"
 
@@ -10582,6 +10583,7 @@ msgstr "Only what your company allows."
 msgid "Only when asked"
 msgstr "Only when asked"
 
+#: src/agents/schedule.ts
 #: src/agents/setup/words.ts
 msgid "Only when someone asks"
 msgstr "Only when someone asks"
@@ -10670,6 +10672,10 @@ msgstr "Open"
 #: src/brain/brain-nav.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
+
+#: src/agents/setup-left.tsx
+msgid "Open {tab}"
+msgstr "Open {tab}"
 
 #: src/settings/where-stephen.tsx
 msgid "Open a chat with Stephen, or search for him in Teams’ apps."
@@ -10842,7 +10848,6 @@ msgid "Or write it yourself"
 msgstr "Or write it yourself"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Orb"
 msgstr "Orb"
 
@@ -10918,6 +10923,7 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 
 #: src/agents/agent-page.tsx
+#: src/agents/setup-left.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Overview"
@@ -11002,7 +11008,6 @@ msgid "Pages"
 msgstr "Pages"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Pair in orbit"
 msgstr "Pair in orbit"
 
@@ -11316,7 +11321,6 @@ msgid "Plan the day"
 msgstr "Plan the day"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Planet"
 msgstr "Planet"
 
@@ -12728,6 +12732,7 @@ msgstr "Save the places"
 msgid "Save where they go"
 msgstr "Save where they go"
 
+#: src/agents/setup-left.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -12759,6 +12764,10 @@ msgstr "Saved to your memory"
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
 msgstr "Saved, but it doesn't pass yet: Definition says what to fix."
 
+#: src/agents/setup-left.tsx
+msgid "Saved: {savedList}."
+msgstr "Saved: {savedList}."
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/resource-params.tsx
 msgid "Saved."
@@ -12772,6 +12781,7 @@ msgstr "Saving"
 msgid "Saving to your memory"
 msgstr "Saving to your memory"
 
+#: src/agents/setup-left.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
 msgid "Saving…"
@@ -12811,6 +12821,7 @@ msgstr "Say what you want to build, and Grasp builds it."
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
+#: src/agents/setup-left.tsx
 msgid "Schedule"
 msgstr "Schedule"
 
@@ -14152,7 +14163,6 @@ msgid "Suspended"
 msgstr "Suspended"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Swarm"
 msgstr "Swarm"
 
@@ -15743,7 +15753,6 @@ msgid "Thought for {time}"
 msgstr "Thought for {time}"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Three circling"
 
@@ -15940,7 +15949,6 @@ msgid "Transcript"
 msgstr "Transcript"
 
 #: src/agents/agent-look.tsx
-#: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Triangle"
 
@@ -15970,6 +15978,7 @@ msgstr "True until {until}"
 msgid "Try"
 msgstr "Try"
 
+#: src/agents/setup-left.tsx
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
@@ -16943,6 +16952,10 @@ msgstr "What it is for"
 msgid "What it may also do"
 msgstr "What it may also do"
 
+#: src/agents/setup-left.tsx
+msgid "what it may do"
+msgstr "what it may do"
+
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it may do"
@@ -17485,6 +17498,10 @@ msgstr "Who can see records in {name}?"
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
 msgstr "Who can talk to him"
+
+#: src/agents/setup-left.tsx
+msgid "who can use it"
+msgstr "who can use it"
 
 #: src/agents/setup/audience-step.tsx
 #: src/agents/setup/review-step.tsx

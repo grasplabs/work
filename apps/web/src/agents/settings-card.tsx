@@ -5,8 +5,10 @@ import {
   FieldContent,
   FieldDescription,
   FieldLabel,
+  FieldStatus,
   FieldTitle,
 } from "@grasp-os/ui/components/field";
+import type { FieldStatusValue } from "@grasp-os/ui/components/field";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Text } from "@grasp-os/ui/components/text";
 import {
@@ -18,15 +20,48 @@ import { Icon, InfoIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
+
+import type { Session } from "../core.ts";
 
 // The agents pages in Damsko's settings pattern (its docs, Patterns ›
 // Settings): a topic is one small flush Card, its title on the page just
 // above it (SectionHeader variant="group"), its rows inside, each a
 // responsive Field with its control or its value on one end edge. More
 // about a topic or a row stands behind an info mark beside its name, said
-// on hover and focus.
+// on hover and focus. A row that saves as it changes says so beside its
+// control (`useRowSave`, FieldStatus): a spinner, then a tick; failed, its
+// value kept and Try again.
+
+/** What a page change asks of core, then the page read again: whether it went through. */
+export type Change = (
+  action: (session: Session) => Promise<unknown>
+) => Promise<boolean>;
+
+/**
+ * Follows a row's save as it changes (`save`, given the work, which says
+ * whether it went through), and says it beside the row's control
+ * (`status`, for SettingRow): a spinner, then a tick; failed, Try again.
+ */
+export const useRowSave = () => {
+  const [status, setStatus] = useState<FieldStatusValue>("idle");
+  const [last, setLast] = useState<() => Promise<boolean>>();
+  const save = async (work: () => Promise<boolean>): Promise<void> => {
+    setLast(() => work);
+    setStatus("loading");
+    setStatus((await work()) ? "success" : "error");
+  };
+  const handleRetry = () => {
+    if (last !== undefined) {
+      void save(last);
+    }
+  };
+  return {
+    status: <FieldStatus onRetry={handleRetry} status={status} />,
+    save,
+  };
+};
 
 const styles = stylex.create({
   // A group's title a small step over its card, its words where the rows' start.
@@ -156,16 +191,20 @@ export const SettingRow = ({
   label,
   help,
   info,
+  saving,
   children,
 }: {
   label: string;
   help?: ReactNode;
   info?: string | undefined;
+  /** Its save as it changes, beside the control (`useRowSave`). */
+  saving?: ReactNode;
   children: ReactNode;
 }) => (
   <Field orientation="responsive">
     <RowWords control help={help} info={info} label={label} />
     {children}
+    {saving}
   </Field>
 );
 

@@ -1,17 +1,22 @@
+import type { ChatAgent } from "@grasp-os/shared/chat";
+
 import { AgentFigure } from "./figure/agent-figure.tsx";
-import { lookOfFace } from "./figure/look.ts";
+import { lookOf, stephensLook } from "./figure/look.ts";
 
-// An agent's picture where only its face is known, as a chat names the
-// agent that answered (chat/thread.tsx): its figure, still, at a list's
-// size. Decorative: its name stands beside it.
+// An agent's picture beside the answers it gave in a chat (chat/thread.tsx):
+// its figure, still, at a list's size, drawn as its page draws it
+// (`lookOf`). Decorative: its name stands beside it.
 
-/** An agent's figure, by the face core keeps for it. */
+/** An agent's figure; the first agent's for one the chat no longer has. */
 export const AgentAvatar = ({
-  face,
+  agent,
   size = "lg",
 }: {
-  face: string;
+  agent: Pick<ChatAgent, "id" | "face" | "name"> | undefined;
   size?: "default" | "lg";
 }) => (
-  <AgentFigure look={lookOfFace(face)} size={size === "lg" ? "sm" : "xs"} />
+  <AgentFigure
+    look={agent === undefined ? stephensLook : lookOf(agent)}
+    size={size === "lg" ? "sm" : "xs"}
+  />
 );

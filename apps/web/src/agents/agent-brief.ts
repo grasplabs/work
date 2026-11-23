@@ -95,3 +95,22 @@ export const instructionsOf = (brief: Brief, i18n: I18n): string => {
     .map(([part, body]) => `${heading(part)}\n${body}`)
     .join("\n\n");
 };
+
+/**
+ * The goal instructions say now: the words under their Goal heading, as
+ * the person left them, on one line; "" where they have no such part.
+ */
+export const goalOf = (instructions: string, i18n: I18n): string => {
+  const heading = `## ${i18n._(briefHeadings.goal)}`;
+  const lines = instructions.split("\n");
+  const at = lines.findIndex((line) => line.trim() === heading);
+  if (at === -1) {
+    return "";
+  }
+  const after = lines.slice(at + 1);
+  const next = after.findIndex((line) => line.trimStart().startsWith("#"));
+  return (next === -1 ? after : after.slice(0, next))
+    .join(" ")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+};

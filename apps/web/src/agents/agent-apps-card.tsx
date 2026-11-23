@@ -47,6 +47,7 @@ import { classNames } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentFailure } from "./agent-facts.tsx";
 import { SettingsCard } from "./settings-card.tsx";
+import type { Change } from "./settings-card.tsx";
 import { scoreOf, wordsOf } from "./setup/apps-recommend.ts";
 
 // An agent's apps (core's agent-app-access.ts), on its Instructions part:
@@ -86,9 +87,6 @@ export const workOutQuietly = async (
     // Its apps stay as they were; the card works them out on a press.
   }
 };
-
-/** What a page change asks of core, then the page read again. */
-type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
 /** An app the company offers, as the catalog has it. */
 type Offered = Pick<

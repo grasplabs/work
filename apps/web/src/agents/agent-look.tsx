@@ -13,7 +13,7 @@ import { AgentFigure } from "./figure/agent-figure.tsx";
 import type { FigureShape } from "./figure/body.ts";
 import { agentFigurePalettes, faceOf, lookOf } from "./figure/look.ts";
 import type { AgentFigureLook, AgentFigurePalette } from "./figure/look.ts";
-import { SettingRow, SettingsCard } from "./settings-card.tsx";
+import { SettingRow, SettingsCard, useRowSave } from "./settings-card.tsx";
 
 // An agent's look on its page (Ruben, 21 November: "adjust your agent
 // figure and color"): the figure as it looks now, large, beside its shape
@@ -31,6 +31,34 @@ export const offeredShapes = [
   "crystal",
   "planet",
 ] as const satisfies readonly FigureShape[];
+
+/** The words a look is said in: each shape offered and each palette, by name. */
+export const useLookWords = () => {
+  const { t } = useLingui();
+  const shapeNames: Record<(typeof offeredShapes)[number], string> = {
+    orb: t`Orb`,
+    trio: t`Three circling`,
+    pair: t`Pair in orbit`,
+    swarm: t`Swarm`,
+    prism: t`Triangle`,
+    crystal: t`Crystal`,
+    planet: t`Planet`,
+  };
+  const paletteNames: Record<AgentFigurePalette, string> = {
+    evergreen: t`Evergreen`,
+    meadow: t`Meadow`,
+    ember: t`Ember`,
+    amber: t`Amber`,
+    ocean: t`Ocean`,
+    moon: t`Moon`,
+  };
+  // A shape the agent has from before, outside those offered, is its own.
+  const shapeNameOf = (shape: FigureShape): string => {
+    const offered = offeredShapes.find((each) => each === shape);
+    return offered === undefined ? t`Its own shape` : shapeNames[offered];
+  };
+  return { shapeNames, shapeNameOf, paletteNames };
+};
 
 const styles = stylex.create({
   control: { display: "block", width: "12rem", maxWidth: "100%" },
@@ -50,36 +78,21 @@ export const AgentLook = ({
 }) => {
   const { t } = useLingui();
   const look = lookOf(agent);
-  const shapeNames: Record<(typeof offeredShapes)[number], string> = {
-    orb: t`Orb`,
-    trio: t`Three circling`,
-    pair: t`Pair in orbit`,
-    swarm: t`Swarm`,
-    prism: t`Triangle`,
-    crystal: t`Crystal`,
-    planet: t`Planet`,
-  };
-  const paletteNames: Record<AgentFigurePalette, string> = {
-    evergreen: t`Evergreen`,
-    meadow: t`Meadow`,
-    ember: t`Ember`,
-    amber: t`Amber`,
-    ocean: t`Ocean`,
-    moon: t`Moon`,
-  };
+  const { shapeNameOf, paletteNames } = useLookWords();
   // The shapes offered, and the agent's own where it has another.
   const shapes: readonly FigureShape[] = offeredShapes.some(
     (shape) => shape === look.shape
   )
     ? offeredShapes
     : [look.shape, ...offeredShapes];
-  // A shape the agent has from before, outside those offered, is its own.
-  const shapeNameOf = (shape: FigureShape): string => {
-    const offered = offeredShapes.find((each) => each === shape);
-    return offered === undefined ? t`Its own shape` : shapeNames[offered];
-  };
-  const choose = (next: AgentFigureLook): void => {
-    void save({ face: faceOf(next) });
+  // Each row says its own save beside its control.
+  const shapeSave = useRowSave();
+  const paletteSave = useRowSave();
+  const choose = (
+    row: ReturnType<typeof useRowSave>,
+    next: AgentFigureLook
+  ): void => {
+    void row.save(async () => await save({ face: faceOf(next) }));
   };
   return (
     <SettingsCard
@@ -89,7 +102,7 @@ export const AgentLook = ({
       title={t`Look`}
     >
       <FieldGroup>
-        <SettingRow label={t`Shape`}>
+        <SettingRow label={t`Shape`} saving={shapeSave.status}>
           <span {...stylex.props(styles.control)}>
             <Select
               disabled={!can}
@@ -100,7 +113,7 @@ export const AgentLook = ({
               onValueChange={(value) => {
                 const shape = shapes.find((each) => each === value);
                 if (shape !== undefined) {
-                  choose({ ...look, shape });
+                  choose(shapeSave, { ...look, shape });
                 }
               }}
               value={look.shape}
@@ -112,7 +125,7 @@ export const AgentLook = ({
             </Select>
           </span>
         </SettingRow>
-        <SettingRow label={t`Colours`}>
+        <SettingRow label={t`Colours`} saving={paletteSave.status}>
           <span {...stylex.props(styles.control)}>
             <Select
               disabled={!can}
@@ -125,7 +138,7 @@ export const AgentLook = ({
                   (each) => each === value
                 );
                 if (palette !== undefined) {
-                  choose({ ...look, palette });
+                  choose(paletteSave, { ...look, palette });
                 }
               }}
               value={look.palette}
