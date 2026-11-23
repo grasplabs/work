@@ -88,7 +88,19 @@ export const aiStatusReportSchema = z.strictObject({
    * default model's provider first, whether or not a call reached it yet;
    * then every provider Grasp's own key was used with (`platform`).
    */
-  providers: z.array(aiProviderStatusSchema).max(16),
+  providers: z
+    .array(z.unknown())
+    .max(16)
+    // The admin and the cores roll out on their own: a core on another
+    // release may name a provider this admin doesn't know (one Grasp no
+    // longer uses, or doesn't use yet). That provider's row is left out,
+    // never the whole report with it.
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const status = aiProviderStatusSchema.safeParse(row);
+        return status.success ? [status.data] : [];
+      })
+    ),
   /**
    * What Grasp's own features cost on its keys, this month and last.
    * Optional: a core on an earlier release reports its providers only,

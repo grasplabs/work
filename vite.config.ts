@@ -154,6 +154,11 @@ export default defineConfig({
           ],
         },
       ],
+      // shadcn's, but a Damsko component's `style` (StyleX layout styles,
+      // which its type holds) is left to the type checker
+      // (scripts/lint/grasp-plugin.ts).
+      "shadcn/no-inline-styles": "off",
+      "grasp/no-inline-styles": "error",
       // Picked from Ultracite's anti-slop preset: the rules that stop agents
       // from silencing the type checker. The rest of that preset forces
       // workarounds (no options objects, no `unknown`).

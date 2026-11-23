@@ -10,31 +10,28 @@ import type { Speaker } from "@grasp-os/shared/voice";
 // feature unavailable, never served by another.
 
 /**
- * Each speaker's voice, by its ElevenLabs ID. Stephen's is "Adam", the
- * voice Eleven v4 is shown with: young, confident, conversational.
- * Claire's is "Jessica": playful, bright and warm, checked by ElevenLabs
- * in English, Dutch, German and Spanish, not in French. The sample
- * speakers are ElevenLabs's own voices, each clearly not Stephen.
+ * Each speaker's voice, by its KugelAudio ID, from the voices of its
+ * public catalog its documentation plays (docs.kugelaudio.com, "Using
+ * Voices", read on 2026-11-19). Stephen's is "James Whitfield" and
+ * Claire's "Samantha Ferris", both English voices; the one model says
+ * every language in any voice. The sample speakers are catalog voices
+ * too, each clearly not Stephen: Lisa "Julia Ziegler", Mark "Noah
+ * Tremblay", Tim "Daniel Krüger".
  */
 const voices = {
-  stephen: "s3TPKV1kjDlVtZbl4Ksh",
-  claire: "r1KmysJdVYZjJCm4mL3b",
-  lisa: "EXAVITQu4vr4xnSDxMaL",
-  mark: "cjVigY5qzO86Huf0OWal",
-  tim: "TX3LPaxmHKxFdv7VOQHJ",
+  stephen: "1656",
+  claire: "1071",
+  lisa: "2222",
+  mark: "1073",
+  tim: "2220",
 } as const satisfies Record<Speaker, string>;
 
 /**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
- * down speech, live and recorded, and ElevenLabs's Eleven v4 says the lines,
- * v4 Turbo a line only known as it is said, with the same voices.
+ * down speech, live and recorded, and KugelAudio's Kugel 3.5 says the
+ * lines.
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
-  speech: {
-    provider: "elevenlabs",
-    model: "eleven_v4",
-    quickModel: "eleven_v4_turbo",
-    voices,
-  },
+  speech: { provider: "kugelaudio", model: "kugel-3.5", voices },
 } as const;

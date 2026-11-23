@@ -215,7 +215,7 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     overflow: "hidden",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.md,

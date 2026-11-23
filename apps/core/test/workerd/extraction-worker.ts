@@ -167,12 +167,9 @@ export default {
         })
       );
     }
-    const mediaType = searchParams.get("type");
-    if (
-      mediaType !== uploadTypes.pdf &&
-      mediaType !== uploadTypes.docx &&
-      mediaType !== uploadTypes.xlsx
-    ) {
+    const asked = searchParams.get("type");
+    const mediaType = Object.values(uploadTypes).find((type) => type === asked);
+    if (mediaType === undefined) {
       return new Response("Which type?", { status: 400 });
     }
     return Response.json(

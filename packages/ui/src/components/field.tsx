@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's Field,
 // which wires the label's `for`, `aria-labelledby`, `aria-describedby` and `aria-invalid` itself:
 // a control of ours inside a Field needs no ids and no spread.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Field name="email">
 //     <FieldLabel>Work email</FieldLabel>

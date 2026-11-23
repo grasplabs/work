@@ -1,7 +1,6 @@
 // Marker: a line in a conversation that marks something that happened to it:
 // a status of the conversation, a note, a row with a rule under it, or a word
 // in the middle of a hairline (a date, "New messages", a checkpoint).
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Marker variant="separator">
 //     <MarkerContent>Today</MarkerContent>

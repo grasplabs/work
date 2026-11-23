@@ -1,8 +1,6 @@
-// Sidebar: an app's main places down one side, from shadcn's (registry/bases/base/ui/sidebar.tsx),
-// converted from Tailwind to StyleX: a provider that holds whether it is open, the sidebar with its
-// header, its content in groups of menus and its footer, a trigger and a rail that fold it, and the
-// page beside it (SidebarInset).
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Sidebar: an app's main places down one side: a provider that holds whether it is open, the
+// sidebar with its header, its content in groups of menus and its footer, a trigger and a rail that
+// fold it, and the page beside it (SidebarInset).
 //
 //   <SidebarProvider>
 //     <Sidebar>
@@ -40,6 +38,12 @@
 // `sidebarStateScript` draws it before the page wakes. A group that folds is a SidebarCollapsible,
 // a Collapsible by a `name`, whose fold is kept and drawn the same way. Nothing here knows a
 // product: a profile, a theme control or a working mark is the caller's, composed into the parts.
+//
+// The provider's row is the window's height unless its `style` gives the frame's, and under lg
+// (the window's width) the sidebar is a Sheet fixed to the window. In a box of its own, such as a
+// gallery's card, give the row the box's height and make the box the containing block of what is
+// fixed (`contain: layout`, or a transform); or show it with `collapsible="none"`, which never
+// turns into a sheet.
 //
 // An area of the product with a navigation of its own (its settings, one project) is a level: the
 // SidebarLevels between the header and the footer hold a SidebarLevel for each, one shown at a
@@ -250,7 +254,7 @@ const styles = stylex.create({
     lineHeight: font.textSmLine,
   },
   floating: {
-    borderRadius: radius.sidebarCardRadius,
+    borderRadius: radius["2xl"],
     cornerShape: radius.shape,
     borderWidth: size.hairline,
     borderStyle: "solid",
@@ -322,7 +326,7 @@ const styles = stylex.create({
       default: null,
       [stylex.when.anySibling('[data-variant="inset"]', sidebarMarker)]: {
         default: null,
-        [media.lg]: radius.sidebarInsetRadius,
+        [media.lg]: radius.md,
       },
     },
     // The line is a layer over what the card holds, so no bar's ground inside covers it.
@@ -412,7 +416,7 @@ const styles = stylex.create({
     paddingBlockEnd: space["1"],
     paddingInline: size.sidebarRowInline,
     borderWidth: 0,
-    borderRadius: radius.row,
+    borderRadius: radius.lg,
     cornerShape: radius.shape,
     backgroundColor: "transparent",
     // Drawn as a button or a link (`asChild`), it answers the pointer as a row's words do.
@@ -471,7 +475,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: size.hairline },
     borderStyle: "solid",
     borderColor: "ButtonText",
-    borderRadius: radius.row,
+    borderRadius: radius.lg,
     cornerShape: radius.shape,
     color: {
       default: colors.sidebarSecondaryForeground,
@@ -580,7 +584,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: size.hairline },
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: radius.row,
+    borderRadius: radius.lg,
     cornerShape: radius.shape,
     overflow: "hidden",
     color: {
@@ -636,7 +640,7 @@ const styles = stylex.create({
   },
   // A large row (a person, a workspace), in the words read first; it folds to its picture alone.
   lg: {
-    borderRadius: radius.row,
+    borderRadius: radius.lg,
     color: colors.sidebarForeground,
     height: {
       default: size.sidebarMenuButtonHeightLg,
@@ -748,7 +752,7 @@ const styles = stylex.create({
     width: ICON,
     height: ICON,
     overflow: "hidden",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
 
@@ -1404,7 +1408,7 @@ type Own<Tag extends "a" | "button" | "div" | "h2" | "li" | "nav" | "ul"> =
 
 /**
  * A part that is its element and its look (SidebarHeader, SidebarMenu, …): the element with
- * shadcn's slots (`sidebar-header`, `data-sidebar="header"`) and the caller's props on it.
+ * its slot names (`sidebar-header`, `data-sidebar="header"`) and the caller's props on it.
  */
 const part = <Tag extends "div" | "li" | "ul">(
   tag: Tag,

@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's
 // HoverCard: the popup's raised surface with the one corner, placed beside the link and kept inside
 // the window. The link stays a link: a press or a tap follows it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <HoverCard>
 //     <HoverCardTrigger href="/people/amara">Amara Okafor</HoverCardTrigger>
@@ -179,7 +178,7 @@ const styles = stylex.create({
       default: colors.linkUnderline,
       ":hover": { default: null, [HOVER]: "currentColor" },
     },
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     transitionProperty: "text-decoration-color",
     transitionDuration: motionVars.hover,
@@ -204,7 +203,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.popover,
     boxShadow: shadow.popupShadow,

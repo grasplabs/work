@@ -3,7 +3,6 @@
 // Drawer: a raised panel the window's height, floating a little off its edges, a head with its
 // title and a close button, a body that scrolls, and actions at its foot. Escape, a press on the
 // shade or a drag towards its side closes it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Sheet>
 //     <SheetTrigger asChild><Button variant="outline">Edit profile</Button></SheetTrigger>
@@ -215,7 +214,7 @@ const styles = stylex.create({
     height: `calc(100% - 2 * ${INSET})`,
     marginBlock: INSET,
     marginInline: INSET,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     // It slides in from its side and back out to it (UI SDK marks the first and last frame), in
     // the library's open time; with reduced motion it is there and gone at once.
     translate: {
