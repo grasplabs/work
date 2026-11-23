@@ -110,9 +110,10 @@ describe("the page a connection ends on", () => {
       }),
       { app: "HubSpot" }
     );
-    const items = [...(dialog()?.querySelectorAll("li") ?? [])].map(
-      (each) => each.textContent
-    );
+    // The rows, not the hairlines between them.
+    const items = [
+      ...(dialog()?.querySelectorAll('li:not([role="none"])') ?? []),
+    ].map((each) => each.textContent);
     expect(items).toStrictEqual([
       expect.stringContaining("For everyone"),
       "HUBSPOT_LIST_CONTACTS",

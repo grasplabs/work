@@ -1,14 +1,34 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import { revokeByHandAt } from "@grasp-os/shared/connect";
 import type { RevocationToDo } from "@grasp-os/shared/connect";
-import { Trans } from "@lingui/react/macro";
+import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Link as TextLink } from "@grasp-os/ui/components/link";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await } from "@tanstack/react-router";
-import { TriangleAlertIcon } from "lucide-react";
+import { Fragment } from "react";
 
 import { formatDate } from "../format.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { AppLogo } from "./app-logo.tsx";
+import { InfoTip } from "./info-tip.tsx";
+import { PartNotLoaded } from "./part-not-loaded.tsx";
+import { ProviderMark } from "./provider-mark.tsx";
 
 // Access at an app Grasp couldn't remove itself (GRA-1197): when a
 // connection was disconnected, or asked to connect again, connect revokes
@@ -17,6 +37,11 @@ import { AppLogo } from "./app-logo.tsx";
 // given up, is shown here to the company's admins (and Grasp's staff,
 // read-only), with what to do: remove Grasp's access at the app by hand.
 // A personal connection is named by its owner, never its account.
+
+const styles = stylex.create({
+  // A title and its info mark, on one line.
+  titled: { display: "inline-flex", alignItems: "center", gap: space["1"] },
+});
 
 /** The place to remove Grasp's access, as words with a link where one exists. */
 const WhereToRemove = ({
@@ -31,14 +56,9 @@ const WhereToRemove = ({
   const account = toDo.accountName ?? "";
   const link =
     at === undefined ? null : (
-      <a
-        className="underline"
-        href={at}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
+      <TextLink external href={at}>
         {new URL(at).host + new URL(at).pathname}
-      </a>
+      </TextLink>
     );
   if (toDo.scope === "shared") {
     return link === null ? (
@@ -77,7 +97,7 @@ const Standing = ({ toDo }: { toDo: RevocationToDo }) => {
   if (toDo.givenUpAt === null) {
     const tries = toDo.attempts;
     return (
-      <Badge variant="outline">
+      <Badge variant="warning">
         <Trans>Still trying · {tries} tries</Trans>
       </Badge>
     );
@@ -102,10 +122,12 @@ const ToDoRow = ({
   const whose =
     toDo.scope === "shared" ? (toDo.accountName ?? "") : (toDo.ownerName ?? "");
   return (
-    <li className="flex items-start gap-3 py-2">
-      <AppLogo logo={null} name={app} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="font-medium">
+    <Item size="sm">
+      <ItemMedia align="center">
+        <ProviderMark id={toDo.provider} logo={null} name={app} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
           {toDo.scope === "shared" ? (
             <Trans>
               {app}, shared: {whose}
@@ -115,18 +137,20 @@ const ToDoRow = ({
               {app}, {whose}&apos;s own
             </Trans>
           )}
-        </span>
-        <span className="text-muted-foreground">
+        </ItemTitle>
+        <ItemDescription>
           {toDo.owedFor === "disconnected" ? (
             <Trans>Disconnected on {since}.</Trans>
           ) : (
             <Trans>Asked to connect again on {since}.</Trans>
           )}{" "}
           <WhereToRemove app={app} toDo={toDo} />
-        </span>
-      </div>
-      <Standing toDo={toDo} />
-    </li>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Standing toDo={toDo} />
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -137,40 +161,43 @@ const ToDoList = ({
   toDos: Loaded<RevocationToDo[]>;
   nameOf: (provider: string) => string;
 }) => {
+  const { t } = useLingui();
   if (toDos.state === "ready" && toDos.data.length === 0) {
     return null;
   }
   return (
-    <section
-      aria-labelledby="integrations-revoke-by-hand"
-      className="flex flex-col gap-2"
-    >
-      <h2
-        className="flex items-center gap-2 font-medium"
-        id="integrations-revoke-by-hand"
-      >
-        <TriangleAlertIcon className="text-destructive size-4" />
-        <Trans>Access to remove by hand</Trans>
-      </h2>
-      {toDos.state === "ready" ? (
-        <>
-          <p className="text-muted-foreground">
-            <Trans>
-              Grasp couldn&apos;t remove its own access at these apps. Until
-              someone removes it there, it may still work.
-            </Trans>
-          </p>
-          <ul className="flex flex-col divide-y">
-            {toDos.data.map((toDo) => (
-              <ToDoRow key={toDo.id} nameOf={nameOf} toDo={toDo} />
-            ))}
-          </ul>
-        </>
-      ) : (
-        // A failed read is said, never taken for nothing to remove.
-        <NotLoaded page={toDos} />
-      )}
-    </section>
+    <Card asChild size="sm">
+      <section aria-label={t`Access to remove by hand`}>
+        <CardHeader>
+          <CardTitle level={2}>
+            <span {...stylex.props(styles.titled)}>
+              {t`Access to remove by hand`}
+              {/* Why, behind the info mark: the title says what to do. */}
+              <InfoTip label={t`More about access to remove by hand`}>
+                {t`Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work.`}
+              </InfoTip>
+            </span>
+          </CardTitle>
+        </CardHeader>
+        {toDos.state === "ready" ? (
+          <CardContent flush>
+            <ItemGroup aria-label={t`Access to remove by hand`}>
+              {toDos.data.map((toDo, index) => (
+                <Fragment key={toDo.id}>
+                  {index > 0 ? <ItemSeparator /> : null}
+                  <ToDoRow nameOf={nameOf} toDo={toDo} />
+                </Fragment>
+              ))}
+            </ItemGroup>
+          </CardContent>
+        ) : (
+          <CardContent>
+            {/* A failed read is said, never taken for nothing to remove. */}
+            <PartNotLoaded page={toDos} />
+          </CardContent>
+        )}
+      </section>
+    </Card>
   );
 };
 

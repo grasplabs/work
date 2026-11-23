@@ -78,7 +78,7 @@ test("an admin sees the access Grasp couldn't remove, with where to remove it by
   await signInTo(memberPage.context(), owner);
   await memberPage.goto("/integrations");
   await expect(
-    memberPage.getByRole("heading", { name: "Integrations" })
+    memberPage.getByRole("heading", { level: 1, name: "Integrations" })
   ).toBeVisible();
   await expect(
     memberPage.getByRole("region", { name: "Access to remove by hand" })

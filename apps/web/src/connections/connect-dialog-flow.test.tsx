@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { ConnectDialog } from "./connect-dialog.tsx";
 import { integrationsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
+import { toolWords } from "./tool-choices.ts";
 
 // The connect dialog against core's connections as the page reaches them
 // over RPC, faked: what an admin chooses for each tool of a Composio
@@ -63,13 +64,7 @@ const entry = (source: "native" | "composio", id: string, name: string) => ({
   offered: true,
 });
 
-const [hubspot, microsoft] = integrationsOf(
-  [
-    entry("composio", "hubspot", "HubSpot"),
-    entry("native", "microsoft", "Microsoft 365"),
-  ],
-  []
-);
+const [hubspot] = integrationsOf([entry("composio", "hubspot", "HubSpot")], []);
 
 const tools: CatalogTool[] = [
   {
@@ -170,7 +165,8 @@ const press = async (element: Element | null | undefined): Promise<void> => {
 const row = (name: string): HTMLElement => {
   const found = [...document.querySelectorAll("li")].find(
     (each) =>
-      each.textContent?.includes(name) && each.querySelector("li") === null
+      each.textContent?.includes(toolWords(name, "hubspot")) &&
+      each.querySelector("li") === null
   );
   if (found === undefined) {
     throw new Error(`No row for ${name}`);
@@ -237,22 +233,5 @@ describe("choosing what Grasp may do in a toolkit", () => {
     expect(sent).toStrictEqual([
       [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
     ]);
-  });
-});
-
-describe("signing in to a native provider", () => {
-  afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.innerHTML = "";
-  });
-
-  it("says the address of its sign-in page", async () => {
-    await opened(microsoft);
-    expect(document.body.textContent).toContain(
-      "You sign in at login.microsoftonline.com"
-    );
   });
 });

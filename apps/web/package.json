@@ -24,6 +24,7 @@
     "@lingui/core": "catalog:",
     "@lingui/react": "catalog:",
     "@pierre/diffs": "catalog:",
+    "@stylexjs/stylex": "catalog:",
     "@tanstack/react-router": "catalog:",
     "capnweb": "catalog:",
     "lucide-react": "catalog:",

@@ -32,6 +32,67 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Working`,
       success: t`Done`,
     },
+    alert: { close: t({ message: "Dismiss", context: "close a notice" }) },
+    alertDialog: { cancel: t`Cancel` },
+    badge: {
+      dot: {
+        default: t({ message: "Note", context: "how serious a badge is" }),
+        success: t({ message: "Done", context: "how serious a badge is" }),
+        warning: t({ message: "Warning", context: "how serious a badge is" }),
+        destructive: t({ message: "Error", context: "how serious a badge is" }),
+        info: t({ message: "Info", context: "how serious a badge is" }),
+      },
+      remove: t`Remove`,
+      removeNamed: (words) => t`Remove ${words}`,
+    },
+    dialog: { close: t`Close` },
+    dropdownMenu: { expand: t`More actions` },
+    empty: { error: t`This did not load` },
+    field: {
+      statusError: t`Could not save. Your choice is kept.`,
+      statusLoading: t`Saving`,
+      statusRetry: t`Try again`,
+      statusSuccess: t`Saved`,
+    },
+    input: {
+      hidePassword: t`Hide password`,
+      replace: t({ message: "Replace", context: "a saved key" }),
+      showPassword: t`Show password`,
+    },
+    keyValue: {
+      copy: (label) => {
+        const name = label.toLocaleLowerCase();
+        return t`Copy ${name}`;
+      },
+      loading: t`Loading the value`,
+    },
+    link: { external: t`opens in a new tab` },
+    sheet: { close: t`Close` },
+    sidePanel: {
+      close: t`Close`,
+      showAll: t`Show all`,
+      views: t({ message: "Views", context: "a panel's tabs" }),
+    },
+    stepper: {
+      count: (step, total) => t`Step ${step} of ${total}`,
+      current: (step, total, label) => t`Step ${step} of ${total}: ${label}`,
+      finished: t`All steps done`,
+      navBack: t`Back`,
+      navNext: t`Next`,
+      states: {
+        complete: t({ message: "done", context: "a step's status" }),
+        active: t({ message: "current step", context: "a step's status" }),
+        pending: t({ message: "not started", context: "a step's status" }),
+        error: t({ message: "failed", context: "a step's status" }),
+      },
+    },
+    switch: { error: t`Could not save` },
+    toast: {
+      close: t`Close`,
+      error: t`Could not finish`,
+      loading: t`Still working`,
+      name: t`Notifications`,
+    },
   };
   return (
     <I18nProvider catalog={catalog} locale={i18n.locale}>

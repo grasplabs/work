@@ -1,13 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/app-kit/components/dialog";
 import {
   composioConsentText,
   composioKeyConsentText,
@@ -17,28 +7,98 @@ import type { ListedConnection } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldTitle,
+} from "@grasp-os/ui/components/field";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { SectionHeader } from "@grasp-os/ui/components/section-header";
+import { Text } from "@grasp-os/ui/components/text";
+import { colors, size as sizes, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useState } from "react";
-import type { ReactNode } from "react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Fragment, useState } from "react";
 
 import { holderName } from "../activity/pending.tsx";
-import { ErrorText } from "../error-text.tsx";
-import { formatDate, formatList } from "../format.ts";
+import { formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
-import type { AudiencesRead } from "./brain-audience.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
 
-// The person's connections and the shared ones, as core lists them: what
-// each reaches, who connected it, and, for admins and builders, which Apps
-// and agents hold a permission for it. Connect and core check every
-// reconnect, disconnect and revoke; the page leaves out only what the role
-// can't do.
+// What an app's page says of each connection beyond its row (the app's
+// page lists the accounts, app/page.tsx): signing in again and disconnecting from the
+// row, and under the page's sections what each connection holds besides:
+// why one whose access ran out can't be signed in to again, the consent a
+// Composio one was made with, who may read in the Brain what agents read
+// through a shared one, and which Apps and agents hold a permission for it.
+// Connect and core check every reconnect, disconnect and revoke; the page
+// leaves out only what the role can't do.
+
+const styles = stylex.create({
+  // A group's name in the card's flush rows, on their inset.
+  head: {
+    marginInline: space.tableCellInline,
+    marginBlockStart: space["3"],
+    marginBlockEnd: space["1"],
+  },
+  // A part of the card at its rows' inset, a hairline over every part but the first.
+  part: {
+    display: "grid",
+    gap: space["2"],
+    paddingBlock: space["3"],
+    paddingInline: space.tableCellInline,
+    borderBlockStartWidth: { default: sizes.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  // The consent, quoted as it was given.
+  quote: {
+    margin: 0,
+    paddingInlineStart: space["3"],
+    borderInlineStartWidth: sizes.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: colors.border,
+  },
+});
 
 /** Every permission the person may list, and the Apps' names. */
 export interface HeldPermissions {
@@ -46,25 +106,6 @@ export interface HeldPermissions {
   /** App names by ID; an ID stands in for an App not listed here. */
   appNames: ReadonlyMap<string, string>;
 }
-
-/** Where a connection stands, in words, by its status and whose it is. */
-const statusTextOf = ({
-  status,
-  scope,
-}: ListedConnection): MessageDescriptor => {
-  if (status === "needs_reauth") {
-    return msg`Needs someone to sign in again`;
-  }
-  if (status === "disconnected") {
-    return msg`Disconnected`;
-  }
-  return scope === "shared"
-    ? msg`Active, for the whole company`
-    : msg`Active, only for you`;
-};
-
-/** An ISO 8601 time as a date for people. */
-const dateOf = (iso: string): string => formatDate(iso);
 
 /** Who holds a permission, for people: the App's name, or the agent. */
 const holderOf = (
@@ -95,72 +136,77 @@ const HolderItem = ({
       : t`the whole connection`;
   const actions = formatList(permission.actions);
   return (
-    <li className="flex flex-col gap-1">
-      <div className="flex items-center justify-between gap-2">
-        <span>{t`${holder}: ${actions} on ${resource}`}</span>
-        {mayRevoke ? (
+    <Item size="xs">
+      <ItemContent>
+        <ItemTitle>{holder}</ItemTitle>
+        <ItemDescription>
+          {failure ?? t`${actions} on ${resource}`}
+        </ItemDescription>
+      </ItemContent>
+      {mayRevoke ? (
+        <ItemActions>
           <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
             aria-label={t`Revoke ${holder}'s permission`}
+            disabled={busy}
             onClick={() => {
               void change(
                 async (session) =>
                   await session.permissions.revoke(permission.id)
               );
             }}
+            size="sm"
+            variant="ghost"
           >
-            <Trans>Revoke</Trans>
+            {t`Revoke`}
           </Button>
-        ) : null}
-      </div>
-      <ErrorText>{failure}</ErrorText>
-    </li>
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 };
 
 /**
- * The Apps and agents that can use the connection `id` now: those with an
- * active permission for it. One only asked for allows nothing yet.
+ * The permissions that let Apps and agents use the connection `id` now:
+ * the active ones. One only asked for allows nothing yet.
  */
-const Holders = ({
-  id,
-  held,
-  mayRevoke,
-}: {
-  id: string;
-  held: HeldPermissions;
-  mayRevoke: boolean;
-}) => {
-  const holding = held.permissions.filter(
+const holdingOf = (held: HeldPermissions, id: string): Permission[] =>
+  held.permissions.filter(
     ({ object, status }) =>
       object.type === "connection" &&
       object.connectionId === id &&
       status === "active"
   );
+
+/** The Apps and agents that can use a connection now, each with what it may do. */
+const Holders = ({
+  holding,
+  appNames,
+  mayRevoke,
+}: {
+  holding: Permission[];
+  appNames: ReadonlyMap<string, string>;
+  mayRevoke: boolean;
+}) => {
+  const { t } = useLingui();
+  const title = t`Apps and agents with a permission`;
   return (
-    <div className="flex flex-col gap-1 text-sm">
-      <h4 className="font-medium">
-        <Trans>Apps and agents with a permission</Trans>
-      </h4>
-      {holding.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>None.</Trans>
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {holding.map((permission) => (
+    <section>
+      <div {...stylex.props(styles.head)}>
+        <SectionHeader size="sm" title={title} />
+      </div>
+      <ItemGroup aria-label={title}>
+        {holding.map((permission, index) => (
+          <Fragment key={permission.id}>
+            {index > 0 ? <ItemSeparator /> : null}
             <HolderItem
-              key={permission.id}
-              permission={permission}
-              holder={holderOf(permission, held.appNames)}
+              holder={holderOf(permission, appNames)}
               mayRevoke={mayRevoke}
+              permission={permission}
             />
-          ))}
-        </ul>
-      )}
-    </div>
+          </Fragment>
+        ))}
+      </ItemGroup>
+    </section>
   );
 };
 
@@ -173,6 +219,10 @@ const Holders = ({
 const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
   const { t } = useLingui();
   const who = connection.connectedByName ?? t`An admin`;
+  const tools =
+    connection.tools === undefined || connection.tools.length === 0
+      ? t`Tools allowed: none recorded`
+      : t`Tools allowed: ${ph({ tools: formatList(connection.tools) })}`;
   // The consent for how it was made, as connect recorded it; none where it
   // wasn't recorded.
   const consent =
@@ -182,33 +232,40 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
           managed: composioConsentText,
           key: composioKeyConsentText,
         }[connection.composioAuth];
+  if (consent === undefined) {
+    return (
+      <div {...stylex.props(styles.part)}>
+        <KeyValueList
+          items={[{ id: "consent", label: t`Consent`, value: tools }]}
+          orientation="horizontal"
+        />
+      </div>
+    );
+  }
   return (
-    <div className="flex flex-col gap-1 text-sm">
-      <h4 className="font-medium">
-        <Trans>Consent</Trans>
-      </h4>
-      {consent === undefined ? null : (
-        <>
-          <p>
-            <Trans>{who} consented to this before connecting it:</Trans>
-          </p>
-          <blockquote className="text-muted-foreground border-l-2 pl-3">
-            {consent}
-          </blockquote>
-          <p className="text-muted-foreground">
-            <Trans>
-              This is the consent as Grasp words it now. The audit log keeps a
-              hash of the exact text they were shown.
-            </Trans>
-          </p>
-        </>
-      )}
-      <p>
-        {connection.tools === undefined || connection.tools.length === 0
-          ? t`Tools allowed: none recorded`
-          : t`Tools allowed: ${ph({ tools: formatList(connection.tools) })}`}
-      </p>
-    </div>
+    <FieldGroup>
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldTitle>{t`Consent`}</FieldTitle>
+          <FieldDescription>
+            {t`This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown.`}
+          </FieldDescription>
+        </FieldContent>
+        <Collapsible fitContent>
+          <CollapsibleTrigger>
+            {t`${who} consented to this before connecting it`}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <blockquote {...stylex.props(styles.quote)}>
+              <Text color="muted" size="sm">
+                {consent}
+              </Text>
+            </blockquote>
+            <Text size="sm">{tools}</Text>
+          </CollapsibleContent>
+        </Collapsible>
+      </Field>
+    </FieldGroup>
   );
 };
 
@@ -241,13 +298,6 @@ const ranOutText = (
       );
 };
 
-const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
-  <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-8">
-    <dt className="text-muted-foreground flex-none sm:w-32">{term}</dt>
-    <dd className="flex min-w-0 items-center gap-2">{children}</dd>
-  </div>
-);
-
 /** Signing in again to a connection whose access ran out, in the connect dialog. */
 const SignInAgain = ({
   connection,
@@ -270,8 +320,9 @@ const SignInAgain = ({
           setOpen(true);
         }}
         size="sm"
+        variant="outline"
       >
-        <Trans>Sign in again</Trans>
+        {t`Sign in again`}
       </Button>
       <ConnectDialog
         again={connection}
@@ -284,12 +335,64 @@ const SignInAgain = ({
   );
 };
 
-/** Disconnecting, once confirmed: its tokens go, and everything that used it loses it. */
-const Disconnect = ({
+/** What Disconnect asks before it goes: its tokens go, and everything that used it loses it. */
+const DisconnectContent = ({
   connection,
   label,
   last,
+  onDone,
 }: {
+  connection: ListedConnection;
+  label: string;
+  last: boolean;
+  /** Closes the question once it is gone. */
+  onDone: () => void;
+}) => {
+  const { failure, change } = useChange({ leave: last });
+  const { t } = useLingui();
+  return (
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{t`Disconnect ${label}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again.`}
+          {connection.keepsReads === true
+            ? ` ${t`Everything the Brain kept from it is erased for good.`}`
+            : null}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      {failure === undefined ? null : (
+        <Alert variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
+      <AlertDialogFooter>
+        <AlertDialogCancel>{t`Close`}</AlertDialogCancel>
+        <Button
+          errorLabel={t`Couldn't disconnect`}
+          onClick={async () => {
+            let gone = false;
+            await change(async (session) => {
+              await session.connections.disconnect(connection.id);
+              gone = true;
+            });
+            if (!gone) {
+              throw new Error("Not disconnected");
+            }
+            onDone();
+          }}
+          size="sm"
+          variant="destructive"
+        >
+          {t`Disconnect`}
+        </Button>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  );
+};
+
+/** What Disconnect is given: the connection, its name, and whether it is the page's last. */
+interface DisconnectProps {
   connection: ListedConnection;
   label: string;
   /**
@@ -297,66 +400,58 @@ const Disconnect = ({
    * its page goes with it, so the list shows next.
    */
   last: boolean;
-}) => {
-  const { busy, failure, change } = useChange({ leave: last });
-  const [confirming, setConfirming] = useState(false);
+}
+
+/** Disconnecting, from its own button, once confirmed. */
+const Disconnect = ({ connection, label, last }: DisconnectProps) => {
   const { t } = useLingui();
+  const [open, setOpen] = useState(false);
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              aria-label={t`Disconnect ${label}`}
-            />
-          }
-        >
-          <Trans>Disconnect</Trans>
-        </DialogTrigger>
-        <DialogContent closeLabel={t`Close`}>
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Disconnect {label}?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                Its tokens are deleted, every App and agent loses it, and
-                actions waiting on it are dropped. Connect it again to use it
-                again.
-              </Trans>
-            </DialogDescription>
-            {connection.keepsReads === true ? (
-              <DialogDescription>
-                <Trans>
-                  Everything the Brain kept from it is erased for good.
-                </Trans>
-              </DialogDescription>
-            ) : null}
-          </DialogHeader>
-          <DialogFooter closeLabel={t`Close`} showCloseButton>
-            <Button
-              variant="destructive"
-              disabled={busy}
-              onClick={() => {
-                setConfirming(false);
-                void change(
-                  async (session) =>
-                    await session.connections.disconnect(connection.id)
-                );
-              }}
-            >
-              <Trans>Disconnect</Trans>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    <AlertDialog onOpenChange={setOpen} open={open}>
+      <AlertDialogTrigger asChild>
+        <Button aria-label={t`Disconnect ${label}`} size="sm" variant="outline">
+          {t`Disconnect`}
+        </Button>
+      </AlertDialogTrigger>
+      <DisconnectContent
+        connection={connection}
+        label={label}
+        last={last}
+        onDone={() => {
+          setOpen(false);
+        }}
+      />
+    </AlertDialog>
   );
 };
+
+/** Disconnecting, opened by another control (an app's Manage menu), once confirmed. */
+export const DisconnectDialog = ({
+  open,
+  onOpenChange,
+  ...rest
+}: DisconnectProps & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => (
+  <AlertDialog onOpenChange={onOpenChange} open={open}>
+    <DisconnectContent
+      {...rest}
+      onDone={() => {
+        onOpenChange(false);
+      }}
+    />
+  </AlertDialog>
+);
+
+/** A connection's name: its app's, with its account's where the provider names one. */
+const labelOf = (
+  connection: ListedConnection,
+  integration: Integration
+): string =>
+  connection.accountName === null
+    ? integration.name
+    : `${integration.name} (${connection.accountName})`;
 
 /**
  * Whether `identity` chooses who may read in the Brain what agents read
@@ -374,123 +469,64 @@ const choosesBrainAudience = (
   connection.status !== "disconnected";
 
 /**
- * One connection to the integration, as the prototype's Account section
- * shows it: its account, where it stands, who connected it and when, and
- * what can be done with it.
+ * Whether this person disconnects `connection` from the app's page: only its
+ * owner sees a personal one, admins disconnect shared ones, and Grasp staff
+ * none. Connect checks it again.
  */
-const ConnectionItem = ({
+export const mayDisconnect = (
+  connection: ListedConnection,
+  identity: Pick<Identity, "role" | "staff">
+): boolean =>
+  (connection.scope === "personal" || isAdmin(identity.role)) &&
+  !identity.staff;
+
+/**
+ * What can be done to one account from its row on the app's page: sign in
+ * again where its access ran out and this person may, and disconnect where
+ * they may. Each dialog grows from its own button.
+ */
+export const AccountActions = ({
   connection,
   integration,
-  held,
   identity,
-  audiences,
-  onAudienceChanged,
 }: {
   connection: ListedConnection;
   integration: Integration;
-  held: HeldPermissions | undefined;
   identity: Identity;
-  /** Every shared connection's Brain audience, read once for the page. */
-  audiences: AudiencesRead;
-  /** A change or an erase of one was asked for: they are read again. */
-  onAudienceChanged: () => void;
 }) => {
-  const { t } = useLingui();
-  const admin = isAdmin(identity.role);
-  // Only the owner sees a personal connection here, and admins disconnect
-  // shared ones: connect checks both.
-  const mayDisconnect = connection.scope === "personal" || admin;
-  const reconnectable = canReconnect(connection, integration.offered, identity);
-  const { accountName } = connection;
-  const { name } = integration;
-  const label = accountName === null ? name : `${name} (${accountName})`;
-  const connectedBy =
-    connection.connectedBy === identity.userId
-      ? t`You`
-      : (connection.connectedByName ?? t`Someone no longer here`);
-  const ranOut = connection.status === "needs_reauth";
+  const label = labelOf(connection, integration);
   return (
-    <li className="bg-card flex flex-col gap-4 rounded-xl border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-medium">{label}</h3>
-        <div className="flex items-start gap-2">
-          {ranOut && reconnectable ? (
-            <SignInAgain
-              connection={connection}
-              identity={identity}
-              integration={integration}
-              label={label}
-            />
-          ) : null}
-          {mayDisconnect ? (
-            <Disconnect
-              connection={connection}
-              label={label}
-              last={!integration.listed && integration.connections.length === 1}
-            />
-          ) : null}
-        </div>
-      </div>
-      <dl className="flex flex-col gap-3">
-        <Detail term={t`Status`}>
-          <span
-            aria-hidden="true"
-            className={
-              ranOut
-                ? "bg-status-attention size-1.75 rounded-full"
-                : "bg-status-agreed size-1.75 rounded-full"
-            }
-          />
-          {i18n._(statusTextOf(connection))}
-        </Detail>
-        <Detail term={t`Account`}>
-          {accountName ?? t`Not named by the provider`}
-        </Detail>
-        <Detail term={t`Connected by`}>{connectedBy}</Detail>
-        <Detail term={t`Connected on`}>{dateOf(connection.createdAt)}</Detail>
-      </dl>
-      {ranOut && !reconnectable ? (
-        <p className="text-muted-foreground">
-          {ranOutText(
-            connection.source === "native" &&
-              oauthProviderSchema.safeParse(connection.provider).success,
-            integration.offered,
-            identity.staff
-          )}
-        </p>
+    <>
+      {connection.status === "needs_reauth" &&
+      canReconnect(connection, integration.offered, identity) ? (
+        <SignInAgain
+          connection={connection}
+          identity={identity}
+          integration={integration}
+          label={label}
+        />
       ) : null}
-      {ranOut && reconnectable ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            Its access ran out. Sign in again with the same account: Apps and
-            agents keep their permissions for it.
-          </Trans>
-        </p>
-      ) : null}
-      {connection.source === "composio" ? (
-        <ConsentRecord connection={connection} />
-      ) : null}
-      {choosesBrainAudience(connection, identity) ? (
-        <BrainAudience
-          audiences={audiences}
+      {mayDisconnect(connection, identity) ? (
+        <Disconnect
           connection={connection}
           label={label}
-          onChanged={onAudienceChanged}
+          last={!integration.listed && integration.connections.length === 1}
         />
       ) : null}
-      {held === undefined ? null : (
-        <Holders
-          id={connection.id}
-          held={held}
-          mayRevoke={isMemberAdmin(identity)}
-        />
-      )}
-    </li>
+    </>
   );
 };
 
-/** The integration's connections this person can see, each on its card. */
-export const ConnectionList = ({
+/**
+ * What each of an app's connections holds beyond its row on the app's
+ * page: why one whose access ran out can't be signed in to again by this
+ * person; the consent a Composio one was made with; for the company's
+ * admins on a shared one, who may read in the Brain what agents read
+ * through it; and, for admins and builders, the Apps and agents holding a
+ * permission for it. A card for each connection with any of these, named
+ * by its account where there are several; nothing for the rest.
+ */
+export const ConnectionsAccess = ({
   integration,
   held,
   identity,
@@ -500,25 +536,68 @@ export const ConnectionList = ({
   held: Loaded<HeldPermissions> | undefined;
   identity: Identity;
 }) => {
+  const { t } = useLingui();
   // Read once for every card that chooses one, never a read a card.
   const { read: audiences, onChanged } = useBrainAudiences(
     integration.connections.some((connection) =>
       choosesBrainAudience(connection, identity)
     )
   );
-  return (
-    <ul className="flex flex-col gap-3">
-      {integration.connections.map((connection) => (
-        <ConnectionItem
-          audiences={audiences}
-          onAudienceChanged={onChanged}
-          connection={connection}
-          held={held?.state === "ready" ? held.data : undefined}
-          identity={identity}
-          integration={integration}
-          key={connection.id}
-        />
-      ))}
-    </ul>
-  );
+  const holders = held?.state === "ready" ? held.data : undefined;
+  const several = integration.connections.length > 1;
+  return integration.connections.map((connection) => {
+    const label = labelOf(connection, integration);
+    const stuck =
+      connection.status === "needs_reauth" &&
+      !canReconnect(connection, integration.offered, identity);
+    const consented = connection.source === "composio";
+    const chooses = choosesBrainAudience(connection, identity);
+    const holding =
+      holders === undefined ? [] : holdingOf(holders, connection.id);
+    if (!stuck && !consented && !chooses && holding.length === 0) {
+      return null;
+    }
+    return (
+      <Card asChild key={connection.id} size="sm">
+        <section>
+          <CardHeader>
+            <CardTitle level={2}>{several ? label : t`Access`}</CardTitle>
+          </CardHeader>
+          <CardContent flush>
+            {stuck ? (
+              <div {...stylex.props(styles.part)}>
+                <Alert variant="warning">
+                  <AlertDescription>
+                    {ranOutText(
+                      connection.source === "native" &&
+                        oauthProviderSchema.safeParse(connection.provider)
+                          .success,
+                      integration.offered,
+                      identity.staff
+                    )}
+                  </AlertDescription>
+                </Alert>
+              </div>
+            ) : null}
+            {consented ? <ConsentRecord connection={connection} /> : null}
+            {chooses ? (
+              <BrainAudience
+                audiences={audiences}
+                connection={connection}
+                label={label}
+                onChanged={onChanged}
+              />
+            ) : null}
+            {holders === undefined || holding.length === 0 ? null : (
+              <Holders
+                appNames={holders.appNames}
+                holding={holding}
+                mayRevoke={isMemberAdmin(identity)}
+              />
+            )}
+          </CardContent>
+        </section>
+      </Card>
+    );
+  });
 };
