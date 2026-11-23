@@ -27,6 +27,7 @@ import { appName, personName } from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
 import { actorIcon, actorOf, entryWords } from "./audit-log.tsx";
+import { typeLabels } from "./type-labels.ts";
 
 // One audit event's details, beside the events on Settings › Audit trail
 // (or in a Sheet on a phone), on Damsko's Inspector (blocks/inspector-01):
@@ -114,12 +115,17 @@ const useWhoRows = () => {
 
 /**
  * What it concerned, each opening what it names: the thing acted on (its
- * events), the App and the workflow.
+ * events, where the event was found: the log or the archive), the App and
+ * the workflow.
  */
 const useAboutRows = () => {
   const { t } = useLingui();
   const navigate = useNavigate();
-  return (event: AuditEvent, directory: Directory): InspectorRow[] => {
+  return (
+    event: AuditEvent,
+    directory: Directory,
+    archive: true | undefined
+  ): InspectorRow[] => {
     const rows: InspectorRow[] = [];
     const { target, actor } = event;
     if (target !== undefined) {
@@ -130,7 +136,7 @@ const useAboutRows = () => {
         onClick: () => {
           void navigate({
             to: "/settings/audit",
-            search: { target: target.id },
+            search: { target: target.id, archive },
           });
         },
       });
@@ -213,8 +219,9 @@ const chainId = (key: string, label: string, value: string): KeyValueItem => ({
 });
 
 /**
- * Its place in the tamper-evident chain: whether it checks out, where it
- * stands, and the ids to copy, each on its own line.
+ * Its place in the tamper-evident chain: whether it checks out, its type
+ * (which the table leaves out where it is narrow), where it stands, and
+ * the ids to copy, each on its own line.
  */
 const useIntegrityFacts = () => {
   const { t } = useLingui();
@@ -228,6 +235,15 @@ const useIntegrityFacts = () => {
           ? t`Yes: it is unchanged and links to the event before it.`
           : t`No: it was changed, or doesn't link to the event before it.`,
       },
+      ...(record.type === null
+        ? []
+        : [
+            {
+              id: "type",
+              label: t`Type`,
+              value: i18n._(typeLabels[record.type]),
+            },
+          ]),
       { id: "position", label: t`Position`, value: String(record.seq) },
       {
         id: "recorded",
@@ -269,17 +285,21 @@ const SearchAction = ({
 /**
  * One event's details, on Damsko's Inspector: beside the table
  * (`framed`), or in a Sheet on a phone. `onClose` closes whichever holds
- * it.
+ * it. Its searches (their events, similar ones, what it was about) look
+ * where the event was found: in the archive when it came from there.
  */
 export const EventInspector = ({
   record,
   directory,
   framed,
+  archive = false,
   onClose,
 }: {
   record: AuditRecord;
   directory: Directory;
   framed: boolean;
+  /** The event was found in the archive, not the log. */
+  archive?: boolean;
   onClose?: () => void;
 }) => {
   const { t, i18n: page } = useLingui();
@@ -293,7 +313,9 @@ export const EventInspector = ({
   const detailRows = useDetailRows();
   const integrityFacts = useIntegrityFacts();
   const { event } = record;
-  const about = event === null ? [] : aboutRows(event, directory);
+  // The archive stays searched; the log's own address leaves it out.
+  const scope = archive ? true : undefined;
+  const about = event === null ? [] : aboutRows(event, directory, scope);
   const details = event === null ? [] : detailRows(event);
   const findSimilar =
     event === null ? undefined : (
@@ -301,7 +323,7 @@ export const EventInspector = ({
         onClick={() => {
           void navigate({
             to: "/settings/audit",
-            search: { action: event.action },
+            search: { action: event.action, archive: scope },
           });
         }}
       >
@@ -323,7 +345,7 @@ export const EventInspector = ({
                 onClick={() => {
                   void navigate({
                     to: "/settings/audit",
-                    search: { actor: id },
+                    search: { actor: id, archive: scope },
                   });
                 }}
               >

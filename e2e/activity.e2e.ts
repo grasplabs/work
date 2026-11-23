@@ -23,6 +23,53 @@ const startingWith = (start: string): RegExp =>
   new RegExp(`^${start}(?:\\. |\\?$|$)`, "u");
 
 /**
+ * The widths the audit trail must fit: a wide window, a laptop's, a
+ * tablet's, and a phone.
+ */
+const widths = [
+  { width: 1440, height: 900 },
+  { width: 1024, height: 768 },
+  { width: 768, height: 1024 },
+  { width: 390, height: 844 },
+];
+
+/**
+ * Whether the events table fits its box on `page` as it is now: the table
+ * no wider than the box it scrolls in, the page not wider than the window,
+ * and every row's button to its details wholly in view.
+ */
+const eventsFit = async (page: Page, table: Locator) => {
+  const { tableWidth, boxWidth, pageWidth, window } = await table.evaluate(
+    (element) => ({
+      tableWidth: element.scrollWidth,
+      boxWidth: element.parentElement?.clientWidth ?? 0,
+      pageWidth: document.documentElement.scrollWidth,
+      window: document.documentElement.clientWidth,
+    })
+  );
+  const buttons = await table
+    .getByRole("button", { name: /^Details of event /u })
+    .evaluateAll((each) =>
+      each.map((button) => {
+        const { left, right } = button.getBoundingClientRect();
+        const box = button.closest("table")?.parentElement;
+        const edge = box?.getBoundingClientRect();
+        return (
+          edge !== undefined &&
+          left >= edge.left &&
+          right <= edge.right &&
+          right <= document.documentElement.clientWidth
+        );
+      })
+    );
+  return {
+    table: tableWidth <= boxWidth,
+    page: pageWidth <= window,
+    buttons: buttons.length > 0 && buttons.every(Boolean),
+  };
+};
+
+/**
  * Opens, in the inbox on `page`, the permission request `who` asks (its
  * row among other tests' items), and gives the item.
  */
@@ -129,6 +176,19 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(rows.filter({ hasText: "Asked for a permission" })).toHaveCount(
     1
   );
+  // The table fits its box from a wide window down to a phone: no column
+  // cut off, no sideways scroll, and the button to an event's details in
+  // view, which opens it without moving the table.
+  const table = page.getByRole("table", { name: "Events" });
+  for (const size of widths) {
+    // oxlint-disable-next-line no-await-in-loop -- one window size at a time
+    await page.setViewportSize(size);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await expect
+      .poll(async () => await eventsFit(page, table))
+      .toStrictEqual({ table: true, page: true, buttons: true });
+  }
+  await page.setViewportSize(widths[0] ?? { width: 1440, height: 900 });
   // Its details beside the table, or in a sheet on a narrow page: what it
   // recorded, and its action to copy.
   await granted.getByRole("button", { name: /^Details of event /u }).click();
@@ -166,13 +226,20 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   expect(lines[1]).toContain(approved);
 
   // Text that can't start an action is dropped, not refused by core, and
-  // so is a day no calendar has, rather than searched as the next month's.
+  // so is a day no calendar has, rather than searched as the next month's:
+  // only the target is set.
   await page.goto(
-    `/settings/audit?target=${approved}&action=${encodeURIComponent("no such action!")}&from=2024-02-29&to=2099-02-29`
+    `/settings/audit?target=${approved}&action=${encodeURIComponent("no such action!")}&to=2099-02-29`
   );
-  await page.getByRole("button", { name: /^Filters, \d set$/u }).click();
+  await page.getByRole("button", { name: "Filters, 1 set" }).click();
   await expect(page.getByRole("textbox", { name: "Action" })).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await expect(granted).toHaveCount(1);
+  // A leap day is a day: the target and the dates are set.
+  await page.goto(`/settings/audit?target=${approved}&from=2024-02-29`);
+  await expect(
+    page.getByRole("button", { name: "Filters, 2 set" })
+  ).toBeVisible();
   await expect(granted).toHaveCount(1);
   await expect(page.getByRole("alert").filter({ hasText: /\S/u })).toHaveCount(
     0

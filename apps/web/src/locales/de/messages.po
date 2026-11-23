@@ -2029,6 +2029,10 @@ msgid "Added"
 msgstr "Ergänzt"
 
 #: src/activity/audit-words.ts
+msgid "Added a chat to a project"
+msgstr "Einen Chat zu einem Projekt hinzugefügt"
+
+#: src/activity/audit-words.ts
 msgid "Added a document to an agent"
 msgstr "Einem Agenten ein Dokument hinzugefügt"
 
@@ -2037,12 +2041,20 @@ msgid "Added a member to an App"
 msgstr "Ein Mitglied zu einer App hinzugefügt"
 
 #: src/activity/audit-words.ts
+msgid "Added a person or team to a project"
+msgstr "Eine Person oder ein Team zu einem Projekt hinzugefügt"
+
+#: src/activity/audit-words.ts
 msgid "Added a webhook to an App"
 msgstr "Hat einer App einen Webhook hinzugefügt"
 
 #: src/activity/audit-words.ts
 msgid "Added an AI provider's key"
 msgstr "Den Schlüssel eines KI-Anbieters hinzugefügt"
+
+#: src/activity/audit-words.ts
+msgid "Added an App or workflow to a project"
+msgstr "Eine App oder einen Workflow zu einem Projekt hinzugefügt"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Added by hand"
@@ -2093,6 +2105,7 @@ msgstr "Zu den Skills des Teams hinzugefügt und seitdem außer Gebrauch genomme
 msgid "Added to the team's skills."
 msgstr "Zu den Skills des Teams hinzugefügt."
 
+#: src/projects/file-item-dialog.tsx
 #: src/projects/project-people.tsx
 msgid "Adding"
 msgstr "Wird hinzugefügt"
@@ -3611,6 +3624,10 @@ msgid "Changed a permission"
 msgstr "Eine Berechtigung geändert"
 
 #: src/activity/audit-words.ts
+msgid "Changed a project"
+msgstr "Ein Projekt geändert"
+
+#: src/activity/audit-words.ts
 msgid "Changed a request for packages"
 msgstr "Eine Paketanfrage geändert"
 
@@ -4555,6 +4572,10 @@ msgid "Created a data store"
 msgstr "Einen Datenspeicher erstellt"
 
 #: src/activity/audit-words.ts
+msgid "Created a project"
+msgstr "Ein Projekt angelegt"
+
+#: src/activity/audit-words.ts
 msgid "Created a team"
 msgstr "Ein Team angelegt"
 
@@ -4862,6 +4883,10 @@ msgstr "Gelöscht"
 #: src/activity/audit-words.ts
 msgid "Deleted a data store"
 msgstr "Einen Datenspeicher gelöscht"
+
+#: src/activity/audit-words.ts
+msgid "Deleted a project"
+msgstr "Ein Projekt gelöscht"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
@@ -9405,6 +9430,7 @@ msgstr "Keines: Sein Anbieter wurde entfernt."
 msgid "None."
 msgstr "Keine."
 
+#: src/projects/file-item-dialog.tsx
 #: src/projects/project-people.tsx
 msgid "Not added"
 msgstr "Nicht hinzugefügt"
@@ -15328,8 +15354,20 @@ msgid "Too many tries. Wait a minute, then try again."
 msgstr "Zu viele Versuche. Warte eine Minute und versuche es dann noch einmal."
 
 #: src/activity/audit-words.ts
+msgid "Took a chat out of a project"
+msgstr "Einen Chat aus einem Projekt genommen"
+
+#: src/activity/audit-words.ts
+msgid "Took a person or team out of a project"
+msgstr "Eine Person oder ein Team aus einem Projekt genommen"
+
+#: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "Eine Antwort auf die E-Mail eines Laufs angenommen"
+
+#: src/activity/audit-words.ts
+msgid "Took an App or workflow out of a project"
+msgstr "Eine App oder einen Workflow aus einem Projekt genommen"
 
 #: src/activity/audit-words.ts
 msgid "Took away an answer to the Brain's question"
@@ -15485,6 +15523,7 @@ msgctxt "inbox item kind: two sources disagree"
 msgid "Two answers"
 msgstr "Zwei Antworten"
 
+#: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/apps/field-editor.tsx
 #: src/workflows/files-and-apps.tsx

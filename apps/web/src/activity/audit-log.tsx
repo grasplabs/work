@@ -215,9 +215,13 @@ const styles = stylex.create({
     paddingInline: space.tableCellInline,
     paddingBlockEnd: space["3"],
   },
-  // What the event did, and its mark where it didn't verify, on one line.
+  // What the event did, and its mark where it didn't verify: on one line
+  // where there is room, the mark under the words where there isn't. A
+  // word longer than the column breaks rather than widen the table.
   event: {
     display: "inline-flex",
+    flexWrap: "wrap",
+    overflowWrap: "anywhere",
     alignItems: "center",
     gap: space["2"],
   },
@@ -227,11 +231,13 @@ const styles = stylex.create({
     marginBlock: `calc(-1 * ${space["1"]})`,
   },
   // Who did it: a face (or what kind of actor it is) before the name.
+  // An ID for a name (an agent's, an App's) breaks rather than widen the table.
   who: {
     display: "inline-flex",
     alignItems: "center",
     gap: space["2"],
     minWidth: 0,
+    overflowWrap: "anywhere",
   },
   // The kind's icon, in the room a face takes.
   kind: {
@@ -787,7 +793,14 @@ export const LogRecords = ({
   const lastShown = at * pageSize + shown.length;
   return (
     <>
-      {/* One page of the log at a time: Newer and Older below page through core's. */}
+      {/*
+        One page of the log at a time: Newer and Older below page through
+        core's. It fits its box from a wide window down to a phone: what
+        was done and by whom wrap, the type goes where the box is narrow
+        and who did it where it is a phone's (an event's details say
+        both), and the column of buttons has no words over it, so the
+        button that opens an event stays in view.
+      */}
       <Table
         aria-label={archive ? t`Archived events` : t`Events`}
         density="compact"
@@ -800,17 +813,15 @@ export const LogRecords = ({
             <TableHead>
               <Trans>Event</Trans>
             </TableHead>
-            <TableHead>
+            <TableHead hideBelow="sm">
               <Trans>By</Trans>
             </TableHead>
             {beside ? null : (
-              <TableHead>
+              <TableHead hideBelow="md">
                 <Trans>Type</Trans>
               </TableHead>
             )}
-            <TableHead align="end">
-              <Trans>Details</Trans>
-            </TableHead>
+            <TableHead align="end" aria-label={t`Details`} />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -819,7 +830,7 @@ export const LogRecords = ({
             return (
               <TableRow current={open === seq} key={seq}>
                 <TableCell>{entryTime(record.receivedAt)}</TableCell>
-                <TableCell>
+                <TableCell wrap>
                   <span {...stylex.props(styles.event)}>
                     {entryWords(record.event?.action)}
                     {record.verified ? null : (
@@ -829,11 +840,11 @@ export const LogRecords = ({
                     )}
                   </span>
                 </TableCell>
-                <TableCell>
+                <TableCell hideBelow="sm" wrap>
                   <EntryWho directory={directory} record={record} />
                 </TableCell>
                 {beside ? null : (
-                  <TableCell>
+                  <TableCell hideBelow="md">
                     {record.type === null ? (
                       "–"
                     ) : (

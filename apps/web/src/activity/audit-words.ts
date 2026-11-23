@@ -270,6 +270,27 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "team.member.added", text: msg`Added someone to a team` },
   { action: "team.member.removed", text: msg`Took someone off a team` },
   { action: "team", text: msg`Changed a team` },
+  { action: "project.created", text: msg`Created a project` },
+  { action: "project.updated", text: msg`Changed a project` },
+  { action: "project.deleted", text: msg`Deleted a project` },
+  {
+    action: "project.item.filed",
+    text: msg`Added an App or workflow to a project`,
+  },
+  {
+    action: "project.item.unfiled",
+    text: msg`Took an App or workflow out of a project`,
+  },
+  {
+    action: "project.member.added",
+    text: msg`Added a person or team to a project`,
+  },
+  {
+    action: "project.member.removed",
+    text: msg`Took a person or team out of a project`,
+  },
+  { action: "chat.filed", text: msg`Added a chat to a project` },
+  { action: "chat.unfiled", text: msg`Took a chat out of a project` },
   {
     action: "workflow.decision",
     text: msg`A decision was put to people, or answered`,

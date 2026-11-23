@@ -61,7 +61,7 @@ let root: Root | undefined;
 const directory = { people: new Map(), teams: new Map(), apps: new Map() };
 
 /** The events, and the details of the one opened, as the audit trail's page holds them. */
-const Events = ({ first }: { first: AuditPage }) => {
+const Events = ({ first, archive }: { first: AuditPage; archive: boolean }) => {
   const [open, setOpen] = useState<AuditRecord>();
   return (
     <>
@@ -69,19 +69,31 @@ const Events = ({ first }: { first: AuditPage }) => {
         directory={directory}
         first={first}
         onDetails={setOpen}
-        search={{}}
+        search={archive ? { archive } : {}}
       />
       {open === undefined ? null : (
-        <EventInspector directory={directory} framed record={open} />
+        <EventInspector
+          archive={archive}
+          directory={directory}
+          framed
+          record={open}
+        />
       )}
     </>
   );
 };
 
-/** The events, core's first page `first`, and its older pages from `older`. */
+/** The audit trail's filters the page went to last, by the router. */
+let went: () => Record<string, unknown> = () => ({});
+
+/**
+ * The events, core's first page `first`, and its older pages from `older`:
+ * the log's, or the archive's.
+ */
 const shown = async (
   first: AuditPage,
-  older: (before: number) => AuditPage
+  older: (before: number) => AuditPage,
+  archive = false
 ): Promise<number[]> => {
   const asked: number[] = [];
   const session = {
@@ -100,23 +112,24 @@ const shown = async (
       run: (reached: typeof session) => Promise<T>
     ): Promise<T> => await run(session),
   };
-  const router = createRouter({
+  const created = createRouter({
     routeTree: createRootRoute({
-      component: () => <Events first={first} />,
+      component: () => <Events archive={archive} first={first} />,
     }),
     history: createMemoryHistory(),
     context: { core },
   });
+  went = () => ({ ...created.state.location.search });
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
+        <RouterProvider router={created} />
       </I18nProvider>
     );
-    await router.load();
+    await created.load();
   });
   return asked;
 };
@@ -168,6 +181,7 @@ describe(LogRecords, () => {
       root?.unmount();
     });
     root = undefined;
+    went = () => ({});
     document.body.innerHTML = "";
   });
 
@@ -228,5 +242,49 @@ describe(LogRecords, () => {
       verified: true,
       hash: true,
     });
+  });
+
+  it("keeps to the archive when an archived event's details search on: their events, similar ones, what it was about", async () => {
+    const person: AuditRecord = {
+      ...record(7),
+      event: {
+        id: "event-7",
+        at: "2026-01-05T10:00:00.000Z",
+        source: "core",
+        actor: { type: "person", userId: "user-1" },
+        action: "project.created",
+        target: { type: "project", id: "project-1" },
+        provenance: [],
+        detail: { name: "Launch" },
+      },
+    };
+    await shown(
+      { records: [person], next: null },
+      () => ({ records: [], next: null }),
+      true
+    );
+    await press("Details of event 7");
+    const searches: unknown[] = [];
+    for (const name of ["Their events", "Find similar"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one search after the other
+      await press(name);
+      searches.push(went());
+    }
+    // What it was about: the About list's row, named by the target's ID.
+    const about = document.querySelector('[aria-label="About"] button');
+    await act(async () => {
+      if (about instanceof HTMLElement) {
+        about.click();
+      }
+      await Promise.resolve();
+    });
+    await settled();
+    searches.push(went());
+
+    expect(searches).toStrictEqual([
+      { actor: "user-1", archive: true },
+      { action: "project.created", archive: true },
+      { target: "project-1", archive: true },
+    ]);
   });
 });

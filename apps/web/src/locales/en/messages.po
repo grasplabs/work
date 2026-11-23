@@ -2029,6 +2029,10 @@ msgid "Added"
 msgstr "Added"
 
 #: src/activity/audit-words.ts
+msgid "Added a chat to a project"
+msgstr "Added a chat to a project"
+
+#: src/activity/audit-words.ts
 msgid "Added a document to an agent"
 msgstr "Added a document to an agent"
 
@@ -2037,12 +2041,20 @@ msgid "Added a member to an App"
 msgstr "Added a member to an App"
 
 #: src/activity/audit-words.ts
+msgid "Added a person or team to a project"
+msgstr "Added a person or team to a project"
+
+#: src/activity/audit-words.ts
 msgid "Added a webhook to an App"
 msgstr "Added a webhook to an App"
 
 #: src/activity/audit-words.ts
 msgid "Added an AI provider's key"
 msgstr "Added an AI provider's key"
+
+#: src/activity/audit-words.ts
+msgid "Added an App or workflow to a project"
+msgstr "Added an App or workflow to a project"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Added by hand"
@@ -2093,6 +2105,7 @@ msgstr "Added to the team's skills, and since taken out of use."
 msgid "Added to the team's skills."
 msgstr "Added to the team's skills."
 
+#: src/projects/file-item-dialog.tsx
 #: src/projects/project-people.tsx
 msgid "Adding"
 msgstr "Adding"
@@ -3611,6 +3624,10 @@ msgid "Changed a permission"
 msgstr "Changed a permission"
 
 #: src/activity/audit-words.ts
+msgid "Changed a project"
+msgstr "Changed a project"
+
+#: src/activity/audit-words.ts
 msgid "Changed a request for packages"
 msgstr "Changed a request for packages"
 
@@ -4555,6 +4572,10 @@ msgid "Created a data store"
 msgstr "Created a data store"
 
 #: src/activity/audit-words.ts
+msgid "Created a project"
+msgstr "Created a project"
+
+#: src/activity/audit-words.ts
 msgid "Created a team"
 msgstr "Created a team"
 
@@ -4862,6 +4883,10 @@ msgstr "Deleted"
 #: src/activity/audit-words.ts
 msgid "Deleted a data store"
 msgstr "Deleted a data store"
+
+#: src/activity/audit-words.ts
+msgid "Deleted a project"
+msgstr "Deleted a project"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
@@ -9405,6 +9430,7 @@ msgstr "None: its provider was removed."
 msgid "None."
 msgstr "None."
 
+#: src/projects/file-item-dialog.tsx
 #: src/projects/project-people.tsx
 msgid "Not added"
 msgstr "Not added"
@@ -15328,8 +15354,20 @@ msgid "Too many tries. Wait a minute, then try again."
 msgstr "Too many tries. Wait a minute, then try again."
 
 #: src/activity/audit-words.ts
+msgid "Took a chat out of a project"
+msgstr "Took a chat out of a project"
+
+#: src/activity/audit-words.ts
+msgid "Took a person or team out of a project"
+msgstr "Took a person or team out of a project"
+
+#: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "Took a reply to a run's email"
+
+#: src/activity/audit-words.ts
+msgid "Took an App or workflow out of a project"
+msgstr "Took an App or workflow out of a project"
 
 #: src/activity/audit-words.ts
 msgid "Took away an answer to the Brain's question"
@@ -15485,6 +15523,7 @@ msgctxt "inbox item kind: two sources disagree"
 msgid "Two answers"
 msgstr "Two answers"
 
+#: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/apps/field-editor.tsx
 #: src/workflows/files-and-apps.tsx

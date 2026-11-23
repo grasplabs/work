@@ -114,11 +114,14 @@ const useWide = () => {
 const Details = ({
   record,
   directory,
+  archive,
   wide,
   onClose,
 }: {
   record: AuditRecord;
   directory: Directory;
+  /** The event was found in the archive. */
+  archive: boolean;
   wide: boolean;
   onClose: () => void;
 }) => {
@@ -126,6 +129,7 @@ const Details = ({
     return (
       <div {...stylex.props(styles.aside)}>
         <EventInspector
+          archive={archive}
           directory={directory}
           framed
           onClose={onClose}
@@ -149,7 +153,12 @@ const Details = ({
             <Trans>Event details</Trans>
           </SheetTitle>
         </SheetHeader>
-        <EventInspector directory={directory} framed={false} record={record} />
+        <EventInspector
+          archive={archive}
+          directory={directory}
+          framed={false}
+          record={record}
+        />
       </SheetContent>
     </Sheet>
   );
@@ -215,6 +224,7 @@ const AuditTrail = () => {
         </section>
         {open === undefined || directory === undefined ? null : (
           <Details
+            archive={filters.archive === true}
             directory={directory}
             key={open.seq}
             onClose={() => {

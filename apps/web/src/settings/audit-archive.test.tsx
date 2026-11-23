@@ -19,17 +19,18 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { auditFilterOf, LogBar, LogRecords } from "../activity/audit-log.tsx";
+import { LogBar, LogRecords, readLog } from "../activity/audit-log.tsx";
 import type { LogSearch } from "../activity/log-search.ts";
+import type { Session } from "../core.ts";
 import { RetentionRows } from "./audit-archive.tsx";
 
 // Settings › Audit trail › the archive (searched from the events' Filters,
 // read a stretch at a time, and exported with the log) and Retention (in
-// the Integrity and archive dialog), against core's
-// audit API as the page reaches it over RPC (the boundary from the web
-// app), faked: an archive of `stretches`, newest first, a stretch per
-// page as core reads it, filtered by action, and the deployment's
-// retention.
+// the Integrity and archive dialog), against core's audit API as the page
+// reaches it over RPC (the boundary from the web app), faked: the live log,
+// an archive of `stretches`, newest first, a stretch per page as core
+// reads it, filtered by action, and the deployment's retention. Nobody is
+// listed, so events name who did them by ID.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -57,7 +58,13 @@ const archived = (seq: number, action: string): AuditRecord => {
   };
 };
 
-/** Core's audit API: an archive in stretches, and the deployment's retention. */
+/** Nobody listed: names stay IDs. */
+const none = async (): Promise<never[]> => {
+  await Promise.resolve();
+  return [];
+};
+
+/** Core's audit API: the log, an archive in stretches, and the deployment's retention. */
 const fakeAudit = ({
   stretches,
   retention,
@@ -65,8 +72,16 @@ const fakeAudit = ({
   stretches: AuditRecord[][];
   retention: AuditRetention;
 }) => {
+  /** What the archive was asked for. */
   const asked: { action?: string; before?: number }[] = [];
+  /** How often the live log was searched. */
+  const log = { searched: 0 };
   const audit = {
+    search: async (): Promise<AuditPage> => {
+      await Promise.resolve();
+      log.searched += 1;
+      return { records: [], next: null };
+    },
     searchArchive: async (
       filter?: AuditFilter,
       before?: number
@@ -94,7 +109,16 @@ const fakeAudit = ({
       return retention;
     },
   };
-  return { session: { audit }, asked };
+  return {
+    session: {
+      audit,
+      members: { list: none, teams: none },
+      apps: { list: none },
+      connections: { agents: none },
+    },
+    asked,
+    log,
+  };
 };
 
 let root: Root | undefined;
@@ -110,11 +134,9 @@ const settled = async (): Promise<void> => {
   });
 };
 
-const directory = { people: new Map(), teams: new Map(), apps: new Map() };
-
 /**
  * The events as the page shows them for `search`: the bar over them, the
- * first page read as the page's loader reads it, and the retention rows.
+ * first page read by the page's loader, and the retention rows.
  */
 const shown = async (
   session: ReturnType<typeof fakeAudit>["session"],
@@ -125,24 +147,24 @@ const shown = async (
       run: (reached: typeof session) => Promise<T>
     ): Promise<T> => await run(session),
   };
-  const first =
-    search.archive === true
-      ? await session.audit.searchArchive(auditFilterOf(search))
-      : undefined;
+  // SAFETY: the page's read reaches only `audit.search`,
+  // `audit.searchArchive`, `members.list`, `members.teams`, `apps.list` and
+  // `connections.agents`, which this stand-in has.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+  const reached = session as unknown as Session;
+  const { page, directory } = await readLog(reached, search);
   const rootRoute = createRootRoute({
     component: () => (
       <>
         <LogBar directory={directory} search={search} />
-        {first === undefined ? null : (
-          <LogRecords
-            directory={directory}
-            first={first}
-            onDetails={() => {
-              // Not under test.
-            }}
-            search={search}
-          />
-        )}
+        <LogRecords
+          directory={directory}
+          first={page}
+          onDetails={() => {
+            // Not under test.
+          }}
+          search={search}
+        />
         <RetentionRows />
       </>
     ),
@@ -199,6 +221,24 @@ describe("Settings › Audit trail › Archive and retention", () => {
     });
     root = undefined;
     document.body.innerHTML = "";
+  });
+
+  it("searches the archive, not the log, only when the filters ask for it", async () => {
+    const { session, asked, log } = fakeAudit({
+      stretches: [[archived(7, "test.b")]],
+      retention: kept,
+    });
+    await shown(session, { action: "test.b" });
+    const live = { asked: asked.length, searched: log.searched };
+    await shown(session, { action: "test.b", archive: true });
+
+    expect({
+      live,
+      archive: { asked: asked.length, searched: log.searched },
+    }).toStrictEqual({
+      live: { asked: 0, searched: 1 },
+      archive: { asked: 1, searched: 1 },
+    });
   });
 
   it("searches the archive with the page's filters, and pages through it a stretch at a time", async () => {

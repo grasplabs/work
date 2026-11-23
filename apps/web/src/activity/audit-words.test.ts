@@ -40,6 +40,30 @@ describe("an audit entry's words", () => {
     });
   });
 
+  it("say what was done to a project, and to a chat filed in one, each in its own words", () => {
+    const projectActions = [
+      "project.created",
+      "project.updated",
+      "project.deleted",
+      "project.item.filed",
+      "project.item.unfiled",
+      "project.member.added",
+      "project.member.removed",
+      "chat.filed",
+      "chat.unfiled",
+    ];
+    const words = projectActions.map((action) => said(action));
+    expect({
+      filed: said("chat.filed"),
+      allSaid: words.every((each) => each !== undefined),
+      distinct: new Set(words).size,
+    }).toStrictEqual({
+      filed: "Added a chat to a project",
+      allSaid: true,
+      distinct: projectActions.length,
+    });
+  });
+
   it("say code read entities, each by its own name", () => {
     expect({
       get: said("brain.entities.get"),
