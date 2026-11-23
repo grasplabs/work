@@ -4,6 +4,7 @@
 // they move: the pin fetched, the package installed again, the changes
 // proposed to Damsko.
 import { spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
   cpSync,
   existsSync,
@@ -17,6 +18,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
@@ -116,6 +118,41 @@ export const writeWithin = (
   const file = within(root, relative);
   mkdirSync(nodePath.dirname(file), { recursive: true });
   writeFileSync(file, content);
+};
+
+/** A folder's files over HTTP on this machine alone, as the site serves the registry. */
+export const serveFolder = async (
+  folder: string
+): Promise<{ url: string; close: () => void }> => {
+  const server = createServer((request, response) => {
+    const { pathname } = new URL(request.url ?? "/", "http://localhost");
+    let content: Uint8Array | undefined;
+    try {
+      // The registry's own path, read as every other file here is.
+      content = readWithin(folder, pathname.slice(1));
+    } catch {
+      content = undefined;
+    }
+    if (content === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response
+      .writeHead(200, { "content-type": "application/json" })
+      .end(content);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("The registry's server has no port.");
+  }
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => {
+      server.close();
+    },
+  };
 };
 
 /** Where a registry file stands in `packages/ui` once installed. */
@@ -293,18 +330,49 @@ const dayMs = 86_400_000;
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 
 /**
+ * A line git's merge leaves to resolve: `<<<<<<< here`, `|||||||`,
+ * `=======` or `>>>>>>> Damsko`, seven of the sign alone or before a space.
+ */
+const conflictMarker = /^(?:<{7}|\|{7}|={7}|>{7})(?: |\r?$)/u;
+
+/** Each line of a file that is one of git's conflict markers, numbered from 1. */
+const markerLines = (content: Uint8Array): number[] =>
+  new TextDecoder()
+    .decode(content)
+    .split("\n")
+    .flatMap((line, index) => (conflictMarker.test(line) ? [index + 1] : []));
+
+/** Each line of a listed file that is one of git's conflict markers, by file and line. */
+const unresolved = (
+  installed: Installed,
+  local: readonly LocalChange[]
+): string[] =>
+  local.flatMap(({ path }) => {
+    const ours = installed.read(path);
+    return ours === undefined
+      ? []
+      : markerLines(ours).map(
+          (line) =>
+            `${path}:${line} holds one of git's conflict markers: resolve the conflict, keeping what the change here needs`
+        );
+  });
+
+/**
  * Where `packages/ui` is not Damsko's at the pinned commit, one line each:
  * a symbolic link, a file missing, changed or not Damsko's that
- * local-changes.json doesn't list, a listed file that no longer differs or
- * never was, an entry dated after today, and a package an item names that
- * the package doesn't take from the catalog.
+ * local-changes.json doesn't list, a listed file still holding git's
+ * conflict markers (by line), a listed file that no longer differs or never
+ * was, an entry dated after today, and a package an item names that the
+ * package doesn't take from the catalog. `conflicted` are listed files an
+ * update has just left with markers, to be named once, as conflicts.
  */
 export const differences = (
   expected: Expected,
   damsko: (path: string) => Uint8Array,
   installed: Installed,
   local: readonly LocalChange[] = [],
-  today = new Date()
+  today = new Date(),
+  conflicted: readonly string[] = []
 ): string[] => {
   const found: string[] = [];
   const listed = new Set(local.map((change) => change.path));
@@ -340,6 +408,12 @@ export const differences = (
       differs(path, `${path} is no file of the installed items`);
     }
   }
+  found.push(
+    ...unresolved(
+      installed,
+      local.filter(({ path }) => !linked(path) && !conflicted.includes(path))
+    )
+  );
   // Today anywhere on Earth: a day listed where it is already tomorrow
   // (UTC+14) is no day after today, though CI's clock is UTC's.
   const latestToday = dayOf(new Date(today.getTime() + 14 * 3_600_000));
@@ -454,6 +528,65 @@ export const fetchDamsko = (
 };
 
 /**
+ * Damsko's tree at the pin `packages/ui` is at now, checked out into
+ * `into`, unchecked: it was checked when it was pinned, and Damsko's `main`
+ * may have left it since (a rewritten history). An update reads it only as
+ * the base each listed change is carried from, never installs it.
+ */
+const fetchPinned = (
+  repository: string,
+  commit: string,
+  into: string
+): void => {
+  if (!commitPattern.test(commit)) {
+    throw new Error(`"${commit}" is not a commit of Damsko in full.`);
+  }
+  mkdirSync(into, { recursive: true });
+  git(into, "init", "--quiet");
+  git(into, "remote", "add", "origin", repository);
+  git(into, "fetch", "--quiet", "--filter=blob:none", "origin", commit);
+  git(into, "checkout", "--quiet", "--detach", commit);
+};
+
+/** Damsko's checkouts a command reads, in a scratch folder. */
+export interface Checkouts {
+  /** The commit the command holds `packages/ui` to: the pin, or an update's new one. */
+  readonly commit: string;
+  /** Damsko's tree at `commit`. */
+  readonly checkout: string;
+  /** Damsko's tree at the pin `packages/ui` is at now. */
+  readonly pinned: string;
+}
+
+/**
+ * Damsko at what a command needs. `check` and `propose` read the pin, which
+ * must be on Damsko's `main` or a release tag (fetchDamsko). `update` holds
+ * only its new pin (`target`, else the pin again) to that; the pin it
+ * moves from is read as it is (fetchPinned), so an update can always move
+ * off a pin that is no longer on `main`.
+ */
+export const fetchFor = (
+  repository: string,
+  command: "check" | "update" | "propose",
+  pinned: string,
+  target: string | undefined,
+  scratch: string
+): Checkouts => {
+  const checkout = nodePath.join(scratch, "damsko");
+  const commit = fetchDamsko(
+    repository,
+    command === "update" ? (target ?? pinned) : pinned,
+    checkout
+  );
+  if (commit === pinned) {
+    return { commit, checkout, pinned: checkout };
+  }
+  const old = nodePath.join(scratch, "pinned");
+  fetchPinned(repository, pinned, old);
+  return { commit, checkout, pinned: old };
+};
+
+/**
  * The listed changes as one patch for Damsko. `damsko` is a git checkout
  * of its tree at the pin; `files` holds each changed file by its path
  * there, with this repository's content, undefined where it was removed
@@ -474,7 +607,8 @@ export const proposal = (
 export type Carried =
   | { readonly kind: "dropped" }
   | { readonly kind: "kept"; readonly content: Content }
-  | { readonly kind: "conflict"; readonly content: Uint8Array };
+  | { readonly kind: "conflict"; readonly content: Uint8Array }
+  | { readonly kind: "removed"; readonly content: Uint8Array };
 
 const sameContent = (one: Content, other: Content): boolean =>
   one === undefined || other === undefined ? one === other : same(one, other);
@@ -525,8 +659,10 @@ export const merge = (
 /**
  * A listed change at a new pin: dropped once Damsko's file is ours, kept
  * where Damsko left the file as it was, else Damsko's change merged under
- * ours, or a conflict to resolve by hand. `was` is Damsko's file at the old
- * pin, `now` at the new one, `ours` this repository's, each undefined
+ * ours, or a conflict to resolve by hand. Where Damsko removed a file
+ * changed here, it is kept as this repository's own, for someone to decide
+ * (`removed`): there are no lines to merge. `was` is Damsko's file at the
+ * old pin, `now` at the new one, `ours` this repository's, each undefined
  * where there is none.
  */
 export const carry = ({
@@ -545,7 +681,7 @@ export const carry = ({
     return { kind: "kept", content: ours };
   }
   if (now === undefined) {
-    return { kind: "conflict", content: ours };
+    return { kind: "removed", content: ours };
   }
   const merged = merge(was ?? new Uint8Array(), ours, now);
   return merged.clean
@@ -600,24 +736,44 @@ export interface UpdateInput {
   /** `packages/ui/package.json`'s dependencies. */
   readonly dependencies: Readonly<Record<string, string>>;
   readonly today?: Date;
+  /** How the swap moves and writes files: node's own, but in a test. */
+  readonly files?: SwapFiles;
 }
 
 export interface Updated {
   /** The listed files left with git's conflict markers. */
   readonly conflicts: readonly string[];
+  /** The listed files Damsko removed, kept here as they are. */
+  readonly removed: readonly string[];
   /** The entries dropped, as Damsko's file is now the same. */
   readonly dropped: readonly string[];
 }
 
+/** The file operations the swap makes, each of which a full disk can fail. */
+export interface SwapFiles {
+  readonly rename: (from: string, to: string) => void;
+  readonly write: (root: string, relative: string, content: Content) => void;
+}
+
+const nodeFiles: SwapFiles = { rename: renameSync, write: writeWithin };
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 /**
  * Puts `stage/src` in the place of `ui/src`, and the given files beside
  * it: the new `src/` is first copied next to the old, so the swap is two
- * renames. Whatever fails puts back what was.
+ * renames. Whatever fails puts back what was. The old `src/` waits in a
+ * folder beside it (`.update-*`), removed once the swap holds or is
+ * undone; if putting it back fails too, it is the only copy of what was
+ * there, listed changes not yet committed among it, so it stays, and the
+ * error says where.
  */
 const swap = (
   ui: string,
   stage: string,
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  { rename, write }: SwapFiles
 ): void => {
   const aside = mkdtempSync(nodePath.join(ui, ".update-"));
   const next = nodePath.join(aside, "next");
@@ -628,33 +784,48 @@ const swap = (
   );
   let moved = false;
   let placed = false;
+  let settled = false;
   try {
     cpSync(nodePath.join(stage, "src"), next, {
       recursive: true,
       verbatimSymlinks: true,
     });
     if (existsSync(source)) {
-      renameSync(source, before);
+      rename(source, before);
       moved = true;
     }
-    renameSync(next, source);
+    rename(next, source);
     placed = true;
     for (const [name, content] of Object.entries(files)) {
-      writeWithin(ui, name, new TextEncoder().encode(content));
+      write(ui, name, new TextEncoder().encode(content));
     }
+    settled = true;
   } catch (error) {
-    if (placed) {
-      rmSync(source, { recursive: true, force: true });
+    try {
+      if (placed) {
+        rmSync(source, { recursive: true, force: true });
+      }
+      if (moved) {
+        rename(before, source);
+      }
+      for (const [name, content] of Object.entries(kept)) {
+        write(ui, name, content);
+      }
+    } catch (undoError) {
+      const where = existsSync(before)
+        ? `packages/ui/src as it was, listed changes and all, is in ${before}: move it back to ${source} (rm -rf ${source} && mv ${before} ${source}), then git checkout packages/ui/damsko.json packages/ui/local-changes.json`
+        : `packages/ui/src is back as it was; git checkout packages/ui/damsko.json packages/ui/local-changes.json puts the pin and the list back`;
+      throw new Error(
+        `${messageOf(error)}\nPutting packages/ui back failed too: ${messageOf(undoError)}\n${where}.`,
+        { cause: undoError }
+      );
     }
-    if (moved) {
-      renameSync(before, source);
-    }
-    for (const [name, content] of Object.entries(kept)) {
-      writeWithin(ui, name, content);
-    }
+    settled = true;
     throw error;
   } finally {
-    rmSync(aside, { recursive: true, force: true });
+    if (settled || !existsSync(before)) {
+      rmSync(aside, { recursive: true, force: true });
+    }
   }
 };
 
@@ -680,6 +851,7 @@ export const updateTree = async (input: UpdateInput): Promise<Updated> => {
     mkdirSync(stage, { recursive: true });
     await input.install(stage);
     const conflicts: string[] = [];
+    const removed: string[] = [];
     const dropped: string[] = [];
     const remaining = local.filter(({ path }) => {
       const carried = carry({
@@ -694,6 +866,8 @@ export const updateTree = async (input: UpdateInput): Promise<Updated> => {
       writeWithin(stage, path, carried.content);
       if (carried.kind === "conflict") {
         conflicts.push(path);
+      } else if (carried.kind === "removed") {
+        removed.push(path);
       }
       return true;
     });
@@ -708,18 +882,24 @@ export const updateTree = async (input: UpdateInput): Promise<Updated> => {
       },
       { ...treeOf(stage), dependencies: input.dependencies },
       remaining,
-      input.today
+      input.today,
+      conflicts
     );
     if (found.length > 0) {
       throw new Error(
         `The new install is not Damsko's; packages/ui is left as it was:\n${found.join("\n")}`
       );
     }
-    swap(ui, stage, {
-      "damsko.json": input.pin,
-      "local-changes.json": `${JSON.stringify(remaining, null, 2)}\n`,
-    });
-    return { conflicts, dropped };
+    swap(
+      ui,
+      stage,
+      {
+        "damsko.json": input.pin,
+        "local-changes.json": `${JSON.stringify(remaining, null, 2)}\n`,
+      },
+      input.files ?? nodeFiles
+    );
+    return { conflicts, removed, dropped };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
