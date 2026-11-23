@@ -117,7 +117,7 @@ export const DeleteWorkflow = ({
             <AlertDialogFooter>
               <AlertDialogCancel />
               <Button
-                errorLabel={t`Not deleted`}
+                errorText={t`Not deleted`}
                 onClick={remove}
                 size="sm"
                 variant="destructive"

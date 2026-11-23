@@ -234,7 +234,7 @@ const Route = ({
       )}
       {tools.length === 0 ? null : (
         <BrandIconGroup
-          items={tools.map(({ name }) => ({ label: name }))}
+          items={tools.map(({ name }) => ({ name }))}
           max={toolsShown}
           size="xs"
         />

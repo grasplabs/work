@@ -72,7 +72,7 @@ export const StopRun = ({
         <AlertDialogFooter>
           <AlertDialogCancel>{t`Keep it running`}</AlertDialogCancel>
           <Button
-            errorLabel={t`Not stopped`}
+            errorText={t`Not stopped`}
             onClick={confirm}
             size="sm"
             variant="destructive"

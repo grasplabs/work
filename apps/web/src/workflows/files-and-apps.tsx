@@ -328,7 +328,7 @@ const RevokeBinding = ({
         <AlertDialogFooter>
           <AlertDialogCancel />
           <Button
-            errorLabel={t`Not revoked`}
+            errorText={t`Not revoked`}
             onClick={async () => {
               await dialog.hold(revoke);
             }}

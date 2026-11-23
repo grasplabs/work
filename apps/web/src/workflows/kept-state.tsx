@@ -144,7 +144,7 @@ const KeptEntries = ({
               <AlertDialogFooter>
                 <AlertDialogCancel />
                 <Button
-                  errorLabel={t`Not reset`}
+                  errorText={t`Not reset`}
                   onClick={resetAll}
                   size="sm"
                   variant="destructive"

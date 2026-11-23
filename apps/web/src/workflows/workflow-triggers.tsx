@@ -524,7 +524,7 @@ const TriggerRow = ({
                 <AlertDialogFooter>
                   <AlertDialogCancel />
                   <Button
-                    errorLabel={t`Not deleted`}
+                    errorText={t`Not deleted`}
                     onClick={async () => {
                       await deleting.hold(deleted);
                     }}
