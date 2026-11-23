@@ -3,6 +3,7 @@ import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { chatPresence } from "../chat/chat-presence.ts";
 import { LoadingBar } from "../frame/page-skeletons-b.tsx";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
@@ -61,6 +62,8 @@ const WorkflowRun = () => {
 };
 
 export const Route = createFileRoute("/_shell/workflows/$workflow_/runs/$run")({
+  // A run is read, not talked over: Grasp's chat stays away, as on its workflow.
+  staticData: { chat: chatPresence.hidden },
   pendingComponent: LoadingBar,
   loader: async ({ context: { core }, params: { workflow, run } }) => {
     const [resource, read, names] = await Promise.all([

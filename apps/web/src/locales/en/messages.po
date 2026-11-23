@@ -391,7 +391,6 @@ msgid "{count, plural, one {# rule} other {# rules}}"
 msgstr "{count, plural, one {# rule} other {# rules}}"
 
 #: src/workflows/listed-count.tsx
-#: src/workflows/workflow-page.tsx
 msgid "{count, plural, one {# run} other {# runs}}"
 msgstr "{count, plural, one {# run} other {# runs}}"
 
@@ -876,6 +875,10 @@ msgstr "{more, plural, one {# more file} other {# more files}}"
 #: src/drafts/share-with-team.tsx
 msgid "{more, plural, one {and # more} other {and # more}}"
 msgstr "{more, plural, one {and # more} other {and # more}}"
+
+#: src/workflows/workflow-page.tsx
+msgid "{more, plural, one {Show # more run} other {Show # more runs}}"
+msgstr "{more, plural, one {Show # more run} other {Show # more runs}}"
 
 #: src/brain/brain-article/team-work.tsx
 msgctxt "the same pain: these teams told it too"
@@ -1401,11 +1404,6 @@ msgstr "{started, plural, one {Started # workflow} other {Started # workflows}}"
 msgctxt "when a workflow run started, and who started it"
 msgid "{started} · by {who}"
 msgstr "{started} · by {who}"
-
-#: src/workflows/run-page.tsx
-msgctxt "when a workflow run started, and how long it took"
-msgid "{started} · took {took}"
-msgstr "{started} · took {took}"
 
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
@@ -19136,6 +19134,11 @@ msgstr "Too many files are moving at once. Try again shortly."
 #: src/guest-sign-in.tsx
 msgid "Too many tries. Wait a minute, then try again."
 msgstr "Too many tries. Wait a minute, then try again."
+
+#: src/workflows/run-page.tsx
+msgctxt "how long a workflow run took"
+msgid "Took {took}"
+msgstr "Took {took}"
 
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"

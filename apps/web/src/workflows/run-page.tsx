@@ -205,7 +205,6 @@ export const RunPage = ({
   const shown = waits ? "waiting" : run.status;
   const steps = updates(run, waits);
   const seesResult = run.principal === names.me || admin;
-  const started = formatSince(run.createdAt);
   const took =
     run.endedAt === null
       ? undefined
@@ -225,15 +224,14 @@ export const RunPage = ({
                 <Badge tone={runToneOf(shown)} variant="dot">
                   {i18n._(runStatusLabels[shown])}
                 </Badge>
-                <Text element="span" size="sm" tone="muted">
-                  {took === undefined
-                    ? formatSince(run.createdAt)
-                    : t({
-                        message: `${started} · took ${took}`,
-                        context:
-                          "when a workflow run started, and how long it took",
-                      })}
-                </Text>
+                {took === undefined ? null : (
+                  <Text element="span" size="sm" tone="muted">
+                    {t({
+                      message: `Took ${took}`,
+                      context: "how long a workflow run took",
+                    })}
+                  </Text>
+                )}
               </span>
             }
             title={title}

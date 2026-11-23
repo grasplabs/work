@@ -5,10 +5,11 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { DecisionCard } from "../decision-card.tsx";
-import { formatSince } from "../format.ts";
+import { formatNumber, formatSince } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -76,6 +77,9 @@ export interface WorkshopRow {
   to: WorkshopView;
 }
 
+/** How many of its runs show before the rest are asked for. */
+const firstRuns = 10;
+
 /** A run as a row: when it started, who started it, and how it stands. */
 const RunRow = ({
   workflow,
@@ -134,6 +138,7 @@ const Runs = ({
   own: boolean;
 }) => {
   const { t } = useLingui();
+  const [all, setAll] = useState(false);
   const label = t({ message: "Runs", context: "a workflow's runs" });
   if (runs.state !== "ready") {
     return <NotLoadedState page={runs} />;
@@ -152,15 +157,30 @@ const Runs = ({
     );
   }
   const newest = workflowRunsListed;
+  const shown = all ? runs.data : runs.data.slice(0, firstRuns);
+  const more = runs.data.length - shown.length;
   return (
     <>
       <ItemGroup aria-label={label} separated>
-        {runs.data.map((run) => (
+        {shown.map((run) => (
           <RunRow key={run.id} names={names} run={run} workflow={workflow} />
         ))}
       </ItemGroup>
+      {more > 0 ? (
+        <span>
+          <Button
+            onClick={() => {
+              setAll(true);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t`${plural(more, { one: "Show # more run", other: "Show # more runs" })}`}
+          </Button>
+        </span>
+      ) : null}
       {/* Core lists the newest runs only. */}
-      {runs.data.length >= newest ? (
+      {all && runs.data.length >= newest ? (
         <Text size="sm" tone="muted">
           {t`Only the newest ${newest} runs show here.`}
         </Text>
@@ -284,7 +304,7 @@ export const WorkflowHome = ({
                 <>
                   {" "}
                   <Text element="span" size="xs" tone="muted">
-                    {t`${plural(count, { one: "# run", other: "# runs" })}`}
+                    {formatNumber(count)}
                   </Text>
                 </>
               )}
