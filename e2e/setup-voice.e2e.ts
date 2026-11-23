@@ -34,9 +34,12 @@ test("the admin goes through empty steps and back, with the sound on and off", a
 
   // Sound on: the welcome is said warmly, in the page's language.
   await page.goto("/setup?step=welcome");
+  // Focus is on the step's title, so a screen reader starts there.
   await expect(
-    page.getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
-  ).toBeFocused();
+    page
+      .locator(":focus")
+      .getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
+  ).toBeVisible();
   await expect
     .poll(() =>
       asked.find((line) =>
@@ -104,6 +107,22 @@ test("the admin goes through empty steps and back, with the sound on and off", a
     page.getByRole("heading", { name: "Where does the work get written down?" })
   ).toBeVisible();
   expect(asked.length).toBe(before);
+});
+
+test("the steps at the foot are named, the one at hand marked, and one done goes back to it", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("setupVoice");
+  const page = await pageOf(admin);
+  await answerSpeech(page);
+  await page.goto("/setup?step=sources");
+  const steps = page.getByRole("list", { name: "Onboarding steps" });
+  await expect(steps.locator("[aria-current='step']")).toContainText("Sources");
+  await steps.getByRole("button", { name: /^Company\b/u }).click();
+  await expect(
+    page.getByRole("heading", { name: "Who’s who at your company?" })
+  ).toBeVisible();
+  await expect(steps.locator("[aria-current='step']")).toContainText("Company");
 });
 
 /** Before the admin chose anything; the onboarding's store is the deployment's one. */

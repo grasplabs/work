@@ -1,50 +1,103 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@grasp-os/app-kit/components/breadcrumb";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { placeErrors } from "@grasp-os/shared/document-places";
 import type {
   DocumentPlace,
   PlaceItem,
   PlacesSuite,
 } from "@grasp-os/shared/document-places";
-import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+} from "@grasp-os/ui/components/breadcrumb";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  Item,
+  ItemContent,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   BuildingIcon,
   ChevronRightIcon,
-  CloudIcon,
-  FileTextIcon,
+  CircleUserIcon,
   FolderIcon,
-  HardDriveIcon,
+  Icon,
   SearchIcon,
   UsersIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
 
 import { useCore } from "../use-core.ts";
 import { extensionOf, readable } from "./document-files.ts";
+
+const styles = stylex.create({
+  picker: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[3],
+    minWidth: 0,
+  },
+  // One height whatever it shows, so the dialog does not jump between folders.
+  box: {
+    height: "18rem",
+    overflowY: "auto",
+    paddingInline: space[3],
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.border,
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+  },
+  centred: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space[3],
+    height: "100%",
+    padding: space[6],
+    textAlign: "center",
+  },
+  // A file: its box and its name, a line over each but the first, as the list's rows have.
+  file: {
+    display: "flex",
+    alignItems: "center",
+    minHeight: size.tapTarget,
+    borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  more: { display: "flex", justifyContent: "center", padding: space[2] },
+});
 
 // Where the admin picks documents in the place they live (GRA-370): the
 // places the documents connection reaches (their OneDrive and the
@@ -77,10 +130,10 @@ type Shown =
   | { state: "items"; items: PlaceItem[]; next: string | null }
   | { state: "failed"; reconnect: boolean };
 
-const placeIcons: Record<DocumentPlace["kind"], LucideIcon> = {
-  onedrive: CloudIcon,
+const placeIcons: Record<DocumentPlace["kind"], IconData> = {
+  onedrive: CircleUserIcon,
   site: BuildingIcon,
-  "my-drive": HardDriveIcon,
+  "my-drive": CircleUserIcon,
   "shared-drive": UsersIcon,
 };
 
@@ -94,31 +147,28 @@ const needsReconnecting = (error: unknown): boolean => {
   return code === "place.inactive" || code === "place.not_connected";
 };
 
-const PlaceRow = ({
-  place,
+/** A place or a folder: the whole row opens it. */
+const OpenRow = ({
+  icon,
+  name,
   onOpen,
 }: {
-  place: DocumentPlace;
+  icon: IconData;
+  name: string;
   onOpen: () => void;
-}) => {
-  const Icon = placeIcons[place.kind];
-  return (
-    <li className="border-b last:border-b-0">
-      <button
-        className="hover:bg-muted focus-visible:ring-ring/50 flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left outline-none focus-visible:ring-3"
-        onClick={onOpen}
-        type="button"
-      >
-        <Icon aria-hidden="true" className="text-muted-foreground size-4" />
-        <span className="min-w-0 flex-1 truncate">{place.name}</span>
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="text-muted-foreground size-4"
-        />
-      </button>
-    </li>
-  );
-};
+}) => (
+  <Item onClick={onOpen} size="sm">
+    <ItemMedia>
+      <Icon icon={icon} />
+    </ItemMedia>
+    <ItemContent>
+      <ItemTitle>{name}</ItemTitle>
+    </ItemContent>
+    <ItemDetail>
+      <Icon icon={ChevronRightIcon} />
+    </ItemDetail>
+  </Item>
+);
 
 const ItemRow = ({
   item,
@@ -133,58 +183,53 @@ const ItemRow = ({
 }) => {
   const { t } = useLingui();
   if (item.kind === "folder") {
-    return (
-      <li className="border-b last:border-b-0">
-        <button
-          className="hover:bg-muted focus-visible:ring-ring/50 flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left outline-none focus-visible:ring-3"
-          onClick={onOpen}
-          type="button"
-        >
-          <FolderIcon
-            aria-hidden="true"
-            className="text-muted-foreground size-4"
-          />
-          <span className="min-w-0 flex-1 truncate">{item.name}</span>
-          <ChevronRightIcon
-            aria-hidden="true"
-            className="text-muted-foreground size-4"
-          />
-        </button>
-      </li>
-    );
+    return <OpenRow icon={FolderIcon} name={item.name} onOpen={onOpen} />;
   }
   const can = isReadable(item);
   return (
-    <li className="border-b last:border-b-0">
-      <label className="flex min-h-11 items-center gap-3 px-3 py-2 has-disabled:opacity-60">
-        <Checkbox checked={picked} disabled={!can} onCheckedChange={onPick} />
-        <FileTextIcon
-          aria-hidden="true"
-          className="text-muted-foreground size-4 flex-none"
+    <li {...stylex.props(styles.file)}>
+      <Field disabled={!can} orientation="horizontal">
+        <Checkbox
+          checked={picked}
+          onCheckedChange={(checked) => {
+            onPick(checked === true);
+          }}
         />
-        <span className="min-w-0 flex-1 truncate">{item.name}</span>
-        {can ? null : (
-          <span className="text-muted-foreground flex-none text-xs">{t`Can’t be read`}</span>
-        )}
-      </label>
+        <FieldContent>
+          <FieldLabel>{item.name}</FieldLabel>
+          {can ? null : <FieldDescription>{t`Can’t be read`}</FieldDescription>}
+        </FieldContent>
+      </Field>
     </li>
   );
 };
 
-/** A step back in the trail, as a breadcrumb's link: it opens that place or folder again. */
-const Crumb = ({
-  children,
-  onClick,
+/** The next page of a folder, at the foot of its list. */
+const MoreRow = ({
+  loading,
+  onMore,
 }: {
-  children: string;
-  onClick: () => void;
-}) => (
-  <BreadcrumbLink
-    render={<button aria-label={children} onClick={onClick} type="button" />}
-  >
-    {children}
-  </BreadcrumbLink>
-);
+  loading: boolean;
+  onMore: () => void;
+}) => {
+  const { t } = useLingui();
+  const words = t`Show more`;
+  return (
+    <li {...stylex.props(styles.more)}>
+      <Button
+        disabled={loading}
+        successLabel={words}
+        errorLabel={words}
+        onClick={onMore}
+        size="sm"
+        status={loading ? "loading" : "idle"}
+        variant="ghost"
+      >
+        {words}
+      </Button>
+    </li>
+  );
+};
 
 /** The search of a place: by name and content, sent with Enter; empty, its folder again. */
 const SearchPlace = ({
@@ -206,31 +251,23 @@ const SearchPlace = ({
         onSearch(value.trim());
       }}
     >
-      <InputGroup>
-        <InputGroupInput
-          aria-label={t`Search ${name}`}
-          maxLength={120}
-          onChange={(event) => {
-            onChange(event.target.value);
-          }}
-          placeholder={t`Search ${name}`}
-          value={value}
-        />
-        <InputGroupAddon>
-          <SearchIcon />
-        </InputGroupAddon>
-      </InputGroup>
+      <Input
+        aria-label={t`Search ${name}`}
+        icon={SearchIcon}
+        maxLength={120}
+        onValueChange={onChange}
+        placeholder={t`Search ${name}`}
+        value={value}
+      />
     </form>
   );
 };
 
 /** What the picker shows while it is open: mounted on each opening, so it starts at the places with nothing picked. */
 const PickerBody = ({
-  onClose,
   onAdd,
   onReconnect,
 }: {
-  onClose: () => void;
   onAdd: (files: PickedFile[]) => void;
   onReconnect: () => void;
 }) => {
@@ -336,158 +373,158 @@ const PickerBody = ({
   }
   return (
     <>
-      <div className="flex min-w-0 flex-col gap-3">
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem key="places">
-              {spot === null ? (
-                <BreadcrumbPage>{t`Places`}</BreadcrumbPage>
-              ) : (
-                <Crumb
-                  onClick={() => {
-                    setSearch("");
-                    void loadPlaces();
-                  }}
-                >
-                  {t`Places`}
-                </Crumb>
-              )}
-            </BreadcrumbItem>
-            {spot === null
-              ? null
-              : [{ id: null, name: spot.place.name }, ...spot.trail].map(
-                  (step, at, all) => (
-                    <Fragment key={step.id ?? spot.place.id}>
-                      <BreadcrumbSeparator />
-                      <BreadcrumbItem>
+      <DialogBody>
+        <div {...stylex.props(styles.picker)}>
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem key="places">
+                {spot === null ? (
+                  <BreadcrumbPage>{t`Places`}</BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink asChild>
+                    <button
+                      onClick={() => {
+                        setSearch("");
+                        void loadPlaces();
+                      }}
+                      type="button"
+                    >
+                      {t`Places`}
+                    </button>
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
+              {spot === null
+                ? null
+                : [{ id: null, name: spot.place.name }, ...spot.trail].map(
+                    (step, at, all) => (
+                      <BreadcrumbItem key={step.id ?? spot.place.id}>
                         {at === all.length - 1 && spot.query === null ? (
                           <BreadcrumbPage>{step.name}</BreadcrumbPage>
                         ) : (
-                          <Crumb
-                            onClick={() => {
-                              setSearch("");
-                              void loadItems({
-                                place: spot.place,
-                                trail: spot.trail.slice(0, at),
-                                query: null,
-                              });
-                            }}
-                          >
-                            {step.name}
-                          </Crumb>
+                          <BreadcrumbLink asChild>
+                            <button
+                              onClick={() => {
+                                setSearch("");
+                                void loadItems({
+                                  place: spot.place,
+                                  trail: spot.trail.slice(0, at),
+                                  query: null,
+                                });
+                              }}
+                              type="button"
+                            >
+                              {step.name}
+                            </button>
+                          </BreadcrumbLink>
                         )}
                       </BreadcrumbItem>
-                    </Fragment>
-                  )
-                )}
-          </BreadcrumbList>
-        </Breadcrumb>
-        {spot === null ? null : (
-          <SearchPlace
-            name={spot.place.name}
-            onSearch={(query) => {
-              void loadItems({
-                place: spot.place,
-                trail: query === "" ? spot.trail : [],
-                query: query === "" ? null : query,
-              });
-            }}
-            onChange={setSearch}
-            value={search}
-          />
-        )}
-        <div className="h-72 overflow-y-auto rounded-lg border">
-          {shown.state === "loading" ? (
-            <div className="flex h-full items-center justify-center">
-              <Spinner aria-label={t`Loading`} />
-            </div>
-          ) : null}
-          {shown.state === "failed" ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-              <p className="text-muted-foreground text-balance">
-                {shown.reconnect
-                  ? t`This connection needs to be connected again.`
-                  : t`I could not open this just now. Try again in a moment.`}
-              </p>
-              {shown.reconnect ? (
-                <Button onClick={onReconnect} size="sm" variant="outline">
-                  {t`Connect again`}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          {empty === null ? null : (
-            <p className="text-muted-foreground flex h-full items-center justify-center p-6">
-              {empty}
-            </p>
+                    )
+                  )}
+            </BreadcrumbList>
+          </Breadcrumb>
+          {spot === null ? null : (
+            <SearchPlace
+              name={spot.place.name}
+              onSearch={(query) => {
+                void loadItems({
+                  place: spot.place,
+                  trail: query === "" ? spot.trail : [],
+                  query: query === "" ? null : query,
+                });
+              }}
+              onChange={setSearch}
+              value={search}
+            />
           )}
-          {shown.state === "places" ? (
-            <ul className="p-1">
-              {shown.places.map((place) => (
-                <PlaceRow
-                  key={place.id}
-                  onOpen={() => {
-                    void loadItems({ place, trail: [], query: null });
-                  }}
-                  place={place}
-                />
-              ))}
-            </ul>
-          ) : null}
-          {shown.state === "items" && spot !== null ? (
-            <ul className="p-1">
-              {shown.items.map((item) => (
-                <ItemRow
-                  item={item}
-                  key={item.id}
-                  onOpen={() => {
-                    setSearch("");
-                    void loadItems({
-                      place: spot.place,
-                      trail: [
-                        ...(spot.query === null ? spot.trail : []),
-                        { id: item.id, name: item.name },
-                      ],
-                      query: null,
-                    });
-                  }}
-                  onPick={(on) => {
-                    pick(item, on);
-                  }}
-                  picked={picked.has(`${spot.place.id}/${item.id}`)}
-                />
-              ))}
-              {shown.next === null ? null : (
-                <li className="flex justify-center p-2">
-                  <Button
-                    disabled={more}
-                    onClick={() => {
+          <div {...stylex.props(styles.box)}>
+            {shown.state === "loading" ? (
+              <div {...stylex.props(styles.centred)}>
+                <Spinner aria-label={t`Loading`} />
+              </div>
+            ) : null}
+            {shown.state === "failed" ? (
+              <div {...stylex.props(styles.centred)}>
+                <Text size="sm" color="muted">
+                  {shown.reconnect
+                    ? t`This connection needs to be connected again.`
+                    : t`I could not open this just now. Try again in a moment.`}
+                </Text>
+                {shown.reconnect ? (
+                  <Button onClick={onReconnect} size="sm" variant="outline">
+                    {t`Connect again`}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {empty === null ? null : (
+              <div {...stylex.props(styles.centred)}>
+                <Text size="sm" color="muted">
+                  {empty}
+                </Text>
+              </div>
+            )}
+            {shown.state === "places" ? (
+              <ItemGroup>
+                {shown.places.map((place) => (
+                  <OpenRow
+                    icon={placeIcons[place.kind]}
+                    key={place.id}
+                    name={place.name}
+                    onOpen={() => {
+                      void loadItems({ place, trail: [], query: null });
+                    }}
+                  />
+                ))}
+              </ItemGroup>
+            ) : null}
+            {shown.state === "items" && spot !== null ? (
+              <ItemGroup>
+                {shown.items.map((item) => (
+                  <ItemRow
+                    item={item}
+                    key={item.id}
+                    onOpen={() => {
+                      setSearch("");
+                      void loadItems({
+                        place: spot.place,
+                        trail: [
+                          ...(spot.query === null ? spot.trail : []),
+                          { id: item.id, name: item.name },
+                        ],
+                        query: null,
+                      });
+                    }}
+                    onPick={(on) => {
+                      pick(item, on);
+                    }}
+                    picked={picked.has(`${spot.place.id}/${item.id}`)}
+                  />
+                ))}
+                {shown.next === null ? null : (
+                  <MoreRow
+                    loading={more}
+                    onMore={() => {
                       void loadItems(spot, shown.next);
                     }}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    {more ? <Spinner data-icon="inline-start" /> : null}
-                    {t`Show more`}
-                  </Button>
-                </li>
-              )}
-            </ul>
-          ) : null}
+                  />
+                )}
+              </ItemGroup>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </DialogBody>
       <DialogFooter>
-        <Button onClick={onClose} variant="outline">
-          {t`Cancel`}
-        </Button>
-        <Button
+        <DialogClose>{t`Cancel`}</DialogClose>
+        <DialogClose
           disabled={count === 0}
           onClick={() => {
             onAdd([...picked.values()]);
           }}
+          variant="default"
         >
           {t`${plural(count, { one: "Add # document", other: "Add # documents" })}`}
-        </Button>
+        </DialogClose>
       </DialogFooter>
     </>
   );
@@ -510,7 +547,7 @@ export const PlacePicker = ({
   const { t } = useLingui();
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-svh sm:max-w-lg" closeLabel={t`Close`}>
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{t`Choose documents`}</DialogTitle>
           <DialogDescription>
@@ -519,15 +556,7 @@ export const PlacePicker = ({
               : t`From Google Drive. I read only the files you add.`}
           </DialogDescription>
         </DialogHeader>
-        {open ? (
-          <PickerBody
-            onAdd={onAdd}
-            onClose={() => {
-              onOpenChange(false);
-            }}
-            onReconnect={onReconnect}
-          />
-        ) : null}
+        {open ? <PickerBody onAdd={onAdd} onReconnect={onReconnect} /> : null}
       </DialogContent>
     </Dialog>
   );

@@ -1,12 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { hrErrors, hrPlatformNames } from "@grasp-os/shared/hr";
 import type { HrPlatform, OnboardingHr } from "@grasp-os/shared/hr";
 import {
@@ -14,10 +5,16 @@ import {
   onboardingTeamsMax,
 } from "@grasp-os/shared/onboarding";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { Button } from "@grasp-os/ui/components/button";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { useCore } from "../use-core.ts";
 import {
@@ -33,6 +30,17 @@ import {
   StaffListError,
   withLeadsFrom,
 } from "./staff-list.ts";
+
+const styles = stylex.create({
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[4],
+    width: "100%",
+    maxWidth: "24rem",
+    textAlign: "start",
+  },
+});
 
 // Who leads which team, from the company's HR platform (GRA-371; the
 // prototype's `Leads`, with `HR_PLATFORMS`), on the confirm step: the
@@ -115,7 +123,6 @@ export const HrLeads = ({
   const { t } = useLingui();
   const core = useCore();
   const router = useRouter();
-  const ids = useId();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [typed, setTyped] = useState<Typed>({ id: "", secret: "" });
@@ -139,7 +146,7 @@ export const HrLeads = ({
     const found = await readHrRoster(core, connecting, noTeam, roster);
     setBusy(false);
     if (connecting !== null) {
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
     if (typeof found === "string") {
       if (found === "inactive") {
@@ -168,54 +175,53 @@ export const HrLeads = ({
     });
   };
   const ready = typed.id.trim() !== "" && typed.secret.trim() !== "";
+  const connectIt = t`Connect ${name}`;
   return (
     <>
       {open ? (
         <Onward>
           <form
-            className="flex w-full max-w-sm flex-col gap-4 text-left"
             onSubmit={(event) => {
               event.preventDefault();
               if (ready) {
                 void read(typed);
               }
             }}
+            {...stylex.props(styles.form)}
           >
-            <FieldGroup>
-              <FieldDescription>
-                {t`In ${name}, make a service user that may read people’s basic and work details, and paste its ID and token here.`}
-              </FieldDescription>
-              <Field>
-                <FieldLabel
-                  htmlFor={`${ids}-id`}
-                >{t`Service user ID`}</FieldLabel>
-                <Input
-                  autoComplete="off"
-                  disabled={busy}
-                  id={`${ids}-id`}
-                  onChange={(event) => {
-                    setTyped({ ...typed, id: event.target.value });
-                  }}
-                  value={typed.id}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${ids}-secret`}>{t`Token`}</FieldLabel>
-                <Input
-                  autoComplete="off"
-                  disabled={busy}
-                  id={`${ids}-secret`}
-                  onChange={(event) => {
-                    setTyped({ ...typed, secret: event.target.value });
-                  }}
-                  type="password"
-                  value={typed.secret}
-                />
-              </Field>
-            </FieldGroup>
-            <Button disabled={busy || !ready} type="submit" variant="outline">
-              {busy ? <Spinner data-icon="inline-start" /> : null}
-              {t`Connect ${name}`}
+            <Text size="sm" color="muted">
+              {t`In ${name}, make a service user that may read people’s basic and work details, and paste its ID and token here.`}
+            </Text>
+            <Field disabled={busy}>
+              <FieldLabel>{t`Service user ID`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                onValueChange={(id) => {
+                  setTyped({ ...typed, id });
+                }}
+                value={typed.id}
+              />
+            </Field>
+            <Field disabled={busy}>
+              <FieldLabel>{t`Token`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                onValueChange={(secret) => {
+                  setTyped({ ...typed, secret });
+                }}
+                type="password"
+                value={typed.secret}
+              />
+            </Field>
+            <Button
+              disabled={busy || !ready}
+              successLabel={connectIt}
+              errorLabel={connectIt}
+              status={busy ? "loading" : "idle"}
+              type="submit"
+              variant="outline"
+            >
+              {connectIt}
             </Button>
           </form>
         </Onward>

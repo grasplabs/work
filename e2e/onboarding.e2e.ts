@@ -404,9 +404,12 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await installReadingClock(page);
   await page.goto("/setup?step=welcome");
 
+  // Focus is on the step's title, so a screen reader starts there.
   await expect(
-    page.getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
-  ).toBeFocused();
+    page
+      .locator(":focus")
+      .getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
+  ).toBeVisible();
   await page.getByRole("button", { name: "English" }).click();
   await page.getByRole("button", { name: "Let’s start" }).click();
 

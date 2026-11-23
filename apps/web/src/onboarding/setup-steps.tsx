@@ -1,21 +1,3 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { Switch } from "@grasp-os/app-kit/components/switch";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type {
@@ -49,21 +31,48 @@ import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView, KnownPart } from "@grasp-os/shared/onboarding-gate";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
-import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
+import { Link } from "@grasp-os/ui/components/link";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
 import {
   CheckIcon,
   CopyIcon,
-  InfoIcon,
-  PenLineIcon,
+  Icon,
+  PencilIcon,
   UploadIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import { useContext, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { z } from "zod";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
+import { GoogleLogo, MicrosoftLogo } from "../connections/brand-logos.ts";
 import { copyText } from "../copy.ts";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -87,6 +96,7 @@ import { ForgetTeams } from "./forget-teams.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
+import { comeIn, motion } from "./motion.ts";
 import { NoSenderItem } from "./no-sender.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
@@ -113,7 +123,7 @@ import {
   stepLine,
   SupportLink,
   tones,
-  useEntrance,
+  useArrives,
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
@@ -141,6 +151,129 @@ import {
   wasHeard,
 } from "./visit.ts";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
+
+const styles = stylex.create({
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space[6],
+    width: "100%",
+  },
+  signIns: { display: "grid", gap: space[3], width: "100%" },
+  signInsTwo: {
+    gridTemplateColumns: {
+      default: null,
+      [media.sm]: "repeat(2, minmax(0, 1fr))",
+    },
+  },
+  full: { width: "100%" },
+  listButton: { width: "100%", maxWidth: "24rem" },
+  hidden: { display: "none" },
+  centred: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space[2],
+  },
+  wrapped: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[2],
+  },
+  question: { margin: 0, textWrap: "balance" },
+  quiet: { color: colors.mutedForeground },
+  // Who leads each team and whether it takes part: a row a team, the list no taller than the window leaves.
+  org: {
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    maxHeight: "40svh",
+    overflow: "auto",
+    textAlign: "start",
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.border,
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+  },
+  orgRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 12rem) auto",
+    alignItems: "center",
+    gap: space[3],
+    paddingBlock: space[2],
+    paddingInline: space[4],
+    borderBlockEndWidth: { default: size.hairline, ":last-child": 0 },
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  team: { display: "flex", flexDirection: "column", minWidth: 0 },
+  teamName: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  teamOff: {
+    color: colors.mutedForeground,
+    textDecorationLine: "line-through",
+    textDecorationColor: colors.border,
+  },
+  // On a laptop, two columns side by side, so the step fits on screen.
+  sides: {
+    display: "grid",
+    gap: space[4],
+    width: "100%",
+    textAlign: "start",
+  },
+  sidesWide: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(2, minmax(0, 1fr))",
+    },
+    alignItems: { default: null, [media.lg]: "start" },
+  },
+  sidesNarrow: { maxWidth: "35rem" },
+  side: { display: "flex", flexDirection: "column", gap: space[4] },
+  roomy: { gap: space[6] },
+  messageHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    paddingBlock: space[3],
+    paddingInline: space[4],
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  from: { display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 },
+  editing: { padding: space[3] },
+  message: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[3],
+    maxHeight: "10rem",
+    overflow: "auto",
+    padding: space[4],
+    whiteSpace: "pre-line",
+  },
+  paragraph: { margin: 0 },
+  gate: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space[3],
+    width: "100%",
+    textAlign: "center",
+  },
+  // Many things to settle scroll in their own panel: what the window leaves once the step's title and its way on have their room.
+  panel: {
+    width: "100%",
+    maxHeight: "max(12rem, 100svh - 20rem)",
+    overflowY: "auto",
+  },
+});
 
 // One screen of the client onboarding, by step (prototype
 // `components/onboarding/onboarding-steps.tsx`, the steps of a real
@@ -222,21 +355,9 @@ const suiteNames: Record<DirectorySuite, string> = {
 };
 
 /** Each suite's mark, as its own sign-in button guidelines draw it. */
-const suiteLogos: Record<DirectorySuite, string> = {
-  microsoft: "/logos/microsoft.svg",
-  google: "/logos/google.svg",
-};
-
-/** Hands the reader a CSV file to save, made in the browser. */
-const downloadCsv = (content: string, filename: string): void => {
-  const url = URL.createObjectURL(
-    new Blob([content], { type: "text/csv;charset=utf-8" })
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+const suiteLogos: Record<DirectorySuite, IconData> = {
+  microsoft: MicrosoftLogo,
+  google: GoogleLogo,
 };
 
 /** What the steps that connect read, from a step's props (connect-steps.tsx). */
@@ -252,7 +373,7 @@ const connectProps = ({ data, onward }: StepProps) => ({
 const useRefresh = (): (() => Promise<void>) => {
   const router = useRouter();
   return async () => {
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
 };
 
@@ -494,11 +615,8 @@ const Welcome = (props: StepProps) => {
         voice={lines.voice}
       />
       <div
-        className={cn(
-          "transition-all duration-700 ease-out",
-          !asked && "-translate-y-2 opacity-0"
-        )}
         inert={!asked}
+        {...stylex.props(motion.change, !asked && motion.waitingAbove)}
       >
         <LanguageChoice
           onPick={(locale) => {
@@ -601,13 +719,13 @@ const shareDocument = async (
  */
 const WaitingNote = ({ waiting }: { waiting: number }) =>
   waiting > 0 ? (
-    <p className="text-muted-foreground text-xs">
+    <Text size="xs" color="muted">
       {plural(waiting, {
         one: "# person new on your list gets a link once you confirm your organization.",
         other:
           "# people new on your list get their links once you confirm your organization.",
       })}
-    </p>
+    </Text>
   ) : null;
 
 /** Where connecting a directory comes back to: this step. */
@@ -733,38 +851,35 @@ const SignIns = ({
     <>
       <Onward>
         <div
-          className={cn(
-            "grid w-full gap-2.5",
-            suites.length > 1 && "sm:grid-cols-2"
+          {...stylex.props(
+            styles.signIns,
+            suites.length > 1 && styles.signInsTwo
           )}
         >
           {suites.map((suite) => {
             const signIn = suiteNames[suite];
             const waiting = reading === suite;
+            const words = waiting
+              ? t`Waiting for ${signIn}`
+              : t`Continue with ${signIn}`;
             return (
               <Button
-                className="w-full"
                 disabled={reading !== null}
+
                 key={suite}
+                // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
+                style={styles.full}
                 onClick={() => {
                   onConnect(suite);
                 }}
                 size="lg"
+                successLabel={words}
+                errorLabel={words}
+                status={waiting ? "loading" : "idle"}
                 variant="outline"
               >
-                {waiting ? (
-                  <Spinner data-icon="inline-start" />
-                ) : (
-                  <img
-                    alt=""
-                    className="size-4"
-                    data-icon="inline-start"
-                    src={suiteLogos[suite]}
-                  />
-                )}
-                {waiting
-                  ? t`Waiting for ${signIn}`
-                  : t`Continue with ${signIn}`}
+                <Icon icon={suiteLogos[suite]} />
+                {words}
               </Button>
             );
           })}
@@ -921,24 +1036,25 @@ const Company = (props: StepProps) => {
   }
   // The step's one main action, in lime, as the prototype's
   // (`onboarding-steps.tsx`): with no sign-in to offer, the list is the way on.
+  const listWords =
+    reading === "list" ? t`Reading your staff list` : t`Choose your staff list`;
   const listButton = (
     <Button
-      className="w-full max-w-sm"
       disabled={reading !== null}
+
+      // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
+      style={styles.listButton}
       onClick={() => {
         list.current?.click();
       }}
-      size="xl"
-      variant="highlight"
+      size="lg"
+      successLabel={listWords}
+      errorLabel={listWords}
+      status={reading === "list" ? "loading" : "idle"}
+      variant="default"
     >
-      {reading === "list" ? (
-        <Spinner data-icon="inline-start" />
-      ) : (
-        <UploadIcon data-icon="inline-start" />
-      )}
-      {reading === "list"
-        ? t`Reading your staff list`
-        : t`Choose your staff list`}
+      <Icon icon={UploadIcon} />
+      {listWords}
     </Button>
   );
   return (
@@ -964,17 +1080,14 @@ const Company = (props: StepProps) => {
       {roster === null && suites.length === 0 ? (
         <Onward>
           {listButton}
-          <p className="text-muted-foreground text-balance">
+          <p {...stylex.props(styles.question, styles.quiet)}>
             {t`From your HR or payroll system. Microsoft 365 or Google can be connected later, with us.`}{" "}
-            <button
-              className="hover:text-foreground focus-visible:ring-ring/50 rounded-sm underline underline-offset-4 outline-none focus-visible:ring-3"
-              onClick={() => {
-                downloadCsv(exampleList, "staff-list-example.csv");
-              }}
-              type="button"
+            <Link
+              download="staff-list-example.csv"
+              href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
             >
               {t`See an example`}
-            </button>
+            </Link>
           </p>
           <MoreAbout page="staffList">{t`More about the staff list`}</MoreAbout>
         </Onward>
@@ -1011,7 +1124,7 @@ const Company = (props: StepProps) => {
         accept=".csv,.tsv,.txt,.xlsx"
         aria-hidden="true"
         aria-label={t`Choose your staff list`}
-        className="hidden"
+        {...stylex.props(styles.hidden)}
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file !== undefined) {
@@ -1096,21 +1209,22 @@ const PlaceButton = ({
   onChoose: () => void;
 }) => {
   const { t } = useLingui();
+  const words =
+    suite === "microsoft"
+      ? t`Choose from SharePoint or OneDrive`
+      : t`Choose from Google Drive`;
   return (
-    <Button disabled={disabled} onClick={onChoose} variant="outline">
-      {waiting ? (
-        <Spinner data-icon="inline-start" />
-      ) : (
-        <img
-          alt=""
-          className="size-4"
-          data-icon="inline-start"
-          src={suiteLogos[suite]}
-        />
-      )}
-      {suite === "microsoft"
-        ? t`Choose from SharePoint or OneDrive`
-        : t`Choose from Google Drive`}
+    <Button
+      disabled={disabled}
+
+      onClick={onChoose}
+      successLabel={words}
+      errorLabel={words}
+      status={waiting ? "loading" : "idle"}
+      variant="outline"
+    >
+      <Icon icon={suiteLogos[suite]} />
+      {words}
     </Button>
   );
 };
@@ -1376,10 +1490,7 @@ const Documents = (props: StepProps) => {
     ...pending,
   ];
   const ask = open?.reading.ask ?? null;
-  const askEntrance = useEntrance(
-    open?.id ?? "",
-    "animate-in fade-in slide-in-from-bottom-1 duration-300"
-  );
+  const askArrives = useArrives(open?.id ?? "");
   return (
     <>
       <Heading
@@ -1404,11 +1515,13 @@ const Documents = (props: StepProps) => {
           }}
           rows={rows}
         />
-        <p className="text-muted-foreground text-xs">{t`I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none.`}</p>
+        <Text size="xs" color="muted">
+          {t`I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none.`}
+        </Text>
         <ErrorText>{removeProblem}</ErrorText>
         {suites.length === 0 ? null : (
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex flex-wrap justify-center gap-2">
+          <div {...stylex.props(styles.centred)}>
+            <div {...stylex.props(styles.wrapped)}>
               {suites.map((suite) => (
                 <PlaceButton
                   disabled={connecting !== null}
@@ -1444,14 +1557,14 @@ const Documents = (props: StepProps) => {
         )}
         {open === undefined || ask === null ? null : (
           <div
-            className={cn("flex flex-col items-center gap-2", askEntrance)}
             key={open.id}
+            {...comeIn(askArrives, motion.rise, styles.centred)}
           >
-            <p className="text-balance">
+            <p {...stylex.props(styles.question)}>
               {ask.question}{" "}
-              <span className="text-muted-foreground">{open.name}</span>
+              <span {...stylex.props(styles.quiet)}>{open.name}</span>
             </p>
-            <div className="flex flex-wrap justify-center gap-2">
+            <div {...stylex.props(styles.wrapped)}>
               {ask.options.map((option) => (
                 <Button
                   disabled={busy}
@@ -1469,7 +1582,9 @@ const Documents = (props: StepProps) => {
             <ErrorText>{failure}</ErrorText>
           </div>
         )}
-        <p className="text-muted-foreground text-xs">{t`Leave out personnel files and anything about one person.`}</p>
+        <Text size="xs" color="muted">
+          {t`Leave out personnel files and anything about one person.`}
+        </Text>
       </Onward>
       <Primary
         disabled={reading.length > 0}
@@ -1563,7 +1678,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
         voice={lines.voice}
       />
       <Onward>
-        <div className="setup-org-list flex w-full flex-col overflow-auto rounded-xl border text-left">
+        <div {...stylex.props(styles.org)}>
           {teams.map(({ team, people }) => {
             // Someone erased stays in their team, without a name.
             const options = people.map((person) => ({
@@ -1573,52 +1688,38 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
             const { name } = team;
             const count = people.length;
             return (
-              <div
-                className="setup-org-row grid items-center gap-3 border-b px-4 py-2.5 last:border-b-0"
-                key={team.id}
-              >
-                <div className="flex min-w-0 flex-col">
+              <div key={team.id} {...stylex.props(styles.orgRow)}>
+                <div {...stylex.props(styles.team)}>
                   <span
-                    className={cn(
-                      "truncate",
-                      team.off &&
-                        "text-muted-foreground decoration-border line-through"
+                    {...stylex.props(
+                      styles.teamName,
+                      team.off && styles.teamOff
                     )}
                   >
                     {name}
                   </span>
-                  <span className="text-muted-foreground text-xs">
+                  <Text as="span" size="xs" color="muted">
                     {plural(count, { one: "# person", other: "# people" })}
-                  </span>
+                  </Text>
                 </div>
                 <Select
                   disabled={team.off}
                   items={options}
-                  onValueChange={(value: unknown) => {
+                  onValueChange={(value) => {
                     change(team.id, {
-                      lead:
-                        typeof value === "string" && value !== ""
-                          ? value
-                          : null,
+                      lead: value === null || value === "" ? null : value,
                     });
                   }}
-                  value={team.lead ?? ""}
+                  value={team.lead}
                 >
                   <SelectTrigger
                     aria-label={t`Lead of ${name}`}
-                    className="w-full"
+                    // oxlint-disable-next-line shadcn/no-inline-styles -- a StyleX style, Damsko's layout prop: no inline style
+                    style={styles.full}
                   >
                     <SelectValue placeholder={t`Who leads it?`} />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {options.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
+                  <SelectContent />
                 </Select>
                 <Switch
                   aria-label={t`${name} takes part`}
@@ -1631,11 +1732,11 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
             );
           })}
         </div>
-        <p className="text-muted-foreground text-xs">
+        <Text size="xs" color="muted">
           {missing > 0
             ? t`A team without a lead gets its links on the first day, and I ask each person what they do.`
             : t`Switch a team off and nobody in it gets a link.`}
-        </p>
+        </Text>
         <WaitingNote waiting={props.data.view.waiting} />
         <ErrorText>{failure}</ErrorText>
       </Onward>
@@ -1797,13 +1898,13 @@ const Team = (props: StepProps) => {
         voice={lines.voice}
       />
       {/* On a laptop, the message on the left and the plan on the right, so the step fits on screen. */}
-      <div className="grid w-full gap-3.5 text-left lg:grid-cols-2 lg:items-start">
-        <div className="flex flex-col gap-3.5">
-          <div className="bg-card overflow-hidden rounded-xl border shadow-sm">
-            <div className="flex items-center gap-2.5 border-b px-4 py-3">
-              <div className="flex min-w-0 flex-1 flex-col">
+      <div {...stylex.props(styles.sides, styles.sidesWide)}>
+        <div {...stylex.props(styles.side)}>
+          <Card padding="none">
+            <div {...stylex.props(styles.messageHead)}>
+              <div {...stylex.props(styles.from)}>
                 <span>{admin}</span>
-                <span className="text-muted-foreground">
+                <span {...stylex.props(styles.quiet)}>
                   {company === null
                     ? t`To everyone`
                     : t`To everyone at ${company}`}
@@ -1816,11 +1917,7 @@ const Team = (props: StepProps) => {
                 size="sm"
                 variant="ghost"
               >
-                {editing ? (
-                  <CheckIcon data-icon="inline-start" />
-                ) : (
-                  <PenLineIcon data-icon="inline-start" />
-                )}
+                <Icon icon={editing ? CheckIcon : PencilIcon} />
                 {editing ? t`Done` : t`Edit`}
               </Button>
               <Button
@@ -1832,42 +1929,37 @@ const Team = (props: StepProps) => {
                 size="sm"
                 variant="ghost"
               >
-                {copied ? (
-                  <CheckIcon data-icon="inline-start" />
-                ) : (
-                  <CopyIcon data-icon="inline-start" />
-                )}
+                <Icon icon={copied ? CheckIcon : CopyIcon} />
                 {copied ? t`Copied` : t`Copy`}
               </Button>
             </div>
             {editing ? (
-              <div className="p-3">
+              <div {...stylex.props(styles.editing)}>
                 <Textarea
                   aria-label={t`The message`}
-                  onChange={(event) => {
-                    props.onMessage(event.target.value);
-                  }}
+                  onValueChange={props.onMessage}
                   rows={8}
                   value={message}
                 />
               </div>
             ) : (
-              <div className="flex max-h-40 flex-col gap-2.5 overflow-auto px-4 py-4 whitespace-pre-line">
+              <div {...stylex.props(styles.message)}>
                 {message.split(/\n{2,}/u).map((paragraph, index) => (
-                  <p key={index}>{paragraph}</p>
+                  <p key={index} {...stylex.props(styles.paragraph)}>
+                    {paragraph}
+                  </p>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
           <Alert>
-            <InfoIcon />
             <AlertTitle>{t`What happens next`}</AlertTitle>
             <AlertDescription>
               <SpokenText from={0} line={next} text={next} />
             </AlertDescription>
           </Alert>
         </div>
-        <div className="flex flex-col gap-3.5">
+        <div {...stylex.props(styles.side)}>
           <SendPlanForm
             choice={choice}
             onChange={choose}
@@ -1949,10 +2041,7 @@ const ListeningStep = (props: StepProps) => {
   // oxlint-disable-next-line react/hook-use-state -- read once as the step arrives, never set
   const [mailShown] = useState(() => !props.settled.includes("mail"));
   const gateOpen = percent >= data.gate.threshold;
-  const gateEntrance = useEntrance(
-    gateOpen ? "open" : "",
-    "animate-in fade-in slide-in-from-bottom-2 duration-400"
-  );
+  const gateArrives = useArrives(gateOpen ? "open" : "");
   return (
     <>
       <Heading
@@ -1962,12 +2051,13 @@ const ListeningStep = (props: StepProps) => {
       />
       {/* Before the links go out, until it's done: the admin's mail filter lets Grasp's mail through, beside where the interviews stand and the way on on a laptop, so the step fits on screen. Settled here, it stays to say so until they leave. */}
       <div
-        className={cn(
-          "grid w-full gap-6 text-left",
-          mailShown ? "lg:grid-cols-2 lg:items-start" : "max-w-140"
+        {...stylex.props(
+          styles.sides,
+          styles.roomy,
+          mailShown ? styles.sidesWide : styles.sidesNarrow
         )}
       >
-        <div className="flex flex-col gap-6">
+        <div {...stylex.props(styles.side, styles.roomy)}>
           <InterviewsProgress
             links={data.links}
             listening={listening}
@@ -1976,12 +2066,7 @@ const ListeningStep = (props: StepProps) => {
             view={data.view}
           />
           {gateOpen ? (
-            <div
-              className={cn(
-                "flex w-full flex-col items-center gap-3 text-center",
-                gateEntrance
-              )}
-            >
+            <div {...comeIn(gateArrives, motion.rise, styles.gate)}>
               <Callout
                 text={t`I’ve heard enough to open. There are just a few things I need from you first.`}
               />
@@ -2076,10 +2161,7 @@ const Review = (props: StepProps) => {
         voice={lines.voice}
       />
       {/* Many things to settle scroll in their own panel, so the way on stays in sight. */}
-      <section
-        aria-label={t`What needs you`}
-        className="setup-panel w-full overflow-y-auto"
-      >
+      <section aria-label={t`What needs you`} {...stylex.props(styles.panel)}>
         {differences.length === 0 ? null : (
           <Differences
             changing={changing}
@@ -2210,12 +2292,7 @@ export const SetupStepBody = ({
       <Seen value={seen}>
         <Opening value={opening}>
           <Explained value={{ explained, onExplained }}>
-            <div
-              className={cn(
-                "flex w-full flex-col items-center gap-6",
-                !seen && "animate-in fade-in duration-500"
-              )}
-            >
+            <div {...comeIn(!seen, motion.fade, styles.body)}>
               <Body {...props} />
             </div>
           </Explained>
