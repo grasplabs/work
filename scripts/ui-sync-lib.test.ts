@@ -22,11 +22,13 @@ import { describe, expect, it, onTestFinished } from "vite-plus/test";
 
 import {
   carry,
+  damskoLicence,
   differences,
   expectedOf,
   fetchDamsko,
   fetchFor,
   localChangesSchema,
+  noticeDifference,
   overdue,
   parseRegistry,
   proposal,
@@ -1257,4 +1259,22 @@ describe("the update", () => {
       );
     }
   );
+});
+
+describe("the notice that src/ stays under Damsko's licence", () => {
+  it("links Damsko's licence at the pinned commit, and at no other", () => {
+    const commit = "2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7";
+    expect(
+      noticeDifference(`Damsko's licence:\n${damskoLicence(commit)}\n`, commit)
+    ).toBeUndefined();
+    expect(
+      noticeDifference(
+        `Damsko's licence:\n${damskoLicence("aba6f6e9327fdd78f9aee01c2f9dcf28593c4e74")}\n`,
+        commit
+      )
+    ).toBe(
+      `LICENSE must link Damsko's licence at the pin, ${damskoLicence(commit)}`
+    );
+    expect(noticeDifference(undefined, commit)).toMatch(/^LICENSE is missing/u);
+  });
 });

@@ -473,6 +473,27 @@ export const differences = (
   return found;
 };
 
+/** Damsko's licence at a commit, as packages/ui/LICENSE links it. */
+export const damskoLicence = (commit: string): string =>
+  `https://github.com/grasplabs/damsko/blob/${commit}/LICENSE`;
+
+/**
+ * What is wrong with packages/ui/LICENSE, the notice that the files under
+ * src/ stay under Damsko's licence, if anything: it must link that licence
+ * at the pinned commit, which ui:update moves it to with the pin.
+ */
+export const noticeDifference = (
+  notice: string | undefined,
+  commit: string
+): string | undefined => {
+  if (notice === undefined) {
+    return "LICENSE is missing: it says the files under src/ stay under Damsko's licence";
+  }
+  return notice.includes(damskoLicence(commit))
+    ? undefined
+    : `LICENSE must link Damsko's licence at the pin, ${damskoLicence(commit)}`;
+};
+
 /**
  * Listed changes older than two weeks, one line each: one with no pull
  * request in Damsko yet, and one whose pull request hasn't reached the pin.
