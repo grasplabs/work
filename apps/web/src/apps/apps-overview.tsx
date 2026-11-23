@@ -22,7 +22,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
-import { toast, Toaster } from "@grasp-os/ui/components/toast";
+import { toast } from "@grasp-os/ui/components/toast";
 import {
   ArchiveIcon,
   Icon,
@@ -354,9 +354,6 @@ export const AppsOverview = ({
           ))}
         </Tabs>
       )}
-      {/* Why an archive or a restore failed, said in a toast: the frame's
-          own toasts are still the kit's. */}
-      <Toaster />
     </Page>
   );
 };
