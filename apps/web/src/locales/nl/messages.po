@@ -9493,8 +9493,8 @@ msgid "It answers in a chat, whenever it is asked."
 msgstr "Het antwoordt in een chat, wanneer het gevraagd wordt."
 
 #: src/agents/agent-page.tsx
-msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead."
-msgstr "Het antwoordt niemand meer, en zijn schema en instellingen worden verwijderd. De chats die mensen ermee hadden blijven van hen. Wil je het even stoppen, zet het dan uit."
+msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
+msgstr "Het antwoordt niemand meer, en zijn schema en instellingen worden verwijderd. De chats die mensen ermee hadden blijven van hen. Wil je het even stoppen, pauzeer het dan."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -13679,6 +13679,7 @@ msgid "Pattern"
 msgstr "Patroon"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/settings/stephen-card.tsx
 #: src/voice/sound-controls.tsx
 #: src/workflows/workflow-status.tsx
@@ -15127,6 +15128,7 @@ msgid "Results"
 msgstr "Resultaten"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Hervatten"
@@ -19390,17 +19392,12 @@ msgstr "Maak van een volle inbox een korte lijst van wat vandaag een mens nodig 
 msgid "Turn into"
 msgstr "Omzetten in"
 
-#: src/agents/agent-page.tsx
-msgid "Turn off"
-msgstr "Uitzetten"
-
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
 msgid "Turn off"
 msgstr "Uitzetten"
 
 #: src/agents/agent-apps-card.tsx
-#: src/agents/agent-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Turn on"
 msgstr "Aanzetten"

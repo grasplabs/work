@@ -117,6 +117,8 @@ const styles = stylex.create({
   },
   ok: { color: grasp.success, display: "inline-flex" },
   failed: { color: grasp.danger, display: "inline-flex" },
+  // Didn't run, for nothing wrong with the agent: paused, or busy.
+  quiet: { color: grasp.muted, display: "inline-flex" },
   history: { display: "grid", gap: grasp.space2 },
   runs: { display: "grid", margin: 0, padding: 0, listStyle: "none" },
   // A run's mark, its title and its date: the date keeps its line, and
@@ -187,6 +189,17 @@ export const runsOf = (wakes: readonly AgentWake[]): Run[] =>
         : [{ wake, at: wake.lastAt, outcome: outcomeOf(wake.lastOutcome) }]
     )
     .toSorted((a, b) => b.at.localeCompare(a.at));
+
+/** How a run's row marks how it went: ran, didn't for a harmless reason, or failed. */
+const markOf = {
+  started: { icon: Done, look: styles.ok },
+  "agent.paused": { icon: Pause, look: styles.quiet },
+  "agent.busy": { icon: Clock, look: styles.quiet },
+  "agent.not_for_you": { icon: Failed, look: styles.failed },
+  "permission.person_inactive": { icon: Failed, look: styles.failed },
+  "model.no_provider": { icon: Failed, look: styles.failed },
+  other: { icon: Failed, look: styles.failed },
+} as const;
 
 /** Outcomes that say nothing is wrong with the agent: it ran, was paused, or was busy and tries again. */
 const fine = new Set<Outcome>(["started", "agent.paused", "agent.busy"]);
@@ -623,12 +636,8 @@ const RunHistory = ({ wakes }: { wakes: readonly AgentWake[] }) => {
         <ul {...stylex.props(styles.runs)}>
           {runs.map(({ wake, at, outcome }) => (
             <li key={wake.id} {...stylex.props(styles.run)}>
-              <span
-                {...stylex.props(
-                  outcome === "started" ? styles.ok : styles.failed
-                )}
-              >
-                <Icon icon={outcome === "started" ? Done : Failed} />
+              <span {...stylex.props(markOf[outcome].look)}>
+                <Icon icon={markOf[outcome].icon} />
               </span>
               <span {...stylex.props(styles.runWords)}>
                 <span {...stylex.props(styles.runTitle)}>

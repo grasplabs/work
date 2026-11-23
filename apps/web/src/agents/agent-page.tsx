@@ -368,7 +368,7 @@ const DeleteAgent = ({
       <AlertDialogContent>
         <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
         <AlertDialogDescription>
-          {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead.`}
+          {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
           <AlertDialogCancel />
@@ -429,7 +429,7 @@ const AgentHead = ({
                 },
               },
               {
-                label: on ? t`Turn off` : t`Turn on`,
+                label: on ? t`Pause` : t`Resume`,
                 icon: on ? Pause : Play,
                 disabled: !can,
                 onSelect: () => {
@@ -644,8 +644,9 @@ export const AgentPage = ({
           />
         )}
         <AgentFailure>{failure}</AgentFailure>
-        {/* Every tab stays mounted, the others hidden: what is typed and
-          not yet saved on one stays while another is looked at. */}
+        {/* The other tabs stay mounted, hidden: what is typed and not yet
+          saved on one stays while another is looked at. The overview holds
+          nothing typed, so it mounts only when shown. */}
         {shownTab === "overview" ? (
           <AgentOverview
             agent={agent}

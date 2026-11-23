@@ -62,8 +62,19 @@ const styles = stylex.create({
     outlineOffset: "-1px",
   },
   off: { color: grasp.muted, backgroundColor: grasp.soft },
-  on: { color: grasp.paper, backgroundColor: grasp.ink },
-  paused: { color: grasp.paper, backgroundColor: grasp.muted },
+  // In forced colours backgrounds are gone: a day it runs keeps a thicker ring.
+  on: {
+    color: grasp.paper,
+    backgroundColor: grasp.ink,
+    outline: { default: "none", [media.forced]: "3px solid CanvasText" },
+    outlineOffset: { default: "-1px", [media.forced]: "-3px" },
+  },
+  paused: {
+    color: grasp.paper,
+    backgroundColor: grasp.muted,
+    outline: { default: "none", [media.forced]: "3px solid CanvasText" },
+    outlineOffset: { default: "-1px", [media.forced]: "-3px" },
+  },
 });
 
 export const DayPills = ({

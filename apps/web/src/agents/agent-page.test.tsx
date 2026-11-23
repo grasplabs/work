@@ -1171,6 +1171,7 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" }, false);
+    expect(document.body.textContent).not.toContain("Edit instructions");
     const off = isDisabled(button("Pause"));
     const edit = isDisabled(await fromMenu("Edit"));
     // Closed again before the tabs are pressed.
@@ -1206,7 +1207,7 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Claire", tab: "instructions" });
     await set(field("Instructions"), "A draft, not saved.", "input");
     // Paused: core is asked and the page read again.
-    await press(await fromMenu("Turn off"));
+    await press(await fromMenu("Pause"));
     const afterPause = field("Instructions").value;
     await openTab("access");
     await openTab("instructions");
@@ -1268,7 +1269,7 @@ describe("an agent's page", () => {
     await press(button("Add a time"));
     await set(field("What to ask it each time"), "refuse this", "input");
     // Another change on the page saves and the page is read again.
-    await press(await fromMenu("Turn off"));
+    await press(await fromMenu("Pause"));
     expect(field("What to ask it each time").value).toBe("refuse this");
     // Core refuses it: still there to be corrected, and said why.
     await press(exactButton("Add"));

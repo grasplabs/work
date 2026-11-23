@@ -9493,8 +9493,8 @@ msgid "It answers in a chat, whenever it is asked."
 msgstr "Il répond dans un chat, chaque fois qu’on le lui demande."
 
 #: src/agents/agent-page.tsx
-msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, turn it off instead."
-msgstr "Il ne répond plus à personne, et son horaire et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, désactivez-le plutôt."
+msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead."
+msgstr "Il ne répond plus à personne, et son horaire et ses réglages sont supprimés. Les chats que les gens ont eus avec lui restent les leurs. Pour l’arrêter un moment, mettez-le plutôt en pause."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It asks you before it sends or changes anything."
@@ -13679,6 +13679,7 @@ msgid "Pattern"
 msgstr "Motif"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/settings/stephen-card.tsx
 #: src/voice/sound-controls.tsx
 #: src/workflows/workflow-status.tsx
@@ -15127,6 +15128,7 @@ msgid "Results"
 msgstr "Résultats"
 
 #: src/agents/agent-overview.tsx
+#: src/agents/agent-page.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Reprendre"
@@ -19390,17 +19392,12 @@ msgstr "Transforme une boîte de réception pleine en une courte liste de ce qui
 msgid "Turn into"
 msgstr "Transformer en"
 
-#: src/agents/agent-page.tsx
-msgid "Turn off"
-msgstr "Désactiver"
-
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
 msgid "Turn off"
 msgstr "Désactiver"
 
 #: src/agents/agent-apps-card.tsx
-#: src/agents/agent-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Turn on"
 msgstr "Activer"
