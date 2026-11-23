@@ -1,0 +1,79 @@
+import { Input } from "@grasp-os/ui/components/input";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { useState } from "react";
+
+// A setting's text, saved as the person leaves the field (or presses
+// Enter in a one-line field), as the workspace's name is: an emptied
+// field saves none, Escape puts back what was saved, and nothing is sent
+// while it is what was saved. The Field round it names it. On Damsko, for
+// every settings page (an App's, the organization's); settings/
+// saved-field.tsx is the old library's, until its last page moves.
+
+/** What a field is saved as: its text, trimmed; null when emptied. */
+const savedAs = (draft: string): string | null => {
+  const trimmed = draft.trim();
+  return trimmed === "" ? null : trimmed;
+};
+
+export const SavedField = ({
+  value,
+  onSave,
+  maxLength,
+  multiline = false,
+  readOnly = false,
+}: {
+  value: string | null;
+  onSave: (value: string | null) => void;
+  maxLength: number;
+  /** Several lines (a description, an address), saved as the field is left. */
+  multiline?: boolean;
+  /** Shown, not changed: for whoever may not change it. */
+  readOnly?: boolean;
+}) => {
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = (): void => {
+    if (draft === null) {
+      return;
+    }
+    setDraft(null);
+    const next = savedAs(draft);
+    if (next !== value) {
+      onSave(next);
+    }
+  };
+  const shown = draft ?? value ?? "";
+  if (multiline) {
+    return (
+      <Textarea
+        maxLength={maxLength}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setDraft(null);
+          }
+        }}
+        onValueChange={setDraft}
+        readOnly={readOnly}
+        rows={3}
+        value={shown}
+      />
+    );
+  }
+  return (
+    <Input
+      maxLength={maxLength}
+      onBlur={save}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          setDraft(null);
+        }
+      }}
+      onValueChange={setDraft}
+      readOnly={readOnly}
+      value={shown}
+    />
+  );
+};

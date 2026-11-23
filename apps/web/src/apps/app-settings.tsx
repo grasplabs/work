@@ -31,7 +31,6 @@ import {
   FieldTitle,
 } from "@grasp-os/ui/components/field";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { Input } from "@grasp-os/ui/components/input";
 import {
   Select,
   SelectContent,
@@ -40,7 +39,6 @@ import {
 } from "@grasp-os/ui/components/select";
 import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import { Text } from "@grasp-os/ui/components/text";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { ArchiveIcon, Icon, LinkIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -66,6 +64,7 @@ import { StatusBadge } from "../drafts/status-badge.tsx";
 import { formatDateTime } from "../format.ts";
 import { WithInfo } from "../frame/info-tip.tsx";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import { SavedField } from "../frame/saved-field.tsx";
 import { decidesRequests } from "../inbox/waiting.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
@@ -482,79 +481,6 @@ const ForBuilders = ({
   );
 };
 
-/** What a field is saved as: its text, trimmed; null when emptied. */
-const savedAs = (draft: string): string | null => {
-  const trimmed = draft.trim();
-  return trimmed === "" ? null : trimmed;
-};
-
-/**
- * A setting's text, saved as the person leaves the field (or presses
- * Enter in a one-line field): an emptied field saves none, Escape puts
- * back what was saved, and nothing is sent while it is what was saved.
- * Read-only for whoever may not change it. The Field round it names it.
- */
-const SavedText = ({
-  value,
-  readOnly,
-  multiline = false,
-  maxLength,
-  onSave,
-}: {
-  value: string;
-  readOnly: boolean;
-  multiline?: boolean;
-  maxLength: number;
-  onSave: (value: string | null) => void;
-}) => {
-  const [draft, setDraft] = useState<string | null>(null);
-  const save = (): void => {
-    if (draft === null) {
-      return;
-    }
-    setDraft(null);
-    const next = savedAs(draft);
-    if (next !== value) {
-      onSave(next);
-    }
-  };
-  const shown = draft ?? value;
-  if (multiline) {
-    return (
-      <Textarea
-        maxLength={maxLength}
-        onBlur={save}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            setDraft(null);
-          }
-        }}
-        onValueChange={setDraft}
-        readOnly={readOnly}
-        rows={3}
-        value={shown}
-      />
-    );
-  }
-  return (
-    <Input
-      maxLength={maxLength}
-      onBlur={save}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        }
-        if (event.key === "Escape") {
-          setDraft(null);
-        }
-      }}
-      onValueChange={setDraft}
-      readOnly={readOnly}
-      value={shown}
-    />
-  );
-};
-
 const GeneralForm = ({
   app,
   read,
@@ -642,7 +568,7 @@ const GeneralForm = ({
                 <FieldContent>
                   <FieldLabel>{t`Name`}</FieldLabel>
                 </FieldContent>
-                <SavedText
+                <SavedField
                   maxLength={appLimits.nameLength}
                   onSave={(name) => {
                     // A name can't be emptied.
@@ -663,7 +589,7 @@ const GeneralForm = ({
                     })}
                   </FieldLabel>
                 </FieldContent>
-                <SavedText
+                <SavedField
                   maxLength={appLimits.descriptionLength}
                   multiline
                   onSave={(description) => {
