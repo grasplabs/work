@@ -31,7 +31,12 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
+import {
+  Link,
+  useLocation,
+  useMatchRoute,
+  useRouter,
+} from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
@@ -40,8 +45,9 @@ import { InboxNavItem } from "../inbox/nav-item.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
 import { WorkflowsItem } from "../workflows/nav-item.tsx";
 import { GraspMark } from "./grasp-mark.ts";
+import { levelAt } from "./levels.ts";
 import { PersonMenu } from "./person-menu.tsx";
-import { settingsLevel, SettingsLevel } from "./settings-level.tsx";
+import { SettingsLevel } from "./settings-level.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
 
 // The app's sidebar, Damsko's Sidebar on its own light ground, the page a
@@ -154,14 +160,6 @@ const Head = ({ searching }: { searching: boolean }) => {
   );
 };
 
-/** The sidebar's level now: Settings' own while a Settings page is open, else the main one. */
-const useLevel = (): string => {
-  const matchRoute = useMatchRoute();
-  return matchRoute({ to: "/settings", fuzzy: true }) === false
-    ? "main"
-    : settingsLevel;
-};
-
 /** The app's sidebar: Grasp's mark, search and the fold, the sections or a level, and the person. */
 export const AppSidebar = ({
   core,
@@ -173,7 +171,8 @@ export const AppSidebar = ({
   const { t } = useLingui();
   const router = useRouter();
   const { setOpenMobile } = useSidebar();
-  const level = useLevel();
+  // Settings' own while a Settings page is open, else the main one.
+  const level = levelAt(useLocation().pathname);
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
   useEffect(

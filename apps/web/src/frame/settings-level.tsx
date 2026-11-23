@@ -18,9 +18,6 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import { groupsFor } from "../settings/sections.ts";
 import { WayOut } from "./way-out.tsx";
 
-/** The sidebar's level for Settings: what the SidebarLevels' `value` calls it. */
-export const settingsLevel = "settings";
-
 /**
  * Settings' own navigation, a level of the sidebar while a Settings page
  * is open (in its sheet on a phone): Back, out of Settings to the page the
@@ -35,7 +32,7 @@ export const SettingsLevel = ({ identity }: { identity: Identity }) => {
     staff: identity.staff,
   });
   return (
-    <SidebarLevel value={settingsLevel}>
+    <SidebarLevel value="settings">
       <SidebarLevelHeader>
         <SidebarMenu>
           <SidebarMenuItem>

@@ -2,6 +2,8 @@ import { Link, useLocation } from "@tanstack/react-router";
 import type { AnchorHTMLAttributes } from "react";
 import { useState } from "react";
 
+import { levelAt } from "./levels.ts";
+
 // Back, in a level of the sidebar (Settings), leads out of every level, to
 // the last page the main level stood beside; to Chat when the person
 // landed in a level. Kept while the sidebar is, which keeps every level in
@@ -13,12 +15,6 @@ interface Outside {
   search: Record<string, unknown>;
 }
 
-/** The areas whose pages put a level of their own in the sidebar. */
-const levelled = [/^\/settings(?:\/|$)/u];
-
-const inLevel = (pathname: string): boolean =>
-  levelled.some((area) => area.test(pathname));
-
 /**
  * The way out of a level: a link to the last page outside every level. It
  * takes what a part drawing it as its child (`asChild`) gives it.
@@ -29,7 +25,7 @@ export const WayOut = ({
 }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href">) => {
   const { pathname, search } = useLocation();
   const [outside, setOutside] = useState<Outside>();
-  if (!inLevel(pathname) && outside?.pathname !== pathname) {
+  if (levelAt(pathname) === "main" && outside?.pathname !== pathname) {
     setOutside({ pathname, search });
   }
   return outside === undefined ? (
