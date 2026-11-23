@@ -140,7 +140,7 @@ const publish = async (page: Page, name: string): Promise<void> => {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 };
 
-/** A version's label, `YY.MM.N`, as History names it. */
+/** A version's label, `vN`, as History names it. */
 const versionLabel = /v\d+/u;
 
 /** What the editor says of a draft that passes. */

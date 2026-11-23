@@ -303,13 +303,15 @@ const triggerStartOf = ({
 };
 
 /**
- * A trigger asking to start its workflow, by its kind, the workflow and
- * what it listens to (`triggerDescription`: which mailbox, which source).
+ * A trigger asking to start its workflow, by its kind and the workflow; a
+ * webhook trigger by its source too (`triggerDescription`), as an admin
+ * may have several. Core's request names no mailbox or connection by
+ * name, so the others say no more.
  */
 const startAskers = {
-  email: msg({ message: "Email trigger for {workflow} ({what})" }),
+  email: msg({ message: "Email trigger for {workflow}" }),
   schedule: msg({ message: "Schedule for {workflow}" }),
-  connector: msg({ message: "Connection trigger for {workflow} ({what})" }),
+  connector: msg({ message: "Connection trigger for {workflow}" }),
   webhook: msg({ message: "Webhook trigger for {workflow} ({what})" }),
 } as const satisfies Record<TriggerKind, MessageDescriptor>;
 

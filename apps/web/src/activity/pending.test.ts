@@ -158,7 +158,7 @@ describe("a schedule trigger asking to start its workflow", () => {
   // A Tuesday at noon in Amsterdam: the next run is Wednesday at 09:00 there.
   const now = new Date("2026-11-17T11:00:00.000Z");
 
-  it("says what it is and when it next runs, in the schedule's own zone, and any other trigger by its kind, its workflow and what it listens to", () => {
+  it("says what it is and when it next runs, in the schedule's own zone, and any other trigger by its kind and workflow, a webhook by its source too", () => {
     const scheduled = requestWords(triggered("schedule"), directory, now);
     const other = requestWords(triggered("email"), directory, now);
 
@@ -183,8 +183,7 @@ describe("a schedule trigger asking to start its workflow", () => {
       otherNext: undefined,
       other: true,
       asker: "Schedule for invoice-approval",
-      otherAsker:
-        "Email trigger for invoice-approval (When an email arrives at its own address)",
+      otherAsker: "Email trigger for invoice-approval",
     });
   });
 });

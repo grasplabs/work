@@ -5252,8 +5252,8 @@ msgid "Connection trigger"
 msgstr "Déclencheur de connexion"
 
 #: src/activity/pending.tsx
-msgid "Connection trigger for {workflow} ({what})"
-msgstr "Déclencheur de connexion de {workflow} ({what})"
+msgid "Connection trigger for {workflow}"
+msgstr "Déclencheur de connexion de {workflow}"
 
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
@@ -6820,8 +6820,8 @@ msgid "Email trigger"
 msgstr "Déclencheur d'e-mail"
 
 #: src/activity/pending.tsx
-msgid "Email trigger for {workflow} ({what})"
-msgstr "Déclencheur d’e-mail de {workflow} ({what})"
+msgid "Email trigger for {workflow}"
+msgstr "Déclencheur d’e-mail de {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
