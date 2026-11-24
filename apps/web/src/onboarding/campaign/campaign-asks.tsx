@@ -69,9 +69,7 @@ const Nudge = ({ ask, onDone }: { ask: Ask; onDone: () => void }) => (
       await sent();
       onDone();
     }}
-    size="sm"
     successText="Sent"
-    variant="outline"
   >
     {`Nudge ${ask.team}`}
   </Button>
@@ -90,9 +88,7 @@ const Readdress = ({
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
-        <Button size="sm" variant="outline">
-          Correct the address
-        </Button>
+        <Button variant="outline">Correct the address</Button>
       </PopoverTrigger>
       <PopoverContent align="end">
         <PopoverHeader>

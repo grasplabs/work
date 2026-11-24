@@ -74,7 +74,7 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
         <Heading level={1} size="xl">
           {lead}
         </Heading>
-        <Text>{rest}</Text>
+        <Text size="lg">{rest}</Text>
       </header>
       <OnYourComputer />
       {three.length === 0 ? (
@@ -86,7 +86,7 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
           <ul aria-label="What we learned" {...stylex.props(styles.three)}>
             {three.map(({ finding, team }) => (
               <li key={finding.id}>
-                <Text>
+                <Text size="lg">
                   {findingSentence(finding, team, {
                     named: true,
                     grouped: campaign.grouped,
