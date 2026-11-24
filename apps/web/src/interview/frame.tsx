@@ -21,12 +21,16 @@ import type { ReactNode } from "react";
 import { GraspLogo } from "../connections/brand-logos.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
+import type { Pose } from "../onboarding/field/engine.ts";
+import { StephenField } from "../onboarding/field/stephen-field.tsx";
 import { useNarrow } from "../onboarding/use-narrow.ts";
 
 // The frame every screen of someone's interview link stands in, full
 // screen, outside the app, as the sign-in page before it: Grasp's mark at
 // the window's top start, the language at its top end with what the screen
 // adds before it, Damsko's calm dither behind the header, and the page.
+// A calm screen with nothing of its own to draw (the sign-in, a notice)
+// stands on Stephen's living field instead, as the setup's screens do.
 
 const styles = stylex.create({
   frame: {
@@ -36,6 +40,8 @@ const styles = stylex.create({
     boxSizing: "border-box",
     height: "100svh",
     overflow: "hidden",
+    // Stephen's field lies under the page, inside the frame.
+    isolation: "isolate",
     backgroundColor: colors.background,
     color: colors.bodyForeground,
   },
@@ -148,35 +154,50 @@ export const DitherOver = () => (
 
 /**
  * The frame: the header across the window, the calm dither behind it on
- * every screen but the read-back, and the screen.
+ * every screen but the read-back, and the screen; on Stephen's field
+ * instead, resting where `pose` says, for a calm screen.
  */
 export const Frame = ({
   strip = true,
+  pose,
   actions,
   children,
 }: {
   /** The texture behind the header. */
   strip?: boolean;
+  /** Stephen's field behind the whole screen, resting here; the header's texture gives way to it. */
+  pose?: Pose;
   /** More at the header's end, before the language. */
   actions?: ReactNode;
   children: ReactNode;
-}) => (
-  <div {...stylex.props(styles.frame)}>
-    <header {...stylex.props(styles.header)}>
-      {/* Grasp's mark alone: "Grasp" is its name. */}
-      <span {...stylex.props(styles.brand)}>
-        <Icon icon={GraspLogo} label="Grasp" />
-      </span>
-      <div {...stylex.props(styles.end)}>
-        {actions}
-        <Language />
-      </div>
-    </header>
-    {strip ? (
-      <div aria-hidden="true" {...stylex.props(styles.field, styles.strip)}>
-        <span {...stylex.props(styles.texture)} />
-      </div>
-    ) : null}
-    <main {...stylex.props(styles.main)}>{children}</main>
-  </div>
-);
+}) => {
+  const screen = (
+    <>
+      <header {...stylex.props(styles.header)}>
+        {/* Grasp's mark alone: "Grasp" is its name. */}
+        <span {...stylex.props(styles.brand)}>
+          <Icon icon={GraspLogo} label="Grasp" />
+        </span>
+        <div {...stylex.props(styles.end)}>
+          {actions}
+          <Language />
+        </div>
+      </header>
+      {strip && pose === undefined ? (
+        <div aria-hidden="true" {...stylex.props(styles.field, styles.strip)}>
+          <span {...stylex.props(styles.texture)} />
+        </div>
+      ) : null}
+      <main {...stylex.props(styles.main)}>{children}</main>
+    </>
+  );
+  return (
+    <div {...stylex.props(styles.frame)}>
+      {pose === undefined ? (
+        screen
+      ) : (
+        <StephenField pose={pose}>{screen}</StephenField>
+      )}
+    </div>
+  );
+};

@@ -7,12 +7,19 @@ import {
   PauseFilledIcon,
 } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  isValidElement,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDay } from "../format.ts";
 import { isLocale } from "../i18n.ts";
+import type { Pose } from "../onboarding/field/engine.ts";
+import { beside } from "../onboarding/field/poses.ts";
 import {
   deleteInterview,
   isRefused,
@@ -516,6 +523,10 @@ const Talking = ({
     />
   );
 
+/** Every screen but the conversation stands on Stephen's field; the conversation keeps its own room. */
+const poseOf = (stage: ReactNode): Pose | undefined =>
+  isValidElement(stage) && stage.type === Talking ? undefined : beside;
+
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
@@ -607,7 +618,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   }
 
   return (
-    <Frame actions={actions} strip={!reading}>
+    <Frame actions={actions} pose={poseOf(stage)} strip={!reading}>
       {stage}
       <Failed message={deleteFailed ?? withdrawFailed} />
     </Frame>

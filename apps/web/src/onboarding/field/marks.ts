@@ -25,12 +25,35 @@ const REACH = 0.6;
 const bayerAt = (x: number, y: number): number =>
   ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
 
-/** A picture as cells: which are lit, read once from the component's own mark. */
+/** The least free room beside a component's words, in CSS pixels, that a picture is drawn in. */
+const LEAST_ROOM = 72;
+
+/** How far a picture keeps from the words, in CSS pixels. */
+const CLEAR = 12;
+
+/** A picture as cells: which are lit, read once from the component's own mark, and the free room it has. */
 interface Mark {
   columns: number;
   rows: number;
   lit: Uint8Array;
+  /** From the component's far edge to the end of its words, in CSS pixels. */
+  room: number;
 }
+
+/** How much free room a component has after its words, toward its far edge. */
+const roomAfterWords = (element: Element): number => {
+  const box = element.getBoundingClientRect();
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  let end = box.left;
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if ((node.textContent ?? "").trim() !== "") {
+      range.selectNodeContents(node);
+      end = Math.max(end, range.getBoundingClientRect().right);
+    }
+  }
+  return box.right - end;
+};
 
 /** What is known of each component's mark: being read, read, or none. */
 const marks = new WeakMap<Element, Mark | "reading" | null>();
@@ -53,7 +76,7 @@ const pictureOf = (element: Element): SVGSVGElement | null => {
 const readMark = async (svg: SVGSVGElement, rows: number): Promise<Mark> => {
   const copy = svg.cloneNode(true);
   if (!(copy instanceof SVGSVGElement)) {
-    return { columns: 0, rows: 0, lit: new Uint8Array() };
+    return { columns: 0, rows: 0, lit: new Uint8Array(), room: 0 };
   }
   const box = svg.viewBox.baseVal;
   const aspect = box.width > 0 && box.height > 0 ? box.width / box.height : 1;
@@ -76,7 +99,7 @@ const readMark = async (svg: SVGSVGElement, rows: number): Promise<Mark> => {
   flat.height = rows;
   const context = flat.getContext("2d", { willReadFrequently: true });
   if (context === null) {
-    return { columns: 0, rows: 0, lit: new Uint8Array() };
+    return { columns: 0, rows: 0, lit: new Uint8Array(), room: 0 };
   }
   context.drawImage(image, 0, 0, columns, rows);
   const { data } = context.getImageData(0, 0, columns, rows);
@@ -84,7 +107,7 @@ const readMark = async (svg: SVGSVGElement, rows: number): Promise<Mark> => {
   for (let at = 0; at < lit.length; at += 1) {
     lit[at] = (data[at * 4 + 3] ?? 0) > 96 ? 1 : 0;
   }
-  return { columns, rows, lit };
+  return { columns, rows, lit, room: 0 };
 };
 
 /** The mark of a component, once read; it starts reading it the first time it is asked. */
@@ -94,7 +117,9 @@ const markOf = (element: Element, height: number): Mark | null => {
     return known === "reading" ? null : known;
   }
   const svg = pictureOf(element);
-  if (svg === null) {
+  // Never over its words: a component whose words fill it (a button) has no room for one.
+  const room = roomAfterWords(element);
+  if (svg === null || room < LEAST_ROOM) {
     marks.set(element, null);
     return null;
   }
@@ -102,7 +127,7 @@ const markOf = (element: Element, height: number): Mark | null => {
   const rows = Math.max(8, Math.round((height * SCALE) / CELL));
   void (async () => {
     try {
-      marks.set(element, await readMark(svg, rows));
+      marks.set(element, { ...(await readMark(svg, rows)), room });
     } catch {
       marks.set(element, null);
     }
@@ -153,11 +178,12 @@ export const drawMarks = (
     }
     const left = x + width - mark.columns * CELL * 0.82;
     const top = y + (height - mark.rows * CELL) / 2;
-    const fadeFrom = x + width * (1 - REACH);
-    // Kept inside the component, clear of its edge, so his ring stays clean.
+    const free = x + width - mark.room + CLEAR;
+    const fadeFrom = Math.max(x + width * (1 - REACH), free);
+    // Kept inside the component, clear of its edge and of its words, so his ring and the words stay clean.
     context.save();
     context.beginPath();
-    context.rect(x + 3, y + 3, width - 6, height - 6);
+    context.rect(free, y + 3, x + width - 3 - free, height - 6);
     context.clip();
     for (let row = 0; row < mark.rows; row += 1) {
       for (let column = 0; column < mark.columns; column += 1) {
