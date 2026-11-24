@@ -19,6 +19,8 @@ import {
   ArrowRightIcon,
   Icon,
   LogOutIcon,
+  VolumeIcon,
+  VolumeOffIcon,
 } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
@@ -38,6 +40,7 @@ import {
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { useCore } from "../use-core.ts";
+import { allowSound, setVoiceOn, useSay, useVoice } from "../voice/voice.ts";
 import type { Pose } from "./field/engine.ts";
 import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
@@ -45,7 +48,7 @@ import { useNarrow } from "./use-narrow.ts";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
-// language, light or dark, and the way out at its end; then the step in one
+// language, his voice, light or dark, and the way out at its end; then the step in one
 // centred column, its words on the start edge, the page scrolling. Behind
 // it all, Stephen: the light of the page, alive, in another place on every
 // screen (field/stephen-field.tsx). Leaving signs out: the admin can't use
@@ -247,6 +250,36 @@ const WayArrows = ({ ways }: { ways: Ways }) => {
   );
 };
 
+/**
+ * Stephen's voice, on or off, remembered in this browser. While the browser
+ * still holds sound back (until the page is first pressed), a press lets
+ * him be heard and says the line he is on again.
+ */
+const Sound = () => {
+  const { t } = useLingui();
+  const { on, blocked } = useVoice();
+  const heard = on && !blocked;
+  const name = heard ? t`Turn my voice off` : t`Turn my voice on`;
+  return (
+    <Button
+      aria-label={name}
+      aria-pressed={heard}
+      onClick={() => {
+        if (on && blocked) {
+          void allowSound();
+          return;
+        }
+        setVoiceOn(!on);
+      }}
+      size={tool.button}
+      tooltip={name}
+      variant="ghost"
+    >
+      <Icon icon={heard ? VolumeIcon : VolumeOffIcon} />
+    </Button>
+  );
+};
+
 /** Leaving signs out; nothing is lost. Where signing out didn't work, they stay. */
 const Leave = () => {
   const { t } = useLingui();
@@ -300,6 +333,7 @@ export const CalmFrame = ({
         </span>
         <div {...stylex.props(styles.tools)}>
           {language ? <Language /> : null}
+          <Sound />
           <Appearance userId={userId} />
           <Leave />
         </div>
@@ -314,8 +348,20 @@ export const CalmFrame = ({
   </div>
 );
 
+/** A sentence ends before the next is said: a title without its own stop gets one. */
+const endsSentence = /[.!?…]$/u;
+
+/** What Stephen says on a step: its title, and its line when the line is words alone. */
+const spokenStep = (title: string, body: ReactNode): string => {
+  if (typeof body !== "string") {
+    return title;
+  }
+  return `${endsSentence.test(title.trim()) ? title : `${title.trim()}.`} ${body}`;
+};
+
 /**
- * One step: the serif title in Stephen's voice, one line under it, what
+ * One step: the serif title in Stephen's voice (he says it, and its line,
+ * as the step arrives), one line under it, what
  * the step asks, and its end: its one `default` Button, an `outline` for a
  * lesser way, a `link` for a third.
  */
@@ -335,24 +381,31 @@ export const CalmStep = ({
   body: ReactNode;
   children?: ReactNode;
   end?: ReactNode;
-}) => (
-  <section
-    {...stylex.props(styles.step, figure !== undefined && styles.stepCentred)}
-  >
-    {figure}
-    <div {...stylex.props(styles.head, centred && styles.headCentred)}>
-      <Heading level={1} size="xl">
-        {title}
-      </Heading>
-      {typeof body === "string" ? <Text size="lg">{body}</Text> : body}
-    </div>
-    {children}
-    {end === undefined || end === null ? null : (
-      <div
-        {...stylex.props(styles.end, figure !== undefined && styles.endCentred)}
-      >
-        {end}
+}) => {
+  // Stephen says the step as it arrives: its title, and its line when it is words alone.
+  useSay(spokenStep(title, body), { delay: 250 });
+  return (
+    <section
+      {...stylex.props(styles.step, figure !== undefined && styles.stepCentred)}
+    >
+      {figure}
+      <div {...stylex.props(styles.head, centred && styles.headCentred)}>
+        <Heading level={1} size="xl">
+          {title}
+        </Heading>
+        {typeof body === "string" ? <Text size="lg">{body}</Text> : body}
       </div>
-    )}
-  </section>
-);
+      {children}
+      {end === undefined || end === null ? null : (
+        <div
+          {...stylex.props(
+            styles.end,
+            figure !== undefined && styles.endCentred
+          )}
+        >
+          {end}
+        </div>
+      )}
+    </section>
+  );
+};

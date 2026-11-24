@@ -706,8 +706,8 @@ msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
 #: src/onboarding/documents-step.tsx
-msgid "{kinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
-msgstr "{kinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
+msgid "{kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person."
+msgstr "{kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person."
 
 #: src/frame/ui-words.tsx
 msgid "{kinds}, up to {maxSize}"
@@ -8804,10 +8804,6 @@ msgstr "Leave for now"
 msgid "Leave out"
 msgstr "Leave out"
 
-#: src/onboarding/documents-step.tsx
-msgid "Leave out personnel files and anything about one person."
-msgstr "Leave out personnel files and anything about one person."
-
 #: src/pages/leave-confirm-dialog.tsx
 msgid "Leave this page?"
 msgstr "Leave this page?"
@@ -11844,8 +11840,8 @@ msgid "Play it again"
 msgstr "Play it again"
 
 #: src/onboarding/documents-step.tsx
-msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
-msgstr "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
+msgid "Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person."
+msgstr "Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person."
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -12078,7 +12074,6 @@ msgid "Reaches"
 msgstr "Reaches"
 
 #: src/activity/type-labels.ts
-#: src/onboarding/documents-step.tsx
 msgid "Read"
 msgstr "Read"
 
@@ -16594,6 +16589,14 @@ msgstr "Try the search again"
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Trying again…"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Turn my voice off"
+msgstr "Turn my voice off"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Turn my voice on"
+msgstr "Turn my voice on"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
