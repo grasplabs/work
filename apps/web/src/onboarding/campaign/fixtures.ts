@@ -72,6 +72,8 @@ export interface Campaign {
   /** By team; for a small company, one group holding everyone. */
   teams: TeamPicture[];
   asks: Ask[];
+  /** Who declined the interview, by name (never why): Ruben's decision. */
+  declined: string[];
   /** What happened on which day, for the week's timeline: Grasp's own words. */
   events: { day: string; text: string }[];
 }
@@ -227,6 +229,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
       teamOn(purchasing, 0, false, 0),
     ],
     asks: [],
+    declined: [],
     events: [
       { day: "2026-11-23", text: "Your message and the invitations went out." },
     ],
@@ -251,6 +254,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
       teamOn(purchasing, 2, true, 1),
     ],
     asks: [],
+    declined: [],
     events: [
       { day: "2026-11-23", text: "Your message and the invitations went out." },
       { day: "2026-11-24", text: "The first findings came in, from Planning." },
@@ -285,6 +289,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
       },
       { id: "quiet", kind: "quiet", team: "Customer service", waiting: 7 },
     ],
+    declined: ["Pieter de Groot"],
     events: [
       { day: "2026-11-23", text: "Your message and the invitations went out." },
       { day: "2026-11-24", text: "The first findings came in, from Planning." },
@@ -312,6 +317,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
       teamOn(purchasing, 3, true, 1),
     ],
     asks: [],
+    declined: ["Pieter de Groot"],
     events: [
       { day: "2026-11-23", text: "Your message and the invitations went out." },
       { day: "2026-11-24", text: "The first findings came in, from Planning." },
@@ -368,6 +374,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
       },
     ],
     asks: [],
+    declined: [],
     events: [
       {
         day: "2026-11-23",

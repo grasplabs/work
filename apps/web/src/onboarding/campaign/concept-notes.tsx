@@ -29,8 +29,14 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { AskAction } from "./campaign-asks.tsx";
-import { AllFindings, OnYourComputer, wide } from "./campaign-parts.tsx";
-import { statementOf, whenWords } from "./campaign-words.ts";
+import {
+  AllFindings,
+  NothingYet,
+  OnYourComputer,
+  RunningLine,
+  wide,
+} from "./campaign-parts.tsx";
+import { statementOf } from "./campaign-words.ts";
 import type { Ask, Campaign, Finding, TeamPicture } from "./fixtures.ts";
 import { ReadAloud } from "./read-aloud.tsx";
 
@@ -58,6 +64,7 @@ const styles = stylex.create({
     alignSelf: "stretch",
   },
   press: { display: "flex" },
+  who: { display: "flex", alignItems: "center", gap: space[2] },
   // On a phone only his latest line stands.
   earlier: { display: { default: null, [media.maxSm]: "none" } },
   foot: {
@@ -180,12 +187,14 @@ export const CampaignNotes = ({ campaign }: { campaign: Campaign }) => {
   return (
     <div {...stylex.props(styles.page)}>
       <header {...stylex.props(styles.centre)}>
-        <AgentIndicator
-          aria-label={
-            enough ? "Stephen is done listening" : "Stephen is listening"
-          }
-          success={enough}
-        />
+        {enough ? null : (
+          <span {...stylex.props(styles.who)}>
+            <AgentIndicator />
+            <Text as="span" size="sm" color="muted">
+              Stephen is listening
+            </Text>
+          </span>
+        )}
         <Heading level={1} size="xl">
           {lead}
         </Heading>
@@ -194,9 +203,9 @@ export const CampaignNotes = ({ campaign }: { campaign: Campaign }) => {
         </Text>
       </header>
       {lines.length === 0 ? (
-        <Text color="muted" size="sm">
-          The first things I learn come in on day two.
-        </Text>
+        <div {...stylex.props(wide.only)}>
+          <NothingYet />
+        </div>
       ) : (
         <MessageGroup>
           <div {...stylex.props(styles.thread)}>
@@ -227,9 +236,7 @@ export const CampaignNotes = ({ campaign }: { campaign: Campaign }) => {
       <OnYourComputer />
       <div {...stylex.props(wide.only)}>
         <div {...stylex.props(styles.foot)}>
-          <Text as="span" size="sm" color="muted">
-            {`${whenWords(campaign)} · ${campaign.known}% known`}
-          </Text>
+          <RunningLine campaign={campaign} indicator={false} />
           <AllFindings campaign={campaign} variant="outline" />
         </div>
       </div>

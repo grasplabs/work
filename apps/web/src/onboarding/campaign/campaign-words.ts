@@ -135,8 +135,8 @@ export const statementOf = (
   }
 };
 
-/** When: the close and the day Grasp opens, in one quiet line. */
+/** When: the close, the one date that matters on this page. */
 export const whenWords = (campaign: Campaign): string =>
   campaign.pace === "enough"
-    ? `Closes tonight · Grasp opens around ${shortDay(campaign.opensAround)}`
-    : `Closes ${shortDay(campaign.closes)}, ${daysLeftWords(campaign)} · Grasp opens around ${shortDay(campaign.opensAround)}`;
+    ? "The interviews close tonight"
+    : `The interviews close ${shortDay(campaign.closes)}, ${daysLeftWords(campaign)}`;
