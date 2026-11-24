@@ -120,6 +120,40 @@ test("never leaves for the company's sign-in once the person has gone Back while
   await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
 });
 
+test("never leaves for the company's sign-in once the person has gone Back after the door opened, before core answered", async ({
+  page,
+}) => {
+  // Core answers where to sign in only once the person has gone Back.
+  const { promise: wentBack, resolve: answer } = Promise.withResolvers<null>();
+  await page.route("**/api/auth/sign-in/sso", async (route) => {
+    const response = await route.fetch();
+    await wentBack;
+    await route.fulfill({ response });
+  });
+  await page.goto("/sign-in?by=code");
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  // The door has opened: the chosen way has faded too, and the page waits
+  // on core alone. Going Back now is the same page's other view (the
+  // code), so only the ways in, gone, keep it from leaving.
+  await expect(page.locator('[data-way="microsoft"]')).toHaveCSS(
+    "opacity",
+    "0"
+  );
+  await page.goBack();
+  const codePage = page.getByRole("heading", {
+    level: 1,
+    name: "Sign in to Grasp",
+  });
+  await expect(codePage).toBeAttached();
+  answer(null);
+  // Longer than core's answer takes to arrive and be acted on.
+  await page.waitForTimeout(1500);
+  await expect(codePage).toBeAttached();
+  expect(new URL(page.url()).searchParams.get("by")).toBe("code");
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+});
+
 test("an interview link nobody made asks to sign in first, then can't be opened with the request ID core refused it under, says nothing was saved, and lets them sign out to sign in again", async ({
   context,
   page,

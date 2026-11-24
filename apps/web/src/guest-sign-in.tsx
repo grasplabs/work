@@ -110,14 +110,15 @@ export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
       email: email.trim(),
       otp: code.replaceAll(/\s/gu, ""),
     });
-    // The person has moved on meanwhile: they stay where they went.
-    if (left.aborted) {
-      return;
-    }
     if (refusal === null) {
       // Loaded again, signed in: the start page sends a guest here, to
-      // what is shared with them.
+      // what is shared with them. Also after they went Back meanwhile:
+      // signed in, the ways in are no longer theirs.
       window.location.assign("/");
+      return;
+    }
+    // Refused after the person moved on: they stay where they went.
+    if (left.aborted) {
       return;
     }
     setBusy(false);
