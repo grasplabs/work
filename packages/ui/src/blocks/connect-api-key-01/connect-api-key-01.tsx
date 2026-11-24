@@ -164,6 +164,11 @@ export interface ConnectApiKeyProps {
   description?: ReactNode;
   /** The providers, as tiles, in order. */
   providers: readonly ConnectApiKeyProvider[];
+  /**
+   * The most tiles in a row, so four stand two and two and not three and one; fewer where they do
+   * not fit, one a row on a phone. Without it, as many as fit.
+   */
+  columns?: 2 | 3;
   /** The provider connected now, if any: never its key, only the key's last four characters. */
   connected?: { provider: string; last: string } | null;
   /**
@@ -216,6 +221,17 @@ const styles = stylex.create({
   },
   // The quiet line under the tiles: a ghost button, its plus and its words.
   own: { display: "grid", justifyItems: "start", marginBlockStart: space["3"] },
+});
+
+// At most so many in a row: a tile is never narrower than its share of the row less a gap, so one
+// more never fits beside them, and still never narrower than its least width.
+const atMost = stylex.create({
+  2: {
+    gridTemplateColumns: `repeat(auto-fit, minmax(min(max(${size.connectTile}, calc(100% / 2 - ${space["3"]})), 100%), 1fr))`,
+  },
+  3: {
+    gridTemplateColumns: `repeat(auto-fit, minmax(min(max(${size.connectTile}, calc(100% / 3 - ${space["3"]})), 100%), 1fr))`,
+  },
 });
 
 /** A provider's mark: its logo, or its first letter. */
@@ -450,6 +466,7 @@ export const ConnectApiKey = ({
   title,
   description,
   providers,
+  columns,
   connected,
   onConnect,
   onDisconnect,
@@ -563,7 +580,10 @@ export const ConnectApiKey = ({
                 // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari drops a list's role once its markers are hidden
                 role="list"
                 aria-label={title}
-                {...stylex.props(styles.tiles)}
+                {...stylex.props(
+                  styles.tiles,
+                  columns !== undefined && atMost[columns]
+                )}
               >
                 {tiles.map((provider) => (
                   <li key={provider.id} {...stylex.props(styles.tile)}>
