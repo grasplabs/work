@@ -381,9 +381,10 @@ describe("the AI step", () => {
     const ready = said("ai", {});
     const unknown = said("ai", { ai: null });
     expect({
-      asked: [asked.includes("Your own key"), asked.includes("Continue")],
+      // Asked for a key: the step says so (the providers stand on the page, with no card titled for it).
+      asked: [asked.includes("Paste a key"), asked.includes("Continue")],
       ready: [ready.includes("Your own key works"), ready.includes("Continue")],
-      unknown: [unknown.includes("Your own key"), unknown.includes("Continue")],
+      unknown: [unknown.includes("Paste a key"), unknown.includes("Continue")],
     }).toStrictEqual({
       asked: [true, false],
       ready: [true, true],

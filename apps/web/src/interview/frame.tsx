@@ -82,7 +82,7 @@ const styles = stylex.create({
     inset: 0,
     zIndex: -1,
     pointerEvents: "none",
-    opacity: size.pageHeaderDitherStrength,
+    opacity: size.textureStrength,
     maskImage: pixel.mask,
     maskSize: "3px 3px",
     display: { default: "block", [media.forcedColors]: "none" },

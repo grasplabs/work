@@ -6314,6 +6314,10 @@ msgid "Everything I read and say runs on it. Paste a key from your provider, and
 msgstr "Alles, was ich lese und sage, läuft darauf. Füge einen Schlüssel deines Anbieters ein, und du bezahlst ihn direkt."
 
 #: src/onboarding/setup-steps.tsx
+msgid "Everything I read and say runs on it. You can set it up later in Settings."
+msgstr "Alles, was ich lese und sage, läuft darauf. Sie können es später in den Einstellungen einrichten."
+
+#: src/onboarding/setup-steps.tsx
 msgid "Everything I read and say runs on it. You use Grasp’s AI, and it’s ready."
 msgstr "Alles, was ich lese und sage, läuft darauf. Du nutzt Grasps KI, und sie ist bereit."
 
