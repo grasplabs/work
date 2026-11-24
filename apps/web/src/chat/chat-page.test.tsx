@@ -102,7 +102,10 @@ const summaryOf = (id: string): ChatSummary => ({
 const opened = async (
   first: string,
   summary: (id: string) => Promise<ChatSummary> = async (id) =>
-    await Promise.resolve(summaryOf(id))
+    await Promise.resolve(summaryOf(id)),
+  /** How core's watch of a chat ends: never, by default. */
+  watch: () => Promise<never> = async () =>
+    await Promise.withResolvers<never>().promise
 ) => {
   const asked: string[] = [];
   const chats = {
@@ -115,7 +118,7 @@ const opened = async (
       await Promise.resolve();
     },
     heldCalls: async () => await Promise.resolve([]),
-    watch: async () => await Promise.withResolvers<never>().promise,
+    watch,
     summary,
   };
   const core = {
@@ -290,5 +293,32 @@ describe("a chat's own page", () => {
     await settled();
 
     expect(seen.chat?.summary?.title).toBe("Chat chat-b");
+  });
+
+  it("is not found once core has none of its chat any more, and never selects it again", async () => {
+    const selected: (string | undefined)[] = [];
+    await opened("chat-gone", undefined, async () => {
+      await Promise.resolve();
+      throw agentErrors.create("agent.chat_not_found");
+    });
+    // From here on: each chat the frame's chat is made to show.
+    const seenNow = activeChat("chat");
+    for (let tick = 0; tick < 5; tick += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one moment after another
+      await settled();
+      selected.push(activeChat("chat"));
+    }
+
+    expect({
+      notFound: document.body.textContent.includes("This page is not here"),
+      box: box(),
+      seenNow,
+      selected,
+    }).toStrictEqual({
+      notFound: true,
+      box: null,
+      seenNow: undefined,
+      selected: [undefined, undefined, undefined, undefined, undefined],
+    });
   });
 });

@@ -4,12 +4,17 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { LoadingLines, PageNotLoaded } from "../frame/page-states.tsx";
+import {
+  LoadingLines,
+  NotFound,
+  PageNotLoaded,
+} from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { setActiveChat } from "./active-chat.ts";
 import { boxOf, ChatConversation, ChatFooter } from "./chat-body.tsx";
 import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
+import { useFollowedChat } from "./chat-watch.ts";
 import { useGlobalChat } from "./global-chat.tsx";
 import { reading } from "./reading.stylex.ts";
 
@@ -22,7 +27,8 @@ import { reading } from "./reading.stylex.ts";
 // page, opened there, goes on with it, from the same watch. Only that
 // chat shows here, and only it is asked in: whatever selected another one
 // meanwhile (a read or a send answered late) is undone before the page
-// paints, and until then the page shows no conversation and no box.
+// paints, and until then the page shows no conversation and no box. A
+// chat core no longer has is not found, and not selected again.
 
 const styles = stylex.create({
   // The page down the card: the column takes what the bar leaves.
@@ -59,17 +65,29 @@ export const ChatPage = ({
   const { words, sourceNames, retitle } = chat;
   // Whether the frame's chat is this page's: anything else shows nothing.
   const ours = chat.chatId === chatId;
+  // Core has none of it any more (deleted since the page loaded, here or
+  // elsewhere): not found, and never selected again.
+  const { gone } = useFollowedChat(chatId);
   useLayoutEffect(() => {
-    if (!ours) {
+    setActiveChat(chatId, "chat");
+  }, [chatId]);
+  // Another chat selected since (a read or a send answered late): this
+  // page's again. A chat left unselected (deleted) stays so.
+  const other = chat.chatId !== undefined && !ours;
+  useLayoutEffect(() => {
+    if (other && gone !== true) {
       setActiveChat(chatId, "chat");
     }
-  }, [ours, chatId]);
+  }, [other, gone, chatId]);
   const summary = ours ? chat.summary : undefined;
   // Renamed since, or named by its agent once a turn ended: the newer name.
   const name = summary?.title ?? title ?? words.title;
   const rename = useRenameChat(chatId, retitle);
   // The rename where the name stands, opened by its own keys or the menu's Rename.
   const [renaming, setRenaming] = useState(false);
+  if (gone === true) {
+    return <NotFound />;
+  }
   return (
     <div ref={page} {...stylex.props(styles.page)}>
       <SiteHeader
