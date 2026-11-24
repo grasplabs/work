@@ -603,9 +603,13 @@ const Concepts = ({ concept }: { concept: Concept }) => {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
   }
   const step = isConceptStep(asked) ? asked : "welcome";
+  // Their first name; none where core has none ("Hi, I'm Stephen"). The
+  // local test account is named "Admin": the concepts greet a fixture's
+  // first name instead, as a real admin would be greeted.
+  const first = identity.name.trim().split(/\s+/u)[0] ?? "";
   return (
     <ConceptSetup
-      admin={identity.name.split(" ")[0] ?? identity.name}
+      admin={first === "Admin" ? "Marieke" : first}
       concept={concept}
       data={{ ai: loaded.data.ai }}
       go={(next) => {

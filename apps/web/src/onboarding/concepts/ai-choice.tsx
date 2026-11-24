@@ -130,7 +130,7 @@ const GraspRow = ({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>{t`Grasp’s AI`}</ItemTitle>
-          <ItemDescription>{t`Nothing to set up. Runs on ${model} in the EU, and you pay for what you use.`}</ItemDescription>
+          <ItemDescription>{t`Works right away. It runs on ${model} in the EU, and you pay for what you use.`}</ItemDescription>
         </ItemContent>
         <ItemActions>
           {inUse ? (
@@ -221,7 +221,7 @@ export const AiChoice = ({
             : t`Your own contract with a provider. You pay them directly.`
         }
         labels={{
-          keyNote: t`Stored sealed. Only its last four characters are shown again.`,
+          keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
         }}
         onConnect={async (choice) => {
           await connect(choice);
