@@ -219,12 +219,6 @@ export const StepsConcept = ({
   return (
     <ConceptFrame
       language={step !== "welcome"}
-      onGo={(to) => {
-        if (to === "welcome" || to === "ai" || to === "about") {
-          go(to);
-        }
-      }}
-      reached={(["welcome", "ai", "about"] as const).indexOf(step)}
       step={step}
       tools={speaks ? <SoundToggle /> : null}
     >
