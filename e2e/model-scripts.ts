@@ -136,6 +136,71 @@ export const modelScripts = {
     ],
   },
   /**
+   * An answer with a table and a link out of Grasp: what opens over the
+   * chat from an answer (the table's Copy and Download menus, the link's
+   * question before it leaves).
+   */
+  answersTable: {
+    opener: "Which regions sold most last week?",
+    replies: [
+      says(
+        [
+          "North sold most; the [weekly report](https://example.com/report) has the rest.",
+          "",
+          "| Region | Sales |",
+          "| --- | ---: |",
+          "| North | 12 |",
+          "| South | 9 |",
+        ].join("\n")
+      ),
+    ],
+  },
+  /**
+   * The agent asks two questions in the box's place (`askQuestions`), and
+   * answers once the person's answers come.
+   */
+  asksFirst: {
+    opener: "Send me a report every week.",
+    replies: [
+      {
+        text: "",
+        toolCalls: [
+          {
+            id: "askreport",
+            name: "askQuestions",
+            arguments: {
+              questions: [
+                {
+                  kind: "choice",
+                  header: "Rhythm",
+                  question: "How often should it come?",
+                  options: [
+                    { label: "Daily", description: "Every working day" },
+                    { label: "Weekly", description: "On Mondays" },
+                  ],
+                  recommended: 1,
+                },
+                {
+                  kind: "choice",
+                  question: "Who should get it?",
+                  options: [
+                    { label: "Me" },
+                    { label: "My team" },
+                    { label: "Finance" },
+                  ],
+                  multiple: true,
+                },
+              ],
+            },
+          },
+        ],
+        inputTokens: 100,
+        outputTokens: 40,
+      },
+      says("A weekly report on Mondays, for you and Finance."),
+    ],
+  },
+  /**
    * The agent asks for an App's npm packages, on a card in its chat (the
    * request itself is written as its resolve proposes it: a local stack
    * reaches no registry, e2e/dependency-request.ts), and carries on once

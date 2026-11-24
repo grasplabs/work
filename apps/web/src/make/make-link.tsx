@@ -1,8 +1,8 @@
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import type { ChatPlanKind } from "@grasp-os/shared/chat";
+import { Button } from "@grasp-os/ui/components/button";
+import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
 
 // The one door to something new: "Make something" on the Apps page, the
 // Workflows page, a project and Chat's own page opens the normal chat page
@@ -20,12 +20,13 @@ export const MakeSomethingLink = ({
   project?: string;
   size?: "default" | "sm";
 }) => (
-  <Link
-    className={buttonVariants({ size })}
-    search={project === undefined ? { make: kind } : { make: kind, project }}
-    to="/"
-  >
-    <PlusIcon data-icon="inline-start" />
-    <Trans>Make something</Trans>
-  </Link>
+  <Button asChild size={size}>
+    <Link
+      search={project === undefined ? { make: kind } : { make: kind, project }}
+      to="/"
+    >
+      <Icon icon={PlusIcon} />
+      <Trans>Make something</Trans>
+    </Link>
+  </Button>
 );

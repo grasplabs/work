@@ -2,12 +2,15 @@ import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatMake } from "@grasp-os/shared/chat";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import { canBuild } from "@grasp-os/shared/roles";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await, useRouteContext } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
-import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import type { Session } from "../core.ts";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -20,16 +23,18 @@ import { openChat } from "./chat-layout.ts";
 import { ChatSwitcherButton } from "./chat-switcher.tsx";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
-import { RecentsButton } from "./recents.tsx";
-import { StartingQuestions } from "./suggestions.tsx";
+import {
+  ModelsUnavailableNotice,
+  unavailableText,
+} from "./models-unavailable.tsx";
 import { useAsk } from "./use-ask.ts";
 
-// Chat's own page (routes/_shell.index.tsx): where to start. Grasp's buddy
-// and the question "What should we look at today?", centred, with the box
-// to ask in and questions to start from under it, and Make something for
-// who builds. Make something comes here too (`make`, from `?make=app` or
-// `?make=workflow` and `&project=`): what to get done, and ideas to start
-// from in place of the questions (make/make-ideas.tsx), the blueprints for
+// Chat's own page (routes/_shell.index.tsx): where to start. The question
+// "What should we look at today?", centred, with the box to ask in, and
+// Make something for who builds (as on #2503, without Grasp's buddy).
+// Make something comes here too (`make`, from `?make=app` or
+// `?make=workflow` and `&project=`): what to get done, how to say it and
+// ideas to start from under the box (make/make-ideas.tsx), the blueprints for
 // an App, a few starting sentences for a workflow; the first question
 // starts the chat with what to make (`ChatMake`), which the chat keeps.
 // From an opportunity an admin drafts (`opportunity`, GRA-1751), the box
@@ -37,6 +42,47 @@ import { useAsk } from "./use-ask.ts";
 // and send: nothing is asked until they do. Asking starts a new chat in
 // Grasp's one chat (global-chat.tsx), which opens full screen over the
 // page with the answer coming in, as on every other page.
+
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflowY: "auto",
+  },
+  centre: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
+    // As far in as #2503's: 16px from the sides on a phone.
+    paddingInline: space["4"],
+    paddingBlock: space["12"],
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["8"],
+    width: "100%",
+    maxWidth: "48rem",
+    paddingBlockEnd: space["10"],
+  },
+  greeting: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space["6"],
+    textAlign: "center",
+  },
+  words: { display: "grid", gap: space["4"] },
+  // The box takes the column's whole width, wider than its own at most, as
+  // on #2503: 48rem at most.
+  box: { maxWidth: "100%" },
+  // The box and, under it, why nothing can be asked yet.
+  ask: { display: "grid", gap: space["2"] },
+});
 
 /** What Make something offers to start from: an App's blueprints, or a workflow's starting sentences. */
 export type MakeIdeas =
@@ -66,23 +112,33 @@ const Ideas = ({
 );
 
 /** The page's question: what to look at, or, making something, what to get done. */
-const Greeting = ({ making }: { making: boolean }) =>
-  making ? (
-    <div className="flex flex-col gap-2">
-      <h1 className="type-display" id="new-chat">
-        <Trans>What do you want to get done?</Trans>
-      </h1>
-      <p className="text-muted-foreground">
-        <Trans>
-          Say it like you&apos;d tell a colleague. Grasp works out what to make.
-        </Trans>
-      </p>
-    </div>
-  ) : (
-    <h1 className="type-display" id="new-chat">
+const Greeting = ({ making }: { making: boolean }) => (
+  <Heading id="new-chat" level={1} size="lg">
+    {making ? (
+      <Trans>What do you want to get done?</Trans>
+    ) : (
       <Trans>What should we look at today?</Trans>
-    </h1>
-  );
+    )}
+  </Heading>
+);
+
+/** Under the box, making something: how to say it, then the ideas to start from. */
+const Making = ({
+  ideas,
+  onPick,
+}: {
+  ideas: Promise<Loaded<MakeIdeas>> | undefined;
+  onPick: (text: string) => void;
+}) => (
+  <div {...stylex.props(styles.words)}>
+    <Text as="p" color="muted" size="sm">
+      <Trans>
+        Say it like you&apos;d tell a colleague. Grasp works out what to make.
+      </Trans>
+    </Text>
+    {ideas === undefined ? null : <Ideas ideas={ideas} onPick={onPick} />}
+  </div>
+);
 
 /** What Make something offers for `make`, read for the person. */
 export const ideasOf = async (
@@ -119,11 +175,12 @@ export const ChatStart = ({
   opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
 }) => {
   const { t, i18n } = useLingui();
-  const { offered } = useGlobalChat();
+  const { offered, modelsUnavailable, retry } = useGlobalChat();
+  const unavailable = unavailableText(modelsUnavailable);
   const { identity } = useRouteContext({ from: "/_shell" });
   const agents = offered?.agents ?? [];
   const named = agents.find(({ id }) => id === agent);
-  const { composer, ask } = useAsk(
+  const { composer } = useAsk(
     undefined,
     offered?.models,
     offered?.efforts,
@@ -173,41 +230,34 @@ export const ChatStart = ({
         }
         crumbs={[{ label: t`Chat` }]}
       />
-      <section
-        aria-labelledby="new-chat"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto text-sm"
-      >
-        <div className="flex min-h-full items-center justify-center px-6 py-12">
-          <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
-            <div className="flex flex-col items-center gap-6 text-center">
-              <GraspBuddy />
+      <section aria-labelledby="new-chat" {...stylex.props(styles.page)}>
+        <div {...stylex.props(styles.centre)}>
+          <div {...stylex.props(styles.column)}>
+            <div {...stylex.props(styles.greeting)}>
               <Greeting making={make !== undefined} />
             </div>
-            <Composer
-              actions={<RecentsButton />}
-              agentModel={agentModelOf(agents, answering)}
-              running={false}
-              {...composer}
-            />
-            {ideas === undefined ? null : (
-              <Ideas
+            <div {...stylex.props(styles.ask)}>
+              <Composer
+                placeholder={t`Ask anything, or describe a process`}
+                agentModel={agentModelOf(agents, answering)}
+                running={false}
+                style={styles.box}
+                {...(unavailable === undefined ? {} : { unavailable })}
+                {...composer}
+              />
+              <ModelsUnavailableNotice
+                onRetry={retry}
+                why={modelsUnavailable}
+              />
+            </div>
+            {make === undefined ? null : (
+              <Making
                 ideas={ideas}
                 onPick={(text) => {
                   composer.onText(text);
                 }}
               />
             )}
-            {make === undefined ? (
-              <StartingQuestions
-                disabled={composer.busy || (composer.models?.length ?? 0) === 0}
-                onPick={(question) => {
-                  const prefix = agentsMentioned
-                    .map(({ label }) => `@${label} `)
-                    .join("");
-                  void ask(`${prefix}${question}`, [], agentsMentioned);
-                }}
-              />
-            ) : null}
           </div>
         </div>
       </section>

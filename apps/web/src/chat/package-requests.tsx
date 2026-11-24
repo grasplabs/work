@@ -1,29 +1,57 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/app-kit/components/card";
 import type {
   DependencyFinding,
   DependencyRequest,
 } from "@grasp-os/shared/dependencies";
 import { packageKey } from "@grasp-os/shared/dependencies";
 import { messageOf } from "@grasp-os/shared/errors";
+import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  Confirmation,
+  ConfirmationActions,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from "@grasp-os/ui/components/confirmation";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { DecisionButton } from "./decision-button.tsx";
+import { FailureLine } from "./failure-line.tsx";
+
+const styles = stylex.create({
+  details: {
+    display: "grid",
+    justifyItems: "start",
+    gap: space["2"],
+    // A line of its own in the confirmation, under its title.
+    flexBasis: "100%",
+    minWidth: 0,
+  },
+  findings: {
+    display: "grid",
+    gap: space["1"],
+    margin: 0,
+    paddingInlineStart: 0,
+    listStyleType: "none",
+  },
+  finding: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    gap: space["2"],
+  },
+  list: { display: "grid", gap: space["2"] },
+});
 
 // The npm packages the chat's agent asked for (core's
 // packages/requests.ts), each on a card: the App's builder
@@ -67,23 +95,27 @@ const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
     return null;
   }
   return (
-    <ul className="flex flex-col gap-1">
+    <ul {...stylex.props(styles.findings)}>
       {findings.map((finding) => (
         <li
-          className="flex flex-wrap items-baseline gap-2"
           key={`${packageKey(finding.package)}:${finding.id ?? finding.kind}`}
+          {...stylex.props(styles.finding)}
         >
           <Badge
             variant={
               finding.severity === "critical" || finding.severity === "high"
                 ? "destructive"
-                : "attention"
+                : "warning"
             }
           >
             {i18n._(severities[finding.severity])}
           </Badge>
-          <span className="font-mono">{packageKey(finding.package)}</span>
-          <span className="break-words">{finding.summary}</span>
+          <Text as="span" size="sm" wrap="anywhere">
+            {packageKey(finding.package)}
+          </Text>
+          <Text as="span" size="sm" wrap="anywhere">
+            {finding.summary}
+          </Text>
         </li>
       ))}
     </ul>
@@ -127,73 +159,67 @@ const PackageRequest = ({
   const count = Object.keys(request.lock.packages).length;
   const removed = formatList(request.removed);
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
+    <Confirmation approval={{ id: request.id }} state="approval-requested">
+      <ConfirmationTitle>
+        <ConfirmationRequest>
           <Trans>The agent asks for npm packages for {subject}</Trans>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-2 text-sm">
-          <p className="break-words whitespace-pre-wrap">{request.purpose}</p>
-          <dl className="flex flex-col gap-2">
-            <div className="flex flex-col">
-              <dt className="text-muted-foreground">
-                <Trans>Packages</Trans>
-              </dt>
-              <dd className="font-mono break-words">{direct}</dd>
-            </div>
-            {request.removed.length === 0 ? null : (
-              <div className="flex flex-col">
-                <dt className="text-muted-foreground">
-                  <Trans>Takes out</Trans>
-                </dt>
-                <dd className="font-mono break-words">{removed}</dd>
-              </div>
-            )}
-            <div className="flex flex-col">
-              <dt className="text-muted-foreground">
-                <Trans>With what they bring</Trans>
-              </dt>
-              <dd>
-                {plural(count, { one: "# package", other: "# packages" })}
-              </dd>
-            </div>
-          </dl>
-          <Findings findings={request.findings} />
-          <p className="text-muted-foreground">
-            <Trans>
-              Nothing uses them until you approve. Known malware is always
-              refused.
-            </Trans>
-          </p>
-          <ErrorText>{failure}</ErrorText>
-        </div>
-      </CardContent>
-      <CardFooter>
-        <div className="flex gap-2">
-          <Button
-            aria-label={t`Approve the packages for ${subject}`}
-            disabled={busy}
-            onClick={() => {
-              void decide(true);
-            }}
-          >
-            <Trans>Approve</Trans>
-          </Button>
-          <Button
-            aria-label={t`Deny the packages for ${subject}`}
-            disabled={busy}
-            onClick={() => {
-              void decide(false);
-            }}
-            variant="outline"
-          >
-            <Trans>Deny</Trans>
-          </Button>
-        </div>
-      </CardFooter>
-    </Card>
+        </ConfirmationRequest>
+      </ConfirmationTitle>
+      <div {...stylex.props(styles.details)}>
+        <Text size="sm" wrap="anywhere">
+          {request.purpose}
+        </Text>
+        <KeyValueList
+          items={[
+            { id: "packages", label: t`Packages`, value: direct, mono: true },
+            ...(request.removed.length === 0
+              ? []
+              : [
+                  {
+                    id: "removed",
+                    label: t`Takes out`,
+                    value: removed,
+                    mono: true,
+                  },
+                ]),
+            {
+              id: "count",
+              label: t`With what they bring`,
+              value: plural(count, { one: "# package", other: "# packages" }),
+            },
+          ]}
+        />
+        <Findings findings={request.findings} />
+        <Text color="muted" size="sm">
+          <Trans>
+            Nothing uses them until you approve. Known malware is always
+            refused.
+          </Trans>
+        </Text>
+        <FailureLine>{failure}</FailureLine>
+      </div>
+      <ConfirmationActions>
+        <DecisionButton
+          disabled={busy}
+          label={t`Deny the packages for ${subject}`}
+          onPress={async () => {
+            await decide(false);
+          }}
+          variant="outline"
+        >
+          <Trans>Deny</Trans>
+        </DecisionButton>
+        <DecisionButton
+          disabled={busy}
+          label={t`Approve the packages for ${subject}`}
+          onPress={async () => {
+            await decide(true);
+          }}
+        >
+          <Trans>Approve</Trans>
+        </DecisionButton>
+      </ConfirmationActions>
+    </Confirmation>
   );
 };
 
@@ -235,13 +261,13 @@ export const PackageRequests = ({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `version` and `reads` say when to read again
   }, [core, chatId, version, reads]);
   if (read.state === "refused") {
-    return <ErrorText>{read.message}</ErrorText>;
+    return <FailureLine>{read.message}</FailureLine>;
   }
   if (read.state === "loading" || read.requests.length === 0) {
     return null;
   }
   return (
-    <section aria-label={t`Package requests`} className="flex flex-col gap-2">
+    <section aria-label={t`Package requests`} {...stylex.props(styles.list)}>
       {read.requests.map((request) => (
         <PackageRequest
           key={request.id}

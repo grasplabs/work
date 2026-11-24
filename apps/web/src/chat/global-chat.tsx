@@ -1,4 +1,3 @@
-import { useIsMobile } from "@grasp-os/app-kit/hooks/use-mobile";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -42,6 +41,7 @@ import {
   useSubjectChat,
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
+import { useNarrow } from "./narrow.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
 
@@ -135,7 +135,6 @@ const useModelsUnavailable = (
 export interface ChatWords {
   title: string;
   placeholder: string;
-  empty: string;
 }
 
 /**
@@ -162,19 +161,11 @@ const useChatWords = (): ChatWords => {
   const { t, i18n } = useLingui();
   const subject = subjectOf(useShownSlot());
   if (subject !== undefined) {
-    const { title, placeholder, empty } = subjectWords;
-    return {
-      title: i18n._(title),
-      placeholder: i18n._(placeholder),
-      empty: i18n._(empty),
-    };
+    const { title, placeholder } = subjectWords;
+    return { title: i18n._(title), placeholder: i18n._(placeholder) };
   }
   const title = t`Ask Grasp`;
-  return {
-    title,
-    placeholder: title,
-    empty: t`Ask anything, or describe a process`,
-  };
+  return { title, placeholder: title };
 };
 
 /**
@@ -227,7 +218,7 @@ const useGlobalChatValue = () => {
   // next message.
   const asking = pendingAsk(view.messages, view.running);
   const layout = useChatLayout();
-  const roomBeside = !useIsMobile();
+  const roomBeside = !useNarrow();
   // About the page's subject, it stays open (chat-subject.ts), where the
   // page has it: that page is where its subject is made. Elsewhere, open
   // where it was put, where this page allows it there; elsewhere it stays
