@@ -347,6 +347,29 @@ const styles = stylex.create({
 });
 
 /**
+ * Puts a phone trail's step away while it wrapped out of sight: out of the
+ * tab order and the accessibility tree too (`inert`), as #2503's bar puts
+ * it away (`thinSteps`). It stays laid out, so the next resize finds
+ * whether it fits again.
+ */
+const watchStep = (item: HTMLLIElement | null): (() => void) | undefined => {
+  const list = item?.parentElement;
+  if (item === null || list === null || list === undefined) {
+    return undefined;
+  }
+  const place = () => {
+    item.inert =
+      item.getBoundingClientRect().top >= list.getBoundingClientRect().bottom;
+  };
+  place();
+  const observer = new ResizeObserver(place);
+  observer.observe(list);
+  return () => {
+    observer.disconnect();
+  };
+};
+
+/**
  * Where the page is on a phone, as #2503's bar says it: the page and the
  * step before it (`phoneCrumbs="last-two"`), the step dropped where both
  * don't fit (`phoneCrumbs` in phoneTrail's styles). Composed here, not
@@ -373,7 +396,7 @@ const PhoneTrail = ({
     >
       <ol {...stylex.props(styles.phoneCrumbs)}>
         {step === undefined ? null : (
-          <li {...stylex.props(styles.phoneStep)}>
+          <li ref={watchStep} {...stylex.props(styles.phoneStep)}>
             {"to" in step ? (
               <CrumbLink
                 crumb={step}

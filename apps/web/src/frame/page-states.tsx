@@ -70,6 +70,9 @@ const styles = stylex.create({
     paddingBlock: space["12"],
   },
   failedWhole: { minHeight: "100dvh" },
+  // Under a page's own heading (a section's): no page-sized room, only a
+  // section's.
+  failedSection: { minHeight: 0, paddingBlock: space["6"] },
   words: {
     display: "grid",
     justifyItems: "center",
@@ -365,7 +368,13 @@ export const ErrorState = ({
       : words;
   const shownTitle = title ?? t`This page didn't load`;
   return (
-    <div {...stylex.props(styles.failed, !inFrame && styles.failedWhole)}>
+    <div
+      {...stylex.props(
+        styles.failed,
+        !inFrame && styles.failedWhole,
+        heading !== "h1" && styles.failedSection
+      )}
+    >
       <div data-slot="page-failed" {...stylex.props(styles.words)}>
         <Heading level={levels[heading]} size="lg">
           {shownTitle}
