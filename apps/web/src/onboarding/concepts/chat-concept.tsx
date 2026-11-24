@@ -404,7 +404,7 @@ export const ChatConcept = ({
   today,
   go,
   onward,
-}: ConceptProps) => {
+}: Omit<ConceptProps, "footOnlyBack">) => {
   const { t, i18n } = useLingui();
   const [said, setSaid] = useState(readSaid);
   const replies = useReplies();
