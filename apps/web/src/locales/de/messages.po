@@ -707,7 +707,7 @@ msgstr "{kind}: {contractId}"
 
 #: src/onboarding/documents-step.tsx
 msgid "{kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person."
-msgstr ""
+msgstr "{kinds} und alles, was erklärt, wie ihr arbeitet. Entwürfe sind auch gut. Lass alles weg, was nur eine Person betrifft."
 
 #: src/frame/ui-words.tsx
 msgid "{kinds}, up to {maxSize}"
@@ -11841,7 +11841,7 @@ msgstr "Noch einmal abspielen"
 
 #: src/onboarding/documents-step.tsx
 msgid "Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person."
-msgstr ""
+msgstr "Richtlinien, Abläufe, Arbeitsanweisungen. Entwürfe sind auch gut. Lass alles weg, was nur eine Person betrifft."
 
 #: src/activity/audit-log.tsx
 msgid "Position"
