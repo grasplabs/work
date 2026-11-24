@@ -509,6 +509,45 @@ describe("the inbox", () => {
     });
   });
 
+  it("puts the one that opens after an answer in the address, the first after the last", async () => {
+    /** Answers the Brain question open in words of the person's own. */
+    const answer = async () => {
+      const box = document.querySelector("textarea");
+      await act(async () => {
+        if (box !== null) {
+          box.value = "The sales lead.";
+          box.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        await Promise.resolve();
+      });
+      await press("Answer");
+      await settle();
+    };
+    const middle = await shown({ asked: three(), at: "/inbox?item=asked:2" });
+    await answer();
+    const afterMiddle = { open: beside(), item: middle.item() };
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    const last = await shown({ asked: three(), at: "/inbox?item=asked:3" });
+    await answer();
+
+    expect({
+      afterMiddle,
+      afterLast: { open: beside(), item: last.item() },
+    }).toStrictEqual({
+      afterMiddle: {
+        open: { question: "Who signs a quote?", place: "2 of 2" },
+        item: "asked:3",
+      },
+      afterLast: {
+        open: { question: "Who approves a refund?", place: "1 of 2" },
+        item: "asked:1",
+      },
+    });
+  });
+
   it("opens an item in a sheet on a phone once its row is pressed, and closing it leaves the item", async () => {
     const page = await shown({ asked: three(), width: 390 });
     const atFirst = { sheet: sheet(), beside: beside() };
@@ -701,6 +740,32 @@ describe("the inbox", () => {
         words: "The sales lead.",
         answer: false,
       },
+    });
+  });
+
+  it("lets the item kept after a refused answer go once another row is pressed", async () => {
+    const page = await shown({
+      asked: three(),
+      at: "/inbox?item=asked:2",
+      gapClosed: true,
+    });
+    const box = document.querySelector("textarea");
+    await act(async () => {
+      if (box !== null) {
+        box.value = "The sales lead.";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    await press("Answer");
+    await settle();
+    const kept = beside();
+    await pressRow("asked:3");
+
+    expect({ kept, open: beside(), item: page.item() }).toStrictEqual({
+      kept: { question: "Who pays the invoices?", place: "" },
+      open: { question: "Who signs a quote?", place: "2 of 2" },
+      item: "asked:3",
     });
   });
 

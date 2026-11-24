@@ -181,6 +181,89 @@ describe("the weekly report in the inbox", () => {
     expect(html).toContain('<meta name="color-scheme" content="light dark">');
   });
 
+  it("carries its fonts as data in the file it downloads, and prints with them from this origin, the only place the page's policy loads fonts from", async () => {
+    const font = document.createElement("style");
+    font.textContent = `@font-face{font-family:"Probe";src:url("/fonts/probe.woff2") format("woff2")} body{font-family:"Probe"}`;
+    document.head.append(font);
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        await Promise.resolve(
+          new Response(new Uint8Array([1, 2, 3]), {
+            headers: { "content-type": "font/woff2" },
+          })
+        )
+    );
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function save(this: HTMLAnchorElement) {
+        saved.push(this.href);
+      }
+    );
+    const printed: string[] = [];
+    try {
+      await shown();
+      await press("Your report on week 6 is ready");
+      await vi.waitFor(
+        async () => {
+          await settle();
+          expect(
+            [...document.querySelectorAll("button")].some(
+              (each) =>
+                each.textContent.trim().startsWith("Download") && !each.disabled
+            )
+          ).toBeTruthy();
+        },
+        { timeout: 3000 }
+      );
+      await press("Download");
+      // The frame it prints from, caught on its way into the page.
+      vi.spyOn(document.body, "append").mockImplementation((...nodes) => {
+        for (const node of nodes) {
+          if (node instanceof HTMLIFrameElement) {
+            printed.push(node.srcdoc);
+          }
+        }
+      });
+      await press("Save as PDF");
+      await vi.waitFor(() => {
+        expect({ saved: saved.length, printed: printed.length }).toStrictEqual({
+          saved: 1,
+          printed: 1,
+        });
+      });
+      const file = (await resolveObjectURL(saved[0] ?? "")?.text()) ?? "";
+      const here = new URL("/fonts/probe.woff2", location.href).href;
+
+      expect({
+        file: file.includes('url("data:font/woff2;base64,AQID")'),
+        printed: printed[0]?.includes(`url("${here}")`),
+        printedData: printed[0]?.includes("data:font"),
+      }).toStrictEqual({ file: true, printed: true, printedData: false });
+    } finally {
+      font.remove();
+    }
+  });
+
+  it("dates the week's runs by their calendar days, wherever the reader is", async () => {
+    const zone = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      await shown();
+      await press("Your report on week 6 is ready");
+      await settle();
+
+      expect(document.querySelector("[role='dialog']")?.textContent).toContain(
+        "Nov 9, 2026 to Nov 15, 2026"
+      );
+    } finally {
+      if (zone === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = zone;
+      }
+    }
+  });
+
   it("on a day the week has not closed, is the week so far, with when the report is ready", async () => {
     await shown({
       ...programme,

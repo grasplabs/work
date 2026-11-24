@@ -42,7 +42,8 @@ import { ReportView } from "./report-view.tsx";
 // every other day as a quiet row at the list's foot, opening the week so
 // far. Opening it shows the report's page (report-view.tsx) in a sheet;
 // Download saves that page as one HTML file, with its styles and fonts
-// carried in it, and Save as PDF prints the same file.
+// carried in it, and Save as PDF prints the same page, its fonts loaded
+// from this origin.
 
 /** How many bytes go to `String.fromCodePoint` at once: well under any engine's argument limit. */
 const CHUNK = 8192;
@@ -171,9 +172,17 @@ const usedRule = (rule: CSSRule, page: HTMLElement, need: Need): string => {
 
 /**
  * The page as a file of its own: its markup, with the styles it uses
- * written in and its fonts carried as data, so it opens the same offline.
+ * written in. Downloaded (`embed`), its fonts are carried as data, so it
+ * opens the same offline; printed here, they are named by their address
+ * on this origin, as a `srcdoc` frame keeps the page's policy, which loads
+ * fonts from nowhere else (font-src is default-src, 'self'; core's
+ * security-headers.ts).
  */
-const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
+const snapshot = async (
+  page: HTMLElement,
+  title: string,
+  embed: boolean
+): Promise<string> => {
   // The characters the page shows, by code point: the fonts' ranges are in them.
   const shown = new Set<number>();
   for (const character of page.textContent ?? "") {
@@ -199,16 +208,20 @@ const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
       }
     }
   }
-  const data = new Map(
-    await Promise.all(
-      [...fonts].map(async ([url, href]) => [url, await asData(href)] as const)
-    )
-  );
+  const data: ReadonlyMap<string, string | undefined> = embed
+    ? new Map(
+        await Promise.all(
+          [...fonts].map(
+            async ([url, href]) => [url, await asData(href)] as const
+          )
+        )
+      )
+    : fonts;
   const css = sheets
     .map(({ css: text }) =>
       text.replaceAll(fontUrl, (whole: string, url: string) => {
-        const inline = data.get(url);
-        return inline === undefined ? whole : `url("${inline}")`;
+        const source = data.get(url);
+        return source === undefined ? whole : `url("${source}")`;
       })
     )
     .join("\n");
@@ -289,12 +302,16 @@ const ReportSheetBody = ({
   const page = useRef<HTMLDivElement>(null);
   // Named by the week it is on, the one that closed, as its row and the sheet say.
   const week = String(programme.nextReport.week).padStart(2, "0");
-  const fileOf = async (): Promise<string | undefined> => {
+  const fileOf = async (embed: boolean): Promise<string | undefined> => {
     const drawn = page.current;
     if (drawn === null || company === undefined) {
       return undefined;
     }
-    return await snapshot(drawn, `${company} week ${programme.week}`.trim());
+    return await snapshot(
+      drawn,
+      `${company} week ${programme.week}`.trim(),
+      embed
+    );
   };
   return (
     <>
@@ -314,7 +331,7 @@ const ReportSheetBody = ({
         <Button
           disabled={company === undefined}
           onClick={async () => {
-            const html = await fileOf();
+            const html = await fileOf(true);
             if (html !== undefined) {
               downloadText(
                 `weekly-report-week-${week}.html`,
@@ -332,7 +349,7 @@ const ReportSheetBody = ({
         <Button
           disabled={company === undefined}
           onClick={async () => {
-            const html = await fileOf();
+            const html = await fileOf(false);
             if (html !== undefined) {
               print(html);
             }

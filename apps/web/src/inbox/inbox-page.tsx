@@ -54,7 +54,7 @@ import { ItemDetail } from "./item-detail.tsx";
 import type { Frame } from "./item-detail.tsx";
 import { groupOf, listed } from "./items.ts";
 import type { Group, InboxItem } from "./items.ts";
-import { orderOf, skip, stepFrom } from "./walk.ts";
+import { orderOf, placeIn, skip, stepFrom } from "./walk.ts";
 
 // The Inbox, on Damsko: what waits on the person, to work through quickly.
 // The list is the page; beside it on a wide window, Damsko's side panel
@@ -405,6 +405,66 @@ const shownOf = (
   return { item, place, gone: item !== undefined && place === -1 };
 };
 
+/** An item whose answer core refused, with the row and the group chosen then. */
+interface Refused {
+  item: InboxItem;
+  chosen: string | undefined;
+  group: Group;
+}
+
+/** The item kept after its answer was refused: while the row and the group chosen then still are. */
+const keptOf = (
+  refused: Refused | undefined,
+  chosen: string | undefined,
+  group: Group
+): InboxItem | undefined =>
+  refused?.chosen === chosen && refused?.group === group
+    ? refused?.item
+    : undefined;
+
+/**
+ * The item selected: the one chosen; once it waits no more, the one that
+ * came after it, now in its place, the first after the last (walk.ts).
+ * With the address that one takes from then on (`successor`), so a reload
+ * opens it again: none while the one chosen still waits, or is kept after
+ * a refusal, whose address it still is.
+ */
+const selectedIn = (
+  list: readonly InboxItem[],
+  chosen: string | undefined,
+  at: number,
+  kept: InboxItem | undefined
+): { selected: InboxItem | undefined; successor: string | undefined } => {
+  const selected =
+    list[
+      placeIn(
+        list.map(({ id }) => id),
+        { id: chosen ?? "", index: at }
+      )
+    ];
+  const moved =
+    chosen !== undefined &&
+    kept === undefined &&
+    selected !== undefined &&
+    selected.id !== chosen;
+  return { selected, successor: moved ? selected.id : undefined };
+};
+
+/** Puts `item` in the page's address in place of the one there, once there is one. */
+const useAddressOf = (item: string | undefined): void => {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (item !== undefined) {
+      void navigate({
+        from: "/inbox",
+        to: "/inbox",
+        search: (before) => ({ ...before, item }),
+        replace: true,
+      });
+    }
+  }, [navigate, item]);
+};
+
 /** The panel beside a wide list; on a phone, its sheet, open once a row is chosen. */
 const Beside = ({
   wide,
@@ -527,8 +587,13 @@ const ToDo = ({
   // An item whose answer core refused, kept in place with core's reason
   // until the person moves on: read again, it may wait no more (answered
   // elsewhere), and the one after it must not take its place, its answers
-  // under the pointer, before the refusal is read.
-  const [refused, setRefused] = useState<InboxItem>();
+  // under the pointer, before the refusal is read. Kept with the row and
+  // the group chosen then: once the person chooses another, it goes.
+  const [refused, setRefused] = useState<Refused>();
+  const kept = keptOf(refused, chosen, group);
+  if (refused !== undefined && kept === undefined) {
+    setRefused(undefined);
+  }
   // The item an answer settled: the one that opens in its place holds its
   // answers back a moment (item-detail.tsx).
   const [answered, setAnswered] = useState<string>();
@@ -559,9 +624,9 @@ const ToDo = ({
   if (index !== -1 && index !== at) {
     setAt(index);
   }
-  const selected =
-    index === -1 ? list[Math.min(at, list.length - 1)] : list[index];
-  const { item: shownItem, place, gone } = shownOf(list, selected, refused);
+  const { selected, successor } = selectedIn(list, chosen, at, kept);
+  useAddressOf(successor);
+  const { item: shownItem, place, gone } = shownOf(list, selected, kept);
   // A row was chosen: on a phone its sheet opens.
   const reading = chosen !== undefined && shownItem !== undefined;
 
@@ -690,7 +755,7 @@ const ToDo = ({
             setLanded((count) => count + 1);
           }}
           onRefused={() => {
-            setRefused(shownItem);
+            setRefused({ item: shownItem, chosen, group });
           }}
           onSaid={(said) => {
             // Through at last, after a refusal: kept no longer, the one
@@ -718,7 +783,7 @@ export const InboxPage = ({
   tail,
 }: {
   items: readonly InboxItem[];
-  /** The item open, by its ID: the list's first when none is, or it waits no more. */
+  /** The item open, by its ID: the list's first when none is; the one after it once it waits no more. */
   chosen?: string;
   /** The group in view, as the address has it; all when it has none. */
   group?: Exclude<Group, "all">;

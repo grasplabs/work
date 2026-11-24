@@ -25,7 +25,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode, Ref } from "react";
 
-import { formatDate, formatPercent } from "../format.ts";
+import { formatDay, formatPercent } from "../format.ts";
 
 // The weekly report as a page of its own, made only of Damsko's parts: a
 // StatGroup for its figures, a Chart for the runs per day, ChartBarList
@@ -123,8 +123,8 @@ const weekOf = (
   if (runs !== undefined) {
     const { days } = runs;
     ran = {
-      from: formatDate(runs.from),
-      to: formatDate(runs.to),
+      from: formatDay(runs.from),
+      to: formatDay(runs.to),
       total: runs.runs.total,
       completed: sum(days.map((day) => day.completed)),
       failed: sum(days.map((day) => day.failed)),
