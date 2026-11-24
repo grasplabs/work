@@ -168,17 +168,18 @@ const store = <Value>(cache: Cache<Value>, id: string, value: Value): void => {
 
 /**
  * The value `load` gives for `name` under `key`, from `cache` while it is
- * fresh. A failed load is never kept.
+ * fresh, or however old with `lastKept`. A failed load is never kept.
  */
 const cachedIn = async <Value>(
   cache: Cache<Value>,
   key: string,
   name: string,
-  load: () => Promise<Value>
+  load: () => Promise<Value>,
+  { lastKept = false }: { lastKept?: boolean } = {}
 ): Promise<Value> => {
   const id = `${await sha256Hex(key)}:${name}`;
   const hit = cache.get(id);
-  if (hit !== undefined && hit.expiresAt > Date.now()) {
+  if (hit !== undefined && (lastKept || hit.expiresAt > Date.now())) {
     return hit.value;
   }
   const value = await load();
@@ -402,6 +403,25 @@ export const listedToolkits = async (key: string): Promise<ListedToolkit[]> =>
     key,
     "toolkits",
     async () => await composioEntries(key)
+  );
+
+/**
+ * Composio's toolkits as last listed, however long ago, listed now only
+ * when none are kept: for a logo's address, which changes rarely. A page
+ * asks for every logo it shows at once, each in a request of its own; were
+ * each to list the toolkits afresh once the list had gone stale, a
+ * screenful of logos would read Composio's whole list that many times.
+ * The catalog's own read, which the page makes first, keeps it current.
+ */
+export const lastListedToolkits = async (
+  key: string
+): Promise<ListedToolkit[]> =>
+  await cachedIn(
+    toolkitCache,
+    key,
+    "toolkits",
+    async () => await composioEntries(key),
+    { lastKept: true }
   );
 
 /** The catalog, as `ConnectApi.catalog` describes it. */

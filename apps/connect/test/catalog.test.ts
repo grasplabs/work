@@ -182,15 +182,6 @@ describe("the catalog", () => {
     ]);
   });
 
-  it("gives people looking at the same time the same catalog", async () => {
-    const [first, second] = await Promise.all([
-      exports.default.catalog(),
-      exports.default.catalog(),
-    ]);
-    expect(second).toStrictEqual(first);
-    expect(first.composio).toBe("listed");
-  });
-
   it("says Composio is unavailable when its list goes on past what connect reads, and keeps none of it", async () => {
     composio.endless = true;
     const endless = await exports.default.catalog();

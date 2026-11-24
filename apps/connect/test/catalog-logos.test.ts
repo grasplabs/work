@@ -255,6 +255,16 @@ describe("a catalog entry's logo", () => {
     expect(composio.logoRequests).toHaveLength(3);
   });
 
+  it("is found in the toolkits as last listed, without listing them again once that list is old", async () => {
+    await logoOf("hubspot");
+    const listed = composio.requests.length;
+    // Past the ten minutes the catalog keeps Composio's list for.
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 11 * 60 * 1000);
+    await Promise.all([logoOf("hubspot"), logoOf("linear")]);
+    expect(composio.requests).toHaveLength(listed);
+  });
+
   it("is none while it doesn't come, and asked for again next time", async () => {
     const passing = [
       () => new Response("Service Unavailable", { status: 503 }),

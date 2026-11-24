@@ -5,7 +5,7 @@ import {
 import type { CatalogLogo, CatalogLogoType } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 
-import { listedToolkits } from "./catalog.ts";
+import { lastListedToolkits } from "./catalog.ts";
 import { ComposioError, composioKey, readCappedBytes } from "./composio.ts";
 
 // Catalog entries' logos. The Integrations page shows each toolkit's logo
@@ -250,7 +250,7 @@ export const catalogLogo = async (
     return null;
   }
   try {
-    const listed = await listedToolkits(key);
+    const listed = await lastListedToolkits(key);
     const logoSource = listed.find(({ entry }) => entry.id === id)?.logoSource;
     return logoSource === undefined ? null : await cachedLogo(logoSource);
   } catch (error) {
