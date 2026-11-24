@@ -9,15 +9,14 @@ import {
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
+import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { RowAction, SidebarMore, SidebarRow } from "../frame/sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { setActiveChat, useActiveChat } from "./active-chat.ts";
-import { useOpenChat } from "./chat-presence.ts";
+import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useChatsWindow } from "./chat-switcher.tsx";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
@@ -108,7 +107,7 @@ const useRowChanges = () => {
 };
 
 /**
- * The sidebar's recent chats, as rows: each opens its chat beside the
+ * The sidebar's recent chats, as rows: each opens its chat on its own
  * page, by its title alone, marked while it is the open chat, with its menu
  * and renamed in place; All chats after them, the chats window; and the
  * question a delete asks first. No rows when the person has none, or
@@ -121,18 +120,13 @@ export const useRecentChats = ({
 }): { rows: SidebarRow[]; more: SidebarMore; dialog: ReactNode } => {
   const { t } = useLingui();
   const chats = useChats(enabled);
-  const activeId = useActiveChat();
-  const openHere = useOpenChat();
+  const matchRoute = useMatchRoute();
+  const goToChat = useGoToChat();
   const openChats = useChatsWindow();
   const { setOpenMobile } = useSidebar();
   const changes = useRowChanges();
   const [deleting, setDeleting] = useState<ChatSummary>();
-  // Neither navigates, so the phone's sheet would stay over them: it goes first.
-  const open = (chat: ChatSummary) => {
-    setOpenMobile(false);
-    setActiveChat(chat.id);
-    openHere();
-  };
+  // The window doesn't navigate, so the phone's sheet would stay over it: it goes first.
   const more: SidebarMore = {
     label: t`All chats`,
     onClick: () => {
@@ -154,10 +148,9 @@ export const useRecentChats = ({
       label: title,
       // In the regular weight, as "All chats" under them is.
       quiet: true,
-      onClick: () => {
-        open(chat);
-      },
-      current: chat.id === activeId,
+      // The chat's own page (chat-link.ts), marked while it is open.
+      render: (look) => <Link {...look} {...chatLink(chat.id)} />,
+      current: matchRoute(chatLink(chat.id)) !== false,
       // Its agent is still answering: the Working mark at the row's end.
       working: chat.running,
       workingLabel: t`Answering`,
@@ -166,7 +159,7 @@ export const useRecentChats = ({
       renameLabel: t`Rename ${title}`,
       onAction: (value) => {
         if (value === "open") {
-          open(chat);
+          goToChat(chat.id);
         } else if (value === "archive") {
           void changes.archive(chat);
         } else if (value === "delete") {
@@ -181,7 +174,7 @@ export const useRecentChats = ({
   const dialog =
     deleting === undefined ? null : (
       <DeleteChatDialog
-        active={deleting.id === activeId}
+        active={matchRoute(chatLink(deleting.id)) !== false}
         chat={deleting}
         onOpenChange={(next) => {
           if (!next) {

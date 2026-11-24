@@ -30,14 +30,11 @@ const downloadChat = async (
   format: "Markdown (.md)" | "PDF"
 ): Promise<void> => {
   await page.getByRole("button", { name: "More for this chat" }).click();
-  // By the keyboard: the submenu also opens as the pointer rests on its
-  // item, so a click there may close it again, and the test would race.
-  await page.getByRole("menuitem", { name: "Download" }).focus();
-  await page.keyboard.press("ArrowRight");
-  const item = page.getByRole("menuitem", { name: format });
-  await item.focus();
-  await expect(item).toBeFocused();
-  await page.keyboard.press("Enter");
+  await page
+    .getByRole("menuitem", {
+      name: format === "PDF" ? "Download as PDF" : "Download as Markdown",
+    })
+    .click();
 };
 
 const textOf = async (download: Download): Promise<string> =>
@@ -140,8 +137,8 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   await page.goto("/");
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  // It opens full screen in Grasp's chat, named once core has said its
-  // title, which the export is named after.
+  // It opens on its own page, named once core has said its title, which
+  // the export is named after.
   const messages = page
     .getByRole("region", { name: question })
     .getByRole("log", { name: "Messages" });
