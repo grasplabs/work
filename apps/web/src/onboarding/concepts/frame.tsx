@@ -9,8 +9,15 @@ import {
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
+import { GlobeIcon, Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { plural } from "@lingui/core/macro";
@@ -22,6 +29,8 @@ import type { ReactNode } from "react";
 import { GraspLogo } from "../../connections/brand-logos.ts";
 import { signOut } from "../../core-connection.ts";
 import { LanguageButton } from "../../frame/language-button.tsx";
+import { chooseLocale, isLocale, localeNames } from "../../i18n.ts";
+import type { Locale } from "../../i18n.ts";
 import { useCore } from "../../use-core.ts";
 import { useNarrow } from "../use-narrow.ts";
 
@@ -164,6 +173,55 @@ const Whereabouts = ({ step }: { step: WholeStep }) => {
   );
 };
 
+const languages = Object.entries(localeNames).flatMap(([code, name]) =>
+  isLocale(code) ? [{ code, name }] : []
+);
+
+/** The language: today's button, and on a phone its globe alone, so the bar keeps one line. */
+const Language = () => {
+  const { t, i18n } = useLingui();
+  const narrow = useNarrow();
+  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+  const name = localeNames[locale];
+  if (!narrow) {
+    return <LanguageButton side="bottom" />;
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t`Language: ${name}`}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Icon icon={GlobeIcon} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="bottom">
+        <DropdownMenuRadioGroup
+          onValueChange={(value: unknown) => {
+            if (isLocale(value)) {
+              void chooseLocale(value);
+            }
+          }}
+          value={locale}
+        >
+          {languages.map((each) => (
+            <DropdownMenuRadioItem
+              closeOnSelect
+              key={each.code}
+              label={each.name}
+              value={each.code}
+            >
+              <span lang={each.code}>{each.name}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 /** Leaving: asked first, then signed out, everything kept. */
 const Leave = () => {
   const { t } = useLingui();
@@ -254,7 +312,7 @@ export const ConceptFrame = ({
       <Whereabouts step={step} />
       <div {...stylex.props(styles.end)}>
         {tools}
-        {language ? <LanguageButton side="bottom" /> : null}
+        {language ? <Language /> : null}
         <Leave />
       </div>
     </header>
