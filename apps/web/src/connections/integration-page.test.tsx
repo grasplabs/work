@@ -150,14 +150,15 @@ const notHere = async (): Promise<never> => {
  * A faked core whose session answers what the pages read, from
  * `connections`, and records every disconnect asked of it.
  */
-const coreOf = (connections: ListedConnection[], disconnected: string[]) => {
+const coreOf = (
+  connections: ListedConnection[],
+  disconnected: string[],
+  catalog: () => Promise<OfferedCatalog> = async () =>
+    await Promise.resolve({ entries: [entry, microsoft], composio: "listed" })
+) => {
   const known = {
     connections: {
-      catalog: async (): Promise<OfferedCatalog> =>
-        await Promise.resolve({
-          entries: [entry, microsoft],
-          composio: "listed",
-        }),
+      catalog,
       list: async (): Promise<ListedConnection[]> =>
         await Promise.resolve(connections),
       catalogTools: async () =>
@@ -205,7 +206,8 @@ const coreOf = (connections: ListedConnection[], disconnected: string[]) => {
 const shown = async (
   address: string,
   connections: ListedConnection[],
-  identity: Identity = person()
+  identity: Identity = person(),
+  catalog?: () => Promise<OfferedCatalog>
 ): Promise<string[]> => {
   const disconnected: string[] = [];
   const top = createRootRoute();
@@ -237,7 +239,7 @@ const shown = async (
   const router = createRouter({
     routeTree: top.addChildren([shell.addChildren([page, list])]),
     history: createMemoryHistory({ initialEntries: [address] }),
-    context: { core: coreOf(connections, disconnected) },
+    context: { core: coreOf(connections, disconnected, catalog) },
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -306,6 +308,32 @@ describe("the Integrations pages, back from a sign-in", () => {
   }, 60_000);
 
   afterEach(unmounted);
+
+  it("keeps the accounts that loaded when the catalog didn't, saying beside them why it didn't", async () => {
+    await shown(
+      "/integrations",
+      [mailbox("ada@example.com", "active")],
+      person(),
+      async () => {
+        await Promise.resolve();
+        throw Object.assign(new Error("The catalog can't be read."), {
+          code: "connection.catalog_unavailable",
+        });
+      }
+    );
+    const alerts = [...document.querySelectorAll('[role="alert"]')].map(
+      (each) => each.textContent
+    );
+
+    expect({
+      // The account's tile, under its provider's ID, as the catalog names none.
+      app: [...document.querySelectorAll("button")].some((each) =>
+        each.textContent.startsWith("microsoft")
+      ),
+      said: alerts.some((each) => each.includes("The catalog can't be read.")),
+      searched: document.body.textContent.includes("No apps match"),
+    }).toStrictEqual({ app: true, said: true, searched: false });
+  });
 
   it("disconnects nothing back from a sign-in that made a new connection beside a stopped one, and says it is connected again", async () => {
     const disconnected = await shown(

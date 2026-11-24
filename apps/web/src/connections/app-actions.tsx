@@ -289,7 +289,13 @@ export const useAppActions = ({
   if (again !== undefined && !accountRows) {
     actions.onSignIn = openNative(again);
   }
-  if (connectable && !none && integration.source === "native") {
+  // A second account: a native connector's, or a toolkit's that signs in
+  // beside one that works (a stopped one is connected again instead). A
+  // key stays the toolkit's one.
+  const another =
+    integration.source === "native" ||
+    (integration.auth === "managed" && stopped.length === 0);
+  if (connectable && !none && another) {
     actions.onConnectAnother = openNative();
   }
   if (connectable && integration.auth === "key" && lapsed.length > 0) {

@@ -11,6 +11,7 @@ import { useAppActions } from "./app-actions.tsx";
 import { useAppOf } from "./app-of.tsx";
 import type { AppToolChoice } from "./app/model.ts";
 import { AppPage } from "./app/page.tsx";
+import { useAppWords } from "./app/words.ts";
 import { waitsForAdmin } from "./connect-dialog.tsx";
 import {
   AccountActions,
@@ -19,6 +20,7 @@ import {
 } from "./connection-list.tsx";
 import { FollowLinks } from "./follow-links.tsx";
 import type { Integration } from "./integrations.ts";
+import { PartNotLoaded } from "./part-not-loaded.tsx";
 import {
   allowedOf,
   changeableConnectionOf,
@@ -39,7 +41,8 @@ import { useChange } from "./use-change.ts";
 // allowed can't be taken away (disconnect instead). Everyone else, Grasp
 // staff included, reads it; a native connector's tools are fixed. A change
 // that didn't go through says why beside its control (the tools, or the
-// offered switch), never in a toast. A row that stopped working beside a
+// offered switch), never in a toast. Where which workflows use it
+// couldn't be read, the page says so rather than leave Used by out. A row that stopped working beside a
 // shared connection that works says it can go now, to whoever may
 // disconnect it.
 
@@ -61,16 +64,20 @@ export const IntegrationAppPage = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
+  const words = useAppWords();
   const appOf = useAppOf(identity);
   const toolsChange = useChange();
   const offerChange = useChange();
   const busy = toolsChange.busy || offerChange.busy;
   // The last tool allowed, kept: said over the tools like a refused change.
   const [lastTool, setLastTool] = useState<string>();
+  // The connection a change of tools goes to: its tools are the ones shown.
+  const changeable = changeableConnectionOf(integration, identity);
   const app = appOf(integration, {
     size: "lg",
     tools: tools?.state === "ready" ? tools.data : undefined,
     uses: uses?.state === "ready" ? uses.data : undefined,
+    toolsOf: changeable,
   });
   const { actions, dialogs } = useAppActions({
     integration,
@@ -107,7 +114,6 @@ export const IntegrationAppPage = ({
         />,
       ])
   );
-  const changeable = changeableConnectionOf(integration, identity);
   const changeTools = (
     changes: readonly { id: string; choice: AppToolChoice }[]
   ): void => {
@@ -166,6 +172,10 @@ export const IntegrationAppPage = ({
             }
           : {})}
       >
+        {/* Used by shows only what uses it: a read that failed says so. */}
+        {uses === undefined ? null : (
+          <PartNotLoaded page={uses} what={words.usedBy} />
+        )}
         {children}
       </AppPage>
       {dialogs}

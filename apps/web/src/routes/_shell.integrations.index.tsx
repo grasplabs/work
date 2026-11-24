@@ -63,6 +63,7 @@ import type {
   Integration,
   IntegrationSections,
 } from "../connections/integrations.ts";
+import { PartNotLoaded } from "../connections/part-not-loaded.tsx";
 import { RecommendedApps } from "../connections/recommended-apps.tsx";
 import { nothingKnown, recommendedOf } from "../connections/recommended.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
@@ -609,12 +610,13 @@ const Integrations = () => {
   const recommended = overview ? recommendedOf(integrations, known) : [];
   const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
   const crumbs = crumbsOf(t`Integrations`, kind);
-  // The apps and the connections are the page: without either, it failed
-  // as a whole, and says so across the card.
-  const unread = catalog.state === "ready" ? connections : catalog;
-  if (unread.state !== "ready") {
-    return <PageNotLoaded crumbs={crumbs} page={unread} />;
+  // The apps and the connections are the page: without both, it failed as
+  // a whole, and says so across the card; with one, it shows what it has
+  // and says beside it what didn't load.
+  if (catalog.state !== "ready" && connections.state !== "ready") {
+    return <PageNotLoaded crumbs={crumbs} page={catalog} />;
   }
+  const loaded = catalog.state === "ready" && connections.state === "ready";
   return (
     <>
       <RequestAppDialog
@@ -651,6 +653,8 @@ const Integrations = () => {
             catalog.state === "ready" && catalog.data.composio === "unavailable"
           }
         />
+        <PartNotLoaded page={catalog} />
+        <PartNotLoaded page={connections} />
         <output {...stylex.props(visuallyHidden)}>
           {q === undefined
             ? ""
@@ -706,7 +710,7 @@ const Integrations = () => {
               new Set(recommended.map(({ integration }) => integration.key))
             }
           />
-          {shown === 0 ? (
+          {loaded && shown === 0 ? (
             <NothingFound
               onRequest={() => {
                 setRequesting(true);

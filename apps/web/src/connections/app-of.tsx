@@ -104,6 +104,8 @@ interface AppOptions {
   tools?: readonly CatalogTool[] | undefined;
   /** Which workflows use each connection, once read. */
   uses?: readonly ConnectionWorkflows[] | undefined;
+  /** The connection whose tools are shown, where a change goes to it; else the one the parts speak of. */
+  toolsOf?: ListedConnection | undefined;
   /** The mark's size: `sm` on a tile, `default` in the panel, `lg` on the page. */
   size: MarkSize;
 }
@@ -113,7 +115,10 @@ export const useAppOf = (
   identity: Pick<Identity, "role" | "staff" | "userId">
 ) => {
   const { t } = useLingui();
-  return (integration: Integration, { tools, uses, size }: AppOptions): App => {
+  return (
+    integration: Integration,
+    { tools, uses, toolsOf, size }: AppOptions
+  ): App => {
     const primary = primaryOf(integration, uses);
     // Each account, in its own state: the page's rows.
     const rows = integration.connections.map((each): AppConnection => ({
@@ -169,7 +174,7 @@ export const useAppOf = (
             tools: appToolsOf(
               tools,
               integration,
-              primary,
+              toolsOf ?? primary,
               t`No longer offered`
             ),
           }),

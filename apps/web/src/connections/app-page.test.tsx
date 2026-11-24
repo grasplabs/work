@@ -6,6 +6,7 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -19,6 +20,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import type { Loaded } from "../load-from-core.tsx";
 import { IntegrationAppPage } from "./app-page.tsx";
 import { integrationsOf } from "./integrations.ts";
 
@@ -143,6 +145,7 @@ const shown = async (
     answered = Promise.resolve(true),
     more = [],
     app = entry,
+    uses = { state: "ready", data: [] },
   }: {
     identity?: Identity;
     address?: string;
@@ -151,6 +154,8 @@ const shown = async (
     more?: ListedConnection[];
     /** The app, where it isn't HubSpot. */
     app?: OfferedCatalog["entries"][number];
+    /** The read of which workflows use each connection. */
+    uses?: Loaded<ConnectionWorkflows[]>;
   } = {}
 ): Promise<Sent[]> => {
   const sent: Sent[] = [];
@@ -179,7 +184,7 @@ const shown = async (
         identity={identity}
         integration={integration}
         tools={{ state: "ready", data: tools }}
-        uses={{ state: "ready", data: [] }}
+        uses={uses}
       />
     ),
   });
@@ -306,6 +311,67 @@ describe("changing what Grasp may do in a connected app", () => {
           ],
         },
       ],
+    });
+  });
+
+  it("shows the tools of the connection a change goes to, not of a stopped one a workflow uses", async () => {
+    const stopped: ListedConnection = {
+      ...connection,
+      id: "connection-0",
+      status: "needs_reauth",
+      tools: ["HUBSPOT_LIST_CONTACTS"],
+      offeredTools: ["HUBSPOT_LIST_CONTACTS"],
+    };
+    const sent = await shown(stopped, {
+      more: [connection],
+      uses: {
+        state: "ready",
+        data: [
+          {
+            connectionId: "connection-0",
+            workflows: [{ id: "w1", name: "Follow up", title: null }],
+          },
+        ],
+      },
+    });
+    const before = wordsOf(choiceOf("Notes") ?? document.body);
+    await pick("Notes", "Write");
+
+    expect({ before, sent }).toStrictEqual({
+      // The working connection's: one note tool allowed, the other not.
+      before: "Mixed",
+      sent: [
+        {
+          connectionId: "connection-1",
+          tools: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_CREATE_NOTE",
+            "HUBSPOT_DELETE_NOTE",
+          ],
+          expected: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_CREATE_NOTE",
+          ],
+        },
+      ],
+    });
+  });
+
+  it("says which workflows use it couldn't be read, rather than show none", async () => {
+    await shown(connection, {
+      uses: { state: "refused", message: "Workflows can't be read now." },
+    });
+
+    const said = [...document.querySelectorAll('[role="alert"]')].map((each) =>
+      each.querySelector('[data-slot="alert-description"]')
+    );
+
+    expect({
+      title: said.map((each) => each?.previousElementSibling?.textContent),
+      reason: said.map((each) => each?.textContent),
+    }).toStrictEqual({
+      title: ["Used by"],
+      reason: ["Workflows can't be read now."],
     });
   });
 

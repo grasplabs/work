@@ -329,11 +329,11 @@ export const ConnectApp = ({
 };
 
 /**
- * Each tool as it starts: the host's earlier choice where it gives one
- * (`initialTools`), else its default, a tool that only reads runs and one
- * that changes something stays off until chosen. A tool that changes
- * something is never Read: an earlier Read for it starts as Write, which
- * asks first.
+ * Each tool as it starts: from the host's earlier choices where it gives
+ * them (`initialTools`), a tool they leave out staying off, as it was;
+ * else its default, a tool that only reads runs and one that changes
+ * something stays off until chosen. A tool that changes something is never
+ * Read: an earlier Read for it starts as Write, which asks first.
  */
 const defaultsOf = (
   tools: readonly AppTool[],
@@ -343,8 +343,9 @@ const defaultsOf = (
     (initial ?? []).map((each) => [each.id, each.choice])
   );
   return tools.map((tool) => {
-    const choice =
-      earlier.get(tool.id) ?? (tool.kind === "read" ? "read" : "never");
+    const fallback =
+      initial === undefined && tool.kind === "read" ? "read" : "never";
+    const choice = earlier.get(tool.id) ?? fallback;
     return {
       ...tool,
       choice: tool.kind === "write" && choice === "read" ? "write" : choice,
@@ -431,8 +432,8 @@ export const ConnectAppConsent = ({
   /**
    * What Grasp may do with each tool when the dialog opens, where the host
    * knows it: connecting a stopped toolkit again (`again`) starts from the
-   * old connection's choices. A tool left out starts at its default (reads
-   * on, changes off).
+   * old connection's choices. A tool left out starts off, as the old
+   * connection had it.
    */
   initialTools?: readonly { id: string; choice: AppToolChoice }[];
 }) => {

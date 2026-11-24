@@ -362,6 +362,18 @@ describe("an app's panel", () => {
     });
   });
 
+  it("connects a stopped toolkit again allowing no read tool the stopped connection didn't", async () => {
+    const sent = await opened("hubspot", [
+      { ...stopped, tools: ["HUBSPOT_CREATE_NOTE"], readTools: [] },
+    ]);
+    await press(buttons("Connect again")[0]);
+    await press(dialogAction("Connect"));
+
+    expect(
+      sent.map((each) => ("toolkit" in each ? each.tools : each))
+    ).toStrictEqual([[{ name: "HUBSPOT_CREATE_NOTE", resource: "contactId" }]]);
+  });
+
   it("says connecting a stopped toolkit again makes a new connection beside the stopped one, and leaves for the sign-in disconnecting nothing", async () => {
     const assign = vi
       .spyOn(window.location, "assign")
@@ -514,6 +526,24 @@ describe("an app's panel", () => {
     const staff = buttons("Connect").length;
 
     expect({ member, staff }).toStrictEqual({ member: 0, staff: 0 });
+  });
+
+  it("has an admin connect another account to a toolkit that works under Manage, but never a second key", async () => {
+    const working: ListedConnection = { ...stopped, status: "active" };
+    await opened("airtable", [
+      { ...working, id: "c-airtable", provider: "airtable" },
+    ]);
+    await press(buttons("Manage")[0]);
+    const key = buttons("Connect another account").length;
+    unmounted();
+    await opened("hubspot", [working]);
+    await press(buttons("Manage")[0]);
+    await press(buttons("Connect another account")[0]);
+
+    expect({
+      key,
+      dialog: dialogOf("Connect HubSpot") !== undefined,
+    }).toStrictEqual({ key: 0, dialog: true });
   });
 
   it("offers signing in again to a lapsed native connection under Manage", async () => {
