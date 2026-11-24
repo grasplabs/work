@@ -185,12 +185,12 @@ test("a person opens a line of the brain's activity beside it, sees what the bra
   ).toBeVisible();
 });
 
-test("on a phone, a source's name on the Sources page reads whole, with where it lives and when on the line under it", async ({
+test("a source's row on the Sources page is laid out by its list's width: on a phone and beside an opened source the name reads whole with where it lives and when under it, on a wider list the name keeps to one line with that at the row's end", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("brainActivity");
   const tag = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
-  const title = `Travel policy ${tag} with a long name that runs past a phone's width`;
+  const title = `Travel policy ${tag} with a long name that runs past a phone's width and past a row's on a laptop`;
   const { core, api } = apiOf(admin);
   try {
     await api.brain.addRecords([
@@ -209,21 +209,14 @@ test("on a phone, a source's name on the Sources page reads whole, with where it
   }
 
   const page = await pageOf(admin);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/brain/sources");
-  const row = page
-    .getByRole("main")
-    .getByRole("listitem")
-    .filter({ hasText: title });
-  await expect(row).toBeVisible(brainRead);
-
-  // Every word of the name inside the row's title, none cut off; the detail
-  // starts under the name's last line, not beside it.
-  const place = await row
-    .locator('[data-slot="item-title"]')
-    .evaluate((box, name) => {
+  const main = page.getByRole("main");
+  const row = main.getByRole("listitem").filter({ hasText: title });
+  // Where the name's words and the detail stand in the row's title.
+  const placed = async () =>
+    await row.locator('[data-slot="item-title"]').evaluate((box, name) => {
       const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
       const words = document.createRange();
+      let holder: Element | null = null;
       for (
         let node = walker.nextNode();
         node !== null;
@@ -231,20 +224,72 @@ test("on a phone, a source's name on the Sources page reads whole, with where it
       ) {
         if (node.textContent === name) {
           words.selectNodeContents(node);
+          holder = node.parentElement;
         }
       }
       const text = words.getBoundingClientRect();
       const detail = box
         .querySelector('[data-slot="item-detail"]')
         ?.getBoundingClientRect();
+      // The title's line height, in pixels ("20px").
+      const line = Number(getComputedStyle(box).lineHeight.replace("px", ""));
       return {
+        lines: Math.round(text.height / line),
+        cut:
+          holder !== null &&
+          getComputedStyle(holder).textOverflow === "ellipsis" &&
+          holder.scrollWidth > holder.clientWidth,
         textEnd: text.right,
         textBottom: text.bottom,
         titleEnd: box.getBoundingClientRect().right,
         detailTop: detail?.top ?? 0,
+        nameEnd: holder?.getBoundingClientRect().right ?? 0,
+        detailStart: detail?.left ?? 0,
+        detailEnd: detail?.right ?? 0,
       };
     }, title);
-  expect(place.textBottom).toBeGreaterThan(0);
-  expect(place.textEnd).toBeLessThanOrEqual(place.titleEnd + 0.5);
-  expect(place.detailTop).toBeGreaterThanOrEqual(place.textBottom - 0.5);
+  const linesOf = async () => {
+    const place = await placed();
+    return place.lines;
+  };
+  // Stacked: every word of the name inside the row's title, none cut off,
+  // the detail under the name's last line, not beside it.
+  const stacked = async () => {
+    const place = await placed();
+    expect(place.textBottom).toBeGreaterThan(0);
+    expect(place.cut).toBe(false);
+    expect(place.textEnd).toBeLessThanOrEqual(place.titleEnd + 0.5);
+    expect(place.detailTop).toBeGreaterThanOrEqual(place.textBottom - 0.5);
+  };
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/brain/sources");
+  await expect(row).toBeVisible(brainRead);
+  await stacked();
+
+  // At a laptop's width the list is wide enough for one line: the name on
+  // it, cut with an ellipsis, and the detail beside it at the row's end.
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expect.poll(linesOf).toBe(1);
+  const wide = await placed();
+  expect(wide.cut).toBe(true);
+  expect(wide.detailTop).toBeLessThan(wide.textBottom);
+  expect(wide.detailStart).toBeGreaterThanOrEqual(wide.nameEnd - 0.5);
+  expect(wide.detailEnd).toBeLessThanOrEqual(wide.titleEnd + 0.5);
+
+  // At a desktop's width with a source open beside it, the list is as
+  // narrow as a phone's, and its rows stack again.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await main.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: `Board pack ${tag}.txt`,
+    mimeType: "text/plain",
+    buffer: Buffer.from("The board pack's text."),
+  });
+  await dialog.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(dialog).toBeHidden({ timeout: 30_000 });
+  // The upload opens beside the list, which narrows.
+  await expect.poll(linesOf, brainRead).toBeGreaterThan(1);
+  await stacked();
 });

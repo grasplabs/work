@@ -123,7 +123,12 @@ import { given } from "./brain.ts";
 import { LearnedSection } from "./learned-section.tsx";
 import { OwnExportSection } from "./own-export.tsx";
 import { paneStyles } from "./page-pane.ts";
-import { SourceItem, SourceItemParts, sourcesByKind } from "./source-item.tsx";
+import {
+  SourceItem,
+  SourceItemParts,
+  sourceList,
+  sourcesByKind,
+} from "./source-item.tsx";
 import type { SourceKind, SourceRow as Source } from "./source-item.tsx";
 
 // The Brain's sources, a section per kind on the library's rows: the
@@ -2099,7 +2104,7 @@ export const SourcesPage = ({
                   <Heading id={listHeading} level={2} size="2xs">
                     <Trans>Sources you may read</Trans>
                   </Heading>
-                  <div {...stylex.props(styles.groups)}>
+                  <div {...stylex.props(styles.groups, sourceList.list)}>
                     {sourcesByKind(rows.map(({ item }) => item)).map(
                       ({ kind, sources: ofKind }) => (
                         <SidePanelSection

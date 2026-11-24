@@ -18,7 +18,7 @@ import {
   WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
@@ -65,19 +65,35 @@ const kindIcons: Record<SourceKind, IconData> = {
   memory: BrainIcon,
 };
 
-// A side panel's card keeps an `xs` row's detail whole at its end and cuts the name to what is
-// left, which on a phone is a few letters. Here the name and the detail are words of their own,
-// laid out as the card does, so the name wraps, never cut; on a phone the detail is the line under
-// the name, as in #2503.
+// A list of sources stacks below 30rem of its own width, as #2503's row list does: the name wraps
+// between its words and where it lives and when is the line under it. Wider, the name keeps to
+// one line, cut with an ellipsis, and its detail stands whole at the row's end. The list's width,
+// not the window's: beside an opened source a desktop's list is under 30rem too.
+const STACK = "@container sources (width < 30rem)";
+
+/** The list the sources' rows stand in, whose width lays each row out. */
+export const sourceList = stylex.create({
+  list: { containerType: "inline-size", containerName: "sources" },
+});
+
 const styles = stylex.create({
   words: {
-    display: { default: "flex", [media.maxSm]: "block" },
+    display: { default: "flex", [STACK]: "block" },
     flexGrow: 1,
     alignItems: "center",
     gap: space["2"],
     minWidth: 0,
   },
-  detail: { display: { default: null, [media.maxSm]: "block" } },
+  // Wrapped between words only: a name with no space in it is cut, as #2503's, not broken.
+  name: {
+    display: { default: null, [STACK]: "block" },
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: { default: "nowrap", [STACK]: "normal" },
+    overflowWrap: "normal",
+  },
+  detail: { display: { default: null, [STACK]: "block" } },
 });
 
 /** Where it lives and when, in one quiet line. */
@@ -102,7 +118,7 @@ export const SourceItem = ({
       <ItemContent>
         <ItemTitle>
           <span {...stylex.props(styles.words)}>
-            {source.title}
+            <span {...stylex.props(styles.name)}>{source.title}</span>
             <ItemDetail style={styles.detail}>{detailOf(source)}</ItemDetail>
           </span>
         </ItemTitle>
