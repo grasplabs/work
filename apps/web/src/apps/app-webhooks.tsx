@@ -383,6 +383,7 @@ export const AppWebhooks = ({
       <section aria-label={t`Addresses`}>
         <CardHeader>
           <WithInfo
+            of="title"
             info={t`Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form.`}
           >
             <CardTitle level={3}>{t`Addresses`}</CardTitle>

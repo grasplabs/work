@@ -388,6 +388,7 @@ const AppInstructions = ({ app }: { app: ViewedApp }) => {
       <section aria-label={t`Instructions`}>
         <CardHeader>
           <WithInfo
+            of="title"
             info={t`What a builder’s chat about this App starts with. Only its builders read and change it.`}
             label={t`More about its instructions`}
           >
@@ -429,6 +430,7 @@ const ForBuilders = ({
         <section aria-label={t`Copies`}>
           <CardHeader>
             <WithInfo
+              of="title"
               info={t`Its definition to keep or move, and a blueprint others can start from.`}
               label={t`More about copies`}
             >
@@ -459,6 +461,7 @@ const ForBuilders = ({
           <section aria-label={t`Its data`}>
             <CardHeader>
               <WithInfo
+                of="title"
                 info={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
                 label={t`More about its data`}
               >
@@ -475,6 +478,7 @@ const ForBuilders = ({
         <section aria-label={t`Putting it away`}>
           <CardHeader>
             <WithInfo
+              of="title"
               info={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
               label={t`More about putting it away`}
             >
@@ -684,6 +688,7 @@ const GeneralForm = ({
         >
           <CardHeader>
             <WithInfo
+              of="title"
               info={t`Who answers for the App: who is asked about it and decides what changes.`}
               label={t`More about the owner`}
             >

@@ -198,6 +198,7 @@ export const AppIntegrations = ({
       <section aria-label={t`Integrations`}>
         <CardHeader>
           <WithInfo
+            of="title"
             info={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
           >
             <CardTitle level={3}>{t`Integrations`}</CardTitle>

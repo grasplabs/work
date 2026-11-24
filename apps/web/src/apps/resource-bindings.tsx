@@ -510,6 +510,7 @@ const Undeclared = ({
       <section aria-label={t`No longer declared`}>
         <CardHeader>
           <WithInfo
+            of="title"
             info={t`The current version doesn't declare these, so they serve nothing until a version declares them again.`}
           >
             <CardTitle level={3}>{t`No longer declared`}</CardTitle>
@@ -583,6 +584,7 @@ export const ResourceBindings = ({
         <section aria-label={t`Resources`}>
           <CardHeader>
             <WithInfo
+              of="title"
               info={
                 decides
                   ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`

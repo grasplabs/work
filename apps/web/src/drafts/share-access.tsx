@@ -336,18 +336,18 @@ export const ShareAccess = ({
       members={members}
       onAdd={onAdd}
     />
-    {members.length === 0 ? null : (
-      <ul aria-label={listLabel} {...stylex.props(styles.rows)}>
-        {members.map((member) => (
-          <Row
-            key={member.id}
-            levels={levels}
-            member={member}
-            onLevelChange={onLevelChange}
-            onRemove={onRemove}
-          />
-        ))}
-      </ul>
-    )}
+    {/* Always there, empty too, as #2503's: who has it is a list of none
+        before anyone is added, and the dialog keeps its height. */}
+    <ul aria-label={listLabel} {...stylex.props(styles.rows)}>
+      {members.map((member) => (
+        <Row
+          key={member.id}
+          levels={levels}
+          member={member}
+          onLevelChange={onLevelChange}
+          onRemove={onRemove}
+        />
+      ))}
+    </ul>
   </div>
 );
