@@ -75,6 +75,7 @@ export const IntegrationAppPage = ({
     identity,
     app,
     tools,
+    uses: uses?.state === "ready" ? uses.data : undefined,
     size: "sm",
     accountRows: true,
   });

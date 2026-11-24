@@ -6,9 +6,10 @@ import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Loaded } from "../load-from-core.tsx";
@@ -142,7 +143,12 @@ const ConnectToolkit = ({
   );
 };
 
-/** Connecting one of Grasp's own connectors from the app parts' dialog. */
+/**
+ * Connecting one of Grasp's own connectors from the app parts' dialog. Its
+ * Sign in follows the start, so it can't be pressed again meanwhile; and
+ * only the newest start sends the browser away, should an older one, from
+ * the dialog opened before, answer later.
+ */
 const ConnectNative = ({
   app: shown,
   integration,
@@ -156,12 +162,15 @@ const ConnectNative = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
+  const newest = useRef(0);
   const provider = oauthProviderSchema.safeParse(integration.id);
   if (!provider.success) {
     return null;
   }
   const app = integration.name;
-  const connect = ({ forWhom }: ConnectAppChoice): void => {
+  const connect = async ({ forWhom }: ConnectAppChoice): Promise<void> => {
+    newest.current += 1;
+    const mine = newest.current;
     const start = async (): Promise<void> => {
       const started = await core.withSession(
         async (session) =>
@@ -171,13 +180,17 @@ const ConnectNative = ({
             returnTo: returnToOf(integration.key),
           })
       );
-      // The browser leaves for the provider's sign-in.
-      goTo(started);
+      if (newest.current === mine) {
+        // The browser leaves for the provider's sign-in.
+        goTo(started);
+      }
     };
-    toast.promise(start(), {
+    const started = start();
+    toast.promise(started, {
       loading: t`Waiting for ${app}`,
       error: (error) => failureText(error),
     });
+    await started;
   };
   const signInAt = signInHostOf(integration);
   return (
@@ -212,15 +225,17 @@ const removableOf = (
 /**
  * A toolkit's connections that stopped working, which an admin connects
  * again beside (a key toolkit's, replaced by the new key); none while one
- * the company relies on still works, or for anyone else.
+ * the company relies on still works, or for anyone else. One a workflow
+ * uses is relied on, as the app's state says (`primaryOf`, app-of.tsx).
  */
 const stoppedOf = (
   integration: Integration,
-  identity: Identity
+  identity: Identity,
+  uses: readonly ConnectionWorkflows[] | undefined
 ): ListedConnection[] =>
   integration.source === "composio" &&
   fixOf(integration, identity) === "reconnect" &&
-  reliedOnLapsed(integration)
+  reliedOnLapsed(integration, uses)
     ? integration.connections.filter(
         ({ status, scope }) => status === "needs_reauth" && scope === "shared"
       )
@@ -271,6 +286,7 @@ export const useAppActions = ({
   identity,
   app,
   tools,
+  uses,
   size,
   accountRows,
 }: {
@@ -280,6 +296,8 @@ export const useAppActions = ({
   app: App;
   /** The read of its tools: a toolkit's Connect waits for it. */
   tools: Loaded<CatalogTool[]> | undefined;
+  /** Which workflows use each connection, once read: one they use is relied on. */
+  uses: readonly ConnectionWorkflows[] | undefined;
   size: "xs" | "sm";
   /**
    * Whether the host draws a row for each account, which offers signing in
@@ -296,7 +314,7 @@ export const useAppActions = ({
     setNative({ again: target });
   };
   const actions: AppActions = {};
-  const stopped = stoppedOf(integration, identity);
+  const stopped = stoppedOf(integration, identity, uses);
   const way = connectWayOf(integration, identity, tools, stopped);
   if (way === "native") {
     actions.connect = (

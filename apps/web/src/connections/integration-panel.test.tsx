@@ -7,6 +7,7 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -18,7 +19,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { IntegrationPanel } from "./integration-panel.tsx";
 import { integrationsOf } from "./integrations.ts";
@@ -127,7 +128,14 @@ const opened = async (
   id: string,
   connections: ListedConnection[],
   identity: Identity = person(),
-  given: { core?: object; catalogTools?: () => Promise<CatalogTool[]> } = {}
+  given: {
+    core?: object;
+    catalogTools?: () => Promise<CatalogTool[]>;
+    /** How core answers a native sign-in's start; refused at once by default. */
+    start?: (request: Started) => Promise<{ url: string }>;
+    /** Which workflows use each connection. */
+    uses?: ConnectionWorkflows[];
+  } = {}
 ): Promise<(Sent | Started | { disconnected: string })[]> => {
   const sent: (Sent | Started | { disconnected: string })[] = [];
   const api = {
@@ -145,7 +153,8 @@ const opened = async (
     },
     start: async (request: Started): Promise<{ url: string }> => {
       sent.push(request);
-      return await Promise.reject(new Error("Not now"));
+      return await (given.start?.(request) ??
+        Promise.reject(new Error("Not now")));
     },
   };
   const core = given.core ?? {
@@ -172,7 +181,7 @@ const opened = async (
         onClose={() => {
           // The test reads the panel, not it closing.
         }}
-        uses={Promise.resolve({ state: "ready", data: [] })}
+        uses={Promise.resolve({ state: "ready", data: given.uses ?? [] })}
       />
     ),
   });
@@ -375,6 +384,102 @@ describe("an app's panel", () => {
     await press(buttons("Connect another account")[0]);
 
     expect(dialogOf("Connect HubSpot")).toBeDefined();
+  });
+
+  it("has an admin connect again a stopped toolkit a workflow uses, beside one that works", async () => {
+    const working: ListedConnection = {
+      id: "c-working",
+      source: "composio",
+      provider: "hubspot",
+      scope: "shared",
+      status: "active",
+      ownerUserId: null,
+      connectedBy: "u1",
+      connectedByName: "Ada",
+      accountName: "sales@example.com",
+      createdAt: "2026-10-01T00:00:00.000Z",
+      tools: ["HUBSPOT_LIST_CONTACTS"],
+      readTools: ["HUBSPOT_LIST_CONTACTS"],
+    };
+    const stopped: ListedConnection = {
+      ...working,
+      id: "c-stopped",
+      status: "needs_reauth",
+      accountName: "ops@example.com",
+      tools: ["HUBSPOT_CREATE_NOTE"],
+      readTools: [],
+    };
+    const sent = await opened("hubspot", [working, stopped], person(), {
+      uses: [
+        {
+          connectionId: "c-stopped",
+          workflows: [{ id: "w1", name: "follow-up", title: null }],
+        },
+      ],
+    });
+    await press(buttons("Connect again")[0]);
+    await press(dialogAction("Connect"));
+
+    // From what the stopped one allowed; the one that works is left alone.
+    expect(
+      sent.map((each) => ("toolkit" in each ? each.tools : each))
+    ).toStrictEqual([["HUBSPOT_CREATE_NOTE"]]);
+  });
+
+  it("starts a native sign-in once per press, and goes only where the newest start sends it", async () => {
+    const assign = vi
+      .spyOn(window.location, "assign")
+      .mockImplementation(() => {
+        // The browser stays here for the test to read.
+      });
+    const answers = [
+      Promise.withResolvers<{ url: string }>(),
+      Promise.withResolvers<{ url: string }>(),
+    ];
+    let calls = 0;
+    const sent = await opened("microsoft", [], person(), {
+      start: async () => {
+        const answer = answers[calls];
+        calls += 1;
+        if (answer === undefined) {
+          throw new Error("Started too often");
+        }
+        return await answer.promise;
+      },
+    });
+    await press(buttons("Connect")[0]);
+    // Pressed twice while core starts it: one start.
+    await press(dialogAction("Sign in to Microsoft 365"));
+    await press(dialogAction("Sign in to Microsoft 365"));
+    const once = sent.length;
+    // Closed and opened again, for everyone this time.
+    await press(buttons("Cancel")[0]);
+    await press(buttons("Connect")[0]);
+    await press(buttons("Everyone")[0]);
+    await press(dialogAction("Sign in to Microsoft 365"));
+    // The first, just for the admin, answers last: it sends the browser nowhere.
+    await act(async () => {
+      answers[1]?.resolve({ url: "https://login.example.test/shared" });
+      await Promise.resolve();
+    });
+    await settled();
+    await act(async () => {
+      answers[0]?.resolve({ url: "https://login.example.test/personal" });
+      await Promise.resolve();
+    });
+    await settled();
+    const went = assign.mock.calls.map(([url]) => String(url));
+    assign.mockRestore();
+
+    expect({
+      once,
+      scopes: sent.map((each) => ("scope" in each ? each.scope : each)),
+      went,
+    }).toStrictEqual({
+      once: 1,
+      scopes: ["personal", "shared"],
+      went: ["https://login.example.test/shared"],
+    });
   });
 
   it("has an admin connect Microsoft 365 for everyone, saying where they'll sign in", async () => {

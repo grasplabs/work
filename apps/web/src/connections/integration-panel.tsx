@@ -90,6 +90,7 @@ export const IntegrationPanel = ({
     identity,
     app,
     tools,
+    uses: used?.state === "ready" ? used.data : undefined,
     size: "xs",
     accountRows: false,
   });
