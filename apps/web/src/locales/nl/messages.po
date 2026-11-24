@@ -8651,6 +8651,10 @@ msgstr "Meer over deze koppeling"
 msgid "More about this section"
 msgstr "Meer over dit onderdeel"
 
+#: src/apps/app-settings.tsx
+msgid "More about who it’s made for"
+msgstr "Meer over voor wie ze gemaakt is"
+
 #: src/frame/ui-words.tsx
 msgid "More actions"
 msgstr "Meer acties"

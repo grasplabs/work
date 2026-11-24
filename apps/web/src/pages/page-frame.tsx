@@ -17,7 +17,7 @@ import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Text } from "@grasp-os/ui/components/text";
 import { InfoIcon, LoaderIcon as Working } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
-import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n as pageI18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -65,13 +65,18 @@ const styles = stylex.create({
   // What a bare frame is doing, over its corner: nothing to press, so
   // clicks go through it to the page. A width of its own, a toast's within
   // the frame: Alert's words are measured by the room they get, so a box
-  // sized by its content would give them none.
+  // sized by its content would give them none. An opaque ground of its own,
+  // a popover's, under the Alert's tint and in its corners: the page under
+  // it never shows through.
   notice: {
     display: { default: "block", [PRINT]: "none" },
     position: "absolute",
     top: space[3],
     insetInlineEnd: space[3],
     width: `min(${size.toastWidth}, 100% - 2 * ${space[3]})`,
+    backgroundColor: colors.popover,
+    borderRadius: radius.xl,
+    cornerShape: radius.shape,
     pointerEvents: "none",
   },
   chrome: { gap: space[2], padding: space[3] },

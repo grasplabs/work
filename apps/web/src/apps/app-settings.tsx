@@ -618,6 +618,7 @@ const GeneralForm = ({
                 <FieldContent>
                   <WithInfo
                     info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
+                    label={t`More about who it’s made for`}
                   >
                     <FieldLabel>{t`Made for`}</FieldLabel>
                   </WithInfo>

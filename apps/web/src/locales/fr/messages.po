@@ -8651,6 +8651,10 @@ msgstr "En savoir plus sur cette connexion"
 msgid "More about this section"
 msgstr "En savoir plus sur cette section"
 
+#: src/apps/app-settings.tsx
+msgid "More about who it’s made for"
+msgstr "En savoir plus sur son public"
+
 #: src/frame/ui-words.tsx
 msgid "More actions"
 msgstr "Plus d’actions"
