@@ -308,6 +308,15 @@ describe("a setup without a staff list", () => {
     }).toStrictEqual({ said: true, on: true, list: true });
   });
 
+  it("never holds the admin at the company step: they share a list, or skip it for Grasp's staff to sort out", () => {
+    const company = said("company", {});
+    expect({
+      share: company.includes("Share a staff list"),
+      skip: company.includes("Skip for now"),
+      sortedOut: company.includes("we’ll sort it out with you"),
+    }).toStrictEqual({ share: true, skip: true, sortedOut: true });
+  });
+
   it("asks for the message alone on the team step: Grasp's staff plan the day", () => {
     const team = said("team", {});
     expect({
