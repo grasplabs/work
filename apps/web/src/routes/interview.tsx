@@ -20,6 +20,10 @@ import {
   openSession,
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
+import {
+  conceptSearch,
+  InterviewConcepts,
+} from "../interview/concepts/concepts.tsx";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
 import { Mark } from "../interview/mark.tsx";
 import { InterviewPage } from "../interview/page.tsx";
@@ -317,8 +321,57 @@ const Interview = () => {
   }
 };
 
+/**
+ * CONCEPT ONLY (never merged): `?concept=a|b|c` shows a concept of the
+ * interview's start or read-back on fixture data
+ * (interview/concepts/concepts.tsx); without it, the interview as it is.
+ */
+const InterviewOrConcept = () => {
+  const concept = conceptSearch(Route.useSearch());
+  return concept === undefined ? (
+    <Interview />
+  ) : (
+    <InterviewConcepts search={concept} />
+  );
+};
+
+/** The address's concept switches, kept as they are written. */
+const conceptKeys = [
+  "concept",
+  "stage",
+  "at",
+  "left",
+  "still",
+  "lang",
+  "transcript",
+  "fold",
+  "start",
+] as const;
+
+/** The concept switches, by name, as the address writes them. */
+interface ConceptKeys {
+  concept?: unknown;
+  stage?: unknown;
+  at?: unknown;
+  left?: unknown;
+  still?: unknown;
+  lang?: unknown;
+  transcript?: unknown;
+  fold?: unknown;
+  start?: unknown;
+}
+
 export const Route = createFileRoute("/interview")({
-  validateSearch: (search: Record<string, unknown>): { error?: string } =>
-    signInErrorSearch(search),
-  component: Interview,
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { error?: string } & ConceptKeys => {
+    const kept: ConceptKeys = {};
+    for (const key of conceptKeys) {
+      if (search[key] !== undefined) {
+        kept[key] = search[key];
+      }
+    }
+    return { ...kept, ...signInErrorSearch(search) };
+  },
+  component: InterviewOrConcept,
 });
