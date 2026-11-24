@@ -1,6 +1,13 @@
 import { BAYER_MATRIX } from "@grasp-os/ui/lib/utils";
 
-import { breathOf, eyeLifeOf, shutOf, stepEye, twitchOf } from "./eye.ts";
+import {
+  breathOf,
+  eyeLifeOf,
+  shutOf,
+  stepEye,
+  twitchOf,
+  warmthOf,
+} from "./eye.ts";
 import type { EyeLife } from "./eye.ts";
 import { laterParts } from "./figures.ts";
 import type { Drawn, Hit, Sphere } from "./solid.ts";
@@ -135,7 +142,7 @@ const poses: Record<FigureState, Pose> = {
     size: 1.06,
     wander: 0.1,
     open: 1,
-    pupil: 1.05,
+    pupil: 1.2,
   },
 };
 
@@ -514,7 +521,7 @@ const gazeOf = (body: Body): Gaze => {
       x: 0,
       y: 0,
       pupil: now.pupil,
-      squint: 0,
+      squint: warmthOf(body.state),
       twitch: 0,
     };
   }
@@ -533,11 +540,19 @@ const gazeOf = (body: Body): Gaze => {
 };
 
 /** The eye's half width and its open half height, in the orb's radius. */
-const EYE_WIDE = 0.4;
-const EYE_HIGH = 0.21;
-const IRIS = 0.19;
-const PUPIL = 0.085;
-const SPARK = 0.04;
+// Round, not a person's almond eye: with a full pupil and a clear glint it reads as friendly,
+// where the narrow one stared.
+const EYE_WIDE = 0.33;
+const EYE_HIGH = 0.28;
+const IRIS = 0.21;
+const PUPIL = 0.11;
+const SPARK = 0.055;
+
+/**
+ * A fine line round the opening, in cells, in the orb's own shadow: on a bright orb (listening,
+ * done) the white of the eye is as light as what is round it, and without the line it was lost.
+ */
+const RIM = 0.6;
 
 /** How far round the opening the lids' shading reaches, in the orb's radius. */
 const LID = 0.1;
@@ -589,7 +604,7 @@ const lidLight = (
     return undefined;
   }
   return upper
-    ? light * (0.3 + 0.7 * fade ** 1.5)
+    ? light * (0.8 + 0.2 * fade ** 1.5)
     : light * (0.8 + 0.2 * fade) + 0.06 * (1 - fade);
 };
 
@@ -628,17 +643,25 @@ const eyeLight = (
       ? light * (0.6 + 0.4 * ramp(below, 0, LID * across))
       : undefined;
   }
-  // Done, the lower lid rises like a smile in the eyes.
-  const half =
-    EYE_HIGH * gaze.open * across * (v < 0 ? 1 - 0.6 * gaze.squint : 1);
-  const inside = half - Math.abs(v);
+  // Glad, the lower lid rises and arcs up in the middle, as a cheek pushes it: the opening
+  // narrows toward a crescent, the way eyes smile.
+  const reach = EYE_HIGH * gaze.open * across;
+  const lower = -reach * (1 - gaze.squint) + reach * 0.5 * gaze.squint;
+  const inside = Math.min(reach - v, v - lower);
   if (inside <= 0) {
-    return lidLight(-inside / Math.max(0.3, across), v > 0, light);
+    return lidLight(
+      -inside / Math.max(0.3, across),
+      v > (reach + lower) / 2,
+      light
+    );
+  }
+  if (inside < cell * RIM) {
+    return Math.min(light, 1) * 0.22;
   }
   // The upper lid's shadow falls on the top of the opening.
   const shade =
     v > 0
-      ? 0.6 + 0.4 * ramp(inside, 0, 0.07)
+      ? 0.9 + 0.1 * ramp(inside, 0, 0.07)
       : 0.85 + 0.15 * ramp(inside, 0, 0.05);
   const ix = gaze.x * (EYE_WIDE - IRIS) * 0.75;
   const iy = gaze.y * Math.max(0, EYE_HIGH * gaze.open - IRIS) * 0.75;
@@ -653,7 +676,8 @@ const eyeLight = (
     return 0;
   }
   if (fromIris < IRIS) {
-    return (0.12 + 0.4 * light) * shade;
+    // Kept dark on a bright orb, so the pupil and the glint stay clear.
+    return (0.12 + 0.22 * Math.min(light, 1)) * shade;
   }
   return (0.32 + 0.8 * light) * shade;
 };
