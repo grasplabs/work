@@ -16,6 +16,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Text } from "@grasp-os/ui/components/text";
 import {
+  ArrowRightIcon,
   FileDocIcon,
   FileIcon,
   FilePdfIcon,
@@ -53,7 +54,8 @@ import type { StepProps } from "./step-parts.ts";
 // each is sent to core the moment it is added and read there for real, its
 // row showing how far it is, and a refusal said on its row with Try again.
 // Once read it leaves the upload's list for the one list of what was
-// shared, on this visit or an earlier one, each with Remove.
+// shared, on this visit or an earlier one, above the zone, each with
+// Remove. The step's words, the places and the way on stand centred.
 // What only the one who shared it can say, Stephen asks at once, with
 // the answers to pick from. Where the deployment signs in with Microsoft
 // or Google, the admin can pick them where they live instead (GRA-370):
@@ -62,7 +64,14 @@ import type { StepProps } from "./step-parts.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
-  places: { display: "flex", flexWrap: "wrap", gap: space[3] },
+  // The places and the way on stand on the column's middle, under the centred words.
+  places: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[3],
+  },
+  end: { display: "flex", justifyContent: "center", width: "100%" },
   question: { display: "grid", gap: space[4] },
   options: { display: "flex", flexWrap: "wrap", gap: space[2] },
 });
@@ -260,30 +269,23 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           ? t`Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person.`
           : t`${kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person.`
       }
+      centred
       end={
-        <Button
-          onClick={() => {
-            void onward();
-          }}
-          size="lg"
-        >
-          {t`Continue`}
-        </Button>
+        <div {...stylex.props(styles.end)}>
+          <Button
+            onClick={() => {
+              void onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+            <Icon icon={ArrowRightIcon} />
+          </Button>
+        </div>
       }
       title={t`Do you have anything that explains how you work?`}
     >
       <div {...stylex.props(styles.stack)}>
-        <DocumentPages shared={kept.map(({ name }) => name)}>
-          <FileUpload
-            accept={accepted}
-            // What it takes is said in the step's own words, not in a smaller line under the zone.
-            description=""
-            multiple
-            onUpload={upload}
-            onValueChange={setComing}
-            value={coming}
-          />
-        </DocumentPages>
         {kept.length === 0 ? null : (
           <ItemGroup aria-label={t`Documents you shared`}>
             {kept.map(({ id, name }: OnboardingDocument) => (
@@ -336,6 +338,17 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
             </div>
           </Card>
         )}
+        <DocumentPages shared={kept.map(({ name }) => name)}>
+          <FileUpload
+            accept={accepted}
+            // What it takes is said in the step's own words, not in a smaller line under the zone.
+            description=""
+            multiple
+            onUpload={upload}
+            onValueChange={setComing}
+            value={coming}
+          />
+        </DocumentPages>
         {suites.length === 0 ? null : (
           <div {...stylex.props(styles.places)}>
             {suites.map((suite) => (
