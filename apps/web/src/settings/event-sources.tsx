@@ -446,7 +446,8 @@ const SourceRow = ({
   const mark = markOf(name);
   return (
     <Item size="xs">
-      <ItemMedia align="center">
+      {/* A mark stands in the row's middle; a bare icon on the title's line. */}
+      <ItemMedia align={mark === undefined ? "start" : "center"}>
         {mark === undefined ? (
           <Icon icon={LinkIcon} />
         ) : (

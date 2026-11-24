@@ -234,7 +234,8 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
   };
   return (
     <Item size="xs">
-      <ItemMedia align="center">
+      {/* A mark stands in the row's middle; a bare icon on the title's line. */}
+      <ItemMedia align={brand === undefined ? "start" : "center"}>
         {brand === undefined ? (
           <Icon icon={MessageCircleIcon} />
         ) : (
