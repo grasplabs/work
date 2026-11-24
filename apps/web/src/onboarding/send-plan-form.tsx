@@ -1,11 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-} from "@grasp-os/ui/components/field";
+import { Field, FieldError } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Switch } from "@grasp-os/ui/components/switch";
@@ -219,7 +215,6 @@ const DayField = ({
           size="sm"
           value={value}
         />
-        <FieldDescription>{t`For example ${example}`}</FieldDescription>
         <FieldError>{t`I can’t plan that day. Type one like ${example}, from ${earliest} to ${latest}.`}</FieldError>
       </Field>
     </div>
@@ -244,7 +239,6 @@ export const SendPlanForm = ({
   onWrong: (field: "first" | "later", wrong: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const dayField = useId();
   const timeField = useId();
   const laterField = useId();
   const teamsField = useId();
@@ -270,13 +264,8 @@ export const SendPlanForm = ({
     <Card padding="lg">
       <div {...stylex.props(styles.stack)}>
         <div {...stylex.props(styles.part)}>
-          <div id={dayField}>
-            <Text size="lg">
-              {t`The first links go out to the team leads. Everyone else follows once their lead has talked.`}
-            </Text>
-          </div>
           <ToggleGroup
-            aria-labelledby={dayField}
+            aria-label={t`The day I start`}
             onValueChange={(value: unknown[]) => {
               const day = offered.find((each) => each.id === value[0])?.day;
               if (day !== undefined) {

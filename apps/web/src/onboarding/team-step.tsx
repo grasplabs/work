@@ -13,7 +13,7 @@ import { useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
-import { MailToLetThrough } from "./review-parts.tsx";
+import { Postmark } from "./postmark.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
@@ -22,15 +22,33 @@ import type { StepProps } from "./step-parts.ts";
 import { planDraft } from "./visit.ts";
 
 // Tell the team, and plan the interviews: the message the admin sends
-// themselves, written here and copied, and the day the interviews start.
-// The leads get their link that morning; everyone else once their lead
-// talked. Not ready yet, the admin can do it later: the setup ends here
-// for now, and Settings, Onboarding keeps it as an open to-do.
+// themselves, as a letter, written here and copied, postmarked
+// with the day the interviews start (postmark.tsx); then that day, and
+// which teams, on one card of its own. The leads get their link that
+// morning; everyone else once their lead talked. Not ready yet, the admin
+// can do it later: the setup ends here for now, and Settings, Onboarding
+// keeps it as an open to-do. Letting Grasp's mail through is the review
+// step's, which comes next.
 
 const styles = stylex.create({
-  stack: { display: "grid", gap: space[6] },
-  message: { display: "grid", gap: space[3] },
-  copy: { justifySelf: "start" },
+  stack: { display: "grid", gap: space[4] },
+  letter: { display: "grid", gap: space[3] },
+  // The whole message, however narrow the page: it grows with its text, never scrolls inside.
+  message: { maxHeight: "none" },
+  // Copy on the start edge, the postmark on the end, both on the letter's foot.
+  foot: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space[3],
+  },
+  end: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[3],
+    width: "100%",
+  },
 });
 
 export const TeamStep = ({
@@ -39,8 +57,6 @@ export const TeamStep = ({
   message: kept,
   onMessage,
   onward,
-  settled,
-  onSettle,
 }: StepProps) => {
   const { t } = useLingui();
   const navigate = useNavigate();
@@ -119,8 +135,9 @@ export const TeamStep = ({
   return (
     <CalmStep
       body={t`People respond better when they know why I’m reaching out. Send them this message yourself, then pick the day I start.`}
+      centred
       end={
-        <>
+        <div {...stylex.props(styles.end)}>
           <Button
             disabled={!holds}
             onClick={() => {
@@ -142,26 +159,25 @@ export const TeamStep = ({
               {t`Do this later`}
             </Button>
           ) : null}
-        </>
+        </div>
       }
       title={t`Before I reach out, let your team know`}
     >
       <div {...stylex.props(styles.stack)}>
-        <div {...stylex.props(styles.message)}>
+        <div {...stylex.props(styles.letter)}>
           <Textarea
             aria-label={t`The message`}
             onValueChange={onMessage}
-            rows={9}
+            rows={6}
+            style={styles.message}
             value={message}
           />
-          <CopyButton
-            size="lg"
-            style={styles.copy}
-            value={message}
-            variant="outline"
-          >
-            {t`Copy the message`}
-          </CopyButton>
+          <div {...stylex.props(styles.foot)}>
+            <CopyButton size="lg" value={message} variant="outline">
+              {t`Copy the message`}
+            </CopyButton>
+            <Postmark day={choice.day} />
+          </div>
         </div>
         <SendPlanForm
           choice={choice}
@@ -180,7 +196,6 @@ export const TeamStep = ({
           today={today}
         />
         <ErrorText>{failure}</ErrorText>
-        <MailToLetThrough data={data} onSettle={onSettle} settled={settled} />
       </div>
     </CalmStep>
   );

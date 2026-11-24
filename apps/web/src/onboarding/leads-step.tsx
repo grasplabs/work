@@ -30,7 +30,6 @@ import { useSaveChoices } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { SupportLink } from "./support-link.tsx";
-import { TeamCrowd } from "./team-crowd.tsx";
 import { orgConfirmed, orgDraft } from "./visit.ts";
 
 // The leads: first which HR platform the company uses, a row each, pressed
@@ -70,12 +69,7 @@ const styles = stylex.create({
     borderBlockStartStyle: "solid",
     borderBlockStartColor: colors.border,
   },
-  // Its name over its people.
-  name: {
-    display: "grid",
-    gap: space[2],
-    gridColumn: { default: "auto", [PHONE]: "1 / -1" },
-  },
+  name: { gridColumn: { default: "auto", [PHONE]: "1 / -1" } },
 });
 
 /** The HR platform: one named, which Grasp sets up with them; another asked for by name; or none. */
@@ -292,19 +286,9 @@ const ConfirmOrg = ({
               }));
               return (
                 <li key={team.id} {...stylex.props(styles.row)}>
-                  <span {...stylex.props(styles.name)}>
-                    <Text size="lg">{name}</Text>
-                    <TeamCrowd
-                      people={people
-                        .map((person) => person.id)
-                        .toSorted(
-                          (a, b) =>
-                            Number(b === team.lead) - Number(a === team.lead)
-                        )}
-                      lead={team.lead !== null}
-                      off={team.off}
-                    />
-                  </span>
+                  <Text size="lg" style={styles.name}>
+                    {name}
+                  </Text>
                   <Combobox
                     aria-label={t`Lead of ${name}`}
                     disabled={team.off}

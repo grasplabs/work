@@ -416,7 +416,9 @@ describe("the team step's day, typed", () => {
     "reads $browser's order, says the format, and saves what it says",
     async (region) => {
       const { saved } = await shown(region.language, [region.browser]);
-      expect(document.body.textContent).toContain(region.hint);
+      // Typed in a form it can't read, it says the form it reads.
+      await typeDay("soon");
+      expect(error()).toContain(region.hint.replace(/^For example /u, ""));
       // 12 January 2027 in this region's order; the other order is 1 December.
       await typeDay(region[region.reads]);
       const said = nextSaid();
@@ -490,9 +492,9 @@ describe("the team step's day, typed", () => {
     "with %s first, shows an example that is taken as typed",
     async (first) => {
       const { saved } = await shown("en", [first]);
-      const hint = document
-        .querySelector('[data-slot="field-description"]')
-        ?.textContent?.replace(/^For example /u, "");
+      await typeDay("soon");
+      const hint = /like (?<example>\S+),/u.exec(error() ?? "")?.groups
+        ?.example;
       await typeDay(hint ?? "");
       expect(error()).toBeUndefined();
       await send();

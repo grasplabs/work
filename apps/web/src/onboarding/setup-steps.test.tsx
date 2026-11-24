@@ -296,19 +296,6 @@ describe("where the interviews stand", () => {
   });
 });
 
-describe("letting Grasp's mail through", () => {
-  it("is asked on the team step, before the links go out, naming the sending domain, until they say it's done", () => {
-    const open = said("team", {});
-    expect({
-      asked: open.includes("Let Grasp’s mail through"),
-      named: open.includes(
-        "Apply it if the sender’s domain is mail.example.test."
-      ),
-      done: said("team", { settled: ["mail"] }).includes("Settled: It’s done"),
-    }).toStrictEqual({ asked: true, named: true, done: true });
-  });
-});
-
 describe("what needs the admin", () => {
   it("counts letting Grasp's mail through, and lets them go on once it's done", () => {
     const open = said("review", {});

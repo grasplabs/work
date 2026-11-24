@@ -3,26 +3,21 @@ import type { PlacesSuite } from "@grasp-os/shared/document-places";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
+import { uploadExtensionOf, uploadTypes } from "@grasp-os/shared/uploads";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@grasp-os/ui/components/attachment";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
 import { FileUpload } from "@grasp-os/ui/components/file-upload";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
 import { Text } from "@grasp-os/ui/components/text";
-import {
-  ArrowRightIcon,
-  FileDocIcon,
-  FileIcon,
-  FilePdfIcon,
-  Icon,
-  XIcon,
-} from "@grasp-os/ui/lib/icons";
+import { ArrowRightIcon, Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -36,7 +31,7 @@ import { isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
-import { extensionOf, readable } from "./document-files.ts";
+import { readable } from "./document-files.ts";
 import { DocumentPages } from "./document-pages.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
@@ -54,8 +49,8 @@ import type { StepProps } from "./step-parts.ts";
 // each is sent to core the moment it is added and read there for real, its
 // row showing how far it is, and a refusal said on its row with Try again.
 // Once read it leaves the upload's list for the one list of what was
-// shared, on this visit or an earlier one, above the zone, each with
-// Remove. The step's words, the places and the way on stand centred.
+// shared, on this visit or an earlier one, above the zone: small chips
+// side by side (Damsko's Attachment), each with Remove. The step's words, the places and the way on stand centred.
 // What only the one who shared it can say, Stephen asks at once, with
 // the answers to pick from. Where the deployment signs in with Microsoft
 // or Google, the admin can pick them where they live instead (GRA-370):
@@ -79,13 +74,10 @@ const styles = stylex.create({
 /** Where connecting the places documents live comes back to: this step. */
 const documentsStep = "/setup?step=documents";
 
-/** A shared document's own icon, by its kind. */
-const iconOf = (name: string) => {
-  const extension = extensionOf(name);
-  if (extension === "pdf") {
-    return FilePdfIcon;
-  }
-  return ["docx", "doc"].includes(extension) ? FileDocIcon : FileIcon;
+/** A shared document's media type, by its name, for the mark its chip wears. */
+const typeOf = (name: string): string | undefined => {
+  const extension = uploadExtensionOf(name);
+  return extension === undefined ? undefined : uploadTypes[extension];
 };
 
 /** Every kind of file core reads, as the upload takes them. */
@@ -287,32 +279,27 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
     >
       <div {...stylex.props(styles.stack)}>
         {kept.length === 0 ? null : (
-          <ItemGroup aria-label={t`Documents you shared`}>
+          <AttachmentGroup aria-label={t`Documents you shared`}>
             {kept.map(({ id, name }: OnboardingDocument) => (
-              <Item key={id} variant="outline">
-                <ItemMedia variant="icon">
-                  <Icon icon={iconOf(name)} />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{name}</ItemTitle>
-                </ItemContent>
-                <ItemActions>
-                  <Button
+              <Attachment key={id}>
+                <AttachmentMedia type={typeOf(name)} />
+                <AttachmentContent>
+                  <AttachmentTitle>{name}</AttachmentTitle>
+                </AttachmentContent>
+                <AttachmentActions>
+                  <AttachmentAction
                     aria-label={t`Remove ${name}`}
                     disabled={busy}
                     onClick={() => {
                       void remove(id);
                     }}
-                    size="icon-sm"
-                    tooltip={t`Remove`}
-                    variant="ghost"
                   >
                     <Icon icon={XIcon} />
-                  </Button>
-                </ItemActions>
-              </Item>
+                  </AttachmentAction>
+                </AttachmentActions>
+              </Attachment>
             ))}
-          </ItemGroup>
+          </AttachmentGroup>
         )}
         <ErrorText>{removeProblem}</ErrorText>
         {open === undefined || ask === null ? null : (
