@@ -12,12 +12,6 @@ import type {
 } from "@grasp-os/shared/chat";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  ChainOfThought,
-  ChainOfThoughtContent,
-  ChainOfThoughtHeader,
-  ChainOfThoughtStep,
-} from "@grasp-os/ui/components/chain-of-thought";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
 import { Link } from "@grasp-os/ui/components/link";
 import {
@@ -48,30 +42,14 @@ import {
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import { Text } from "@grasp-os/ui/components/text";
 import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@grasp-os/ui/components/tool";
-import {
   Trace,
   TraceIcon,
   TraceLine,
   TraceTitle,
 } from "@grasp-os/ui/components/trace";
-import {
-  CodeIcon,
-  FileIcon,
-  Icon,
-  MessageCircleIcon,
-  PencilIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  WrenchIcon,
-} from "@grasp-os/ui/lib/icons";
-import type { IconData } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { Icon, MessageCircleIcon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -85,7 +63,8 @@ import { formatList, formatTime } from "../format.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 import { ThreadAgentChange } from "./agent-change-card.tsx";
 import { ThreadAgentDraft } from "./agent-draft-card.tsx";
-import { AnswerTableActions } from "./answer-table-actions.tsx";
+import { AnswerSteps } from "./answer-steps.tsx";
+import type { AnswerStep } from "./answer-steps.tsx";
 import {
   SeeInBrain,
   useAnswerThinking,
@@ -96,14 +75,7 @@ import { answeredOf } from "./answered.ts";
 import { ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
-import {
-  answerStatusOf,
-  chainStatuses,
-  stepFinished,
-  stepStatusOf,
-  toolStates,
-} from "./chat-states.ts";
-import type { StepStatus } from "./chat-states.ts";
+import { answerStatusOf, stepFinished, stepStatusOf } from "./chat-states.ts";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import { failureMessage } from "./failure.ts";
 import { pendingCard } from "./make-card.tsx";
@@ -129,8 +101,9 @@ const ThinkingCard = lazy(async () => {
 // question just sent the room under it for its answer). Each turn is a
 // Message: the person's question in their bubble; Grasp's answer as plain
 // words, with what the model thought (Reasoning), the steps it took as
-// one Chain of thought over them (each tool call and code step a Tool,
-// opening to what went in and came back), and the answer's Markdown
+// one line that opens over them (answer-steps.tsx: each tool call and
+// code step a line, opening to what went in and came back), and the
+// answer's Markdown
 // (MessageResponse, which paces it while it is written). While Grasp works
 // and has shown nothing yet, one working line says what it does; once
 // steps arrive, the chain's line does, so there is only ever one working
@@ -174,6 +147,17 @@ const styles = stylex.create({
   flat: { margin: 0 },
   // A loading pair: the person's question over Grasp's answer.
   pair: { display: "grid", gap: space["6"] },
+  // An answer's foot, as #2503's: its actions, then when it was given, on one line.
+  foot: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space["3"],
+    rowGap: space["2"],
+    minHeight: size.controlSm,
+  },
+  // How long Grasp worked, a step after the line's words.
+  took: { marginInlineStart: space["2"] },
 });
 
 /** A text a tool call was given, by its field; an ellipsis while none has arrived. */
@@ -188,11 +172,8 @@ const definitionTools: ReadonlySet<string> = new Set(definitionToolNames);
 /** The tools that read Grasp's docs. */
 const docsTools: ReadonlySet<string> = new Set(["searchDocs", "readDocs"]);
 
-/** What kind of step a call is, for its mark and the answer's one line. */
-type StepKind = "search" | "read" | "write" | "tool";
-
-/** What kind of step each of Grasp's tools is; any other is a tool. */
-const toolKinds: Readonly<Record<string, StepKind>> = {
+/** What kind of step each of Grasp's tools is, for the answer's one line; any other is a tool. */
+const toolKinds: Readonly<Record<string, AnswerStep["kind"]>> = {
   readFile: "read",
   readDocs: "read",
   writeFile: "write",
@@ -203,14 +184,6 @@ const toolKinds: Readonly<Record<string, StepKind>> = {
   searchFiles: "search",
   searchBrain: "search",
   searchDocs: "search",
-};
-
-/** Each kind of step's mark. */
-const kindIcons: Readonly<Record<StepKind, IconData>> = {
-  search: SearchIcon,
-  read: FileIcon,
-  write: PencilIcon,
-  tool: WrenchIcon,
 };
 
 /** The paths of the files a call writes (`files`, by path), as far as they came. */
@@ -334,20 +307,6 @@ interface StepContext {
   running: boolean;
 }
 
-/** One step of an answer, as the chain of thought and its Tool show it. */
-interface AnswerStep {
-  id: string;
-  /** The tool's own name, as the model called it; `code` for a code step. */
-  tool: string;
-  kind: StepKind;
-  /** What it did, in the past once finished; as it goes until then. */
-  label: string;
-  status: StepStatus;
-  /** What went in: a tool's arguments (drawn as JSON), or a code step's code. */
-  input: unknown;
-  result: string | undefined;
-}
-
 /** An answer's steps, from what it called and ran. */
 const useAnswerSteps = (): ((
   replies: readonly Stepped[],
@@ -373,25 +332,24 @@ const useAnswerSteps = (): ((
         if (step.kind === "tool") {
           return {
             id: callId,
-            tool: step.call.tool,
             kind: toolKinds[step.call.tool] ?? "tool",
             label: summary(step.call, finished),
+            active: summary(step.call, false),
             status,
-            input: step.call.input,
+            input: JSON.stringify(step.call.input, null, 2),
             result: result?.text,
           };
         }
         const logged =
           context.output?.callId === callId ? context.output.text : undefined;
-        let label = finished ? t`Ran a code step` : t`Running a code step`;
-        if (status === "writing") {
-          label = t`Writing a code step`;
-        }
         return {
           id: callId,
-          tool: "code",
           kind: "tool",
-          label,
+          label: finished ? t`Ran a code step` : t`Running a code step`,
+          active:
+            status === "writing"
+              ? t`Writing a code step`
+              : t`Running a code step`,
           status,
           input: step.code.code,
           result: result?.text ?? logged,
@@ -430,41 +388,49 @@ const useWorkingLabel = (): ((
   };
 };
 
+/** The kinds of step, in the order the answer's one line names them. */
+const kindOrder: readonly AnswerStep["kind"][] = [
+  "search",
+  "read",
+  "write",
+  "tool",
+];
+
 /**
- * What an answer's steps came to, in a line, as a whole sentence: the
- * searches, reads, writes or tools when they were all of one kind, else
- * how many steps; only those that finished count.
+ * What an answer's steps came to, in a line, as #2503 says it: each kind
+ * of step that ran, done or failed ("Searched once and ran 1 tool"), then
+ * how many failed.
  */
 const useStepsSummary = (): ((steps: readonly AnswerStep[]) => string) => {
-  const { t } = useLingui();
-  // What the finished steps came to: a failed one did none of it.
-  const doneLine = (done: readonly AnswerStep[]): string => {
-    const kinds = new Set(done.map(({ kind }) => kind));
-    const count = done.length;
-    const [only] = kinds;
-    if (kinds.size !== 1 || only === undefined) {
-      return t`${plural(count, { one: "# step", other: "# steps" })}`;
-    }
-    return {
-      search: t`${plural(count, { one: "Searched once", other: "Searched # times" })}`,
-      read: t`${plural(count, { one: "Read # file", other: "Read # files" })}`,
-      write: t`${plural(count, { one: "Changed # file", other: "Changed # files" })}`,
-      tool: t`${plural(count, { one: "Ran # tool", other: "Ran # tools" })}`,
-    }[only];
-  };
+  const { t, i18n } = useLingui();
+  // Each a part of the line, joined with the others: "searched once and ran 1 tool".
+  const partOf = (kind: AnswerStep["kind"], count: number): string =>
+    ({
+      search: t`${plural(count, { one: "searched once", other: "searched # times" })}`,
+      read: t`${plural(count, { one: "read # file", other: "read # files" })}`,
+      write: t`${plural(count, { one: "changed # file", other: "changed # files" })}`,
+      tool: t`${plural(count, { one: "ran # tool", other: "ran # tools" })}`,
+    })[kind];
   return (steps) => {
-    const done = steps.filter(({ status }) => stepFinished(status));
+    const ran = steps.filter(
+      ({ status }) => stepFinished(status) || status === "failed"
+    );
+    const parts = kindOrder.flatMap((kind) => {
+      const count = ran.filter((step) => step.kind === kind).length;
+      return count === 0 ? [] : [partOf(kind, count)];
+    });
+    if (parts.length === 0) {
+      return t`No steps yet`;
+    }
+    const joined = formatList(parts);
+    const line = `${joined.charAt(0).toLocaleUpperCase(i18n.locale)}${joined.slice(1)}`;
     const failedCount = steps.filter(
       ({ status }) => status === "failed"
     ).length;
     if (failedCount === 0) {
-      return doneLine(done);
+      return line;
     }
     const failed = t`${plural(failedCount, { one: "# step failed", other: "# steps failed" })}`;
-    if (done.length === 0) {
-      return failed;
-    }
-    const line = doneLine(done);
     return t({
       message: `${line}; ${failed}`,
       comment:
@@ -902,110 +868,6 @@ const AnswerEnding = ({
   </>
 );
 
-/** What a step came to: its result under Output, or under Error why it failed or stopped. */
-const StepOutput = ({ step }: { step: AnswerStep }) => {
-  const { t } = useLingui();
-  if (step.status === "stopped") {
-    return <ToolOutput errorText={t`Stopped before it finished`} />;
-  }
-  if (step.status === "failed" && step.result !== undefined) {
-    return <ToolOutput errorText={step.result} />;
-  }
-  return <ToolOutput output={step.result} />;
-};
-
-/**
- * An answer's steps as one Chain of thought: its line says what Grasp does
- * while it works (the running step's own words, in the shimmer), else how
- * long it worked; each step a line, holding its call as a Tool that opens
- * to what went in and came back.
- */
-/**
- * Whether a fold has been opened yet, and its open state: what it holds
- * is drawn only once it has, and then kept, so it closes as it opened.
- * A thread holds many folds no one opens (every answer's steps), each
- * drawn whole until now.
- */
-const useOpened = (): {
-  open: boolean;
-  opened: boolean;
-  onOpenChange: (next: boolean) => void;
-} => {
-  const [open, setOpen] = useState(false);
-  const [opened, setOpened] = useState(false);
-  return {
-    open,
-    opened,
-    onOpenChange: (next) => {
-      setOpen(next);
-      if (next) {
-        setOpened(true);
-      }
-    },
-  };
-};
-
-/** A step's call, opening to what went in and came back; drawn once opened. */
-const StepCall = ({ step }: { step: AnswerStep }) => {
-  const { open, opened, onOpenChange } = useOpened();
-  return (
-    <Tool onOpenChange={onOpenChange} open={open}>
-      <ToolHeader name={step.tool} state={toolStates[step.status]} />
-      <ToolContent>
-        {opened ? (
-          <>
-            <ToolInput input={step.input} />
-            <StepOutput step={step} />
-          </>
-        ) : null}
-      </ToolContent>
-    </Tool>
-  );
-};
-
-const AnswerSteps = ({
-  steps,
-  line,
-}: {
-  steps: readonly AnswerStep[];
-  line: ReactNode;
-}) => {
-  const { t } = useLingui();
-  const { open, opened, onOpenChange } = useOpened();
-  return (
-    <ChainOfThought
-      aria-label={t`What Grasp did`}
-      onOpenChange={onOpenChange}
-      open={open}
-    >
-      <ChainOfThoughtHeader>{line}</ChainOfThoughtHeader>
-      <ChainOfThoughtContent>
-        {opened
-          ? steps.map((step) => {
-              let description: string | undefined;
-              if (step.status === "retried") {
-                description = t`Retried`;
-              } else if (step.status === "stopped") {
-                description = t`Stopped`;
-              }
-              return (
-                <ChainOfThoughtStep
-                  description={description}
-                  icon={step.tool === "code" ? CodeIcon : kindIcons[step.kind]}
-                  key={step.id}
-                  label={step.label}
-                  status={chainStatuses[step.status]}
-                >
-                  <StepCall step={step} />
-                </ChainOfThoughtStep>
-              );
-            })
-          : null}
-      </ChainOfThoughtContent>
-    </ChainOfThought>
-  );
-};
-
 /** What an answer holds: its steps, what they did, its words, and how it ended. */
 const AnswerBody = ({
   turn,
@@ -1042,25 +904,30 @@ const AnswerBody = ({
       ? t`Working on it`
       : context.workingLabel;
   // Done: what the steps came to, and how long Grasp worked, quieter.
-  let line: ReactNode = (
+  const line: ReactNode = (
     <>
       {summary(steps)}
       {workedMs === undefined ? null : (
         <>
-          {" "}
-          <Text as="span" color="muted">
+          {/* The space a screen reader says; the eye has the gap. */}
+          <span {...stylex.props(visuallyHidden)}> </span>
+          <Text as="span" color="muted" style={styles.took}>
             {saidShort(workedMs)}
           </Text>
         </>
       )}
     </>
   );
-  if (live) {
-    line = <Shimmer>{working}</Shimmer>;
-  }
   return (
     <div {...stylex.props(styles.stack)}>
-      {activity ? <AnswerSteps line={line} steps={steps} /> : null}
+      {activity ? (
+        <AnswerSteps
+          line={line}
+          live={live}
+          steps={steps}
+          workingLabel={working}
+        />
+      ) : null}
       {stepped.flatMap((reply) =>
         reply.tools.flatMap(({ callId }) => {
           const saved = context.results.get(callId)?.saved;
@@ -1165,6 +1032,58 @@ const Thoughts = ({
   );
 };
 
+/**
+ * Whether the thought's line shows, as #2503's: once the model thought
+ * here it has its line for good; an answer read back has one only where
+ * its thinking was timed.
+ */
+const useThoughtShown = (
+  thinks: boolean,
+  seconds: number | undefined
+): boolean => {
+  const [began, setBegan] = useState(thinks);
+  if (thinks && !began) {
+    setBegan(true);
+  }
+  return began || seconds !== undefined;
+};
+
+/**
+ * An answer's foot, as #2503's: its actions, then when it was given, on
+ * one line; with no words to act on (its turn asked the person instead,
+ * or it failed), the time alone. The actions are there from the start,
+ * while it is written too: the Message keeps their room and shows them
+ * once the answer is done, so the end moves nothing.
+ */
+const AnswerFoot = ({
+  at,
+  copyText,
+  retry,
+}: {
+  at: string | undefined;
+  copyText: string;
+  retry: (() => void) | undefined;
+}) => {
+  const { t } = useLingui();
+  const time = at === undefined ? null : <SentAt at={at} />;
+  if (copyText === "") {
+    return time;
+  }
+  return (
+    <div {...stylex.props(styles.foot)}>
+      <MessageActions aria-label={t`Answer actions`}>
+        <CopyButton aria-label={t`Copy the answer`} value={copyText} />
+        {retry === undefined ? null : (
+          <MessageAction aria-label={t`Ask again`} onClick={retry}>
+            <Icon icon={RefreshCwIcon} />
+          </MessageAction>
+        )}
+      </MessageActions>
+      {time}
+    </div>
+  );
+};
+
 /** One answer of Grasp's: what it thought, its steps, its words, and what came of them, as one Message. */
 const AnswerRow = ({
   turn,
@@ -1192,16 +1111,18 @@ const AnswerRow = ({
   const copyText = words.join("\n\n");
   const retry = context.onRetry;
   const thinking = status === "thinking";
+  const thinksNow = thinking || stillThinks(partial);
+  const thoughtShown = useThoughtShown(thinksNow, thought.seconds);
   return (
     <Message aria-label={context.agentName ?? "Grasp"} status={status}>
       <MessageContent>
         {context.agentName === undefined ? null : (
           <MessageHeader>{context.agentName}</MessageHeader>
         )}
-        {thought.thoughts === undefined ? null : (
+        {thought.thoughts === undefined || !thoughtShown ? null : (
           <Thoughts
             seconds={thought.seconds}
-            streaming={thinking || stillThinks(partial)}
+            streaming={thinksNow}
             thoughts={thought.thoughts}
             timed={thought.timed}
             workingLabel={thinking ? context.workingLabel : undefined}
@@ -1232,25 +1153,11 @@ const AnswerRow = ({
             )}
           </MessageError>
         ) : null}
-        {/* An answer with no words (its turn asked the person instead) has
-          nothing to act on. Its actions are there from the start, while it
-          is written too: the Message keeps their room and shows them once
-          the answer is done, so the end moves nothing. */}
-        {copyText === "" || status === "error" ? null : (
-          <MessageActions aria-label={t`Answer actions`}>
-            <CopyButton aria-label={t`Copy the answer`} value={copyText} />
-            {retry === undefined ? null : (
-              <MessageAction aria-label={t`Ask again`} onClick={retry}>
-                <Icon icon={RefreshCwIcon} />
-              </MessageAction>
-            )}
-            {/* Its tables are read once it is written. */}
-            {status === "streaming" ? null : (
-              <AnswerTableActions text={copyText} />
-            )}
-          </MessageActions>
-        )}
-        {last === undefined ? null : <SentAt at={last.at} />}
+        <AnswerFoot
+          at={last?.at}
+          copyText={status === "error" ? "" : copyText}
+          retry={retry}
+        />
       </MessageContent>
     </Message>
   );

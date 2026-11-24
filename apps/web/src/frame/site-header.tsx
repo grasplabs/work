@@ -15,6 +15,7 @@ import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
+import { ChatToggle } from "../chat/chat-toggle.tsx";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -154,7 +155,8 @@ const styles = stylex.create({
  * otherwise the sidebar's head holds it), then where the page is (Damsko's
  * Breadcrumb, which under 640px keeps only the step back; its steps parted
  * by a slash, as the product's bar has them), with where its
- * subject stands after it (`trailing`), and at its end the page's actions.
+ * subject stands after it (`trailing`), and at its end the page's actions,
+ * then the way to show or hide Grasp's chat (chat/chat-toggle.tsx).
  * It is app-shell-01's header, drawn by the page: the block draws its own
  * from props (the crumbs, the title, the actions), which the pages here
  * draw themselves.
@@ -262,9 +264,10 @@ export const SiteHeader = ({
           <div {...stylex.props(styles.trailing)}>{trailing}</div>
         )}
       </div>
-      {actions === undefined ? null : (
-        <div {...stylex.props(styles.actions)}>{actions}</div>
-      )}
+      <div {...stylex.props(styles.actions)}>
+        {actions}
+        <ChatToggle />
+      </div>
     </header>
   );
 };

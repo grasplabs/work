@@ -293,13 +293,12 @@ const AddMenu = () => {
 /**
  * The box's tools: at the start the add menu and what answers; at the end
  * the microphone, Send (or Stop) and what the page adds. In one row the
- * text stands between the two, and what answers comes only once something
- * is typed, so at rest the placeholder keeps the room.
+ * text stands between the two, and what answers stands at the end, before
+ * the microphone, as #2503's bar has it.
  */
 const BoxTools = ({
   attaches,
   compact,
-  typed,
   answerer,
   speech,
   stop,
@@ -307,7 +306,6 @@ const BoxTools = ({
 }: {
   attaches: boolean;
   compact: boolean;
-  typed: boolean;
   answerer: ReactNode;
   speech: PromptInputSpeechButtonProps | undefined;
   stop: (() => void) | undefined;
@@ -319,7 +317,7 @@ const BoxTools = ({
       {compact ? null : answerer}
     </PromptInputTools>
     <PromptInputTools style={styles.end}>
-      {compact && typed ? answerer : null}
+      {compact ? answerer : null}
       {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
       <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
       {children}
@@ -799,7 +797,6 @@ export const Composer = ({
           speech={dictation.speech}
           // Stop lets a held question go; else it stops the answer, where one can be.
           stop={held ? letGo : onStop}
-          typed={text.trim() !== ""}
         >
           {children}
         </BoxTools>
