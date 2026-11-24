@@ -8,9 +8,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
-  ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -23,12 +21,13 @@ import { DownloadIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState, Fragment } from "react";
+import { useState } from "react";
 
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { Code } from "./code.tsx";
 import { SectionCard } from "./section-card.tsx";
+import { SeparatedItems } from "./separated-items.tsx";
 
 // Any published version of an independent workflow, as its builders read
 // it (GRA-1329), by its label: its definition exactly as published
@@ -165,12 +164,12 @@ export const VersionSource = ({
           />
         )}
         {source === undefined ? null : (
-          <ItemGroup
+          <SeparatedItems
             aria-label={t`The source files of version ${sourceVersion}`}
-          >
-            {Object.entries(source.files).map(([path, text], at) => (
-              <Fragment key={path}>
-                {at === 0 ? null : <ItemSeparator />}
+
+            rows={Object.entries(source.files).map(([path, text]) => ({
+              key: path,
+              row: (
                 <Item size="xs">
                   <ItemMedia>
                     <Icon icon={FileIcon} />
@@ -194,9 +193,9 @@ export const VersionSource = ({
                     </Button>
                   </ItemActions>
                 </Item>
-              </Fragment>
-            ))}
-          </ItemGroup>
+              ),
+            }))}
+          />
         )}
       </div>
     </SectionCard>

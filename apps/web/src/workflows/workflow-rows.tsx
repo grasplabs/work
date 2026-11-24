@@ -14,8 +14,6 @@ import {
   Item,
   ItemContent,
   ItemDescription,
-  ItemGroup,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -33,7 +31,6 @@ import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { Fragment } from "react";
 import type { ReactNode } from "react";
 
 import { stateOf } from "./overview.ts";
@@ -43,6 +40,7 @@ import type {
   TriggersByWorkflow,
   WorkflowState,
 } from "./overview.ts";
+import { SeparatedItems } from "./separated-items.tsx";
 import { triggerBlockText } from "./trigger-block.ts";
 
 // The Workflows page (direction C, Ruben's pick of 23 November): one
@@ -478,18 +476,19 @@ export const WorkflowRows = ({
         </Table>
       </div>
       <div {...stylex.props(styles.cards)}>
-        <ItemGroup aria-label={label}>
-          {rows.map((row, at) => (
-            <Fragment key={row.id}>
-              {at === 0 ? null : <ItemSeparator />}
+        <SeparatedItems
+          aria-label={label}
+          rows={rows.map((row) => ({
+            key: row.id,
+            row: (
               <WorkflowCard
                 admin={admin}
                 row={row}
                 triggers={triggers.get(row.id)}
               />
-            </Fragment>
-          ))}
-        </ItemGroup>
+            ),
+          }))}
+        />
       </div>
     </>
   );

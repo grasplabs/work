@@ -21,7 +21,7 @@ import {
 import { Input } from "@grasp-os/ui/components/input";
 import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -104,6 +104,10 @@ const SETTINGS_MEASURE = "56rem";
 
 const styles = stylex.create({
   settings: {
+    // The text the reference's shell gives a page, which what isn't sized
+    // itself inherits (the item shell here sets a smaller one).
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,

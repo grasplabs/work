@@ -17,8 +17,6 @@ import {
   Item,
   ItemContent,
   ItemDescription,
-  ItemGroup,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -43,7 +41,7 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState } from "react";
 
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -57,6 +55,7 @@ import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
 import { WorkflowRunsTable } from "./resource-runs.tsx";
 import { SectionCard } from "./section-card.tsx";
+import { SeparatedItems } from "./separated-items.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
@@ -305,10 +304,11 @@ const ActivityList = ({
   });
   return (
     <SectionCard aria-label={label} flush>
-      <ItemGroup aria-label={label}>
-        {activity.data.map((row, at) => (
-          <Fragment key={activityKey(row)}>
-            {at === 0 ? null : <ItemSeparator />}
+      <SeparatedItems
+        aria-label={label}
+        rows={activity.data.map((row) => ({
+          key: activityKey(row),
+          row: (
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>{activityText(row, names)}</ItemTitle>
@@ -317,9 +317,9 @@ const ActivityList = ({
                 </ItemDescription>
               </ItemContent>
             </Item>
-          </Fragment>
-        ))}
-      </ItemGroup>
+          ),
+        }))}
+      />
     </SectionCard>
   );
 };

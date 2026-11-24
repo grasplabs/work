@@ -16,7 +16,7 @@ import type {
 import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
-import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, font, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -108,6 +108,10 @@ const styles = stylex.create({
   // a page (28px above, 32px below, 24px at its sides): the frame's item
   // shell gives none of its own.
   flow: {
+    // The text the reference's shell gives a page, which what isn't sized
+    // itself inherits (the item shell here sets a smaller one).
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,
@@ -129,6 +133,10 @@ const styles = stylex.create({
   // As wide as the page, with the room round it the reference's shell
   // gives a page: the frame's item shell here gives none of its own.
   column: {
+    // The text the reference's shell gives a page, which what isn't sized
+    // itself inherits (the item shell here sets a smaller one).
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
     boxSizing: "border-box",
     width: "100%",
     paddingBlockStart: `calc(${space["7"]} + ${space["6"]})`,

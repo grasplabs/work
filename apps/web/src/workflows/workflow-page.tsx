@@ -16,18 +16,17 @@ import {
   ItemContent,
   ItemDescription,
   ItemGroup,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Text } from "@grasp-os/ui/components/text";
 import { Icon, MessageCircleIcon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
-import { Fragment, useState } from "react";
+import { Link, useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { formatSince } from "../format.ts";
@@ -39,6 +38,7 @@ import { ListedCount } from "./listed-count.tsx";
 import { useStartedBy } from "./run-detail.tsx";
 import { useRunTitle } from "./run-page.tsx";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
+import { SeparatedItems } from "./separated-items.tsx";
 import type { WorkflowSettingsSection } from "./settings-sections.ts";
 
 // An independent workflow's own page as direction C (Track) has it: its
@@ -54,6 +54,10 @@ const styles = stylex.create({
   // The room round it the reference's shell gives a page (28px above,
   // 32px below, 24px at its sides): the item shell here gives none.
   scroll: {
+    // The text the reference's shell gives a page, which what isn't sized
+    // itself inherits (the item shell here sets a smaller one).
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
     flexGrow: 1,
     minHeight: 0,
     overflowY: "auto",
@@ -176,14 +180,13 @@ const Runs = ({
   const more = runs.data.length - shown.length;
   return (
     <>
-      <ItemGroup aria-label={label}>
-        {shown.map((run, at) => (
-          <Fragment key={run.id}>
-            {at === 0 ? null : <ItemSeparator />}
-            <RunRow names={names} run={run} workflow={workflow} />
-          </Fragment>
-        ))}
-      </ItemGroup>
+      <SeparatedItems
+        aria-label={label}
+        rows={shown.map((run) => ({
+          key: run.id,
+          row: <RunRow names={names} run={run} workflow={workflow} />,
+        }))}
+      />
       {more > 0 ? (
         <span>
           <Button
@@ -302,6 +305,7 @@ export const WorkflowHome = ({
   onOpen: (to: WorkshopView) => void;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
   const count = runs.state === "ready" ? runs.data.length : undefined;
   return (
     <div {...stylex.props(styles.scroll)}>
@@ -309,7 +313,13 @@ export const WorkflowHome = ({
         <div {...stylex.props(styles.page)}>
           <PageHeader description={status} title={name} />
           {decisions.map((decision) => (
-            <DecisionCard decision={decision} key={decision.id} />
+            <DecisionCard
+              decision={decision}
+              key={decision.id}
+              onAnswered={() => {
+                void router.invalidate();
+              }}
+            />
           ))}
           <section {...stylex.props(styles.section)}>
             <Heading level={2} size="xs">

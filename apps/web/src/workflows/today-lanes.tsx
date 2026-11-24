@@ -96,6 +96,10 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: space["3"],
+    // The text the reference's page gives what isn't sized itself (a
+    // lane's name), whatever the frame around it sets.
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
   },
   wide: { display: { default: "none", [WIDE]: "block" } },
   narrow: {
@@ -146,9 +150,6 @@ const styles = stylex.create({
     gap: space["2"],
     height: size.controlLg,
     minWidth: 0,
-    // The words' own size, not the page's: the frame around it may set
-    // another.
-    fontSize: font.textSm,
     lineHeight: 1.25,
     textWrap: "pretty",
   },

@@ -13,15 +13,15 @@ import {
 } from "@grasp-os/ui/components/collapsible";
 import { Container } from "@grasp-os/ui/components/container";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { ItemGroup, ItemSeparator } from "@grasp-os/ui/components/item";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Stepper } from "@grasp-os/ui/components/stepper";
 import type { StepperStep } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Fragment, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDuration, formatSince } from "../format.ts";
@@ -39,6 +39,7 @@ import { FileRow, RunFilesReader } from "./run-files.tsx";
 import type { RunFilesRead } from "./run-files.tsx";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
 import { WaitingForAiProvider } from "./runs.tsx";
+import { SeparatedItems } from "./separated-items.tsx";
 import { StopRun } from "./stop-run.tsx";
 import { RunTraceDetail } from "./traces.tsx";
 
@@ -56,6 +57,10 @@ const styles = stylex.create({
   // The room round it the reference's shell gives a page (28px above,
   // 32px below, 24px at its sides).
   room: {
+    // The text the reference's shell gives a page, which what isn't sized
+    // itself inherits (the item shell here sets a smaller one).
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
     paddingBlockStart: space["7"],
     paddingBlockEnd: space["8"],
     paddingInline: space["6"],
@@ -67,6 +72,16 @@ const styles = stylex.create({
     paddingBlockEnd: space["8"],
   },
   section: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // Why it stopped, as wide as the alert's words: Damsko's alert keeps an
+  // empty action column's 8px gap at its end where it is wide (the
+  // registry gap "Alert's empty action column"), which the reference's has
+  // not.
+  stopped: {
+    marginInlineEnd: {
+      default: 0,
+      "@container (width >= 24rem)": `calc(-1 * ${space["2"]})`,
+    },
+  },
   when: {
     display: "flex",
     flexWrap: "wrap",
@@ -167,14 +182,13 @@ const RunFiles = ({
           <Heading level={2} size="xs">
             {label}
           </Heading>
-          <ItemGroup aria-label={label}>
-            {files.map((file, at) => (
-              <Fragment key={file.id}>
-                {at === 0 ? null : <ItemSeparator />}
-                <FileRow file={file} run={run.id} workflow={workflow} />
-              </Fragment>
-            ))}
-          </ItemGroup>
+          <SeparatedItems
+            aria-label={label}
+            rows={files.map((file) => ({
+              key: file.id,
+              row: <FileRow file={file} run={run.id} workflow={workflow} />,
+            }))}
+          />
         </section>
       )}
     </>
@@ -204,6 +218,7 @@ export const RunPage = ({
 }) => {
   const { t, i18n } = useLingui();
   const { run, failure, builder, stop } = useFollowedRun(workflow, opened);
+  const router = useRouter();
   const title = useRunTitle()(run);
   const updates = useUpdates(names);
   const crumbs: Crumb[] = [
@@ -252,7 +267,7 @@ export const RunPage = ({
             {run.error === undefined ? null : (
               <Alert variant="destructive">
                 <AlertTitle>{t`It stopped here`}</AlertTitle>
-                <AlertDescription>
+                <AlertDescription style={styles.stopped}>
                   <RunResultView builder={builder} run={run} seesResult />
                 </AlertDescription>
               </Alert>
@@ -261,7 +276,12 @@ export const RunPage = ({
               <RunResultView run={run} seesResult={seesResult} />
             ) : null}
             {decision === undefined || !going ? null : (
-              <DecisionCard decision={decision} />
+              <DecisionCard
+                decision={decision}
+                onAnswered={() => {
+                  void router.invalidate();
+                }}
+              />
             )}
             <section {...stylex.props(styles.section)}>
               <Heading level={2} size="xs">
