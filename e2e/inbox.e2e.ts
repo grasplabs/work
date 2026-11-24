@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
@@ -61,4 +62,53 @@ test("a person with nothing waiting finds their inbox from the nav, with nothing
   await page.getByRole("tab", { name: /^Done/u }).click();
   await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
   await expectNoError(page);
+});
+
+/**
+ * Where the page's card ends at `size`, and the inbox in it, on the
+ * person's inbox: with the window's height, and how far the card would
+ * scroll.
+ */
+const inboxFitAt = async (
+  page: Page,
+  size: { width: number; height: number }
+) => {
+  await page.setViewportSize(size);
+  await page.goto("/inbox");
+  await expect(page.getByRole("tab", { name: /^To do/u })).toBeVisible(
+    pageRead
+  );
+  return await page.evaluate(() => {
+    const card = document.querySelector('[data-slot="app-shell-page"]');
+    const tabs = document.querySelector('[role="tablist"]');
+    // What of the card holds the inbox's tabs: the inbox, under the bar.
+    const inbox = [...(card?.children ?? [])].find(
+      (child) => tabs !== null && child.contains(tabs)
+    );
+    if (card === null || inbox === undefined) {
+      throw new Error("No page card, or no inbox in it");
+    }
+    return {
+      window: innerHeight,
+      card: card.getBoundingClientRect().bottom,
+      inbox: inbox.getBoundingClientRect().bottom,
+      overflow: card.scrollHeight - card.clientHeight,
+    };
+  });
+};
+
+test("the inbox fills the page's card under its bar, wide and on a phone, so its list and its item each scroll on their own", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("inbox");
+  const page = await pageOf(admin);
+  const wide = await inboxFitAt(page, { width: 1440, height: 900 });
+  const phone = await inboxFitAt(page, { width: 390, height: 844 });
+  for (const fit of [wide, phone]) {
+    // The card reaches the window's foot, but for the frame's margin…
+    expect(fit.card).toBeGreaterThan(fit.window - 24);
+    // …and the inbox its card's, with nothing past it to scroll to.
+    expect(Math.abs(fit.card - fit.inbox)).toBeLessThanOrEqual(1);
+    expect(fit.overflow).toBeLessThanOrEqual(0);
+  }
 });

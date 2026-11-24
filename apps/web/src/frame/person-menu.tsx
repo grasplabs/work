@@ -42,7 +42,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
@@ -250,6 +250,57 @@ const LanguageMenu = ({ inline }: { inline: boolean }) => {
   );
 };
 
+/**
+ * The menu, opened on a phone, at its top. There it opens in the sidebar's
+ * sheet, and UI SDK's sheet scrolls what takes the focus in it clear of
+ * the foot of the area it scrolls in, by 16px; the menu, focused as it
+ * opens, is that area itself, so it opened 16px down, its first label cut
+ * (registry gap "a sheet scrolls a menu that opens in it", 24 November).
+ * So, as it takes the focus on opening, it goes back to its top: heard on
+ * the document, after the sheet. `inMenuRef` is for an element in the
+ * menu, `handleOpenChange` for the menu's own.
+ */
+const useOpensAtTop = (active: boolean) => {
+  const inMenuRef = useRef<HTMLSpanElement>(null);
+  const opening = useRef(false);
+  useEffect(() => {
+    if (!active) {
+      return () => {
+        // Nothing was listened to.
+      };
+    }
+    const toTop = (event: FocusEvent) => {
+      const menu = inMenuRef.current?.closest(
+        '[data-slot="dropdown-menu-content"]'
+      );
+      const { target } = event;
+      if (
+        !opening.current ||
+        menu === null ||
+        menu === undefined ||
+        !(target instanceof Node) ||
+        !menu.contains(target)
+      ) {
+        return;
+      }
+      opening.current = false;
+      if (target === menu) {
+        menu.scrollTo({ top: 0, behavior: "instant" });
+      }
+    };
+    document.addEventListener("focusin", toTop);
+    return () => {
+      document.removeEventListener("focusin", toTop);
+    };
+  }, [active]);
+  return {
+    inMenuRef,
+    handleOpenChange: (open: boolean) => {
+      opening.current = open;
+    },
+  };
+};
+
 /** The person at the sidebar's foot, and their menu. */
 export const PersonMenu = ({
   core,
@@ -265,6 +316,7 @@ export const PersonMenu = ({
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
   const { isMobile } = useSidebar();
+  const { inMenuRef, handleOpenChange } = useOpensAtTop(isMobile);
   const role = roleLabel(identity.role);
   // The menu is gone once pressed: a sign-out core didn't carry out is
   // said in a toast, and the page stays.
@@ -281,7 +333,7 @@ export const PersonMenu = ({
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={handleOpenChange}>
           <DropdownMenuTrigger asChild>
             {/* Named by the person alone: their role is in the menu. */}
             <SidebarMenuButton aria-label={identity.name} size="lg">
@@ -300,7 +352,7 @@ export const PersonMenu = ({
           <DropdownMenuContent align="end" side={isMobile ? "top" : "right"}>
             <DropdownMenuGroup>
               <DropdownMenuLabel>
-                <span {...stylex.props(styles.signedIn)}>
+                <span ref={inMenuRef} {...stylex.props(styles.signedIn)}>
                   <span>{identity.name}</span>
                   <span {...stylex.props(styles.role)}>
                     {identity.staff ? t`${role}, Grasp staff` : role}

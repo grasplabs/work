@@ -343,8 +343,8 @@ export const InboxPage = ({
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      {/* As high as the window under the header, so the list and the item each scroll on their own. */}
-      <div className="h-inbox flex min-h-0 flex-col text-sm">
+      {/* The rest of the page's card under its bar, so the list and the item each scroll on their own. */}
+      <div className="flex min-h-0 flex-1 flex-col text-sm">
         {report === undefined ? null : (
           <div className="border-b px-4 py-3">{report}</div>
         )}

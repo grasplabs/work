@@ -86,6 +86,18 @@ test("on a phone the person menu holds the languages and the themes, each within
 
   // Under their names in the menu itself, no submenu off the window's edge.
   await opened("Sidebar", "Show or hide the sidebar");
+  // Opened at its top, the person's name whole, once it has come in.
+  await expect
+    .poll(
+      async () =>
+        await menu.evaluate(async (element) => {
+          await Promise.all(
+            element.getAnimations().map(async (each) => await each.finished)
+          );
+          return element.scrollTop;
+        })
+    )
+    .toBe(0);
   await chosen(menu.getByRole("menuitemradio", { name: "Nederlands" }));
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
