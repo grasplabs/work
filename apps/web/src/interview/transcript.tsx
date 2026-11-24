@@ -1,3 +1,5 @@
+import type { InterviewLine } from "@grasp-os/shared/interview-links";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -7,29 +9,63 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type { InterviewLine } from "@grasp-os/shared/interview-links";
-import { interviewerNames } from "@grasp-os/shared/onboarding";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+} from "@grasp-os/ui/components/message";
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@grasp-os/ui/components/message-scroller";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { announce } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { XIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { useInterviewer } from "./kept.ts";
-import { Marked, Own } from "./talk.tsx";
+import { soundIsOn } from "./speech.ts";
+import { Marked } from "./talk.tsx";
 import { useInterviewWords } from "./words.ts";
 
 // The transcript, from the button top right (prototype
 // `interview-view.tsx`, `Transcript`): the conversation as a normal chat,
-// Stephen on the left and them on the right, with what he marked in their
-// words. It is no panel: it floats at the right side with nothing around
-// it, fades in and away, and follows the newest line. It scrolls in
-// itself; the page around it never does. Each line can be removed, by
-// them alone, once confirmed (GRA-1897): only they read what was said,
-// so only they can say which words should go.
+// Damsko's MessageScroller of Messages, the interviewer at the start and
+// them at the end, with what he marked in their words. It is no panel: it
+// floats at the right side with nothing around it, fades in, and follows
+// the newest line. It scrolls in itself; the page around it never does.
+// Each line can be removed, by them alone, once confirmed (GRA-1897): only
+// they read what was said, so only they can say which words should go.
+// Whose a line is stays as core keeps it (`from: "stephen" | "person"`);
+// only its side of the chat is read from it here.
 
 export const transcriptId = "interview-transcript";
+
+const styles = stylex.create({
+  aside: {
+    position: "absolute",
+    zIndex: 1,
+    top: 0,
+    bottom: 0,
+    insetInlineStart: { default: space["4"], [media.sm]: "auto" },
+    insetInlineEnd: { default: space["4"], [media.sm]: space["10"] },
+    display: "flex",
+    flexDirection: "column",
+    width: { default: "auto", [media.sm]: "22rem" },
+  },
+  note: { flexShrink: 0, paddingBlockEnd: space["2"] },
+  thread: { display: "flex", flexGrow: 1, minHeight: 0 },
+});
 
 /** How many words of a line its remove button names it by. */
 const namingWords = 6;
@@ -82,33 +118,85 @@ const RemoveLine = ({
   );
 };
 
-/** One line, as it was said; one removed, as removed. */
+/** One line of the conversation: the interviewer's at the start, theirs at the end; one removed, as removed. */
 const Line = ({
   line,
-  names,
+  onRemove,
 }: {
   line: InterviewLine;
-  names: ReturnType<typeof useInterviewWords>["tag"];
+  onRemove: () => void;
 }) => {
   const { t } = useLingui();
+  const names = useInterviewWords().tag;
+  const who = interviewerNames[useInterviewer()];
+  const stephen = line.from === "stephen";
+  const words = startOf(line.text);
+  let said = (
+    <Bubble align="end" variant="muted">
+      <BubbleContent>
+        <Marked marks={line.marks ?? []} names={names} text={line.text} />
+      </BubbleContent>
+    </Bubble>
+  );
   if (line.removed === true) {
-    return (
-      <p className="text-muted-foreground min-w-0 flex-1 text-sm italic">
-        {line.from === "stephen" ? t`A line of mine, removed.` : t`Removed.`}
-      </p>
+    said = (
+      <Text color="muted" size="sm">
+        {stephen ? t`A line of mine, removed.` : t`Removed.`}
+      </Text>
+    );
+  } else if (stephen) {
+    said = (
+      <Bubble variant="ghost">
+        <BubbleContent>{line.text}</BubbleContent>
+      </Bubble>
     );
   }
-  return line.from === "stephen" ? (
-    <p className="min-w-0 flex-1 text-sm leading-relaxed">
-      <span className="sr-only">Stephen: </span>
-      {line.text}
-    </p>
-  ) : (
-    <Own className="min-w-0 flex-1">
-      <span className="sr-only">{t`You:`} </span>
-      <Marked marks={line.marks ?? []} names={names} text={line.text} />
-    </Own>
+  return (
+    <Message
+      align={stephen ? "start" : "end"}
+      {...(stephen ? { "aria-label": who } : {})}
+    >
+      <MessageContent>
+        {said}
+        {line.removed === true ? null : (
+          <MessageActions>
+            <MessageAction
+              aria-label={
+                stephen
+                  ? t`Remove ${who}’s line: ${words}`
+                  : t`Remove your line: ${words}`
+              }
+              onClick={onRemove}
+            >
+              <Icon icon={XIcon} />
+            </MessageAction>
+          </MessageActions>
+        )}
+      </MessageContent>
+    </Message>
   );
+};
+
+/**
+ * While the transcript stands alone, the stage that reads his line out is
+ * inert, and the transcript's log only says how many lines came: each new
+ * line of his is said once, in his words. Not their own, which they know,
+ * and not when it is heard, which would say it twice.
+ */
+const useHisNewLinesSaid = (alone: boolean, lines: InterviewLine[]): void => {
+  const known = useRef(lines.length);
+  useEffect(() => {
+    const before = known.current;
+    known.current = lines.length;
+    if (!alone || soundIsOn()) {
+      return;
+    }
+    for (const line of lines.slice(before)) {
+      if (line.from === "stephen" && line.removed !== true) {
+        announce(line.text);
+      }
+    }
+  }, [alone, lines]);
 };
 
 export const Transcript = ({
@@ -126,19 +214,7 @@ export const Transcript = ({
 }) => {
   const { t } = useLingui();
   const [removing, setRemoving] = useState<number | null>(null);
-  const who = interviewerNames[useInterviewer()];
-  const names = useInterviewWords().tag;
-  const list = useRef<HTMLDivElement>(null);
-  const count = lines.length;
-  // It follows the newest line down.
-  useEffect(() => {
-    if (open && count > 0) {
-      const element = list.current;
-      if (element !== null) {
-        element.scrollTop = element.scrollHeight;
-      }
-    }
-  }, [open, count]);
+  useHisNewLinesSaid(alone, lines);
   if (!open) {
     return null;
   }
@@ -146,55 +222,41 @@ export const Transcript = ({
   return (
     <aside
       aria-label={t`Transcript`}
-      className="animate-in fade-in absolute inset-x-4 top-0 bottom-0 z-10 flex flex-col duration-300 sm:right-10 sm:left-auto sm:w-80"
       id={transcriptId}
+      {...stylex.props(styles.aside, fadeIn)}
     >
       {marked ? (
-        <p className="text-muted-foreground flex-none pb-2 text-xs">{t`What is marked is what I wrote down. You check it at the end.`}</p>
+        <div {...stylex.props(styles.note)}>
+          <Text color="muted" size="xs">
+            {t`What is marked is what I wrote down. You check it at the end.`}
+          </Text>
+        </div>
       ) : null}
-      <div
-        aria-live={alone ? "polite" : "off"}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain mask-y-from-95%"
-        ref={list}
-      >
-        <ol className="flex flex-col gap-4 py-6">
-          {lines.length === 0 ? (
-            <li className="text-muted-foreground">{t`Nothing said yet.`}</li>
-          ) : null}
-          {lines.map((line, at) => {
-            const words = startOf(line.text);
-            return (
-              <li
-                className={cn(
-                  "flex items-start gap-1",
-                  line.from === "stephen" ? "pr-6" : "flex-row-reverse"
-                )}
-                // The conversation only grows: a line's place is what it is.
-                key={at}
-              >
-                <Line line={line} names={names} />
-                {line.removed === true ? null : (
-                  <Button
-                    aria-label={
-                      line.from === "stephen"
-                        ? t`Remove ${who}’s line: ${words}`
-                        : t`Remove your line: ${words}`
-                    }
-                    className="flex-none"
-                    onClick={() => {
-                      setRemoving(at);
-                    }}
-                    size="icon-xs"
-                    variant="ghost"
-                  >
-                    <XIcon />
-                  </Button>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </div>
+      {lines.length === 0 ? (
+        <Text color="muted">{t`Nothing said yet.`}</Text>
+      ) : (
+        <div {...stylex.props(styles.thread)}>
+          <MessageScrollerProvider autoScroll>
+            <MessageScroller>
+              <MessageScrollerViewport aria-label={t`Transcript`}>
+                <MessageScrollerContent>
+                  {lines.map((line, place) => (
+                    // The conversation only grows: a line's place is what it is, and core removes it by it.
+                    <MessageScrollerItem key={place} messageId={String(place)}>
+                      <Line
+                        line={line}
+                        onRemove={() => {
+                          setRemoving(place);
+                        }}
+                      />
+                    </MessageScrollerItem>
+                  ))}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+            </MessageScroller>
+          </MessageScrollerProvider>
+        </div>
+      )}
       <RemoveLine
         at={removing}
         onRemove={(at) => {

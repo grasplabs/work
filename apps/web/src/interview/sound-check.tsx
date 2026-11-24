@@ -1,20 +1,23 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { interviewerNames } from "@grasp-os/shared/onboarding";
+} from "@grasp-os/ui/components/dropdown-menu";
+import { Text } from "@grasp-os/ui/components/text";
+import { ChevronDownIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { useLingui } from "@lingui/react/macro";
-import { ChevronDownIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import type { DotSign } from "./dot-signs.ts";
 import { Head, headSizes, useHead } from "./head.tsx";
 import { useInterviewer } from "./kept.ts";
+import { fullWidth, looks } from "./looks.ts";
 import {
   chooseMic,
   hangUp,
@@ -51,13 +54,10 @@ export type AnswerBy = "talk" | "type";
 /** Which check they are at: whether they hear the interviewer, whether they are heard, or both done. */
 type Check = "sound" | "mic" | "ready";
 
-/** What the bar under the line shows: the microphone being asked for, their voice, or the interviewer's. */
-type Doing = Exclude<BarDoing, "thinking">;
-
 /** How soon a screen's first line is said, so it is said once the screen has faded in. */
 export const sayAfterMs = 350;
 
-/** A quiet way to do something else: a line of text, never a second button. */
+/** A quiet way to do something else: a ghost button, never a second filled one. */
 export const Quiet = ({
   onClick,
   children,
@@ -65,13 +65,9 @@ export const Quiet = ({
   onClick: () => void;
   children: string;
 }) => (
-  <button
-    className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 rounded-sm font-medium text-balance underline-offset-4 outline-none hover:underline focus-visible:ring-3"
-    onClick={onClick}
-    type="button"
-  >
+  <Button onClick={onClick} size="sm" variant="ghost">
     {children}
-  </button>
+  </Button>
 );
 
 /** Which microphone is listened through, to change where there is more than one. */
@@ -89,16 +85,20 @@ const Microphones = ({
     devices.find((each) => each.id === device)?.name ?? devices[0]?.name ?? "";
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t`Microphone: ${name}`}
-        render={<Button className="max-w-full" size="sm" variant="ghost" />}
-      >
-        <span className="truncate">{name}</span>
-        <ChevronDownIcon data-icon="inline-end" />
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t`Microphone: ${name}`}
+          size="sm"
+          truncate
+          variant="ghost"
+        >
+          {name}
+          <Icon icon={ChevronDownIcon} />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center">
         <DropdownMenuRadioGroup
-          onValueChange={(id: unknown) => {
+          onValueChange={(id) => {
             if (typeof id === "string") {
               onChoose(id);
             }
@@ -144,54 +144,54 @@ const MicStep = ({
   };
   if (mic !== "asking" && mic !== "on") {
     return (
-      <div className="flex w-full max-w-sm flex-col items-center gap-3">
-        <p aria-live="polite" className="text-muted-foreground text-balance">
-          {problems[mic]}
-        </p>
-        <Button
-          className="w-full"
-          onClick={() => {
-            onStart("type");
-          }}
-          size="xl"
-          variant="highlight"
-        >
-          {t`Start by typing`}
-        </Button>
+      <div {...stylex.props(looks.actions)}>
+        <div aria-live="polite">
+          <Text color="muted">{problems[mic]}</Text>
+        </div>
+        <div {...stylex.props(fullWidth.button)}>
+          <Button
+            onClick={() => {
+              onStart("type");
+            }}
+            size="lg"
+          >
+            {t`Start by typing`}
+          </Button>
+        </div>
         {mic === "unsupported" ? null : (
           <Quiet onClick={onRetry}>{t`Try again`}</Quiet>
         )}
       </div>
     );
   }
-  let doing: Doing = "speaking";
+  let doing: BarDoing = "speaking";
   if (mic === "asking") {
     doing = "asking";
   } else if (hearing) {
     doing = "listening";
   }
   return (
-    <div className="flex w-full max-w-sm flex-col items-center gap-3">
+    <div {...stylex.props(looks.actions)}>
       {check === "mic" ? <VoiceBar doing={doing} /> : null}
       {check === "mic" && mic === "asking" ? (
-        <p className="text-muted-foreground text-balance">
+        <Text color="muted">
           {t`Allow the microphone when your browser asks.`}
-        </p>
+        </Text>
       ) : null}
       {check === "mic" && devices.length > 1 && device !== null ? (
         <Microphones device={device} devices={devices} onChoose={onChoose} />
       ) : null}
       {check === "ready" ? (
-        <Button
-          className="w-full"
-          onClick={() => {
-            onStart("talk");
-          }}
-          size="xl"
-          variant="highlight"
-        >
-          {t({ message: "Start", context: "begin the interview" })}
-        </Button>
+        <div {...stylex.props(fullWidth.button)}>
+          <Button
+            onClick={() => {
+              onStart("talk");
+            }}
+            size="lg"
+          >
+            {t({ message: "Start", context: "begin the interview" })}
+          </Button>
+        </div>
       ) : null}
       <Quiet
         onClick={() => {
@@ -355,7 +355,7 @@ export const SoundCheck = ({
   }
 
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen)}>
       <Head
         fill={0.35}
         label={t`${who}, drawn in dots.`}
@@ -364,36 +364,25 @@ export const SoundCheck = ({
         voice={voiceLevel}
         who={interviewer}
       />
-      <div className="flex w-full flex-col items-center gap-6" ref={body}>
-        <div
-          aria-live="polite"
-          className="flex min-h-16 w-full items-start justify-center"
-        >
-          <div
-            className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
-            key={check}
-          >
-            <PageHeaderTitle>
-              <SpokenText said={said} text={line} />
-            </PageHeaderTitle>
-          </div>
+      <div ref={body} {...stylex.props(looks.body)}>
+        <div aria-live="polite" {...stylex.props(looks.lineRoom)}>
+          <h1 key={check} {...stylex.props(looks.said, fadeIn)}>
+            <SpokenText said={said} text={line} />
+          </h1>
         </div>
         {check === "sound" ? (
-          <div className="flex w-full max-w-sm flex-col items-center gap-3">
-            <Button
-              className="w-full"
-              onClick={toMic}
-              size="xl"
-              variant="highlight"
-            >
-              {t`Yes, I can hear you`}
-            </Button>
+          <div {...stylex.props(looks.actions)}>
+            <div {...stylex.props(fullWidth.button)}>
+              <Button onClick={toMic} size="lg">
+                {t`Yes, I can hear you`}
+              </Button>
+            </div>
             {replayed > 0 ? (
-              <p className="text-muted-foreground text-balance">
+              <Text color="muted">
                 {t`Still nothing? Turn your volume up, or check where your sound goes.`}
-              </p>
+              </Text>
             ) : null}
-            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <div {...stylex.props(looks.quietRow)}>
               <Quiet
                 onClick={() => {
                   setReplayed(replayed + 1);
