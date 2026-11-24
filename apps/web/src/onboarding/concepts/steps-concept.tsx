@@ -1,3 +1,4 @@
+import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
@@ -20,15 +21,20 @@ import { SoundToggle } from "./sound-toggle.tsx";
 import { interviewer, StephenFigure } from "./stephen.tsx";
 
 // Concepts B and C of the setup's first three steps. B, "calm steps": one
-// topic a screen, a short title, at most two sentences, the form, and the
-// flow's foot (the library's StepperNav: Back, and Next as the one
-// button); two text styles a screen, the serif title and the body; the
-// interviewer only in the welcome's title; no speech. C, "Steps, Stephen speaks": B's screens, with each step's title
-// and sentence said aloud as it arrives, the sentence lighting up word by
-// word as it is said, and the sound one toggle in the bar.
+// topic a screen, a serif title, at most two sentences, the form, and one
+// real button that says what it does, with Back beside it; two text styles
+// a screen; the interviewer only in the welcome's title; no speech. The
+// welcome has no foot at all: a card press chooses and goes on. How far
+// along stands at the top, by `foot`: a thin Progress under the bar, or the
+// library's StepperNav bar with its count. C, "Steps, Stephen speaks": B's
+// screens, with each step's title and sentence said aloud as it arrives,
+// the sentence lighting up word by word as it is said, his figure small
+// above it, and the sound one toggle in the bar.
 
 const styles = stylex.create({
   step: { display: "grid", gap: space[8] },
+  // The one way on, at full size, as wide as a comfortable reach.
+  onward: { justifySelf: "start", minWidth: "12rem" },
   head: { display: "grid", gap: space[3] },
 });
 
@@ -67,7 +73,43 @@ const StepHead = ({
   );
 };
 
-/** One step: its head, its form, and the flow's foot. */
+/**
+ * The end of a later step, once it can go on: StepperNav's footer (Back,
+ * how far, Next that works), with its count in `b`; with the bar at the
+ * top (`c`), the step's own button, saying what it does.
+ */
+const End = ({
+  foot,
+  at,
+  onBack,
+  onNext,
+}: {
+  foot: ConceptProps["foot"];
+  at: number;
+  onBack: () => void;
+  onNext: () => void;
+}) => {
+  const { t } = useLingui();
+  if (foot === "c") {
+    return (
+      <Button onClick={onNext} size="lg" style={styles.onward}>
+        {t`Continue`}
+      </Button>
+    );
+  }
+  return (
+    <StepperNav
+      nextType="button"
+      onBack={onBack}
+      onNext={onNext}
+      showCount={foot === "b"}
+      step={at}
+      total={wholeSetup.length}
+    />
+  );
+};
+
+/** One step: its head, its form, and its end. */
 const Step = ({
   title,
   sentence,
@@ -91,33 +133,20 @@ const Step = ({
 /** A language other than the page's was picked a moment ago: the page drawn anew in it knows. */
 let languagePicked = false;
 
-const Welcome = ({ admin, speaks, onNext, footOnlyBack }: StepBodyProps) => {
+const Welcome = ({ admin, speaks, onNext, cards }: StepBodyProps) => {
   const { t, i18n } = useLingui();
   const [picked, setPicked] = useState(languagePicked);
-  // A card goes on by itself: on a first visit the foot is either there,
-  // held with its reason, or not there at all (`footOnlyBack`).
-  const foot = picked || !footOnlyBack;
   return (
     <Step
-      nav={
-        foot ? (
-          <StepperNav
-            disabled={!picked}
-            disabledReason={t`Choose a language`}
-            finishText={t`Start`}
-            onNext={onNext}
-            step={0}
-            total={wholeSetup.length}
-          />
-        ) : null
-      }
+      nav={null}
       sentence={t`I’ll set up Grasp with you, one step at a time. Which language would you like to work in?`}
       speaks={speaks}
       title={admin === "" ? t`Hi, I’m Stephen` : t`Hi ${admin}, I’m Stephen`}
     >
-      {/* A press on a card chooses it and goes on: one thing at a time. Next stays, for coming back. */}
+      {/* No foot: a press on a card chooses it and goes on. Coming back, the language in use is marked. */}
       <LanguageCards
         chosen={picked && isLocale(i18n.locale) ? i18n.locale : null}
+        look={cards}
         onPick={(locale) => {
           setPicked(true);
           languagePicked = true;
@@ -131,20 +160,16 @@ const Welcome = ({ admin, speaks, onNext, footOnlyBack }: StepBodyProps) => {
   );
 };
 
-const Ai = ({ data, speaks, onNext, onBack }: StepBodyProps) => {
+const Ai = ({ data, speaks, onNext, onBack, foot }: StepBodyProps) => {
   const { t } = useLingui();
   const ready = data.ai === null || data.ai.ready;
   return (
     <Step
       nav={
-        <StepperNav
-          disabled={!ready}
-          disabledReason={t`Choose an AI first`}
-          onBack={onBack}
-          onNext={onNext}
-          step={1}
-          total={wholeSetup.length}
-        />
+        // Until a model answers, the choice above is the way on; then one Continue.
+        ready ? (
+          <End at={1} foot={foot} onBack={onBack} onNext={onNext} />
+        ) : null
       }
       sentence={t`Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key.`}
       speaks={speaks}
@@ -155,18 +180,11 @@ const Ai = ({ data, speaks, onNext, onBack }: StepBodyProps) => {
   );
 };
 
-const Plan = ({ speaks, onNext, onBack, today }: StepBodyProps) => {
+const Plan = ({ speaks, onNext, onBack, today, foot }: StepBodyProps) => {
   const { t } = useLingui();
   return (
     <Step
-      nav={
-        <StepperNav
-          onBack={onBack}
-          onNext={onNext}
-          step={2}
-          total={wholeSetup.length}
-        />
-      }
+      nav={<End at={2} foot={foot} onBack={onBack} onNext={onNext} />}
       sentence={t`I talk with your team for one week. Then you get what I learned, team by team.`}
       speaks={speaks}
       title={t`Here’s the plan`}
@@ -178,7 +196,8 @@ const Plan = ({ speaks, onNext, onBack, today }: StepBodyProps) => {
 
 interface StepBodyProps {
   admin: string;
-  footOnlyBack: boolean;
+  foot: ConceptProps["foot"];
+  cards: ConceptProps["cards"];
   data: ConceptProps["data"];
   speaks: boolean;
   today: Date;
@@ -196,15 +215,40 @@ export const StepsConcept = ({
   today,
   go,
   onward,
-  footOnlyBack,
+  foot,
+  cards,
 }: ConceptProps & { speaks: boolean }) => {
   const order: ConceptStep[] = ["welcome", "ai", "about"];
   const index = order.indexOf(step);
+  const { t } = useLingui();
   const Body = bodies[step];
   const next = order[index + 1];
   const back = order[index - 1];
+  const onBack = () => {
+    if (back !== undefined) {
+      go(back);
+    }
+  };
+  const onNext = () => {
+    if (next === undefined) {
+      onward();
+    } else {
+      go(next);
+    }
+  };
+  // The AI step waits on a model that answers; the others can always go on.
+  const canGoOn = step !== "ai" || data.ai === null || data.ai.ready;
   return (
     <ConceptFrame
+      along={
+        step === "welcome" || foot !== "c"
+          ? undefined
+          : {
+              at: wholeSetup.indexOf(step),
+              onBack,
+              ...(canGoOn ? { onNext } : { waiting: t`Choose an AI first` }),
+            }
+      }
       language={step !== "welcome"}
       step={step}
       tools={speaks ? <SoundToggle /> : null}
@@ -212,21 +256,12 @@ export const StepsConcept = ({
     >
       <Body
         admin={admin}
-        footOnlyBack={footOnlyBack}
+        cards={cards}
         data={data}
         key={step}
-        onBack={() => {
-          if (back !== undefined) {
-            go(back);
-          }
-        }}
-        onNext={() => {
-          if (next === undefined) {
-            onward();
-          } else {
-            go(next);
-          }
-        }}
+        foot={foot}
+        onBack={onBack}
+        onNext={onNext}
         speaks={speaks}
         today={today}
       />

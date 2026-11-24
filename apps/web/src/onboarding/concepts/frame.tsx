@@ -5,6 +5,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
 import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -48,6 +49,12 @@ const styles = stylex.create({
     paddingInline: { default: space[8], [media.maxSm]: space[4] },
   },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
+  stepperBar: {
+    width: "100%",
+    maxWidth: "48rem",
+    marginInline: "auto",
+    paddingInline: space[4],
+  },
   where: {
     display: "flex",
     justifyContent: { default: "center", [media.maxSm]: "flex-start" },
@@ -223,15 +230,47 @@ const Leave = () => {
         void leave();
       }}
       size="sm"
-      variant="ghost"
+      variant="link"
     >
-      <Icon icon={LogOutIcon} />
       {t`Leave for now`}
     </Button>
   );
 };
 
+/** How far along, at the top of a later step: the library's StepperNav bar. */
+export interface Along {
+  /** The step's place in the whole setup, from 0. */
+  at: number;
+  onBack: () => void;
+  /** The way on from the bar (`b`); none while the step still waits on its answer. */
+  onNext?: () => void;
+  /** Why the bar's Next waits, while it does. */
+  waiting?: string;
+}
+
+/** How far along, under the bar: the library's StepperNav bar with its count. */
+const AlongBar = ({ along }: { along: Along }) => {
+  const { onBack, onNext, waiting } = along;
+  const total = wholeSetup.length;
+  return (
+    <div {...stylex.props(styles.stepperBar)}>
+      <StepperNav
+        disabled={onNext === undefined}
+        {...(waiting !== undefined && { disabledReason: waiting })}
+        onBack={onBack}
+        {...(onNext !== undefined && { onNext })}
+        nextType="button"
+        showCount
+        step={along.at}
+        total={total}
+        variant="bar"
+      />
+    </div>
+  );
+};
+
 export const ConceptFrame = ({
+  along,
   step,
   language = true,
   tools,
@@ -247,6 +286,8 @@ export const ConceptFrame = ({
   wide?: boolean;
   /** As high as the window, the step scrolling inside itself. */
   fill?: boolean;
+  /** StepperNav's bar under the top bar, for a later step that ends in its own button. */
+  along?: Along | undefined;
   children: ReactNode;
 }) => (
   <div {...stylex.props(styles.window, fill && styles.filled)}>
@@ -261,6 +302,7 @@ export const ConceptFrame = ({
         <Leave />
       </div>
     </header>
+    {along === undefined ? null : <AlongBar along={along} />}
     <main {...stylex.props(styles.main, fill && styles.fillMain)}>
       <div
         {...stylex.props(
