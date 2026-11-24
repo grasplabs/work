@@ -1,0 +1,17 @@
+@import "@grasp-os/app-kit/styles.css";
+/* The theme's sans, bundled so it is served from this origin. */
+@import "@fontsource-variable/geist";
+/* Newsreader, the theme's serif (`font-serif`), for titles and key figures. */
+@import "@fontsource-variable/newsreader/opsz.css";
+/* JetBrains Mono, the theme's code font (`font-mono`). */
+@import "@fontsource-variable/jetbrains-mono";
+
+@source "../";
+
+/* The admin's frame (admin/frame.tsx): its sidebar, and the bar above each page. */
+@layer base {
+  [data-slot="sidebar-wrapper"] {
+    --sidebar-width: calc(var(--spacing) * 60);
+    --header-height: calc(var(--spacing) * 12);
+  }
+}

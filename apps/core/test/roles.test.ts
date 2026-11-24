@@ -1,0 +1,344 @@
+import { authErrors } from "@grasp-os/shared/errors";
+import type { Role } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
+import {
+  runMinuteTasks,
+  waitingInOutbox,
+  whileLogDown,
+} from "./maintenance.ts";
+import {
+  auditedDuring,
+  callAuth,
+  letSessionRecheckPass,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInWithRole,
+  whoami,
+} from "./sign-in.ts";
+
+const idp = mockIdp();
+
+const signedInAs = async (role: Role) => await signedInWithRole(idp, role);
+
+describe("roles and teams", () => {
+  it("are read again within a few seconds, so changes apply without reconnecting", async () => {
+    const admin = await signedInAs("admin");
+    const person = await signedInAs("user");
+    const { core } = await openRpc(person.session);
+    using session = core.authenticate();
+    await expect(session.whoami()).resolves.toMatchObject({
+      role: "user",
+      teams: [],
+    });
+
+    const { core: adminCore } = await openRpc(admin.session);
+    using adminSession = adminCore.authenticate();
+    await adminSession.members.setRole(person.userId, "builder");
+    const created = await callAuth("/organization/create-team", admin.session, {
+      name: "Finance",
+    });
+    const team = z.object({ id: z.string() }).parse(await created.json());
+    const added = await callAuth(
+      "/organization/add-team-member",
+      admin.session,
+      { teamId: team.id, userId: person.userId }
+    );
+    expect(added.status).toBe(200);
+    using _clock = letSessionRecheckPass();
+
+    await expect(session.whoami()).resolves.toMatchObject({
+      role: "builder",
+      teams: [{ id: team.id, name: "Finance" }],
+    });
+  });
+
+  it("can't be raised by anyone but an admin, not even their own", async () => {
+    for (const role of ["user", "builder"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const person = await signedInAs(role);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const { core } = await openRpc(person.session);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const raised = await outcome(
+        core.authenticate().members.setRole(person.userId, "admin")
+      );
+      expect(raised).toBe("role.forbidden");
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const team = await callAuth("/organization/create-team", person.session, {
+        name: `${role}'s own team`,
+      });
+      expect(team.status).toBe(403);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await expect(whoami(person.session)).resolves.toMatchObject({ role });
+    }
+  });
+
+  it("give no access with a role that isn't ours", async () => {
+    const person = await signedInAs("user");
+    await env.DB.prepare("UPDATE members SET role = 'owner' WHERE user_id = ?")
+      .bind(person.userId)
+      .run();
+    const owner = await whoami(person.session).catch((error: unknown) => error);
+    expect(authErrors.codeOf(owner)).toBe("auth.unauthenticated");
+  });
+
+  it("are given back when creating the membership failed, on the next sign-in", async () => {
+    const person = await signedInAs("user");
+    // As if the membership was never written on the first sign-in.
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(person.userId)
+      .run();
+    const lost = await whoami(person.session).catch((error: unknown) => error);
+    expect(authErrors.codeOf(lost)).toBe("auth.unauthenticated");
+
+    const again = await signedIn(idp, "microsoft", person.person);
+    await expect(whoami(again)).resolves.toMatchObject({ role: "user" });
+  });
+});
+
+describe("a removed member", () => {
+  it("holds even when the membership row outlives it", async () => {
+    const admin = await signedInAs("admin");
+    // As if deleting the membership failed after the removal was recorded.
+    await env.DB.prepare(
+      "INSERT INTO member_removals (organization_id, user_id, removed_at) VALUES ('organization', ?, ?)"
+    )
+      .bind(admin.userId, Date.now())
+      .run();
+
+    const refusal = await whoami(admin.session).catch(
+      (error: unknown) => error
+    );
+    expect(authErrors.codeOf(refusal)).toBe("auth.unauthenticated");
+    const team = await callAuth("/organization/create-team", admin.session, {
+      name: "Still here",
+    });
+    expect(team.status).toBe(403);
+  });
+});
+
+describe("member and team changes", () => {
+  it("are audited with who made them, and identifiers only", async () => {
+    const admin = await signedInAs("admin");
+    const person = await signedInAs("user");
+    let teamId = "";
+    const audited = await auditedDuring(async () => {
+      const created = await callAuth(
+        "/organization/create-team",
+        admin.session,
+        { name: "Finance" }
+      );
+      ({ id: teamId } = z
+        .object({ id: z.string() })
+        .parse(await created.json()));
+      await callAuth("/organization/add-team-member", admin.session, {
+        teamId,
+        userId: person.userId,
+      });
+      await callAuth("/organization/remove-team-member", admin.session, {
+        teamId,
+        userId: person.userId,
+      });
+      await callAuth("/organization/update-team", admin.session, {
+        teamId,
+        data: { name: "Finance and legal" },
+      });
+      await callAuth("/organization/remove-team", admin.session, { teamId });
+    });
+
+    const actor = { type: "person", userId: admin.userId };
+    expect(audited).toStrictEqual([
+      expect.objectContaining({
+        actor,
+        action: "team.created",
+        target: { type: "team", id: teamId },
+      }),
+      expect.objectContaining({
+        actor,
+        action: "team.member.added",
+        target: { type: "team", id: teamId },
+        detail: { userId: person.userId, pinned: "in" },
+      }),
+      expect.objectContaining({
+        actor,
+        action: "team.member.removed",
+        target: { type: "team", id: teamId },
+        detail: { userId: person.userId, pinned: "out" },
+      }),
+      expect.objectContaining({
+        actor,
+        action: "team.updated",
+        target: { type: "team", id: teamId },
+      }),
+      expect.objectContaining({
+        actor,
+        action: "team.deleted",
+        target: { type: "team", id: teamId },
+      }),
+    ]);
+  });
+
+  it("keep their audit event when the audit log is down, and append it later", async () => {
+    const admin = await signedInAs("admin");
+    const teamId = await whileLogDown(async () => {
+      const created = await callAuth(
+        "/organization/create-team",
+        admin.session,
+        { name: "Finance" }
+      );
+      expect(created.status).toBe(200);
+      const { id } = z.object({ id: z.string() }).parse(await created.json());
+      // It waits in the outbox while the log is down.
+      await expect(waitingInOutbox(env.DB, "team.created", id)).resolves.toBe(
+        1
+      );
+      return id;
+    });
+
+    await runMinuteTasks();
+    const sent = await allEvents();
+    expect(
+      sent.filter(
+        ({ action, target }) =>
+          action === "team.created" && target?.id === teamId
+      )
+    ).toHaveLength(1);
+  });
+
+  it("aren't audited when refused", async () => {
+    const person = await signedInAs("user");
+    const audited = await auditedDuring(async () => {
+      await callAuth("/organization/create-team", person.session, {
+        name: "Mine",
+      });
+    });
+    expect(audited).toStrictEqual([]);
+  });
+});
+
+/** A team named `name`, made with `session`: its ID. */
+const teamOf = async (session: string, name: string): Promise<string> => {
+  const created = await callAuth("/organization/create-team", session, {
+    name,
+  });
+  return z.object({ id: z.string() }).parse(await created.json()).id;
+};
+
+describe("teams, as admins manage them", () => {
+  it("are listed with their members for admins, also teams they aren't in", async () => {
+    const admin = await signedInAs("admin");
+    const person = await signedInAs("user");
+    const teamId = await teamOf(admin.session, "Sales");
+    const emptyId = await teamOf(admin.session, "Legal");
+    await callAuth("/organization/add-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
+    const { core } = await openRpc(admin.session);
+
+    const listed = await core.authenticate().members.teams();
+
+    expect(listed).toContainEqual({
+      id: teamId,
+      name: "Sales",
+      memberIds: [person.userId],
+    });
+    expect(listed).toContainEqual({
+      id: emptyId,
+      name: "Legal",
+      memberIds: [],
+    });
+  });
+
+  it("aren't listed or changed by anyone but an admin", async () => {
+    const admin = await signedInAs("admin");
+    const teamId = await teamOf(admin.session, "Operations");
+    for (const role of ["user", "builder"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const person = await signedInAs(role);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const { core } = await openRpc(person.session);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await expect(outcome(core.authenticate().members.teams())).resolves.toBe(
+        "role.forbidden"
+      );
+      const changes: [path: string, body: unknown][] = [
+        ["/organization/update-team", { teamId, data: { name: "Mine" } }],
+        ["/organization/add-team-member", { teamId, userId: person.userId }],
+        ["/organization/remove-team-member", { teamId, userId: admin.userId }],
+        ["/organization/remove-team", { teamId }],
+      ];
+      for (const [path, body] of changes) {
+        // oxlint-disable-next-line no-await-in-loop -- one change at a time
+        const refused = await callAuth(path, person.session, body);
+        expect({ path, status: refused.status }).toStrictEqual({
+          path,
+          status: 403,
+        });
+      }
+    }
+    const { core } = await openRpc(admin.session);
+    await expect(core.authenticate().members.teams()).resolves.toContainEqual({
+      id: teamId,
+      name: "Operations",
+      memberIds: [],
+    });
+  });
+
+  it("can all be deleted, the last one too", async () => {
+    const admin = await signedInAs("admin");
+    const { core } = await openRpc(admin.session);
+    using session = core.authenticate();
+    await teamOf(admin.session, "Finance");
+    for (const { id } of await session.members.teams()) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time
+      const removed = await callAuth(
+        "/organization/remove-team",
+        admin.session,
+        {
+          teamId: id,
+        }
+      );
+      expect(removed.status).toBe(200);
+    }
+    await expect(session.members.teams()).resolves.toStrictEqual([]);
+  });
+});
+
+describe("Better Auth routes", () => {
+  it("only serves the ones core chose", async () => {
+    const admin = await signedInAs("admin");
+    const routes: [path: string, body?: unknown][] = [
+      ["/sign-up/email", { email: "x@acme.test", password: "p", name: "x" }],
+      ["/sign-in/email", { email: "x@acme.test", password: "p" }],
+      ["/sign-in/social", { provider: "google" }],
+      ["/sso/register", { providerId: "evil", issuer: "https://evil.example" }],
+      ["/sso/providers"],
+      ["/organization/create", { name: "Mine", slug: "mine" }],
+      [
+        "/organization/invite-member",
+        { email: "x@evil.example", role: "admin" },
+      ],
+      ["/organization/leave", { organizationId: "organization" }],
+      ["/organization/delete", { organizationId: "organization" }],
+      ["/update-user", { name: "Someone else" }],
+      ["/change-email", { newEmail: "x@evil.example" }],
+      ["/delete-user", {}],
+      ["/error"],
+    ];
+    const responses = await Promise.all(
+      routes.map(
+        async ([path, body]) => await callAuth(path, admin.session, body)
+      )
+    );
+    expect(responses.map((response) => response.status)).toStrictEqual(
+      routes.map(() => 404)
+    );
+  });
+});

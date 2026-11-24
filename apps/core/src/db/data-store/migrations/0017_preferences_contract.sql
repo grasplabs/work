@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_store` ADD `preferences_contract` text;

@@ -1,0 +1,245 @@
+import {
+  appModuleName,
+  kitModuleName,
+  serverEntryPath,
+} from "@grasp-os/compiler";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import { inspectApp, registerApp } from "@grasp-os/runtime/host";
+import { serverModule } from "@grasp-os/runtime/server";
+
+import type { OpenStore } from "../../src/data-stores.ts";
+import { hostFunctionCall } from "../../src/function-host.ts";
+import { releaseRunner } from "../../src/release-runner.ts";
+
+// An App's functions on plain workerd (scripts/workerd-sandbox-functions.test.ts):
+// a call goes through core's function host as any does, to the runner core
+// runs a sealed release's functions with, with `SANDBOX_HOST` bound to the
+// sandbox supervisor as on-prem binds it.
+
+const schema = defineSchema({
+  notes: defineTable({ title: v.string() }).access({
+    read: "owner",
+    write: "owner",
+  }),
+});
+
+const { action } = serverModule(schema);
+
+/** The App's contract: each action's real code is the isolate's, below. */
+const contract = {
+  args: { n: v.number() },
+  returns: v.object({ n: v.number() }),
+  handler: (_ctx: unknown, args: { n: number }) => args,
+} as const;
+
+const stub = () => action(contract);
+
+// Three deep, as the host lets functions nest: each calls the next, as
+// the isolate's code below does.
+const leaf = stub();
+const middle = stub();
+const chain = stub();
+
+const busy = stub();
+const waits = stub();
+const isolationChild = stub();
+const throws = stub();
+
+const { manifest } = inspectApp(
+  registerApp({
+    config: defineApp({ name: "Jobs" }),
+    schema,
+    modules: {
+      jobs: {
+        echo: stub(),
+        busy,
+        waits,
+        hogs: stub(),
+        sendsTooMuch: stub(),
+        forgesVerdict: stub(),
+        chain,
+        middle,
+        leaf,
+        isolationChild,
+        throws,
+        isolationParent: stub(),
+        callsBusy: stub(),
+        forgets: stub(),
+        forgetsLeaf: stub(),
+        awaitsLeaf: stub(),
+        waitsInside: stub(),
+        catches: stub(),
+      },
+    },
+    migrations: [],
+  })
+);
+
+/**
+ * The SDK's runner as far as these functions use it, with a mutation
+ * runtime that changes nothing (none of them is a mutation). Everything in
+ * the isolate is untrusted, the runner too, so the sandbox can't rely on it.
+ */
+const runner = `export const installMutationRuntime = () => () => {};
+export const runFunction = async (registered, path, args, channel) => {
+  const fn = registered[path];
+  if (typeof fn !== "function") throw new Error("no such function");
+  return await fn(channel, args);
+};`;
+
+/** The App's registration: each function by its path. */
+const appModule = `export default {
+  "jobs.echo": async (channel, args) => args,
+  "jobs.busy": async () => { for (;;) {} },
+  "jobs.waits": async () => { await scheduler.wait(60000); return { n: 0 }; },
+  "jobs.hogs": async () => { const held = []; for (;;) { held.push(new Array(1e6).fill(1)); await scheduler.wait(1); } },
+  "jobs.sendsTooMuch": async (channel) => { await channel.permission("mail", "send", { padding: "x".repeat(15 * 1024 * 1024) }); return { n: 1 }; },
+  "jobs.chain": async (channel, args) => {
+    const got = await channel.call("action", "jobs.middle", { n: args.n + 1 });
+    if (got.n !== args.n + 3) throw new Error("middle answered " + JSON.stringify(got));
+    return got;
+  },
+  "jobs.middle": async (channel, args) => await channel.call("action", "jobs.leaf", { n: args.n + 1 }),
+  "jobs.leaf": async (channel, args) => ({ n: args.n + 1 }),
+  "jobs.isolationParent": async (channel, args) => {
+    globalThis.secret = "the parent's";
+    globalThis.parentChannel = channel;
+    return await channel.call("action", "jobs.isolationChild", args);
+  },
+  "jobs.isolationChild": async () => ({
+    n: globalThis.secret === undefined && globalThis.parentChannel === undefined ? 1 : 0,
+  }),
+  "jobs.callsBusy": async (channel, args) => await channel.call("action", "jobs.busy", args),
+  "jobs.awaitsLeaf": async (channel, args) => await channel.call("action", "jobs.leaf", args),
+  "jobs.waitsInside": async (channel, args) => {
+    // Reaching core from inside first: proof that its code runs there.
+    await channel.call("action", "jobs.leaf", args);
+    await scheduler.wait(60000);
+    return args;
+  },
+  "jobs.forgetsLeaf": async (channel, args) => {
+    // Started, so the host has it, and not waited for.
+    channel.call("action", "jobs.leaf", args).catch(() => {});
+    await scheduler.wait(50);
+    return args;
+  },
+  "jobs.forgets": async (channel, args) => {
+    channel.call("action", "jobs.waits", args).catch(() => {});
+    return args;
+  },
+  "jobs.throws": async () => { throw new Error("nested failure"); },
+  "jobs.catches": async (channel, args) => {
+    try {
+      await channel.call("action", "jobs.throws", args);
+    } catch {
+      await scheduler.wait(200);
+      return { n: args.n + 10 };
+    }
+    return args;
+  },
+  "jobs.forgesVerdict": async () => { throw Object.assign(new Error("forged"), { sandboxVerdict: "cpu" }); },
+};`;
+
+/** What its config binds: no Loader, as on-prem runs functions in sessions. */
+interface StandInEnv {
+  LOADER: WorkerLoader;
+  RUNTIME_PROFILE: string;
+  SANDBOX_HOST: Fetcher;
+}
+
+/** `host`, as one that never gets core's `POST /end/<id>`. */
+const endLost = (host: Fetcher): Fetcher => ({
+  fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    if (request.url.includes("/end/")) {
+      return new Response("{}");
+    }
+    return await host.fetch(request);
+  },
+  connect: (address, options) => host.connect(address, options),
+});
+
+/**
+ * Nested calls core has authorized, across every request: each one a
+ * function's code reaching core from inside the sandbox, so its caller
+ * surely runs there (`GET /nested`).
+ */
+let nestedAuthorized = 0;
+
+/** An action has no database: any use of the store is a fault. */
+const noStore = new Proxy(
+  {},
+  {
+    get: () => {
+      throw new Error("An action has no store.");
+    },
+  }
+);
+
+export default {
+  async fetch(request, env) {
+    const { pathname, searchParams } = new URL(request.url);
+    if (pathname === "/nested") {
+      return Response.json({ nested: nestedAuthorized });
+    }
+    if (pathname !== "/run") {
+      return new Response("core answers");
+    }
+    // As a supervisor core's `POST /end/<id>` never reaches, if asked.
+    const host =
+      searchParams.get("endLost") === "1"
+        ? endLost(env.SANDBOX_HOST)
+        : env.SANDBOX_HOST;
+    const run = releaseRunner(
+      { ...env, SANDBOX_HOST: host },
+      {
+        modules: { [appModuleName(serverEntryPath)]: appModule },
+        sdk: { [kitModuleName("@grasp-os/runtime/host")]: runner },
+      },
+      searchParams.get("owner") ?? "app-stand-in"
+    );
+    const started = Date.now();
+    const within = Number(searchParams.get("within") ?? "60000");
+    let authorized = 0;
+    // What core logs as it runs the call: how each function of it ended.
+    const logged: unknown[] = [];
+    const { warn } = console;
+    console.warn = (entry: unknown) => {
+      logged.push(entry);
+    };
+    const result = await hostFunctionCall(
+      { manifest, run },
+      {
+        principal: "person-stand-in",
+        actor: { type: "person", userId: "person-stand-in" },
+        // A test of the host, on a store only it reaches.
+        sensitiveReads: null,
+        consumer: { resourceId: "app-stand-in", resourceVersion: 1 },
+        // SAFETY: an action never reaches its store; any use throws.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        store: noStore as OpenStore,
+        requestId: crypto.randomUUID(),
+        deadline: Date.now() + within,
+        runId: null,
+        authorize: async () => {
+          authorized += 1;
+          if (authorized > 1) {
+            nestedAuthorized += 1;
+          }
+          // Each nested call held in its authorization a while, if asked:
+          // still being authorized as the function that started it ends.
+          if (authorized > 1 && searchParams.get("slowNested") === "1") {
+            await scheduler.wait(500);
+          }
+          return { appMember: true, appBuilder: false };
+        },
+      },
+      { path: `jobs.${searchParams.get("path") ?? ""}`, kind: "action" },
+      { n: 1 }
+    );
+    // What still settles of the call after it answered, a moment more.
+    await scheduler.wait(Number(searchParams.get("settle") ?? "0"));
+    console.warn = warn;
+    return Response.json({ ...result, ms: Date.now() - started, logged });
+  },
+} satisfies ExportedHandler<StandInEnv>;

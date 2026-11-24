@@ -1,0 +1,854 @@
+import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
+import {
+  appProviderSchema,
+  oauthProviderSchema,
+} from "@grasp-os/shared/connect";
+import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { directoryProviderSchema } from "@grasp-os/shared/directory";
+import type { DirectoryProvider } from "@grasp-os/shared/directory";
+import { placesProviderSchema } from "@grasp-os/shared/document-places";
+import type { PlacesProvider } from "@grasp-os/shared/document-places";
+import { hrProviderSchema } from "@grasp-os/shared/hr";
+import type { HrProvider } from "@grasp-os/shared/hr";
+import { log } from "@grasp-os/shared/log";
+import { z } from "zod";
+
+import { appRecord } from "./bundled-connectors.ts";
+import type { AppRecord } from "./bundled-connectors.ts";
+import { hibobAccount, hibobCredential } from "./hibob.ts";
+import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
+import type { TokenSet } from "./oauth-client.ts";
+import {
+  classesOnByDefault,
+  googleRights,
+  microsoftRights,
+} from "./provider-rights.ts";
+
+// The providers people connect accounts from, as config records: one
+// generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
+// those that take a key.
+//
+// The suites, Microsoft 365 and Google Workspace, are configured here.
+// Grasp owns one multi-tenant app per suite; its client ID and secret are
+// Worker secrets on connect (threat model Q1), and a suite whose secrets
+// are unset can't be connected. Every suite is pinned to the
+// organization's own tenant, from the deployment's sign-in config: the
+// flow asks the provider for that tenant only where the provider can do
+// so, and the account in the ID token must be in it (threat model CN5).
+// Accounts outside the organization can't be connected, personal ones
+// included.
+//
+// Every other app is described by the provider record its native
+// connector carries (the connector kit's sign-in.ts), and nothing here
+// changes for a new one. Its client ID and secret, for OAuth, are its
+// entry in `APP_OAUTH_CLIENTS`, found by its provider's name alone, so no
+// record reaches another app's secret (AP6). An app has no tenant: the
+// account is the one the app's own lookup names.
+
+/** The client credentials of Grasp's app at a provider. */
+export interface OAuthClientCredentials {
+  id: string;
+  secret: string;
+}
+
+/** The account a token is for, from its ID token. */
+export interface ProviderAccount {
+  /** Stable at the provider: an Entra object ID, a Google subject. */
+  id: string;
+  /** For people: an email address or user principal name. */
+  name: string | null;
+  /**
+   * Its email address, as the provider vouches for it: Google's verified
+   * email, or the address the organization's own tenant gives it.
+   */
+  email: string | null;
+}
+
+/** Where a call's credential goes on a request, and what it says. */
+export interface Credential {
+  /** A lowercase header name. */
+  header: string;
+  value: string;
+}
+
+/** An OAuth access token, as a request carries it. */
+export const bearer = (accessToken: string): Credential => ({
+  header: "authorization",
+  value: `Bearer ${accessToken}`,
+});
+
+/** A provider people connect with the OAuth authorization code flow. */
+export interface OAuthProviderConfig {
+  kind: "oauth";
+  id: string;
+  /** The native connector that carries out the connection's actions. */
+  server: string;
+  /**
+   * Whether the flow is pinned to the organization's tenant at the
+   * provider (the suites). An app has none: its tenant is always `""`.
+   */
+  pinned: boolean;
+  /** Whether `tenant` is a tenant of this provider's kind. */
+  isTenant: (tenant: string) => boolean;
+  authorizationEndpoint: (tenant: string) => string;
+  tokenEndpoint: (tenant: string) => string;
+  /** RFC 7009 revocation; none where the provider has no such endpoint. */
+  revocationEndpoint?: string;
+  /**
+   * Where one grant covers every token of an account with one of Grasp's
+   * OAuth clients, the group of providers that share it: revoking any
+   * token of the account revokes them all. Google's grant is the account's
+   * with a client, so each Google client is a group of its own (Workspace,
+   * the directory and documents each have theirs). Unset where each token
+   * is a grant of its own (RFC 7009), which revoking one token leaves the
+   * rest of (src/revocations.ts).
+   */
+  accountWideGrant?: string;
+  scopes: readonly string[];
+  /** How the scope parameter joins `scopes`. */
+  scopeSeparator: string;
+  /**
+   * The access a token must be granted, exactly: tokens granted more than
+   * `allowed`, or less than `required`, are refused
+   * (`connection.scopes_refused`). For a connection that must hold no
+   * more than it asks for, as the directory's and the documents'; none
+   * for the rest. A renewal (`renewedAsGranted`) must hold all its
+   * connection held before, and nothing beyond `allowed`: a scope added
+   * to `required` later is asked of connecting only, so a connection made
+   * before it goes on with what it was granted.
+   */
+  granted?: {
+    allowed: ReadonlySet<string>;
+    required: readonly string[];
+  };
+  /**
+   * Scopes a renewed token must hold, or its connection is marked for
+   * reconnecting (`needs_reauth`), which keeps it and its permissions
+   * (oauth.ts): scopes added to `scopes` after connections were made, which
+   * a connection made before lacks until its person consents again. Only a
+   * renewal that lists what it granted is checked.
+   */
+  renewalRequires?: readonly string[];
+  /**
+   * Only shared connections, never a person's own (the directory's, the
+   * documents').
+   */
+  sharedOnly?: boolean;
+  /** Parameters the authorization request adds to the standard ones. */
+  authorizationParams: (tenant: string) => Record<string, string>;
+  /** How the client authenticates at the token and revocation endpoints. */
+  clientAuthentication: "client_secret_post" | "client_secret_basic";
+  client: (env: Env) => OAuthClientCredentials | undefined;
+  /**
+   * The account subject the tokens name, whatever else they say: to tell
+   * whether a live connection holds the same grant before revoking tokens
+   * that won't be kept. None for an app: only its lookup names one.
+   */
+  subject?: (tokens: TokenSet) => string | undefined;
+  /**
+   * The account the tokens are for, if they come from this provider for
+   * Grasp's app and the account is in `tenant`; `null` otherwise.
+   */
+  account: (
+    tokens: TokenSet,
+    tenant: string,
+    clientId: string
+  ) => Promise<ProviderAccount | null>;
+  /**
+   * For a provider whose reader lists name accounts by address (Google's),
+   * the address the provider confirms, at a renewal, for the account
+   * `accountId` in `tenant`, by the same rules as when it was connected;
+   * `null` when it confirms none. Core counts a connection's address as
+   * proved only while the last renewal confirmed it (connections.ts
+   * `personalAccounts`). None where reader lists name an account by a
+   * stable ID (Entra's object ID).
+   */
+  confirmAddress?: (
+    tokens: TokenSet,
+    tenant: string,
+    clientId: string,
+    accountId: string
+  ) => Promise<string | null>;
+}
+
+/** An app people connect with an API key they give. */
+export interface ApiKeyProviderConfig {
+  kind: "api_key";
+  id: string;
+  server: string;
+  /** The key, as a call's requests carry it. */
+  credential: (key: string) => Credential;
+  /** The account the key is for, as the app says; `null` if it refused it. */
+  account: (key: string) => Promise<ProviderAccount | null>;
+  /** Only shared connections, never a person's own (the HR platform's). */
+  sharedOnly?: boolean;
+}
+
+export type ProviderConfig = OAuthProviderConfig | ApiKeyProviderConfig;
+
+const credentials = (
+  id: string | undefined,
+  secret: string | undefined
+): OAuthClientCredentials | undefined =>
+  id === undefined || id === "" || secret === undefined || secret === ""
+    ? undefined
+    : { id, secret };
+
+const guidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const domainPattern = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/u;
+
+/** Just the subject of an ID token, however the rest of it looks. */
+const oidOnly = z.object({ oid: z.string().min(1) });
+const subOnly = z.object({ sub: z.string().min(1) });
+
+const microsoftClaims = z.object({
+  iss: z.string(),
+  aud: z.string(),
+  tid: z.string(),
+  oid: z.string().min(1),
+  /** Set for a B2B guest: the tenant that really signed them in. */
+  idp: z.string().optional(),
+  email: z.string().optional(),
+  preferred_username: z.string().optional(),
+});
+
+const googleClaims = z.object({
+  iss: z.string(),
+  aud: z.string(),
+  sub: z.string().min(1),
+  hd: z.string().optional(),
+  email: z.string().optional(),
+  email_verified: z.boolean().optional(),
+});
+
+const googleIssuers = new Set([
+  "https://accounts.google.com",
+  "accounts.google.com",
+]);
+
+const microsoftLogin = "https://login.microsoftonline.com";
+
+/**
+ * The Entra account an ID token is for, if it comes from Entra for the
+ * client `clientId` and the account is homed in `tenant`.
+ */
+// oxlint-disable-next-line require-await -- an app's lookup is async
+const entraAccount: OAuthProviderConfig["account"] = async (
+  { idToken },
+  tenant,
+  clientId
+) => {
+  const parsed = microsoftClaims.safeParse(idTokenClaims(idToken));
+  if (!parsed.success) {
+    return null;
+  }
+  const {
+    iss,
+    aud,
+    tid,
+    oid,
+    idp,
+    email,
+    preferred_username: name,
+  } = parsed.data;
+  // A guest is homed in another tenant: not an account of the organization.
+  const inTenant =
+    tid.toLowerCase() === tenant &&
+    iss.toLowerCase() === `${microsoftLogin}/${tenant}/v2.0` &&
+    (idp === undefined || idp === iss) &&
+    aud === clientId;
+  return inTenant
+    ? { id: oid, name: name ?? null, email: email ?? name ?? null }
+    : null;
+};
+
+/**
+ * Microsoft 365, through Entra ID's v2 endpoints for the organization's own
+ * tenant, so the sign-in page offers only its accounts. Entra has no token
+ * revocation endpoint: disconnecting deletes the tokens, and they lapse.
+ */
+const microsoft: OAuthProviderConfig = {
+  kind: "oauth",
+  id: "microsoft",
+  server: "microsoft-365",
+  pinned: true,
+  isTenant: (tenant) => guidPattern.test(tenant),
+  authorizationEndpoint: (tenant) =>
+    `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
+  tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
+  // Those of the classes on by default; a consent asks those of the classes
+  // the company turned on (`rightsFor`, GRA-717).
+  scopes: microsoftRights(classesOnByDefault),
+  // Asked for since the connector writes workbooks: a connection made
+  // before can't, and is reconnected in place. Change own asks for it.
+  renewalRequires: ["Files.ReadWrite.All"],
+  scopeSeparator: " ",
+  authorizationParams: () => ({ response_mode: "query" }),
+  clientAuthentication: "client_secret_post",
+  client: (env) =>
+    credentials(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
+  subject: ({ idToken }) => oidOnly.safeParse(idTokenClaims(idToken)).data?.oid,
+  account: entraAccount,
+};
+
+/** Google's userinfo endpoint, as its discovery document names it. */
+const googleUserinfo = "https://openidconnect.googleapis.com/v1/userinfo";
+
+/** What a userinfo answer must hold for its address to count, as an ID token's would. */
+const googleUserinfoSchema = z.object({
+  sub: z.string().min(1),
+  email: z.string().min(1),
+  email_verified: z.literal(true),
+  hd: z.string(),
+});
+
+/** How long a userinfo read may take before its address counts as unconfirmed. */
+const userinfoTimeoutMs = 10_000;
+
+/**
+ * The address Google's userinfo endpoint confirms for `accessToken`: only
+ * for the account `accountId` under the hosted domain `tenant`, marked
+ * verified; `null` for anything else, an error included.
+ */
+export const googleUserinfoAddress = async (
+  accessToken: string,
+  tenant: string,
+  accountId: string
+): Promise<string | null> => {
+  try {
+    const response = await fetch(googleUserinfo, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(userinfoTimeoutMs),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const info = googleUserinfoSchema.safeParse(await response.json());
+    return info.success &&
+      info.data.sub === accountId &&
+      info.data.hd.toLowerCase() === tenant
+      ? info.data.email.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Google Workspace. Google can only hint at the domain (`hd`), so the ID
+ * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
+ * is how Google gives a refresh token every time.
+ */
+const google: OAuthProviderConfig = {
+  kind: "oauth",
+  id: "google",
+  server: "google-workspace",
+  pinned: true,
+  isTenant: (tenant) => domainPattern.test(tenant),
+  authorizationEndpoint: () => "https://accounts.google.com/o/oauth2/v2/auth",
+  tokenEndpoint: () => "https://oauth2.googleapis.com/token",
+  revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+  // Google revokes the account's whole grant with this client.
+  accountWideGrant: "google",
+  // Those of the classes on by default; a consent asks those of the classes
+  // the company turned on (`rightsFor`, GRA-756). A connection granted
+  // before the connector wrote events is marked for reconnecting on its
+  // first refused write (tokens.ts `markIfGrantLacks`).
+  scopes: googleRights(classesOnByDefault),
+  scopeSeparator: " ",
+  authorizationParams: (tenant) => ({
+    access_type: "offline",
+    prompt: "consent",
+    hd: tenant,
+  }),
+  clientAuthentication: "client_secret_post",
+  client: (env) => credentials(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
+  subject: ({ idToken }) => subOnly.safeParse(idTokenClaims(idToken)).data?.sub,
+  // oxlint-disable-next-line require-await -- an app's lookup is async
+  account: async ({ idToken }, tenant, clientId) => {
+    const parsed = googleClaims.safeParse(idTokenClaims(idToken));
+    if (!parsed.success) {
+      return null;
+    }
+    const { iss, aud, sub, hd, email, email_verified: verified } = parsed.data;
+    const inTenant =
+      googleIssuers.has(iss) &&
+      aud === clientId &&
+      hd?.toLowerCase() === tenant &&
+      verified === true;
+    return inTenant
+      ? { id: sub, name: email ?? null, email: email ?? null }
+      : null;
+  },
+  confirmAddress: async (tokens, tenant, clientId, accountId) => {
+    // The renewal's ID token, which Google returns from a refresh
+    // (https://developers.google.com/identity/openid-connect/openid-connect,
+    // "an ID token is returned from a token refresh"), checked as at
+    // connecting; else the userinfo endpoint of Google's discovery document,
+    // for the token just renewed, with the same checks.
+    const fromToken = await google.account(tokens, tenant, clientId);
+    if (fromToken !== null) {
+      return fromToken.id === accountId
+        ? (fromToken.email?.toLowerCase() ?? null)
+        : null;
+    }
+    return await googleUserinfoAddress(tokens.accessToken, tenant, accountId);
+  },
+};
+
+/** What the directory's Microsoft connection reads Graph with, and only that. */
+const microsoftDirectoryScopes = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  // Everyone's department, job title and manager: `User.ReadBasic.All`
+  // holds names and addresses only.
+  "User.Read.All",
+  // The groups an admin maps to teams, and their members, nested groups'
+  // included (GRA-2056, directory-groups.ts): asked of every company when
+  // it connects, so mapping a group never needs a second consent.
+  // `GroupMember.ReadBasic.All` reads members only, not the groups
+  // themselves, which a search and a group's properties need.
+  "Group.ReadBasic.All",
+] as const;
+
+/**
+ * The directory's read-only admin connection to Entra (GRA-369), for the
+ * onboarding to know who works where. It signs in with an Entra app
+ * registration of its own
+ * (`MICROSOFT_DIRECTORY_CLIENT_*`), since Entra puts every scope a person
+ * ever granted an app into each token for it, and a token granted
+ * anything beyond these scopes, or short of the read, is refused.
+ */
+const microsoftDirectory: OAuthProviderConfig = {
+  ...microsoft,
+  id: "microsoft-directory",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
+  // No connector: its connection takes no calls, only core's read uses it.
+  server: "microsoft-directory",
+  scopes: microsoftDirectoryScopes,
+  granted: {
+    allowed: new Set(
+      microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
+    ),
+    required: ["User.Read.All", "Group.ReadBasic.All"],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.MICROSOFT_DIRECTORY_CLIENT_ID,
+      env.MICROSOFT_DIRECTORY_CLIENT_SECRET
+    ),
+};
+
+/** Google's directory, read-only: its users, and nothing of Gmail or Drive. */
+const googleDirectoryScope =
+  "https://www.googleapis.com/auth/admin.directory.user.readonly";
+
+/**
+ * The directory's read-only admin connection to Google's directory
+ * (GRA-369), through the Admin SDK, which only a Workspace admin's account
+ * reads. It has an OAuth client of its own (`GOOGLE_DIRECTORY_CLIENT_*`):
+ * Google revokes the whole grant of an account and client whichever of
+ * its tokens is revoked, so disconnecting it can never disconnect the
+ * same admin's Gmail. Google names the sign-in scopes by their full URIs
+ * in its answer.
+ */
+const googleDirectory: OAuthProviderConfig = {
+  ...google,
+  id: "google-directory",
+  // A client of its own (below), so a grant of its own.
+  accountWideGrant: "google-directory",
+  server: "google-directory",
+  scopes: ["openid", "email", "profile", googleDirectoryScope],
+  granted: {
+    allowed: new Set([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      googleDirectoryScope,
+    ]),
+    required: [googleDirectoryScope],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.GOOGLE_DIRECTORY_CLIENT_ID,
+      env.GOOGLE_DIRECTORY_CLIENT_SECRET
+    ),
+};
+
+/** The directory's connections, by provider. */
+const directoryProviders: Readonly<
+  Record<DirectoryProvider, OAuthProviderConfig>
+> = {
+  "microsoft-directory": microsoftDirectory,
+  "google-directory": googleDirectory,
+};
+
+/**
+ * HiBob, the HR platform's read-only connection (GRA-371), for the
+ * onboarding to know who leads which team. HiBob signs in a service user
+ * the company's admin makes in Bob, with its ID and token: no OAuth, so no
+ * app of Grasp's at HiBob, and nothing Grasp can ask it to hold no more
+ * than. What keeps it to the read is connect's: it is the organization's
+ * only, connected by its admin; it takes no connector calls (no connector
+ * can name its provider); and the key is sent only with the one search
+ * hr.ts makes, for only the fields a roster needs (hibob.ts).
+ */
+const hibobHr: ApiKeyProviderConfig = {
+  kind: "api_key",
+  id: "hibob-hr",
+  // No connector: its connection takes no calls, only core's read uses it.
+  server: "hibob-hr",
+  credential: hibobCredential,
+  account: hibobAccount,
+  sharedOnly: true,
+};
+
+/** The HR platforms' connections, by provider. */
+const hrProviders: Readonly<Record<HrProvider, ApiKeyProviderConfig>> = {
+  "hibob-hr": hibobHr,
+};
+
+/** What the documents' Microsoft connection reads with, and only that. */
+const microsoftDocumentsScopes = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  // The files the admin can open, in OneDrive and SharePoint, read only.
+  "Files.Read.All",
+  // The SharePoint sites they can open, to list them as places.
+  "Sites.Read.All",
+] as const;
+
+/**
+ * The documents' read-only admin connection to SharePoint and OneDrive
+ * (GRA-370), for the onboarding's documents step: the admin picks files
+ * there instead of downloading and dropping them. As the directory's, it
+ * signs in with an Entra app registration of its own
+ * (`MICROSOFT_DOCUMENTS_CLIENT_*`), since Entra puts every scope a person
+ * ever granted an app into each token for it; a token granted anything
+ * beyond these scopes, a write among them, or short of the reads, is
+ * refused. Delegated: it opens what the admin who connected it can open,
+ * and nothing more.
+ */
+const microsoftDocuments: OAuthProviderConfig = {
+  ...microsoft,
+  id: "microsoft-documents",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
+  // No connector: its connection takes no calls, only core's reads use it.
+  server: "microsoft-documents",
+  scopes: microsoftDocumentsScopes,
+  granted: {
+    allowed: new Set(
+      microsoftDocumentsScopes.map((scope) => scope.toLowerCase())
+    ),
+    required: ["Files.Read.All", "Sites.Read.All"],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.MICROSOFT_DOCUMENTS_CLIENT_ID,
+      env.MICROSOFT_DOCUMENTS_CLIENT_SECRET
+    ),
+};
+
+/** Google Drive, read-only: its files, and nothing of Gmail or the calendar. */
+const googleDocumentsScope = "https://www.googleapis.com/auth/drive.readonly";
+
+/**
+ * The documents' read-only admin connection to Google Drive (GRA-370). It
+ * has an OAuth client of its own (`GOOGLE_DOCUMENTS_CLIENT_*`), for the
+ * directory's reason: Google revokes the whole grant of an account and
+ * client whichever of its tokens is revoked, so disconnecting it never
+ * disconnects the same admin's Gmail. Google's Picker, which grants only
+ * the files picked (`drive.file`), would need the token in the browser,
+ * and tokens stay in connect; so the folders are listed here, read-only.
+ */
+const googleDocuments: OAuthProviderConfig = {
+  ...google,
+  id: "google-documents",
+  // A client of its own (below), so a grant of its own.
+  accountWideGrant: "google-documents",
+  server: "google-documents",
+  scopes: ["openid", "email", "profile", googleDocumentsScope],
+  granted: {
+    allowed: new Set([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      googleDocumentsScope,
+    ]),
+    required: [googleDocumentsScope],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.GOOGLE_DOCUMENTS_CLIENT_ID,
+      env.GOOGLE_DOCUMENTS_CLIENT_SECRET
+    ),
+};
+
+/** The documents' connections, by provider. */
+const placesProviders: Readonly<Record<PlacesProvider, OAuthProviderConfig>> = {
+  "microsoft-documents": microsoftDocuments,
+  "google-documents": googleDocuments,
+};
+
+/** The suites, by provider. */
+export const providers: Readonly<Record<OAuthProvider, OAuthProviderConfig>> = {
+  microsoft,
+  google,
+};
+
+/**
+ * Grasp's OAuth apps at the apps, by provider: one Worker secret, JSON,
+ * which the admin delivers as it does the suites' secrets. Each entry
+ * is read on its own, so one that's broken leaves only its own app unset.
+ */
+const appClientsSchema = z.record(z.string(), z.unknown());
+const appClientSchema = z.strictObject({
+  id: z.string().min(1).max(512),
+  secret: z.string().min(1).max(4096),
+});
+
+/**
+ * Grasp's client at the app `provider`, from `APP_OAUTH_CLIENTS`, by that
+ * name only. A map that doesn't parse, or an entry that doesn't, leaves
+ * that app unset, and is logged by its name, never its value.
+ */
+const appClient = (
+  env: Env,
+  provider: string
+): OAuthClientCredentials | undefined => {
+  const raw = env.APP_OAUTH_CLIENTS;
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  let value: unknown = undefined;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    // Refused below, as anything else that isn't the map.
+  }
+  const clients = appClientsSchema.safeParse(value);
+  if (!clients.success) {
+    log.error("config.invalid", { var: "APP_OAUTH_CLIENTS" });
+    return undefined;
+  }
+  if (!Object.hasOwn(clients.data, provider)) {
+    return undefined;
+  }
+  const client = appClientSchema.safeParse(clients.data[provider]);
+  if (!client.success) {
+    log.error("config.invalid", { var: "APP_OAUTH_CLIENTS", provider });
+    return undefined;
+  }
+  return client.data;
+};
+
+/** The account an app's lookup names, with `credential`. */
+const lookedUp =
+  (lookup: AccountLookup) =>
+  async (credential: Credential): Promise<ProviderAccount | null> =>
+    await lookupAccount(lookup, credential);
+
+/** An app, as its record describes it. */
+const appProvider = ({
+  provider,
+  server,
+  signIn,
+}: AppRecord): ProviderConfig => {
+  const lookup = lookedUp(signIn.account);
+  if (signIn.kind === "api_key") {
+    const credential = (key: string): Credential => ({
+      header: signIn.header,
+      value: `${signIn.prefix ?? ""}${key}`,
+    });
+    return {
+      kind: "api_key",
+      id: provider,
+      server,
+      credential,
+      account: async (key) => await lookup(credential(key)),
+    };
+  }
+  return {
+    kind: "oauth",
+    id: provider,
+    server,
+    pinned: false,
+    isTenant: (tenant) => tenant === "",
+    authorizationEndpoint: () => signIn.authorizationEndpoint,
+    tokenEndpoint: () => signIn.tokenEndpoint,
+    ...(signIn.revocationEndpoint === undefined
+      ? {}
+      : { revocationEndpoint: signIn.revocationEndpoint }),
+    scopes: signIn.scopes,
+    scopeSeparator: signIn.scopeSeparator,
+    authorizationParams: () => ({ ...signIn.authorizationParams }),
+    clientAuthentication: signIn.clientAuthentication,
+    client: (env) => appClient(env, provider),
+    // No ID token is trusted from an app: its lookup names the account,
+    // and it has no subject apart from that.
+    account: async ({ accessToken }) => await lookup(bearer(accessToken)),
+  };
+};
+
+/**
+ * The provider `id` names: a suite, the directory's, the documents', an
+ * HR platform's, or an app of this release.
+ */
+export const providerFor = (id: string): ProviderConfig | undefined => {
+  const suite = oauthProviderSchema.safeParse(id);
+  if (suite.success) {
+    return providers[suite.data];
+  }
+  const directory = directoryProviderSchema.safeParse(id);
+  if (directory.success) {
+    return directoryProviders[directory.data];
+  }
+  const places = placesProviderSchema.safeParse(id);
+  if (places.success) {
+    return placesProviders[places.data];
+  }
+  const hr = hrProviderSchema.safeParse(id);
+  if (hr.success) {
+    return hrProviders[hr.data];
+  }
+  const record = appProviderSchema.safeParse(id).success
+    ? appRecord(id)
+    : undefined;
+  return record === undefined ? undefined : appProvider(record);
+};
+
+/** How Entra may prefix a Microsoft Graph scope in a token's answer. */
+const graphScopePrefix = "https://graph.microsoft.com/";
+
+/** The scopes a token answer lists, lowercase, Graph's by their short name. */
+const scopesOf = (scope: string): Set<string> =>
+  new Set(
+    scope
+      .split(" ")
+      .filter((each) => each !== "")
+      // Entra may name Graph's scopes by their full URI.
+      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+  );
+
+/**
+ * Whether a renewal's `tokens` still hold every scope `provider` requires
+ * of one (`renewalRequires`). An answer that lists none passes: nothing
+ * says it lacks one.
+ */
+export const renewalHolds = (
+  { renewalRequires = [] }: OAuthProviderConfig,
+  { scope }: TokenSet
+): boolean => {
+  if (scope === undefined) {
+    return true;
+  }
+  const scopes = scopesOf(scope);
+  return renewalRequires.every((each) => scopes.has(each.toLowerCase()));
+};
+
+/**
+ * Whether `tokens` were granted exactly the access `provider` asks for,
+ * where it must hold no more (`granted`): every scope the provider's
+ * answer lists among those allowed, and every one required among them.
+ * An answer that lists none is refused: nobody can tell what it holds.
+ */
+export const grantedAsAsked = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  if (scope === undefined) {
+    return false;
+  }
+  const scopes = scopesOf(scope);
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    granted.required.every((each) => scopes.has(each.toLowerCase()))
+  );
+};
+
+/**
+ * The OpenID scopes, which a provider's answer may name or leave out:
+ * Google's answer names email and profile by their full URIs.
+ */
+const signInScopes: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+]);
+
+/**
+ * Whether a renewal's `tokens` hold what their connection was granted,
+ * where it must hold no more (`granted`): nothing beyond what is allowed,
+ * and nothing less than the connection's earlier grant (`before`, its
+ * token answer's scope, as kept), the OpenID scopes aside, which an
+ * answer may leave out. A grant that predates a scope asked for since is
+ * no change; one that lost a scope it had, or gained one unasked, is. An
+ * answer that lists none is refused.
+ */
+export const renewedAsGranted = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet,
+  before: string | null
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  // Connect keeps no connection with a restricted grant whose answer said
+  // nothing of it (`grantedAsAsked`): an unknown either way is refused.
+  if (scope === undefined || before === null) {
+    return false;
+  }
+  const scopes = scopesOf(scope);
+  const held = [...scopesOf(before)];
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    held.every((each) => signInScopes.has(each) || scopes.has(each))
+  );
+};
+
+/** Whether a grant of `scope` (a token answer's, as kept) holds `wanted`. */
+export const grantHolds = (scope: string, wanted: string): boolean =>
+  scopesOf(scope).has(wanted.toLowerCase());
+
+/**
+ * The scopes `provider` asks for now that a grant of `scope` (a token
+ * answer's) lacks, besides the OpenID ones: those its connector came to
+ * ask for after the connection was made.
+ */
+export const scopesLacking = (
+  { scopes }: OAuthProviderConfig,
+  scope: string
+): string[] => {
+  const granted = scopesOf(scope);
+  return scopes.filter((each) => {
+    const asked = each.toLowerCase();
+    return !(signInScopes.has(asked) || granted.has(asked));
+  });
+};

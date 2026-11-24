@@ -1,0 +1,485 @@
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { onboardingStore } from "../src/onboarding/store.ts";
+import { heardBudgets } from "../src/onboarding/transcription.ts";
+import { writtenText } from "./ai-providers-fake.ts";
+import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
+import { codeOf, openedFor, signedInAs } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
+import { spentMicros } from "./model-usage.ts";
+import { carrying, keyPlaces, plan, sentCount } from "./platform-providers.ts";
+import { routed, unique } from "./sign-in.ts";
+
+// A stretch of what someone said, written down from its recording when the
+// live line can't be used (src/onboarding/hear.ts). OpenAI's transcription,
+// Grasp's own by default (@grasp-os/shared/platform-ai), is the outside
+// system: a fake behind connect's fetch that writes every recording down
+// as the same words. Connect, the store, the link checks and the counting
+// are real. The ways it can fail, tried here:
+//
+// - Writing down for a link that isn't one, on another device, or for a
+//   link that heard all it may today; with no transcription set up.
+// - A request that isn't a recording, or is too large.
+// - The recording kept anywhere: the store, the database, the audit log.
+// - Listening out for words the page chose, or for more than 30.
+// - Charged to the organization's spend: what is heard is charged to
+//   Grasp's own key (GRA-1064).
+
+/** Something no recording would hold by chance: if it shows anywhere, the recording was kept. */
+const marker = "RECORDING-MARKER-7f3a";
+
+/** A request core made of OpenAI, as far as these tests read it. */
+interface Asked {
+  path: string;
+  fields: Record<string, string[]>;
+  file: number;
+  /** The name the recording went under. */
+  fileName: string;
+}
+
+/** What reached OpenAI with `audio` in it: each request's fields and file. */
+const askedWith = async (audio: string): Promise<Asked[]> => {
+  const carried = await carrying(audio);
+  return await Promise.all(
+    carried.map(async ({ path, headers, body }) => {
+      const form = await new Response(body, {
+        headers: { "content-type": headers["content-type"] ?? "" },
+      }).formData();
+      const fields: Record<string, string[]> = {};
+      let file = 0;
+      let fileName = "";
+      for (const [name, value] of form.entries()) {
+        if (typeof value === "string") {
+          fields[name] = [...(fields[name] ?? []), value];
+        } else {
+          file = value.size;
+          fileName = value.name;
+        }
+      }
+      return { path, fields, file, fileName };
+    })
+  );
+};
+
+/** The words a request listened out for, from its prompt. */
+const termsOf = (asked: Asked | undefined): string[] =>
+  (asked?.fields.prompt?.[0] ?? "")
+    .replace(/^Names and terms: /u, "")
+    .replace(/\.$/u, "")
+    .split(", ")
+    .filter((term) => term !== "");
+
+/** A recording's audio no other test sends, so what reached OpenAI with it is this test's. */
+const newAudio = (): string => `${marker}-${unique()}${"x".repeat(2000)}`;
+
+let monthsUsed = 0;
+
+/** A month no other test counts spend in: from 2900, clear of other files. */
+const newMonth = (): string => {
+  monthsUsed += 1;
+  return `${2900 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
+};
+
+/** What `run` returns with model spend counted in `month`. */
+const hearing = async <T>(
+  run: () => Promise<T>,
+  { month }: { month?: string } = {}
+): Promise<T> => {
+  const before = env.SPEND_MONTH;
+  if (month !== undefined) {
+    env.SPEND_MONTH = month;
+  }
+  try {
+    return await run();
+  } finally {
+    env.SPEND_MONTH = before;
+  }
+};
+
+/** What `seconds` heard cost, in micros: $0.60 an hour. */
+const heardMicros = (seconds: number): number =>
+  Math.round(((seconds * 0.6) / 3600) * 1e6);
+
+/** What the organization's keys spent in `month`: nothing heard counts there. */
+const deploymentSpend = async (month: string) => await spentMicros(month);
+
+/** What Grasp's own key spent in `month`: what was heard counts there. */
+const graspSpend = async (month: string) =>
+  await spentMicros(month, { credential: "platform" });
+
+/** The gateway's audit events for recordings after `head`, as these tests read them. */
+const gatewayEvents = async (head: number) => {
+  const events = await eventsAfter(head);
+  return events
+    .filter(({ detail }) => detail?.purpose === "onboarding.hear")
+    .map(({ action, actor, model, cost, detail }) => ({
+      action,
+      actor,
+      model: model?.model,
+      cost: cost?.amount,
+      seconds: detail?.seconds,
+      outcome: detail?.outcome,
+      reason: detail?.reason,
+    }));
+};
+
+/** What the page sends: a body, with the browser's session cookie. */
+interface Sent {
+  body: FormData | string;
+  cookie: string;
+}
+
+/** A recording as the page sends it, with the link and what it measured. */
+const recording = (
+  link: Device,
+  { seconds = "2.4", audio = newAudio(), type = "audio/webm" } = {}
+): Sent & { body: FormData } => {
+  const form = new FormData();
+  form.set("secret", link.secret);
+  form.set("locale", "en");
+  form.set("seconds", seconds);
+  form.set("audio", new File([audio], "stretch", { type }));
+  return { body: form, cookie: link.cookie };
+};
+
+const hear = async ({ body, cookie }: Sent): Promise<Response> =>
+  await routed(interviewHearPath, {
+    method: "POST",
+    headers: { cookie, "sec-fetch-site": "same-origin" },
+    body,
+  });
+
+/** Seconds the onboarding counted as heard for interviews. */
+const heardCounted = async (): Promise<number> => {
+  const rows = await onboardingStore(env).usage();
+  return rows
+    .filter(
+      (row) => row.purpose === "interviews" && row.model === "transcription"
+    )
+    .reduce((sum, { seconds }) => sum + seconds, 0);
+};
+
+/** Bytes as text, so a recording written anywhere as text or bytes shows. */
+const asText = (value: unknown): string =>
+  JSON.stringify(value, (_key, inner: unknown) =>
+    inner instanceof ArrayBuffer ? new TextDecoder().decode(inner) : inner
+  );
+
+/** Tables SQLite and the runtime keep for themselves. */
+const ownTable = /^(?:_cf|sqlite_|d1_)/u;
+
+/** Everything the onboarding's store and the database hold, as text. */
+const everythingStored = async (): Promise<string> => {
+  const stored = await runInDurableObject(
+    onboardingStore(env),
+    (_object, state) =>
+      state.storage.sql
+        .exec<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+        .toArray()
+        .filter(({ name }) => !ownTable.test(name))
+        .map(({ name }) =>
+          asText(state.storage.sql.exec(`SELECT * FROM "${name}"`).toArray())
+        )
+        .join("\n")
+  );
+  const { results } = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table'"
+  ).all<{ name: string }>();
+  const tables = await Promise.all(
+    results
+      .filter(({ name }) => !ownTable.test(name))
+      .map(async ({ name }) => {
+        const { results: rows } = await env.DB.prepare(
+          `SELECT * FROM "${name}"`
+        ).all();
+        return asText(rows);
+      })
+  );
+  return [stored, ...tables, asText(await allEvents())].join("\n");
+};
+
+/** The company's name, as the deployment's organization has it. */
+const companyNamed = async (): Promise<string> => {
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+  )
+    .bind(Date.now())
+    .run();
+  const row = await env.DB.prepare(
+    "SELECT name FROM organizations LIMIT 1"
+  ).first<{ name: string }>();
+  return row?.name ?? "";
+};
+
+describe(
+  "a recording written down on someone's link",
+  { timeout: 60_000 },
+  () => {
+    it("writes a link's recording down through the gateway, keeps nothing of it, and counts its seconds", async () => {
+      const { link } = await openedFor();
+      const before = await heardCounted();
+      const audio = newAudio();
+      const result = await hearing(async () => {
+        const response = await hear(recording(link, { audio }));
+        return { status: response.status, body: await response.json() };
+      });
+      const [request] = await askedWith(audio);
+      const stored = await everythingStored();
+      expect({
+        result,
+        path: request?.path,
+        model: request?.fields.model,
+        language: request?.fields.language,
+        file: request?.file,
+        counted: (await heardCounted()) - before,
+        kept: stored.includes(marker),
+      }).toStrictEqual({
+        result: { status: 200, body: { heard: writtenText } },
+        path: "/v1/audio/transcriptions",
+        model: ["gpt-4o-transcribe"],
+        language: ["en"],
+        file: audio.length,
+        counted: 2.4,
+        kept: false,
+      });
+      // Grasp's key from connect alone, once, to OpenAI.
+      await expect(keyPlaces(audio, platformOpenAiKey)).resolves.toStrictEqual({
+        hosts: ["eu.api.openai.com"],
+        headers: ["authorization"],
+        inBody: false,
+        placeholder: false,
+      });
+    });
+
+    it.each([
+      ["Chrome's WebM with Opus", "audio/webm;codecs=opus", "stretch.webm"],
+      ["Firefox's Ogg with Opus", "audio/ogg;codecs=opus", "stretch.ogg"],
+      ["Safari's MP4 with AAC", "audio/mp4", "stretch.mp4"],
+      ["an M4A recording", "audio/x-m4a", "stretch.m4a"],
+      ["a WAV recording", "audio/wav", "stretch.wav"],
+    ])(
+      "sends %s under a name whose extension OpenAI reads its format by",
+      async (_, type, name) => {
+        const { link } = await openedFor();
+        const audio = newAudio();
+        const status = await hearing(async () => {
+          const response = await hear(recording(link, { audio, type }));
+          await response.body?.cancel();
+          return response.status;
+        });
+        const [request] = await askedWith(audio);
+        expect({ status, name: request?.fileName }).toStrictEqual({
+          status: 200,
+          name,
+        });
+      }
+    );
+
+    it("refuses a recording of a type OpenAI can't take, sending nothing", async () => {
+      const { link } = await openedFor();
+      const audio = newAudio();
+      const refusal = await hearing(
+        async () =>
+          await codeOf(
+            await hear(recording(link, { audio, type: "audio/aac" }))
+          )
+      );
+      expect({ refusal, sent: await sentCount(audio) }).toStrictEqual({
+        refusal: [400, "hear.invalid"],
+        sent: 0,
+      });
+    });
+
+    it("listens out for the company, the team's names, the company's own words and its tools, at most 30, never the page's", async () => {
+      const company = await companyNamed();
+      const store = onboardingStore(env);
+      await store.saveStephen(
+        {
+          languages: ["en"],
+          limits: [],
+          terms: ["Kostenstelle", "Dreiwegeabgleich"],
+        },
+        { type: "system" }
+      );
+      const { link } = await openedFor();
+      const audio = newAudio();
+      const form = recording(link, { audio });
+      form.body.append("keyterms", "Injected");
+      const result = await hearing(async () => {
+        const response = await hear(form);
+        return response.status;
+      });
+      const [asked] = await askedWith(audio);
+      const terms = termsOf(asked);
+      expect({
+        result,
+        // The roster's own: Oli Olsen, in Ops.
+        named: [
+          "Oli",
+          "Ops",
+          company,
+          "Kostenstelle",
+          "Dreiwegeabgleich",
+        ].every((term) => terms.includes(term)),
+        injected: terms.includes("Injected"),
+        atMost30: terms.length <= 30,
+      }).toStrictEqual({
+        result: 200,
+        named: true,
+        injected: false,
+        atMost30: true,
+      });
+    });
+
+    it("listens out for no more than 30 words, however many the company has", async () => {
+      await onboardingStore(env).saveStephen(
+        {
+          languages: ["en"],
+          limits: [],
+          terms: Array.from({ length: 40 }, (_, at) => `Term${at}`),
+        },
+        { type: "system" }
+      );
+      const { link } = await openedFor();
+      const audio = newAudio();
+      await hearing(async () => await hear(recording(link, { audio })));
+      const [asked] = await askedWith(audio);
+      expect(termsOf(asked)).toHaveLength(30);
+    });
+
+    it.each([
+      ["an unknown link", "unknown", [404, "interview.link_invalid"]],
+      ["nobody signed in", "signedOut", [401, "interview.sign_in"]],
+      [
+        "someone else signed in",
+        "someoneElse",
+        [404, "interview.link_invalid"],
+      ],
+      ["no recording", "noAudio", [400, "hear.invalid"]],
+      ["a recording too large", "tooLarge", [400, "hear.invalid"]],
+      ["not a form", "notForm", [400, "hear.invalid"]],
+    ] as const)(
+      "refuses %s, with nothing sent to the gateway",
+      async (_name, kind, refusal) => {
+        const { link } = await openedFor();
+        const someoneElse = await signedInAs(`someone-${unique()}@acme.test`);
+        const audio = newAudio();
+        const bodies: Record<typeof kind, () => Sent> = {
+          unknown: () =>
+            recording({ ...link, secret: "a".repeat(43) }, { audio }),
+          signedOut: () => ({ ...recording(link, { audio }), cookie: "" }),
+          someoneElse: () => ({
+            ...recording(link, { audio }),
+            cookie: someoneElse,
+          }),
+          noAudio: () => {
+            const sent = recording(link, { audio });
+            sent.body.delete("audio");
+            return sent;
+          },
+          tooLarge: () =>
+            recording(link, { audio: `${audio}${"x".repeat(1024 * 1024)}` }),
+          notForm: () => ({
+            body: JSON.stringify({ secret: link.secret, audio }),
+            cookie: link.cookie,
+          }),
+        };
+        const result = await hearing(
+          async () => await codeOf(await hear(bodies[kind]()))
+        );
+        expect({
+          result,
+          sent: await sentCount(audio),
+        }).toStrictEqual({
+          result: refusal,
+          sent: 0,
+        });
+      }
+    );
+
+    it("refuses a link that heard all it may today", async () => {
+      const { link, person } = await openedFor();
+      await onboardingStore(env).countHeard(
+        `link:${person}:heard`,
+        "interviews",
+        heardBudgets.link
+      );
+      const audio = newAudio();
+      const result = await hearing(
+        async () => await codeOf(await hear(recording(link, { audio })))
+      );
+      expect({
+        result,
+        sent: await sentCount(audio),
+      }).toStrictEqual({
+        result: [429, "hear.limited"],
+        sent: 0,
+      });
+    });
+
+    it("says when the upstream failed", async () => {
+      const { link } = await openedFor();
+      const failed = newAudio();
+      await plan(platformOpenAiKey, [{ status: 500 }]);
+      const failing = await hearing(
+        async () => await codeOf(await hear(recording(link, { audio: failed })))
+      );
+      expect(failing).toStrictEqual([502, "hear.failed"]);
+    });
+
+    it("charges what was heard to Grasp's own key, never to the deployment's spend", async () => {
+      const { link } = await openedFor();
+      const month = newMonth();
+      const head = await logHead();
+      const audio = { first: newAudio(), second: newAudio() };
+      const result = await hearing(
+        async () => {
+          const first = await hear(
+            recording(link, { seconds: "29.2", audio: audio.first })
+          );
+          const second = await hear(
+            recording(link, { seconds: "30", audio: audio.second })
+          );
+          return {
+            first: first.status,
+            second: second.status,
+            deployment: await deploymentSpend(month),
+            grasp: await graspSpend(month),
+          };
+        },
+        { month }
+      );
+      const sent = await Promise.all(
+        Object.values(audio).map(async (one) => await sentCount(one))
+      );
+      const heardEvent = {
+        action: "model.call",
+        actor: { type: "system" },
+        model: "gpt-4o-transcribe",
+        cost: (30 * 0.6) / 3600,
+        seconds: 30,
+        outcome: "answered",
+        reason: undefined,
+      };
+      expect({
+        ...result,
+        sent,
+        events: await gatewayEvents(head),
+      }).toStrictEqual({
+        first: 200,
+        second: 200,
+        deployment: 0,
+        // Whole seconds, rounded up.
+        grasp: 2 * heardMicros(30),
+        sent: [1, 1],
+        events: [heardEvent, heardEvent],
+      });
+    });
+  }
+);

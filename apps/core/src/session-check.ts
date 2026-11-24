@@ -1,0 +1,103 @@
+import { roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+
+/**
+ * Who is behind the connection, as its latest reading says (at most
+ * {@link sessionRecheckMs} old); throws once the session has ended.
+ */
+export type SessionCheck = (() => Promise<Identity>) & {
+  /**
+   * Drops the latest reading, so the next check reads who is behind the
+   * connection now: for when core learns their role or teams may have
+   * changed (query-subscriptions.ts). A check that keeps no reading has
+   * none.
+   */
+  readonly forget?: () => void;
+};
+
+/**
+ * Runs `run` as the person behind the session: checks it first and hands
+ * over the identity that check returned, so nothing reaches the person
+ * without the check, or with an identity a method kept for itself.
+ */
+export const withPerson = async <T>(
+  check: SessionCheck,
+  run: (person: Identity) => T | Promise<T>
+): Promise<T> => await run(await check());
+
+/**
+ * Whether `person` may act inside the client's workspace: a member, never
+ * a Grasp staff session (`sessionIdentity`), which reaches the onboarding
+ * alone. Asked of the staff mark itself too, so a staff identity that
+ * somehow lacks `onboardingOnly` is still refused.
+ */
+export const reachesWorkspace = (
+  person: Pick<Identity, "staff" | "onboardingOnly">
+): boolean => !(person.staff || person.onboardingOnly === true);
+
+/**
+ * `check`, refusing Grasp staff with `role.forbidden`: what every
+ * namespace but the onboarding's checks with. A staff session manages a
+ * deployment and never acts inside the client's workspace
+ * (`sessionIdentity`); a staff member added as a member signs in as one.
+ */
+export const fullAccess = (check: SessionCheck): SessionCheck =>
+  Object.assign(
+    async (): Promise<Identity> => {
+      const person = await check();
+      if (!reachesWorkspace(person)) {
+        throw roleErrors.create("role.forbidden");
+      }
+      return person;
+    },
+    {
+      forget: (): void => {
+        check.forget?.();
+      },
+    }
+  );
+
+/**
+ * How long one reading of who is behind a connection holds. It is read
+ * again at most this often, whatever the connection does (rpc.ts): a
+ * revoked or expired session, a removal, a changed role or team, or a
+ * closed staff window reaches an open connection within this long, its
+ * calls and what is pushed to it alike. A new connection always reads now.
+ */
+export const sessionRecheckMs = 5000;
+
+/**
+ * `read`, run again at most every `ms` and shared by everyone who asks
+ * meanwhile: so a stream of calls or pushes costs a reading every few
+ * seconds, not one each. A reading that fails isn't kept: the next ask
+ * reads again, and so does the next ask once `forget` dropped the latest.
+ */
+export const recheckedEvery = <T>(
+  ms: number,
+  read: () => Promise<T>
+): (() => Promise<T>) & { forget: () => void } => {
+  let latest: { value: Promise<T>; until: number } | undefined;
+  return Object.assign(
+    async (): Promise<T> => {
+      const now = Date.now();
+      if (latest !== undefined && latest.until > now) {
+        return await latest.value;
+      }
+      const reading = { value: read(), until: now + ms };
+      latest = reading;
+      try {
+        return await reading.value;
+      } catch (error) {
+        if (latest === reading) {
+          latest = undefined;
+        }
+        throw error;
+      }
+    },
+    {
+      forget: (): void => {
+        latest = undefined;
+      },
+    }
+  );
+};

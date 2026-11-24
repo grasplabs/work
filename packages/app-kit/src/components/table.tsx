@@ -1,0 +1,168 @@
+import { watchEnds } from "@grasp-os/app-kit/lib/row-ends";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import * as React from "react";
+
+// A table with more columns than its room moves sideways inside itself, never the page. The
+// side with more columns behind it fades (`watchEnds` marks it), since nothing else would say so.
+// `card`: the table stands in a card of its own, as the prototype's lists do.
+function Table({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"table"> & { variant?: "default" | "card" }) {
+  return (
+    <div
+      data-slot="table-container"
+      data-variant={variant}
+      ref={watchEnds}
+      className={cn(
+        "relative w-full overflow-x-auto data-more-end:mask-r-from-[calc(100%-2.5rem)] data-more-start:mask-l-from-[calc(100%-2.5rem)]",
+        variant === "card" && "bg-card rounded-xl border"
+      )}
+    >
+      <table
+        data-slot="table"
+        className={cn("w-full caption-bottom text-sm", className)}
+        {...props}
+      />
+    </div>
+  );
+}
+
+function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
+  return (
+    <thead
+      data-slot="table-header"
+      className={cn("[&_tr]:border-b", className)}
+      {...props}
+    />
+  );
+}
+
+function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
+  return (
+    <tbody
+      data-slot="table-body"
+      className={cn("[&_tr:last-child]:border-0", className)}
+      {...props}
+    />
+  );
+}
+
+function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
+  return (
+    <tfoot
+      data-slot="table-footer"
+      className={cn(
+        "bg-muted/50 border-t font-medium [&>tr]:last:border-b-0",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
+  return (
+    <tr
+      data-slot="table-row"
+      className={cn(
+        "hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+/*
+ * `card`: a table in a card of its own, as the Grasp design lists
+ * workflows and runs: wider cells, and quiet column names.
+ * `section`: a table in a section of a card whose rows start 1.25rem in,
+ * as Settings lists them: its first and last columns line up with them.
+ */
+function TableHead({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"th"> & { variant?: "default" | "card" | "section" }) {
+  return (
+    <th
+      data-slot="table-head"
+      data-variant={variant}
+      className={cn(
+        "h-10 text-left align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        variant === "card" && "text-muted-foreground px-4 font-normal",
+        variant === "section" &&
+          "text-muted-foreground px-2 font-normal first:px-5 last:pr-5",
+        variant === "default" && "text-foreground px-2 font-medium",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * `card` and `section` as for `TableHead`; `roomy` also gives each row more
+ * height, and `compact` and `comfortable` less or more, for a table whose
+ * reader picks its row height. `end` is a row's last, narrow cell (its
+ * chevron or menu).
+ */
+function TableCell({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"td"> & {
+  variant?:
+    | "default"
+    | "card"
+    | "roomy"
+    | "section"
+    | "compact"
+    | "comfortable"
+    | "end";
+}) {
+  return (
+    <td
+      data-slot="table-cell"
+      data-variant={variant}
+      className={cn(
+        "align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        variant === "default" && "p-2",
+        variant === "card" && "px-4 py-2",
+        variant === "roomy" && "px-4 py-3",
+        variant === "section" && "p-2 first:px-5 last:pr-5",
+        variant === "compact" && "px-4 py-1.5",
+        variant === "comfortable" && "px-4 py-5",
+        variant === "end" && "py-2 pr-3 pl-2",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+function TableCaption({
+  className,
+  ...props
+}: React.ComponentProps<"caption">) {
+  return (
+    <caption
+      data-slot="table-caption"
+      className={cn("text-muted-foreground mt-4 text-sm", className)}
+      {...props}
+    />
+  );
+}
+
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableCaption,
+};

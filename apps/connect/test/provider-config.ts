@@ -1,0 +1,51 @@
+/**
+ * The tenants and Grasp's OAuth apps the fake providers know, in connect's
+ * tests and in core's, which run the real connect. Imported by the vite
+ * configs (Node) and the tests (workerd), so it only holds data.
+ */
+export const acmeTenant = "11111111-1111-4111-8111-111111111111";
+export const otherTenant = "33333333-3333-4333-8333-333333333333";
+export const acmeDomain = "acme.test";
+
+/** Grasp's apps at the providers, as set on connect in the tests. */
+export const clients = {
+  microsoft: { id: "grasp-connect-entra", secret: "entra-connect-secret" },
+  google: { id: "grasp-connect-google", secret: "google-connect-secret" },
+  /** The directory's own Entra app and Google client. */
+  microsoftDirectory: {
+    id: "grasp-directory-entra",
+    secret: "entra-directory-secret",
+  },
+  googleDirectory: {
+    id: "grasp-directory-google",
+    secret: "google-directory-secret",
+  },
+  /** The documents' own Entra app and Google client. */
+  microsoftDocuments: {
+    id: "grasp-documents-entra",
+    secret: "entra-documents-secret",
+  },
+  googleDocuments: {
+    id: "grasp-documents-google",
+    secret: "google-documents-secret",
+  },
+} as const;
+
+/** Grasp's key for Composio, as set on connect in the tests. */
+export const testComposioKey = "test-composio-key";
+
+/**
+ * The client's own Teams bot, as set on connect in the tests: its Entra
+ * app, in the client's tenant, and its secret, which test/bot-connector.ts
+ * knows.
+ */
+export const teamsBot = {
+  id: "acme-teams-bot",
+  tenant: acmeTenant,
+  secret: "acme-teams-bot-secret",
+} as const;
+
+/** Grasp's apps at the apps that aren't suites, as test/app-provider.ts knows them. */
+export const appClients = {
+  "sample-oauth": { id: "grasp-sample-oauth", secret: "sample-oauth-secret" },
+} as const;

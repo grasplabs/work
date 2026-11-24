@@ -1,0 +1,1108 @@
+import { aiGrantHeader } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderKey,
+  AiProviderRoutes,
+} from "@grasp-os/shared/ai-providers";
+import type { WebhookOutcome } from "@grasp-os/shared/app-webhooks";
+import type { OutboxedAuditEvent } from "@grasp-os/shared/audit";
+import {
+  capabilityErrors,
+  verifyCapability,
+} from "@grasp-os/shared/capability";
+import type { CapabilityClaims } from "@grasp-os/shared/capability";
+import type { ChannelSigningKeys } from "@grasp-os/shared/channel-keys";
+import {
+  confirmActionSchema,
+  connectCallSchema,
+  connectErrors,
+  declineActionSchema,
+  heldOutcomeRequestSchema,
+  markTaken,
+} from "@grasp-os/shared/connect";
+import type {
+  ActionShape,
+  Catalog,
+  CatalogLogo,
+  CatalogTool,
+  ConnectorContract,
+  NativeOperation,
+  ConnectApi,
+  ConnectCall,
+  ConnectionOwner,
+  PersonalAccount,
+  ConnectionPerson,
+  ConnectionSummary,
+  OrganizationConnection,
+  ConnectResult,
+  Disconnect,
+  RequireClassRights,
+  DisconnectPersonal,
+  RevocationByHand,
+  RevocationsByHand,
+  ErasePersonal,
+  FinishConnection,
+  HeldCall,
+  HeldIn,
+  HeldOutcome,
+  OutboxedConnectorEvent,
+  PendingAction,
+  StartConnection,
+  ConnectWithKey,
+  StartToolkitConnection,
+  ToolkitKeyField,
+  ToolkitKeyFieldsRequest,
+  ConnectToolkitWithKey,
+  ChangeToolkitTools,
+  UnknownOutcome,
+  UnknownOutcomeListing,
+} from "@grasp-os/shared/connect";
+import type {
+  DirectoryConnection,
+  DirectoryDeletedRead,
+  DirectoryGroupRead,
+  DirectoryGroupSearch,
+  DirectoryLookup,
+  DirectoryRead,
+} from "@grasp-os/shared/directory";
+import type {
+  PlaceFile,
+  PlaceItemsRead,
+  PlacesConnection,
+  PlacesRead,
+} from "@grasp-os/shared/document-places";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import type { ErrorPayload } from "@grasp-os/shared/errors";
+import type { HrConnection, HrRead } from "@grasp-os/shared/hr";
+import { errorFields, log } from "@grasp-os/shared/log";
+import type {
+  NpmAdvisories,
+  NpmMalwareReports,
+  NpmMetadata,
+} from "@grasp-os/shared/packages";
+import type {
+  SyncPage,
+  SyncPlaceChoices,
+  SyncPlaces,
+  SyncSourcePage,
+} from "@grasp-os/shared/sync";
+import type { ClockRegistration } from "@grasp-os/workerflow/clock";
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+import {
+  aiProviderRoutes,
+  listAiProviderKeys,
+  modelFetch,
+  modelSocket,
+  removeAiProviderKey,
+  saveAiProviderKey,
+} from "./ai-providers.ts";
+import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
+import type { CallOutcome, CallRecord } from "./audit.ts";
+import {
+  carryOut,
+  connectionFor,
+  heldOutcome,
+  requireHeldFiles,
+} from "./call.ts";
+import type { CallDone, CallProgress } from "./call.ts";
+import { catalog, catalogTools } from "./catalog.ts";
+import { keptChange } from "./changes.ts";
+import { channelSigningKeys } from "./channel-keys.ts";
+import { channelFetch } from "./channels.ts";
+import { requireClassRights } from "./class-rights.ts";
+import { clock } from "./clock.ts";
+import {
+  finishToolkitFlow,
+  changeToolkitTools,
+  connectToolkitWithKey,
+  startToolkitConnection,
+  toolkitKeyFields,
+} from "./composio-connections.ts";
+import { connectionOwners, personalAccounts } from "./connections.ts";
+import {
+  actionShape,
+  connectorContract,
+  connectorContracts,
+  nativeOperation,
+} from "./contracts.ts";
+import { requireDecision } from "./decisions.ts";
+import {
+  readDirectoryGroup,
+  searchDirectoryGroups,
+} from "./directory-groups.ts";
+import {
+  directoryConnections,
+  lookUpInDirectory,
+  readDeletedDirectoryUsers,
+  readDirectory,
+} from "./directory.ts";
+import {
+  placesConnections,
+  readPlaceFile,
+  readPlaceItems,
+  readPlaces,
+} from "./document-places.ts";
+import {
+  ackConnectorEvents,
+  syncEventSources,
+  takeConnectorEvents,
+} from "./events.ts";
+import { hrConnections, readHr } from "./hr.ts";
+import { createHttpConnection } from "./http-connections.ts";
+import { catalogLogo } from "./logos.ts";
+import {
+  npmAdvisories,
+  npmMalwareReports,
+  npmMetadata,
+  npmTarball,
+} from "./npm.ts";
+import {
+  abandonFlow,
+  connectWithKey,
+  disconnect,
+  disconnectPersonal,
+  finishConnection,
+  listConnections,
+  organizationConnections,
+  startConnection,
+} from "./oauth.ts";
+import {
+  listAllUnknownOutcomes,
+  listUnknownOutcomes,
+  refuseResolution,
+  resolveOutcome,
+  unknownOutcomeFor,
+  unresolvedUnder,
+} from "./outcomes.ts";
+import {
+  anyPending,
+  auditRefusedDecision,
+  callOf,
+  decidedCallOf,
+  dropForEndedRun,
+  dropForBinding,
+  dropForEndedRuns,
+  dropForRemovedApp,
+  dropStaleBinding,
+  heldFor,
+  declineChatActions,
+  heldCall,
+  listPendingActions,
+  pendingActionFor,
+  refuseConfirmation,
+  refuseEnded,
+  take,
+} from "./pending.ts";
+import type { HeldAction } from "./pending.ts";
+import { beginErasure, erasePersonal } from "./person-erasure.ts";
+import { probeBindings } from "./probe.ts";
+import { readReaderGroups } from "./reader-groups.ts";
+import { revocationsByHand } from "./revocations-by-hand.ts";
+import {
+  listSyncPlaces,
+  listSyncSources,
+  pickSyncPlaces,
+  readSyncPage,
+  syncPlaceChoices,
+} from "./sync.ts";
+import { webhookPost } from "./webhooks.ts";
+
+// The egress handler of native connectors' isolates (src/connectors.ts).
+export { ConnectorEgress } from "./egress.ts";
+
+/**
+ * The keys a capability may be made with: the current, then the previous.
+ *
+ * Rotating the signing key: set the old one as
+ * `CAPABILITY_SIGNING_KEY_PREVIOUS` on connect, then the new one as
+ * `CAPABILITY_SIGNING_KEY` on connect and core (core always signs with the
+ * current key), then remove the previous one. Optional, so it isn't in
+ * `secrets.required`.
+ */
+const signingKeys = (env: Env): string[] =>
+  [env.CAPABILITY_SIGNING_KEY, env.CAPABILITY_SIGNING_KEY_PREVIOUS].filter(
+    (key): key is string => typeof key === "string" && key !== ""
+  );
+
+/** How a call that threw ended, for the audit log. */
+const outcomeOf = (code: string | undefined): CallOutcome => {
+  switch (code) {
+    case "connect.outcome_unknown": {
+      return "unknown";
+    }
+    case "connect.action_failed":
+    case "connect.server_unavailable":
+    case undefined: {
+      return "failed";
+    }
+    default: {
+      return "refused";
+    }
+  }
+};
+
+/**
+ * Records a call that didn't go through. If even that fails, it is logged:
+ * the caller learns why its call failed, not why its event did.
+ */
+const auditFailure = async (env: Env, record: CallRecord): Promise<void> => {
+  try {
+    await auditCall(env, record);
+  } catch (error) {
+    log.error("audit.record_failed", errorFields(error));
+  }
+};
+
+/** How a call that returned ended, for the audit log. */
+const callOutcome = ({
+  failed,
+  replayed,
+  pending,
+  reconciled,
+}: CallDone): CallOutcome => {
+  if (pending !== undefined) {
+    return "held";
+  }
+  // Recovered by finding the effect: the original's answer, not a send.
+  if (reconciled === true) {
+    return "reconciled";
+  }
+  if (replayed) {
+    return "replayed";
+  }
+  return failed ? "failed" : "ok";
+};
+
+type StatedCall = Omit<ConnectCall, "capability" | "input" | "attachments">;
+
+/** The call as the audit log states it: never its input or its files. */
+const statedOf = ({
+  input: _input,
+  attachments: _attachments,
+  ...stated
+}: Omit<ConnectCall, "capability">): StatedCall => stated;
+
+/** An expected error's details, such as a `retryAfterSeconds`, if any. */
+const detailsOf = (error: unknown): ErrorPayload["details"] =>
+  isExpectedError(error) ? error.details : undefined;
+
+/**
+ * `connect.outcome_unknown`, with `details`: a native connector's marked
+ * as waiting for its person to resolve it (`awaitsResolution`), so a
+ * workflow run waits on it. A Composio tool's error, whose text nobody is
+ * shown yet, fails the run's step instead.
+ */
+const unknownOutcome = (
+  progress: CallProgress,
+  details?: ErrorPayload["details"]
+): Error =>
+  connectErrors.create(
+    "connect.outcome_unknown",
+    progress.native === true ? { ...details, awaitsResolution: true } : details
+  );
+
+const codeOf = (error: unknown): string | undefined =>
+  connectErrors.codeOf(error) ?? capabilityErrors.codeOf(error);
+
+/**
+ * The connector layer. Every external call from agents, Apps and the
+ * knowledge indexer passes through here: scoped, approved, logged.
+ *
+ * Only core reaches it, over its service binding; it has no route and no
+ * public address. Even so it trusts no call on its own: each one carries a
+ * capability core made for exactly that call, and connect checks it first.
+ * Every call goes into the audit log, refused ones too.
+ */
+export { Clock } from "./clock.ts";
+
+export default class Connect
+  extends WorkerEntrypoint<Env>
+  implements ConnectApi
+{
+  /**
+   * Connect's health, and the one model request that can't go over RPC: a
+   * realtime WebSocket core's gateway decided, to the provider's own URL
+   * with its grant (`modelSocket`, src/ai-providers.ts).
+   */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.has(aiGrantHeader)) {
+      return await modelSocket(this.env, signingKeys(this.env), request);
+    }
+    const { pathname } = new URL(request.url);
+    if (pathname === "/health") {
+      return Response.json({ ok: true });
+    }
+    return new Response("Not found", { status: 404 });
+  }
+
+  /**
+   * Arms connect's clock if nothing has: core's clock asks every minute
+   * (core's src/clock.ts), the repair path that starts it on a new
+   * deployment and after anything cleared its alarm. Reports it as it
+   * left it, for the admin's provisioning probe (core's
+   * src/provision-probe.ts).
+   */
+  async ensureClock(): Promise<ClockRegistration> {
+    // As data, its call to the clock's object released here: handed on as
+    // it is, that call's result would carry its release on to core, which
+    // reads the answer and keeps nothing of it.
+    using registration = await clock(this.env).ensureRegistered();
+    const { armed, tasks } = registration;
+    return { armed, tasks };
+  }
+
+  /**
+   * Whether each of connect's private bindings answers a no-op, for the
+   * admin's provisioning probe, which core makes (src/probe.ts).
+   */
+  async probeBindings(): Promise<Record<string, boolean>> {
+    return await probeBindings(this.env);
+  }
+
+  /**
+   * The version answering, from its version metadata; null where there is
+   * none (plain workerd). Core names it to the admin's signed requests
+   * alone (core's src/provision-probe.ts): in a Workers for
+   * Platforms namespace, how the admin reads which version connect runs.
+   */
+  version(): string | null {
+    return this.env.CF_VERSION_METADATA?.id ?? null;
+  }
+
+  // The audit outbox (src/audit.ts). Core's clock takes the events
+  // connect recorded, appends them to the audit log, then acknowledges them,
+  // with those the log can't take, which connect moves aside.
+
+  async takeAuditEvents(held?: unknown): Promise<OutboxedAuditEvent[]> {
+    return await takeAuditEvents(this.env, held);
+  }
+
+  async ackAuditEvents(appended: unknown, rejected?: unknown): Promise<void> {
+    await ackAuditEvents(this.env, appended, rejected);
+  }
+
+  // Connector events (src/events.ts). Core's clock sends who
+  // listens where, then takes the events read, delivers them to workflows,
+  // and settles them.
+
+  async syncEventSources(listeners: unknown): Promise<void> {
+    await syncEventSources(this.env, listeners);
+  }
+
+  async takeConnectorEvents(): Promise<OutboxedConnectorEvent[]> {
+    return await takeConnectorEvents(this.env);
+  }
+
+  async ackConnectorEvents(ack: unknown): Promise<void> {
+    await ackConnectorEvents(this.env, ack);
+  }
+
+  // Connecting accounts (src/oauth.ts). Core calls these for a signed-in
+  // person, whom it names; none of them returns a token.
+
+  async startConnection(request: StartConnection): Promise<{ url: string }> {
+    return await startConnection(this.env, request);
+  }
+
+  async finishConnection(
+    request: FinishConnection
+  ): Promise<{ connectionId: string; returnTo: string }> {
+    return (
+      (await finishToolkitFlow(this.env, request)) ??
+      (await finishConnection(this.env, request))
+    );
+  }
+
+  async connectWithKey(
+    request: ConnectWithKey
+  ): Promise<{ connectionId: string }> {
+    return await connectWithKey(this.env, request);
+  }
+
+  async listConnections(
+    person: ConnectionPerson
+  ): Promise<ConnectionSummary[]> {
+    return await listConnections(this.env, person);
+  }
+
+  async organizationConnections(): Promise<OrganizationConnection[]> {
+    return await organizationConnections(this.env);
+  }
+
+  async connectionOwners(
+    connectionIds: readonly string[]
+  ): Promise<ConnectionOwner[]> {
+    return await connectionOwners(this.env.DB, connectionIds);
+  }
+
+  async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {
+    return await personalAccounts(this.env.DB, userId);
+  }
+
+  async readReaderGroups(request: unknown): Promise<{ read: number }> {
+    return { read: await readReaderGroups(this.env, request) };
+  }
+
+  async requireClassRights(
+    request: RequireClassRights
+  ): Promise<{ reconnect: number }> {
+    return await requireClassRights(this.env, request);
+  }
+
+  async disconnect(request: Disconnect): Promise<{ revoked: boolean }> {
+    return await disconnect(this.env, request);
+  }
+
+  /** The revokes at a provider connect couldn't make (src/revocations-by-hand.ts). */
+  async revocationsByHand(
+    request: RevocationsByHand
+  ): Promise<RevocationByHand[]> {
+    return await revocationsByHand(this.env, request);
+  }
+
+  async disconnectPersonal(
+    request: DisconnectPersonal
+  ): Promise<{ disconnected: number }> {
+    return await disconnectPersonal(this.env, request);
+  }
+
+  async erasePersonal(
+    request: ErasePersonal
+  ): Promise<{ connections: number }> {
+    return await erasePersonal(this.env, request);
+  }
+
+  async beginErasure(request: ErasePersonal): Promise<void> {
+    await beginErasure(this.env, request);
+  }
+
+  async abandonFlow(state: string): Promise<void> {
+    await abandonFlow(this.env, state);
+  }
+
+  // Connecting a Composio toolkit (src/composio-connections.ts), for an
+  // admin who consented; `finishConnection` finishes it.
+
+  async startToolkitConnection(
+    request: StartToolkitConnection
+  ): Promise<{ url: string }> {
+    return await startToolkitConnection(this.env, request);
+  }
+
+  // Connecting one that takes a key, with what the admin typed: no flow,
+  // nothing kept of the key (src/composio-connections.ts).
+
+  async toolkitKeyFields(
+    request: ToolkitKeyFieldsRequest
+  ): Promise<ToolkitKeyField[]> {
+    return await toolkitKeyFields(this.env, request);
+  }
+
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKey
+  ): Promise<{ connectionId: string }> {
+    return await connectToolkitWithKey(this.env, request);
+  }
+
+  async changeToolkitTools(
+    request: ChangeToolkitTools
+  ): Promise<{ tools: string[] }> {
+    return await changeToolkitTools(this.env, request);
+  }
+
+  // The npm registry (src/npm.ts): a package's metadata, and one
+  // version's tarball by its integrity hash, for core to resolve and
+  // unpack. Public data; nothing here is a client's.
+
+  // RPC exposes prototype methods only, so these can't be static.
+  // oxlint-disable-next-line class-methods-use-this
+  async npmMetadata(name: unknown): Promise<NpmMetadata> {
+    return await npmMetadata(name);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this
+  async npmTarball(request: unknown): Promise<Uint8Array> {
+    return await npmTarball(request);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this
+  async npmAdvisories(request: unknown): Promise<NpmAdvisories> {
+    return await npmAdvisories(request);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this
+  async npmMalwareReports(request: unknown): Promise<NpmMalwareReports> {
+    return await npmMalwareReports(request);
+  }
+
+  // A chat platform's signing keys (src/channel-keys.ts), for core to
+  // check that a request from the platform really comes from it. Public
+  // data; nothing here is a client's.
+
+  // oxlint-disable-next-line class-methods-use-this
+  async channelSigningKeys(platform: unknown): Promise<ChannelSigningKeys> {
+    return await channelSigningKeys(platform);
+  }
+
+  // The chat platforms (src/channels.ts): core's chat adapters send every
+  // request through here, and connect sends it on as the client's own bot.
+
+  async channelFetch(platform: unknown, request: unknown): Promise<Response> {
+    return await channelFetch(this.env, platform, request);
+  }
+
+  // A company's webhooks (src/webhooks.ts): core signs an App's event,
+  // connect sends it to the URL, checked again.
+
+  // HTTP connections (src/http-connections.ts): an admin approves an
+  // outside API's origin, paths, methods and credential, sealed here and
+  // never answered back; its calls go through `call` as any connection's.
+
+  async createHttpConnection(
+    request: unknown
+  ): Promise<{ connectionId: string }> {
+    return await createHttpConnection(this.env, request);
+  }
+
+  async webhookPost(post: unknown): Promise<WebhookOutcome> {
+    return await webhookPost(this.env, post);
+  }
+
+  // AI providers (src/ai-providers.ts): the organization's own keys,
+  // sealed here and never answered back, and every model request core's
+  // gateway decided, sent on with the credential its grant names.
+
+  async saveAiProviderKey(
+    request: unknown,
+    by: unknown
+  ): Promise<AiProviderKey> {
+    return await saveAiProviderKey(this.env, request, by);
+  }
+
+  async removeAiProviderKey(provider: unknown, by: unknown): Promise<boolean> {
+    return await removeAiProviderKey(this.env, provider, by);
+  }
+
+  async aiProviderKeys(): Promise<AiProviderKey[]> {
+    return await listAiProviderKeys(this.env);
+  }
+
+  async aiProviderRoutes(): Promise<AiProviderRoutes> {
+    return await aiProviderRoutes(this.env);
+  }
+
+  async modelFetch(
+    request: unknown,
+    grant: unknown,
+    stop?: unknown
+  ): Promise<Response> {
+    return await modelFetch(
+      this.env,
+      signingKeys(this.env),
+      request,
+      grant,
+      stop
+    );
+  }
+
+  // The catalog (src/catalog.ts): what can be connected.
+
+  async catalog(): Promise<Catalog> {
+    return await catalog(this.env);
+  }
+
+  async catalogTools(request: unknown): Promise<CatalogTool[]> {
+    return await catalogTools(this.env, request);
+  }
+
+  async catalogLogo(request: unknown): Promise<CatalogLogo | null> {
+    return await catalogLogo(this.env, request);
+  }
+
+  // The directory (src/directory.ts): for the onboarding, and to know the
+  // people writing to Stephen on a chat platform, in core, only.
+
+  async directoryConnections(): Promise<DirectoryConnection[]> {
+    return await directoryConnections(this.env);
+  }
+
+  async readDirectory(request: unknown): Promise<DirectoryRead> {
+    return await readDirectory(this.env, request);
+  }
+
+  async readDeletedDirectoryUsers(
+    request: unknown
+  ): Promise<DirectoryDeletedRead> {
+    return await readDeletedDirectoryUsers(this.env, request);
+  }
+
+  async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {
+    return await lookUpInDirectory(this.env, request);
+  }
+
+  // The directory's groups (src/directory-groups.ts): for an admin to map
+  // one to a team, and for the daily read to place its members.
+
+  async searchDirectoryGroups(request: unknown): Promise<DirectoryGroupSearch> {
+    return await searchDirectoryGroups(this.env, request);
+  }
+
+  async readDirectoryGroup(request: unknown): Promise<DirectoryGroupRead> {
+    return await readDirectoryGroup(this.env, request);
+  }
+
+  // The HR platform (src/hr.ts): for the onboarding, in core, only.
+
+  async hrConnections(): Promise<HrConnection[]> {
+    return await hrConnections(this.env);
+  }
+
+  async readHr(request: unknown): Promise<HrRead> {
+    return await readHr(this.env, request);
+  }
+
+  // Where the documents live (src/document-places.ts): for the
+  // onboarding, in core, only.
+
+  async placesConnections(): Promise<PlacesConnection[]> {
+    return await placesConnections(this.env);
+  }
+
+  async readPlaces(request: unknown): Promise<PlacesRead> {
+    return await readPlaces(this.env, request);
+  }
+
+  async readPlaceItems(request: unknown): Promise<PlaceItemsRead> {
+    return await readPlaceItems(this.env, request);
+  }
+
+  async readPlaceFile(request: unknown): Promise<PlaceFile> {
+    return await readPlaceFile(this.env, request);
+  }
+
+  // Native sync (src/sync.ts): one page of a source's changes, for core's
+  // sync run, which applies it to the Brain and keeps the cursor.
+
+  async readSyncPage(request: unknown): Promise<SyncPage> {
+    return await readSyncPage(this.env, request);
+  }
+
+  async syncSources(request: unknown): Promise<SyncSourcePage> {
+    return await listSyncSources(this.env, request);
+  }
+
+  /** The places of a connection's sync, each a source of its own. */
+  async listSyncPlaces(request: unknown): Promise<SyncPlaces> {
+    return await listSyncPlaces(this.env, request);
+  }
+
+  /**
+   * What an admin may pick for a shared connection's sync (shared drives,
+   * document libraries), a read at a time, each with whether it is picked;
+   * null when the connection has no sync of picked places.
+   */
+  async syncPlaceChoices(request: unknown): Promise<SyncPlaceChoices | null> {
+    return await syncPlaceChoices(this.env, request);
+  }
+
+  /** An admin's picks of a shared connection's places to sync. Audited. */
+  async pickSyncPlaces(
+    request: unknown
+  ): Promise<{ places: string[]; version: number }> {
+    return await pickSyncPlaces(this.env, request);
+  }
+
+  // Generated connector contracts (src/contracts.ts): what an App's
+  // connector resource is bound to and checked against.
+
+  async connectorContract(request: unknown): Promise<ConnectorContract> {
+    return await connectorContract(this.env, request);
+  }
+
+  async connectorContracts(request: unknown): Promise<string[]> {
+    return await connectorContracts(this.env, request);
+  }
+
+  /**
+   * Whether an action only reads, and the input it takes, as connect goes
+   * by them: what core checks a chat's write against before the call.
+   */
+  async actionShape(request: unknown): Promise<ActionShape> {
+    return await actionShape(this.env, request);
+  }
+
+  // A native action a host catalog contract describes by JSON Schema
+  // (GRA-982): confirmed from the release's manifests.
+
+  // RPC exposes prototype methods only, so this can't be static.
+  // oxlint-disable-next-line class-methods-use-this
+  async nativeOperation(request: unknown): Promise<NativeOperation> {
+    // Read from the manifests at once; awaited first, so what it throws
+    // is a rejection, as every other method's refusal is.
+    await Promise.resolve();
+    return nativeOperation(request);
+  }
+
+  // Held actions (src/pending.ts). Core names the person from their
+  // session; only they see and decide what waits for them.
+
+  async listPendingActions(
+    person: ConnectionPerson,
+    heldIn: HeldIn
+  ): Promise<PendingAction[]> {
+    return await listPendingActions(this.env, person, heldIn);
+  }
+
+  async refuseConfirmation(request: unknown): Promise<void> {
+    await refuseConfirmation(this.env, request);
+  }
+
+  async pendingAction(request: unknown): Promise<PendingAction | null> {
+    return await pendingActionFor(this.env, request);
+  }
+
+  async heldCall(request: unknown): Promise<HeldCall> {
+    return await heldCall(this.env, request);
+  }
+
+  /**
+   * How a held call ended, for a caller with core's capability for that
+   * call, checked as `call` checks one. Recorded as a call is, refused
+   * ones too: what it hands over as a repeat's answer (`replayed`), with
+   * what that read; still waiting as `held`; declined, or not ended well,
+   * as refused or failed with why.
+   */
+  async heldOutcome(request: unknown): Promise<HeldOutcome> {
+    const parsed = heldOutcomeRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      await auditFailure(this.env, {
+        outcome: "refused",
+        reason: "connect.invalid",
+      });
+      throw connectErrors.create("connect.invalid");
+    }
+    const { capability, ...call } = parsed.data;
+    let claims: CapabilityClaims | undefined;
+    let read: Awaited<ReturnType<typeof heldOutcome>>;
+    try {
+      claims = await verifyCapability(signingKeys(this.env), capability, call);
+      requireDecision(claims);
+      read = await heldOutcome(this.env, claims);
+    } catch (error) {
+      const reason = codeOf(error);
+      await auditFailure(this.env, {
+        call,
+        claims,
+        outcome: outcomeOf(reason),
+        reason: reason ?? "internal",
+      });
+      throw error;
+    }
+    const { outcome, pendingActionId } = read;
+    const ended = { call, claims, sideEffect: true, pendingActionId };
+    if (outcome.state === "done") {
+      await auditCall(this.env, {
+        ...ended,
+        outcome: "replayed",
+        replayed: true,
+        provenance: outcome.result.provenance,
+      });
+    } else if (outcome.state === "waiting") {
+      await auditCall(this.env, { ...ended, outcome: "held" });
+    } else {
+      const reason =
+        outcome.state === "declined" ? "connect.declined" : outcome.reason;
+      await auditCall(this.env, {
+        ...ended,
+        // A tool's own error is an answer, handed over as a repeat gets it.
+        outcome:
+          reason === "connect.action_failed" ? "replayed" : outcomeOf(reason),
+        reason,
+        // How it ended, read again: no send of its own.
+        replayed: true,
+      });
+    }
+    return outcome;
+  }
+
+  async dropForEndedRun(request: unknown): Promise<void> {
+    await dropForEndedRun(this.env, request);
+  }
+
+  async dropForEndedRuns(request: unknown): Promise<void> {
+    await dropForEndedRuns(this.env, request);
+  }
+
+  async dropForBinding(request: unknown): Promise<void> {
+    await dropForBinding(this.env, request);
+  }
+
+  async dropForRemovedApp(request: unknown): Promise<void> {
+    await dropForRemovedApp(this.env, request);
+  }
+
+  async dropStaleBinding(request: unknown): Promise<void> {
+    await dropStaleBinding(this.env, request);
+  }
+
+  async anyPending(request: unknown): Promise<boolean> {
+    return (
+      (await anyPending(this.env, request)) ||
+      (await unresolvedUnder(this.env, request))
+    );
+  }
+
+  // Calls of unknown outcome (src/outcomes.ts). Core names the person from
+  // their session; only they see and resolve what acted for them. An
+  // organization's own admins list everyone's, without what was sent.
+
+  async listUnknownOutcomes(
+    person: ConnectionPerson,
+    before?: string
+  ): Promise<UnknownOutcome[]> {
+    return await listUnknownOutcomes(this.env, person, before);
+  }
+
+  async listAllUnknownOutcomes(
+    admin: ConnectionPerson,
+    before?: string
+  ): Promise<UnknownOutcomeListing[]> {
+    return await listAllUnknownOutcomes(this.env, admin, before);
+  }
+
+  async unknownOutcome(request: unknown): Promise<UnknownOutcome | null> {
+    return await unknownOutcomeFor(this.env, request);
+  }
+
+  async resolveOutcome(request: unknown): Promise<void> {
+    await resolveOutcome(this.env, signingKeys(this.env), request);
+  }
+
+  async refuseResolution(request: unknown): Promise<void> {
+    await refuseResolution(this.env, request);
+  }
+
+  async declineChatActions(request: unknown): Promise<number> {
+    return await declineChatActions(this.env, request);
+  }
+
+  async declineAction(request: unknown): Promise<void> {
+    const parsed = declineActionSchema.safeParse(request);
+    if (!parsed.success) {
+      throw connectErrors.create("connect.invalid");
+    }
+    const { person, id, via } = parsed.data;
+    await take(
+      this.env,
+      person,
+      await heldFor(this.env, person, id, "decline", via),
+      "decline",
+      false,
+      via
+    );
+  }
+
+  /**
+   * Runs a held action its person confirmed: the stored call, exactly, on
+   * the normal path, once. Only with the capability core signed for
+   * confirming this action for this person, from their session, once it
+   * checked the permission and the context again; and only while the input
+   * is the one they were shown.
+   *
+   * What can still refuse it is checked before it is taken, so a refusal
+   * leaves it waiting and is recorded as refused, not confirmed: the
+   * capability, the input, and the connection (active, the person's to
+   * use, the same account). The call path checks them all
+   * again once it is taken, and those checks are the ones that count.
+   */
+  async confirmAction(request: unknown): Promise<ConnectResult> {
+    const parsed = confirmActionSchema.safeParse(request);
+    if (!parsed.success) {
+      throw connectErrors.create("connect.invalid");
+    }
+    const { capability, person, id, inputHash, via, attachments } = parsed.data;
+    const held = await heldFor(this.env, person, id, "confirm", via);
+    // Its day over: declined as expired, whatever the press carries.
+    await refuseEnded(this.env, person, held);
+    const call = callOf(held);
+    let claims: CapabilityClaims | undefined;
+    try {
+      claims = await verifyCapability(signingKeys(this.env), capability, call);
+      requireDecision(claims, {
+        decision: { kind: "confirm", pendingActionId: held.id },
+        person,
+        call: decidedCallOf(held),
+      });
+      if (inputHash !== held.inputHash) {
+        throw connectErrors.create("connect.pending_changed");
+      }
+      const connection = await connectionFor(
+        this.env,
+        claims,
+        call.connectionId,
+        held
+      );
+      // The files it attaches (GRA-887): only the bytes of the digests the
+      // person was shown, checked before the action is taken, so bytes
+      // that differ leave it waiting. None are kept with it.
+      await requireHeldFiles(connection, call, attachments);
+    } catch (error) {
+      await auditRefusedDecision(
+        this.env,
+        person,
+        "confirm",
+        id,
+        codeOf(error) ?? "internal",
+        held,
+        claims?.restricted,
+        via
+      );
+      throw error;
+    }
+    await take(this.env, person, held, "confirm", claims.restricted, via);
+    try {
+      return await this.#carryOutAudited(
+        attachments === undefined ? call : { ...call, attachments },
+        claims,
+        held
+      );
+    } catch (error) {
+      // Taken, and failed: said so, so core tells the action's chat. What
+      // went unexpectedly wrong is logged here, and goes as a failure.
+      if (!isExpectedError(error)) {
+        log.error("connect.confirmed_action_failed", errorFields(error));
+      }
+      throw markTaken(error);
+    }
+  }
+
+  async call(request: unknown): Promise<ConnectResult> {
+    const parsed = connectCallSchema.safeParse(request);
+    if (!parsed.success) {
+      await auditFailure(this.env, {
+        outcome: "refused",
+        reason: "connect.invalid",
+      });
+      throw connectErrors.create("connect.invalid");
+    }
+    const { capability, ...call } = parsed.data;
+    let claims: CapabilityClaims;
+    try {
+      claims = await verifyCapability(signingKeys(this.env), capability, call);
+      // A decision's capability decides its call through `confirmAction`
+      // or `resolveOutcome`, never anything here.
+      requireDecision(claims);
+    } catch (error) {
+      const reason = codeOf(error);
+      await auditFailure(this.env, {
+        call: statedOf(call),
+        outcome: outcomeOf(reason),
+        reason: reason ?? "internal",
+      });
+      throw error;
+    }
+    return await this.#carryOutAudited(call, claims);
+  }
+
+  /**
+   * Carries out a call whose capability is verified, or the held action
+   * `held` its person confirmed, and records it, refused ones too.
+   */
+  async #carryOutAudited(
+    call: Omit<ConnectCall, "capability">,
+    claims: CapabilityClaims,
+    held?: HeldAction
+  ): Promise<ConnectResult> {
+    const stated = statedOf(call);
+    let done: CallDone;
+    const progress: CallProgress = {};
+    try {
+      done = await carryOut(this.env, claims, call, progress, held);
+    } catch (error) {
+      let reason = codeOf(error);
+      // Once the key was claimed the call may have gone out: an error that
+      // is none of connect's own answers (spending or freeing the key
+      // failed, say) leaves its outcome unknown, never a plain failure.
+      const lost = progress.claimed === true && reason === undefined;
+      if (lost) {
+        log.error("connect.call_after_claim_failed", errorFields(error));
+        reason = "connect.outcome_unknown";
+      }
+      await auditFailure(this.env, {
+        call: stated,
+        claims,
+        // A repeat refused as its earlier call ended is of a side effect.
+        sideEffect: progress.replayed === true ? true : progress.sideEffect,
+        outcome: outcomeOf(reason),
+        reason: reason ?? "internal",
+        replayed: progress.replayed,
+        recovery: progress.recovery,
+        pendingActionId: held?.id,
+        http: progress.http,
+      });
+      throw reason === "connect.outcome_unknown"
+        ? unknownOutcome(progress, lost ? undefined : detailsOf(error))
+        : error;
+    }
+    // Nothing is returned, or stored for a repeat, that the audit log
+    // doesn't have: a side effect's answer is stored with its events. If
+    // that fails, the call happened but went unrecorded: its key is spent,
+    // and it is recorded, as far as possible, with an unknown outcome.
+    // What it changed is kept with its answer and events, its hash in them;
+    // preparing it comes after the call went out, so its failure is one of
+    // recording too.
+    const record: CallRecord = {
+      call: stated,
+      claims,
+      sideEffect: done.sideEffect,
+      outcome: callOutcome(done),
+      reason: done.failed ? "connect.action_failed" : undefined,
+      replayed: done.replayed,
+      recovery: done.recovery,
+      provenance: done.result.provenance,
+      provider: progress.provider,
+      pendingActionId: done.pending?.id ?? held?.id,
+      http: progress.http,
+    };
+    try {
+      const kept = await keptChange(this.env, claims, call, done.change);
+      await auditCall(this.env, { ...record, changeHash: kept.hash }, [
+        ...(done.commit === undefined ? [] : [done.commit]),
+        ...kept.writes,
+      ]);
+    } catch (error) {
+      log.error("audit.record_failed", errorFields(error));
+      await done.spend?.().catch((spendError: unknown) => {
+        log.error("idempotency.spend_failed", errorFields(spendError));
+      });
+      await auditFailure(this.env, {
+        ...record,
+        outcome: "unknown",
+        reason: "connect.outcome_unknown",
+      });
+      // Sent, unrecorded: as any lost answer, a native one waits for its
+      // person to resolve it.
+      throw unknownOutcome(progress);
+    }
+    if (done.failed) {
+      throw connectErrors.create("connect.action_failed", {
+        output: done.result.output,
+      });
+    }
+    if (done.pending === undefined) {
+      return done.keep === undefined
+        ? done.result
+        : { ...done.result, keep: done.keep };
+    }
+    // A run's step can't carry on with an answer that says "held": it ends
+    // as held, and core waits for the person's decision before running it
+    // again under the same key (workflows/host.ts), which then finds the
+    // answer, or `connect.declined`.
+    if (claims.authority.mode === "workflow") {
+      throw connectErrors.create("connect.held", {
+        pendingActionId: done.pending.id,
+      });
+    }
+    return { ...done.result, pending: done.pending };
+  }
+}

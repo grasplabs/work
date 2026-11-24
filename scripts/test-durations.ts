@@ -1,0 +1,170 @@
+// Records how long each test file takes, for the split between CI's
+// shards (scripts/test-shards.ts), from the shards' test-progress
+// artifacts (scripts/stall-reporter.ts writes them), of the merge
+// queue's last passing runs, which run every shard:
+//
+//   gh run list --workflow ci.yml --event merge_group --status success \
+//     --limit 5 --json databaseId -q '.[].databaseId' |
+//     xargs -I{} gh run download {} -p 'test-progress-*' -D runs/{}
+//   vp run test:durations runs/*/*/test-progress.log
+//
+// Several runs make it steadier: each file takes the median of the runs
+// it passed in. A run where a file failed a test gives it no time: a test
+// cut at its timeout, and again on its retry, is two timeouts, not the
+// file's time. Files the logs don't name keep the time they had. Rewrites
+// scripts/test-durations.json.
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { z } from "zod";
+
+import { aloneSeconds, byKey } from "./test-shards.ts";
+
+/**
+ * A project's name in a progress log: Vitest names a browser project's
+ * instance after its browser, with a space, as in
+ * `@grasp-os/app-kit:browser (chromium)`.
+ */
+const projectPattern = String.raw`(?<project>\S+(?: \([^)\s]+\))?)`;
+
+/** A finished test in a progress log: when, how it ended, how long it took, and its file and name. */
+const progressLine = new RegExp(
+  String.raw`^(?<at>\S+) (?<state>\S+)(?: (?<ms>\d+)ms)? ${projectPattern} (?<file>\S+) > `,
+  "u"
+);
+
+/** A finished file in a progress log: how long Vitest timed it, hooks included. */
+const fileLine = new RegExp(
+  String.raw`^\S+ file (?<ms>\d+)ms ${projectPattern} (?<file>\S+)$`,
+  "u"
+);
+
+/**
+ * Seconds per file, `<project> <file>`, as one progress log has them: from
+ * the start of its first test (when it finished, less its time) to when
+ * its last finished, which counts the hooks between its tests too (a
+ * fresh store, a sign-in), or the sum of its tests' times, or the file's
+ * own time when it has one, whichever is most. Only the file's own time
+ * counts its `beforeAll` and `afterAll`: the compiler's build tests spend
+ * half their time there, which the rest put at about half what they took.
+ * A file that failed a test in the log is left out: what it took there is
+ * no measure of what it takes.
+ */
+export const fileSecondsIn = (log: string): Map<string, number> => {
+  const files = new Map<string, { sum: number; from: number; to: number }>();
+  const fileMs = new Map<string, number>();
+  const failed = new Set<string>();
+  for (const line of log.split("\n")) {
+    const own = fileLine.exec(line)?.groups;
+    if (own !== undefined) {
+      const key = `${own.project} ${own.file}`;
+      fileMs.set(key, Math.max(fileMs.get(key) ?? 0, Number(own.ms)));
+      continue;
+    }
+    const match = progressLine.exec(line);
+    if (match?.groups === undefined) {
+      continue;
+    }
+    const { at, state, ms, project, file } = match.groups;
+    const key = `${project} ${file}`;
+    if (state === "failed") {
+      failed.add(key);
+    }
+    const took = Number(ms ?? 0);
+    const finished = Date.parse(at ?? "");
+    const seen = files.get(key) ?? {
+      sum: 0,
+      from: Number.POSITIVE_INFINITY,
+      to: Number.NEGATIVE_INFINITY,
+    };
+    seen.sum += took;
+    if (Number.isFinite(finished)) {
+      seen.from = Math.min(seen.from, finished - took);
+      seen.to = Math.max(seen.to, finished);
+    }
+    files.set(key, seen);
+  }
+  const keys = new Set(
+    [...files.keys(), ...fileMs.keys()].filter((key) => !failed.has(key))
+  );
+  return new Map(
+    [...keys].map((key) => {
+      const { sum = 0, from = 0, to = 0 } = files.get(key) ?? {};
+      return [
+        key,
+        Math.max(
+          sum,
+          Number.isFinite(from) ? to - from : 0,
+          fileMs.get(key) ?? 0
+        ) / 1000,
+      ];
+    })
+  );
+};
+
+/** The durations as the file keeps them: seconds per `<project> <file>`. */
+export const parseDurations = (json: string): Record<string, number> =>
+  z.record(z.string(), z.number()).parse(JSON.parse(json));
+
+const median = (values: readonly number[]): number => {
+  const sorted = values.toSorted((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? (sorted[middle] ?? 0)
+    : ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
+};
+
+/**
+ * `known` updated from `logs`: each file the logs name takes the median of
+ * its times in them, rounded to a tenth of a second; the rest keep theirs.
+ * A file the split runs on a shard of its own (`aloneSeconds`) keeps its
+ * time from a log of it alone: alone it runs faster than beside others,
+ * and that time would put it back beside them, where it slows again. The
+ * new Brain's leak test by meaning took 95 s alone and 261 s once the next
+ * split put it beside 76 other files (November 2026).
+ */
+export const updatedDurations = (
+  known: Readonly<Record<string, number>>,
+  logs: readonly string[]
+): Record<string, number> => {
+  const runs = new Map<string, number[]>();
+  for (const log of logs) {
+    const files = fileSecondsIn(log);
+    const [only] = files.keys();
+    if (files.size === 1 && (known[only ?? ""] ?? 0) >= aloneSeconds) {
+      continue;
+    }
+    for (const [key, seconds] of files) {
+      runs.set(key, [...(runs.get(key) ?? []), seconds]);
+    }
+  }
+  const durations = new Map(Object.entries(known));
+  for (const [key, seconds] of runs) {
+    durations.set(key, Math.round(median(seconds) * 10) / 10);
+  }
+  return Object.fromEntries([...durations].toSorted(([a], [b]) => byKey(a, b)));
+};
+
+/** Where the durations are kept. */
+export const durationsFile = fileURLToPath(
+  new URL("test-durations.json", import.meta.url)
+);
+
+if (import.meta.main) {
+  const logs = process.argv.slice(2);
+  if (logs.length === 0) {
+    console.error("Usage: vp run test:durations <test-progress.log>...");
+    process.exitCode = 1;
+  } else {
+    const known = parseDurations(readFileSync(durationsFile, "utf-8"));
+    const durations = updatedDurations(
+      known,
+      logs.map((log) => readFileSync(log, "utf-8"))
+    );
+    // Through a file of its own, so an interrupted write never leaves the
+    // sequencer, which reads this file, half a file.
+    const written = `${durationsFile}.tmp`;
+    writeFileSync(written, `${JSON.stringify(durations, null, 2)}\n`);
+    renameSync(written, durationsFile);
+  }
+}

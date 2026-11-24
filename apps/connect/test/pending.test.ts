@@ -1,0 +1,1846 @@
+import { signCapability } from "@grasp-os/shared/capability";
+import { connectErrors } from "@grasp-os/shared/connect";
+import type {
+  ConnectionPerson,
+  ConnectResult,
+  HeldCall,
+  PendingAction,
+} from "@grasp-os/shared/connect";
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import type { Authority } from "@grasp-os/shared/permissions";
+import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+import {
+  connections,
+  idempotentCalls,
+  pendingActions,
+} from "../src/db/schema.ts";
+import {
+  addConnection,
+  agentFor,
+  appFor,
+  auditEvents,
+  callAs,
+  chatOrigin,
+  outcome,
+  runMaintenance,
+  serverUrl,
+  someone,
+} from "./connect.ts";
+import type { Call, Signed } from "./connect.ts";
+import { fakeMcpServer } from "./mcp-server.ts";
+
+// Side effects held until the person they act for confirms them (threat
+// model R7, R12, CN7, CN8, CN15). The ways it can fail come first: a write
+// from chat, or from a context that read restricted data, runs before the
+// person confirms it; confirming twice runs it twice; someone else
+// confirms it (another member, Grasp staff, the agent itself with a
+// capability of its own); it runs after its connection was disconnected or
+// reconnected to another account, or with another input than the person
+// was shown; a confirmation for one App's or connection's action runs
+// another's; declining or dropping it leaves anything behind but its
+// event; a refusal is recorded as a confirmation.
+
+const server = fakeMcpServer(serverUrl, [
+  {
+    name: "mail.send",
+    run: ({ to }) => ({ output: { sent: to } }),
+  },
+  {
+    name: "mail.archive",
+    run: () => ({ output: { archived: true } }),
+  },
+]);
+
+const audit = auditEvents();
+
+/** An agent in chat, acting for `person`. */
+const inChat = (person: ConnectionPerson, agentId = "agent-chat"): Authority =>
+  agentFor(person.userId, agentId, "interactive");
+
+const mail = (connectionId: string, to = "ben@acme.test"): Call => ({
+  connectionId,
+  action: "mail.send",
+  input: { to, subject: "Invoice" },
+  idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+});
+
+/** Makes `call` from chat, as core signs it: the reference connect held. */
+const hold = async (
+  authority: Authority,
+  call: Call,
+  signed: Signed = {}
+): Promise<ConnectResult> =>
+  await callAs(authority, call, { origin: chatOrigin, ...signed });
+
+const waitingFor = async (person: ConnectionPerson): Promise<PendingAction[]> =>
+  await exports.default.listPendingActions(person, "grasp");
+
+/** The one held action waiting for `person`. */
+const heldFor = async (person: ConnectionPerson): Promise<PendingAction> => {
+  const [held, ...others] = await waitingFor(person);
+  if (held === undefined || others.length > 0) {
+    throw new Error("Expected one held action");
+  }
+  return held;
+};
+
+/**
+ * Confirms `held` as `person`, as core does: with a capability for the
+ * held call that confirms it, for `authority` (by default, the App or
+ * agent that asked, acting for `person`).
+ */
+const confirm = async (
+  person: ConnectionPerson,
+  held: PendingAction,
+  {
+    authority = inChat(person),
+    inputHash = held.inputHash,
+    signed = {},
+    call = {},
+  }: {
+    authority?: Authority;
+    inputHash?: string;
+    signed?: Signed;
+    call?: Partial<Call>;
+  } = {}
+): Promise<ConnectResult> =>
+  await exports.default.confirmAction({
+    person,
+    id: held.id,
+    inputHash,
+    capability: await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
+      connectionId: held.connectionId,
+      resource: held.resource ?? undefined,
+      action: held.action,
+      idempotencyKey: held.idempotencyKey,
+      origin: chatOrigin,
+      decision: { kind: "confirm", pendingActionId: held.id },
+      ...call,
+      ...signed,
+    }),
+  });
+
+/** Reads `held`'s outcome as core does: by `authority`, with what `signed` says. */
+const readOutcome = async (
+  authority: Authority,
+  held: HeldCall,
+  signed: Signed & { resource?: string }
+) => {
+  const stated = {
+    connectionId: held.connectionId,
+    action: held.action,
+    idempotencyKey: held.idempotencyKey,
+    ...(signed.resource === undefined ? {} : { resource: signed.resource }),
+  };
+  return await exports.default.heldOutcome({
+    ...stated,
+    capability: await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
+      ...stated,
+      origin: chatOrigin,
+      ...signed,
+    }),
+  });
+};
+
+const decline = async (
+  person: ConnectionPerson,
+  held: PendingAction
+): Promise<void> => {
+  await exports.default.declineAction({ person, id: held.id });
+};
+
+/** Where an App's call comes from, as core signs it. */
+const appOrigin = {
+  permissionId: "permission-mail",
+  context: { type: "app" as const, appId: "app-crm" },
+};
+
+/** Where App `appId`'s call comes from, as core signs it. */
+const originOf = (appId: string) => ({
+  permissionId: "permission-mail",
+  context: { type: "app" as const, appId },
+});
+
+/** Where a run's call comes from, as core signs it. */
+const runOrigin = {
+  permissionId: "permission-mail",
+  context: {
+    type: "workflowRun" as const,
+    workflowId: "workflow-crm",
+    runId: "run-1",
+  },
+};
+
+/** How a run's call ended: its output, or its code and the held action. */
+const retried = async (
+  result: Promise<ConnectResult>
+): Promise<{ code: string; output?: string; pendingActionId?: unknown }> => {
+  try {
+    const { output } = await result;
+    return { code: "ok", output };
+  } catch (error) {
+    const details: unknown =
+      typeof error === "object" && error !== null && "details" in error
+        ? error.details
+        : undefined;
+    return {
+      code: connectErrors.codeOf(error) ?? String(error),
+      pendingActionId:
+        typeof details === "object" && details !== null
+          ? Reflect.get(details, "pendingActionId")
+          : undefined,
+    };
+  }
+};
+
+/** What is left of held actions and stored answers for `connectionId`. */
+const leftFor = async (connectionId: string) => {
+  const db = drizzle(env.DB);
+  return {
+    held: await db
+      .select()
+      .from(pendingActions)
+      .where(eq(pendingActions.connectionId, connectionId)),
+    answers: await db
+      .select()
+      .from(idempotentCalls)
+      .where(eq(idempotentCalls.connectionId, connectionId)),
+  };
+};
+
+/** The events about `connectionId`, by action and outcome. */
+const eventsFor = async (connectionId: string) => {
+  const events = await audit.events();
+  return events
+    .filter(({ target }) => target?.id === connectionId)
+    .map(({ action, actor, detail }) => ({
+      action,
+      actor: actor.type,
+      outcome: detail.outcome ?? detail.reason ?? null,
+    }));
+};
+
+describe("a side effect from chat", () => {
+  it("isn't held for someone whose erasure began as it was asked, on a shared connection too", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Their erasure began (connect's person-erasure.ts marks it first)
+    // while the call was on its way: nothing is held for them.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(anna.userId, Date.now())
+      .run();
+
+    const asked = await outcome(hold(inChat(anna), mail(connectionId)));
+
+    expect({
+      asked,
+      ran: server.ran,
+      held: await waitingFor(anna),
+    }).toStrictEqual({
+      asked: "capability.invalid",
+      ran: [],
+      held: [],
+    });
+  });
+
+  it("is held, not run, and its person sees the exact call", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    const result = await hold(inChat(anna), call);
+    const held = await heldFor(anna);
+    const { inputHash, requestedAt, ...shown } = held;
+    expect({ result, ran: server.ran, shown }).toStrictEqual({
+      result: { output: "null", provenance: [], pending: { id: held.id } },
+      ran: [],
+      shown: {
+        id: held.id,
+        subject: { type: "agent", agentId: "agent-chat" },
+        appVersion: null,
+        mode: "interactive",
+        context: chatOrigin.context,
+        permissionId: chatOrigin.permissionId,
+        connectionId,
+        // A Composio connection: known by its toolkit, and its tools
+        // describe nothing connect shows.
+        connectionName: "mail",
+        resource: null,
+        restricted: false,
+        action: "mail.send",
+        idempotencyKey: call.idempotencyKey,
+        input: JSON.stringify(call.input),
+        // A chat's call came through no App resource binding.
+        binding: null,
+      },
+    });
+    expect({
+      hash: /^[0-9a-f]{64}$/u.test(inputHash),
+      requested: Number.isNaN(Date.parse(requestedAt)),
+    }).toStrictEqual({ hash: true, requested: false });
+    await expect(eventsFor(connectionId)).resolves.toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+    ]);
+  });
+
+  it("on a native connection is shown as its tool describes it, in the input's own values, with the connection's name", async () => {
+    const anna = someone();
+    const connectionId = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "microsoft-365",
+      accountName: "anna@acme.test",
+    });
+    const input = {
+      mailbox: "anna@acme.test",
+      to: ["ben@acme.test", "cleo@acme.test"],
+      subject: "Invoice INV-7",
+      body: "Hi Ben,\n\nThe invoice is attached.",
+    };
+    await hold(inChat(anna), {
+      connectionId,
+      action: "mail.send",
+      input,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const held = await heldFor(anna);
+    expect({
+      connectionName: held.connectionName,
+      description: held.description,
+      input: held.input,
+    }).toStrictEqual({
+      connectionName: "Microsoft 365 (anna@acme.test)",
+      description: {
+        title: "Send an email",
+        fields: [
+          { input: "mailbox", label: "From", value: input.mailbox },
+          { input: "to", label: "To", value: input.to },
+          { input: "subject", label: "Subject", value: input.subject },
+          { input: "body", label: "Body", value: input.body },
+        ],
+        complete: true,
+      },
+      input: JSON.stringify(input),
+    });
+    // The one the person is asked about on confirming reads the same.
+    await expect(
+      exports.default.pendingAction({ person: anna, id: held.id })
+    ).resolves.toStrictEqual(held);
+  });
+
+  it("says its description is incomplete when the input holds what the tool doesn't show, and shows other values as JSON", async () => {
+    const anna = someone();
+    const connectionId = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "microsoft-365",
+    });
+    // Held before the tool reads it, so it may hold anything: a property
+    // the tool doesn't take, a value of another type.
+    const input = {
+      mailbox: "anna@acme.test",
+      to: ["ben@acme.test", 7],
+      subject: "Invoice",
+      forwardTo: "eve@evil.test",
+    };
+    await hold(inChat(anna), {
+      connectionId,
+      action: "mail.send",
+      input,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const held = await heldFor(anna);
+    expect({
+      connectionName: held.connectionName,
+      description: held.description,
+      input: held.input,
+    }).toStrictEqual({
+      connectionName: "Microsoft 365",
+      description: {
+        title: "Send an email",
+        fields: [
+          { input: "mailbox", label: "From", value: "anna@acme.test" },
+          {
+            input: "to",
+            label: "To",
+            value: JSON.stringify(input.to, null, 2),
+          },
+          { input: "subject", label: "Subject", value: "Invoice" },
+        ],
+        complete: false,
+      },
+      input: JSON.stringify(input),
+    });
+  });
+
+  it("on a Composio connection is never shown as a native connector's, whatever its toolkit is called", async () => {
+    const anna = someone();
+    // A toolkit slugged as a native provider, with a tool named as the
+    // native connector's is.
+    const connectionId = await addConnection({
+      provider: "microsoft",
+      accountName: "anna@acme.test",
+    });
+    await hold(inChat(anna), mail(connectionId));
+    const held = await heldFor(anna);
+    expect({
+      connectionName: held.connectionName,
+      described: "description" in held,
+    }).toStrictEqual({
+      connectionName: "microsoft (anna@acme.test)",
+      described: false,
+    });
+  });
+
+  it("is the same held action when the call is repeated, and refused with another input", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    const first = await hold(inChat(anna), call);
+    const again = await hold(inChat(anna), call);
+    const changed = await outcome(
+      hold(inChat(anna), { ...call, input: { to: "eve@evil.test" } })
+    );
+    const waiting = await waitingFor(anna);
+    expect({
+      again: again.pending,
+      changed,
+      waiting: waiting.map(({ id, input }) => ({ id, input })),
+    }).toStrictEqual({
+      again: first.pending,
+      changed: "connect.idempotency_conflict",
+      waiting: [{ id: first.pending?.id, input: JSON.stringify(call.input) }],
+    });
+  });
+
+  it("runs once its person confirms it, exactly as held, and a repeat gets its answer", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    await hold(inChat(anna), call);
+    const held = await heldFor(anna);
+    const confirmed = await confirm(anna, held);
+    const repeat = await hold(inChat(anna), call);
+    expect({
+      confirmed,
+      repeat,
+      ran: server.ran,
+      waiting: await waitingFor(anna),
+      again: await outcome(confirm(anna, held)),
+    }).toStrictEqual({
+      // A Composio tool names nothing it read: known by toolkit and tool.
+      confirmed: {
+        output: '{"sent":"ben@acme.test"}',
+        provenance: ["mail/mail.send"],
+      },
+      repeat: {
+        output: '{"sent":"ben@acme.test"}',
+        provenance: ["mail/mail.send"],
+      },
+      ran: [{ tool: "mail.send", input: call.input }],
+      waiting: [],
+      again: "connect.pending_not_found",
+    });
+    await expect(eventsFor(connectionId)).resolves.toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+      { action: "connection.action.confirmed", actor: "person", outcome: null },
+      { action: "connection.call", actor: "agent", outcome: "ok" },
+      { action: "connection.call", actor: "agent", outcome: "replayed" },
+    ]);
+    // The second confirmation found nothing left to name but its ID.
+    const audited = await audit.events();
+    expect(
+      audited
+        .filter(({ action }) => action === "connection.action.confirm_refused")
+        .map(({ detail }) => detail)
+    ).toStrictEqual([
+      { pendingActionId: held.id, reason: "connect.pending_not_found" },
+    ]);
+  });
+
+  it("without a key of its caller's is held under one connect makes, once however often it is asked while it waits, and runs once when confirmed", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const first = await hold(inChat(anna), call);
+    // The model asks again, and twice at once: the same action each time.
+    const repeats = await Promise.all([
+      hold(inChat(anna), call),
+      hold(inChat(anna), call),
+    ]);
+    // Another input, another chat, another person: each an action of its own.
+    const other = await hold(inChat(anna), {
+      ...call,
+      input: { to: "cleo@acme.test", subject: "Invoice" },
+    });
+    const elsewhere = await hold(inChat(anna), call, {
+      origin: {
+        ...chatOrigin,
+        context: {
+          type: "chat",
+          workspaceId: "workspace-1",
+          chatId: "chat-2",
+        },
+      },
+    });
+    const ben = someone();
+    await hold(inChat(ben), call);
+    const waiting = await waitingFor(anna);
+    const held = waiting.find(({ id }) => id === first.pending?.id);
+    if (held === undefined) {
+      throw new Error("Expected the first call's held action");
+    }
+    const confirmed = await confirm(anna, held);
+    // Decided: asked again, it is a new action.
+    const after = await hold(inChat(anna), call);
+    expect({
+      repeats: repeats.map(({ pending }) => pending?.id),
+      waiting: new Set(waiting.map(({ id }) => id)),
+      bens: await waitingFor(ben),
+      confirmed: confirmed.output,
+      ran: server.ran,
+      again: await outcome(confirm(anna, held)),
+      after: after.pending?.id === first.pending?.id,
+    }).toStrictEqual({
+      repeats: [first.pending?.id, first.pending?.id],
+      waiting: new Set([
+        first.pending?.id,
+        other.pending?.id,
+        elsewhere.pending?.id,
+      ]),
+      bens: [expect.objectContaining({ input: JSON.stringify(call.input) })],
+      confirmed: '{"sent":"ben@acme.test"}',
+      ran: [{ tool: "mail.send", input: call.input }],
+      again: "connect.pending_not_found",
+      after: false,
+    });
+    expect(new Set(waiting.map(({ id }) => id)).size).toBe(3);
+  });
+
+  it("is found again by its ID only by the chat that asked, and its outcome read only with a capability for that very call", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const chat = {
+      agentId: "agent-chat",
+      onBehalfOf: anna.userId,
+      // The chat of `chatOrigin`.
+      workspaceId: "workspace-1",
+      chatId: "chat-1",
+    };
+    const send = await hold(inChat(anna), call);
+    const archive = await hold(inChat(anna), {
+      connectionId,
+      action: "mail.archive",
+      input: {},
+    });
+    // One under a key of its caller's: only a repeat of the call finds it.
+    const keyed = await hold(inChat(anna), mail(connectionId, "dan@acme.test"));
+    const id = send.pending?.id ?? "";
+    const callOf = async (request: object = {}) =>
+      await exports.default.heldCall({ ...chat, id, ...request });
+    const ended = async (
+      held: HeldCall,
+      signed: Signed & { resource?: string } = {},
+      authority = inChat(anna)
+    ) => await readOutcome(authority, held, signed);
+    const sent = await callOf();
+    const archived = await callOf({ id: archive.pending?.id });
+    const whileWaiting = await ended(sent);
+    const others = await Promise.all(
+      [
+        { chatId: "chat-2" },
+        { onBehalfOf: someone().userId },
+        { agentId: "agent-other" },
+        { id: crypto.randomUUID() },
+        { id: keyed.pending?.id },
+      ].map(async (request) => await outcome(callOf(request)))
+    );
+    const waiting = await waitingFor(anna);
+    const heldOf = (pendingId: string | undefined): PendingAction => {
+      const held = waiting.find((each) => each.id === pendingId);
+      if (held === undefined) {
+        throw new Error("Expected the held action");
+      }
+      return held;
+    };
+    await confirm(anna, heldOf(id));
+    await decline(anna, heldOf(archive.pending?.id));
+    expect({
+      sent,
+      whileWaiting,
+      others,
+      confirmed: await ended(sent),
+      declined: await ended(archived),
+      // Decided, it is still only its own chat's.
+      elsewhere: await outcome(callOf({ chatId: "chat-2" })),
+      // A capability for another resource, or another agent's, reads
+      // nothing.
+      otherResource: await outcome(ended(sent, { resource: "other" })),
+      otherAgent: await outcome(ended(sent, {}, inChat(anna, "agent-other"))),
+      confirming: await outcome(
+        ended(sent, { decision: { kind: "confirm", pendingActionId: id } })
+      ),
+    }).toStrictEqual({
+      sent: {
+        connectionId,
+        resource: null,
+        action: "mail.send",
+        idempotencyKey: `chat-1:${id}`,
+      },
+      whileWaiting: { state: "waiting" },
+      others: others.map(() => "connect.pending_not_found"),
+      confirmed: {
+        state: "done",
+        result: {
+          output: '{"sent":"ben@acme.test"}',
+          provenance: ["mail/mail.send"],
+        },
+      },
+      declined: { state: "declined" },
+      elsewhere: "connect.pending_not_found",
+      otherResource: "connect.pending_not_found",
+      otherAgent: "connect.pending_not_found",
+      confirming: "capability.invalid",
+    });
+    // Each read is recorded as a call is: waiting, handed over, refused.
+    const events = await eventsFor(connectionId);
+    expect(
+      events.slice(events.findIndex(({ outcome: end }) => end === "held") + 3)
+    ).toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+      { action: "connection.action.confirmed", actor: "person", outcome: null },
+      { action: "connection.call", actor: "agent", outcome: "ok" },
+      { action: "connection.action.declined", actor: "person", outcome: null },
+      { action: "connection.call", actor: "agent", outcome: "replayed" },
+      { action: "connection.call", actor: "agent", outcome: "refused" },
+      { action: "connection.call", actor: "agent", outcome: "refused" },
+      { action: "connection.call", actor: "agent", outcome: "refused" },
+      { action: "connection.call", actor: "agent", outcome: "refused" },
+    ]);
+    // Declined, it left its key spent and nothing of its input.
+    const { held, answers } = await leftFor(connectionId);
+    expect({
+      held: held.map(({ id: left }) => left),
+      declined: answers
+        .filter(({ state }) => state === "declined")
+        .map(({ action, output, provenance }) => ({
+          action,
+          output,
+          provenance,
+        })),
+    }).toStrictEqual({
+      held: [keyed.pending?.id],
+      declined: [
+        { action: "mail.archive", output: "declined", provenance: null },
+      ],
+    });
+  });
+
+  it("from a workflow run without a key is refused, not held under a key of connect's", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const signed = { restricted: true, origin: runOrigin };
+    await expect(
+      outcome(callAs(agentFor(anna.userId), call, signed))
+    ).resolves.toBe("connect.idempotency_key_required");
+    expect({ waiting: await waitingFor(anna), ran: server.ran }).toStrictEqual({
+      waiting: [],
+      ran: [],
+    });
+  });
+
+  it("with files attached is refused for a Composio tool, held or not: only a native write takes files (GRA-887)", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const bytes = Uint8Array.from(new TextEncoder().encode("alpha"));
+    const call = {
+      ...mail(connectionId),
+      idempotencyKey: "run-1:files",
+      attachments: { [await sha256HexOfBytes(bytes)]: bytes },
+    };
+    const refused = [
+      await outcome(callAs(agentFor(anna.userId), call)),
+      await outcome(
+        callAs(agentFor(anna.userId), call, {
+          restricted: true,
+          origin: runOrigin,
+        })
+      ),
+    ];
+    expect({
+      refused,
+      waiting: await waitingFor(anna),
+      ran: server.ran,
+    }).toStrictEqual({
+      refused: ["connect.invalid", "connect.invalid"],
+      waiting: [],
+      ran: [],
+    });
+  });
+
+  it("runs once when confirmed twice at the same moment", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    await hold(inChat(anna), mail(connectionId));
+    const held = await heldFor(anna);
+    const outcomes = await Promise.all([
+      outcome(confirm(anna, held)),
+      outcome(confirm(anna, held)),
+    ]);
+    expect({
+      outcomes: outcomes.toSorted(),
+      ran: server.ran.length,
+    }).toStrictEqual({ outcomes: ["connect.pending_not_found", "ok"], ran: 1 });
+  });
+
+  it("is confirmed by nobody but the person it waits for, whatever they hold", async () => {
+    const anna = someone();
+    const ben = someone("admin");
+    const staff: ConnectionPerson = { ...someone("admin"), staff: true };
+    // Staff signed in with Anna's own ID changes nothing either.
+    const annaAsStaff: ConnectionPerson = { ...anna, staff: true };
+    const connectionId = await addConnection();
+    await hold(inChat(anna), mail(connectionId));
+    const held = await heldFor(anna);
+    const attempts = await Promise.all([
+      outcome(confirm(ben, held, { authority: inChat(ben) })),
+      outcome(confirm(ben, held, { authority: inChat(anna) })),
+      outcome(confirm(staff, held, { authority: inChat(staff) })),
+      outcome(confirm(annaAsStaff, held)),
+      // Anna's own session, with a capability for someone else...
+      outcome(confirm(anna, held, { authority: inChat(ben) })),
+      // ...for another agent, or the agent's own workflow...
+      outcome(confirm(anna, held, { authority: inChat(anna, "agent-other") })),
+      outcome(
+        confirm(anna, held, {
+          authority: agentFor(anna.userId, "agent-chat", "workflow"),
+        })
+      ),
+      // ...or the agent's own call's capability, which confirms nothing.
+      outcome(confirm(anna, held, { signed: { decision: undefined } })),
+    ]);
+    const stillWaiting = await waitingFor(anna);
+    expect({
+      attempts,
+      staffList: await waitingFor(annaAsStaff),
+      benList: await waitingFor(ben),
+      ran: server.ran,
+      stillWaiting: stillWaiting.map(({ id }) => id),
+    }).toStrictEqual({
+      attempts: [
+        "connect.pending_not_found",
+        "connect.pending_not_found",
+        "connect.pending_not_found",
+        "connect.pending_not_found",
+        "capability.invalid",
+        "capability.invalid",
+        "capability.invalid",
+        "capability.invalid",
+      ],
+      staffList: [],
+      benList: [],
+      ran: [],
+      stillWaiting: [held.id],
+    });
+    // Every attempt is recorded, under whoever made it.
+    const audited = await audit.events();
+    expect(
+      audited
+        .filter(({ action }) => action === "connection.action.confirm_refused")
+        .map(({ actor }) => actor.type)
+        .toSorted()
+    ).toStrictEqual([
+      "person",
+      "person",
+      "person",
+      "person",
+      "person",
+      "person",
+      "staff",
+      "staff",
+    ]);
+  });
+
+  it("isn't run by a confirmation's capability outside confirming it", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    await hold(inChat(anna), call);
+    const held = await heldFor(anna);
+    await expect(
+      outcome(
+        callAs(inChat(anna), call, {
+          origin: chatOrigin,
+          decision: { kind: "confirm", pendingActionId: held.id },
+        })
+      )
+    ).resolves.toBe("capability.invalid");
+    expect({ ran: server.ran, waiting: await waitingFor(anna) }).toStrictEqual({
+      ran: [],
+      waiting: [held],
+    });
+  });
+
+  it("runs only for the action, connection and App or agent it was held for", async () => {
+    const anna = someone();
+    const [connectionId, otherConnection] = await Promise.all([
+      addConnection(),
+      addConnection(),
+    ]);
+    const crm = appFor(anna.userId, "app-crm");
+    await hold({ ...crm, mode: "interactive" }, mail(connectionId));
+    const held = await heldFor(anna);
+    const attempts = await Promise.all([
+      outcome(confirm(anna, held, { authority: inChat(anna) })),
+      outcome(
+        confirm(anna, held, {
+          authority: {
+            ...appFor(anna.userId, "app-other"),
+            mode: "interactive",
+          },
+        })
+      ),
+      outcome(
+        confirm(anna, held, {
+          authority: { ...crm, mode: "interactive" },
+          call: { connectionId: otherConnection },
+        })
+      ),
+      outcome(
+        confirm(anna, held, {
+          authority: { ...crm, mode: "interactive" },
+          call: { action: "mail.archive" },
+        })
+      ),
+      outcome(
+        confirm(anna, held, {
+          authority: { ...crm, mode: "interactive" },
+          call: { idempotencyKey: "chat-1:other" },
+        })
+      ),
+    ]);
+    expect({ attempts, ran: server.ran }).toStrictEqual({
+      attempts: [
+        "capability.invalid",
+        "capability.invalid",
+        "capability.invalid",
+        "capability.invalid",
+        "capability.invalid",
+      ],
+      ran: [],
+    });
+    await confirm(anna, held, { authority: { ...crm, mode: "interactive" } });
+    expect(server.ran).toHaveLength(1);
+  });
+
+  it("runs only with a confirmation of exactly it, from where it was held: never with a resolution's capability", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const crm = {
+      ...appFor(anna.userId, "app-crm"),
+      mode: "interactive" as const,
+    };
+    await hold(crm, mail(connectionId));
+    const held = await heldFor(anna);
+    const refusal = async (
+      signed: Signed,
+      authority: Authority = crm
+    ): Promise<string> =>
+      await outcome(confirm(anna, held, { authority, signed }));
+    const attempts = {
+      resolution: await refusal({
+        decision: { kind: "resolve", choice: "not_happened", claimedAt: 0 },
+      }),
+      anotherAction: await refusal({
+        decision: { kind: "confirm", pendingActionId: crypto.randomUUID() },
+      }),
+      otherVersion: await refusal({}, { ...crm, appVersion: 2 }),
+      otherPermission: await refusal({
+        origin: { ...chatOrigin, permissionId: "permission-other" },
+      }),
+      otherContext: await refusal({
+        origin: {
+          ...chatOrigin,
+          context: {
+            type: "chat",
+            workspaceId: "workspace-1",
+            chatId: "chat-2",
+          },
+        },
+      }),
+      withBinding: await refusal({
+        origin: {
+          ...chatOrigin,
+          binding: {
+            id: "binding-mail",
+            declarationHash: "a".repeat(64),
+            fingerprint: "b".repeat(64),
+          },
+        },
+      }),
+    };
+    const waiting = await waitingFor(anna);
+    expect({
+      attempts,
+      ran: server.ran,
+      waiting: waiting.map(({ id }) => id),
+    }).toStrictEqual({
+      attempts: {
+        resolution: "capability.invalid",
+        anotherAction: "capability.invalid",
+        otherVersion: "capability.invalid",
+        otherPermission: "capability.invalid",
+        otherContext: "capability.invalid",
+        withBinding: "capability.invalid",
+      },
+      ran: [],
+      waiting: [held.id],
+    });
+    await confirm(anna, held, { authority: crm });
+    expect(server.ran).toHaveLength(1);
+  });
+
+  it("runs only with the input its person was shown", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    await hold(inChat(anna), call);
+    const held = await heldFor(anna);
+    const otherHash = "0".repeat(64);
+    await expect(
+      outcome(confirm(anna, held, { inputHash: otherHash }))
+    ).resolves.toBe("connect.pending_changed");
+    await expect(waitingFor(anna)).resolves.toStrictEqual([held]);
+    await confirm(anna, held);
+    expect(server.ran).toStrictEqual([
+      { tool: "mail.send", input: call.input },
+    ]);
+  });
+
+  it("is dropped when declined, leaving nothing but its event", async () => {
+    const anna = someone();
+    const ben = someone();
+    const connectionId = await addConnection();
+    await hold(inChat(anna), mail(connectionId));
+    const held = await heldFor(anna);
+    const byBen = await outcome(decline(ben, held));
+    const stillWaiting = await waitingFor(anna);
+    await decline(anna, held);
+    expect({
+      byBen,
+      stillWaiting: stillWaiting.map(({ id }) => id),
+      confirmed: await outcome(confirm(anna, held)),
+      ran: server.ran,
+      left: await leftFor(connectionId),
+    }).toStrictEqual({
+      byBen: "connect.pending_not_found",
+      stillWaiting: [held.id],
+      confirmed: "connect.pending_not_found",
+      ran: [],
+      left: { held: [], answers: [] },
+    });
+    const events = await eventsFor(connectionId);
+    expect(
+      events.filter(({ action }) => action === "connection.action.declined")
+    ).toStrictEqual([
+      { action: "connection.action.declined", actor: "person", outcome: null },
+    ]);
+  });
+
+  it("isn't taken while its connection is inactive or reaches another account", async () => {
+    const anna = someone();
+    const [gone, moved] = await Promise.all([
+      addConnection({ accountId: `account-${crypto.randomUUID()}` }),
+      addConnection({ accountId: `account-${crypto.randomUUID()}` }),
+    ]);
+    await hold(inChat(anna), mail(gone));
+    await hold(inChat(anna), mail(moved));
+    const waiting = await waitingFor(anna);
+    const heldOn = (connectionId: string): PendingAction => {
+      const held = waiting.find((each) => each.connectionId === connectionId);
+      if (held === undefined) {
+        throw new Error("No held action");
+      }
+      return held;
+    };
+    const db = drizzle(env.DB);
+    await db
+      .update(connections)
+      .set({ status: "needs_reauth" })
+      .where(eq(connections.id, gone));
+    await db
+      .update(connections)
+      .set({ accountId: `account-${crypto.randomUUID()}` })
+      .where(eq(connections.id, moved));
+    const refused = {
+      gone: await outcome(confirm(anna, heldOn(gone))),
+      moved: await outcome(confirm(anna, heldOn(moved))),
+    };
+    const stillWaiting = await waitingFor(anna);
+    const audited = await audit.events();
+    expect({
+      ...refused,
+      ran: server.ran,
+      // Refused before they were taken: they keep waiting, not confirmed.
+      stillWaiting: stillWaiting.length,
+      events: audited
+        .filter(({ action }) => action.startsWith("connection.action."))
+        .map(({ action, detail }) => `${action} ${String(detail.reason)}`)
+        .toSorted(),
+    }).toStrictEqual({
+      gone: "connect.connection_inactive",
+      moved: "connect.connection_changed",
+      ran: [],
+      stillWaiting: 2,
+      events: [
+        "connection.action.confirm_refused connect.connection_changed",
+        "connection.action.confirm_refused connect.connection_inactive",
+      ],
+    });
+  });
+
+  it("is dropped by a disconnect retried after the connection was already stopped", async () => {
+    const anna = someone();
+    const admin = someone("admin");
+    const connectionId = await addConnection();
+    await hold(inChat(anna), mail(connectionId));
+    // As a disconnect that stopped the connection, then failed to drop.
+    await drizzle(env.DB)
+      .update(connections)
+      .set({ status: "disconnected" })
+      .where(eq(connections.id, connectionId));
+    const again = await exports.default.disconnect({
+      person: admin,
+      connectionId,
+    });
+    expect({
+      again,
+      waiting: await waitingFor(anna),
+      left: await leftFor(connectionId),
+    }).toStrictEqual({
+      again: { revoked: false },
+      waiting: [],
+      left: { held: [], answers: [] },
+    });
+  });
+
+  it("are all dropped by a disconnect, however many, a batch at a time", async () => {
+    const anna = someone();
+    const admin = someone("admin");
+    const connectionId = await addConnection();
+    const { pending } = await hold(inChat(anna), mail(connectionId));
+    const db = drizzle(env.DB);
+    const held = await db
+      .select()
+      .from(pendingActions)
+      .where(eq(pendingActions.id, pending?.id ?? ""))
+      .get();
+    if (held === undefined) {
+      throw new Error("Nothing held");
+    }
+    // More than two of a drop's batches, as many calls would leave them.
+    const [one, ...more] = Array.from({ length: 120 }, (_, index) =>
+      db.insert(pendingActions).values({
+        ...held,
+        id: crypto.randomUUID(),
+        idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+        createdAt: new Date(held.createdAt.getTime() + index),
+      })
+    );
+    if (one === undefined) {
+      throw new Error("Nothing to insert");
+    }
+    await db.batch([one, ...more]);
+    await exports.default.disconnect({ person: admin, connectionId });
+    const audited = await audit.events();
+    const dropped = audited.filter(
+      ({ action, target }) =>
+        action === "connection.action.dropped" && target?.id === connectionId
+    );
+    expect({
+      left: await leftFor(connectionId),
+      dropped: dropped.length,
+      once: new Set(dropped.map(({ detail }) => detail.pendingActionId)).size,
+    }).toStrictEqual({
+      left: { held: [], answers: [] },
+      dropped: 121,
+      once: 121,
+    });
+  });
+
+  it("is listed apart by where it was held: in Grasp, or in a chat app's conversation, each list as long as its own, however many the other holds", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Held in Grasp first, then more in a chat app than a list answers.
+    const inGrasp = await hold(inChat(anna), mail(connectionId));
+    const { pending } = await hold(inChat(anna), mail(connectionId), {
+      chatApp: true,
+    });
+    const db = drizzle(env.DB);
+    const held = await db
+      .select()
+      .from(pendingActions)
+      .where(eq(pendingActions.id, pending?.id ?? ""))
+      .get();
+    if (held === undefined) {
+      throw new Error("Nothing held");
+    }
+    const [one, ...more] = Array.from({ length: 220 }, (_, index) =>
+      db.insert(pendingActions).values({
+        ...held,
+        id: crypto.randomUUID(),
+        idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+        createdAt: new Date(held.createdAt.getTime() + index + 1),
+      })
+    );
+    if (one === undefined) {
+      throw new Error("Nothing to insert");
+    }
+    await db.batch([one, ...more]);
+    const listed = async (heldIn: "grasp" | "chat_app") =>
+      await exports.default.listPendingActions(anna, heldIn);
+    const [grasp, chatApp] = [await listed("grasp"), await listed("chat_app")];
+    expect({
+      grasp: grasp.map(({ id }) => id),
+      chatApp: chatApp.length,
+      chatAppHoldsGrasps: chatApp.some(({ id }) => id === inGrasp.pending?.id),
+    }).toStrictEqual({
+      grasp: [inGrasp.pending?.id],
+      chatApp: 200,
+      chatAppHoldsGrasps: false,
+    });
+  });
+
+  it("is dropped with its event when its connection is disconnected, or its person removed", async () => {
+    const anna = someone();
+    const admin = someone("admin");
+    const [shared, other] = await Promise.all([
+      addConnection(),
+      addConnection(),
+    ]);
+    await hold(inChat(anna), mail(shared));
+    await hold(inChat(anna), mail(other));
+    await exports.default.disconnect({ person: admin, connectionId: shared });
+    const afterDisconnect = await waitingFor(anna);
+    await exports.default.disconnectPersonal({
+      person: null,
+      ownerUserIds: [anna.userId],
+    });
+    const audited = await audit.events();
+    expect({
+      afterDisconnect: afterDisconnect.map(({ connectionId }) => connectionId),
+      afterRemoval: await waitingFor(anna),
+      left: [await leftFor(shared), await leftFor(other)],
+      dropped: audited
+        .filter(({ action }) => action === "connection.action.dropped")
+        .map(({ actor, target, detail }) => ({
+          actor: actor.type,
+          connectionId: target?.id,
+          reason: detail.reason,
+        })),
+      ran: server.ran,
+    }).toStrictEqual({
+      afterDisconnect: [other],
+      afterRemoval: [],
+      left: [
+        { held: [], answers: [] },
+        { held: [], answers: [] },
+      ],
+      dropped: [
+        {
+          actor: "person",
+          connectionId: shared,
+          reason: "connection.disconnected",
+        },
+        { actor: "system", connectionId: other, reason: "person.removed" },
+      ],
+      ran: [],
+    });
+  });
+
+  it("runs at most once when its call fails after it was taken", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    await hold(inChat(anna), call);
+    const held = await heldFor(anna);
+    // The mail goes out, and its answer is lost on the way back.
+    server.network = "drop";
+    const confirmed = await outcome(confirm(anna, held));
+    expect({
+      confirmed,
+      again: await outcome(confirm(anna, held)),
+      // The agent asking again learns the outcome is unknown: never re-sent.
+      repeat: await outcome(hold(inChat(anna), call)),
+      ran: server.ran.length,
+    }).toStrictEqual({
+      confirmed: "connect.outcome_unknown",
+      again: "connect.pending_not_found",
+      repeat: "connect.outcome_unknown",
+      ran: 1,
+    });
+  });
+
+  it("frees its key when the server turns it away before it was taken", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    await hold(inChat(anna), call);
+    const held = await heldFor(anna);
+    // The server refuses connect's look at its tools, before the key is
+    // taken. (Once it is, any refusal spends it; idempotency.test.ts.)
+    server.refuseList = true;
+    const refused = await outcome(confirm(anna, held));
+    await hold(inChat(anna), call);
+    const again = await heldFor(anna);
+    await confirm(anna, again);
+    expect({
+      refused,
+      heldAgain: again.id !== held.id,
+      ran: server.ran.length,
+    }).toStrictEqual({
+      refused: "connect.server_unavailable",
+      heldAgain: true,
+      ran: 1,
+    });
+  });
+
+  it("from a chat that read restricted data is held too, marked so, and runs once confirmed", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const result = await hold(inChat(anna), mail(connectionId), {
+      restricted: true,
+    });
+    const held = await heldFor(anna);
+    const confirmed = await confirm(anna, held, {
+      signed: { restricted: true },
+    });
+    const audited = await audit.events();
+    expect({
+      held: { pending: result.pending?.id, restricted: held.restricted },
+      confirmed: confirmed.output,
+      ran: server.ran.length,
+      events: audited
+        .filter(({ target }) => target?.id === connectionId)
+        .map(({ action, detail }) => ({
+          action,
+          restricted: detail.restricted ?? false,
+        })),
+    }).toStrictEqual({
+      held: { pending: held.id, restricted: true },
+      confirmed: '{"sent":"ben@acme.test"}',
+      ran: 1,
+      events: [
+        { action: "connection.call", restricted: true },
+        { action: "connection.action.confirmed", restricted: true },
+        { action: "connection.call", restricted: true },
+      ],
+    });
+  });
+
+  it("records a restricted confirmation when its chat read restricted data after it was held", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    await hold(inChat(anna), mail(connectionId));
+    const held = await heldFor(anna);
+    await confirm(anna, held, { signed: { restricted: true } });
+    const audited = await audit.events();
+    expect({
+      heldRestricted: held.restricted,
+      ran: server.ran.length,
+      confirmed: audited.find(
+        ({ action }) => action === "connection.action.confirmed"
+      )?.detail.restricted,
+    }).toStrictEqual({ heldRestricted: false, ran: 1, confirmed: true });
+  });
+
+  it("from an App that read restricted data is held too, for the person using it", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const inApp = {
+      ...appFor(anna.userId, "app-crm"),
+      mode: "interactive" as const,
+    };
+    const result = await callAs(inApp, mail(connectionId), {
+      restricted: true,
+      origin: appOrigin,
+    });
+    const held = await heldFor(anna);
+    const confirmed = await confirm(anna, held, {
+      authority: inApp,
+      signed: { restricted: true, origin: appOrigin },
+    });
+    expect({
+      pending: result.pending?.id,
+      shown: { restricted: held.restricted, context: held.context },
+      confirmed: confirmed.output,
+      ran: server.ran.length,
+    }).toStrictEqual({
+      pending: held.id,
+      shown: { restricted: true, context: appOrigin.context },
+      confirmed: '{"sent":"ben@acme.test"}',
+      ran: 1,
+    });
+  });
+
+  it("of an App core removed are declined as expired, recorded, and its other Apps' wait on", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const removed = `app-${crypto.randomUUID()}`;
+    const inApp = (appId: string) => ({
+      ...appFor(anna.userId, appId),
+      mode: "interactive" as const,
+    });
+    await callAs(inApp(removed), mail(connectionId), {
+      restricted: true,
+      origin: originOf(removed),
+    });
+    await callAs(inApp("app-crm"), mail(connectionId, "cleo@acme.test"), {
+      restricted: true,
+      origin: appOrigin,
+    });
+    await exports.default.dropForRemovedApp({ appId: removed });
+    const waiting = await waitingFor(anna);
+    const events = await eventsFor(connectionId);
+
+    expect({
+      waiting: waiting.map(({ context }) => context),
+      expired: events.filter(
+        ({ action, outcome: why }) =>
+          action === "connection.action.expired" && why === "app.removed"
+      ).length,
+      refusesNonsense: await exports.default
+        .dropForRemovedApp({ appId: removed, more: true })
+        .then(
+          () => "ok",
+          (error: unknown) => connectErrors.codeOf(error)
+        ),
+    }).toStrictEqual({
+      waiting: [appOrigin.context],
+      expired: 1,
+      refusesNonsense: "connect.invalid",
+    });
+  });
+
+  it("from a run that read restricted data waits for the person it acts for, and its retries get the answer", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const run = appFor(anna.userId, "app-crm");
+    const call = { ...mail(connectionId), idempotencyKey: "run-1:send" };
+    const signed = { restricted: true, origin: runOrigin };
+    const attempt = async () => await retried(callAs(run, call, signed));
+    const first = await attempt();
+    const retry = await attempt();
+    const held = await heldFor(anna);
+    const before = server.ran.length;
+    await confirm(anna, held, { authority: run, signed });
+    const afterConfirm = await attempt();
+    expect({
+      first,
+      retry,
+      shown: { mode: held.mode, restricted: held.restricted },
+      before,
+      afterConfirm,
+      ran: server.ran.length,
+    }).toStrictEqual({
+      // Retryable: the step tries again under the same key.
+      first: { code: "connect.held", pendingActionId: held.id },
+      retry: { code: "connect.held", pendingActionId: held.id },
+      shown: { mode: "workflow", restricted: true },
+      before: 0,
+      afterConfirm: { code: "ok", output: '{"sent":"ben@acme.test"}' },
+      ran: 1,
+    });
+  });
+
+  it("from a run, declined or dropped, fails its retries for good, and waits no more", async () => {
+    const anna = someone();
+    const admin = someone("admin");
+    const [declinedOn, droppedOn] = await Promise.all([
+      addConnection(),
+      addConnection(),
+    ]);
+    const run = appFor(anna.userId, "app-crm");
+    const signed = { restricted: true, origin: runOrigin };
+    const declinedCall = {
+      ...mail(declinedOn),
+      idempotencyKey: "run-1:declined",
+    };
+    const droppedCall = { ...mail(droppedOn), idempotencyKey: "run-1:dropped" };
+    await retried(callAs(run, declinedCall, signed));
+    await retried(callAs(run, droppedCall, signed));
+    const waiting = await waitingFor(anna);
+    const declined = waiting.find(
+      ({ connectionId }) => connectionId === declinedOn
+    );
+    if (declined === undefined) {
+      throw new Error("Nothing held");
+    }
+    await decline(anna, declined);
+    await exports.default.disconnect({
+      person: admin,
+      connectionId: droppedOn,
+    });
+    const stillPending = await Promise.all(
+      [declinedCall, droppedCall].map(
+        async ({ idempotencyKey }) =>
+          await exports.default.anyPending({
+            onBehalfOf: anna.userId,
+            idempotencyKey,
+          })
+      )
+    );
+    expect({
+      stillPending,
+      declined: await retried(callAs(run, declinedCall, signed)),
+      ran: server.ran,
+    }).toStrictEqual({
+      stillPending: [false, false],
+      declined: { code: "connect.declined", pendingActionId: undefined },
+      ran: [],
+    });
+  });
+
+  it("of an independent run are all dropped once its retention is over, whichever App its calls reached", async () => {
+    const anna = someone();
+    const [reached, other] = await Promise.all([
+      addConnection(),
+      addConnection(),
+    ]);
+    // A restricted independent run called App A, whose export called App
+    // B: B's call carries the run's key, under B.
+    const run = `run-${crypto.randomUUID()}`;
+    const appB = appFor(anna.userId, "app-b");
+    const signed = { restricted: true, origin: runOrigin };
+    await retried(
+      callAs(
+        appB,
+        { ...mail(reached), idempotencyKey: `${run}:task:send` },
+        signed
+      )
+    );
+    // Another run's call, under the same App, its ID this one's and more:
+    // not this run's.
+    await retried(
+      callAs(
+        appB,
+        { ...mail(other), idempotencyKey: `${run}x:task:send` },
+        signed
+      )
+    );
+    await exports.default.dropForEndedRuns({
+      runs: [{ workflowId: "workflow-1", runId: run }],
+    });
+    const waiting = await waitingFor(anna);
+    expect(
+      waiting.map(({ connectionId }) => connectionId).toSorted()
+    ).toStrictEqual([other]);
+  });
+
+  it("keeps the inputs of calls an ended run didn't make, whatever their key, and drops its own", async () => {
+    const anna = someone();
+    const run = `run-${crypto.randomUUID()}`;
+    const connectionId = await addConnection();
+    const db = drizzle(env.DB);
+    // Calls of unknown outcome, each keeping its input: the run's own, one
+    // with the person there under a key of the run's shape, and another
+    // run's whose ID is this one's and more.
+    const kept = (key: string, mode: "interactive" | "workflow") => ({
+      subjectType: "app" as const,
+      subjectId: "app-b",
+      onBehalfOf: anna.userId,
+      connectionId,
+      action: "send",
+      idempotencyKey: key,
+      inputHash: "0".repeat(64),
+      state: "unknown" as const,
+      createdAt: new Date(),
+      claimedAt: new Date(),
+      input: `{"key":"${key}"}`,
+      origin: JSON.stringify({ mode }),
+      listId: crypto.randomUUID(),
+    });
+    await db
+      .insert(idempotentCalls)
+      .values([
+        kept(`${run}:task:send`, "workflow"),
+        kept(`${run}:chosen`, "interactive"),
+        kept(`${run}x:task:send`, "workflow"),
+      ]);
+    await exports.default.dropForEndedRuns({
+      runs: [{ workflowId: "workflow-1", runId: run }],
+    });
+    const rows = await db
+      .select({
+        key: idempotentCalls.idempotencyKey,
+        input: idempotentCalls.input,
+      })
+      .from(idempotentCalls)
+      .where(eq(idempotentCalls.connectionId, connectionId));
+    expect(
+      rows
+        .map(({ key, input }) => ({ key, kept: input !== null }))
+        .toSorted((a, b) => a.key.localeCompare(b.key))
+    ).toStrictEqual([
+      { key: `${run}:chosen`, kept: true },
+      { key: `${run}:task:send`, kept: false },
+      { key: `${run}x:task:send`, kept: true },
+    ]);
+  });
+
+  it("from a run that read nothing restricted isn't held", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const result = await callAs(appFor(anna.userId), mail(connectionId), {
+      origin: runOrigin,
+    });
+    expect({
+      output: result.output,
+      waiting: await waitingFor(anna),
+    }).toStrictEqual({ output: '{"sent":"ben@acme.test"}', waiting: [] });
+  });
+
+  it("lists the newest 200 waiting, newest first, and still confirms an older one", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const first = mail(connectionId);
+    const { pending } = await hold(inChat(anna), first);
+    const firstId = pending?.id ?? "";
+    const db = drizzle(env.DB);
+    const oldest = await db
+      .select()
+      .from(pendingActions)
+      .where(eq(pendingActions.id, firstId))
+      .get();
+    if (oldest === undefined) {
+      throw new Error("Nothing held");
+    }
+    // Two hundred newer ones, as more calls would leave them: one statement
+    // each, as D1 binds at most 100 values to one.
+    const [one, ...more] = Array.from({ length: 200 }, (_, index) =>
+      db.insert(pendingActions).values({
+        ...oldest,
+        id: crypto.randomUUID(),
+        idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+        createdAt: new Date(oldest.createdAt.getTime() + 1000 + index),
+      })
+    );
+    if (one === undefined) {
+      throw new Error("Nothing to insert");
+    }
+    await db.batch([one, ...more]);
+    const listed = await waitingFor(anna);
+    const found = await exports.default.pendingAction({
+      person: anna,
+      id: firstId,
+    });
+    if (found === null) {
+      throw new Error("The oldest isn't found");
+    }
+    const requested = listed.map(({ requestedAt }) => Date.parse(requestedAt));
+    await confirm(anna, found);
+    expect({
+      listed: listed.length,
+      newestFirst: requested.every(
+        (at, index) => index === 0 || at < (requested[index - 1] ?? at + 1)
+      ),
+      oldestListed: listed.some(({ id }) => id === firstId),
+      ran: server.ran,
+    }).toStrictEqual({
+      listed: 200,
+      newestFirst: true,
+      oldestListed: false,
+      ran: [{ tool: "mail.send", input: first.input }],
+    });
+  });
+});
+
+/** Moves the clock on by `ms`, as a night passing. */
+const later = (ms: number) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.now() + ms);
+};
+
+describe("a write held from a chat platform", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const hourMs = 60 * 60 * 1000;
+
+  /**
+   * Holds a mail from a Teams chat, as core signs it there: ending at
+   * `heldUntil`, the company's midnight. Without a key of its own, as the
+   * chat's agent calls, so connect makes one that carries the chat.
+   */
+  const holdFromTeams = async (
+    person: ConnectionPerson,
+    connectionId: string,
+    heldUntil: number
+  ): Promise<PendingAction> => {
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    await hold(inChat(person), call, { heldUntil });
+    return await heldFor(person);
+  };
+
+  it("runs when pressed the same day, and says when it ends", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const midnight = Date.now() + hourMs;
+    const held = await holdFromTeams(anna, connectionId, midnight);
+    later(hourMs / 2);
+    const { output } = await confirm(anna, held);
+    expect({
+      endsAt: held.endsAt,
+      output,
+      ran: server.ran.length,
+    }).toStrictEqual({
+      endsAt: new Date(midnight).toISOString(),
+      output: '{"sent":"ben@acme.test"}',
+      ran: 1,
+    });
+  });
+
+  it("runs nothing pressed after its day ended, is declined as expired, and is audited", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const held = await holdFromTeams(anna, connectionId, Date.now() + hourMs);
+    later(hourMs + 1);
+    const pressed = await outcome(confirm(anna, held));
+    // Pressed again, or the same call asked again the next day.
+    const again = await outcome(confirm(anna, held));
+    const left = await leftFor(connectionId);
+    expect({
+      pressed,
+      again,
+      ran: server.ran,
+      waiting: await waitingFor(anna),
+      held: left.held,
+      // Its chat is told it was declined; nothing of its input is kept.
+      spent: left.answers.map(({ idempotencyKey, state, output, input }) => ({
+        idempotencyKey,
+        state,
+        output,
+        input,
+      })),
+    }).toStrictEqual({
+      pressed: "connect.pending_expired",
+      again: "connect.pending_not_found",
+      ran: [],
+      waiting: [],
+      held: [],
+      spent: [
+        {
+          idempotencyKey: held.idempotencyKey,
+          state: "declined",
+          output: "expired",
+          input: null,
+        },
+      ],
+    });
+    await expect(eventsFor(connectionId)).resolves.toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+      {
+        action: "connection.action.expired",
+        actor: "person",
+        outcome: "expired",
+      },
+      {
+        action: "connection.action.confirm_refused",
+        actor: "person",
+        outcome: "connect.pending_expired",
+      },
+      // The second press finds nothing: refused as for any action gone.
+    ]);
+  });
+
+  it("is declined as expired by connect's clock once its day ended, pressed or not", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    await holdFromTeams(anna, connectionId, Date.now() + hourMs);
+    // Before midnight the clock leaves it waiting.
+    await runMaintenance();
+    const before = await leftFor(connectionId);
+    later(hourMs + 1);
+    // Listed no more the moment its day is over.
+    const listed = await waitingFor(anna);
+    await runMaintenance();
+    const after = await leftFor(connectionId);
+    expect({
+      before: before.held.length,
+      listed,
+      after: after.held,
+      spent: after.answers.map(({ state, output }) => ({ state, output })),
+    }).toStrictEqual({
+      before: 1,
+      listed: [],
+      after: [],
+      spent: [{ state: "declined", output: "expired" }],
+    });
+    await expect(eventsFor(connectionId)).resolves.toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+      {
+        action: "connection.action.expired",
+        actor: "system",
+        outcome: "expired",
+      },
+    ]);
+  });
+
+  it("asked again the next day is a new action with that day's end", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const first = await hold(inChat(anna), call, {
+      heldUntil: Date.now() + hourMs,
+    });
+    later(hourMs + 1);
+    const tomorrow = Date.now() + 24 * hourMs;
+    const second = await hold(inChat(anna), call, { heldUntil: tomorrow });
+    const [waiting, ...others] = await waitingFor(anna);
+    expect({
+      fresh: second.pending?.id !== first.pending?.id,
+      waiting: waiting?.id,
+      endsAt: waiting?.endsAt,
+      others,
+    }).toStrictEqual({
+      fresh: true,
+      waiting: second.pending?.id,
+      endsAt: new Date(tomorrow).toISOString(),
+      others: [],
+    });
+  });
+
+  it("from Grasp's own app still waits, however many days pass", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    await hold(inChat(anna), call);
+    later(30 * 24 * hourMs);
+    await runMaintenance();
+    const held = await heldFor(anna);
+    const { output } = await confirm(anna, held);
+    expect({ endsAt: held.endsAt, output }).toStrictEqual({
+      endsAt: undefined,
+      output: '{"sent":"ben@acme.test"}',
+    });
+  });
+
+  // A turn nobody was there for (an agent woken by a schedule or an
+  // event): connect holds every change of it, whoever signed the call and
+  // however, and only with an end. These start from the ways it can fail:
+  // a change run because the capability didn't say chat; one held for
+  // good; one run twice; one run after its day ended.
+
+  it("holds a change of an unattended turn even when its capability isn't a chat's, and says so to its person", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    // Not `interactive`: as if core had signed it as a run's. Held anyway,
+    // and told as held the way a run is told.
+    const result = await outcome(
+      callAs(agentFor(anna.userId), call, {
+        origin: chatOrigin,
+        unattended: true,
+        heldUntil: Date.now() + hourMs,
+      })
+    );
+    const held = await heldFor(anna);
+    expect({
+      result,
+      ran: server.ran,
+      unattended: held.unattended,
+      ends: held.endsAt === undefined,
+    }).toStrictEqual({
+      result: "connect.held",
+      ran: [],
+      unattended: true,
+      ends: false,
+    });
+    // One asked for in chat says nothing of the kind.
+    const ben = someone();
+    await hold(inChat(ben), mail(connectionId));
+    const attended = await heldFor(ben);
+    expect("unattended" in attended).toBeFalsy();
+  });
+
+  it("refuses a change of an unattended turn that carries no end, and holds nothing", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    await expect(
+      outcome(hold(inChat(anna), mail(connectionId), { unattended: true }))
+    ).resolves.toBe("connect.invalid");
+    expect({ waiting: await waitingFor(anna), ran: server.ran }).toStrictEqual({
+      waiting: [],
+      ran: [],
+    });
+  });
+
+  it("runs an unattended turn's change once after one confirmation, and not at all once its day ended", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const signed = { unattended: true, heldUntil: Date.now() + hourMs };
+    await hold(inChat(anna), mail(connectionId), signed);
+    const held = await heldFor(anna);
+    // The person confirms from their own session: no unattended turn there.
+    const [first, second] = await Promise.all([
+      outcome(confirm(anna, held)),
+      outcome(confirm(anna, held)),
+    ]);
+    expect({
+      outcomes: [first, second].toSorted(),
+      ran: server.ran.length,
+    }).toStrictEqual({
+      outcomes: ["connect.pending_not_found", "ok"],
+      ran: 1,
+    });
+
+    await hold(inChat(anna), mail(connectionId, "cy@acme.test"), signed);
+    const late = await heldFor(anna);
+    later(hourMs + 1);
+    await expect(outcome(confirm(anna, late))).resolves.toBe(
+      "connect.pending_expired"
+    );
+    expect(server.ran).toHaveLength(1);
+  });
+
+  it("never takes an unattended turn's change for one its person asked for before: it is held anew, with its own end", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // No key of the caller's, as a chat's code calls: matched by what it
+    // would do and where it was asked.
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const asked = await hold(inChat(anna), call);
+    const woken = await hold(inChat(anna), call, {
+      unattended: true,
+      heldUntil: Date.now() + hourMs,
+    });
+    const again = await hold(inChat(anna), call, {
+      unattended: true,
+      heldUntil: Date.now() + hourMs,
+    });
+    const waiting = await waitingFor(anna);
+    const byId = new Map(waiting.map((each) => [each.id, each]));
+    const first = byId.get(asked.pending?.id ?? "");
+    const second = byId.get(woken.pending?.id ?? "");
+    expect({
+      held: waiting.length,
+      // Asked again unattended, it is the same unattended one.
+      repeated: again.pending?.id === woken.pending?.id,
+      first: [first?.unattended, first?.endsAt === undefined],
+      second: [second?.unattended, second?.endsAt === undefined],
+    }).toStrictEqual({
+      held: 2,
+      repeated: true,
+      first: [undefined, true],
+      second: [true, false],
+    });
+  });
+});

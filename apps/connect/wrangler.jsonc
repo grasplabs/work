@@ -1,0 +1,76 @@
+// Reached only through core's service binding, never from the internet.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "grasp-os-connect",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  // global_fetch_strictly_public: connect's own calls out (to Composio's API
+  // and MCP servers) can't reach private or internal addresses, even when a
+  // public name resolves to one.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false,
+  "preview_urls": false,
+  // No platform line per invocation: connect logs what it needs itself, and
+  // never tokens, headers or bodies (threat model R17). Query strings stay
+  // out of logs and traces too.
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+    "traces": { "enabled": true },
+  },
+  // Every secret connect needs: deploys fail while one is unset. Local dev
+  // loads these and every other key .dev.vars sets
+  // (scripts/wrangler-local-config.ts). CAPABILITY_SIGNING_KEY is shared
+  // with core, which signs a capability for every call connect gets.
+  // TOKEN_ENCRYPTION_KEY seals what connect keeps (src/vault.ts): OAuth
+  // tokens, and the organization's AI provider keys, without which no model
+  // call can be made, locally too.
+  //
+  // Connecting accounts needs more, set by the admin, but connect takes
+  // calls without them, so they aren't required: each provider's app credentials,
+  // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET,
+  // MICROSOFT_DIRECTORY_CLIENT_ID and _SECRET
+  // and GOOGLE_DIRECTORY_CLIENT_ID and _SECRET for the directory's own apps,
+  // MICROSOFT_DOCUMENTS_CLIENT_ID and _SECRET and GOOGLE_DOCUMENTS_CLIENT_ID
+  // and _SECRET for the documents' own apps (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
+  // other app, as JSON by provider. While one is unset, connecting that
+  // provider is refused. So is COMPOSIO_API_KEY, Grasp's key for the client's Composio
+  // project (src/composio.ts): while it is unset, nothing of Composio is
+  // offered or reached. So are TEAMS_BOT_ID, TEAMS_BOT_TENANT_ID and
+  // TEAMS_BOT_SECRET, the client's own Teams bot, and SLACK_BOT_TOKEN, its
+  // Slack app's (src/channels.ts): while one is unset, every request
+  // to its platform is refused. So are OPENAI_API_KEY, ANTHROPIC_API_KEY,
+  // MISTRAL_API_KEY, OPENROUTER_API_KEY and KUGELAUDIO_API_KEY, Grasp's
+  // own keys at the AI providers for platform features
+  // (src/ai-providers.ts): a provider whose key is unset isn't offered for
+  // them. Their types are in src/env.d.ts.
+  "secrets": { "required": ["CAPABILITY_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"] },
+  // Vars the admin set through the API survive a deploy (keep_vars).
+  "keep_vars": true,
+  // Loads a native connector into an isolate of its own for each call
+  // (src/connectors.ts); a new connector needs no entry here.
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "grasp-os-connect",
+      // Local only: `vp run dev` runs connect next to core, which binds its
+      // own database as DB too; this keeps the two local databases apart.
+      "preview_database_id": "grasp-os-connect",
+      "migrations_dir": "src/db/migrations",
+    },
+  ],
+  // The client's clock for connect: its cleanup and rotation on its own
+  // alarm (src/clock.ts), as no cron can run them: drops OAuth and Composio
+  // flows nobody finished, deletes at Composio what earlier tries couldn't,
+  // and seals what a rotated key sealed again.
+  "durable_objects": {
+    "bindings": [{ "name": "CLOCK", "class_name": "Clock" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Clock"] }],
+  // The running version's ID, which connect names to core (`version`): how
+  // the admin reads which version a connect in a Workers for Platforms
+  // namespace runs, whose versions Cloudflare's API doesn't list.
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+}

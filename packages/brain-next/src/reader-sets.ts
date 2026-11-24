@@ -1,0 +1,263 @@
+import { eq } from "drizzle-orm";
+import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
+import { z } from "zod";
+
+import type { Access } from "./contract.ts";
+import { readerSetMembers, readerSets } from "./db/schema.ts";
+
+/** One principal of a set of readers: a person or a group. */
+interface Principal {
+  kind: "person" | "group";
+  principal: string;
+}
+
+/** The principals `access` names: none when nobody is known to read it. */
+const principalsOf = (access: Access): Principal[] => {
+  switch (access.kind) {
+    case "owner": {
+      return [{ kind: "person", principal: access.person }];
+    }
+    case "audience": {
+      return [{ kind: "group", principal: access.group }];
+    }
+    case "readers": {
+      return access.groups.map((group) => ({
+        kind: "group",
+        principal: group,
+      }));
+    }
+    case "none": {
+      return [];
+    }
+    default: {
+      throw new Error("Unknown access");
+    }
+  }
+};
+
+/** Code unit order: the same in every locale, so a key never depends on one. */
+const byCodeUnits = (a: string, b: string): number => {
+  if (a === b) {
+    return 0;
+  }
+  return a < b ? -1 : 1;
+};
+
+/**
+ * A set's key: each principal as JSON, `[kind, id]`, sorted, in a JSON
+ * array. The same principals in any order give the same key.
+ */
+const keyOf = (principals: readonly Principal[]): string =>
+  `[${principals
+    .map(({ kind, principal }) => JSON.stringify([kind, principal]))
+    .toSorted(byCodeUnits)
+    .join(",")}]`;
+
+/** The key of the set of readers `access` names. */
+export const readerSetKeyOf = (access: Access): string =>
+  keyOf(principalsOf(access));
+
+/** A key's principals as {@link keyOf} writes them, before they are checked to be one. */
+const keyPrincipalsSchema = z.array(
+  z.tuple([z.enum(["person", "group"]), z.string()])
+);
+
+/**
+ * The access `principals` names, as `principalsOf` makes them: none, one
+ * person, or groups alone (one group's audience, or readers of several).
+ * Undefined for any other mix, which no access names.
+ */
+const accessOfPrincipals = (
+  principals: readonly (readonly ["person" | "group", string])[]
+): Access | undefined => {
+  const [first, ...rest] = principals;
+  if (first === undefined) {
+    return { kind: "none" };
+  }
+  if (first[0] === "person") {
+    return rest.length === 0 ? { kind: "owner", person: first[1] } : undefined;
+  }
+  if (rest.length === 0) {
+    return { kind: "audience", group: first[1] };
+  }
+  const groups = principals.flatMap(([kind, principal]) =>
+    kind === "group" ? [principal] : []
+  );
+  return groups.length === principals.length
+    ? { kind: "readers", groups }
+    : undefined;
+};
+
+/**
+ * Whether `access` names a principal the set of readers keyed `before`
+ * doesn't: a change of readers that adds one. A key that isn't one adds
+ * every principal.
+ */
+export const addsReaders = (before: string, access: Access): boolean => {
+  let parsed: unknown = undefined;
+  try {
+    parsed = JSON.parse(before);
+  } catch {
+    return true;
+  }
+  const held = new Set(
+    (keyPrincipalsSchema.safeParse(parsed).data ?? []).map((principal) =>
+      JSON.stringify(principal)
+    )
+  );
+  return principalsOf(access).some(
+    ({ kind, principal }) => !held.has(JSON.stringify([kind, principal]))
+  );
+};
+
+/**
+ * The access a set of readers' key names: the inverse of
+ * {@link readerSetKeyOf}, the one way the Brain reads a key back. Undefined
+ * for anything `readerSetKeyOf` doesn't write, so a key it can't name is
+ * never read as someone's.
+ */
+export const accessOfKey = (key: string): Access | undefined => {
+  let parsed: unknown = undefined;
+  try {
+    parsed = JSON.parse(key);
+  } catch {
+    return undefined;
+  }
+  const principals = keyPrincipalsSchema.safeParse(parsed);
+  if (!principals.success) {
+    return undefined;
+  }
+  const access = accessOfPrincipals(principals.data);
+  return access !== undefined && readerSetKeyOf(access) === key
+    ? access
+    : undefined;
+};
+
+/**
+ * The sets of readers a reader is in, as a common table `readable` for a
+ * statement whose `?2` is the reader's person and `?3` their groups
+ * (JSON). Principals are matched with their kind, so a person never
+ * matches a group of the same name, and a set with no principals matches
+ * no one. No person (`?2` null) matches no person's set: SQL's `=` is
+ * never true of null. Each set once.
+ *
+ * One lookup of the members' index per principal, whatever SQLite's
+ * statistics say: the groups come first (`CROSS JOIN` keeps SQLite to
+ * that order), and a `UNION` rather than an `OR`, which SQLite's planner
+ * may answer, once it has statistics, by reading every member.
+ */
+export const readableSql = `readable AS (
+  SELECT reader_set FROM reader_set_members
+  WHERE kind = 'person' AND principal = ?2
+  UNION
+  SELECT reader_set_members.reader_set FROM json_each(?3) AS asked
+  CROSS JOIN reader_set_members
+    ON reader_set_members.kind = 'group'
+    AND reader_set_members.principal = asked.value
+)`;
+
+/**
+ * Most values one statement may bind in SQLite in Durable Objects:
+ * Cloudflare's platform limit ("Maximum bound parameters per query: 100",
+ * https://developers.cloudflare.com/durable-objects/platform/limits/).
+ */
+const boundParametersMax = 100;
+
+/** Most members one insert writes: each binds its set, kind and principal. */
+const membersPerInsert = Math.floor(boundParametersMax / 3);
+
+/**
+ * The set of readers `access` names, made the first time it is needed and
+ * shared by every item with the same readers after that. Call it in the
+ * transaction that writes the item, so a set and its members are whole
+ * before anything points at it.
+ */
+export const readerSetOf = (
+  db: DrizzleSqliteDODatabase,
+  access: Access
+): number => {
+  const principals = principalsOf(access);
+  const key = keyOf(principals);
+  const known = db
+    .select({ id: readerSets.id })
+    .from(readerSets)
+    .where(eq(readerSets.key, key))
+    .get();
+  if (known !== undefined) {
+    return known.id;
+  }
+  const { id } = db
+    .insert(readerSets)
+    .values({ key })
+    .returning({ id: readerSets.id })
+    .get();
+  // A few at a time: each row binds three values, and a statement may
+  // bind no more than SQLite in Durable Objects allows
+  // (`boundParametersMax`), so a long list goes in several statements of
+  // the same transaction.
+  for (let at = 0; at < principals.length; at += membersPerInsert) {
+    db.insert(readerSetMembers)
+      .values(
+        principals
+          .slice(at, at + membersPerInsert)
+          .map((principal) => ({ readerSet: id, ...principal }))
+      )
+      .run();
+  }
+  return id;
+};
+
+/** A set's key, as `keyOf` writes it: its principals, `[kind, id]` each. */
+const keySchema = z.array(z.tuple([z.enum(["person", "group"]), z.string()]));
+
+/**
+ * Makes again each set of readers that memories or extraction marks name
+ * by key and the store no longer holds: what an older release dropped
+ * when it saw nothing else use it (an admin's rollback). A key is the
+ * set's principals, so the set it makes is the one that was. Run at every
+ * start, in the caller's transaction: one indexed step per distinct key
+ * (`memories_readers_idx`, `memory_extractions_readers_idx`).
+ */
+export const rebuildMissingSets = (sql: SqlStorage): void => {
+  // One step per distinct key, over each index of keys: the next key
+  // after the last, never every row.
+  const missing = sql
+    .exec<{ readers: string }>(
+      `WITH RECURSIVE
+      memory_keys(readers) AS (
+        SELECT min(readers) FROM memories
+        UNION ALL
+        SELECT (SELECT min(readers) FROM memories WHERE readers > memory_keys.readers)
+        FROM memory_keys WHERE memory_keys.readers IS NOT NULL
+      ),
+      mark_keys(readers) AS (
+        SELECT min(readers) FROM memory_extractions
+        UNION ALL
+        SELECT (SELECT min(readers) FROM memory_extractions WHERE readers > mark_keys.readers)
+        FROM mark_keys WHERE mark_keys.readers IS NOT NULL
+      )
+      SELECT readers FROM memory_keys WHERE readers IS NOT NULL
+        AND readers NOT IN (SELECT key FROM reader_sets)
+      UNION
+      SELECT readers FROM mark_keys WHERE readers IS NOT NULL
+        AND readers NOT IN (SELECT key FROM reader_sets)`
+    )
+    .toArray();
+  for (const { readers } of missing) {
+    const principals = keySchema.parse(JSON.parse(readers));
+    const { id } = sql
+      .exec<{ id: number }>(
+        "INSERT INTO reader_sets (key) VALUES (?) RETURNING id",
+        readers
+      )
+      .one();
+    for (const [kind, principal] of principals) {
+      sql.exec(
+        "INSERT INTO reader_set_members (reader_set, kind, principal) VALUES (?, ?, ?)",
+        id,
+        kind,
+        principal
+      );
+    }
+  }
+};

@@ -1,0 +1,1 @@
+ALTER TABLE `idempotent_calls` ADD `claimed_at` integer DEFAULT 0 NOT NULL;

@@ -1,0 +1,900 @@
+import { AppDefinitionError } from "./app-definition-error.ts";
+import type { WorkflowEventContract } from "./bound-workflows.ts";
+import { isIdentifier } from "./code-print.ts";
+import { refuser } from "./declaration.ts";
+import { definitionManifest, readDefinition } from "./definition-app.ts";
+import {
+  evaluateExpression,
+  ExpressionError,
+} from "./definition-expression.ts";
+import { isFunctionPath, permissionDataSchema } from "./definition-json.ts";
+import { peoplePermission } from "./definition-types.ts";
+import type {
+  AppDefinition,
+  DefinedAnswer,
+  DefinedField,
+  DefinedFunction,
+  DefinedPermission,
+  DefinedRule,
+  DefinedTable,
+} from "./definition-types.ts";
+import { referencesRenamed } from "./descriptor-references.ts";
+import {
+  isBrowserPermission,
+  isPermission,
+  isWorkflowPermission,
+  PermissionDefinitionError,
+} from "./permission-checks.ts";
+import { readPermissionDeclaration } from "./permission-read.ts";
+import { permission } from "./permission.ts";
+import { SchemaDefinitionError } from "./schema-error.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
+import type { AccessMode, RowRole } from "./table-access.ts";
+import { ValueDefinitionError } from "./value-descriptor.ts";
+import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
+import { v } from "./values.ts";
+
+// The operations that change an App's definition (definition-types.ts): what
+// the chat's tools and the workspace's Data view make. Each answers the
+// definition after it, checked whole (`definitionManifest`), or throws
+// `AppDefinitionError` (or a builder's own error) saying what is wrong,
+// and changes nothing. Types are given as code would write them
+// (`v.string().max(200)`) and permissions as `permission.*(…)`, read by
+// `evaluateExpression` over the SDK's own builders.
+//
+// Tables and fields get IDs as they are added, and keep them: renaming
+// changes a name only. So do server functions, whose ID is what a
+// workflow calls one by: each query and mutation the code exports gets
+// one as a commit brings it (`withExportedFunctions`), and renaming one
+// (`renameFunction`) keeps it, so a workflow bound to it calls it under
+// its new name. One left out by a commit and brought back at its path
+// takes back the ID an earlier version gave it there, if nothing else
+// holds it; a publish still compares it with its callers.
+// An ID stands for whatever function the definition names it with, as
+// the App's builders say: a rename to another export's path moves it
+// there, as rewriting the function's code would change what it does, and
+// a publish still refuses a function that no longer fits its callers.
+
+/** A row rule as an operation takes it: its field by name. */
+type RuleInput =
+  | { readonly kind: "owner" }
+  | { readonly kind: "person" | "team"; readonly field: string }
+  | { readonly kind: "role"; readonly role: RowRole };
+
+/** A table's access as an operation takes it. */
+interface AccessInput {
+  readonly read: AccessMode;
+  readonly write: AccessMode;
+  readonly rows?: {
+    readonly read?: readonly RuleInput[];
+    readonly write?: readonly RuleInput[];
+  };
+}
+
+/** An operation on a definition. */
+export type DefinitionOperation =
+  | {
+      readonly op: "addTable";
+      readonly name: string;
+      /** Its fields, each a `v` expression, by name. */
+      readonly fields?: Readonly<Record<string, string>>;
+      readonly access?: AccessInput;
+    }
+  | {
+      readonly op: "addField";
+      readonly table: string;
+      readonly name: string;
+      readonly type: string;
+      /** The value records the table holds already take. */
+      readonly answer?: JsonValue;
+    }
+  | {
+      readonly op: "changeField";
+      readonly table: string;
+      readonly field: string;
+      readonly type: string;
+      /** The value records that don't fit the new type take, where they lack one. */
+      readonly answer?: JsonValue;
+    }
+  | {
+      readonly op: "renameField";
+      readonly table: string;
+      readonly field: string;
+      readonly name: string;
+    }
+  | {
+      readonly op: "renameTable";
+      readonly table: string;
+      readonly name: string;
+    }
+  | {
+      readonly op: "setAccess";
+      readonly table: string;
+      readonly access: AccessInput;
+      readonly sensitive?: boolean;
+    }
+  | {
+      readonly op: "addIndex";
+      readonly table: string;
+      /** Its name; a search index has none, as a table has one. */
+      readonly name?: string;
+      /** The fields it orders by, or, with `search`, the text fields it searches. */
+      readonly fields: readonly string[];
+      readonly search?: boolean;
+    }
+  | {
+      readonly op: "addPermission";
+      /** A `permission.*(…)` expression, or `people`. */
+      readonly permission: string;
+    }
+  | { readonly op: "removeTable"; readonly table: string }
+  | {
+      readonly op: "removeField";
+      readonly table: string;
+      readonly field: string;
+    }
+  | {
+      readonly op: "removeIndex";
+      readonly table: string;
+      /** The index's name; the search index, which has none, with `search`. */
+      readonly name?: string;
+      readonly search?: boolean;
+    }
+  | { readonly op: "removePermission"; readonly alias: string }
+  | {
+      /**
+       * Sets the events, listen tasks and decisions workflow permission
+       * `alias` declares: what the live version of the workflow the
+       * builder binds has, as the host resolved it
+       * (app-workflow-bindings.ts in core); and records that workflow,
+       * `bound`, as the one the definition binds there.
+       */
+      readonly op: "setWorkflowContract";
+      readonly alias: string;
+      readonly contract: WorkflowEventContract;
+      readonly bound?: { readonly workflowId: string };
+    }
+  | {
+      /** Renames function `function` (by its path now), keeping its ID. */
+      readonly op: "renameFunction";
+      readonly function: string;
+      readonly name: string;
+    }
+  | {
+      readonly op: "moveField";
+      readonly table: string;
+      readonly field: string;
+      /** Where it goes among the table's fields, from 0. */
+      readonly to: number;
+    };
+
+const refuse: (message: string) => never = refuser(AppDefinitionError);
+
+/** The table named `name`. */
+const tableNamed = (definition: AppDefinition, name: string): DefinedTable =>
+  definition.tables.find((table) => table.name === name) ??
+  refuse(
+    `The App has no table \`${name}\`. Its tables: ${definition.tables.map((table) => `\`${table.name}\``).join(", ") || "none yet"}.`
+  );
+
+/** The field of `table` named `name`. */
+const fieldNamed = (table: DefinedTable, name: string): DefinedField =>
+  table.fields.find((field) => field.name === name) ??
+  refuse(
+    `\`${table.name}\` has no field \`${name}\`. Its fields: ${table.fields.map((field) => `\`${field.name}\``).join(", ") || "none yet"}.`
+  );
+
+/** The ID of the field of `table` an index or rule names, or a managed one. */
+const fieldId = (table: DefinedTable, name: string): string =>
+  name === "_createdAt" || name === "_updatedAt"
+    ? name
+    : fieldNamed(table, name).id;
+
+/** The functions `definition` gives IDs. */
+const functionsOf = (definition: AppDefinition): readonly DefinedFunction[] =>
+  definition.functions ?? [];
+
+/** The function `definition` gives an ID at path `name`. */
+const functionNamed = (
+  definition: AppDefinition,
+  name: string
+): DefinedFunction =>
+  functionsOf(definition).find((held) => held.name === name) ??
+  refuse(
+    `The App gives no function \`${name}\` an ID. Those it gives one: ${
+      functionsOf(definition)
+        .map((held) => `\`${held.name}\``)
+        .join(", ") || "none yet"
+    }.`
+  );
+
+/** Refuses `name` unless it is a function's path that `definition` doesn't hold yet. */
+const requireFreeFunctionName = (
+  definition: AppDefinition,
+  name: string
+): void => {
+  if (!isFunctionPath(name)) {
+    refuse(
+      `\`${name}\` isn't a function's path: its module's path under server/ and its export's name, joined by dots (\`server/tasks.ts\`'s \`create\` is \`tasks.create\`).`
+    );
+  }
+  if (functionsOf(definition).some((held) => held.name === name)) {
+    refuse(`The App gives a function \`${name}\` an ID already.`);
+  }
+};
+
+/** `definition` with `functions` in place of its functions. */
+const withFunctions = (
+  definition: AppDefinition,
+  functions: readonly DefinedFunction[]
+): AppDefinition => {
+  const { functions: _held, ...rest } = definition;
+  return functions.length === 0 ? rest : { ...rest, functions };
+};
+
+/**
+ * `definition` with function `operation.function` (by its path now)
+ * renamed `operation.name`, keeping its ID: code alone can't tell a
+ * rename from a function removed and another added, so a rename is said.
+ */
+const withFunctionRenamed = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "renameFunction" }>
+): AppDefinition => {
+  const named = functionNamed(definition, operation.function);
+  requireFreeFunctionName(definition, operation.name);
+  return withFunctions(
+    definition,
+    functionsOf(definition).map((fn) =>
+      fn.id === named.id ? { ...fn, name: operation.name } : fn
+    )
+  );
+};
+
+/**
+ * `definition` giving stable IDs to exactly the functions at `exported`,
+ * the paths of the queries and mutations a version's code exports (what
+ * inspecting it found), as a commit holds it: each keeps the ID
+ * `definition` gives its path (a rename it said moved it there), else the
+ * first ID `previous` (the versions it is committed over, nearest first)
+ * gave that path that no function of it holds already, else a new one
+ * from `newId`. A function the code no longer exports has none: it is
+ * gone.
+ */
+export const withExportedFunctions = (
+  definition: AppDefinition,
+  previous: readonly AppDefinition[],
+  exported: readonly string[],
+  newId: () => string = () => crypto.randomUUID()
+): AppDefinition => {
+  // Only what the code exports: an ID the definition gives a path it
+  // doesn't stands for nothing, and is free to come back where it was.
+  const given = new Map(
+    functionsOf(definition)
+      .filter(({ name }) => exported.includes(name))
+      .map(({ id, name }) => [name, id])
+  );
+  const held = new Set(given.values());
+  const carriedFor = (name: string): string | undefined =>
+    previous
+      .map((before) => functionsOf(before).find((fn) => fn.name === name)?.id)
+      .find((id) => id !== undefined && !held.has(id));
+  const functions = [...exported].toSorted().map((name) => {
+    const id = given.get(name) ?? carriedFor(name) ?? newId();
+    held.add(id);
+    return { id, name };
+  });
+  return withFunctions(definition, functions);
+};
+
+/** The descriptor a `v` expression declares. */
+export const typeFrom = (source: string): ValueDescriptor =>
+  structuredClone(descriptorOf(evaluateExpression(source, { v })));
+
+/** `definition` with `table` in place of the table with its ID. */
+const withTable = (
+  definition: AppDefinition,
+  table: DefinedTable
+): AppDefinition => ({
+  ...definition,
+  tables: definition.tables.map((held) =>
+    held.id === table.id ? table : held
+  ),
+});
+
+/** `answers` with `answer` for `table`'s `field`, in place of any before. */
+const withAnswer = (
+  answers: readonly DefinedAnswer[],
+  table: DefinedTable,
+  field: DefinedField,
+  value: JsonValue | undefined
+): readonly DefinedAnswer[] =>
+  value === undefined
+    ? answers
+    : [
+        ...answers.filter(
+          (answer) => answer.table !== table.id || answer.field !== field.id
+        ),
+        { table: table.id, field: field.id, value },
+      ];
+
+/** An access input, its rules' fields by ID. */
+const accessFrom = (table: DefinedTable, access: AccessInput) => {
+  const rules = (list: readonly RuleInput[] | undefined) =>
+    list?.map((rule): DefinedRule =>
+      rule.kind === "person" || rule.kind === "team"
+        ? { kind: rule.kind, field: fieldNamed(table, rule.field).id }
+        : rule
+    );
+  const read = rules(access.rows?.read);
+  const write = rules(access.rows?.write);
+  return {
+    read: access.read,
+    write: access.write,
+    ...(access.rows === undefined
+      ? {}
+      : {
+          rows: {
+            ...(read === undefined ? {} : { read }),
+            ...(write === undefined ? {} : { write }),
+          },
+        }),
+  };
+};
+
+/** The permission a `permission.*(…)` expression, or `people`, declares, as data. */
+const permissionFrom = (
+  source: string
+): { alias: string; data: DefinedPermission } => {
+  if (source.trim() === peoplePermission) {
+    return {
+      alias: peoplePermission,
+      data: { "~permission": peoplePermission, alias: peoplePermission },
+    };
+  }
+  const declared = evaluateExpression(source, { permission, v });
+  if (
+    !isPermission(declared) &&
+    !isBrowserPermission(declared) &&
+    !isWorkflowPermission(declared)
+  ) {
+    return refuse(
+      "A permission is a `permission.*(…)` declaration, or `people`."
+    );
+  }
+  if (!isIdentifier(declared.alias)) {
+    return refuse(
+      `\`${declared.alias}\` can't be a permission's alias: it is a word JavaScript keeps.`
+    );
+  }
+  // A workflow's events, listen tasks and decisions are what the version
+  // bound has, written from it (`setWorkflowContract`), never by a tool by
+  // hand: a hand-written one would type references the bound version
+  // can't take. Whatever a definition declares, binding a version holds
+  // it to the declaration (app-workflow-bindings.ts in core), and core
+  // holds every event an App sends to a type the bound version lets a
+  // page send, and every answer to its decision.
+  if (
+    isWorkflowPermission(declared) &&
+    (Object.keys(declared.events).length > 0 ||
+      Object.keys(declared.listens).length > 0 ||
+      Object.keys(declared.decisions).length > 0)
+  ) {
+    return refuse(
+      "A workflow's events, listen tasks and decisions come from the live version of the workflow you bind: add the workflow with its args and returns, then declare them with `bindWorkflow`."
+    );
+  }
+  // A declaration is JSON data, which `readPermissionDeclaration` reads back.
+  return {
+    alias: declared.alias,
+    data: permissionDataSchema.parse(structuredClone(declared)),
+  };
+};
+
+/** `definition` with the index `operation` adds: a named one, or its table's search index. */
+const withIndex = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "addIndex" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  const fields = operation.fields.map((name) => fieldId(table, name));
+  if (operation.search === true) {
+    if (operation.name !== undefined) {
+      return refuse(
+        "A search index has no name: a table has one, which `ctx.db.search` reads. Leave `name` out."
+      );
+    }
+    if (table.searchIndex !== undefined) {
+      return refuse(
+        `\`${table.name}\` has a search index already: a table has one, over every text field it searches.`
+      );
+    }
+    return withTable(definition, { ...table, searchIndex: fields });
+  }
+  if (operation.name === undefined) {
+    return refuse("An index has a name, which `.withIndex(name)` reads.");
+  }
+  return withTable(definition, {
+    ...table,
+    indexes: [...table.indexes, { name: operation.name, fields }],
+  });
+};
+
+/**
+ * The table named `name` gone, with its answers. Its records stay in the
+ * App's store, never dropped: a table of that name can't be added again,
+ * as the store keeps the name for those records.
+ */
+const withoutTable = (
+  definition: AppDefinition,
+  name: string
+): AppDefinition => {
+  const table = tableNamed(definition, name);
+  return {
+    ...definition,
+    tables: definition.tables.filter(({ id }) => id !== table.id),
+    answers: definition.answers.filter((answer) => answer.table !== table.id),
+  };
+};
+
+/** What in `table` reads `field`: its indexes, its search index, its row rules. */
+const readersOf = (table: DefinedTable, field: DefinedField): string[] => {
+  const rules = [
+    ...(table.access.rows?.read ?? []),
+    ...(table.access.rows?.write ?? []),
+  ];
+  return [
+    ...table.indexes.flatMap((index) =>
+      index.fields.includes(field.id) ? [`the index \`${index.name}\``] : []
+    ),
+    ...(table.searchIndex?.includes(field.id) === true
+      ? ["the search index"]
+      : []),
+    ...(rules.some((rule) => "field" in rule && rule.field === field.id)
+      ? ["a row rule"]
+      : []),
+  ];
+};
+
+/**
+ * `table`'s field named `name` gone, with its answers; refused while an
+ * index, the search index or a row rule reads it, each named. Its values
+ * stay in the records, as a table's do.
+ */
+const withoutField = (
+  definition: AppDefinition,
+  table: DefinedTable,
+  name: string
+): AppDefinition => {
+  const field = fieldNamed(table, name);
+  const readers = readersOf(table, field);
+  if (readers.length > 0) {
+    return refuse(
+      `\`${table.name}.${field.name}\` is read by ${readers.join(", ")}: remove or change ${readers.length === 1 ? "it" : "them"} first.`
+    );
+  }
+  return {
+    ...withTable(definition, {
+      ...table,
+      fields: table.fields.filter(({ id }) => id !== field.id),
+    }),
+    answers: definition.answers.filter(
+      (answer) => answer.table !== table.id || answer.field !== field.id
+    ),
+  };
+};
+
+/** `definition` without the index `operation` names, or its table's search index. */
+const withoutIndex = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "removeIndex" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  if (operation.search === true) {
+    if (table.searchIndex === undefined) {
+      return refuse(`\`${table.name}\` has no search index.`);
+    }
+    const { searchIndex: _removed, ...rest } = table;
+    return withTable(definition, rest);
+  }
+  if (!table.indexes.some((index) => index.name === operation.name)) {
+    return refuse(
+      `\`${table.name}\` has no index \`${operation.name ?? ""}\`. Its indexes: ${table.indexes.map((index) => `\`${index.name}\``).join(", ") || "none"}.`
+    );
+  }
+  return withTable(definition, {
+    ...table,
+    indexes: table.indexes.filter((index) => index.name !== operation.name),
+  });
+};
+
+/**
+ * `definition` binding `bound` under `alias`, in place of what it bound
+ * there; nothing there, without `bound`. In alias order, so the same
+ * bindings make the same text.
+ */
+const withWorkflowBinding = (
+  definition: AppDefinition,
+  alias: string,
+  bound?: { readonly workflowId: string }
+): AppDefinition => {
+  const { workflowBindings = [], ...rest } = definition;
+  const kept = workflowBindings.filter((held) => held.alias !== alias);
+  const next =
+    bound === undefined
+      ? kept
+      : [...kept, { alias, workflowId: bound.workflowId }].toSorted((a, b) =>
+          a.alias < b.alias ? -1 : 1
+        );
+  return next.length === 0 ? rest : { ...rest, workflowBindings: next };
+};
+
+/** `definition` without the permission whose alias is `alias`. */
+const withoutPermission = (
+  definition: AppDefinition,
+  alias: string
+): AppDefinition => {
+  if (!definition.permissions.some((held) => held.alias === alias)) {
+    return refuse(
+      `The App has no permission \`${alias}\`. Its permissions: ${definition.permissions.map((held) => `\`${typeof held.alias === "string" ? held.alias : ""}\``).join(", ") || "none yet"}.`
+    );
+  }
+  return withWorkflowBinding(
+    {
+      ...definition,
+      permissions: definition.permissions.filter(
+        (held) => held.alias !== alias
+      ),
+    },
+    alias
+  );
+};
+
+/** `definition` without what a removal names. */
+const removed = (
+  definition: AppDefinition,
+  operation: Extract<
+    DefinitionOperation,
+    { op: "removeTable" | "removeField" | "removeIndex" | "removePermission" }
+  >
+): AppDefinition => {
+  switch (operation.op) {
+    case "removeTable": {
+      return withoutTable(definition, operation.table);
+    }
+    case "removeField": {
+      return withoutField(
+        definition,
+        tableNamed(definition, operation.table),
+        operation.field
+      );
+    }
+    case "removeIndex": {
+      return withoutIndex(definition, operation);
+    }
+    case "removePermission": {
+      return withoutPermission(definition, operation.alias);
+    }
+    default: {
+      return refuse("That isn't a removal from a definition.");
+    }
+  }
+};
+
+/**
+ * `definition` with `operation`'s field moved to its place among its
+ * table's fields: the order the generated schema, and every grid, lists
+ * them in. Nothing a record holds changes.
+ */
+const withFieldMoved = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "moveField" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  const field = fieldNamed(table, operation.field);
+  if (
+    !Number.isInteger(operation.to) ||
+    operation.to < 0 ||
+    operation.to >= table.fields.length
+  ) {
+    return refuse(
+      `\`${table.name}\` has ${table.fields.length} fields: a field moves to a place from 0 to ${table.fields.length - 1}.`
+    );
+  }
+  const rest = table.fields.filter(({ id }) => id !== field.id);
+  return withTable(definition, {
+    ...table,
+    fields: [
+      ...rest.slice(0, operation.to),
+      field,
+      ...rest.slice(operation.to),
+    ],
+  });
+};
+
+/** `definition` with the table `operation` adds, with new IDs from `newId`. */
+const withNewTable = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "addTable" }>,
+  newId: () => string
+): AppDefinition => {
+  if (definition.tables.some((table) => table.name === operation.name)) {
+    return refuse(`The App has a table \`${operation.name}\` already.`);
+  }
+  const table: DefinedTable = {
+    id: newId(),
+    name: operation.name,
+    fields: Object.entries(operation.fields ?? {}).map(([name, type]) => ({
+      id: newId(),
+      name,
+      type: typeFrom(type),
+    })),
+    indexes: [],
+    access: { read: "none", write: "none" },
+  };
+  return {
+    ...definition,
+    tables: [
+      ...definition.tables,
+      operation.access === undefined
+        ? table
+        : { ...table, access: accessFrom(table, operation.access) },
+    ],
+  };
+};
+
+/** `definition` with the access `operation` sets on its table. */
+const withAccess = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "setAccess" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  // Once declared sensitive, a table stays so: the store keeps its
+  // values out of the change history for good.
+  if (table.sensitive === true && operation.sensitive === false) {
+    return refuse(
+      `\`${table.name}\` is sensitive, and a table stays so once declared: leave \`sensitive\` out.`
+    );
+  }
+  return withTable(definition, {
+    ...table,
+    access: accessFrom(table, operation.access),
+    ...(operation.sensitive === true ? { sensitive: true as const } : {}),
+  });
+};
+
+/**
+ * `definition` with table `from` named `name`: its ID kept, so its
+ * records follow it on the store, and every field referring to it
+ * (`v.id`) naming it anew. A name another table has, in any case, is
+ * refused: the store tells tables apart regardless of case.
+ */
+const withTableRenamed = (
+  definition: AppDefinition,
+  from: string,
+  name: string
+): AppDefinition => {
+  const table = tableNamed(definition, from);
+  if (
+    definition.tables.some(
+      (held) => held.name.toLowerCase() === name.toLowerCase()
+    )
+  ) {
+    return refuse(
+      `The App has a table \`${name}\` already, or one whose name differs from it only in case.`
+    );
+  }
+  const names = new Map([[table.name, name]]);
+  const referring = (field: DefinedField): DefinedField => ({
+    ...field,
+    type: referencesRenamed(field.type, names),
+  });
+  return {
+    ...definition,
+    tables: definition.tables.map((held) => ({
+      ...held,
+      ...(held.id === table.id ? { name } : {}),
+      fields: held.fields.map(referring),
+    })),
+  };
+};
+
+/**
+ * `definition` with workflow permission `alias` declaring `contract`'s
+ * events, listen tasks and decisions, its args and returns as they are,
+ * checked as a declaration in code is.
+ */
+const withWorkflowContract = (
+  definition: AppDefinition,
+  alias: string,
+  contract: WorkflowEventContract
+): AppDefinition => {
+  const index = definition.permissions.findIndex(
+    (held) => held.alias === alias && held["~permission"] === "workflows"
+  );
+  const held = definition.permissions[index];
+  if (held === undefined) {
+    return refuse(
+      `The App declares no workflow \`${alias}\`: add it with \`addPermission\` first.`
+    );
+  }
+  const declared = readPermissionDeclaration({
+    ...held,
+    events: contract.events,
+    listens: contract.listens,
+    decisions: contract.decisions,
+  });
+  return {
+    ...definition,
+    permissions: definition.permissions.with(
+      index,
+      permissionDataSchema.parse(structuredClone(declared))
+    ),
+  };
+};
+
+/** The definition after `operation`, before it is checked. */
+const applied = (
+  definition: AppDefinition,
+  operation: DefinitionOperation,
+  newId: () => string
+): AppDefinition => {
+  switch (operation.op) {
+    case "addTable": {
+      return withNewTable(definition, operation, newId);
+    }
+    case "addField": {
+      const table = tableNamed(definition, operation.table);
+      if (table.fields.some((field) => field.name === operation.name)) {
+        return refuse(
+          `\`${table.name}\` has a field \`${operation.name}\` already: change it with changeField.`
+        );
+      }
+      const field = {
+        id: newId(),
+        name: operation.name,
+        type: typeFrom(operation.type),
+      };
+      return {
+        ...withTable(definition, {
+          ...table,
+          fields: [...table.fields, field],
+        }),
+        answers: withAnswer(definition.answers, table, field, operation.answer),
+      };
+    }
+    case "changeField": {
+      const table = tableNamed(definition, operation.table);
+      const field = fieldNamed(table, operation.field);
+      const changed = { ...field, type: typeFrom(operation.type) };
+      return {
+        ...withTable(definition, {
+          ...table,
+          fields: table.fields.map((held) =>
+            held.id === field.id ? changed : held
+          ),
+        }),
+        answers: withAnswer(definition.answers, table, field, operation.answer),
+      };
+    }
+    case "renameField": {
+      const table = tableNamed(definition, operation.table);
+      const field = fieldNamed(table, operation.field);
+      if (table.fields.some((held) => held.name === operation.name)) {
+        return refuse(
+          `\`${table.name}\` has a field \`${operation.name}\` already.`
+        );
+      }
+      // Its answer, by the field's ID, stays: the records it fills are
+      // the same under either name.
+      return withTable(definition, {
+        ...table,
+        fields: table.fields.map((held) =>
+          held.id === field.id ? { ...held, name: operation.name } : held
+        ),
+      });
+    }
+    case "moveField": {
+      return withFieldMoved(definition, operation);
+    }
+    case "renameTable": {
+      return withTableRenamed(definition, operation.table, operation.name);
+    }
+    case "setAccess": {
+      return withAccess(definition, operation);
+    }
+    case "addIndex": {
+      return withIndex(definition, operation);
+    }
+    case "addPermission": {
+      const declared = permissionFrom(operation.permission);
+      if (
+        definition.permissions.some((held) => held.alias === declared.alias)
+      ) {
+        return refuse(
+          `The App has a permission \`${declared.alias}\` already.`
+        );
+      }
+      return {
+        ...definition,
+        permissions: [...definition.permissions, declared.data],
+      };
+    }
+    case "setWorkflowContract": {
+      return withWorkflowBinding(
+        withWorkflowContract(definition, operation.alias, operation.contract),
+        operation.alias,
+        operation.bound
+      );
+    }
+    case "removeTable":
+    case "removeField":
+    case "removeIndex":
+    case "removePermission": {
+      return removed(definition, operation);
+    }
+    case "renameFunction": {
+      return withFunctionRenamed(definition, operation);
+    }
+    default: {
+      return refuse("That isn't an operation on a definition.");
+    }
+  }
+};
+
+/**
+ * `definition` after `operation` (see the header), checked whole, with
+ * new IDs from `newId`. Throws for an operation that can't be made, or
+ * that would leave the definition incoherent, saying why.
+ */
+export const applyOperation = (
+  definition: AppDefinition,
+  operation: DefinitionOperation,
+  newId: () => string = () => crypto.randomUUID()
+): AppDefinition => {
+  const next = applied(definition, operation, newId);
+  definitionManifest(next);
+  return next;
+};
+
+/** The errors the builders refuse a definition with: what was wrong. */
+const definitionErrors = [
+  AppDefinitionError,
+  ExpressionError,
+  PermissionDefinitionError,
+  SchemaDefinitionError,
+  ValueDefinitionError,
+];
+
+/** What `make` makes, or the problem a builder refused it with, in words. */
+const attempt = (
+  make: () => AppDefinition
+): { definition: AppDefinition } | { problem: string } => {
+  try {
+    return { definition: make() };
+  } catch (error) {
+    if (definitionErrors.some((type) => error instanceof type)) {
+      return {
+        problem: error instanceof Error ? error.message : String(error),
+      };
+    }
+    throw error;
+  }
+};
+
+/**
+ * `applyOperation`, its refusal answered as data: the problem, in words,
+ * where an operation can't be made. Anything else still throws.
+ */
+export const tryOperation = (
+  definition: AppDefinition,
+  operation: DefinitionOperation,
+  newId?: () => string
+): { definition: AppDefinition } | { problem: string } =>
+  attempt(() => applyOperation(definition, operation, newId));
+
+/** `readDefinition`, its refusal answered as data, as `tryOperation`'s is. */
+export const tryReadDefinition = (
+  data: unknown
+): { definition: AppDefinition } | { problem: string } =>
+  attempt(() => readDefinition(data));

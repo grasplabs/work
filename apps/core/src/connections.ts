@@ -1,0 +1,1375 @@
+import type {
+  Agent,
+  AgentApp,
+  AgentAppsWorkedOut,
+  AgentDocument,
+  AgentSettings,
+  AgentUsage,
+  AgentWake,
+  OwnAgentsUsage,
+} from "@grasp-os/shared/agents";
+import { actorOf } from "@grasp-os/shared/audit";
+import {
+  catalogLogoPath,
+  catalogSourceSchema,
+  composioToolkitSchema,
+  connectErrors,
+  connectionErrors,
+  connectionOwnersMax,
+  connectionScopeSchema,
+  oauthProviderSchema,
+  returnPathMaxLength,
+} from "@grasp-os/shared/connect";
+import type {
+  AppRequest,
+  AppRequestInput,
+  CatalogEntry,
+  CatalogSource,
+  ConnectionSource,
+  ConnectionScope,
+  CatalogTool,
+  ComposioToolRule,
+  ConnectionOwner,
+  ConnectionPerson,
+  ConnectionSummary,
+  ConnectionsApi,
+  ListedConnection,
+  RevocationToDo,
+  OAuthProvider,
+  OfferedCatalog,
+  AppPointerSetting,
+  SharedMailboxSetting,
+  SharedSyncPlaces,
+  ConnectionBrainAudienceSetting,
+  ToolClassSetting,
+  ToolkitKeyField,
+} from "@grasp-os/shared/connect";
+import type { SignInConfig } from "@grasp-os/shared/deployment-config";
+import { authErrors, requestErrors } from "@grasp-os/shared/errors";
+import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { permissionErrors } from "@grasp-os/shared/permissions";
+import {
+  guestRole,
+  isAdmin,
+  requireAdmin,
+  roleErrors,
+} from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import { waitUntil } from "cloudflare:workers";
+import { and, eq, ne } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import {
+  listAgentApps,
+  setAgentApp,
+  workOutAgentApps,
+} from "./agent-app-access.ts";
+import {
+  adoptAgent,
+  changeAgent,
+  declineAgent,
+  listOfferedAgents,
+  offerOwnAgent,
+  listAgents,
+  listOwnAgents,
+  deleteAgent,
+  makeAgent,
+  makeOwnAgent,
+  readAgentSettings,
+  setAgentPaused,
+  setAgentReach,
+  setAgentToolClass,
+} from "./agent-builder.ts";
+import {
+  addAgentDocument,
+  listAgentDocuments,
+  removeAgentDocument,
+} from "./agent-documents.ts";
+import { agentsUsage, ownAgentsUsage } from "./agent-usage.ts";
+import {
+  deleteAgentWake,
+  listAgentWakes,
+  makeAgentWake,
+  setAgentWakePaused,
+} from "./agent-wakes.ts";
+import { pointApp, readAppPointers } from "./app-pointers.ts";
+import {
+  auditedBatch,
+  keepAuditEvent,
+  outboxedIfChanged,
+} from "./audit-outbox.ts";
+import { providerIds, signInConfig } from "./auth/config.ts";
+import { identify } from "./auth/identity.ts";
+import { eraseCaptures } from "./brain-next-origins.ts";
+import { listAppRequests, requestApp } from "./catalog-requests.ts";
+import {
+  readConnectionAudiences,
+  setConnectionAudience,
+} from "./connection-audiences.ts";
+import { mayHoldCapturesOf } from "./connection-capture-key.ts";
+import {
+  accounts,
+  hiddenConnectors,
+  members,
+  users,
+} from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
+import { errorResponse } from "./errors.ts";
+import { spendMonth } from "./model-spend.ts";
+import { startOAuthConnection } from "./oauth-relay.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import {
+  closeOnDisconnect,
+  eraseBrainReads,
+  mayHoldReadsOf,
+} from "./shared-reads.ts";
+import { claimConnectedTokens } from "./source-readers.ts";
+import { routeMember } from "./staff-audit.ts";
+import {
+  readStephenReach,
+  setAppToolClass,
+  setStephenPlace,
+  setStephenReach,
+} from "./stephen-reach.ts";
+import { pickSyncPlaces, readSyncPlaces } from "./sync-picks.ts";
+import {
+  anyMailboxPointed,
+  classesOn,
+  readToolClasses,
+  setToolClass,
+} from "./tool-classes.ts";
+
+// Connecting accounts, as core's part in it: the signed-in person's API
+// over `/rpc`, and the callback the provider sends the browser back to.
+// Everything else is connect's: the flow's state and PKCE verifier, and the
+// tokens, which never come to core (threat model R1). Core says who the
+// person is, read from their session on each request, and where the
+// deployment is (its origin and its tenant at the provider, both from
+// deployment config, never from a request).
+
+/** What the frontend sends to connect a toolkit, checked as `returnTo` is. */
+const connectToolkitRequestSchema = z.object({
+  returnTo: z.string().default("/"),
+});
+type ConnectToolkitRequest = Parameters<ConnectionsApi["connectToolkit"]>[0];
+type ConnectToolkitWithKeyRequest = Parameters<
+  ConnectionsApi["connectToolkitWithKey"]
+>[0];
+
+/** What the frontend sends to start: checked here, as it came over the wire. */
+const startRequestSchema = z.strictObject({
+  provider: oauthProviderSchema,
+  scope: connectionScopeSchema,
+  returnTo: z.string().default("/"),
+});
+type StartRequest = Parameters<ConnectionsApi["start"]>[0];
+
+/**
+ * The person as connect needs them: who, their role, and the accounts they
+ * sign in with (a personal connection must be to one of them), read now.
+ * Entra accounts by their object ID, which is the same for every app in
+ * the tenant; Google ones by their subject.
+ */
+export const personOf = async (
+  env: Env,
+  {
+    userId,
+    role,
+    staff,
+    email,
+  }: Pick<Identity, "userId" | "role" | "staff" | "email">
+): Promise<ConnectionPerson> => {
+  const signIns = await drizzle(env.DB)
+    .select({
+      providerId: accounts.providerId,
+      accountId: accounts.accountId,
+      oid: accounts.oid,
+    })
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
+  const accountsOf: ConnectionPerson["accounts"] = [];
+  for (const { providerId, accountId, oid } of signIns) {
+    if (providerId === providerIds.entra && oid !== null) {
+      accountsOf.push({ provider: "microsoft", subject: oid });
+    } else if (providerId === providerIds.google) {
+      accountsOf.push({ provider: "google", subject: accountId });
+    }
+  }
+  return { userId, role, staff, email, accounts: accountsOf };
+};
+
+/**
+ * Whose each of the connections `ids` is, from connect, a page of IDs at
+ * a time (`ConnectApi.connectionOwners`); unknown ones are left out.
+ */
+export const connectionOwnersOf = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<ConnectionOwner[]> => {
+  const pages: string[][] = [];
+  for (let start = 0; start < ids.length; start += connectionOwnersMax) {
+    pages.push(ids.slice(start, start + connectionOwnersMax));
+  }
+  const owners = await Promise.all(
+    pages.map(async (page) => await env.CONNECT.connectionOwners(page))
+  );
+  return owners.flat();
+};
+
+/**
+ * Erases what the Brain kept through `connectionId` (connection-
+ * capture.ts) once `person` disconnected it, in the background
+ * (`waitUntil`), when it is their own connection of a kind capture keeps
+ * reads from (`mayHoldCapturesOf`). The disconnect never waits on it: should it
+ * fail, it is logged, and the drain of connect's audit outbox erases them
+ * before the disconnect's event leaves it (capture-erasures.ts), which
+ * also records the erasure. Until it ran, a read under way may still land
+ * in the connection's group, and goes with it.
+ */
+const eraseCapturesSoon = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string
+): Promise<void> => {
+  try {
+    const [owner] = await connectionOwnersOf(env, [connectionId]);
+    if (owner !== undefined && mayHoldCapturesOf(owner, person.userId)) {
+      await eraseCaptures(env, person.userId, connectionId);
+    }
+  } catch (error) {
+    log.warn("connection.captures_not_erased_yet", {
+      connectionId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/** The organization's tenant at `provider`, from the sign-in config. */
+export const tenantOf = (
+  config: SignInConfig,
+  provider: OAuthProvider
+): string | undefined =>
+  provider === "microsoft"
+    ? config.entra?.tenantId
+    : config.google?.hostedDomain;
+
+/**
+ * `path` as a URL on `origin`, or `undefined` when it would lead anywhere
+ * else: another origin (`//evil.test`, `/\evil.test`, and tabs or newlines
+ * the URL parser drops), another scheme, or a fragment. What the browser is
+ * sent back to comes only from here, so the callback is no open redirect.
+ */
+export const onOrigin = (origin: string, path: string): URL | undefined => {
+  if (!path.startsWith("/") || path.length > returnPathMaxLength) {
+    return undefined;
+  }
+  try {
+    const url = new URL(path, origin);
+    // `/.//evil.test` resolves to the path `//evil.test`, which a browser
+    // would take for another host if it were ever used as a path again.
+    const safe =
+      url.origin === origin &&
+      url.hash === "" &&
+      !url.pathname.startsWith("//");
+    return safe ? url : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+// Which catalog entries are offered: every one, but those an admin hid
+// (`hidden_connectors`). Core decides it, as the only caller that starts a
+// flow at connect: a hidden entry isn't listed to anyone but admins, and
+// starting to connect it is refused and recorded, whoever asks. Hiding
+// never touches a connection already made; disconnecting it is separate.
+// Such a connection goes on as before: permissions on it are still
+// requested and granted (a blueprint copy's requests included), since
+// hiding is about what people connect, not what is connected. But one that
+// needs reconnecting (`needs_reauth`) can't be until the entry is offered
+// again, as reconnecting starts a flow.
+
+/** One catalog entry an admin offers or hides, as it came over the wire. */
+const offerSchema = z.discriminatedUnion("source", [
+  z.strictObject({
+    source: z.literal("native"),
+    id: oauthProviderSchema,
+    offered: z.boolean(),
+  }),
+  z.strictObject({
+    source: z.literal("composio"),
+    id: composioToolkitSchema,
+    offered: z.boolean(),
+  }),
+]);
+
+/** A catalog entry's key, as the audit log names it. */
+export const entryKey = (source: ConnectionSource, id: string): string =>
+  `${source}:${id}`;
+
+/** The keys of the entries an admin hid. */
+export const hiddenEntries = async (env: Env): Promise<Set<string>> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      source: hiddenConnectors.source,
+      id: hiddenConnectors.connectorId,
+    })
+    .from(hiddenConnectors);
+  return new Set(rows.map(({ source, id }) => entryKey(source, id)));
+};
+
+/**
+ * The catalog's entries, each with whether an admin hid it: what isn't
+ * hidden is what can be connected here, as everyone but an admin sees the
+ * catalog.
+ */
+export const catalogEntries = async (
+  env: Env
+): Promise<(CatalogEntry & { hidden: boolean })[]> => {
+  const [catalog, hidden] = await Promise.all([
+    env.CONNECT.catalog(),
+    hiddenEntries(env),
+  ]);
+  return catalog.entries.map((entry) => ({
+    ...entry,
+    hidden: hidden.has(entryKey(entry.source, entry.id)),
+  }));
+};
+
+/** Whether an admin hid the entry `source` `id`. */
+const isHidden = async (
+  env: Env,
+  source: CatalogSource,
+  id: string
+): Promise<boolean> => {
+  const hidden = await drizzle(env.DB)
+    .select({ id: hiddenConnectors.connectorId })
+    .from(hiddenConnectors)
+    .where(
+      and(
+        eq(hiddenConnectors.source, source),
+        eq(hiddenConnectors.connectorId, id)
+      )
+    )
+    .get();
+  return hidden !== undefined;
+};
+
+/**
+ * The connections among `listed`, what connect lists for the person, with
+ * status `status`, of entries an admin hasn't hidden: `active` ones are
+ * the `offeredConnections`; `needs_reauth` ones are those that can be
+ * connected again, which a hidden entry's can't (above). For a caller
+ * that needs that list itself too, so connect is asked once.
+ */
+export const offeredAmong = async (
+  env: Env,
+  listed: readonly ConnectionSummary[],
+  status: "active" | "needs_reauth" = "active"
+): Promise<ConnectionSummary[]> => {
+  const hidden = await hiddenEntries(env);
+  // An HTTP connection is Apps' and workflows' alone: a chat's agent
+  // never asks for one (tool-classes.ts).
+  return listed.filter(
+    (connection) =>
+      connection.status === status &&
+      connection.source !== "http" &&
+      !hidden.has(entryKey(connection.source, connection.provider))
+  );
+};
+
+/**
+ * The connections `person` may have their chat's agent ask for
+ * (chat-connections.ts): their own personal ones and the shared ones, as
+ * connect lists them, active, of entries an admin hasn't hidden. Hiding an
+ * entry stops new requests for it and grants of those waiting, as it stops
+ * new connections; what was granted before goes on, as above.
+ */
+export const offeredConnections = async (
+  env: Env,
+  person: ConnectionPerson
+): Promise<ConnectionSummary[]> =>
+  await offeredAmong(env, await env.CONNECT.listConnections(person));
+
+/**
+ * Refuses `connectionId` unless it is one of `person`'s
+ * `offeredConnections`: what a chat's request for it needs to be granted.
+ */
+export const requireOfferedConnection = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string
+): Promise<void> => {
+  const offered = await offeredConnections(env, person);
+  if (!offered.some(({ id }) => id === connectionId)) {
+    throw permissionErrors.create("permission.invalid", {
+      issues: [
+        "object.connectionId: It is no longer connected, or no longer offered.",
+      ],
+    });
+  }
+};
+
+/**
+ * Refuses to start connecting the entry `source` `id`, as a `scope`
+ * connection, while it is hidden, and records the refusal as connect
+ * records its own (`provider`, `scope`, `outcome`, `reason`): someone went
+ * around the catalog they were shown.
+ */
+const requireOffered = async (
+  env: Env,
+  person: ConnectionPerson,
+  {
+    source,
+    id,
+    scope,
+  }: { source: CatalogSource; id: string; scope: ConnectionScope }
+): Promise<void> => {
+  if (!(await isHidden(env, source, id))) {
+    return;
+  }
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: actorOf(person),
+    action: "connection.connect",
+    detail: {
+      source,
+      provider: id,
+      scope,
+      outcome: "refused",
+      reason: "connection.not_offered",
+    },
+  });
+  throw connectionErrors.create("connection.not_offered");
+};
+
+/**
+ * Refuses to hide the Composio toolkit `slug` unless Composio lists it: a
+ * misspelled slug would otherwise be hidden without a word, while the
+ * toolkit meant stays offered. While Composio isn't listed, hiding is
+ * refused as unavailable. Offering one again needs no
+ * check, so an entry hidden before Composio dropped it can always be let
+ * go.
+ */
+const requireListedToolkit = async (env: Env, slug: string): Promise<void> => {
+  const catalog = await env.CONNECT.catalog();
+  if (catalog.composio !== "listed") {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  const listed = catalog.entries.some(
+    ({ source, id }) => source === "composio" && id === slug
+  );
+  if (!listed) {
+    throw connectionErrors.create("connection.invalid");
+  }
+};
+
+/**
+ * A signed-in person's `connections`. Every call checks the session
+ * first; connect checks the rest: who may connect
+ * or disconnect what.
+ */
+export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
+  readonly #env: Env;
+  readonly #check: SessionCheck;
+
+  constructor(env: Env, check: SessionCheck) {
+    super();
+    this.#env = env;
+    this.#check = check;
+  }
+
+  /** The person behind the session, checked now, as connect needs them. */
+  async #person(): Promise<ConnectionPerson> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await personOf(this.#env, identity)
+    );
+  }
+
+  async start(request: StartRequest): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = startRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { provider, scope, returnTo } = parsed.data;
+    await requireOffered(this.#env, person, {
+      source: "native",
+      id: provider,
+      scope,
+    });
+    const config = signInConfig(this.#env);
+    const tenant =
+      config === undefined ? undefined : tenantOf(config, provider);
+    if (config === undefined || tenant === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = onOrigin(config.origin, returnTo);
+    if (back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await startOAuthConnection(this.#env, config, {
+      person,
+      provider,
+      scope,
+      tenant,
+      returnTo: `${back.pathname}${back.search}`,
+      classes: await classesOn(this.#env),
+      sharedMailbox: await anyMailboxPointed(this.#env),
+    });
+  }
+
+  /**
+   * Connecting a Composio toolkit, for an admin who consented; connect
+   * checks the rest (the role, the toolkit, the tools, the consent).
+   */
+  async connectToolkit(
+    request: ConnectToolkitRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectToolkitRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { toolkit, tools, consent } = request;
+    // Connect refuses a toolkit that isn't one; a hidden one is refused here.
+    const slug = composioToolkitSchema.safeParse(toolkit);
+    if (slug.success) {
+      // A toolkit is always a shared connection.
+      await requireOffered(this.#env, person, {
+        source: "composio",
+        id: slug.data,
+        scope: "shared",
+      });
+    }
+    return await this.#env.CONNECT.startToolkitConnection({
+      person,
+      toolkit,
+      tools,
+      consent,
+      origin: config.origin,
+      returnTo: `${back.pathname}${back.search}`,
+    });
+  }
+
+  /**
+   * What an admin types to connect a toolkit with a key, as Composio
+   * describes it: connect checks the role and the toolkit.
+   */
+  async keyFields(toolkit: string): Promise<ToolkitKeyField[]> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.toolkitKeyFields({ person, toolkit });
+  }
+
+  /**
+   * Connecting a toolkit with a key the admin typed: core passes it on to
+   * connect and keeps nothing of it, as connect does on to Composio; connect
+   * checks the rest (the role, the toolkit, the fields, the tools, the
+   * consent). The answer is the page to send the browser to, as a sign-in's
+   * is the provider's.
+   */
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKeyRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectToolkitRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { toolkit, tools, consent, values } = request;
+    const slug = composioToolkitSchema.safeParse(toolkit);
+    if (slug.success) {
+      await requireOffered(this.#env, person, {
+        source: "composio",
+        id: slug.data,
+        scope: "shared",
+      });
+    }
+    const { connectionId } = await this.#env.CONNECT.connectToolkitWithKey({
+      person,
+      toolkit,
+      tools,
+      consent,
+      values,
+      origin: config.origin,
+    });
+    back.searchParams.set("connection", connectionId);
+    return { url: back.href };
+  }
+
+  /**
+   * Changes which tools a shared Composio connection allows, as the
+   * signed-in person: connect checks the rest (the role, the connection,
+   * the tools), and audits it (GRA-993).
+   */
+  async changeTools(request: {
+    connectionId: string;
+    tools: (string | ComposioToolRule)[];
+    expected: (string | ComposioToolRule)[];
+  }): Promise<{ tools: string[] }> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.changeToolkitTools({
+      person,
+      connectionId: request.connectionId,
+      tools: request.tools,
+      expected: request.expected,
+    });
+  }
+
+  async list(): Promise<ListedConnection[]> {
+    const person = await this.#person();
+    const listed = await this.#env.CONNECT.listConnections(person);
+    const ids = [
+      ...new Set(listed.flatMap(({ connectedBy }) => connectedBy ?? [])),
+    ];
+    const people =
+      ids.length === 0
+        ? []
+        : await drizzle(this.#env.DB)
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inList(users.id, ids));
+    const names = new Map(people.map(({ id, name }) => [id, name]));
+    // A shared connection the Brain may hold reads of (shared-reads.ts):
+    // its disconnect erases them, so the page says so, as for a person's
+    // own (`mayHoldCapturesOf`). Said to admins alone, who disconnect and
+    // erase it: a member outside its audience learns nothing of it.
+    const holdingShared = isAdmin(person.role)
+      ? await mayHoldReadsOf(
+          this.#env,
+          listed.flatMap(({ id, ownerUserId }) =>
+            ownerUserId === null ? [id] : []
+          )
+        )
+      : new Set<string>();
+    return listed.map((connection) => ({
+      ...connection,
+      connectedByName:
+        connection.connectedBy === null
+          ? null
+          : (names.get(connection.connectedBy) ?? null),
+      ...(mayHoldCapturesOf(connection, person.userId) ||
+      holdingShared.has(connection.id)
+        ? { keepsReads: true as const }
+        : {}),
+    }));
+  }
+
+  async revocationsByHand(): Promise<RevocationToDo[]> {
+    const person = await this.#person();
+    const listed = await this.#env.CONNECT.revocationsByHand({ person });
+    const ids = [
+      ...new Set(listed.flatMap(({ ownerUserId }) => ownerUserId ?? [])),
+    ];
+    const people =
+      ids.length === 0
+        ? []
+        : await drizzle(this.#env.DB)
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inList(users.id, ids));
+    const names = new Map(people.map(({ id, name }) => [id, name]));
+    // A removed member keeps their user row and name: only a membership
+    // says they are still here. A guest's is no member's (roles.ts
+    // `guestRole`); someone suspended is still one.
+    const current =
+      ids.length === 0
+        ? []
+        : await drizzle(this.#env.DB)
+            .select({ userId: members.userId })
+            .from(members)
+            .where(
+              and(inList(members.userId, ids), ne(members.role, guestRole))
+            );
+    const memberIds = new Set(current.map(({ userId }) => userId));
+    // A personal connection's owner by name, as admins see members.
+    return listed.map((each) => ({
+      ...each,
+      ownerName:
+        each.ownerUserId === null
+          ? null
+          : (names.get(each.ownerUserId) ?? null),
+      ownerIsMember:
+        each.ownerUserId !== null && memberIds.has(each.ownerUserId),
+    }));
+  }
+
+  /**
+   * Approves an HTTP connection, as the signed-in person: connect checks
+   * the rest (the role, staff, the origin and where it leads), keeps the
+   * credential sealed, and audits it (GRA-1478).
+   */
+  async createHttp(connection: unknown): Promise<{ connectionId: string }> {
+    const person = await this.#person();
+    // Read here to name what is wrong; connect reads it again.
+    const parsed = httpConnectionSchema.safeParse(connection);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.createHttpConnection({
+      person,
+      connection: parsed.data,
+    });
+  }
+
+  async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
+    const person = await this.#person();
+    // Whose it is, read before connect stops it (it keeps its owner).
+    const [owner] = await connectionOwnersOf(this.#env, [connectionId]);
+    // A revocation never waits on the Brain: connect stops it first, and
+    // what the Brain kept through it goes in the background
+    // (`eraseCapturesSoon`), so a slow store never holds the answer up.
+    const disconnected = await this.#env.CONNECT.disconnect({
+      person,
+      connectionId,
+    });
+    waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
+    // A shared connection's records in the Brain: closed before this
+    // answers, so nobody reads them from then on and no audience is
+    // opened on it again; connect's record of the disconnect erases them
+    // (shared-reads.ts, capture-erasures.ts). A close that fails fails
+    // the disconnect, so it is never answered as done while its records
+    // can still be read: disconnecting again is safe, as connect answers
+    // an already stopped connection as not revoked, and the close runs
+    // again.
+    if (owner?.id === connectionId && owner.ownerUserId === null) {
+      await closeOnDisconnect(this.#env, connectionId, {
+        type: "person",
+        userId: person.userId,
+      });
+    }
+    return disconnected;
+  }
+
+  // Anyone signed in may see what can be connected; connect checks the
+  // request itself.
+
+  async catalog(): Promise<OfferedCatalog> {
+    return await withPerson(this.#check, async ({ role }) => {
+      const [catalog, hidden] = await Promise.all([
+        this.#env.CONNECT.catalog(),
+        hiddenEntries(this.#env),
+      ]);
+      const entries = catalog.entries.map((entry) => ({
+        ...entry,
+        offered: !hidden.has(entryKey(entry.source, entry.id)),
+      }));
+      return {
+        ...catalog,
+        // Admins choose what is offered, so they see what isn't.
+        entries: isAdmin(role)
+          ? entries
+          : entries.filter(({ offered }) => offered),
+      };
+    });
+  }
+
+  async setOffered(
+    source: CatalogSource,
+    id: string,
+    offered: boolean
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      // Staff are admins, but never decide what a client's people connect.
+      if (identity.staff) {
+        throw roleErrors.create("role.forbidden");
+      }
+      const parsed = offerSchema.safeParse({ source, id, offered });
+      if (!parsed.success) {
+        throw connectionErrors.create("connection.invalid");
+      }
+      const entry = parsed.data;
+      if (entry.source === "composio" && !entry.offered) {
+        await requireListedToolkit(this.#env, entry.id);
+      }
+      const db = drizzle(this.#env.DB);
+      // Recorded only when it changed something: offering what is offered
+      // already, or hiding what is hidden, leaves no event.
+      const event = outboxedIfChanged(db, {
+        actor: actorOf(identity),
+        action: "connection.offer_changed",
+        target: {
+          type: "catalog_entry",
+          id: entryKey(entry.source, entry.id),
+        },
+        detail: {
+          source: entry.source,
+          provider: entry.id,
+          offered: entry.offered,
+        },
+      });
+      const thisEntry = and(
+        eq(hiddenConnectors.source, entry.source),
+        eq(hiddenConnectors.connectorId, entry.id)
+      );
+      await (entry.offered
+        ? auditedBatch(this.#env, db, [
+            db.delete(hiddenConnectors).where(thisEntry),
+            event,
+          ])
+        : auditedBatch(this.#env, db, [
+            db
+              .insert(hiddenConnectors)
+              .values({
+                source: entry.source,
+                connectorId: entry.id,
+                hiddenBy: identity.userId,
+                hiddenAt: new Date(),
+              })
+              .onConflictDoNothing(),
+            event,
+          ]));
+    });
+  }
+
+  async toolClasses(): Promise<ToolClassSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readToolClasses(this.#env);
+    });
+  }
+
+  async setToolClass(toolClass: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setToolClass(this.#env, identity, toolClass, audience);
+    });
+  }
+
+  async appPointers(): Promise<AppPointerSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readAppPointers(this.#env);
+    });
+  }
+
+  async pointApp(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pointApp(this.#env, identity, request);
+    });
+  }
+
+  async sharedMailboxes(): Promise<SharedMailboxSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readSharedMailboxes(this.#env);
+    });
+  }
+
+  async pointSharedMailbox(mailbox: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pointSharedMailbox(this.#env, identity, mailbox, audience);
+    });
+  }
+
+  async brainAudiences(): Promise<ConnectionBrainAudienceSetting[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await readConnectionAudiences(this.#env, identity)
+    );
+  }
+
+  async setBrainAudience(
+    connectionId: unknown,
+    audience: unknown,
+    from: unknown,
+    acknowledged?: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setConnectionAudience(
+        this.#env,
+        identity,
+        connectionId,
+        audience,
+        from,
+        acknowledged
+      );
+    });
+  }
+
+  async eraseBrainReads(connectionId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await eraseBrainReads(this.#env, identity, connectionId);
+    });
+  }
+
+  async syncPlaces(connectionId: unknown): Promise<SharedSyncPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await readSyncPlaces(
+          this.#env,
+          identity,
+          async () => await personOf(this.#env, identity),
+          connectionId
+        )
+    );
+  }
+
+  async pickSyncPlaces(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pickSyncPlaces(
+        this.#env,
+        identity,
+        async () => await personOf(this.#env, identity),
+        request
+      );
+    });
+  }
+
+  async stephenReach(): Promise<StephenReach> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readStephenReach(this.#env);
+    });
+  }
+
+  async setStephenReach(on: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setStephenReach(this.#env, identity, on, audience);
+    });
+  }
+
+  async setStephenPlace(
+    place: unknown,
+    audience: unknown,
+    acts: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setStephenPlace(this.#env, identity, place, audience, acts);
+    });
+  }
+
+  async setAppToolClass(
+    app: unknown,
+    toolClass: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAppToolClass(this.#env, identity, app, toolClass, audience);
+    });
+  }
+
+  async agents(): Promise<Agent[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await listAgents(this.#env);
+    });
+  }
+
+  async agentsUsage(): Promise<AgentUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await agentsUsage(this.#env, spendMonth(this.#env));
+    });
+  }
+
+  async ownAgents(): Promise<Agent[]> {
+    return await withPerson(this.#check, async (identity) =>
+      // Grasp's staff are no one of the company: they have none.
+      identity.staff ? [] : await listOwnAgents(this.#env, identity.userId)
+    );
+  }
+
+  async makeOwnAgent(input: unknown): Promise<Agent> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await makeOwnAgent(this.#env, identity, input)
+    );
+  }
+
+  async offerOwnAgent(agentId: unknown, offered: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await offerOwnAgent(this.#env, identity, agentId, offered);
+    });
+  }
+
+  async offeredAgents(): Promise<Agent[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listOfferedAgents(this.#env, identity)
+    );
+  }
+
+  async adoptAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await adoptAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async declineAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await declineAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async ownAgentsUsage(): Promise<OwnAgentsUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await ownAgentsUsage(this.#env, spendMonth(this.#env));
+    });
+  }
+
+  async agentApps(agentId: unknown): Promise<AgentApp[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentApps(this.#env, identity, agentId)
+    );
+  }
+
+  async setAgentApp(
+    agentId: unknown,
+    app: unknown,
+    on: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentApp(this.#env, identity, agentId, app, on);
+    });
+  }
+
+  async workOutAgentApps(agentId: unknown): Promise<AgentAppsWorkedOut> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await workOutAgentApps(this.#env, identity, agentId)
+    );
+  }
+
+  async makeAgent(input: unknown): Promise<Agent> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await makeAgent(this.#env, identity, input)
+    );
+  }
+
+  async changeAgent(agentId: unknown, input: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await changeAgent(this.#env, identity, agentId, input);
+    });
+  }
+
+  async setAgentPaused(agentId: unknown, paused: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentPaused(this.#env, identity, agentId, paused);
+    });
+  }
+
+  async deleteAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await deleteAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async agentDocuments(agentId: unknown): Promise<AgentDocument[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentDocuments(this.#env, identity, agentId)
+    );
+  }
+
+  async addAgentDocument(
+    agentId: unknown,
+    file: unknown
+  ): Promise<AgentDocument> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await addAgentDocument(this.#env, identity, agentId, file)
+    );
+  }
+
+  async removeAgentDocument(
+    agentId: unknown,
+    documentId: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await removeAgentDocument(this.#env, identity, agentId, documentId);
+    });
+  }
+
+  async agentWakes(agentId: unknown): Promise<AgentWake[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentWakes(this.#env, identity, agentId)
+    );
+  }
+
+  async makeAgentWake(agentId: unknown, input: unknown): Promise<AgentWake> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await makeAgentWake(this.#env, identity, agentId, input)
+    );
+  }
+
+  async setAgentWakePaused(wakeId: unknown, paused: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentWakePaused(this.#env, identity, wakeId, paused);
+    });
+  }
+
+  async deleteAgentWake(wakeId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await deleteAgentWake(this.#env, identity, wakeId);
+    });
+  }
+
+  async agentSettings(agentId: unknown): Promise<AgentSettings> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readAgentSettings(this.#env, agentId);
+    });
+  }
+
+  async setAgentReach(
+    agentId: unknown,
+    on: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentReach(this.#env, identity, agentId, on, audience);
+    });
+  }
+
+  async setAgentToolClass(
+    agentId: unknown,
+    toolClass: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentToolClass(
+        this.#env,
+        identity,
+        agentId,
+        toolClass,
+        audience
+      );
+    });
+  }
+
+  async requestApp(request: AppRequestInput): Promise<AppRequest> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await requestApp(this.#env, identity, request)
+    );
+  }
+
+  async appRequests(): Promise<AppRequest[]> {
+    return await withPerson(
+      this.#check,
+      async () => await listAppRequests(this.#env)
+    );
+  }
+
+  async catalogTools(
+    source: CatalogSource,
+    id: string
+  ): Promise<CatalogTool[]> {
+    const { role } = await this.#check();
+    // A hidden entry isn't in anyone's catalog but an admin's, so to
+    // everyone else it has no tools either: as for an entry there isn't.
+    const entry = catalogSourceSchema.safeParse(source);
+    if (
+      !isAdmin(role) &&
+      entry.success &&
+      typeof id === "string" &&
+      (await isHidden(this.#env, entry.data, id))
+    ) {
+      throw connectErrors.create("connect.catalog_entry_not_found");
+    }
+    return await this.#env.CONNECT.catalogTools({
+      source,
+      id,
+    });
+  }
+}
+
+/** Why a flow didn't finish, as the page the browser returns to reads it. */
+const errorCodeOf = (error: unknown): string => {
+  const code =
+    connectionErrors.codeOf(error) ??
+    connectErrors.codeOf(error) ??
+    roleErrors.codeOf(error);
+  if (code === undefined) {
+    log.error("connection.finish_failed", errorFields(error));
+  }
+  return code ?? "internal.unexpected";
+};
+
+/**
+ * Sends the browser on, never caching the answer, and never passing the
+ * callback's URL (it carries the code) on as a referrer.
+ */
+const redirect = (to: URL): Response =>
+  new Response(null, {
+    status: 303,
+    headers: {
+      location: to.href,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    },
+  });
+
+/**
+ * The provider's redirect back, on the client's origin. The session cookie
+ * comes along (a top-level navigation sends `SameSite=Lax` cookies), and
+ * connect finishes the flow only for the person who started it, so a
+ * callback URL opened by anyone else (sent by an attacker, say) attaches
+ * nothing to anyone. Core forwards the code without logging it: the request
+ * log has the path only.
+ */
+export const handleConnectionCallback = async (
+  request: Request,
+  env: Env,
+  onConnected?: (userId: string) => void
+): Promise<Response | undefined> => {
+  const config = signInConfig(env);
+  if (request.method !== "GET" || config === undefined) {
+    return undefined;
+  }
+  // A flow that fails returns to the Integrations page, where people start
+  // connecting and can read why: its own `returnTo` stays with connect,
+  // which may never have found the flow.
+  const integrationsPage = new URL("/integrations", config.origin);
+  const failed = (code: string): Response => {
+    integrationsPage.searchParams.set("connectionError", code);
+    return redirect(integrationsPage);
+  };
+  const params = new URL(request.url).searchParams;
+  const state = params.get("state");
+  if (state === null || state === "") {
+    return failed("connection.flow_invalid");
+  }
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const identity = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "connections.callback"
+  );
+  if (identity === undefined) {
+    // Spent, so the code in this URL can't be brought back to finish it.
+    await env.CONNECT.abandonFlow(state);
+    return failed(authErrors.create("auth.unauthenticated").code);
+  }
+  let finished: { connectionId: string; returnTo: string };
+  try {
+    finished = await env.CONNECT.finishConnection({
+      person: await personOf(env, identity),
+      state,
+      code: params.get("code") ?? undefined,
+      // Only whether there is one matters; the provider's text isn't kept.
+      error: params.get("error")?.slice(0, 64) ?? undefined,
+    });
+    // The accounts it proves are theirs, for the reader lists the Brain
+    // copies (GRA-1761): failed, the flow fails, and connecting again in
+    // place claims them.
+    await claimConnectedTokens(
+      env,
+      identity.userId,
+      await env.CONNECT.personalAccounts(identity.userId)
+    );
+  } catch (error) {
+    return failed(errorCodeOf(error));
+  }
+  // A chat app may be waiting on it (channels/connect-own.ts).
+  onConnected?.(identity.userId);
+  const back = onOrigin(config.origin, finished.returnTo) ?? integrationsPage;
+  back.searchParams.set("connection", finished.connectionId);
+  return redirect(back);
+};
+
+/** A logo's address: `catalogLogoUrl`'s path, with the entry it names. */
+const catalogLogoPattern = new RegExp(
+  `^${catalogLogoPath}/(?<source>[a-z]+)/(?<id>[a-z0-9_-]+)$`,
+  "u"
+);
+
+/** Whether `pathname` is a catalog entry's logo's. */
+export const isCatalogLogoPath = (pathname: string): boolean =>
+  pathname.startsWith(`${catalogLogoPath}/`);
+
+/** How long a browser keeps a logo. */
+const logoMaxAgeSeconds = 24 * 60 * 60;
+
+/**
+ * How long a browser keeps that an entry has no logo: shorter, as a logo
+ * that didn't come in time is none too.
+ */
+const noLogoMaxAgeSeconds = 10 * 60;
+
+/**
+ * A catalog entry's logo, from the deployment's own origin, for anyone
+ * signed in: connect fetched it from the entry's provider and checked
+ * that it is an image of the type it is sent as (connect's logos.ts).
+ * Every answer on this path runs no script, even an SVG opened on its
+ * own (`setSecurityHeaders`). Logos of entries an admin hid are served
+ * all the same: the toolkit's logo is Composio's public image, and
+ * hiding governs what people connect, not what they may look at.
+ */
+export const catalogLogoResponse = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response> => {
+  const notFound = () =>
+    errorResponse(404, requestErrors.create("request.not_found"), requestId);
+  const named = catalogLogoPattern.exec(pathname)?.groups;
+  const source = catalogSourceSchema.safeParse(named?.source);
+  if (request.method !== "GET" || !source.success || named?.id === undefined) {
+    return notFound();
+  }
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "connections.catalog_logo"
+  );
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const logo = await env.CONNECT.catalogLogo({
+    source: source.data,
+    id: named.id,
+  });
+  if (logo === null) {
+    const none = notFound();
+    // The page draws the first letter instead: no need to ask each time.
+    none.headers.set(
+      "cache-control",
+      `private, max-age=${noLogoMaxAgeSeconds}`
+    );
+    return none;
+  }
+  return new Response(logo.bytes, {
+    headers: {
+      "content-type": logo.contentType,
+      "content-length": String(logo.bytes.byteLength),
+      "cache-control": `private, max-age=${logoMaxAgeSeconds}`,
+    },
+  });
+};

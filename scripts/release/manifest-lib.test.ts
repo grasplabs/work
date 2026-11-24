@@ -1,0 +1,402 @@
+/**
+ * The release manifest, generated from the real wrangler.jsonc of core and
+ * connect (fixture-release.ts). Changing either config fails the golden test until the golden file is
+ * regenerated (`vp test -u scripts/release`): a deliberate decision about
+ * how the change reaches client accounts.
+ */
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { assetKey, modelBlobKey, moduleKey } from "@grasp-os/shared/release";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
+import { builds, fixtureBuild, info, rawConfig } from "./fixture-release.ts";
+import { stableStringify } from "./hash-lib.ts";
+import {
+  assertReleaseDir,
+  generateManifest,
+  parseWranglerConfig,
+  releaseBudget,
+  verifyRelease,
+  writeRelease,
+} from "./manifest-lib.ts";
+
+const fixture = await builds();
+
+/** Every string anywhere in `value`. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap(stringsIn);
+  }
+  return [];
+};
+
+describe("the release manifest", () => {
+  it("matches the golden manifest for the real wrangler configs", async () => {
+    await expect(
+      stableStringify(generateManifest(info, fixture))
+    ).toMatchFileSnapshot("testdata/golden-manifest.json");
+  });
+
+  it("leaves only placeholders the admin knows", () => {
+    const { workers } = generateManifest(info, fixture);
+    const tokens = Object.values(workers)
+      .flatMap((worker) => stringsIn(worker.bindings))
+      .filter((value) => value.includes("$"));
+    expect(tokens).toStrictEqual(["$D1_DB_ID", "$D1_DB_ID"]);
+  });
+
+  it("fails the build on a wrangler.jsonc key it doesn't handle", () => {
+    const core = rawConfig("core");
+    expect(() =>
+      parseWranglerConfig("core", { ...core, vars: { A: "b" } })
+    ).toThrow(/vars/u);
+    expect(() =>
+      parseWranglerConfig("core", {
+        ...core,
+        durable_objects: {
+          bindings: [{ name: "X", class_name: "X", script_name: "elsewhere" }],
+        },
+      })
+    ).toThrow(/script_name/u);
+    expect(() =>
+      parseWranglerConfig("core", {
+        ...core,
+        observability: { enabled: true, destinations: ["an-account-sink"] },
+      })
+    ).toThrow(/destinations/u);
+  });
+
+  it("refuses an R2 bucket outside the EU", () => {
+    expect(() =>
+      parseWranglerConfig("core", {
+        ...rawConfig("core"),
+        r2_buckets: [{ binding: "FILES", bucket_name: "grasp-os-files" }],
+      })
+    ).toThrow(/jurisdiction/u);
+  });
+
+  it("names each model file it is given at its content address, where the deploy copies it from", () => {
+    expect(generateManifest(info, fixture).modelFiles).toStrictEqual(
+      info.modelFiles.map((file) => ({
+        ...file,
+        r2Key: modelBlobKey(file.sha256),
+      }))
+    );
+  });
+
+  it("refuses model files no Worker binds a bucket for", async () => {
+    const [connect] = fixture;
+    const core = await fixtureBuild("core");
+    const unbound = {
+      ...core,
+      config: {
+        ...core.config,
+        r2_buckets: core.config.r2_buckets.filter(
+          ({ binding }) => binding !== "MODEL_FILES"
+        ),
+      },
+    };
+    expect(() => generateManifest(info, [connect ?? core, unbound])).toThrow(
+      /no Worker binds MODEL_FILES/u
+    );
+  });
+
+  it("refuses a service binding to a Worker outside the release", async () => {
+    const core = await fixtureBuild("core");
+    expect(() => generateManifest(info, [core])).toThrow(/grasp-os-connect/u);
+  });
+
+  it("refuses Workers on different compatibility dates", () => {
+    const [connect, core] = fixture;
+    if (connect === undefined || core === undefined) {
+      throw new Error("expected two builds");
+    }
+    const older = {
+      ...connect,
+      config: { ...connect.config, compatibility_date: "2026-01-01" },
+    };
+    expect(() => generateManifest(info, [older, core])).toThrow(
+      /compatibility date/u
+    );
+  });
+
+  it("refuses a release id that isn't a plain R2 prefix", () => {
+    expect(() =>
+      generateManifest({ ...info, releaseId: "../26.01.1" }, fixture)
+    ).toThrow(/releaseId/u);
+  });
+
+  it("refuses Worker, Workflow and database names the Workers API wouldn't take", () => {
+    const [connect, core] = fixture;
+    if (connect === undefined || core === undefined) {
+      throw new Error("expected two builds");
+    }
+    const renamed = (config: Partial<typeof core.config>) =>
+      generateManifest(info, [
+        connect,
+        { ...core, config: { ...core.config, ...config } },
+      ]);
+    expect(() => renamed({ name: "Grasp_Core" })).toThrow(/name/u);
+    expect(() =>
+      renamed({
+        workflows: [
+          { name: "Grasp Workflows", binding: "WORKFLOWS", class_name: "W" },
+        ],
+      })
+    ).toThrow(/Workflow/u);
+    expect(() =>
+      renamed({
+        d1_databases: core.config.d1_databases.map((database) => ({
+          ...database,
+          database_name: "grasp.core",
+        })),
+      })
+    ).toThrow(/databaseName/u);
+  });
+
+  it("refuses a build without its D1 migrations or static assets", () => {
+    const [connect, core] = fixture;
+    if (connect === undefined || core === undefined) {
+      throw new Error("expected two builds");
+    }
+    expect(() =>
+      generateManifest(info, [connect, { ...core, d1Migrations: {} }])
+    ).toThrow(/no migrations collected for DB/u);
+    expect(() =>
+      generateManifest(info, [connect, { ...core, d1Migrations: { DB: [] } }])
+    ).toThrow(/no migrations collected for DB/u);
+    const { assets: _assets, ...coreWithoutAssets } = core;
+    expect(() => generateManifest(info, [connect, coreWithoutAssets])).toThrow(
+      /assets/u
+    );
+  });
+
+  it("refuses a build over what a client's deploy can carry", () => {
+    const [connect, core] = fixture;
+    const [main] = core?.modules ?? [];
+    if (connect === undefined || core === undefined || main === undefined) {
+      throw new Error("expected two builds");
+    }
+    // Two modules of half the budget each, neither over it alone, which
+    // with core's own are over it: the deploy sends them all in one upload.
+    const half = releaseBudget.workerModules / 2;
+    const halves = ["a.js", "b.js"].map((name) => ({
+      ...main,
+      name,
+      size: half,
+      bytes: Buffer.alloc(half),
+    }));
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        { ...core, modules: [...core.modules, ...halves] },
+      ])
+    ).toThrow(/core is over the release budget: its modules are 4\d\.\d MiB/u);
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        {
+          ...core,
+          assets: {
+            blobs: core.assets?.blobs ?? new Map<string, Buffer>(),
+            manifest: {
+              ...core.assets?.manifest,
+              "/big.wasm": {
+                hash: "0".repeat(32),
+                size: releaseBudget.staticFile + 1,
+              },
+            },
+          },
+        },
+      ])
+    ).toThrow(/static file \/big\.wasm/u);
+    // A source map counts apart from the modules, against a budget of its
+    // own: as large as all modules may be, it's over the maps' budget, and
+    // leaves the modules within theirs.
+    const map = {
+      ...main,
+      name: "index.js.map",
+      type: "sourcemap" as const,
+      size: releaseBudget.workerModules,
+      bytes: Buffer.alloc(0),
+    };
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        { ...core, modules: [...core.modules, map] },
+      ])
+    ).toThrow(
+      /core is over the release budget: its source maps are 48\.0 MiB \(budget 45\.0 MiB\)$/u
+    );
+    // Random bytes don't compress: 12 MiB of them, within the raw budget,
+    // are over the gzipped one.
+    const incompressible = Buffer.alloc(12 * 1024 * 1024);
+    for (let at = 0; at < incompressible.length; at += 65_536) {
+      crypto.getRandomValues(incompressible.subarray(at, at + 65_536));
+    }
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        {
+          ...core,
+          modules: [
+            ...core.modules,
+            { ...map, size: incompressible.length, bytes: incompressible },
+          ],
+        },
+      ])
+    ).toThrow(
+      /core is over the release budget: its source maps are 12\.0 MiB gzipped \(budget 11\.0 MiB\)$/u
+    );
+    expect(() => generateManifest(info, [connect, core])).not.toThrow();
+  });
+});
+
+describe("a written release", () => {
+  let out = "";
+  const manifest = generateManifest(info, fixture);
+  const [coreModule] = manifest.workers.core?.modules ?? [];
+  const [assetHash] = Object.keys(manifest.assets);
+  if (coreModule === undefined || assetHash === undefined) {
+    throw new Error("expected a core module and an asset");
+  }
+
+  beforeEach(() => {
+    out = mkdtempSync(path.join(tmpdir(), "grasp-os-release-test-"));
+    writeRelease(out, manifest, fixture);
+  });
+
+  afterEach(() => {
+    rmSync(out, { force: true, recursive: true });
+  });
+
+  it("verifies against its manifest", async () => {
+    await expect(verifyRelease(out)).resolves.toHaveProperty(
+      "manifest",
+      manifest
+    );
+  });
+
+  it("replaces an earlier release in the same directory", async () => {
+    const stale = path.join(out, moduleKey("0".repeat(64)));
+    writeFileSync(stale, "from an earlier release");
+    writeRelease(out, manifest, fixture);
+    expect(existsSync(stale)).toBeFalsy();
+    await expect(verifyRelease(out)).resolves.toHaveProperty(
+      "manifest",
+      manifest
+    );
+  });
+
+  it("creates the directory when it's absent", async () => {
+    const nested = path.join(out, "nested", "release");
+    writeRelease(nested, manifest, fixture);
+    await expect(verifyRelease(nested)).resolves.toHaveProperty(
+      "manifest",
+      manifest
+    );
+  });
+
+  it("keeps the previous release when the next build fails", async () => {
+    // What build-release does: check --out first, build, then write.
+    assertReleaseDir(out);
+    expect(() =>
+      generateManifest({ ...info, commit: "not a commit" }, fixture)
+    ).toThrow(/commit/u);
+    await expect(verifyRelease(out)).resolves.toHaveProperty(
+      "manifest",
+      manifest
+    );
+  });
+
+  it("refuses a directory that isn't a release before building", () => {
+    const other = mkdtempSync(path.join(tmpdir(), "grasp-os-not-a-release-"));
+    try {
+      writeFileSync(path.join(other, "keep.txt"), "someone's work");
+      expect(() => {
+        assertReleaseDir(other);
+      }).toThrow(/refusing to delete it/u);
+      expect(() => {
+        assertReleaseDir(path.join(other, "absent"));
+      }).not.toThrow();
+    } finally {
+      rmSync(other, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to replace a directory that isn't a release", () => {
+    const other = mkdtempSync(path.join(tmpdir(), "grasp-os-not-a-release-"));
+    try {
+      writeFileSync(path.join(other, "keep.txt"), "someone's work");
+      expect(() => {
+        writeRelease(other, manifest, fixture);
+      }).toThrow(/refusing to delete it/u);
+      expect(readFileSync(path.join(other, "keep.txt"), "utf-8")).toBe(
+        "someone's work"
+      );
+      expect(existsSync(path.join(other, "manifest.json"))).toBeFalsy();
+    } finally {
+      rmSync(other, { force: true, recursive: true });
+    }
+  });
+
+  it("fails verification when a module changed", async () => {
+    writeFileSync(path.join(out, moduleKey(coreModule.sha256)), "tampered");
+    await expect(verifyRelease(out)).rejects.toThrow(/doesn't match its hash/u);
+  });
+
+  it("fails verification when an asset changed or is missing", async () => {
+    const asset = path.join(out, assetKey(assetHash));
+    writeFileSync(asset, "tampered");
+    await expect(verifyRelease(out)).rejects.toThrow(/doesn't match its hash/u);
+    unlinkSync(asset);
+    await expect(verifyRelease(out)).rejects.toThrow(/missing/u);
+  });
+
+  it("checks every asset index entry, served or not, inside the release", async () => {
+    const write = (assets: Record<string, unknown>): void => {
+      writeFileSync(
+        path.join(out, "manifest.json"),
+        stableStringify({ ...manifest, assets })
+      );
+    };
+    const [hash, blob] = Object.entries(manifest.assets)[0] ?? [];
+    if (hash === undefined || blob === undefined) {
+      throw new Error("expected an asset");
+    }
+    write({ ...manifest.assets, [hash]: { ...blob, r2Key: "../../outside" } });
+    await expect(verifyRelease(out)).rejects.toThrow(/content address/u);
+
+    const unserved = "f".repeat(32);
+    writeFileSync(path.join(out, assetKey(unserved)), "served by nothing");
+    write({
+      ...manifest.assets,
+      [unserved]: { size: 17, r2Key: assetKey(unserved) },
+    });
+    await expect(verifyRelease(out)).rejects.toThrow(/no Worker serves/u);
+  });
+
+  it("fails verification when the manifest points a blob elsewhere", async () => {
+    const moved = readFileSync(
+      path.join(out, "manifest.json"),
+      "utf-8"
+    ).replace(
+      `"r2Key": "${moduleKey(coreModule.sha256)}"`,
+      `"r2Key": "${assetKey(assetHash)}"`
+    );
+    writeFileSync(path.join(out, "manifest.json"), moved);
+    await expect(verifyRelease(out)).rejects.toThrow(/content address/u);
+  });
+});

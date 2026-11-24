@@ -1,0 +1,222 @@
+# Grasp OS
+
+One codebase, deployed once per client into the client's own Cloudflare account in the EU. Clients customise Grasp through configuration and in-product content (Apps, workflows, templates), never through code in this repo. If a template needs a platform code change, the platform is missing a capability: fix the platform, not the template.
+
+## Layout
+
+| Path | What it is |
+| --- | --- |
+| `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
+| `apps/connect` | Connector Worker: the connector layer, the only place OAuth tokens live |
+| `apps/web` | Grasp OS frontend: React SPA, served as static files by core |
+| `apps/docs` | SDK docs: how to build with Grasp, for people and the agent; ships with each release |
+| `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
+| `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
+| `packages/sdk` | `@grasp-os/sdk`: the server, page and workflow SDK, the only API App code sees |
+| `packages/runtime` | `@grasp-os/runtime`: what the SDK re-exports, and the hosts, pages and checks only platform code imports |
+| `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages (shadcn on Base UI, Tailwind v4), still used by `apps/web`, `apps/admin` and `apps/docs` for now |
+| `packages/compiler` | `@grasp-os/compiler`: builds and checks App code and pages |
+| `packages/connectors/*` | Native MCP servers, loaded by connect |
+| `packages/connector-kit` | `@grasp-os/connector-kit`: how a native connector is written (manifest, tools, MCP server) |
+| `packages/shared` | `@grasp-os/shared`: types and Zod schemas |
+| `scripts` | Repo tooling, run by Node directly (TypeScript, no build step) |
+
+Each app keeps its own Drizzle schemas and migrations in `src/db`, one folder per database (`src/db/<name>/` in core). Workspace packages export TypeScript source; there is no library build step.
+
+## Commands
+
+Vite+ (`vp`) is the toolchain. Run from the repo root:
+
+- `vp install`: install dependencies (also installs the git hooks)
+- `vp check`: format, lint (Ultracite + @shadcn/lint) and type-check (tsgo)
+- `vp check --fix`: auto-fix
+- `vp test`: all tests; Worker tests run in workerd
+- `vp run -r build`: build everything
+- `vp run e2e`: Playwright end-to-end tests (`*.e2e.ts` in `e2e/`)
+- `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
+- `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin. It has a fake outside API to add as an HTTP connection (`apps/connect/test/outside-api-fake.ts`): `https://api.acme-billing.test`, any credential, paths under `/v1`. `/v1/invoices` answers at once, `/v1/slow` after 10 seconds, and `/v1/dropped` takes the request, then drops the connection without an answer
+- `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, Apps with 30 days of runs, Knowledge, chats, and projects with their Apps and people, where a few of those people filed their chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
+- `vp run seed:onboarding`: on a fresh `vp run dev` instead of `vp run seed`, the same company halfway through its onboarding (`scripts/seed-onboarding.ts`): day 8 of 14 of the interviews, most leads heard, one team quiet, Grasp at 75% of the 80% go. Admin at `/setup` as admin@acme.test, Grasp's side at `/onboarding` as staff@grasp.test
+- `vp run -r typegen`: regenerate `worker-configuration.d.ts` after changing a `wrangler.jsonc`
+- `vp run -r db:generate`: generate migrations after changing a schema
+
+CI fails when generated files (Worker types, route trees, migrations) are not committed.
+
+Vite+ docs: `node_modules/vite-plus/docs`.
+
+## Conventions
+
+- **Commits and PR titles** follow [Conventional Commits](https://www.conventionalcommits.org): `feat(core): …`, `fix(connect): …`, `chore(deps): …`. Scope is the app or package name. PRs are squash-merged, so the PR title is the commit on `main` and the release note. A `commit-msg` hook and CI enforce it.
+- **Dependencies**: versions live in the `catalog` in `pnpm-workspace.yaml`, pinned exactly; packages reference them as `catalog:`. New versions wait 3 days (pnpm and Renovate). Only packages listed under `allowBuilds` may run install scripts.
+- **No dev docs in the repo**: plans, ADRs, design notes and research live outside it. The Markdown allowed is `README.md`, this file, `.github/` templates, skills, and the SDK docs in `apps/docs/content/`, which ship with each release; CI enforces it. Docs change in the same pull request as the code they describe, and their code examples are type-checked against the SDK in CI. Put the why in code comments where the decision sits, and in PR descriptions.
+- **Secrets**: never commit secrets, client names or client configuration; secretlint checks every commit and CI. Local secrets go in `.dev.vars` (see `.dev.vars.example`). Authenticate Wrangler through the 1Password shell plugin.
+- **No compatibility code for the past**: until the first client release, no backfills, legacy fallbacks, readers for formats older than the current release, or dead code. Refuse an old stored format clearly instead (bump the format, "publish again"). The one exception is the release-to-release window below.
+- **Schemas** (the exception) follow expand, then contract: add first, remove in a later release. Code must work against both the old and the new schema. This holds for Durable Object SQLite too, because the admin can roll a client back to an earlier release: add columns as nullable, and drop or rename in a later release.
+- **No feature flags**: a feature works by default once it merges, in development too. Don't add a flag or a kill switch.
+- **No AI attribution**: no co-author trailers or "generated with" lines in commits or pull requests.
+- **Never skip the git hooks** (`--no-verify`), and never loosen a lint rule to make code pass, except where this file names the exception: fix the code.
+
+## How we build
+
+- **Simplest design that is secure.** KISS and DRY. No features, settings or toggles nobody asked for, and no validation beyond checking input at the boundary; a fixed choice is a constant in code.
+- **Only make a change that is clearly better overall** and makes nothing worse. "Industry standard" alone is no reason.
+- **Question existing code.** When reworking something, don't port a piece because it exists. If it has little value or isn't a common pattern, remove it, and say what you dropped and why in the pull request.
+- **Stable IDs.** References use a stable key; a rename changes only a label and never breaks anything.
+- **Use the library's feature**, don't build our own version of it. Change our design so the library works as designed.
+- **Follow standards.** Code that reads a standard format (Markdown, URLs, MIME, email headers) uses a conformant parser, or follows the specification's grammar exactly. When a review finds a second edge case in a hand-written rule, replace the rule.
+- **Allow and audit over blocking.** Sensible defaults; block only where the risk is severe and obvious. Audit records must be correct: one event per action with who, what and counts, not one per affected item. No arbitrary caps on how much someone may store or list; paging covers size. Limits that protect the platform (request bodies, model tokens, uploads) stay.
+- **Content only one person may read** (their chats, their personal documents) is stored only where that person alone can reach it, such as their own Durable Object.
+
+## Branches and pull requests
+
+Trunk-based: `main` is the only long-lived branch; every merge deploys core and connect to staging. The admin and router, in the same Cloudflare account, deploy to staging on every merge to `main` too; production's are deployed only through the manual Deploy platform workflow. Releases reach clients through the admin, channel by channel: Edge, then Beta, then Stable.
+
+1. Branch from `main` as `<type>/<kebab-description>`, e.g. `feat/audit-export`, using the commit types. A pre-push hook and CI check the name.
+2. Open a **draft** pull request into `main`. CI runs the fast checks.
+3. Have the diff reviewed by a reviewer that didn't write it (a fresh agent with no context from the author is fine) for correctness, simplicity and security. Fix what it finds and review again, until a round finds nothing of medium severity or worse.
+4. Label it: `Security` when it changes who can see or do what (permissions, audiences, staff access, sign-in, tokens, the sandbox, secrets, the audit log, egress, CI); `Complexity: High` for a schema change with data risk, a cross-app or SDK contract, workflow durability or a risk of data loss. The `Review tier` workflow sets labels from size and paths and never lowers them; don't remove or lower one yourself.
+5. `Security` or `Complexity: High` pull requests get one Greptile review, last, on a head that won't change: mark ready and comment `@greptileai review`. Merge at 5/5 with no open notes; a `Security` pull request also needs a security review that starts from its threat model, and one for a Linear issue labelled Security waits for a person's review before merge. Greptile is paid per review: never ask on a draft, and ask again only after fixing a P0 or P1 finding.
+6. Nick and Jakob are requested as reviewers (CODEOWNERS); the ruleset doesn't require an approval. Resolve every review thread: an open one keeps the pull request out of the queue.
+7. Add it to the merge queue (`gh pr merge --squash --auto --match-head-commit <sha>`, so a later push can't merge unreviewed), which runs the full suite on top of the latest `main` and squash-merges it. No need to keep the branch up to date by hand.
+
+Nobody pushes to `main` directly. In an emergency, organisation owners can merge a pull request without a second review or passing checks; GitHub records every bypass. Use it only when waiting would do more harm. The rules live in `.github/rulesets/`; apply changes with `vp run github:setup`.
+
+Conflicts: rebase your branch on `main`. For generated files (lockfile, Worker types, route trees) take either side and regenerate (`vp install`, `vp run -r typegen`, `vp run -r build`) instead of merging by hand. Migrations are different: keep `main`'s, delete your branch's, and run `vp run -r db:generate` again so yours come after them. A migration on `main` never changes; `vp run check:migrations` enforces it.
+
+## Working from Linear
+
+Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issues spent 6 to 15 October 2026 in Shipmunk and came back with new numbers: find an issue by its title, not by a number from an older commit, pull request or note.
+
+- Only pick up issues in **Todo**; their blockers are done. Parent issues are containers; never pick one up.
+- Move the issue to **In Progress** when you start and to **In Review** when the pull request is ready, with the pull request linked. Branch names and PR titles don't carry the issue ID, so move issues by hand.
+- Linear is the project's history. Record a decision or a change of scope as a comment on the issue, and file a follow-up (an audit finding, a fix to merged work) as an issue linked to the one it extends before starting it.
+- When your issue is **Done**, move any issue it blocked to **Todo** once all of that issue's blockers are done.
+- Issues labelled **Security** are reviewed by a person before merge.
+- Don't follow an issue blindly: if its scope conflicts with this file or the code, raise it in the issue.
+
+## Architecture rules
+
+- Every external call goes through connect; every model call through the model gateway in core.
+- Agents and Apps start with access to nothing; every resource needs an explicit permission. The one exception is the Brain: every agent, App and workflow reads it by default, as the person it acts for in that person's own chat, and otherwise only what everyone in the company may read.
+- Anything that runs on its own is a workflow. Pages never run in the background or register hooks.
+- Workflow code imports only `@grasp-os/sdk`, never `@grasp-os/runtime`.
+- Only use platform APIs that also run on workerd. Platform services sit behind adapter interfaces so the on-prem profile can swap them.
+- EU jurisdiction is set when a resource is created (R2 `jurisdiction`, Durable Object `jurisdiction("eu")`, D1 location).
+- All React is compiled by the React Compiler, and the build fails on anything it can't compile. Don't write `useMemo`, `useCallback` or `memo` by hand; if the compiler rejects a component, fix the component. The one exception is a `@grasp-os/app-kit` component that uses a library the compiler itself lists as incompatible: opt out that component alone with `"use no memo"`, say why in a comment, list its file in the compiler's `kitOptOuts`, and turn off `react/incompatible-library` for that file alone. App code never opts out.
+- UI uses `@grasp-os/app-kit` components and theme tokens: no raw colours, arbitrary values or inline styles. `@shadcn/lint` names the component, variant or token to use instead.
+
+## Design
+
+One design, from `@grasp-os/app-kit`, in `apps/web`, `apps/admin` and App pages. The theme (`packages/app-kit/src/styles.css`) is shadcn's: each value stands once, in `:root` and `.dark`, under shadcn's names, mapped to utilities in `@theme inline`. Add a token only for a meaning shadcn has no name for; a surface comes as an `x` / `x-foreground` pair, a signal (a status colour, a chart hue) as one token. Hovers are shadcn's (`hover:bg-x/80`), never a token of their own. Code that draws outside CSS (a canvas) reads the resolved token with `getComputedStyle`, never a copy of the palette.
+
+- **Colour**: tokens only. Lime (`highlight`, `Button variant="highlight"`) once a page, for the one action it is for. Amber (`status-attention`, `Badge variant="attention"`) for what needs someone; green (`status-agreed`, `variant="passed"`) for what is done. Red (`destructive`) for errors, a form's error or something that failed, and for actions that can't be undone.
+- **Type**: Geist (`font-sans`) for the product; Newsreader (`font-serif`) for page titles (`PageHeaderTitle`), the titles of dialogs, sheets and drawers, key figures (`Stat`) and what Grasp says (`type-display`).
+- **Components own their look.** A new look is a cva variant in the component's file in `@grasp-os/app-kit`. `@shadcn/lint` (`no-restyle`, `no-arbitrary-values`, `no-raw-colors`, `require-static-classes`) holds every page, App pages included, to layout classes on a component. Inside `packages/app-kit/src/components` only `no-restyle`, `no-arbitrary-values` and `require-static-classes` are off; `no-raw-colors`, `no-inline-styles` and `no-unknown-classes` hold there too.
+- **Painted fields** (`PaintedField`, always a painting and a pattern) stand only behind the one or two things on a screen that matter most; two side by side never share a painting or a pattern. Like any component it takes layout classes only: its padding and corners are its own props and variants.
+- **Motion**: on the house curve (`ease-house`, the default), each answer over within 300 ms; `grasp/no-slow-motion` holds it for Tailwind's `duration-*` classes and Motion's `transition` and `animate` durations, turned off only for what is seen once or rare, with the reason, in `vite.config.ts`. A stylesheet's own animations and keyframes are checked by review. Under reduced motion nothing slides, grows or glides.
+
+## Translations
+
+The frontend (`apps/web`) speaks English, German, Dutch, Spanish and French through Lingui. English is written in the code; `vp run -r i18n:extract` collects it into `apps/web/src/locales/<locale>/messages.po`, and CI fails when a catalog isn't up to date. `locales.test.ts` fails when a language lacks a message or a translation drops a placeholder.
+
+- JSX text in `<Trans>`; attributes and strings in a component with `t` from `useLingui()` (both from `@lingui/react/macro`). Outside components, `msg` from `@lingui/core/macro`, read with `i18n._()` from `@lingui/core` when rendering, never at module load.
+- Whole sentences only, never glued fragments. Counts go through `plural`. Name placeholders after what they hold: a local `const date = …` gives translators `{date}`, not `{0}`.
+- Lists through `formatList` (`apps/web/src/format.ts`), not `join(", ")` inside a message.
+- Not translated: product and company names, people's names, what someone typed, core's own error messages, and text whose exact words are recorded (the Composio consent).
+- `@grasp-os/app-kit` stays free of Lingui (App pages and the admin share it): its few words are English props a page passes translated.
+- Every new message needs all four translations in the same pull request.
+
+## Testing
+
+Test what the code does, at real boundaries, never how it does it.
+
+- **Integration tests in workerd are the default.** Go in through public interfaces: a Worker request, an RPC call, a Durable Object, a workflow run. Mock only outside systems (model providers, Microsoft Graph, Composio), never our own modules.
+- **Playwright for critical user journeys only**, end to end, with a trace as the artifact.
+- **Isolated unit tests only for pure logic**: permission evaluation, the audit hash chain, parsers.
+- **Security-critical code starts from its threat model.** For the sandbox, permissions and connectors, write the ways it can fail first, including deliberate attacks, then the code.
+- **Durability is tested by breaking things**: kill a run mid-step, restart the engine, replay events, retry with the same idempotency key.
+- **No tautological tests.** Asserting what a mock was told to return, or re-implementing the code under test, proves nothing.
+- **No change-detector tests.** Don't assert call order, internal structure or implementation snapshots; a refactor that keeps behaviour must keep tests green.
+- **No absence tests.** Removing something needs no test that it's gone: no checks on an old export, a file or a name in the source. Where a removal matters, test the behaviour (the endpoint answers 404).
+- **Concurrency and recovery claims** (conditional writes, retries, resumed runs) need a deterministic race or integration test through the real path.
+- **Bug fixes close a behaviour gap.** Find the behaviour test that should have caught the bug and fix or extend it. Add a new test only for behaviour nothing covers; never a test named after a bug.
+- Keep suites flat, use async/await, and never commit `.only` or `.skip`.
+- Locally, run the test files you touched (`vp test <files> --maxWorkers=2`) and `vp check`; the merge queue runs everything. Run Playwright locally (`vp run e2e`, `vp run e2e:admin`) only when `apps/web`, `apps/admin` or `e2e/` changed.
+
+<!-- ultracite:start — generated by `ultracite init --agents universal` (Ultracite 7.12.0); commands adapted to Vite+, testing rules moved to Testing above -->
+
+## Code standards (Ultracite)
+
+This project uses **Ultracite** presets for Oxlint and Oxfmt, loaded through Vite+ in `vite.config.ts`. Run `vp check --fix` to format and fix; most issues are fixed automatically. Full reference: `node_modules/ultracite/skills/ultracite/references/code-standards.md`.
+
+Write code that is **accessible, performant, type-safe, and maintainable**. Focus on clarity and explicit intent over brevity.
+
+### Type safety and explicitness
+
+- Use explicit types for function parameters and return values when they enhance clarity
+- Prefer `unknown` over `any` when the type is genuinely unknown
+- Use const assertions (`as const`) for immutable values and literal types
+- Leverage TypeScript's type narrowing instead of type assertions
+- Use meaningful variable names instead of magic numbers; extract constants with descriptive names
+
+### Modern JavaScript/TypeScript
+
+- Use arrow functions for callbacks and short functions
+- Prefer `for...of` loops over `.forEach()` and indexed `for` loops
+- Use optional chaining (`?.`) and nullish coalescing (`??`) for safer property access
+- Prefer template literals over string concatenation
+- Use destructuring for object and array assignments
+- Use `const` by default, `let` only when reassignment is needed, never `var`
+
+### Async and promises
+
+- Always `await` promises in async functions; don't forget to use the return value
+- Use `async/await` syntax instead of promise chains
+- Handle errors appropriately in async code with try-catch blocks
+- Don't use async functions as Promise executors
+
+### React and JSX
+
+- Use function components over class components
+- Call hooks at the top level only, never conditionally
+- Specify all dependencies in hook dependency arrays correctly
+- Use the `key` prop for elements in iterables (prefer unique IDs over array indices)
+- Nest children between opening and closing tags instead of passing as props
+- Don't define components inside other components
+- Use ref as a prop instead of `React.forwardRef` (React 19)
+- Use semantic HTML and ARIA attributes for accessibility: meaningful alt text, proper heading hierarchy, labels for form inputs, keyboard handlers alongside mouse events, semantic elements (`<button>`, `<nav>`) instead of divs with roles
+
+### Error handling and debugging
+
+- Remove `console.log`, `debugger`, and `alert` statements from production code
+- Throw `Error` objects with descriptive messages, not strings or other values
+- Use `try-catch` blocks meaningfully; don't catch errors just to rethrow them
+- Prefer early returns over nested conditionals for error cases
+
+### Code organization
+
+- Keep functions focused and under reasonable cognitive complexity limits
+- Extract complex conditions into well-named boolean variables
+- Use early returns to reduce nesting
+- Prefer simple conditionals over nested ternary operators
+- Group related code together and separate concerns
+
+### Security
+
+- Add `rel="noopener"` when using `target="_blank"` on links
+- Avoid `dangerouslySetInnerHTML` unless absolutely necessary
+- Don't use `eval()` or assign directly to `document.cookie`
+- Validate and sanitize user input
+
+### Performance
+
+- Avoid spread syntax in accumulators within loops
+- Use top-level regex literals instead of creating them in loops
+- Prefer specific imports over namespace imports
+- Avoid barrel files (index files that re-export everything)
+
+### When the linter can't help
+
+Focus your attention on business logic correctness, meaningful naming, architecture decisions (component structure, data flow, API design), edge cases and error states, user experience (accessibility, performance, usability), and documentation (comment complex logic, but prefer self-documenting code).
+
+<!-- ultracite:end -->

@@ -1,0 +1,136 @@
+import { RpcTarget } from "cloudflare:workers";
+
+import type { Settled } from "./sealed-isolate.ts";
+
+/** What an attempt's host does, each call as its attempt (`AttemptHost`). */
+export interface AttemptCalls {
+  callConnection: (
+    binding: unknown,
+    call: unknown
+  ) => Promise<Settled<unknown>>;
+  openDecision: (
+    request: unknown
+  ) => Promise<Settled<{ decision: string; deadline: number }>>;
+  askDecision: (decision: unknown) => Promise<Settled<null>>;
+}
+
+/**
+ * The one check every call of an attempt passes (`AttemptHost`): the
+ * refusal to answer, as `Settled`, when the attempt no longer holds its
+ * lease (it timed out, the run was cancelled or paused, another
+ * activation took over), or nothing while it holds.
+ */
+export type AttemptFenceCheck = (
+  call: string
+) => Promise<Settled<never> | undefined>;
+
+/**
+ * What admits each call of an attempt once, before it runs, as one of its
+ * run lineage's host calls (`AttemptHost`): the refusal, as `Settled`,
+ * past the lineage's limit, or nothing once admitted.
+ */
+export type AttemptCallAdmission = (
+  call: string
+) => Promise<Settled<never> | undefined>;
+
+/**
+ * Each call of `AttemptCalls`, by the label a refusal of it is audited
+ * with. A mapped type over `AttemptCalls`: a call added there and missing
+ * here doesn't compile, and `fenced` wraps every call listed here.
+ */
+export const attemptCallLabels: {
+  readonly [Name in keyof AttemptCalls]: string;
+} = {
+  callConnection: "connection",
+  openDecision: "decision",
+  askDecision: "decision",
+};
+
+/** The names of the calls an attempt's code makes (`AttemptCalls`). */
+const attemptCallNames = Object.keys(attemptCallLabels).filter(
+  (name): name is keyof AttemptCalls => Object.hasOwn(attemptCallLabels, name)
+);
+
+/**
+ * `calls`, each fenced: refused before it runs once its attempt no longer
+ * holds, and again as it returns, so what it read or got never leaves the
+ * host for an attempt the engine let go of meanwhile, whatever the call
+ * awaited on the way; and, between the first check and the call, admitted
+ * once as one of its lineage's host calls (`admit`), counted whatever the
+ * call then does. Every entry of `calls` is wrapped, so a call added to
+ * `AttemptCalls` is fenced and counted without anyone remembering to.
+ */
+const fenced = (
+  calls: AttemptCalls,
+  check: AttemptFenceCheck,
+  admit: AttemptCallAdmission
+): AttemptCalls => {
+  const wrapped: Partial<
+    Record<
+      keyof AttemptCalls,
+      (...args: unknown[]) => Promise<Settled<unknown>>
+    >
+  > = {};
+  for (const name of attemptCallNames) {
+    const call: (...args: unknown[]) => Promise<Settled<unknown>> = calls[name];
+    const label = attemptCallLabels[name];
+    wrapped[name] = async (...args: unknown[]): Promise<Settled<unknown>> => {
+      const before = await check(label);
+      if (before !== undefined) {
+        return before;
+      }
+      const refused = await admit(label);
+      if (refused !== undefined) {
+        return refused;
+      }
+      const result = await call(...args);
+      return (await check(label)) ?? result;
+    };
+  }
+  // SAFETY: `wrapped` has an entry for every key of `AttemptCalls` (the
+  // keys of `attemptCallLabels`, a mapped type over it), each the call of
+  // that name, taking its arguments as they come and answering what it
+  // answers, or a refusal, which every call may answer.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return wrapped as AttemptCalls;
+};
+
+/**
+ * The host of one attempt of a step, minted when the engine claims it and
+ * handed to that attempt's code alone: what the code does inside a step
+ * (its bindings, a decision) goes through it, each call as
+ * that attempt, with that attempt's identity whenever the call lands. So
+ * a call made late, by an attempt the engine gave up on, can never act
+ * with a newer attempt's authority: it is checked against its own
+ * attempt's lease, refused as stale once that no longer holds, and has no
+ * other attempt to borrow from. Every method answers `Settled`.
+ */
+export class AttemptHost extends RpcTarget implements AttemptCalls {
+  readonly #calls: AttemptCalls;
+
+  constructor(
+    calls: AttemptCalls,
+    check: AttemptFenceCheck,
+    admit: AttemptCallAdmission
+  ) {
+    super();
+    this.#calls = fenced(calls, check, admit);
+  }
+
+  async callConnection(
+    binding: unknown,
+    call: unknown
+  ): Promise<Settled<unknown>> {
+    return await this.#calls.callConnection(binding, call);
+  }
+
+  async openDecision(
+    request: unknown
+  ): Promise<Settled<{ decision: string; deadline: number }>> {
+    return await this.#calls.openDecision(request);
+  }
+
+  async askDecision(decision: unknown): Promise<Settled<null>> {
+    return await this.#calls.askDecision(decision);
+  }
+}

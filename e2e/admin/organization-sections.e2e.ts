@@ -1,0 +1,617 @@
+import { expect, test } from "@playwright/test";
+import type {
+  APIRequestContext,
+  Page,
+  Request as PlaywrightRequest,
+} from "@playwright/test";
+import { z } from "zod";
+
+/** Every section of an organization, by its path under the organization's own, and its title. */
+const sections = [
+  ["", "Overview"],
+  ["details", "Details"],
+  ["steps", "Steps"],
+  ["interviews", "Interviews"],
+  ["workflows", "Workflows"],
+  ["setup", "Setup"],
+  ["integrations", "Integrations"],
+  ["ai-use", "AI use"],
+  ["hours", "Hours"],
+  ["brain", "Brain"],
+  ["log", "Log"],
+] as const;
+
+/** What the organizations seed made (apps/admin/test/e2e-seed.ts). */
+const seededSchema = z.object({ answered: z.string(), unset: z.string() });
+
+const seed = async (
+  request: APIRequestContext
+): Promise<z.infer<typeof seededSchema>> => {
+  const response = await request.post("/__e2e/seed-organizations");
+  expect(response.status()).toBe(200);
+  return seededSchema.parse(await response.json());
+};
+
+/** The path of `clientId`'s section at `path`. */
+const sectionPath = (clientId: string, path: string): string =>
+  `/organizations/${clientId}${path === "" ? "" : `/${path}`}`;
+
+/** Goes to a section from the organization's own column, as staff do. */
+const openSection = async (
+  page: Page,
+  name: string,
+  clientId: string,
+  path: string
+): Promise<void> => {
+  await page
+    .getByRole("navigation", { name })
+    .locator(`a[href="${sectionPath(clientId, path)}"]`)
+    .last()
+    .click();
+  await expect(page).toHaveURL(
+    new RegExp(`${sectionPath(clientId, path)}$`, "u")
+  );
+};
+
+/**
+ * Goes from the organization's Setup, the one section that shows without
+ * its core, to the section at `path`, and sees it say it isn't set up yet.
+ */
+const fromSetupTo = async (
+  page: Page,
+  clientId: string,
+  path: string,
+  title: string
+): Promise<void> => {
+  await openSection(page, "Unset Acme", clientId, "setup");
+  await openSection(page, "Unset Acme", clientId, path);
+  const main = page.getByRole("main");
+  await expect(
+    main.getByRole("heading", {
+      level: 1,
+      name: path === "" ? "Unset Acme" : title,
+    })
+  ).toBeVisible();
+  if (path !== "setup") {
+    await expect(main.getByText("Unset Acme isn’t set up yet")).toBeVisible();
+    await expect(
+      main.getByRole("link", { name: "See its Setup progress" })
+    ).toBeVisible();
+  }
+  await expect(main.getByText("This couldn’t be shown")).toHaveCount(0);
+};
+
+/** Whatever the page logs of a failure while rendering, from now on. */
+const failuresOf = (page: Page): string[] => {
+  const failures: string[] = [];
+  page.on("pageerror", (error) => {
+    failures.push(error.message);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      failures.push(message.text());
+    }
+  });
+  return failures;
+};
+
+// Nick, on the admin: moving between an organization's sections showed
+// the router's "Something went wrong" whenever its core hadn't answered.
+test("every section of an organization not set up yet says so, moving between them from its column", async ({
+  page,
+  request,
+}) => {
+  const { unset } = await seed(request);
+  const failures = failuresOf(page);
+  await page.goto(sectionPath(unset, "setup"), { waitUntil: "networkidle" });
+
+  for (const [path, title] of sections) {
+    // oxlint-disable-next-line no-await-in-loop -- one section after another, as staff move
+    await fromSetupTo(page, unset, path, title);
+  }
+  expect(failures).toStrictEqual([]);
+});
+
+test("an organization's column folds to a rail of its sections, which still lead to each, and opens again", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  const column = page.getByRole("navigation", { name: "Answering Acme" });
+
+  await column.getByRole("button", { name: "Fold the sections" }).click();
+  // Folded, each section is a link named by its title, the open one marked.
+  await expect(
+    column.getByRole("link", { name: "Overview", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+  await column.getByRole("link", { name: "Details", exact: true }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`${sectionPath(answered, "details")}$`, "u")
+  );
+  await expect(
+    column.getByRole("link", { name: "Details", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+
+  await column.getByRole("button", { name: "Expand the sections" }).click();
+  await expect(
+    column.getByRole("heading", { name: "Answering Acme" })
+  ).toBeVisible();
+  await expect(column.getByRole("link", { name: /^Details/u })).toBeVisible();
+});
+
+/** Makes the admin's server function `fn` fail as `mode` says, or none with null. */
+const fault = async (
+  request: APIRequestContext,
+  fn: string | null,
+  mode: "error" | "garbled" = "error"
+): Promise<void> => {
+  const response = await request.post("/__e2e/fault", { data: { fn, mode } });
+  expect(response.status()).toBe(204);
+};
+
+// The dev server is shared by every test and retry: a fault a test set
+// never outlives it, however the test ends, nor is one left from before.
+test.beforeEach(async ({ request }) => {
+  await fault(request, null);
+});
+test.afterEach(async ({ request }) => {
+  await fault(request, null);
+});
+
+/** The section's failure in its place, and Try again bringing the section back once its cause is gone. */
+const failsThenRecovers = async (
+  page: Page,
+  request: APIRequestContext,
+  clientId: string
+): Promise<void> => {
+  const main = page.getByRole("main");
+  await openSection(page, "Answering Acme", clientId, "log");
+  await expect(main.getByText("This couldn’t be shown")).toBeVisible();
+  await expect(main.getByText("Something went wrong")).toHaveCount(0);
+
+  await fault(request, null);
+  await main.getByRole("button", { name: "Try again" }).click();
+  await expect(main.getByLabel("Search the log")).toBeVisible();
+  await expect(main.getByText("This couldn’t be shown")).toHaveCount(0);
+};
+
+// The Log's loader reads the admin's trail (`fetchOrganizationTrail`).
+test("a section whose read fails says so in its place, the column and sidebar still work, and Try again brings it back", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
+    waitUntil: "networkidle",
+  });
+  await fault(request, "fetchOrganizationTrail");
+
+  const main = page.getByRole("main");
+  await openSection(page, "Answering Acme", answered, "log");
+  await expect(main.getByText("This couldn’t be shown")).toBeVisible();
+  // The organization's column still moves between its sections.
+  await openSection(page, "Answering Acme", answered, "details");
+  await expect(
+    main.getByRole("heading", { level: 1, name: "Details" })
+  ).toBeVisible();
+  // And the admin's sidebar still goes elsewhere.
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Answering Acme" })
+    .click();
+  await expect(
+    main.getByRole("heading", { level: 1, name: "Answering Acme" })
+  ).toBeVisible();
+
+  await fault(request, "fetchOrganizationTrail");
+  await failsThenRecovers(page, request, answered);
+});
+
+test("a section that can't render what it read says so in its place, and Try again brings it back", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
+    waitUntil: "networkidle",
+  });
+  // A trail that isn't one: the Log throws rendering it.
+  await fault(request, "fetchOrganizationTrail", "garbled");
+  await failsThenRecovers(page, request, answered);
+});
+
+// The frame's loader reads the platform's counts (`fetchPlatformSidebar`).
+test("a frame that can't be read says so with Try again, which brings the admin back", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
+    waitUntil: "networkidle",
+  });
+  await fault(request, "fetchClientGrid");
+  // The frame read again, as it is once its read went stale, and failing.
+  await page.evaluate(async () => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const invalidate: unknown = Reflect.get(router, "invalidate");
+    if (typeof invalidate !== "function") {
+      throw new TypeError("The page's router can't be read again");
+    }
+    await Reflect.apply(invalidate, router, []);
+  });
+  await expect(page.getByText("The admin couldn’t be read")).toBeVisible();
+  await expect(page.getByText("Something went wrong")).toHaveCount(0);
+
+  await fault(request, null);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Nobody has made an account yet.")).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Organizations" })
+  ).toBeVisible();
+});
+
+/** Whether a request at `url` is a call of one of the admin's server functions. */
+const isCall = (url: string): boolean => url.includes("/_serverFn/");
+
+/**
+ * How many of the page's server function calls started from now on are
+ * unanswered: each tracked by its request, so a call already under way
+ * when this is called never counts.
+ */
+const unansweredCalls = (page: Page): (() => number) => {
+  const unanswered = new Set<PlaywrightRequest>();
+  page.on("request", (sent) => {
+    if (isCall(sent.url())) {
+      unanswered.add(sent);
+    }
+  });
+  const answered = (sent: PlaywrightRequest): void => {
+    unanswered.delete(sent);
+  };
+  page.on("requestfinished", answered);
+  page.on("requestfailed", answered);
+  return () => unanswered.size;
+};
+
+/**
+ * Keeps every preload the page's router starts from now on, as pointing
+ * at a link starts one, so a journey can wait on the real one.
+ */
+const watchPreloads = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const preloadRoute: unknown = Reflect.get(router, "preloadRoute");
+    if (typeof preloadRoute !== "function") {
+      throw new TypeError("The page's router can't preload");
+    }
+    const started: Promise<unknown>[] = [];
+    Reflect.set(globalThis, "__preloadsStarted", started);
+    Reflect.set(router, "preloadRoute", (...args: unknown[]): unknown => {
+      const preload: unknown = Reflect.apply(preloadRoute, router, args);
+      started.push(Promise.resolve(preload).catch(() => null));
+      return preload;
+    });
+  });
+};
+
+/**
+ * Waits until pointing at a link started its preload, that preload is
+ * done, and every server function call made since is answered.
+ */
+const preloaded = async (
+  page: Page,
+  unanswered: () => number
+): Promise<void> => {
+  const started = async (): Promise<number> =>
+    await page.evaluate(() => {
+      const preloads: unknown = Reflect.get(globalThis, "__preloadsStarted");
+      return Array.isArray(preloads) ? preloads.length : 0;
+    });
+  await expect.poll(started).toBeGreaterThan(0);
+  await page.evaluate(async () => {
+    const preloads: unknown = Reflect.get(globalThis, "__preloadsStarted");
+    await Promise.all(Array.isArray(preloads) ? preloads : []);
+  });
+  await expect.poll(unanswered).toBe(0);
+};
+
+/** What a seeded core answered so far, holding each answer `holdMs` from now on if given. */
+const core = async (
+  request: APIRequestContext,
+  clientId: string,
+  holdMs?: number
+): Promise<number> => {
+  const response = await request.post("/__e2e/core", {
+    data: { clientId, holdMs },
+  });
+  expect(response.status()).toBe(200);
+  return z.object({ reads: z.number() }).parse(await response.json()).reads;
+};
+
+/** Goes to the section at `path` from the column and sees its title. */
+const switchTo = async (
+  page: Page,
+  clientId: string,
+  path: string,
+  title: string
+): Promise<void> => {
+  await openSection(page, "Answering Acme", clientId, path);
+  await expect(
+    page.getByRole("main").getByRole("heading", {
+      level: 1,
+      name: path === "" ? "Answering Acme" : title,
+    })
+  ).toBeVisible();
+};
+
+test("moving between an organization's sections asks its core once", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  const failures = failuresOf(page);
+  const before = await core(request, answered);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+
+  for (const [path, title] of sections) {
+    // oxlint-disable-next-line no-await-in-loop -- one section after another, as staff move
+    await switchTo(page, answered, path, title);
+  }
+  await page.waitForLoadState("networkidle");
+
+  // The page and its frame read it once together, and every section after reuses that.
+  expect((await core(request, answered)) - before).toBe(1);
+  expect(failures).toStrictEqual([]);
+});
+
+test("a core that doesn't answer in time leaves its last answer on the page, marked as such", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
+    waitUntil: "networkidle",
+  });
+  await expect(page.getByText("Nobody has made an account yet.")).toBeVisible();
+
+  // Longer than the page waits for a core, shorter than the test.
+  await core(request, answered, 10_000);
+  await page.getByRole("button", { name: "Read again" }).click();
+
+  const main = page.getByRole("main");
+  await expect(
+    main.getByText("Its Grasp couldn’t be read again just now")
+  ).toBeVisible();
+  await expect(
+    main.getByText(/didn’t answer in time\. This is what it answered/u)
+  ).toBeVisible();
+  // What it last answered stays, rather than a page saying nothing is read.
+  await expect(main.getByText("Nobody has made an account yet.")).toBeVisible();
+  await expect(main.getByText("’s Grasp didn’t answer")).toHaveCount(0);
+  await core(request, answered, 0);
+});
+
+test("a core that hangs holds up no other organization's page", async ({
+  page,
+  request,
+}) => {
+  const { answered, unset } = await seed(request);
+  await core(request, answered, 20_000);
+
+  const started = Date.now();
+  await page.goto(sectionPath(unset, "setup"), { waitUntil: "commit" });
+  await expect(
+    page.getByRole("main").getByRole("heading", { level: 1, name: "Setup" })
+  ).toBeVisible();
+  // The admin's frame used to wait for every client's core, up to its 5 s deadline.
+  expect(Date.now() - started).toBeLessThan(4000);
+  await core(request, answered, 0);
+});
+
+test("pointing at another organization's link asks its core nothing, and opening it asks once", async ({
+  page,
+  request,
+}) => {
+  const { answered, unset } = await seed(request);
+  const failures = failuresOf(page);
+  // Past the frame's deadline, so the frame has no answer of it to reuse.
+  await core(request, answered, 6000);
+  const before = await core(request, answered);
+  await page.goto(sectionPath(unset, "setup"), { waitUntil: "networkidle" });
+  // The frame's read gave up on it: it is shown as not answering in time.
+  await expect(
+    page
+      .getByRole("navigation", { name: "Organizations" })
+      .getByText("unreachable")
+  ).toBeAttached();
+  await core(request, answered, 0);
+
+  const link = page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Answering Acme" });
+  const unanswered = unansweredCalls(page);
+  await watchPreloads(page);
+  await link.hover();
+  await link.focus();
+  // Its preload done, and any read it would have started answered.
+  await preloaded(page, unanswered);
+  // Its core's audit log records a read only when staff open it.
+  expect(await core(request, answered)).toBe(before);
+
+  await link.click();
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  expect(await core(request, answered)).toBe(before + 1);
+  expect(failures).toStrictEqual([]);
+});
+
+test("what staff type in a Setup stays as its core's answer comes in", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  const settings = `${sectionPath(answered, "setup")}?tab=settings`;
+  // Once to warm what the page loads, then as staff open it, its core slow.
+  await page.goto(settings, { waitUntil: "networkidle" });
+  await core(request, answered, 2500);
+  await page.goto(settings, { waitUntil: "commit" });
+  const field = page.getByLabel("Entra tenant id");
+  await expect(field).toBeVisible();
+  // The Setup runs, and takes what is typed, before the answer is in.
+  await page.waitForFunction(() => {
+    const input = document.querySelector("#setup-sign-in-entra");
+    return (
+      input !== null &&
+      Object.keys(input).some((key) => key.startsWith("__reactFiber"))
+    );
+  });
+  await expect(page.getByText("Read just now.")).toHaveCount(0);
+  await field.fill("typed-before-the-answer");
+
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  await expect(field).toHaveValue("typed-before-the-answer");
+  await core(request, answered, 0);
+});
+
+/** Every path a seeded core was asked for so far. */
+const coreAsked = async (
+  request: APIRequestContext,
+  clientId: string
+): Promise<string[]> => {
+  const response = await request.post("/__e2e/core", { data: { clientId } });
+  expect(response.status()).toBe(200);
+  return z.object({ asked: z.array(z.string()) }).parse(await response.json())
+    .asked;
+};
+
+test("opening an organization while the frame reads it again asks its core no second time", async ({
+  page,
+  request,
+}) => {
+  const { answered, unset } = await seed(request);
+  await page.goto(sectionPath(unset, "setup"), { waitUntil: "networkidle" });
+  const unanswered = unansweredCalls(page);
+  // Well under the frame's deadline and the page's wait on it, past the click.
+  await core(request, answered, 1500);
+  const before = await core(request, answered);
+
+  // The frame read again, as it is once its read went stale.
+  await page.evaluate(() => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const invalidate: unknown = Reflect.get(router, "invalidate");
+    if (typeof invalidate !== "function") {
+      throw new TypeError("The page's router can't be read again");
+    }
+    void Reflect.apply(invalidate, router, [
+      {
+        filter: (match: { routeId: string }) => match.routeId === "__root__",
+      },
+    ]);
+  });
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Answering Acme" })
+    .click();
+  expect(await core(request, answered)).toBe(before);
+
+  await expect(
+    page.getByRole("main").getByRole("heading", {
+      level: 1,
+      name: "Answering Acme",
+    })
+  ).toBeVisible();
+  await expect(page.getByText("Read just now.")).toBeVisible({
+    timeout: 10_000,
+  });
+  // The frame's read lands, the only one: the page shows the answer it
+  // had while it was fresh, or takes the frame's, never asking alone.
+  await expect
+    .poll(async () => await core(request, answered), { timeout: 10_000 })
+    .toBe(before + 1);
+  // Every call the page made answered: no read of its own came after.
+  await expect.poll(unanswered).toBe(0);
+  expect(await core(request, answered)).toBe(before + 1);
+  await core(request, answered, 0);
+});
+
+test("coming back to an organization within the minute takes its answer, and Read again there asks its core", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  const failures = failuresOf(page);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  const before = await core(request, answered);
+
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Unset Acme" })
+    .click();
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("heading", { level: 1, name: "Unset Acme" })
+  ).toBeVisible();
+  await page.goBack({ waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+  // Come back to: the answer it had, its core not asked.
+  expect(await core(request, answered)).toBe(before);
+
+  await page.getByRole("button", { name: "Read again" }).click();
+  // On the page the tab shows: its core asked anew, once.
+  await expect
+    .poll(async () => await core(request, answered), { timeout: 10_000 })
+    .toBe(before + 1);
+  await expect(page.getByRole("button", { name: "Read again" })).toBeEnabled();
+  expect(await core(request, answered)).toBe(before + 1);
+  expect(failures).toStrictEqual([]);
+});
+
+test("pointing at an organization's Setup asks its core nothing, and opening it does", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  const asked = await coreAsked(request, answered);
+  const before = asked.length;
+
+  const setup = page
+    .getByRole("navigation", { name: "Answering Acme" })
+    .locator(`a[href="${sectionPath(answered, "setup")}"]`)
+    .last();
+  const unanswered = unansweredCalls(page);
+  await watchPreloads(page);
+  await setup.hover();
+  await setup.focus();
+  // Its preload done, and any read it would have started answered.
+  await preloaded(page, unanswered);
+  // Its quota policy and spend are read from its core only once it is opened.
+  const pointed = await coreAsked(request, answered);
+  expect(pointed.slice(before)).toStrictEqual([]);
+
+  await setup.click();
+  await expect(
+    page.getByRole("main").getByRole("heading", { level: 1, name: "Setup" })
+  ).toBeVisible();
+  await expect
+    .poll(async () => {
+      const opened = await coreAsked(request, answered);
+      return opened.length;
+    })
+    .toBeGreaterThan(before);
+});

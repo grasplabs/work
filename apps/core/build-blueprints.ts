@@ -1,0 +1,375 @@
+/**
+ * Embeds the built-in blueprints into dist/blueprints.js, which core
+ * imports as `#blueprints` (src/blueprints.d.ts) and installs once per
+ * release (src/builtins.ts), with no network access. Core's build runs it.
+ * Core's tests embed their fixtures too, into a module of their own
+ * (`testBlueprintsModule`, which vite.config.ts makes `#blueprints` for
+ * them), so a deploy after a test run can't ship a test's built-in.
+ *
+ * Each built-in is a folder under apps/core/blueprints/, named by its id,
+ * which never changes: renaming the folder makes another blueprint. In it:
+ *
+ * - `blueprint.json`: `{ "name": …, "description": … }`, as for any App,
+ *   and optionally `"permissions"`: what each App created from it asks
+ *   for of what the platform offers, as `[{ "object": { "type":
+ *   "platform" }, "actions": […], "binding": … }]`, each a request an
+ *   admin grants on the copy; `"contracts"`: the catalog
+ *   contracts its workflows bind, as an admin publishes them
+ *   (`catalogContractSchema`), which the install publishes if their keys
+ *   aren't taken; and `"workflows"`: the independent workflows each App
+ *   created from it gets, as `[{ "alias": …, "binding": …, "definition":
+ *   "workflows/<alias>.json" }]`, each a grasp-workflow/2 definition
+ *   in the folder (not in `files/`: it is no file of the App), which the
+ *   copy binds under its alias and asks to start under its binding name;
+ * - `definition.json`: the App's definition (@grasp-os/runtime's
+ *   definition-types.ts), which each copy's first version holds, in the folder
+ *   too: it is no file of the App either;
+ * - `files/`: the App's files, by path, written against `@grasp-os/sdk`
+ *   like any App's, its `grasp.config.ts` and `server/schema.ts` exactly
+ *   as its definition generates them.
+ *
+ * A release may ship none: then apps/core/blueprints/ holds only its
+ * `ids.json`, and the build embeds none, which the install takes as a
+ * release without built-ins, removing those an earlier release
+ * installed. A missing folder fails the build, so none is never shipped
+ * by accident.
+ *
+ * `ids.json` names every id a release ever shipped (`checkShippedIds`):
+ * `"shipped"` while its folder is here, `"retired"` once it is gone, and
+ * the build of the release fails until both hold, so neither can be
+ * forgotten. A retired id never takes new, unrelated code: Apps created
+ * from the built-in keep its id as their origin (`app_origins`), and a
+ * deployment that skips the release that removed it (releases reach
+ * clients channel by channel) never detached them, so another built-in
+ * under the id would be offered to them as an update of code they never
+ * came from. Shipping that same built-in again is safe, and right for
+ * those Apps, whose origin it is: mark its id `"shipped"` again, which
+ * the build refuses until someone does, so it is a decision a review
+ * sees. A list in the repo, not a record the install keeps: a rollback to
+ * a release that ships a removed built-in installs it again, as it
+ * should.
+ *
+ * Each is checked here as the install would check it, so a bad one fails
+ * the build rather than the install: its ID, its manifest (its
+ * permissions as any request's are checked), its definition, and its
+ * files as any App's write checks them (paths, no hidden files, each
+ * file's size and their number), their total size as any version's, and
+ * their generated files as its definition generates them.
+ */
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
+
+import {
+  definitionSources,
+  definitionText,
+  readDefinition,
+} from "@grasp-os/runtime/definition";
+import { isUnderGeneratedServerFolder } from "@grasp-os/runtime/host";
+import { appLimits } from "@grasp-os/shared/app-limits";
+import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
+import {
+  blueprintWorkflowSchema,
+  declaredPermissionSchema,
+} from "@grasp-os/shared/permissions";
+import { catalogContractSchema } from "@grasp-os/shared/workflow-resources";
+import { z } from "zod";
+
+import type { BuiltinBlueprint } from "#blueprints";
+
+import { blueprintsDigestText } from "./src/builtin-digest.ts";
+
+/** Where the built-ins that ship with each release are. */
+export const blueprintsDir = path.join(import.meta.dirname, "blueprints");
+
+/** Where core's tests' own built-ins are, which only their module embeds. */
+export const testBlueprintsDir = path.join(
+  import.meta.dirname,
+  "test/fixtures/blueprints"
+);
+
+/** The module core imports as `#blueprints`. */
+export const blueprintsModule = path.join(
+  import.meta.dirname,
+  "dist/blueprints.js"
+);
+
+/** The module core's tests import as `#blueprints`, fixtures included. */
+export const testBlueprintsModule = path.join(
+  import.meta.dirname,
+  "dist/test-blueprints.js"
+);
+
+/**
+ * The module next to a blueprints module `out` that holds their digest:
+ * core imports dist/blueprints-digest.js as `#blueprints-digest`, its
+ * tests dist/test-blueprints-digest.js.
+ */
+export const digestModuleOf = (out: string): string =>
+  out.replace(/\.js$/u, "-digest.js");
+
+/** Most permissions one built-in declares: each is one install statement. */
+export const declaredMaxPermissions = 16;
+
+/**
+ * Most workflows one built-in ships: each is a workflow its creator
+ * creates and publishes as the copy is made, under their own quota.
+ */
+export const declaredMaxWorkflows = 4;
+
+/** Most catalog contracts one built-in ships. */
+export const declaredMaxContracts = 8;
+
+/** A workflow as `blueprint.json` names it: its definition by its path. */
+const declaredWorkflowSchema = blueprintWorkflowSchema.extend({
+  definition: z.string().regex(/^workflows\/[a-z][a-z0-9]*\.json$/u),
+});
+
+/**
+ * A `blueprint.json`: the App's name and description, as for any App, and
+ * what each copy asks for, each binding name once, as an App's
+ * permissions have them.
+ */
+const manifestSchema = fromBlueprintSchema
+  .extend({
+    permissions: z
+      .array(declaredPermissionSchema)
+      .max(declaredMaxPermissions)
+      .refine(
+        (permissions) =>
+          new Set(permissions.map(({ binding }) => binding)).size ===
+          permissions.length,
+        { message: "Each binding name once" }
+      )
+      .default([]),
+    contracts: z
+      .array(catalogContractSchema)
+      .max(declaredMaxContracts)
+      .refine(
+        (contracts) =>
+          new Set(contracts.map(({ key }) => key)).size === contracts.length,
+        { message: "Each key once" }
+      )
+      .default([]),
+    workflows: z
+      .array(declaredWorkflowSchema)
+      .max(declaredMaxWorkflows)
+      .refine(
+        (workflows) =>
+          new Set(workflows.map(({ alias }) => alias)).size ===
+          workflows.length,
+        { message: "Each alias once" }
+      )
+      .default([]),
+  })
+  .refine(
+    // A copy's permissions, its workflows' included, each under a name of
+    // its own, as an App's permissions have them.
+    ({ permissions, workflows }) => {
+      const names = [...permissions, ...workflows].map(
+        ({ binding }) => binding
+      );
+      return new Set(names).size === names.length;
+    },
+    { path: ["workflows"], message: "Each binding name once" }
+  );
+
+/** A folder name that is safe in an ID, a URL and an audit event. */
+const idSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+
+/**
+ * Every file under `dir`, by its path from `dir`, with `/` between names,
+ * but what Grasp generates from its server code (`server/_generated/`):
+ * committed for the repo's type check (generate-blueprints.ts), and
+ * generated again as the install writes the copy's files.
+ */
+export const filesIn = (dir: string): Record<string, string> => {
+  const paths = readdirSync(dir, { recursive: true, encoding: "utf-8" })
+    .filter((file) => statSync(path.join(dir, file)).isFile())
+    .map((file) => file.split(path.sep).join("/"))
+    .filter((file) => !isUnderGeneratedServerFolder(file))
+    .toSorted();
+  return Object.fromEntries(
+    paths.map((file) => [file, readFileSync(path.join(dir, file), "utf-8")])
+  );
+};
+
+/**
+ * The folders of the built-ins in `dir`, one each, by name. `dir` must be
+ * there, holding only the release's `ids.json` when it ships none: the
+ * install removes every built-in a release doesn't ship, so a build that
+ * missed the folder must fail, never ship none.
+ */
+export const blueprintFolders = (dir: string): string[] => {
+  if (!existsSync(dir)) {
+    throw new Error(
+      `The built-in blueprints' folder ${dir} isn't there: a release that ships none keeps it, with its ids.json`
+    );
+  }
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map(({ name }) => name);
+};
+
+/** Every id a release ever shipped, as `ids.json` in its folder keeps them. */
+const shippedIdsSchema = z.record(idSchema, z.enum(["shipped", "retired"]));
+
+/**
+ * Checks the release's folder `dir` against its `ids.json` (above): each
+ * built-in's id listed as `"shipped"`, never `"retired"`, and each id
+ * listed as `"shipped"` a folder's. Throws, saying what to change.
+ */
+export const checkShippedIds = (dir: string): void => {
+  const file = path.join(dir, "ids.json");
+  if (!existsSync(file)) {
+    throw new Error(
+      `${file} isn't there: it names every built-in id a release shipped`
+    );
+  }
+  const ids = shippedIdsSchema.parse(JSON.parse(readFileSync(file, "utf-8")));
+  const folders = blueprintFolders(dir);
+  for (const id of folders) {
+    if (!Object.hasOwn(ids, id)) {
+      throw new Error(`Built-in ${id}: add "${id}": "shipped" to ${file}`);
+    }
+    if (ids[id] === "retired") {
+      throw new Error(
+        `Built-in ${id}: an earlier release removed a built-in of this id, which Apps created from it keep as their origin: name new code another way, or, to ship that same built-in again, mark it "shipped" in ${file}`
+      );
+    }
+  }
+  for (const [id, state] of Object.entries(ids)) {
+    if (state === "shipped" && !folders.includes(id)) {
+      throw new Error(
+        `Built-in ${id} is gone: mark it "retired" in ${file}, never delete it`
+      );
+    }
+  }
+};
+
+/** The built-ins in `dir`, one per folder, checked. */
+const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
+  blueprintFolders(dir).map((name) => {
+    const folder = path.join(dir, name);
+    const where = `Built-in blueprint ${folder}`;
+    if (!idSchema.safeParse(name).success) {
+      throw new Error(`${where}: name the folder in lowercase-kebab-case`);
+    }
+    const manifest = manifestSchema.safeParse(
+      JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))
+    );
+    if (!manifest.success) {
+      throw new Error(`${where}: blueprint.json ${manifest.error.message}`);
+    }
+    const filesDir = path.join(folder, "files");
+    if (!existsSync(filesDir)) {
+      throw new Error(`${where}: has no files/`);
+    }
+    const files = filesIn(filesDir);
+    const checked = fileChangesSchema.safeParse(files);
+    if (!checked.success) {
+      throw new Error(`${where}: files/ ${checked.error.message}`);
+    }
+    const length = Object.values(files).reduce(
+      (total, text) => total + text.length,
+      0
+    );
+    if (length > appLimits.totalLength) {
+      throw new Error(
+        `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
+      );
+    }
+    const workflows = manifest.data.workflows.map((workflow) => {
+      const file = path.join(folder, workflow.definition);
+      if (!existsSync(file)) {
+        throw new Error(`${where}: has no ${workflow.definition}`);
+      }
+      const definition = readFileSync(file, "utf-8");
+      // Checked as an install stores it, so the copy can publish it.
+      const shipped = blueprintWorkflowSchema.safeParse({
+        ...workflow,
+        definition,
+      });
+      if (!shipped.success) {
+        throw new Error(
+          `${where}: ${workflow.definition} ${shipped.error.message}`
+        );
+      }
+      try {
+        JSON.parse(definition);
+      } catch {
+        throw new Error(`${where}: ${workflow.definition} isn't JSON`);
+      }
+      return shipped.data;
+    });
+    const definitionFile = path.join(folder, "definition.json");
+    if (!existsSync(definitionFile)) {
+      throw new Error(`${where}: has no definition.json`);
+    }
+    const definition = readDefinition(
+      JSON.parse(readFileSync(definitionFile, "utf-8"))
+    );
+    // Its code is its definition's, as every version's is (src/apps.ts).
+    for (const [file, source] of Object.entries(
+      definitionSources(definition)
+    )) {
+      if (files[file] !== source) {
+        throw new Error(
+          `${where}: files/${file} isn't what definition.json generates`
+        );
+      }
+    }
+    return {
+      id: name,
+      ...manifest.data,
+      workflows,
+      definition: definitionText(definition),
+      files,
+    };
+  });
+
+/**
+ * Writes the built-ins in `dirs` into `out`, in id order, and their digest
+ * (src/builtin-digest.ts) next to it, or refuses when two share an id.
+ * Leaves an unchanged module as it is, so its time stays the same.
+ */
+export const writeBlueprints = (
+  dirs: readonly string[],
+  out: string = blueprintsModule
+): number => {
+  const blueprints = dirs
+    .flatMap(blueprintsIn)
+    .toSorted((a, b) => (a.id < b.id ? -1 : 1));
+  const ids = blueprints.map(({ id }) => id);
+  const repeated = ids.find((id, index) => ids.indexOf(id) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`Two built-in blueprints are named ${repeated}`);
+  }
+  const digest = createHash("sha256")
+    .update(blueprintsDigestText(blueprints))
+    .digest("hex");
+  for (const [file, text] of [
+    [out, `export default ${JSON.stringify(blueprints)};\n`],
+    [digestModuleOf(out), `export default ${JSON.stringify(digest)};\n`],
+  ] as const) {
+    const unchanged = existsSync(file) && readFileSync(file, "utf-8") === text;
+    if (!unchanged) {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, text);
+    }
+  }
+  return blueprints.length;
+};
+
+if (import.meta.main) {
+  checkShippedIds(blueprintsDir);
+  const count = writeBlueprints([blueprintsDir]);
+  console.info(`Embedded ${count} built-in blueprint(s)`);
+}

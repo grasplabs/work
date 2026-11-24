@@ -1,0 +1,203 @@
+/**
+ * Provisioning a placed client, as a workflow (src/workflow-runs.ts): each
+ * run is one attempt, claimed in D1 first (src/runners.ts), and every attempt
+ * runs the client's one operation (src/hosting/operation.ts), which
+ * resumes from what earlier attempts did. Staff start it, or start it
+ * again after it stopped, with `provisionPlacedClient`: the same call
+ * either way, since a retry resumes the operation rather than start
+ * another.
+ *
+ * Parameters and step results are identifiers only: the run's journal
+ * keeps them (threat model R17).
+ */
+import "@tanstack/react-start/server-only";
+import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
+import { z } from "zod";
+
+import { adminDatabase } from "../db/act.ts";
+import type { Actor } from "../db/act.ts";
+import { deployContext } from "../deploy/context.ts";
+import type { DeployContext } from "../deploy/context.ts";
+import { errorCode } from "../deploy/errors.ts";
+import { ProvisionError } from "../provision/errors.ts";
+import {
+  claimRun,
+  currentRun,
+  hasEnded,
+  releaseRun,
+  takeAttempt,
+} from "../runners.ts";
+import type { HeldClient } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
+import { asStepError, stop, deployStepConfig } from "../workflow-steps.ts";
+import { InventoryError } from "./inventory.ts";
+import {
+  ProvisionOperationError,
+  provisionOf,
+  recordUnstarted,
+  runClientProvision,
+  startClientProvision,
+} from "./operation.ts";
+
+/** What an attempt is started with. */
+const provisionPlacedParamsSchema = z.object({ clientId: z.string() });
+export type ProvisionPlacedParams = z.infer<typeof provisionPlacedParamsSchema>;
+
+/** The attempts' runs. */
+export const provisionAttempts = (
+  env: Pick<Env, "ADMIN_RUNS" | "DURABLE_OBJECT_JURISDICTION">
+) =>
+  adminWorkflow<ProvisionPlacedParams>(
+    env,
+    adminWorkflows.provisionPlacedClient
+  );
+
+/**
+ * A step's failure: the operation's and the inventory's own codes stop
+ * the attempt at once, for staff to act on; anything else as any step's
+ * (`asStepError`), so a smoke check still starting or an API that didn't
+ * answer is retried, resuming the operation.
+ */
+const asOperationStepError = (error: unknown): Error =>
+  error instanceof ProvisionOperationError || error instanceof InventoryError
+    ? stop(error.code, error.message)
+    : asStepError(error);
+
+/**
+ * An attempt: the client's operation, run as one step. Each try of the
+ * step takes the client for itself first (`takeAttempt`): one that timed
+ * out goes on beside its retry, and from then on every check and write
+ * of it is refused. A try that finds the operation done by this run
+ * already succeeds at once: an earlier try finished it, and released the
+ * client, but its result was lost before the engine kept it.
+ */
+export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
+  run: async (event, step): Promise<void> => {
+    const { clientId } = provisionPlacedParamsSchema.parse(event.payload);
+    await step.do(
+      "provision",
+      deployStepConfig,
+      async ({ attempt, idempotencyKey }) => {
+        const held = {
+          clientId,
+          runId: event.instanceId,
+          attempt,
+          attemptKey: idempotencyKey,
+        };
+        const db = adminDatabase(env.DB);
+        let context: DeployContext;
+        try {
+          const operation = await provisionOf(db, clientId);
+          if (operation?.status === "done" && operation.runId === held.runId) {
+            return;
+          }
+          // Taken before anything else is read: from here only this
+          // attempt writes, its failure to read its context included.
+          if (!(await takeAttempt(db, held))) {
+            throw new ProvisionOperationError(
+              "runner_replaced",
+              `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+            );
+          }
+        } catch (error) {
+          throw asOperationStepError(error);
+        }
+        try {
+          context = await deployContext(env);
+        } catch (error) {
+          // Recorded on the operation, for staff to read on its Setup, as
+          // this attempt alone: never over a retry that took it over.
+          await recordUnstarted(db, held, errorCode(error));
+          throw asOperationStepError(error);
+        }
+        try {
+          await runClientProvision(context, held);
+        } catch (error) {
+          throw asOperationStepError(error);
+        }
+      }
+    );
+  },
+});
+
+/** A new attempt's instance id: the client's, and a random part of its own. */
+const newAttemptId = (clientId: string): string =>
+  `${clientId}-p${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+
+/**
+ * Claims client `clientId` for a new attempt in place of its current
+ * runner once that has ended, recording `event`, then, holding it, starts
+ * the operation (`start`, every write of which is conditional on the
+ * claim) and the attempt that runs it. The claim comes first: a start
+ * that doesn't win it changes nothing, so it never rewrites the operation
+ * another attempt runs. A start refused once claimed gives the claim
+ * back. Refused (`already_running`) while another runner is still going,
+ * and when another claim got there first. Returns the attempt's id.
+ */
+const startAttempt = async (
+  env: Env,
+  staff: Actor,
+  clientId: string,
+  event: { action: string; target: string },
+  start: (held: HeldClient) => Promise<void>
+): Promise<string> => {
+  const db = adminDatabase(env.DB);
+  const running = new ProvisionError(
+    "already_running",
+    `Client ${clientId} is being worked on already`
+  );
+  const run = await currentRun(env, clientId);
+  if (run !== null && !hasEnded(run.status)) {
+    throw running;
+  }
+  const runId = await claimRun(
+    db,
+    staff,
+    clientId,
+    run?.runId ?? null,
+    {
+      ...event,
+      clientId,
+      ...(run === null ? {} : { detail: { replaces: run.runId } }),
+    },
+    { kind: "provision_placed", runId: newAttemptId(clientId) }
+  );
+  if (runId === undefined) {
+    throw running;
+  }
+  try {
+    await start({ clientId, runId });
+    await provisionAttempts(env).create({ id: runId, params: { clientId } });
+  } catch (error) {
+    // Nothing runs for it: the client is free for the next start.
+    await releaseRun(db, clientId, runId);
+    throw error;
+  }
+  return runId;
+};
+
+/**
+ * Starts provisioning placed client `clientId` with release `releaseId`,
+ * as `staff`, or resumes its operation: records the operation (or finds
+ * it, switched to `releaseId` while nothing of it is live: a live
+ * client's is refused, `operation_release_changed`),
+ * claims the client for a new attempt in place of its current runner once
+ * that has ended, and starts the attempt. Refused (`already_running`)
+ * while another runner is still going, and when another claim got there
+ * first. Returns the attempt's id.
+ */
+export const provisionPlacedClient = async (
+  env: Env,
+  staff: Actor,
+  clientId: string,
+  releaseId: string
+): Promise<string> =>
+  await startAttempt(
+    env,
+    staff,
+    clientId,
+    { action: "client.provision_placed", target: releaseId },
+    async (held) => {
+      await startClientProvision(adminDatabase(env.DB), staff, held, releaseId);
+    }
+  );

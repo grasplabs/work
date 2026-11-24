@@ -1,0 +1,58 @@
+import { loadExample } from "@grasp-os/app-kit/catalog/examples";
+import type { ExampleName } from "@grasp-os/app-kit/catalog/examples";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
+
+// Local gallery of the UI kit's examples, one per page, each loaded by
+// name only when its page renders it: the same examples the kit's
+// component tests check (packages/app-kit/test/kit.browser.test.tsx);
+// e2e/catalog.e2e.ts loads each page under core's Content Security Policy.
+// Not product UI: like /kit, builds in production mode answer not found.
+
+const isExample = (name: string): name is ExampleName =>
+  Object.hasOwn(loadExample, name);
+
+// One lazy component per example, made once: an example's module loads
+// when its page renders it, not before.
+const lazyExamples = {
+  list: lazy(async () => ({ default: await loadExample.list() })),
+  "detail-form": lazy(async () => ({
+    default: await loadExample["detail-form"](),
+  })),
+  dialog: lazy(async () => ({ default: await loadExample.dialog() })),
+  table: lazy(async () => ({ default: await loadExample.table() })),
+  "responsive-navigation": lazy(async () => ({
+    default: await loadExample["responsive-navigation"](),
+  })),
+  "specialised-panel": lazy(async () => ({
+    default: await loadExample["specialised-panel"](),
+  })),
+} satisfies Record<ExampleName, unknown>;
+
+const ExampleDemo = () => {
+  const { name } = useParams({ from: "/kit_/examples/$name" });
+  if (!isExample(name)) {
+    return null;
+  }
+  const Example = lazyExamples[name];
+  return (
+    <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
+      <PageHeaderTitle>{name}</PageHeaderTitle>
+      <Suspense>
+        <div data-catalog-content="">
+          <Example />
+        </div>
+      </Suspense>
+    </main>
+  );
+};
+
+export const Route = createFileRoute("/kit_/examples/$name")({
+  beforeLoad: ({ params }) => {
+    if (import.meta.env.MODE === "production" || !isExample(params.name)) {
+      throw notFound();
+    }
+  },
+  component: ExampleDemo,
+});

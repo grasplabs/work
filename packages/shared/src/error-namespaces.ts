@@ -1,0 +1,93 @@
+// The namespaces (first segments) of the platform's error codes, apart and
+// with nothing imported, so the SDK's root module (what pages import) can
+// refuse an App's error code in one of them without loading every error
+// family and Zod with it.
+//
+// It is not a list to keep by hand: test/error-namespaces.test.ts loads
+// every module that defines an error family (it finds them by their
+// source) and fails unless this list holds exactly the namespaces their
+// codes use, plus the SDK's own definition namespaces below. Core checks
+// the live registry as well (`isPlatformCode`, functions.ts).
+
+/**
+ * The namespaces of every error family's codes (`defineErrorFamily`),
+ * sorted, as the test derives them.
+ */
+export const familyNamespaces = [
+  "admin",
+  "agent",
+  "ai_key",
+  "ai_provider",
+  "app",
+  "app_data",
+  "audit",
+  "auth",
+  "brain",
+  "capability",
+  "channel",
+  "connect",
+  "connection",
+  "contract",
+  "data",
+  "decision",
+  "dependency",
+  "directory",
+  "document",
+  "draft",
+  "effect",
+  "error_report",
+  "execution",
+  "expression",
+  "file",
+  "function",
+  "hear",
+  "hr",
+  "instructions",
+  "internal",
+  "interview",
+  "kickoff",
+  "link",
+  "member",
+  "migration",
+  "model",
+  "mutation",
+  "notification",
+  "onboarding",
+  "org_settings",
+  "organization",
+  "package",
+  "page",
+  "permission",
+  "place",
+  "project",
+  "query",
+  "request",
+  "role",
+  "signal",
+  "skills",
+  "speech",
+  "statistics",
+  "submission",
+  "sync",
+  "transcription",
+  "upload",
+  "version",
+  "waiting",
+  "webhook",
+  "workflow",
+] as const;
+
+/**
+ * The namespaces of the codes the SDK gives its own refusals and those the
+ * host reserves, which no family defines: a declaration refused
+ * (`definition`, `schema`) and the outcome of a safety check (`safety`). A
+ * server function's declaration refused (`function.invalid_definition`) and
+ * a permission refused at declaration have a family's namespace.
+ */
+export const sdkNamespaces = ["definition", "safety", "schema"] as const;
+
+/** Every namespace an App's own error code can't have. */
+export const platformErrorNamespaces: ReadonlySet<string> = new Set<string>([
+  ...familyNamespaces,
+  ...sdkNamespaces,
+]);

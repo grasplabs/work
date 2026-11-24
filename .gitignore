@@ -1,0 +1,30 @@
+node_modules/
+dist/
+*.compiler-lock*/
+.wrangler/
+*.cpuprofile
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+.tanstack/
+coverage/
+playwright-report/
+parity-report/
+test-results/
+*.tsbuildinfo
+.DS_Store
+.vite-hooks/_/
+release-out/
+wrangler.deploy.jsonc
+wrangler.local.jsonc
+scripts/lab/out/
+# The Brain evaluation's results (scripts/brain-eval.ts)
+.brain-eval/
+
+# Cloudflare cf CLI build output and generated types (apps/admin)
+.cloudflare/
+
+# Vitest browser mode's failure screenshots and attachments
+__screenshots__/
+.vitest-attachments/

@@ -1,0 +1,22 @@
+{
+  "name": "@grasp-os/sdk",
+  "private": true,
+  "description": "The Apps and workflows SDK: what App code imports, re-exported by name from @grasp-os/runtime",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts",
+    "./react": "./src/react.ts",
+    "./workflow": "./src/workflow.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@grasp-os/runtime": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

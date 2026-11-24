@@ -1,0 +1,381 @@
+import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import { sha256Hex, toBase64 } from "@grasp-os/shared/encoding";
+import { authErrors, requestErrors } from "@grasp-os/shared/errors";
+import type { CodedError } from "@grasp-os/shared/errors";
+import { log } from "@grasp-os/shared/log";
+import { modelErrors } from "@grasp-os/shared/models";
+import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import {
+  speechErrors,
+  speechRequestMaxBytes,
+  speechRequestSchema,
+} from "@grasp-os/shared/voice";
+import type { SpeechAnswer, SpokenWord } from "@grasp-os/shared/voice";
+import { z } from "zod";
+
+import { identify } from "../auth/identity.ts";
+import { errorResponse } from "../errors.ts";
+import { platformAi } from "../platform-ai.ts";
+import { boundedText, jsonOf } from "../request-body.ts";
+import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
+import type { SpokenKey } from "../speech-cache.ts";
+import { platformSpeech, speechModel } from "../speech.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
+import { interviewCaller } from "./interview-caller.ts";
+import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
+import { adminWho, onboardingStore } from "./store.ts";
+import type { Took } from "./store.ts";
+
+// `POST /api/speech` (`@grasp-os/shared/voice`): a line of the onboarding
+// said out loud, with when each of its words is said, so the page lights
+// the words up as they are said. Ported from the prototype (grasplabs/
+// prototype, packages/grasp: worker/speech.ts).
+//
+// Said through speech synthesis behind its interface (speech.ts): the
+// KugelAudio voices fixed in src/platform-ai.ts, through the model
+// gateway: the deployment's rules judge every line, its
+// budgets are charged, and the audit log records it, never the line.
+//
+// What it must not do, and what stops it:
+//
+// - Say lines for anyone: only someone's interview link, for the account
+//   it belongs to, signed in (interview-caller.ts), while it may be saved
+//   (the store's `speechOnLink`), or an admin signed in. A request from another site is refused, as no other
+//   site may spend an admin's voice.
+// - Tell the company who talked, and when: a line on a link is said by
+//   the system, never in anyone's name, as the interview's turns are; the
+//   onboarding's own count, which only staff read, has it by purpose.
+// - Run up the bill: a line is at most `maxSpeechChars`; a line said
+//   before is answered from the cache, for nothing (speech-cache.ts); each
+//   link and each admin has seconds of voice a day (`voiceBudgets`); the
+//   router limits the endpoint per address, the store counts calls per
+//   link, and the gateway's budgets hold too.
+// - Say anything but the line: a line with a bracket of its own is
+//   refused, so no direction is slipped in, and its tone, one of
+//   `voiceTags`, is the page's alone (how the figure looks as it is
+//   said): KugelAudio's voice takes no direction, so none is sent.
+
+/** What the gateway is told every line is for. */
+const purpose = "onboarding.speech";
+
+/**
+ * Seconds of voice a day: on someone's link, more than an interview of an
+ * hour has Stephen say; for an admin, enough to hear the onboarding's
+ * pages over and over. A line said before costs none of them.
+ */
+export const voiceBudgets = { link: 30 * 60, admin: 60 * 60 } as const;
+
+/** `Sec-Fetch-Site` values of a request this site's own pages made. */
+const sameSiteFetches = new Set(["same-origin", "none"]);
+
+/** Whom a line is said for: the key its voice counts under, and how it is counted. */
+interface Listener {
+  who: string;
+  /** Seconds said under `who` today. */
+  said: number;
+  budget: number;
+  /** The onboarding's count by purpose: an interview's, or an admin's onboarding. */
+  counted: Took["purpose"];
+  trigger: AuditActor;
+}
+
+/** An answer of this endpoint: never a referrer, never kept by a browser. */
+const answered = (body: string): Response =>
+  new Response(body, {
+    headers: { ...linkHeaders, "content-type": "application/json" },
+  });
+
+const refused = (
+  status: number,
+  error: CodedError,
+  requestId: string
+): Response => {
+  const response = errorResponse(status, error, requestId);
+  for (const [name, value] of Object.entries(linkHeaders)) {
+    response.headers.set(name, value);
+  }
+  return response;
+};
+
+/** The gateway's refusals, as the page is told them. */
+const gatewayRefusals: Partial<
+  Record<
+    string,
+    { status: number; code: Parameters<typeof speechErrors.create>[0] }
+  >
+> = {
+  "model.rate_limited": { status: 429, code: "speech.busy" },
+  "model.unconfigured": { status: 503, code: "speech.unavailable" },
+  "model.not_allowed": { status: 503, code: "speech.unavailable" },
+};
+
+/** Why the gateway didn't say a line, as the page is told it. */
+const failed = (error: unknown, requestId: string): Response => {
+  const code = modelErrors.codeOf(error);
+  log.warn("speech.failed", { requestId, code });
+  const refusal = gatewayRefusals[code ?? ""] ?? {
+    status: 502,
+    code: "speech.failed",
+  };
+  return refused(refusal.status, speechErrors.create(refusal.code), requestId);
+};
+
+/** The page's request, read no further than it may be; `undefined` when it isn't one. */
+const requestOf = async (request: Request) => {
+  const length = Number(request.headers.get("content-length") ?? 0);
+  const raw =
+    length > speechRequestMaxBytes
+      ? undefined
+      : await boundedText(request.body, speechRequestMaxBytes);
+  const parsed = speechRequestSchema.safeParse(
+    raw === undefined ? undefined : jsonOf(raw)
+  );
+  return parsed.success ? parsed.data : undefined;
+};
+
+type Asked = NonNullable<Awaited<ReturnType<typeof requestOf>>>;
+
+/**
+ * Whom a line on someone's link is for, or why their link refuses it. The
+ * store notes the line's cache key (`stored`) in the same call that finds
+ * the link open, so no erasure lands between them (`speechOnLink`).
+ */
+const onLink = async (
+  request: Request,
+  env: Env,
+  link: NonNullable<Asked["link"]>,
+  stored: string,
+  requestId: string
+): Promise<Listener | Response> => {
+  // The session names whose interview it may be (interview-caller.ts).
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return noCallerRefusal(caller, requestId);
+  }
+  const found = await onboardingStore(env).speechOnLink(
+    await sha256Hex(link.secret),
+    caller.account,
+    stored,
+    voiceBudgets.link
+  );
+  if (!found.ok) {
+    if (found.code === "interview.link_invalid") {
+      // Never the secret: only that one opened nothing.
+      log.warn("interview.link_invalid", { requestId });
+    }
+    return linkRefusal(found.code, requestId);
+  }
+  return {
+    ...found.value,
+    budget: voiceBudgets.link,
+    counted: "interviews",
+    trigger: { type: "system" },
+  };
+};
+
+/**
+ * Whom a line for an admin signed in is for, or why it is refused; the
+ * store notes the line's cache key (`stored`) as it reads what they said
+ * today (`speechForAdmin`).
+ */
+const forAdmin = async (
+  request: Request,
+  env: Env,
+  stored: string,
+  requestId: string
+): Promise<Listener | Response> => {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite !== null && !sameSiteFetches.has(fetchSite)) {
+    return refused(403, requestErrors.create("request.forbidden"), requestId);
+  }
+  // Grasp's staff, who may reach the onboarding alone, among them.
+  const person = await identify(env, request.headers);
+  if (person === undefined) {
+    return refused(401, authErrors.create("auth.unauthenticated"), requestId);
+  }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "onboarding.speech");
+  if (!isAdmin(person.role)) {
+    return refused(403, roleErrors.create("role.forbidden"), requestId);
+  }
+  const who = `${adminWho}${person.userId}`;
+  return {
+    who,
+    said: await onboardingStore(env).speechForAdmin(
+      who,
+      stored,
+      voiceBudgets.admin
+    ),
+    budget: voiceBudgets.admin,
+    // The admin's own onboarding, as the prototype counted it.
+    counted: "reading",
+    trigger: actorOf(person),
+  };
+};
+
+/** How long a line takes to say, in seconds: until its last word ends. */
+const secondsOf = (words: readonly SpokenWord[]): number =>
+  (words.at(-1)?.endMs ?? 0) / 1000;
+
+/** Counts a line said, after it was: never holds up nor fails the answer. */
+const countSaid = async (
+  env: Env,
+  listener: Listener,
+  seconds: number,
+  requestId: string
+): Promise<void> => {
+  try {
+    await onboardingStore(env).countVoice(
+      listener.who,
+      listener.counted,
+      seconds
+    );
+  } catch {
+    log.error("speech.count_failed", { requestId });
+  }
+};
+
+/** Keeps a line said, for the next to ask: an answer is never held up by it. */
+const keep = async (
+  env: Env,
+  key: SpokenKey,
+  answer: string,
+  requestId: string
+): Promise<void> => {
+  try {
+    await keepLine(env, key, answer);
+  } catch {
+    log.warn("speech.keep_failed", { requestId });
+  }
+};
+
+/**
+ * Keeps a line said, unless what was said for `who` was erased while the
+ * voice said it: its key (`stored`), noted as it was asked, is then gone
+ * from the store (`stillNoted`), and the line is taken out again right
+ * after it was put, as an R2 put can't be conditional, and by the store's
+ * alarm until it is gone. An erasure that lands after this check finds
+ * the key noted, and takes the line out itself.
+ */
+const keepUnlessErased = async (
+  env: Env,
+  who: string,
+  stored: string,
+  key: SpokenKey,
+  answer: string,
+  requestId: string
+): Promise<void> => {
+  await keep(env, key, answer, requestId);
+  const store = onboardingStore(env);
+  if (!(await store.stillNoted(who, stored))) {
+    await store.forgetSpoken([stored]);
+  }
+};
+
+/** The answer's shape, as the cache keeps it: checked again when read. */
+const keptAnswerSchema = z.object({
+  audio: z.string().min(1),
+  mime: z.string().min(1),
+  words: z.array(
+    z.object({ text: z.string(), startMs: z.number(), endMs: z.number() })
+  ),
+});
+
+/** A line kept before, if one is that reads as an answer. */
+const keptAnswer = async (
+  env: Env,
+  key: SpokenKey,
+  requestId: string
+): Promise<string | undefined> => {
+  try {
+    const kept = await keptLine(env, key);
+    return kept !== undefined &&
+      keptAnswerSchema.safeParse(jsonOf(kept)).success
+      ? kept
+      : undefined;
+  } catch {
+    log.warn("speech.cache_unread", { requestId });
+    return undefined;
+  }
+};
+
+/** Says the page's line for `listener`, from the cache when it was said before. */
+const say = async (
+  env: Env,
+  asked: Asked,
+  listener: Listener,
+  stored: string,
+  requestId: string
+): Promise<Response> => {
+  const voice = platformAi.speech.voices[asked.speaker];
+  const key: SpokenKey = {
+    text: asked.text,
+    voice,
+    model: speechModel,
+    language: asked.language,
+  };
+  const kept = await keptAnswer(env, key, requestId);
+  if (kept !== undefined) {
+    return answered(kept);
+  }
+  // Only a new line costs anything, so only a new line counts against a
+  // budget.
+  if (listener.said >= listener.budget) {
+    return refused(429, speechErrors.create("speech.limited"), requestId);
+  }
+  let speech: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
+  try {
+    speech = await platformSpeech(env, {
+      purpose,
+      trigger: listener.trigger,
+      work: { onboarding: true },
+      requestId,
+    }).speak({ text: asked.text, voice, language: asked.language });
+  } catch (error) {
+    return failed(error, requestId);
+  }
+  const answer: SpeechAnswer = {
+    audio: toBase64(speech.audio),
+    mime: speech.mime,
+    words: speech.words,
+  };
+  const body = JSON.stringify(answer);
+  await Promise.all([
+    keepUnlessErased(env, listener.who, stored, key, body, requestId),
+    countSaid(env, listener, secondsOf(speech.words), requestId),
+  ]);
+  return answered(body);
+};
+
+/** `POST /api/speech`: a line said, for someone's interview link or an admin. */
+export const speechResponse = async (
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  if (request.method !== "POST") {
+    return errorResponse(
+      405,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  const asked = await requestOf(request);
+  if (asked === undefined) {
+    return refused(400, speechErrors.create("speech.invalid"), requestId);
+  }
+  // What was said is noted by this key (a hash, never the words) as it is
+  // asked, and only for a line that may be said: erasing anything of
+  // theirs takes exactly what was said out of the cache, a sentence or a
+  // story at a time (GRA-1897).
+  const stored = await storedKeyOf(asked.text);
+  const listener =
+    asked.link === undefined
+      ? await forAdmin(request, env, stored, requestId)
+      : await onLink(request, env, asked.link, stored, requestId);
+  if (listener instanceof Response) {
+    return listener;
+  }
+  return await say(env, asked, listener, stored, requestId);
+};

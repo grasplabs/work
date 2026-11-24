@@ -1,0 +1,654 @@
+import type { DirectoryPerson } from "@grasp-os/shared/directory";
+import {
+  noTeamId,
+  onboardingPeopleMax,
+  onboardingTeamsMax,
+  rosterSchema,
+} from "@grasp-os/shared/onboarding";
+import type { Roster } from "@grasp-os/shared/onboarding";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  csvRows,
+  directoryListOf,
+  exampleList,
+  StaffListError,
+  staffListOf,
+  withLeadsFrom,
+  withSaved,
+} from "./staff-list.ts";
+
+// From the prototype's `lib/staff-list.test.ts`, and that what it reads is
+// a roster core takes.
+
+const leadName = (list: ReturnType<typeof staffListOf>): string | undefined =>
+  list.roster.people.find((person) => person.id === list.roster.teams[0]?.lead)
+    ?.name;
+
+/** Someone in a directory, as connect reads them. */
+const inDirectory = (
+  id: string,
+  fields: Partial<DirectoryPerson> = {}
+): DirectoryPerson => ({
+  id,
+  name: `Person ${id}`,
+  email: `${id}@acme.test`,
+  department: "",
+  title: "",
+  manager: null,
+  ...fields,
+});
+
+/** A staff list with Bo in `team`. */
+const rowsOf = (team: string) => [
+  ["Name", "Email", "Team"],
+  ["Ada Bos", "ada@x.com", "Sales"],
+  ["Bo Kok", "bo@x.com", team],
+];
+
+/** The team Bo is in. */
+const teamOfBo = (roster: Roster) =>
+  roster.teams.find(
+    ({ id }) => id === roster.people.find(({ name }) => name === "Bo Kok")?.team
+  );
+
+describe("a staff list as rows", () => {
+  it("reads commas, semicolons or tabs, whichever the first line uses, with quoted cells", () => {
+    expect(
+      csvRows(
+        'Naam;E-mail;Afdeling\r\n"Bakker, Daan";daan@x.nl;Klantenservice\r\n'
+      )
+    ).toStrictEqual([
+      ["Naam", "E-mail", "Afdeling"],
+      ["Bakker, Daan", "daan@x.nl", "Klantenservice"],
+    ]);
+    expect(csvRows("Name\tTeam\nLisa\tService")).toStrictEqual([
+      ["Name", "Team"],
+      ["Lisa", "Service"],
+    ]);
+    expect(
+      csvRows('﻿Name,Note\nTim,"said ""hi""\nthen left"\n\n')
+    ).toStrictEqual([
+      ["Name", "Note"],
+      ["Tim", 'said "hi"\nthen left'],
+    ]);
+  });
+
+  it("tells the separator from the rows, not a title line above the headings", () => {
+    expect(
+      csvRows(
+        'Staff list, October 2026\nNaam;E-mail;Afdeling\n"Bakker, Daan";daan@x.nl;Verkoop\nLisa Jansen;lisa@x.nl;Service\n'
+      )
+    ).toStrictEqual([
+      ["Staff list, October 2026"],
+      ["Naam", "E-mail", "Afdeling"],
+      ["Bakker, Daan", "daan@x.nl", "Verkoop"],
+      ["Lisa Jansen", "lisa@x.nl", "Service"],
+    ]);
+  });
+});
+
+describe("the teams and people in a staff list", () => {
+  it("finds its columns by their headings, in any language and order, under a title row", () => {
+    const list = staffListOf(
+      [
+        ["Medewerkerslijst oktober"],
+        ["Afdeling", "Voornaam", "Achternaam", "Functie", "E-mailadres"],
+        [
+          "Klantenservice",
+          "Daan",
+          "Bakker",
+          "Teamleider klantenservice",
+          "Daan@Rivierdal.nl",
+        ],
+        ["Klantenservice", "Lisa", "Jansen", "Medewerker", "lisa@rivierdal.nl"],
+        ["", "Anne", "Visser", "Directeur", "anne@rivierdal.nl"],
+        ["Klantenservice", "", "", "", ""],
+      ],
+      "Overig"
+    );
+    expect(list.roster.teams.map((team) => team.name)).toStrictEqual([
+      "Klantenservice",
+      "Overig",
+    ]);
+    expect(
+      list.roster.people.map((person) => [
+        person.name,
+        person.email,
+        person.title,
+      ])
+    ).toStrictEqual([
+      ["Daan Bakker", "daan@rivierdal.nl", "Teamleider klantenservice"],
+      ["Lisa Jansen", "lisa@rivierdal.nl", "Medewerker"],
+      ["Anne Visser", "anne@rivierdal.nl", "Directeur"],
+    ]);
+    expect(list.skipped).toBe(1);
+    // The lead by their job, when nothing else says it.
+    expect(leadName(list)).toBe("Daan Bakker");
+    expect(list.leadsFrom).toBe("title");
+  });
+
+  it("takes the lead the list names, before anything else", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job title", "Team lead"],
+        ["Lisa Jansen", "lisa@x.com", "Service", "Manager of nothing", ""],
+        ["Daan Bakker", "daan@x.com", "Service", "Agent", "yes"],
+      ],
+      "Other"
+    );
+    expect(leadName(list)).toBe("Daan Bakker");
+    expect(list.leadsFrom).toBe("column");
+  });
+
+  it("takes the one most of a team reports to, by name or email", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Department", "Reports to"],
+        ["Mark de Vries", "Mortgage advice", "anne visser"],
+        ["Emma Smit", "Mortgage advice", "Mark de Vries"],
+        ["Noor Bos", "Mortgage advice", "mark de vries"],
+      ],
+      "Other"
+    );
+    expect(leadName(list)).toBe("Mark de Vries");
+    expect(list.leadsFrom).toBe("manager");
+  });
+
+  it('reads a "leidinggevende" column as a name, or as a yes', () => {
+    const named = staffListOf(
+      [
+        ["Naam", "Team", "Leidinggevende"],
+        ["Mark de Vries", "Hypotheken", ""],
+        ["Emma Smit", "Hypotheken", "Mark de Vries"],
+      ],
+      "Overig"
+    );
+    expect(leadName(named)).toBe("Mark de Vries");
+    const marked = staffListOf(
+      [
+        ["Naam", "Team", "Leidinggevende"],
+        ["Mark de Vries", "Hypotheken", "ja"],
+        ["Emma Smit", "Hypotheken", "nee"],
+      ],
+      "Overig"
+    );
+    expect(leadName(marked)).toBe("Mark de Vries");
+  });
+
+  it("leaves a lead open where the list does not say, and keeps everyone once", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Email", "Team"],
+        ["Lisa Jansen", "lisa@x.com", "Service"],
+        ["Lisa Jansen", "LISA@x.com", "Service"],
+        ["Tim de Groot", "not an email", "Service"],
+      ],
+      "Other"
+    );
+    expect(list.roster.people).toHaveLength(2);
+    expect(list.roster.people[1]?.email).toBe("");
+    expect(list.roster.teams[0]?.lead).toBeNull();
+    expect(list.leadsFrom).toBe("none");
+  });
+
+  it("keeps teams whose names come to the same id apart, with ids that stay put", () => {
+    const long = "Customer service and claims handling for the north";
+    const rows = [
+      ["Name", "Team"],
+      ["Ada", "Sales / North"],
+      ["Bo", "Sales - North"],
+      ["Cas", "sales / north"],
+      ["Dee", `${long} region`],
+      ["Eli", `${long} and east`],
+      ["Fay", "Ops"],
+    ];
+    const list = staffListOf(rows, "Other");
+    expect(list.roster.teams.map((team) => [team.id, team.name])).toStrictEqual(
+      [
+        ["t-sales-north", "Sales / North"],
+        ["t-sales-north-2", "Sales - North"],
+        ["t-customer-service-and-claims-handling", `${long} region`],
+        ["t-customer-service-and-claims-handling-2", `${long} and east`],
+        ["t-ops", "Ops"],
+      ]
+    );
+    // Names that only differ in case are one team.
+    expect(
+      list.roster.people.find((person) => person.name === "Cas")?.team
+    ).toBe("t-sales-north");
+    expect(rosterSchema.safeParse(list.roster).success).toBeTruthy();
+    // Read again, every team and person has the id it had.
+    expect(staffListOf(rows, "Other").roster).toStrictEqual(list.roster);
+  });
+
+  it("tells people apart by name and team where their email address is no email address", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Email", "Team"],
+        ["Lisa Jansen", "N/A", "Service"],
+        ["Tim de Groot", "N/A", "Service"],
+        ["Anne Visser", "-", "Service"],
+        ["Anne Visser", "", "Sales"],
+      ],
+      "Other"
+    );
+    expect(
+      list.roster.people.map((person) => [person.name, person.email])
+    ).toStrictEqual([
+      ["Lisa Jansen", ""],
+      ["Tim de Groot", ""],
+      ["Anne Visser", ""],
+      ["Anne Visser", ""],
+    ]);
+    expect(rosterSchema.safeParse(list.roster).success).toBeTruthy();
+  });
+
+  it("is refused with more people or teams than an onboarding takes", () => {
+    const people = Array.from({ length: onboardingPeopleMax + 1 }, (_, at) => [
+      `Person ${at}`,
+      `p${at}@x.com`,
+      "Service",
+    ]);
+    const teams = Array.from({ length: onboardingTeamsMax + 1 }, (_, at) => [
+      `Person ${at}`,
+      `p${at}@x.com`,
+      `Team ${at}`,
+    ]);
+    for (const rows of [people, teams]) {
+      expect(() =>
+        staffListOf([["Name", "Email", "Team"], ...rows], "Other")
+      ).toThrow(expect.objectContaining({ reason: "large" }));
+    }
+    expect(
+      staffListOf(
+        [["Name", "Email", "Team"], ...people.slice(0, onboardingPeopleMax)],
+        "Other"
+      ).roster.people
+    ).toHaveLength(onboardingPeopleMax);
+  });
+
+  it("is refused without headings it knows, or without anyone in it", () => {
+    expect(() =>
+      staffListOf(
+        [
+          ["a", "b"],
+          ["c", "d"],
+        ],
+        "Other"
+      )
+    ).toThrow(StaffListError);
+    expect(() => staffListOf([["Name", "Team"]], "Other")).toThrow(
+      StaffListError
+    );
+  });
+
+  it("reads its own example, as a roster core takes", () => {
+    const list = staffListOf(csvRows(exampleList), "Other");
+    expect(list.roster.people).toHaveLength(2);
+    expect(list.leadsFrom).toBe("column");
+    expect(rosterSchema.safeParse(list.roster).success).toBeTruthy();
+  });
+});
+
+/** A team's id as core keeps it: its members' team's (GRA-2055), never the list's. */
+const membersId = (team: string): string => `members-${team}`;
+
+describe("a staff list shared again", () => {
+  const rows = [
+    ["Name", "Email", "Team", "Team lead"],
+    ["Lea Bakker", "lea@x.com", "Sales", "yes"],
+    ["Sam Visser", "sam@x.com", "Sales", ""],
+    ["Ona Smit", "ona@x.com", "Ops", ""],
+    ["Kim Bos", "kim@x.com", "Board", ""],
+  ];
+  const first = staffListOf(rows, "Other").roster;
+  const idOf = (name: string): string =>
+    first.people.find((person) => person.name === name)?.id ?? "";
+  const teamOf = (name: string): string =>
+    first.teams.find((team) => team.name === name)?.id ?? "";
+  // As the admin left it: Board switched off, Sam away, and Sam leading Sales.
+  const saved: Roster = rosterSchema.parse({
+    teams: first.teams.map((team) => ({
+      ...team,
+      id: membersId(team.id),
+      off: team.name === "Board",
+      lead: team.name === "Sales" ? idOf("Sam Visser") : team.lead,
+      does: team.name === "Ops" ? "Plans the routes" : "",
+    })),
+    people: first.people.map((person) => ({
+      ...person,
+      team: membersId(person.team),
+      away: person.name === "Sam Visser",
+    })),
+  });
+
+  it("keeps who takes part, who is away, the leads picked and what a team does", () => {
+    const again = withSaved(
+      staffListOf([...rows, ["Noor Jansen", "noor@x.com", "Ops", ""]], "Other")
+        .roster,
+      saved
+    );
+    expect(
+      again.teams.map((team) => [
+        team.name,
+        team.id,
+        team.off,
+        team.lead,
+        team.does,
+      ])
+    ).toStrictEqual([
+      ["Sales", membersId(teamOf("Sales")), false, idOf("Sam Visser"), ""],
+      ["Ops", membersId(teamOf("Ops")), false, null, "Plans the routes"],
+      ["Board", membersId(teamOf("Board")), true, null, ""],
+    ]);
+    expect(
+      again.people.map((person) => [person.name, person.away])
+    ).toStrictEqual([
+      ["Lea Bakker", false],
+      ["Sam Visser", true],
+      ["Ona Smit", false],
+      ["Kim Bos", false],
+      ["Noor Jansen", false],
+    ]);
+    expect(rosterSchema.safeParse(again).success).toBeTruthy();
+  });
+
+  it("takes the list's own lead where the one picked moved to another team", () => {
+    const moved = rows.map((row) =>
+      row[0] === "Sam Visser" ? ["Sam Visser", "sam@x.com", "Ops", ""] : row
+    );
+    const again = withSaved(staffListOf(moved, "Other").roster, saved);
+    expect(
+      again.teams.find((team) => team.id === membersId(teamOf("Sales")))?.lead
+    ).toBe(idOf("Lea Bakker"));
+    expect(rosterSchema.safeParse(again).success).toBeTruthy();
+  });
+
+  it("keeps a team's saved choices when its name comes back in another Unicode form or with spaces around it", () => {
+    const composed = "Caf\u00E9";
+    const decomposed = " Cafe\u0301 ";
+    const read = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job"],
+        ["Ada Bos", "ada@x.com", decomposed, ""],
+      ],
+      "Other"
+    ).roster;
+    const savedCafe: Roster = rosterSchema.parse({
+      teams: [{ id: "members-cafe", name: composed, lead: null, off: true }],
+      people: [{ id: "ada", name: "Ada Bos", team: "members-cafe" }],
+    });
+    const again = withSaved(read, savedCafe);
+    expect(again.teams.map(({ id, off }) => [id, off])).toStrictEqual([
+      ["members-cafe", true],
+    ]);
+  });
+
+  it("gives each team an id of its own when a saved team kept the id the list makes of another's name", () => {
+    // Saved as Sales once, renamed Revenue since, still under `t-sales`.
+    const savedRevenue: Roster = rosterSchema.parse({
+      teams: [{ id: "t-sales", name: "Revenue", lead: null, off: true }],
+      people: [{ id: "ada", name: "Ada Bos", team: "t-sales" }],
+    });
+    const read = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job"],
+        ["Ada Bos", "ada@x.com", "Revenue", ""],
+        ["Bo Kok", "bo@x.com", "Sales", ""],
+      ],
+      "Other"
+    ).roster;
+    const again = withSaved(read, savedRevenue);
+    const teamOfPerson = (name: string) =>
+      again.people.find((person) => person.name === name)?.team;
+    expect({
+      teams: again.teams.map(({ id, name, off }) => [id, name, off]),
+      ada: teamOfPerson("Ada Bos"),
+      bo: teamOfPerson("Bo Kok"),
+      valid: rosterSchema.safeParse(again).success,
+    }).toStrictEqual({
+      teams: [
+        ["t-sales", "Revenue", true],
+        ["t-sales-2", "Sales", false],
+      ],
+      ada: "t-sales",
+      bo: "t-sales-2",
+      valid: true,
+    });
+  });
+
+  it("keeps the team for people without one under its own id in every language, and never as a saved team of its name", () => {
+    const english = staffListOf(rowsOf(""), "Other").roster;
+    // Saved in English, read again in Dutch; and a saved team that took
+    // the name the list gives it, from before it had an id of its own.
+    const savedOther: Roster = rosterSchema.parse({
+      teams: [
+        { id: "members-other", name: "Overig", lead: null },
+        ...english.teams,
+      ],
+      people: [{ id: "ada", name: "Ada Bos", team: "members-other" }],
+    });
+    const dutch = withSaved(
+      staffListOf(rowsOf(""), "Overig").roster,
+      savedOther
+    );
+    expect({
+      english: teamOfBo(english),
+      dutch: teamOfBo(dutch),
+      // Named as the team for people without one: that team.
+      named: teamOfBo(staffListOf(rowsOf("other"), "Other").roster)?.id,
+    }).toStrictEqual({
+      english: {
+        id: noTeamId,
+        name: "Other",
+        lead: null,
+        does: "",
+        off: false,
+      },
+      dutch: { id: noTeamId, name: "Overig", lead: null, does: "", off: false },
+      named: noTeamId,
+    });
+  });
+
+  it("is the list itself when nothing was saved before", () => {
+    expect(withSaved(first, null)).toStrictEqual(first);
+  });
+});
+
+describe("the teams and people in a directory", () => {
+  it("makes teams of departments, leads of who most of a team reports to, and puts people in no department under Other, as a roster core takes", () => {
+    const list = directoryListOf(
+      [
+        // The head of customer service reports outside it: still its lead.
+        inDirectory("daan", {
+          name: "Daan Bakker",
+          department: "Customer service",
+          title: "Head of customer service",
+          manager: "ceo",
+        }),
+        inDirectory("lisa", {
+          name: "Lisa Jansen",
+          department: "Customer service",
+          manager: "daan",
+        }),
+        // Google names a manager by their email address.
+        inDirectory("tim", {
+          name: "Tim de Vries",
+          department: "Customer service",
+          manager: "daan@acme.test",
+        }),
+        inDirectory("ceo", { name: "Eva Visser", title: "Managing director" }),
+        inDirectory("sofia", {
+          name: "Sofia Garcia",
+          department: "Finance",
+          title: "Finance lead",
+          manager: "ceo",
+        }),
+      ],
+      "Other"
+    );
+    const teams = list.roster.teams.map(({ name, lead }) => ({
+      name,
+      lead: list.roster.people.find((person) => person.id === lead)?.name,
+      people: list.roster.people
+        .filter(
+          (person) =>
+            list.roster.teams.find((team) => team.name === name)?.id ===
+            person.team
+        )
+        .map((person) => person.name),
+    }));
+    expect({
+      teams,
+      leadsFrom: list.leadsFrom,
+      taken: rosterSchema.safeParse(list.roster).success,
+    }).toStrictEqual({
+      teams: [
+        {
+          name: "Customer service",
+          lead: "Daan Bakker",
+          people: ["Daan Bakker", "Lisa Jansen", "Tim de Vries"],
+        },
+        { name: "Other", lead: "Eva Visser", people: ["Eva Visser"] },
+        { name: "Finance", lead: "Sofia Garcia", people: ["Sofia Garcia"] },
+      ],
+      leadsFrom: "manager",
+      taken: true,
+    });
+  });
+
+  it("gives everyone the id the same person has from a staff list, so their link stays whichever way they came in", () => {
+    const fromList = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job title"],
+        ["Daan Bakker", "Daan@acme.test", "Customer service", "Team lead"],
+        ["Lisa Jansen", "", "Customer service", "Agent"],
+      ],
+      "Other"
+    );
+    const fromDirectory = directoryListOf(
+      [
+        inDirectory("1", {
+          name: "Daan Bakker",
+          email: "daan@acme.test",
+          department: "Customer service",
+          title: "Team lead",
+        }),
+        inDirectory("2", {
+          name: "Lisa Jansen",
+          email: "",
+          department: "Customer service",
+          title: "Agent",
+          manager: "1",
+        }),
+      ],
+      "Other"
+    );
+    expect(fromDirectory.roster).toStrictEqual(fromList.roster);
+  });
+
+  it("is refused with nobody in it, or more people than an onboarding takes", () => {
+    const tooMany = Array.from(
+      { length: onboardingPeopleMax + 1 },
+      (_, index) => inDirectory(String(index))
+    );
+    expect(() => directoryListOf([], "Other")).toThrow(
+      new StaffListError("empty")
+    );
+    expect(() => directoryListOf(tooMany, "Other")).toThrow(
+      new StaffListError("large")
+    );
+  });
+});
+
+describe("the leads from the HR platform", () => {
+  it("come before the leads the roster had, while what the admin set stays: a team switched off, someone away, a lead where the platform names none", () => {
+    // From the directory: one manager for all, so its leads were guessed by job.
+    const before = directoryListOf(
+      [
+        inDirectory("daan", {
+          name: "Daan Bakker",
+          department: "Customer service",
+        }),
+        inDirectory("lisa", {
+          name: "Lisa Jansen",
+          department: "Customer service",
+          title: "Team lead",
+        }),
+        inDirectory("sofia", { name: "Sofia Garcia", department: "Finance" }),
+        inDirectory("joost", { name: "Joost Smit", department: "Finance" }),
+      ],
+      "Other"
+    ).roster;
+    const [service, finance] = before.teams;
+    // As core keeps it: under the members' teams' ids (GRA-2055).
+    const saved: Roster = {
+      teams: before.teams.map((team) =>
+        team.id === finance?.id
+          ? {
+              ...team,
+              id: membersId(team.id),
+              lead:
+                before.people.find(({ name }) => name === "Joost Smit")?.id ??
+                null,
+              off: true,
+            }
+          : { ...team, id: membersId(team.id) }
+      ),
+      people: before.people.map((person) => ({
+        ...person,
+        team: membersId(person.team),
+        away: person.name === "Lisa Jansen",
+      })),
+    };
+    // HiBob knows who reports to whom in customer service, not in finance.
+    const fromHr = directoryListOf(
+      [
+        inDirectory("1", {
+          name: "Daan Bakker",
+          email: "daan@acme.test",
+          department: "Customer service",
+        }),
+        inDirectory("2", {
+          name: "Lisa Jansen",
+          email: "lisa@acme.test",
+          department: "Customer service",
+          manager: "1",
+        }),
+        inDirectory("3", {
+          name: "Sofia Garcia",
+          email: "sofia@acme.test",
+          department: "Finance",
+        }),
+        inDirectory("4", {
+          name: "Joost Smit",
+          email: "joost@acme.test",
+          department: "Finance",
+        }),
+      ],
+      "Other"
+    ).roster;
+    const merged = withLeadsFrom(fromHr, saved);
+    const nameOf = (id: string | null) =>
+      merged.people.find((person) => person.id === id)?.name;
+    expect({
+      teams: merged.teams.map((team) => ({
+        id: team.id,
+        lead: nameOf(team.lead),
+        off: team.off,
+      })),
+      away: merged.people
+        .filter((person) => person.away)
+        .map((person) => person.name),
+      taken: rosterSchema.safeParse(merged).success,
+    }).toStrictEqual({
+      teams: [
+        { id: membersId(service?.id ?? ""), lead: "Daan Bakker", off: false },
+        { id: membersId(finance?.id ?? ""), lead: "Joost Smit", off: true },
+      ],
+      away: ["Lisa Jansen"],
+      taken: true,
+    });
+  });
+});

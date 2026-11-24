@@ -1,0 +1,127 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { personalWorkspaceId } from "../../src/chats-rpc.ts";
+import { workspace } from "../../src/durable-objects.ts";
+import { codeResults, codeStep, model, says } from "../agent-chat.ts";
+import { testApp, withoutDefinition } from "../app-definitions.ts";
+import type { TestApp } from "../app-definitions.ts";
+import { release } from "../apps.ts";
+import { mockIdp } from "../idp.ts";
+import { fakeProvider } from "../model-provider.ts";
+import { signedInApi } from "../sign-in.ts";
+
+// What a spec 8 draft's function writes with `console` in its sealed
+// preview on-prem (GRA-689): it runs in a sandbox session, which the
+// sandbox host silences, so the host records its lines instead and hands
+// them back to core for the agent's next check, as a Loader tail does on
+// Cloudflare (server-logs.ts). `SANDBOX_HOST` is bound to the sandbox
+// supervisor this project starts.
+
+const idp = mockIdp();
+
+/** A notes App of spec 8's layout whose `create` writes what it creates. */
+const drafted: TestApp = testApp(
+  {
+    name: "Invoice desk",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation } from "@server/_generated/server";
+
+export const create = mutation({
+  args: { title: v.string().min(1).max(200) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => {
+    console.warn("creating", { title: args.title });
+    return await ctx.db.insert("notes", args);
+  },
+});
+`,
+  }
+);
+
+/**
+ * The Invoice desk as released: its config, and a schema with the tables
+ * of every draft here, which the agent never writes (its definition's).
+ */
+const releasedDesk: TestApp = testApp(
+  {
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { number: "v.string().min(1).max(20)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  },
+  {
+    "AGENTS.md": "# Invoice desk\n",
+  }
+);
+
+/** `files` as the agent writes them: never the definition, its config or its schema. */
+const agentWritten = withoutDefinition;
+
+describe(
+  "a spec 8 draft's sealed preview on-prem",
+  { timeout: 180_000 },
+  () => {
+    it("hands the agent's check what its function wrote with console", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { id: app } = await builder.api.apps.create({
+        name: "Invoice desk",
+      });
+      await release(builder, app, releasedDesk);
+      const chat = await builder.api.chats.create("Invoice desk");
+      const stub = workspace(env, personalWorkspaceId(builder.userId));
+      await fakeProvider(
+        codeStep(`export default async (self, env) => {
+          const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+          await env.build.write(app.id, ${JSON.stringify(agentWritten(drafted))}, { revision: (await env.build.files(app.id)).revision });
+          const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
+          // Checked as proposing it would, without proposing it.
+          const { preview } = await env.build.check(app.id);
+          return {
+            created: created.ok,
+            logs: preview.logs.map(({ level, message, method }) => ({ level, message, method })),
+          };
+        };`),
+        says("Checked.")
+      );
+
+      await stub.ask(chatIdSchema.parse(chat.id), {
+        text: "Try the invoice desk's notes",
+        model,
+      });
+
+      const [result] = await codeResults(stub, chat.id);
+      expect(
+        z
+          .unknown()
+          .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "null"))
+      ).toStrictEqual({
+        created: true,
+        logs: [
+          {
+            level: "warn",
+            message: 'creating {"title":"Invoice 7"}',
+            method: "notes.create",
+          },
+        ],
+      });
+    });
+  }
+);

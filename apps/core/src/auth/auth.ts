@@ -1,0 +1,1584 @@
+import type { sso } from "@better-auth/sso";
+import type { AuditEntry } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
+import type { SignInConfig } from "@grasp-os/shared/deployment-config";
+import { fromBase64Url } from "@grasp-os/shared/encoding";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
+import {
+  staffListTeamRefusals,
+  teamNameKey,
+} from "@grasp-os/shared/onboarding";
+import { guestRole, roleSchema } from "@grasp-os/shared/roles";
+import { routerClientIpHeader } from "@grasp-os/shared/router";
+import type { SignInRefusal } from "@grasp-os/shared/sign-in";
+import type { AuthContext } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import {
+  APIError,
+  createAuthMiddleware,
+  getSessionFromCtx,
+} from "better-auth/api";
+import { betterAuth } from "better-auth/minimal";
+import { emailOTP } from "better-auth/plugins/email-otp";
+import { organization } from "better-auth/plugins/organization";
+import { defaultAc } from "better-auth/plugins/organization/access";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import {
+  teamAccessMayHaveDropped,
+  teamGone,
+  tellKept,
+} from "../access-revocations.ts";
+import {
+  auditedBatch,
+  keepAuditEvent,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  outboxedWhere,
+  storedEvent,
+} from "../audit-outbox.ts";
+import {
+  accounts,
+  invitations,
+  members,
+  organizations,
+  sessions,
+  ssoProviders,
+  teamMembers,
+  teams,
+  users,
+  verifications,
+} from "../db/core/schema.ts";
+import { pinTeamMember, placeMember } from "../directory-teams.ts";
+import { directoryKinds, tieSignedIn } from "../directory-ties.ts";
+import {
+  isErasedEmail,
+  isErasedSubject,
+  subjectsOf,
+} from "../erased-people.ts";
+import { mayComeIn, memberMayBeIn, staffMayStay } from "../onboarding/gate.ts";
+import { onboardingStore } from "../onboarding/store.ts";
+import { keepSignInAddress } from "../source-readers.ts";
+import { namedOnListUnmade } from "../staff-list-teams.ts";
+import { checkClaims } from "./claims.ts";
+import {
+  devIdpOrigin,
+  directoryProviderId,
+  oidcProviders,
+  providerIds,
+  signInConfig,
+} from "./config.ts";
+import type { OidcProvider } from "./config.ts";
+import {
+  guestAddress,
+  guestCodeDigits,
+  guestCodeLifetimeS,
+  guestCodeTries,
+  guestSignInPath,
+  isGuestNow,
+  mailGuestCode,
+} from "./guest-codes.ts";
+import {
+  activeMember,
+  mayAct,
+  notRemoved,
+  organizationId,
+} from "./membership-sql.ts";
+
+// Kept apart (membership-sql.ts), with nothing but the schema imported, so
+// access checks read by the revocations this file reaches can use them.
+export {
+  activeMember,
+  guestNow,
+  mayAct,
+  memberNotRemoved,
+  notRemoved,
+  organizationId,
+} from "./membership-sql.ts";
+
+/** Better Auth's routes, under core's API. */
+export const authBasePath = "/api/auth";
+
+const hour = 60 * 60 * 1000;
+/**
+ * Sessions end after this and are never extended: people sign in with their
+ * IdP again, which re-checks them there (an offboarded person keeps access
+ * for at most this long without a revocation).
+ */
+const sessionMs = 12 * hour;
+/** Staff sessions end sooner, and never after the staff window closes. */
+const staffSessionMs = hour;
+
+/**
+ * Roles as the organization plugin checks them. Admins manage teams (the
+ * plugin asks for `member: update` and `member: delete` to put someone on
+ * a team or take them off); builders and users manage nothing here.
+ * Memberships and roles aren't the plugin's: core changes them
+ * (`members.ts`), each in one statement that keeps the organization an
+ * admin, which the plugin's read-then-write routes can't, so those routes
+ * are off. Admin is also the plugin's creator role, which the plugin
+ * allows everything it offers; the route allowlist (`routes.ts`) decides
+ * what that is.
+ */
+const roles = {
+  admin: defaultAc.newRole({
+    member: ["update", "delete"],
+    team: ["create", "update", "delete"],
+  }),
+  builder: defaultAc.newRole({}),
+  user: defaultAc.newRole({}),
+  // Someone outside the company: nothing here, as nowhere else (`mayAct`).
+  [guestRole]: defaultAc.newRole({}),
+};
+
+const schema = {
+  users,
+  sessions,
+  accounts,
+  verifications,
+  organizations,
+  members,
+  invitations,
+  teams,
+  teamMembers,
+  ssoProviders,
+};
+
+/** Better Auth's log lines, message only: arguments can hold tokens or claims. */
+const authLogger = {
+  level: "warn" as const,
+  log: (level: "debug" | "info" | "warn" | "error", message: string) => {
+    log[level === "error" ? "error" : "warn"]("auth", { message });
+  },
+};
+
+/**
+ * `userId`'s current membership of the organization, as a SQL condition on
+ * `members`: none once they may no longer act (`mayAct`).
+ */
+export const currentMembership = (userId: string): SQL | undefined =>
+  and(
+    eq(members.organizationId, organizationId),
+    eq(members.userId, userId),
+    mayAct(userId)
+  );
+
+/** Whether an admin removed `userId` from the organization. */
+export const isRemoved = async (env: Env, userId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ member: number }>(
+    sql`SELECT ${notRemoved(userId)} AS member`
+  );
+  return row.member === 0;
+};
+
+/** Whether `userId` may no longer act or be read as (`mayAct`). */
+export const mayNotAct = async (env: Env, userId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ member: number }>(
+    sql`SELECT ${mayAct(userId)} AS member`
+  );
+  return row.member === 0;
+};
+
+/**
+ * That the organization has an admin now, other than `except` when given,
+ * as a SQL condition.
+ */
+export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
+  SELECT 1 FROM ${members}
+  WHERE ${members.organizationId} = ${organizationId}
+    AND ${members.role} = 'admin'
+    AND ${mayAct(members.userId)}
+    ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
+)`;
+
+/**
+ * Records a change Better Auth has made. Better Auth commits the change
+ * itself, so its event can't join the change's batch; a failed request
+ * wouldn't undo the change, so recording it never fails the request.
+ */
+const record = async (env: Env, entry: AuditEntry): Promise<void> => {
+  await keepAuditEvent(env, drizzle(env.DB), entry);
+};
+
+/**
+ * Makes a configured admin (deployment config, from Grasp's admin) an admin
+ * again when the organization has none left, so a deployment can always
+ * be recovered by signing in. Never someone removed. The change and its
+ * audit event are one batch: both are kept, or neither.
+ */
+const restoreAdmin = async (env: Env, userId: string): Promise<void> => {
+  const db = drizzle(env.DB);
+  const [membership] = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(currentMembership(userId));
+  if (!membership) {
+    return;
+  }
+  await auditedBatch(env, db, [
+    db
+      .update(members)
+      .set({ role: "admin" })
+      .where(
+        and(
+          eq(members.id, membership.id),
+          mayAct(userId),
+          sql`NOT ${activeAdminExists()}`
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "member.role.updated",
+      target: { type: "member", id: membership.id },
+      detail: { userId, role: "admin", reason: "no_admin_left" },
+    }),
+  ]);
+};
+
+/**
+ * That an invitation (a row of `invitations`) is open at `now`, as SQL: in
+ * the organization, nobody has taken it up or withdrawn it, it hasn't
+ * lapsed, and whoever made it is still an admin, so an admin's demotion or
+ * removal also ends what they invited. Listing, inviting and joining all
+ * read it (`members.ts`), and joining checks it again in the statements
+ * that act on it.
+ */
+export const openInvitationAt = (now: number): SQL =>
+  and(
+    eq(invitations.organizationId, organizationId),
+    eq(invitations.status, "pending"),
+    sql`${invitations.expiresAt} > ${now}`,
+    activeMember(invitations.inviterId, ["admin"])
+  ) ?? sql`0`;
+
+/** That invitation `id` is open at `now`, as SQL on its own. */
+const isOpenInvitation = (id: string, now: number): SQL => sql`EXISTS (
+  SELECT 1 FROM ${invitations}
+  WHERE ${invitations.id} = ${id} AND ${openInvitationAt(now)}
+)`;
+
+/** The open invitation of `email`, if any: the newest. */
+const openInvitation = async (
+  env: Env,
+  email: string,
+  now: number
+): Promise<{ id: string; role: string } | undefined> => {
+  const [invitation] = await drizzle(env.DB)
+    .select({ id: invitations.id, role: invitations.role })
+    .from(invitations)
+    .where(and(eq(invitations.email, email), openInvitationAt(now)))
+    .orderBy(desc(invitations.createdAt))
+    .limit(1);
+  const role = roleSchema.safeParse(invitation?.role);
+  return invitation && role.success
+    ? { id: invitation.id, role: role.data }
+    : undefined;
+};
+
+/**
+ * What joining gives someone signing in with `email` at `now`: admin for
+ * a configured admin; otherwise the role of their open invitation, only
+ * while it is still open as the statement that gives it runs (`role`, as
+ * SQL), or `user`. `taken` is the role the invitation is taken up with;
+ * `configuredAdmin` whether they are one.
+ * The one rule for a new member (`ensureMember`) and for a member the
+ * directory made before they signed in (`adoptDirectoryMember`).
+ */
+const joiningOf = async (
+  env: Env,
+  admins: readonly string[],
+  email: string | undefined,
+  now: number
+): Promise<{
+  role: SQL;
+  invitation: { id: string; taken: string } | undefined;
+  configuredAdmin: boolean;
+}> => {
+  const configuredAdmin = email !== undefined && admins.includes(email);
+  const invitation =
+    email === undefined ? undefined : await openInvitation(env, email, now);
+  if (configuredAdmin) {
+    return {
+      configuredAdmin,
+      role: sql`'admin'`,
+      invitation:
+        invitation === undefined
+          ? undefined
+          : { id: invitation.id, taken: "admin" },
+    };
+  }
+  return invitation === undefined
+    ? { configuredAdmin, role: sql`'user'`, invitation: undefined }
+    : {
+        configuredAdmin,
+        role: sql`CASE WHEN ${isOpenInvitation(invitation.id, now)} THEN ${invitation.role} ELSE 'user' END`,
+        invitation: { id: invitation.id, taken: invitation.role },
+      };
+};
+
+/**
+ * The statements that take up `invitation` for `userId`, as they join, and
+ * record it, only where `joined` holds as they run and the invitation is
+ * still open then: taken up once, by the join that gave its role. `taken`
+ * is whether they did, as SQL for the batch's later statements.
+ */
+const takingUp = (
+  db: DrizzleD1Database,
+  invitation: { id: string; taken: string },
+  userId: string,
+  now: number,
+  joined: SQL
+): { statements: [BatchItem<"sqlite">, BatchItem<"sqlite">]; taken: SQL } => {
+  const accepted = createAuditEvent(
+    {
+      actor: actorOf({ userId, staff: false }),
+      action: "member.invitation.accepted",
+      target: { type: "invitation", id: invitation.id },
+      detail: { userId, role: invitation.taken },
+    },
+    "core"
+  );
+  return {
+    statements: [
+      db
+        .update(invitations)
+        .set({ status: "accepted" })
+        .where(
+          and(eq(invitations.id, invitation.id), openInvitationAt(now), joined)
+        ),
+      outboxedEventWhere(db, accepted, sql`changes() > 0`),
+    ],
+    taken: storedEvent(accepted.id),
+  };
+};
+
+/**
+ * Makes someone signing in from the client's IdP a member of the deployment's
+ * organization, creating it on the first sign-in, unless an admin removed
+ * them. Runs on every sign-in, so a membership whose creation failed is
+ * created next time; an existing one, and its role, is kept, except that a
+ * configured admin is made admin again when nobody else is one.
+ *
+ * Someone joining takes up their open invitation (`members.ts`), in one
+ * batch with the membership: the membership gets the invited role only if
+ * the invitation is still open as the insert runs, so one withdrawn, lapsed
+ * or orphaned since it was read gives nothing; and it is taken up, audited,
+ * only by the insert that made them a member, this one. A configured admin
+ * joins as admin, and takes up an invitation too.
+ *
+ * The removal check is part of the insert itself, one statement: a removal
+ * records its marker before it deletes the membership (`members.ts`), so
+ * an insert racing it either lands first and is deleted, or sees the
+ * marker and inserts nothing.
+ */
+const ensureMember = async (
+  env: Env,
+  config: SignInConfig,
+  userId: string
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const [user] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  // Config emails are lowercased when parsed; Better Auth lowercases the IdP's.
+  const email = user?.email.toLowerCase();
+  // Someone an admin removed and then erased signs in again under the email
+  // that was theirs: a new user to Better Auth, but kept out all the same
+  // (person-erasure.ts).
+  if (email !== undefined && (await isErasedEmail(env, email))) {
+    return false;
+  }
+  // And under an identity that was theirs, whatever address it brings now:
+  // the subject their IdP verified, or the Entra object id their ID token
+  // names, which the directory knew them by before they ever signed in.
+  const held = await db
+    .select({
+      providerId: accounts.providerId,
+      accountId: accounts.accountId,
+      oid: accounts.oid,
+    })
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
+  if (
+    await isErasedSubject(
+      env,
+      held.flatMap((account) => subjectsOf(account, directoryProviderId))
+    )
+  ) {
+    return false;
+  }
+  const now = new Date();
+  const { role, invitation, configuredAdmin } = await joiningOf(
+    env,
+    config.admins,
+    email,
+    now.getTime()
+  );
+  await db
+    .insert(organizations)
+    .values({
+      id: organizationId,
+      name: "Organization",
+      slug: organizationId,
+      createdAt: now,
+    })
+    .onConflictDoNothing();
+  const memberId = crypto.randomUUID();
+  const join = db
+    .insert(members)
+    .select(
+      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}, NULL, NULL, NULL
+        WHERE ${notRemoved(userId)}`
+    )
+    .onConflictDoNothing();
+  await (invitation === undefined
+    ? join
+    : auditedBatch(env, db, [
+        join,
+        ...takingUp(
+          db,
+          invitation,
+          userId,
+          now.getTime(),
+          sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
+        ).statements,
+      ]));
+  if (configuredAdmin) {
+    await restoreAdmin(env, userId);
+  }
+  return !(await mayNotAct(env, userId));
+};
+
+/** `userId`'s address, as their sign-in gave it. */
+const emailOf = async (
+  env: Env,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(env.DB)
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user?.email;
+};
+
+/**
+ * Whether an admin's open invitation makes `email` an admin as they join:
+ * they come in while the gate is closed as the admin they are about to
+ * be, so an admin can bring another in for the onboarding.
+ */
+const invitedAsAdmin = async (
+  env: Env,
+  email: string | undefined
+): Promise<boolean> => {
+  if (email === undefined) {
+    return false;
+  }
+  const invitation = await openInvitation(env, email.toLowerCase(), Date.now());
+  return invitation?.role === "admin";
+};
+
+/**
+ * Whether the directory made whoever Entra names by the object id `oid` a
+ * member, and they are an admin now: someone an admin promoted before
+ * they ever signed in. Their user still holds the directory's placeholder
+ * address until their first sign-in adopts it (`adoptDirectoryMember`),
+ * so their verified email finds no admin; their object id does.
+ */
+const directoryAdmin = async (
+  env: Env,
+  oid: string | null | undefined
+): Promise<boolean> => {
+  if (oid === null || oid === undefined || oid === "") {
+    return false;
+  }
+  const [held] = await drizzle(env.DB)
+    .select({ userId: accounts.userId })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.providerId, directoryProviderId),
+        sql`lower(${accounts.oid}) = lower(${oid})`,
+        activeMember(accounts.userId, ["admin"])
+      )
+    )
+    .limit(1);
+  return held !== undefined;
+};
+
+/** The Entra object id `userId` signed in with, if they did. */
+const entraOidOf = async (env: Env, userId: string): Promise<string | null> => {
+  const [account] = await drizzle(env.DB)
+    .select({ oid: accounts.oid })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.userId, userId),
+        eq(accounts.providerId, providerIds.entra)
+      )
+    )
+    .limit(1);
+  return account?.oid ?? null;
+};
+
+/**
+ * Whether the gate lets `userId` in: checked again as their session is
+ * made, beside the check of their claims (`validateUserInfo`).
+ */
+const gateLetsIn = async (
+  env: Env,
+  config: SignInConfig,
+  userId: string
+): Promise<boolean> => {
+  const email = await emailOf(env, userId);
+  return (
+    (await mayComeIn(env, config, email)) ||
+    (await invitedAsAdmin(env, email)) ||
+    (await directoryAdmin(env, await entraOidOf(env, userId)))
+  );
+};
+
+/**
+ * Whether `email`, verified by the company's sign-in, opens someone's
+ * interview link while the gate is closed (GRA-1790, the store's
+ * `interviewInvites`). Fails closed: an onboarding that can't be asked
+ * lets nobody in for an interview.
+ */
+const interviewInvites = async (
+  env: Env,
+  email: string | undefined
+): Promise<boolean> => {
+  if (email === undefined) {
+    return false;
+  }
+  try {
+    return await onboardingStore(env).interviewInvites(email);
+  } catch (error) {
+    log.error("auth.interview_check_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return false;
+  }
+};
+
+/**
+ * The statements that make a member the directory made before they signed
+ * in join, at their first sign-in (`adoptDirectoryMember`), in its batch
+ * after `moved` (the account moved to them there).
+ */
+const joinedAs = (
+  db: DrizzleD1Database,
+  joining: Awaited<ReturnType<typeof joiningOf>>,
+  memberId: string,
+  membershipId: string | undefined,
+  moved: SQL,
+  now: number
+): BatchItem<"sqlite">[] => {
+  // Their first sign-in is their join, decided in the batch once the
+  // account moved, and only while they may act (someone suspended, whose
+  // sign-in `ensureMember` refuses after this, hasn't joined). Their
+  // invitation first: taken up while they have the role the directory
+  // made them with or the one it gives, never over one an admin gave them
+  // since. Then the role, raised only from that one, so nothing is ever
+  // lowered: the invitation's where it was taken up, a configured admin's,
+  // or none. A configured admin's raise is recorded by the take-up's event
+  // where there was one, else by its own: whichever the batch did.
+  const joins = sql`${moved} AND ${mayAct(memberId)}`;
+  const memberWith = (held: SQL) => sql`EXISTS (
+    SELECT 1 FROM ${members}
+    WHERE ${members.organizationId} = ${organizationId}
+      AND ${members.userId} = ${memberId}
+      AND ${members.role} IN ${held}
+  )`;
+  const invited =
+    joining.invitation === undefined
+      ? undefined
+      : takingUp(
+          db,
+          joining.invitation,
+          memberId,
+          now,
+          sql`${joins} AND ${memberWith(sql`(${joining.invitation.taken}, 'user')`)}`
+        );
+  const taken = invited?.taken ?? sql`0`;
+  const raisedTo = joining.configuredAdmin
+    ? sql`'admin'`
+    : sql`CASE WHEN ${taken} THEN ${joining.invitation?.taken ?? "user"} ELSE 'user' END`;
+  return [
+    ...(invited?.statements ?? []),
+    ...(joining.configuredAdmin && membershipId !== undefined
+      ? [
+          outboxedWhere(
+            db,
+            {
+              actor: { type: "system" },
+              action: "member.role.updated",
+              target: { type: "member", id: membershipId },
+              detail: { userId: memberId, role: "admin", reason: "joined" },
+            },
+            sql`${joins} AND ${memberWith(sql`('user')`)} AND NOT ${taken}`
+          ),
+        ]
+      : []),
+    db
+      .update(members)
+      .set({ role: raisedTo })
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          eq(members.userId, memberId),
+          eq(members.role, "user"),
+          joins
+        )
+      ),
+  ];
+};
+
+/**
+ * Folds the user Better Auth just made for a first Microsoft sign-in into
+ * the member the directory made for the same Entra object id, the one
+ * their sign-in's verified ID token names: their account moves to that
+ * member, who takes their name and address, and the new user goes.
+ * Answers the user id the session is for: the directory's member, or
+ * `userId` when there is none, or `userId` isn't new.
+ *
+ * What else belongs to the new user (`moving`, from one user to another:
+ * an interview of theirs) moves first, before the new user goes, so a
+ * failure to move leaves it and the user as they were, adopted at the next
+ * sign-in; moving again is harmless. Moved back whenever the member wasn't
+ * adopted after all, the batch's failure among it: the batch is one
+ * transaction, so whose the account is says whether it landed.
+ */
+export const adoptDirectoryMember = async (
+  env: Env,
+  userId: string,
+  moving: (from: string, to: string) => Promise<void>,
+  now = new Date()
+): Promise<string> => {
+  const db = drizzle(env.DB);
+  const own = await db
+    .select({
+      id: accounts.id,
+      providerId: accounts.providerId,
+      oid: accounts.oid,
+    })
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
+  const [signedIn] = own;
+  // Only a user made just now by an Entra sign-in: that one account, and
+  // no membership yet.
+  if (
+    own.length !== 1 ||
+    signedIn === undefined ||
+    signedIn.providerId !== providerIds.entra ||
+    signedIn.oid === null
+  ) {
+    return userId;
+  }
+  // The object ID compared lower case, as the directory's daily read
+  // keeps it (directory-people.ts), by `accounts_provider_oid_lower_idx`:
+  // however Entra cases it in the token, it is the same person.
+  const [held] = await db
+    .select({ userId: accounts.userId })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.providerId, directoryProviderId),
+        sql`lower(${accounts.oid}) = lower(${signedIn.oid})`,
+        ne(accounts.userId, userId)
+      )
+    );
+  const [fresh] = await db
+    .select({
+      name: users.name,
+      email: users.email,
+      emailVerified: users.emailVerified,
+    })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (held === undefined || fresh === undefined) {
+    return userId;
+  }
+  const memberId = held.userId;
+  // Their first sign-in is when they join: it gives them what a join gives
+  // a new member (`joiningOf`), by the address it brings, as `ensureMember`
+  // would have, had the directory not made them a member first.
+  const joining = await joiningOf(
+    env,
+    signInConfig(env)?.admins ?? [],
+    fresh.email.toLowerCase(),
+    now.getTime()
+  );
+  const [membership] = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        eq(members.userId, memberId)
+      )
+    );
+  await moving(userId, memberId);
+  const notYetMember = sql`NOT EXISTS (
+    SELECT 1 FROM ${members} WHERE ${members.userId} = ${userId}
+  )`;
+  const moved = sql`EXISTS (
+    SELECT 1 FROM ${accounts}
+    WHERE ${accounts.id} = ${signedIn.id} AND ${accounts.userId} = ${memberId}
+  )`;
+  /** Whose the account is now: the member's once the batch landed. */
+  const adoptedNow = async (): Promise<string> => {
+    const [account] = await db
+      .select({ userId: accounts.userId })
+      .from(accounts)
+      .where(eq(accounts.id, signedIn.id));
+    return account?.userId ?? userId;
+  };
+  /** Moves back what moved, unless the member was adopted. */
+  const unlessAdopted = async (adopted: string): Promise<void> => {
+    if (adopted !== memberId) {
+      await moving(memberId, adopted);
+    }
+  };
+  const joiningStatements = joinedAs(
+    db,
+    joining,
+    memberId,
+    membership?.id,
+    moved,
+    now.getTime()
+  );
+  // One batch, in order: the account moves, the user made for it goes
+  // (freeing their address), the member takes their name and address, and
+  // the directory's account goes, as their sign-in names them from now on.
+  const adopting = auditedBatch(env, db, [
+    db
+      .update(accounts)
+      .set({ userId: memberId, updatedAt: now })
+      .where(
+        and(
+          eq(accounts.id, signedIn.id),
+          eq(accounts.userId, userId),
+          notYetMember
+        )
+      ),
+    db
+      .delete(users)
+      .where(
+        and(
+          eq(users.id, userId),
+          sql`NOT EXISTS (SELECT 1 FROM ${accounts} WHERE ${accounts.userId} = ${userId})`
+        )
+      ),
+    db
+      .update(users)
+      .set({
+        name: fresh.name,
+        email: fresh.email,
+        emailVerified: fresh.emailVerified,
+        updatedAt: now,
+      })
+      .where(and(eq(users.id, memberId), moved)),
+    db
+      .delete(accounts)
+      .where(
+        and(
+          eq(accounts.providerId, directoryProviderId),
+          eq(accounts.userId, memberId),
+          moved
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf({ userId: memberId, staff: false }),
+      action: "member.signed_in_from_directory",
+      target: { type: "user", id: memberId },
+    }),
+    ...joiningStatements,
+  ]);
+  try {
+    await adopting;
+  } catch (error) {
+    await unlessAdopted(await adoptedNow());
+    throw error;
+  }
+  const adopted = await adoptedNow();
+  await unlessAdopted(adopted);
+  return adopted;
+};
+
+/** A claim of an IdP's verified profile, if it is a string. */
+const claimOf = (
+  profile: Record<string, unknown> | undefined,
+  claim: string
+): string | null => {
+  const value = profile?.[claim];
+  return typeof value === "string" ? value : null;
+};
+
+/**
+ * Whether a sign-in through `provider`, with the verified `profile` and
+ * `email` it brings, is someone erased: by the address that was theirs, or
+ * by the subject or Entra object id their account had, as the account it
+ * would make names them (`subjectsOf`: the SSO plugin keys an account by
+ * the ID token's `sub`).
+ */
+const isErasedSignIn = async (
+  env: Env,
+  provider: string | undefined,
+  email: unknown,
+  profile: Record<string, unknown> | undefined
+): Promise<boolean> => {
+  if (typeof email === "string" && (await isErasedEmail(env, email))) {
+    return true;
+  }
+  const sub = claimOf(profile, "sub");
+  if (provider === undefined || sub === null) {
+    return false;
+  }
+  return await isErasedSubject(
+    env,
+    subjectsOf(
+      { providerId: provider, accountId: sub, oid: claimOf(profile, "oid") },
+      directoryProviderId
+    )
+  );
+};
+
+/**
+ * Ties the directory's people their sign-in accounts name to the member
+ * signing in (directory-people.ts, GRA-2056), by the daily read's own
+ * rule. Their sign-in goes on whatever comes of it: the next read ties
+ * them all the same.
+ */
+const tieAtSignIn = async (env: Env, userId: string): Promise<void> => {
+  try {
+    await tieSignedIn(env, userId);
+    // And placed in the teams their departments fill, by the same rule.
+    for (const kind of directoryKinds) {
+      // oxlint-disable-next-line no-await-in-loop -- one provider at a time
+      await tellKept(env, await placeMember(env, kind, userId));
+    }
+  } catch (error) {
+    log.error("directory.tie_failed", errorFields(error));
+  }
+};
+
+/**
+ * The session a sign-in through `providerId` gets, or `false` for none.
+ * Staff sessions are marked and cut short; everyone else's opens in the
+ * deployment's organization, as a member.
+ */
+const startSession = async <T extends { expiresAt: Date; userId: string }>(
+  env: Env,
+  config: SignInConfig,
+  session: T,
+  providerId: string | undefined,
+  path: string | undefined
+) => {
+  const now = Date.now();
+  if (path === guestSignInPath) {
+    // A guest, by a code mailed to them (guest-codes.ts): only someone who
+    // is a guest now, and only while the gate lets the company's own
+    // people in. They join nothing, and reach nothing of the company
+    // (identity.ts `sessionIdentity`, the `/organization/` hook).
+    return (await isGuestNow(env, session.userId)) &&
+      (await gateLetsIn(env, config, session.userId))
+      ? { data: { ...session, staff: false, interview: false, guest: true } }
+      : false;
+  }
+  if (providerId === providerIds.staff && config.staff) {
+    // A window the company's admin ended, or onboarding access past its
+    // week after Grasp's go, lets nobody sign in (onboarding/gate.ts).
+    if (
+      !(
+        staffWindowOpen(config, now) &&
+        (await staffMayStay(env, config.staff.opened, config.staff.scope, now))
+      )
+    ) {
+      return false;
+    }
+    const expiresAt = Math.min(
+      now + staffSessionMs,
+      Date.parse(config.staff.until)
+    );
+    return {
+      data: { ...session, staff: true, expiresAt: new Date(expiresAt) },
+    };
+  }
+  const fromClient =
+    providerId === providerIds.entra || providerId === providerIds.google;
+  if (!fromClient) {
+    // Sessions come only from an SSO callback.
+    return false;
+  }
+  if (await gateLetsIn(env, config, session.userId)) {
+    // Someone the directory made a member before they ever signed in is
+    // that member from their first Microsoft sign-in on, by the object id
+    // their verified ID token names; an interview of theirs goes with them
+    // (the store's `accountMoved`).
+    const userId =
+      providerId === providerIds.entra
+        ? await adoptDirectoryMember(env, session.userId, async (from, to) => {
+            await onboardingStore(env).accountMoved(from, to);
+          })
+        : session.userId;
+    // For members.
+    if (!(await ensureMember(env, config, userId))) {
+      return false;
+    }
+    // Asked again of the member they now are: an invitation that let them
+    // in as an admin may have been withdrawn before they joined, and they
+    // joined as a user, whom a closed gate keeps out.
+    if (!(await memberMayBeIn(env, config, userId))) {
+      return false;
+    }
+    await tieAtSignIn(env, userId);
+    return {
+      data: {
+        ...session,
+        userId,
+        staff: false,
+        interview: false,
+        activeOrganizationId: organizationId,
+      },
+    };
+  }
+  // The gate is closed to them: a session for their own interview alone,
+  // if a link of one went to their address (GRA-1790). They join nothing:
+  // no membership is made, a member the directory made is not adopted (and
+  // nothing of it reaches the company's audit log), and the session reaches
+  // no route but the interview's (identity.ts `sessionIdentity`, the
+  // `/organization/` hook). Nobody an admin removed comes in for one either.
+  const { userId } = session;
+  return (await interviewInvites(env, await emailOf(env, userId))) &&
+    !(await mayNotAct(env, userId))
+    ? { data: { ...session, userId, staff: false, interview: true } }
+    : false;
+};
+
+const idTokenClaimsSchema = z.looseObject({
+  oid: z.string().optional(),
+  email: z.string().optional(),
+  email_verified: z.boolean().optional(),
+  tid: z.string().optional(),
+  hd: z.string().optional(),
+});
+
+/** The claims of an ID token the SSO plugin verified in this request, as far as core keeps them. */
+const claimsOf = (idToken: unknown): z.infer<typeof idTokenClaimsSchema> => {
+  const payload = typeof idToken === "string" ? idToken.split(".")[1] : "";
+  if (payload === undefined || payload === "") {
+    return {};
+  }
+  try {
+    const json = new TextDecoder().decode(fromBase64Url(payload));
+    return idTokenClaimsSchema.parse(JSON.parse(json));
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * What a sign-in keeps of its verified ID token: the Entra object ID
+ * (`oid`); the address only where the provider marks it verified
+ * (`email_verified`, as Google's tokens do; a Google sign-in is refused
+ * without it, claims.ts), which an item's reader list may name its
+ * account by (source-readers.ts); and the tenant the token was checked
+ * against (claims.ts), Entra's `tid` or Google's `hd`, which that account
+ * counts in only while the sign-in config names it. Entra's `email` is
+ * never verified, so none of Entra's is kept.
+ */
+const keptClaimsOf = (
+  idToken: unknown
+): {
+  oid: string | null;
+  verifiedEmail: string | null;
+  verifiedEmailAt: Date | null;
+  verifiedTenant: string | null;
+} => {
+  const claims = claimsOf(idToken);
+  const verifiedEmail =
+    claims.email_verified === true ? (claims.email ?? null) : null;
+  return {
+    oid: claims.oid ?? null,
+    verifiedEmail,
+    verifiedEmailAt: verifiedEmail === null ? null : new Date(),
+    verifiedTenant: claims.tid ?? claims.hd ?? null,
+  };
+};
+
+/** Keeps the address a sign-in proved, if any (source-readers.ts). */
+const keepSignInAddressOf = async (
+  env: Env,
+  account: Record<string, unknown>
+): Promise<void> => {
+  const { userId, verifiedEmail } = account;
+  if (typeof userId === "string" && typeof verifiedEmail === "string") {
+    await keepSignInAddress(env, userId, verifiedEmail);
+  }
+};
+
+/**
+ * What is kept of an account from a sign-in: no IdP tokens (core never
+ * holds provider tokens, R1), only the Entra object id and a verified
+ * address taken from the ID token before it is dropped (`keptClaimsOf`).
+ */
+const withoutTokens = <T extends Record<string, unknown>>(account: T) => ({
+  data: {
+    ...account,
+    ...(account.idToken === undefined ? {} : keptClaimsOf(account.idToken)),
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+  },
+});
+
+/** The ids a member or team change names; nothing else is recorded. */
+const changeSchema = z.looseObject({
+  teamId: z.string().optional(),
+  userId: z.string().optional(),
+});
+const returnedSchema = z.looseObject({ id: z.string().optional() });
+
+type Change = z.infer<typeof changeSchema>;
+type Returned = z.infer<typeof returnedSchema>;
+
+/**
+ * The team changes that are audited (R16): what each records, from the
+ * request and what the route returned. Identifiers only.
+ */
+const auditedChanges: Record<
+  string,
+  (
+    change: Change,
+    returned: Returned
+  ) => Pick<AuditEntry, "action" | "target" | "detail">
+> = {
+  "/organization/create-team": (_change, returned) => ({
+    action: "team.created",
+    target: { type: "team", id: returned.id ?? "unknown" },
+  }),
+  "/organization/update-team": (change) => ({
+    action: "team.updated",
+    target: { type: "team", id: change.teamId ?? "unknown" },
+  }),
+  "/organization/remove-team": (change) => ({
+    action: "team.deleted",
+    target: { type: "team", id: change.teamId ?? "unknown" },
+  }),
+  // A hand add or removal pins the pair (`pinTeamMember`): the directory's
+  // read leaves it as the admin set it until an admin lets it.
+  "/organization/add-team-member": (change) => ({
+    action: "team.member.added",
+    target: { type: "team", id: change.teamId ?? "unknown" },
+    detail: { userId: change.userId ?? null, pinned: "in" },
+  }),
+  "/organization/remove-team-member": (change) => ({
+    action: "team.member.removed",
+    target: { type: "team", id: change.teamId ?? "unknown" },
+    detail: { userId: change.userId ?? null, pinned: "out" },
+  }),
+};
+
+/**
+ * Better Auth's SSO plugin, loaded the first time an Auth is made: it
+ * brings SAML and XML parsing, which would cost every isolate's startup
+ * (Cloudflare caps the CPU a Worker's startup may use) though most
+ * requests never sign anyone in.
+ */
+const loadSso = async (): Promise<typeof sso> => {
+  const { sso: plugin } = await import("@better-auth/sso");
+  return plugin;
+};
+
+/**
+ * Refuses a team made or renamed in Settings › Members under a name the
+ * staff list gives a team it hasn't made yet (GRA-2055): the confirm keeps
+ * the list's team by its id, so it would be a second of the name.
+ */
+const refuseNameOnListUnmade = async (env: Env, name: string) => {
+  if (await namedOnListUnmade(env, name)) {
+    throw new APIError("CONFLICT", {
+      code: staffListTeamRefusals.notMadeYet,
+      message:
+        "A team on the staff list has this name. It appears here once the staff list is confirmed.",
+    });
+  }
+};
+
+/** The code a sign-in is refused with while the gate is closed to all. */
+export const notOpenYet = "not_open_yet";
+
+/** What signing in with a code sends: the address it is for. */
+const codeSignInSchema = z.looseObject({ email: z.string() });
+
+/**
+ * Refuses a sign-in with a code (`guestSignInPath`) before the plugin
+ * reads or spends anything: while the gate keeps the company's own people
+ * out, for everyone alike; then for any address that isn't a guest's now,
+ * exactly as a wrong code is refused, so it says nothing of who is one:
+ * after the same reads a wrong code costs (the newest code's row, then
+ * spending it), against a row nobody but a guest ever has. Every refusal
+ * of the route answers alike besides (routes.ts). Members never sign in
+ * with a code, and the plugin never strips an unverified member's
+ * accounts (it does so for an address it signs in that isn't verified
+ * yet).
+ */
+const refuseUnlessGuest = async (
+  env: Env,
+  config: SignInConfig,
+  body: unknown,
+  codes: ReturnType<typeof emailOTP>,
+  rows: Pick<
+    AuthContext["internalAdapter"],
+    "findVerificationValue" | "consumeVerificationValue"
+  >
+): Promise<void> => {
+  if (!(await mayComeIn(env, config))) {
+    throw new APIError("FORBIDDEN", {
+      code: notOpenYet,
+      message: "Grasp isn't open yet.",
+    });
+  }
+  const asked = codeSignInSchema.safeParse(body);
+  if (!(asked.success && (await guestAddress(env, asked.data.email)))) {
+    const row = `sign-in-otp-${asked.data?.email.toLowerCase() ?? ""}`;
+    await rows.findVerificationValue(row);
+    await rows.consumeVerificationValue(row);
+    throw APIError.from("BAD_REQUEST", codes.$ERROR_CODES.INVALID_OTP);
+  }
+};
+
+const createAuth = (
+  env: Env,
+  config: SignInConfig,
+  providers: OidcProvider[],
+  ssoOf: typeof sso
+) => {
+  const db = drizzle(env.DB);
+  // Guests' one way in (guest-codes.ts): never a member's, never a user
+  // made. Codes are kept hashed, and mailed by core alone.
+  const codes = emailOTP({
+    otpLength: guestCodeDigits,
+    expiresIn: guestCodeLifetimeS,
+    allowedAttempts: guestCodeTries,
+    storeOTP: "hashed",
+    disableSignUp: true,
+    sendVerificationOTP: async (data) => {
+      await mailGuestCode(env, data);
+    },
+  });
+  return betterAuth({
+    appName: "Grasp",
+    // The deployment's own address from its config, never the request's:
+    // core is reached on its workers.dev address through the router.
+    baseURL: config.origin,
+    basePath: authBasePath,
+    // The SSO plugin calls no IdP on a private address unless it is
+    // trusted: only a local stack's stand-in for Entra (config.ts) is.
+    trustedOrigins: [devIdpOrigin(env, config)].filter(
+      (origin) => origin !== undefined
+    ),
+    secret: env.BETTER_AUTH_SECRET,
+    database: drizzleAdapter(db, {
+      provider: "sqlite",
+      usePlural: true,
+      schema,
+    }),
+    // One door out (R13): nothing leaves core but the sign-in itself.
+    telemetry: { enabled: false },
+    logger: authLogger,
+    // Better Auth keeps its counts per isolate, so its limits would limit
+    // nothing across a deployment. Rate limits on sign-in belong at the
+    // router, in front of every core.
+    rateLimit: { enabled: false },
+    session: {
+      expiresIn: sessionMs / 1000,
+      disableSessionRefresh: true,
+      additionalFields: {
+        staff: { type: "boolean", defaultValue: false, input: false },
+        interview: { type: "boolean", defaultValue: false, input: false },
+        guest: { type: "boolean", defaultValue: false, input: false },
+      },
+    },
+    // Never link an IdP account to an existing user by email.
+    account: {
+      accountLinking: { enabled: false },
+      additionalFields: {
+        oid: { type: "string", required: false, input: false },
+        verifiedEmail: { type: "string", required: false, input: false },
+        verifiedEmailAt: { type: "date", required: false, input: false },
+        verifiedTenant: { type: "string", required: false, input: false },
+      },
+    },
+    advanced: {
+      // The client's IP, kept on its session, comes from the router's header
+      // alone, never `x-forwarded-for`. Trusted because nothing reaches
+      // Better Auth without the router secret (entry.ts) and the router
+      // replaces any copy the client sent. A local stack has no router, so
+      // nothing sets it there and its sessions carry no client IP.
+      ipAddress: { ipAddressHeaders: [routerClientIpHeader] },
+      // Host-only cookies (`__Host-`): no Domain, so no other client's
+      // hostname under the product domain can read or plant them.
+      useSecureCookies: false,
+      cookiePrefix: "__Host-grasp",
+      defaultCookieAttributes: {
+        secure: true,
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+      },
+    },
+    // Failed sign-ins land on the frontend with `?error=<code>`.
+    onAPIError: { errorURL: "/" },
+    user: {
+      // Runs with the verified ID token's claims before a user or account
+      // is created or linked, and again on every sign-in.
+      validateUserInfo: async ({ user, source }) => {
+        const provider = source.sso?.providerId;
+        let refusal: SignInRefusal | undefined =
+          source.method === "sso-oidc" && provider !== undefined
+            ? checkClaims(
+                config,
+                provider,
+                source.sso?.profile ?? {},
+                Date.now()
+              )
+            : "method_not_allowed";
+        // While the company is onboarding, only its admins come in through
+        // its IdP (and whoever an admin invited as one), and those an
+        // interview link went to, for their interview
+        // alone, before any user or membership is made (onboarding/gate.ts).
+        if (
+          refusal === undefined &&
+          provider !== providerIds.staff &&
+          !(await mayComeIn(env, config, user.email)) &&
+          !(await invitedAsAdmin(env, user.email)) &&
+          !(
+            provider === providerIds.entra &&
+            (await directoryAdmin(
+              env,
+              z.string().safeParse(source.sso?.profile?.oid).data
+            ))
+          ) &&
+          !(await interviewInvites(env, user.email))
+        ) {
+          refusal = "not_open_yet";
+        }
+        if (refusal !== undefined) {
+          log.warn("auth.refused", { provider, refusal });
+          return { error: refusal };
+        }
+        // Someone erased (person-erasure.ts), by the address or an identity
+        // that was theirs: refused here, before Better Auth writes a user,
+        // an account or an email for them, so nothing of theirs is stored
+        // again. They are told what a removed person is, nothing more.
+        const erased = await isErasedSignIn(
+          env,
+          provider,
+          user.email,
+          source.sso?.profile
+        );
+        if (erased) {
+          log.warn("auth.refused", { provider, refusal: "erased" });
+        }
+        return erased ? { error: "unable to create session" } : undefined;
+      },
+    },
+    databaseHooks: {
+      // Sign-in needs no IdP tokens after the claims are checked, so none
+      // are kept: core never holds provider tokens (R1).
+      // Better Auth's hooks must return promises, even with nothing to await.
+      account: {
+        create: {
+          // oxlint-disable-next-line require-await
+          before: async (account) => withoutTokens(account),
+          after: async (account) => {
+            await keepSignInAddressOf(env, account);
+          },
+        },
+        update: {
+          // oxlint-disable-next-line require-await
+          before: async (account) => withoutTokens(account),
+          after: async (account) => {
+            await keepSignInAddressOf(env, account);
+          },
+        },
+      },
+      session: {
+        create: {
+          before: async (session, context) =>
+            await startSession(
+              env,
+              config,
+              session,
+              context?.params?.providerId,
+              context?.path
+            ),
+          after: async (session) => {
+            if (session.staff === true) {
+              await record(env, {
+                actor: actorOf({ userId: session.userId, staff: true }),
+                action: "staff.session.started",
+                target: { type: "session", id: session.id },
+                detail: { expiresAt: session.expiresAt.toISOString() },
+              });
+              return;
+            }
+            // The gate again, now the session is stored: one the gate
+            // closed on after `startSession` looked is gone either way, by
+            // this or by the close, which ends every stored session; and an
+            // interview's that the gate opened on is gone, by this or by the
+            // opening, which ends every interview's session, so they sign
+            // in again as a member.
+            const open = await gateLetsIn(env, config, session.userId);
+            // And a guest's: one removed after `startSession` looked is
+            // gone either way, by this or by the removal, which ends every
+            // stored session of theirs.
+            const noGuest =
+              session.guest === true &&
+              !(await isGuestNow(env, session.userId));
+            if ((session.interview === true ? open : !open) || noGuest) {
+              await drizzle(env.DB)
+                .delete(sessions)
+                .where(eq(sessions.id, session.id));
+              return;
+            }
+            if (session.guest === true) {
+              await record(env, {
+                actor: actorOf({ userId: session.userId, staff: false }),
+                action: "member.guest_signed_in",
+                target: { type: "session", id: session.id },
+              });
+            }
+          },
+        },
+      },
+    },
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (context.path === guestSignInPath) {
+          await refuseUnlessGuest(
+            env,
+            config,
+            context.body,
+            codes,
+            context.context.internalAdapter
+          );
+          return;
+        }
+        if (!context.path.startsWith("/organization/")) {
+          return;
+        }
+        // A removed person's membership row may outlive the removal if
+        // deleting it failed; the organization plugin would still trust it.
+        // An interview's session reaches nothing of the organization, though
+        // the directory may have made them a member already (GRA-1790).
+        const caller = await getSessionFromCtx(context);
+        if (
+          caller &&
+          (caller.session.interview === true ||
+            (await mayNotAct(env, caller.user.id)))
+        ) {
+          throw new APIError("FORBIDDEN", { message: "Not a member." });
+        }
+      }),
+      after: createAuthMiddleware(async (context) => {
+        const describe = auditedChanges[context.path];
+        const { returned } = context.context;
+        if (describe === undefined || returned instanceof Error) {
+          return;
+        }
+        const actor = await getSessionFromCtx(context);
+        if (!actor) {
+          return;
+        }
+        await record(env, {
+          actor: actorOf({
+            userId: actor.user.id,
+            staff: actor.session.staff === true,
+          }),
+          ...describe(
+            changeSchema.parse(context.body ?? {}),
+            returnedSchema.safeParse(returned).data ?? {}
+          ),
+        });
+      }),
+    },
+    plugins: [
+      codes,
+      organization({
+        roles,
+        creatorRole: "admin",
+        // A member's suspension (directory-suspensions.ts): kept on their
+        // membership, never written through Better Auth (`input: false`),
+        // and none of its member routes is on (routes.ts).
+        schema: {
+          member: {
+            additionalFields: {
+              suspendedAt: { type: "date", required: false, input: false },
+              suspendedBy: { type: "string", required: false, input: false },
+            },
+          },
+        },
+        allowUserToCreateOrganization: false,
+        disableOrganizationDeletion: true,
+        // An organization may have no teams at all: an admin deletes
+        // the last one as any other (Settings › Members).
+        teams: { enabled: true, allowRemovingAllTeams: true },
+        // Leaving a team, or the team's deletion, can take a role in each
+        // App shared with it away: their hosts tell the open pages to
+        // look again (access-revocations.ts).
+        organizationHooks: {
+          // An admin's hand change of a membership, pinned ahead of Better
+          // Auth's own write (directory-teams.ts): the directory's read
+          // never undoes it. These two routes alone change a membership
+          // by hand (routes.ts keeps the others off).
+          beforeAddTeamMember: async ({ teamMember }) => {
+            // Teams are the company's: a guest is never in one, nor is
+            // anyone else who may not act (`mayAct`).
+            if (await mayNotAct(env, teamMember.userId)) {
+              throw new APIError("FORBIDDEN", { message: "Not a member." });
+            }
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              true
+            );
+          },
+          beforeRemoveTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              false
+            );
+          },
+          afterRemoveTeamMember: async ({ teamMember }) => {
+            await teamAccessMayHaveDropped(env, teamMember.teamId, [
+              teamMember.userId,
+            ]);
+          },
+          afterDeleteTeam: async ({ team }) => {
+            await teamGone(env, team.id);
+          },
+          // The onboarding's staff list names these same teams (GRA-2055,
+          // staff-list-teams.ts), whose names change here alone: a rename
+          // shows on the list at once. The rename is kept whatever comes of
+          // that, so a failure is logged, not answered: the list's next
+          // save takes the name from here again (`intoMembersTeams`). A
+          // team on the list, saved or confirmed, is taken off there
+          // first, so it never names one gone.
+          afterUpdateTeam: async ({ team }) => {
+            if (team === null) {
+              return;
+            }
+            try {
+              await onboardingStore(env).renameTeam(team.id, team.name);
+            } catch (error) {
+              log.error("onboarding.team_rename_unfollowed", {
+                teamId: team.id,
+                error: error instanceof Error ? error.name : "unknown",
+              });
+            }
+          },
+          beforeDeleteTeam: async ({ team }) => {
+            if (await onboardingStore(env).listsTeam(team.id)) {
+              throw new APIError("CONFLICT", {
+                code: staffListTeamRefusals.onList,
+                message: "The team is on the staff list.",
+              });
+            }
+          },
+          // A name the staff list gives a team it hasn't made yet stays its
+          // own (GRA-2055, `refuseNameOnListUnmade`).
+          beforeCreateTeam: async ({ team }) => {
+            await refuseNameOnListUnmade(env, team.name);
+          },
+          // Renamed to it too: the same second team at the confirm.
+          beforeUpdateTeam: async ({ team, updates }) => {
+            if (
+              updates.name !== undefined &&
+              teamNameKey(updates.name) !== teamNameKey(team.name)
+            ) {
+              await refuseNameOnListUnmade(env, updates.name);
+            }
+          },
+        },
+      }),
+      ssoOf({
+        // Providers come only from deployment config, never from the
+        // database: registering one in-product is off.
+        defaultSSO: providers.map((provider) => ({
+          providerId: provider.providerId,
+          domain: config.domains[0] ?? "",
+          oidcConfig: {
+            issuer: provider.issuer,
+            clientId: provider.clientId,
+            clientSecret: provider.clientSecret,
+            pkce: true,
+            // The plugin's type requires it, but with every endpoint below
+            // set it never fetches it.
+            discoveryEndpoint: `${provider.issuer}/.well-known/openid-configuration`,
+            authorizationEndpoint: provider.authorizationEndpoint,
+            tokenEndpoint: provider.tokenEndpoint,
+            jwksEndpoint: provider.jwksEndpoint,
+            tokenEndpointAuthentication: "client_secret_post",
+            scopes: ["openid", "email", "profile"],
+          },
+        })),
+        providersLimit: 0,
+        // In relay mode every IdP sends people back to the OAuth relay,
+        // which sends them on to this deployment's
+        // `/sso/callback/<provider>`, the one the signed state names
+        // (@grasp-os/shared/oauth-relay, routes.ts); the code is
+        // exchanged with this same redirect URI, the one it was given
+        // for. Otherwise IdPs send people straight to that callback.
+        ...(config.callbackOrigin === undefined
+          ? {}
+          : {
+              redirectURI: relayRedirectUri(config.callbackOrigin, "sign-in"),
+            }),
+      }),
+    ],
+  });
+};
+
+export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Better Auth instances by env, one per set of providers on offer: the
+ * staff provider comes and goes with its window, everything else stays the
+ * same for as long as the env does.
+ */
+const auths = new WeakMap<Env, Map<string, Auth>>();
+
+/**
+ * Better Auth for this deployment, or `undefined` while sign-in isn't
+ * configured. Fails closed: without the secret or the config nobody is
+ * signed in.
+ */
+export const authFor = async (
+  env: Env,
+  config: SignInConfig | undefined
+): Promise<Auth | undefined> => {
+  if (!(config && env.BETTER_AUTH_SECRET)) {
+    return undefined;
+  }
+  const providers = oidcProviders(env, config, Date.now());
+  const key = providers.map(({ providerId }) => providerId).join(" ");
+  const byProviders = auths.get(env) ?? new Map<string, Auth>();
+  auths.set(env, byProviders);
+  const auth =
+    byProviders.get(key) ?? createAuth(env, config, providers, await loadSso());
+  byProviders.set(key, auth);
+  return auth;
+};

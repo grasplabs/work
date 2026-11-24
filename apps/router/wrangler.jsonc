@@ -1,0 +1,190 @@
+// Deployed with deploy-platform to Grasp's account, once per stage: staging's
+// on every push to main, production's only by hand.
+// Serves *.<domain> and stores nothing.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "grasp-router",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  // Every host below the stage's client domain: each client's, and the
+  // auth relay's (@grasp-os/shared/names, `platformRoutes`, which
+  // check:wrangler-configs holds this to). Staging's more specific route
+  // takes staging's hosts from this one, and the admin's exact route takes
+  // the admin's.
+  "routes": [{ "pattern": "*.ongrasp.app/*", "zone_name": "ongrasp.app" }],
+  // No platform line per invocation, and query strings stay out of logs and
+  // traces: the router sees every client's full URLs, OAuth callbacks'
+  // code and state included (threat model R17, RT2), and the tokens of
+  // page modules and package artifacts, which ride in the query so that
+  // this redacts them (core's page-frame.ts): these traces sit in Grasp's
+  // account.
+  // Which stage this Worker serves (@grasp-os/shared/names): production
+  // here, staging in `env.staging`, which repeats every binding under its
+  // staging name, as wrangler inherits none of them.
+  "vars": { "STAGE": "production" },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+    "traces": { "enabled": true },
+  },
+  // The hostname map the admin writes: hostname -> { clientId, coreUrl,
+  // generation } (@grasp-os/shared/router), titled grasp-router-hosts
+  // (@grasp-os/shared/names): scripts/cloudflare-account-setup.ts creates
+  // it, and `deploy` fills in its id (scripts/wrangler-deploy.ts), so this
+  // placeholder only reaches local runs and tests. It holds routing only,
+  // no client content, so KV's lack of an EU jurisdiction doesn't matter
+  // (threat model R18).
+  "kv_namespaces": [{ "binding": "HOSTS", "id": "router-hosts-namespace" }],
+  // Every client's core, as a user Worker in this account's Workers for
+  // Platforms namespace (@grasp-os/shared/names, `clientsNamespace`):
+  // reached only through this binding, by the script its map entry names
+  // (GRA-283). Core, connect and App code bind no namespace, so no client
+  // can reach another's.
+  "dispatch_namespaces": [
+    { "binding": "DISPATCHER", "namespace": "grasp-clients" },
+  ],
+  // The key every client's router secret is derived from. The store id is
+  // the account's own: `deploy` fills it in (scripts/wrangler-deploy.ts), so
+  // this placeholder only reaches local runs and tests.
+  "secrets_store_secrets": [
+    {
+      "binding": "ROUTER_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ROUTER_KEY",
+    },
+  ],
+  // Requests to core's sign-in routes (/api/auth/*), per hostname and
+  // client IPv4 address or IPv6 /64: 300 a minute. A person's sign-in takes two (start, IdP
+  // callback), and the same routes serve session and team calls, so a
+  // whole office behind one address can work at once, while a flood of
+  // sign-in starts or callback guesses is cut to five a second. Counted
+  // per Cloudflare location. The namespace id is ours to
+  // pick, unique per account; the period is in src/index.ts too.
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMIT",
+      "namespace_id": "1001",
+      "simple": { "limit": 300, "period": 60 },
+    },
+    // An interview link's endpoints (/api/interview, and /api/speech,
+    // where its lines are said), per hostname and client address: 300 a minute, as for sign-in, since a whole office
+    // behind one address may be in their interviews at once, each saving
+    // after every answer; a flood of guessed links is cut to five a
+    // second. Core counts calls per link as well.
+    {
+      "name": "INTERVIEW_RATE_LIMIT",
+      "namespace_id": "1003",
+      "simple": { "limit": 300, "period": 60 },
+    },
+    // A chat platform's webhook (/api/channels/<platform>), per hostname
+    // and client address: 600 a minute. Every message a client's people
+    // send their bot comes from the few addresses of the platform's own
+    // servers, so the budget is a whole company's, not a person's; core
+    // limits each person too. A flood from anywhere else is cut to ten a
+    // second before core checks a signature.
+    {
+      "name": "CHANNELS_RATE_LIMIT",
+      "namespace_id": "1006",
+      "simple": { "limit": 600, "period": 60 },
+    },
+    // An event source's URL (/api/hooks/<token>), per hostname and client
+    // address: 120 a minute, two a second, so one address guessing URLs is
+    // cut before core looks a URL up or reads a body.
+    {
+      "name": "WEBHOOK_RATE_LIMIT",
+      "namespace_id": "1008",
+      "simple": { "limit": 120, "period": 60 },
+    },
+    // And per URL, from every address together: one source takes all of
+    // its sender's events, and a payment provider or a shop bursts (a
+    // batch of payouts, a sale opening), from a handful of addresses.
+    // 3,000 a minute, 50 a second, holds a busy provider's bursts with
+    // room to spare, while a flood of one learned URL from many addresses
+    // is still cut. Core checks each delivery's signature before anything
+    // else, and each trigger's runs stay within its hourly room.
+    {
+      "name": "WEBHOOK_SOURCE_RATE_LIMIT",
+      "namespace_id": "1009",
+      "simple": { "limit": 3000, "period": 60 },
+    },
+  ],
+  // Staging (`wrangler deploy --env staging`, deploy-platform with stage
+  // staging): every name from @grasp-os/shared/names with -staging appended,
+  // its own rate limit namespaces, and its own router and client keys in
+  // the account's Secrets Store; the clients' shared secrets are the same.
+  "env": {
+    "staging": {
+      "name": "grasp-router-staging",
+      "routes": [
+        { "pattern": "*.staging.ongrasp.app/*", "zone_name": "ongrasp.app" },
+      ],
+      "vars": {
+        "STAGE": "staging",
+      },
+      "ratelimits": [
+        {
+          "name": "AUTH_RATE_LIMIT",
+          "namespace_id": "2001",
+          "simple": {
+            "limit": 300,
+            "period": 60,
+          },
+        },
+        {
+          "name": "INTERVIEW_RATE_LIMIT",
+          "namespace_id": "2003",
+          "simple": {
+            "limit": 300,
+            "period": 60,
+          },
+        },
+        {
+          "name": "CHANNELS_RATE_LIMIT",
+          "namespace_id": "2006",
+          "simple": {
+            "limit": 600,
+            "period": 60,
+          },
+        },
+        {
+          "name": "WEBHOOK_RATE_LIMIT",
+          "namespace_id": "2008",
+          "simple": {
+            "limit": 120,
+            "period": 60,
+          },
+        },
+        {
+          "name": "WEBHOOK_SOURCE_RATE_LIMIT",
+          "namespace_id": "2009",
+          "simple": {
+            "limit": 3000,
+            "period": 60,
+          },
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "HOSTS",
+          "id": "router-hosts-namespace",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCHER",
+          "namespace": "grasp-clients-staging",
+        },
+      ],
+      "secrets_store_secrets": [
+        {
+          "binding": "ROUTER_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ROUTER_KEY_STAGING",
+        },
+      ],
+    },
+  },
+}

@@ -1,0 +1,237 @@
+/**
+ * The approval workflow the decision tests run, and how they drive it:
+ * start it, and wait on its decision.
+ */
+import { v } from "@grasp-os/runtime/app";
+import type { DecisionAnswerInput } from "@grasp-os/shared/decisions";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { env } from "cloudflare:workers";
+import { vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { finished, liveStatus } from "./runs.ts";
+import type { signedInApi } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
+
+/** Someone signed in, with their API. */
+export type Person = Awaited<ReturnType<typeof signedInApi>>;
+
+/**
+ * What a person may answer: nothing, or a comment, with a total and a
+ * nested value besides (what decision-confirmations.test.ts sends).
+ */
+const answers = v.union(
+  v.null(),
+  v.object({
+    comment: v.string(),
+    total: v.number().optional(),
+    nested: v.object({ a: v.null(), b: v.number() }).optional(),
+  })
+);
+
+/** `answers`, as the workflow's output schema has it. */
+const responseSchema = {
+  kind: "object",
+  fields: {
+    comment: { kind: "string" },
+    total: { kind: "number", optional: true },
+    nested: {
+      kind: "object",
+      fields: { a: { kind: "null" }, b: { kind: "number" } },
+      optional: true,
+    },
+  },
+  nullable: true,
+};
+
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
+});
+
+/** How the approval workflow asks: whom, and for how long. */
+export interface Asking {
+  /** Who decides: `person:<id>`, `team:<id>` or `role:<name>`. */
+  from: string;
+  /** How long it takes answers, in ms: whole seconds. */
+  timeout: number;
+}
+
+/** What the approval's decision answered, as its output reads it. */
+const answered = "review";
+
+/**
+ * The approval workflow's definition: it asks `from` to approve the
+ * invoice through decision binding `approval` (contract `contract`),
+ * waiting `timeout` at most, and ends with the answer. A decision nobody
+ * answered in time fails the run (`urn:grasp:error:unanswered`): its
+ * output is never made up.
+ */
+const approvalOf = (contract: string, { from, timeout }: Asking): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: objectSchema({ invoice: { kind: "string" } }),
+    returns: objectSchema({
+      answered: { kind: "boolean" },
+      approved: { kind: "boolean" },
+      by: { kind: "string" },
+      value: responseSchema,
+    }),
+    result: {
+      answered: true,
+      approved: { $expr: `!${answered}.timedOut && ${answered}.approved` },
+      by: { $expr: `${answered}.timedOut ? "" : ${answered}.by` },
+      value: { $expr: `${answered}.timedOut ? null : ${answered}.payload` },
+    },
+    permissions: { decisions: { approval: { contract } } },
+    steps: [
+      {
+        id: "review",
+        type: "decide",
+        decision: "approval",
+        recipients: [from],
+        prompt: "Approve the invoice",
+        input: { invoice: { $expr: "args.invoice" } },
+        timeout: `${timeout / 1000} seconds`,
+      },
+      {
+        id: "unanswered",
+        type: "raise",
+        if: { $expr: `${answered}.timedOut` },
+        error: { code: "test.unanswered", message: "Failed." },
+      },
+    ],
+  });
+
+export const day = 86_400_000;
+export const week = 7 * day;
+
+/**
+ * A new approval workflow asking as `asking` says, published by
+ * `builder`, its decision contract published and its binding approved by
+ * `admin`, for `asking.from`: its ID.
+ */
+export const approvalWorkflow = async (
+  { admin, builder }: { admin: Person; builder: Person },
+  asking: Asking
+): Promise<string> => {
+  const contract = `approval-${unique()}`;
+  await admin.api.workflowResources.publishContract({
+    key: contract,
+    kind: "decision",
+    input: JSON.stringify(v.object({ invoice: v.string() }).descriptor),
+    response: JSON.stringify(answers.descriptor),
+  });
+  const { id } = await builder.api.workflowResources.create(
+    `approval-${unique()}`
+  );
+  await publishOverRpc(builder.api, id, approvalOf(contract, asking));
+  await admin.api.workflowResources.approveBinding(id, {
+    alias: "approval",
+    target: { kind: "decision", deciders: [asking.from] },
+    reviewed: { version: 1 },
+  });
+  return id;
+};
+
+/** A run of approval workflow `workflow`, started by `by`. */
+export interface ApprovalRun {
+  workflow: string;
+  run: string;
+  by: Person;
+}
+
+/** Starts a run of approval workflow `workflow` as `by`: its ID. */
+export const startedApproval = async (
+  by: Person,
+  workflow: string
+): Promise<ApprovalRun> => {
+  const { runId } = await by.api.workflowResources.start(workflow, {
+    expected: 1,
+    args: { invoice: "INV-7" },
+    key: unique(),
+  });
+  return { workflow, run: z.string().parse(runId), by };
+};
+
+/**
+ * The decision approval run `run` opened, once the run waits on it: its
+ * ID.
+ */
+export const decisionOfRun = async (run: ApprovalRun): Promise<string> =>
+  await vi.waitFor(
+    async () => {
+      const row = await env.DB.prepare(
+        "SELECT id FROM workflow_decisions WHERE resource_run_id = ?"
+      )
+        .bind(run.run)
+        .first<{ id: string }>();
+      if (!row) {
+        throw new Error("No decision yet");
+      }
+      if ((await liveStatus(run.run)) !== "waiting") {
+        throw new Error("Not waiting on its decision yet");
+      }
+      return row.id;
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+
+/**
+ * A run of a new approval workflow asking as `asking` says, started by
+ * `owners.builder`, once it waits on its decision: the run and its
+ * decision.
+ */
+export const asking = async (
+  owners: { admin: Person; builder: Person },
+  input: Asking
+) => {
+  const workflow = await approvalWorkflow(owners, input);
+  const run = await startedApproval(owners.builder, workflow);
+  const decision = await decisionOfRun(run);
+  return { run, decision };
+};
+
+/** How approval run `run` ended: its output, or its error's code. */
+export const outputOf = async ({
+  workflow,
+  run,
+  by,
+}: ApprovalRun): Promise<unknown> => {
+  await finished(run);
+  const ended = await by.api.workflowResources.run(workflow, run);
+  return ended.status === "completed"
+    ? ended.result
+    : { status: ended.status, code: ended.error?.code };
+};
+
+/** An answer to a decision, as a person gives it. */
+type Answer = DecisionAnswerInput;
+
+/**
+ * `person`'s answer to `decision` through the trusted host decision UI,
+ * as the decision's page gives it: reviewed, confirmed, then answered with
+ * that confirmation. Nothing more is asked once it is recorded.
+ */
+export const confirmedAnswer = async (
+  person: Person,
+  decision: string,
+  answer: Answer
+) => {
+  const review = await person.api.decisions.review(decision, answer);
+  if (review.state === "recorded") {
+    return review.decision;
+  }
+  const { confirmation } = await person.api.decisions.confirm(
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  return await person.api.decisions.answer(
+    decision,
+    review.response,
+    confirmation
+  );
+};

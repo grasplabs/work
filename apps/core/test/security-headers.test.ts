@@ -1,0 +1,201 @@
+import { routerSecretHeader } from "@grasp-os/shared/router";
+import { createExecutionContext } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import worker from "../src/index.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+
+/** A request as the router sends it: over https, with the secret. */
+const routed = async (path: string) =>
+  await exports.default.fetch(`https://core${path}`, {
+    headers: { [routerSecretHeader]: env.ROUTER_SECRET },
+  });
+
+const whitespace = /\s+/u;
+
+/**
+ * The directives of a response's Content Security Policy, by name. As in
+ * browsers, the first of a repeated directive counts.
+ */
+const policyOf = (response: Response): Map<string, string[]> => {
+  const header = response.headers.get("content-security-policy") ?? "";
+  const directives = new Map<string, string[]>();
+  for (const directive of header.split(";")) {
+    const [name = "", ...sources] = directive.trim().split(whitespace);
+    const key = name.toLowerCase();
+    if (key !== "" && !directives.has(key)) {
+      directives.set(key, sources);
+    }
+  }
+  return directives;
+};
+
+/** The frontend's HTML: the start page, a client-side route, the file. */
+const pages = ["/", "/apps/some-app", "/index.html"];
+
+const eachPage = async () =>
+  await Promise.all(pages.map(async (path) => await routed(path)));
+
+describe("security headers on the frontend", () => {
+  it("serves the frontend's HTML under a policy", async () => {
+    for (const response of await eachPage()) {
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(response.headers.has("content-security-policy")).toBeTruthy();
+    }
+  });
+
+  it("can't be framed, by another origin or its own", async () => {
+    for (const response of await eachPage()) {
+      expect(policyOf(response).get("frame-ancestors")).toStrictEqual([
+        "'none'",
+      ]);
+    }
+  });
+
+  it("runs only the frontend's own script files: no inline script, eval, other origin or code of pages", async () => {
+    for (const response of await eachPage()) {
+      const policy = policyOf(response);
+      expect(policy.get("default-src")).toStrictEqual(["'self'"]);
+      // The deployment's origin as people reach it, not core's address:
+      // only the build's directory and the theme script, so nothing under
+      // /page-modules/.
+      expect(policy.get("script-src")).toStrictEqual([
+        `${clientOrigin}/assets/`,
+        `${clientOrigin}/theme.js`,
+        // WebAssembly compiles (the Code view's highlighter); eval stays off.
+        "'wasm-unsafe-eval'",
+      ]);
+      // Would otherwise loosen what script-src allows, per kind of script.
+      expect(policy.has("script-src-elem")).toBeFalsy();
+      expect(policy.has("script-src-attr")).toBeFalsy();
+    }
+  });
+
+  it("starts no worker and loads only the frontend's own stylesheets, besides inline styles", async () => {
+    for (const response of await eachPage()) {
+      const policy = policyOf(response);
+      expect(policy.get("worker-src")).toStrictEqual(["'none'"]);
+      // Inline styles for the Code view's renderer (@pierre/diffs).
+      expect(policy.get("style-src")).toStrictEqual([
+        `${clientOrigin}/assets/`,
+        "'unsafe-inline'",
+      ]);
+      expect(policy.has("style-src-elem")).toBeFalsy();
+    }
+  });
+
+  it("connects, loads and submits only to its own origin", async () => {
+    for (const response of await eachPage()) {
+      const policy = policyOf(response);
+      expect(policy.get("connect-src")).toStrictEqual(["'self'"]);
+      expect(policy.get("form-action")).toStrictEqual(["'self'"]);
+      expect(policy.get("img-src")).toStrictEqual(["'self'", "data:"]);
+    }
+  });
+
+  it("allows no plugins and no <base> that re-points relative URLs", async () => {
+    for (const response of await eachPage()) {
+      const policy = policyOf(response);
+      expect(policy.get("object-src")).toStrictEqual(["'none'"]);
+      expect(policy.get("base-uri")).toStrictEqual(["'none'"]);
+    }
+  });
+
+  it("stops content sniffing and cross-origin referrers with paths", async () => {
+    for (const response of await eachPage()) {
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("referrer-policy")).toBe(
+        "strict-origin-when-cross-origin"
+      );
+    }
+  });
+
+  it("keeps no handle on a site that opened it, while popups it opens keep theirs", async () => {
+    for (const response of await eachPage()) {
+      expect(response.headers.get("cross-origin-opener-policy")).toBe(
+        "same-origin-allow-popups"
+      );
+    }
+  });
+
+  it("tells browsers to use https only, for at least a year", async () => {
+    const response = await routed("/");
+    const hsts = response.headers.get("strict-transport-security") ?? "";
+    const maxAge = Number(
+      /max-age=(?<seconds>\d+)/u.exec(hsts)?.groups?.seconds
+    );
+    const oneYear = 365 * 24 * 60 * 60;
+    expect(maxAge).toBeGreaterThanOrEqual(oneYear);
+  });
+
+  it("sends no HSTS over plain http, where browsers ignore it", async () => {
+    const local = { ...env, ROUTER_SECRET: "", DEV_SKIP_ROUTER_SECRET: "true" };
+    const response = await worker.fetch(
+      new Request("http://localhost:8787/"),
+      local,
+      createExecutionContext()
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.has("strict-transport-security")).toBeFalsy();
+    expect(policyOf(response).get("frame-ancestors")).toStrictEqual(["'none'"]);
+  });
+
+  it("keeps API responses what they are, and never sniffed", async () => {
+    const response = await routed("/api/unknown");
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "request.not_found",
+    });
+  });
+});
+
+// The document App pages run in: code nobody reviewed line by line, which
+// must reach nothing but the page that frames it.
+describe("security headers on the page frame", () => {
+  it("frames pages only from the product's own origin", async () => {
+    for (const response of await eachPage()) {
+      expect(policyOf(response).get("frame-src")).toStrictEqual(["'self'"]);
+    }
+  });
+
+  it("is an opaque sandbox, framed only by the product page, that reaches nothing, parses no markup a script writes and runs no script but its build's", async () => {
+    // Without a build: no script at all. With one, only that build's
+    // (page-bridge.test.ts).
+    const policy = policyOf(await routed("/page-frame"));
+    expect(Object.fromEntries(policy)).toStrictEqual({
+      sandbox: ["allow-scripts"],
+      "default-src": ["'none'"],
+      "script-src": ["'none'"],
+      "style-src": ["data:", "'unsafe-inline'"],
+      "img-src": ["data:", "blob:"],
+      "font-src": ["data:"],
+      "connect-src": ["'none'"],
+      "worker-src": ["'none'"],
+      "frame-src": ["'none'"],
+      "form-action": ["'none'"],
+      "base-uri": ["'none'"],
+      "frame-ancestors": ["'self'"],
+      "require-trusted-types-for": ["'script'"],
+      "trusted-types": ["'none'"],
+      webrtc: ["'block'"],
+    });
+  });
+
+  it("gives its policy to its own address only", async () => {
+    const others = await Promise.all(
+      ["/page-frame/", "/page-frame.html", "/x/page-frame"].map(async (path) =>
+        policyOf(await routed(path)).get("script-src")
+      )
+    );
+    expect(others).toStrictEqual(
+      others.map(() => [
+        `${clientOrigin}/assets/`,
+        `${clientOrigin}/theme.js`,
+        "'wasm-unsafe-eval'",
+      ])
+    );
+  });
+});

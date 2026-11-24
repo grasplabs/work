@@ -1,0 +1,339 @@
+import {
+  appCodeFiles,
+  appModuleName,
+  kitModuleName,
+  serverRunner,
+  serverEntryPath,
+  serverSdkModules,
+} from "@grasp-os/compiler";
+import type { Diagnostic } from "@grasp-os/compiler";
+import { readAppManifest, symbolicModules } from "@grasp-os/runtime/host";
+import type { AppManifest } from "@grasp-os/runtime/host";
+import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+import { versionErrors } from "@grasp-os/shared/app-releases";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
+import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
+
+import { cacheKeyOf, inOrder, readCache, throughCache } from "./build-cache.ts";
+import { hostModules } from "./host-modules.ts";
+import { buildAppCode, checkAppCode } from "./pages.ts";
+import type { BuildOptions, BuildProfile } from "./pages.ts";
+import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
+import type { SandboxedEnv } from "./sandboxed.ts";
+
+// Inspecting an App's code of spec 8's layout (spec 8, 16): building it
+// and reading its registration in an isolate of its own, never in core.
+// Sealing a release does it twice (app-releases.ts); a version's pages
+// and a draft's check read the manifest of what they build through it
+// (page-references.ts). It reaches nothing of an App's records, so it
+// can serve both without depending on either.
+
+/**
+ * The most characters an inspection may answer: an App manifest's bound
+ * in bytes, never fewer characters (the host checks the bytes on reading).
+ */
+const inspectionMaxLength = appManifestMaxBytes;
+
+// Sealing, the sidebar and a draft's check take an inspected manifest as
+// what the App registers (its permissions, server methods, pages), so
+// only one core inspected is read back: its MAC must hold (build-cache.ts).
+// Whoever can write to R2 but doesn't hold core's secret can't have a
+// manifest of theirs taken as core's, nor move one core kept to another
+// key.
+
+/** The module that inspects the App in its isolate. */
+const inspectModule = "grasp-inspect.js";
+
+/**
+ * The inspection isolate's main module: the App's registration as JSON
+ * text, through the SDK's runner. Everything in the isolate is
+ * untrusted, this module too; it only bounds what it hands back.
+ */
+const inspectMain = `import { WorkerEntrypoint } from "cloudflare:workers";
+import { manifestOfApp } from ${JSON.stringify(kitModuleName(serverRunner))};
+import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
+
+export class Inspect extends WorkerEntrypoint {
+  manifest() {
+    const text = manifestOfApp(registered);
+    if (typeof text !== "string" || text.length > ${inspectionMaxLength}) {
+      throw new Error("The App's manifest is too large.");
+    }
+    return text;
+  }
+}
+`;
+
+/** The most of why App code failed that a refusal keeps. */
+const maxFailure = 500;
+
+/** A line of a stack trace, as workerd writes one. */
+const stackLine = /^\s+at\s/u;
+
+/**
+ * What App code threw, without its stack: the lines in the SDK's bundled
+ * modules (`sdk~app-error-….js:1:5746`) name nothing of the App's to fix,
+ * and would crowd out why it failed.
+ */
+const withoutStack = (message: string): string =>
+  message
+    .split("\n")
+    .filter((line) => !stackLine.test(line))
+    .join("\n");
+
+/** A frame of a stack trace in one of the App's modules: `app~app.js:12:5`. */
+const appFrame = /\b(?<module>app~[^\s:()]+\.js):(?<line>\d+):(?<column>\d+)/u;
+
+/** The source map a module of the App's server code ends with (the compiler's worker.ts). */
+const inlineMap =
+  /\n\/\/# sourceMappingURL=data:application\/json;charset=utf-8;base64,(?<map>[A-Za-z0-9+/=]+)\n?$/u;
+
+/**
+ * The line of the App's file that `line` and `column` (1-based) of its
+ * compiled module `code` stand for, read through the source map the
+ * module ends with; undefined when it has none, or maps nothing there.
+ */
+const sourceLine = (
+  code: string,
+  line: number,
+  column: number
+): number | undefined => {
+  const map = inlineMap.exec(code)?.groups?.map;
+  if (map === undefined) {
+    return undefined;
+  }
+  const json = new TextDecoder().decode(
+    Uint8Array.from(atob(map), (char) => char.codePointAt(0) ?? 0)
+  );
+  const found = originalPositionFor(new TraceMap(json), {
+    line,
+    column: column - 1,
+  });
+  return found.line ?? undefined;
+};
+
+/**
+ * Where in the App's own files `error` was thrown, by the first frame of
+ * its stack (or of its message, which carries the stack when it crossed
+ * from the sandbox host) in one of `modules`: its place in the module,
+ * read back to the file's line through the module's source map; the
+ * module's line should it have none. Nothing when no frame names one of
+ * them.
+ */
+const thrownAt = (
+  error: unknown,
+  modules: Readonly<Record<string, string>>
+): { file: string; line: number } | Record<string, never> => {
+  const text = [
+    error instanceof Error ? error.message : "",
+    error instanceof Error ? (error.stack ?? "") : "",
+  ].join("\n");
+  for (const candidate of text.split("\n")) {
+    const frame = appFrame.exec(candidate)?.groups;
+    if (frame?.module !== undefined && Object.hasOwn(modules, frame.module)) {
+      // Server code is TypeScript (`.ts`), each folder a `~` in its name.
+      const file = `${frame.module.slice("app~".length, -".js".length).replaceAll("~", "/")}.ts`;
+      const line = Number(frame.line);
+      return {
+        file,
+        line:
+          sourceLine(modules[frame.module] ?? "", line, Number(frame.column)) ??
+          line,
+      };
+    }
+  }
+  return {};
+};
+
+/** The details of a refused build: where and why, as diagnostics say. */
+const buildDetails = (diagnostics: readonly Diagnostic[]) => ({
+  diagnostics: diagnostics
+    .slice(0, 50)
+    .map(({ file, line, rule, message }) => ({
+      file: file ?? null,
+      line: line ?? null,
+      category: diagnosticCategory(rule),
+      message: message.slice(0, maxFailure),
+    })),
+});
+
+/**
+ * The App's code in `files` built with the host's generated modules,
+ * as modules by flat name; `version.build_failed` with diagnostics if it
+ * doesn't build.
+ */
+export const builtCode = async (
+  env: Env,
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string,
+  options: BuildOptions = {}
+): Promise<Record<string, string>> => {
+  const build = await buildAppCode(env, { ...files }, app, options);
+  if (!build.ok) {
+    throw versionErrors.create(
+      "version.build_failed",
+      buildDetails(build.diagnostics)
+    );
+  }
+  return build.modules;
+};
+
+/**
+ * The App's code in `files`, with the host's real generated modules,
+ * built and type-checked against the SDK's server side (`checkAppCode`),
+ * as modules by flat name; `version.build_failed` with diagnostics if it
+ * doesn't build or check. What a release is sealed from.
+ */
+export const checkedCode = async (
+  env: Env,
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string,
+  profile: BuildProfile
+): Promise<Record<string, string>> => {
+  const build = await checkAppCode(env, { ...files }, app, { profile });
+  if (!build.ok) {
+    throw versionErrors.create(
+      "version.build_failed",
+      buildDetails(build.diagnostics)
+    );
+  }
+  return build.modules;
+};
+
+/**
+ * What the App's registration answers when `modules` load in an isolate
+ * of their own, with the SDK's: its manifest's text, or
+ * `version.inspection_failed` with what the App's code threw, or for
+ * running past the sandbox's deadline.
+ */
+export const inspected = async (
+  env: SandboxedEnv,
+  modules: Readonly<Record<string, string>>,
+  sdk: Readonly<Record<string, string>>
+): Promise<string> => {
+  let text: unknown;
+  try {
+    // In the sandbox, which bounds its time on either profile (sandboxed.ts).
+    text = await callSandboxed(
+      env,
+      {
+        mainModule: inspectModule,
+        // The platform's modules last: no App module takes one's name.
+        modules: { ...modules, ...sdk, [inspectModule]: inspectMain },
+      },
+      "Inspect",
+      "manifest"
+    );
+  } catch (error) {
+    // The sandbox host down isn't the App's failure.
+    if (error instanceof SandboxUnavailableError) {
+      throw error;
+    }
+    throw versionErrors.create("version.inspection_failed", {
+      message: withoutStack(error instanceof Error ? error.message : "").slice(
+        0,
+        maxFailure
+      ),
+      ...thrownAt(error, modules),
+    });
+  }
+  if (typeof text !== "string") {
+    throw versionErrors.create("version.inspection_failed", {
+      message: "The inspection answered something that isn't text.",
+    });
+  }
+  return text;
+};
+
+/**
+ * The App manifest in `text`, as the host reads it (`readAppManifest`):
+ * `version.invalid_manifest` with the SDK's reason for anything else.
+ */
+export const readManifest = (text: string): AppManifest => {
+  try {
+    return readAppManifest(text);
+  } catch (error) {
+    throw versionErrors.create("version.invalid_manifest", {
+      message: (error instanceof Error ? error.message : "").slice(
+        0,
+        maxFailure
+      ),
+    });
+  }
+};
+
+/**
+ * What a first inspection of `files` reads: the App's code, with the
+ * symbolic references the host lends it in place of generated modules.
+ */
+const symbolicCode = (
+  files: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appCodeFiles(files),
+  ...symbolicModules(),
+  ...hostModules,
+});
+
+/**
+ * Where the manifest inspected from `code` with SDK `sdkVersion` for
+ * `profile` is cached: by what decides it, as builds are, so the same
+ * code, compiler and SDK register the same.
+ */
+const inspectionKey = async (
+  profile: BuildProfile,
+  code: Record<string, string>,
+  sdkVersion: string
+): Promise<string> =>
+  await cacheKeyOf("inspection", [profile, sdkVersion, inOrder(code)]);
+
+/**
+ * The manifest `filesManifest` keeps for `files`, if it kept one: undefined
+ * otherwise, never inspecting the code itself. For reads that may only
+ * show what core has already worked out (the sidebar, of versions:
+ * production's).
+ */
+export const cachedFilesManifest = async (
+  env: Env,
+  files: Readonly<Record<string, string>>
+): Promise<AppManifest | undefined> => {
+  const sdk = await serverSdkModules(env.ASSETS);
+  const kept = await readCache(
+    env,
+    await inspectionKey("production", symbolicCode(files), sdk.version)
+  );
+  return kept === undefined ? undefined : readManifest(kept);
+};
+
+/**
+ * The manifest of the App whose code `files` holds, inspected with the
+ * symbolic references the host lends a first inspection: what it
+ * registers, for files no release sealed (a draft, a version not yet
+ * made current). Refused as sealing would refuse it.
+ */
+export const filesManifest = async (
+  env: Env,
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string,
+  { profile = "production" }: BuildOptions = {}
+): Promise<AppManifest> => {
+  const sdk = await serverSdkModules(env.ASSETS);
+  const code = symbolicCode(files);
+  // Inspected once, its manifest kept through the cache, as builds are
+  // (build-cache.ts), so saving or checking the same server code again
+  // runs nothing in the sandbox. Only a manifest that reads is kept; a
+  // failure inspects again next time.
+  const { text } = await throughCache(
+    env,
+    await inspectionKey(profile, code, sdk.version),
+    async () => {
+      const symbolic = await builtCode(env, code, app, { profile });
+      const inspection = await inspected(env, symbolic, sdk.modules);
+      readManifest(inspection);
+      return { text: inspection, cache: true };
+    }
+  );
+  return readManifest(text);
+};

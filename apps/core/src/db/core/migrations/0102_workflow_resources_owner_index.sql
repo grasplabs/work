@@ -1,0 +1,1 @@
+CREATE INDEX `workflow_resources_owner_idx` ON `workflow_resources` (`owner_id`);

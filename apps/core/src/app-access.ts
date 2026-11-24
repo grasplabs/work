@@ -1,0 +1,589 @@
+import { appErrors } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
+import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
+import { and, eq, exists, isNull, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+
+import {
+  brainTeamsOfApps,
+  holdsAnySource,
+  mayReadBrainTeamsOf,
+  readerOf,
+  sourcesOf,
+  sourcesOfApps,
+  unreadableBy,
+  unreadableTeamsBy,
+} from "./app-provenance.ts";
+import type { AppSources } from "./app-provenance.ts";
+import { teamsOf } from "./auth/identity.ts";
+import { guestNow } from "./auth/membership-sql.ts";
+import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
+import { viaProjectSql } from "./project-sql.ts";
+import {
+  ceilingOf,
+  roleFromMembers,
+  rowsOf as memberRowsOf,
+} from "./sharing.ts";
+import type { SharedRole } from "./sharing.ts";
+
+// Who may do what in an App (App roles). An App is open to:
+//
+// - the organization's admins, who manage every App, as builders;
+// - its owner, the person who created it, as a builder;
+// - the people, teams and projects it is shared with (`app_members`), in
+//   the role it is shared with them in; someone in several (as a person,
+//   through a team or through a project they are in) has the highest.
+//   Being in a project reaches only what is shared with it, never what is
+//   merely filed in it (projects.ts).
+//
+// The person's role in the organization caps their role in an App: only
+// admins and builders build, so someone whose role there is `user` works
+// in an App's pages at most, even their own App's or one shared with
+// them as a builder. Everyone else has no role in the App, and it doesn't
+// exist for them (`app.not_found`), just as an App that isn't there.
+// Someone an App is shared with is refused too, with `app.unreadable`,
+// while it has read data they can't read where it comes from
+// (app-provenance.ts). Its owner and the admins aren't held to that,
+// they manage it whatever it read, but for a team's content in the Brain
+// (GRA-1842): an App that may hold what a Brain grant recalled of a team
+// is refused, `app.unreadable`, to anyone not in that team now, its owner
+// and admins too. Managing it without reading its data (archiving,
+// restoring, removing it, resetting its data) stays theirs
+// (`{ managing: true }`); an admin revokes its grants as for any App.
+//
+// Whether it is live narrows that (app-status.ts): until its first publish
+// and while archived, it is open to its builders and the admins alone.
+// Someone whose role in it is `user` has none then, and is answered as for
+// an App that isn't there, so an App's existence never shows to its future
+// users before it is live.
+// What an archived App still allows its builders is the caller's to
+// refuse (`requireNotArchived`, apps.ts).
+//
+// Roles in an App are read from the database on every call, so unsharing
+// applies to the next call. The person's session, role and teams come from
+// their connection's latest reading (auth/identity.ts, rpc.ts), at most a
+// few seconds old, so a team change or a new role in the organization
+// applies within those seconds.
+// Grasp staff, who are admins while their window is open, manage Apps as
+// admins do, but never share one (app-members.ts): whom a client's data
+// reaches is the client's decision.
+
+/**
+ * Who asks, as far as their role in an App goes. A guest (`guest`,
+ * guest-access.ts) has a role only through a share with them as a
+ * person, as the App's user, and only in an App that holds no source,
+ * whoever shared it (`requireAppRole`).
+ */
+export type Person = Pick<Identity, "userId" | "role" | "teams" | "guest">;
+
+/** The member rows of Apps that are `by`'s: their own, or one of their teams'. */
+const rowsOf = (by: Pick<Identity, "userId" | "teams">): SQL =>
+  memberRowsOf(appMembers, by);
+
+/** That an App is open to those who don't build it, as SQL on `apps`. */
+export const openToUsersSql = sql`(${apps.currentVersion} IS NOT NULL AND ${apps.archivedAt} IS NULL)`;
+
+/** What of an App decides whether those who don't build it may use it. */
+export type AppOpening = Pick<App, "currentVersion" | "archived">;
+
+/**
+ * Whether an App is open to those who don't build it: live (a version
+ * published) and not archived.
+ */
+export const isOpenToUsers = ({ currentVersion, archived }: AppOpening) =>
+  currentVersion !== null && !archived;
+
+/**
+ * That an App lets `by` in, as a condition on `apps`, beside their role
+ * in it (`appRole`): an App open to users (`openToUsersSql`) for anyone with a role,
+ * any other for its builders alone (its owner, or someone it is shared
+ * with as a builder), when their role in the organization builds. Not for
+ * admins, whom every App is open to.
+ */
+const openInItsStatus = (by: Person): SQL => {
+  if (!canBuild(by.role)) {
+    return openToUsersSql;
+  }
+  return sql`(${openToUsersSql} OR ${apps.ownerId} = ${by.userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ${appMembers.role} = 'builder' AND ${rowsOf(by)}))`;
+};
+
+/**
+ * Refuses an archived App with `app.archived`: what its builders may
+ * still read of it doesn't make it usable. For whatever opens its
+ * pages, calls it or starts its runs.
+ */
+export const requireNotArchived = (app: Pick<App, "archived">): void => {
+  if (app.archived) {
+    throw appErrors.create("app.archived");
+  }
+};
+
+/**
+ * `by`'s role in an App, from what decides it: whether they own it
+ * (`owns`), the roles of its shares that are theirs, as a person or through
+ * a team (`shares`), and whether it is open to users (`open`); and whether that role comes from whom
+ * it is shared with (`shared`), rather than from being an admin or its
+ * owner. Undefined when they have none. The one rule, for one person
+ * (`appRole`) as for many at once (app-notifications.ts): an admin builds
+ * every App; its owner has the role their role in the organization caps;
+ * anyone else the highest of their shares, capped the same way; and a
+ * App not live, or archived, is open to its builders alone.
+ */
+export const decidedAppRole = (
+  by: Pick<Identity, "role">,
+  {
+    owns,
+    shares,
+    open,
+  }: {
+    owns: boolean;
+    shares: readonly SharedRole[];
+    open: boolean;
+  }
+): { role: MemberRole; shared: boolean } | undefined => {
+  let found: { role: MemberRole; shared: boolean } | undefined;
+  if (isAdmin(by.role)) {
+    found = { role: "builder", shared: false };
+  } else if (owns) {
+    found = { role: ceilingOf(by), shared: false };
+  } else {
+    const role = roleFromMembers(by, shares);
+    found = role === undefined ? undefined : { role, shared: true };
+  }
+  // Only a live App is open to those who don't build it.
+  if (found?.role === "user" && !open) {
+    return undefined;
+  }
+  return found;
+};
+
+/**
+ * `by`'s role in `app`, and whether it comes from whom the App is shared
+ * with (`shared`), rather than from being an admin or its owner; undefined
+ * when they have none.
+ */
+const appRole = async (
+  env: Env,
+  by: Person,
+  app: Pick<App, "id" | "owner"> & AppOpening
+): Promise<
+  | {
+      role: MemberRole;
+      shared: boolean;
+      /** Whether they are a guest, as their identity or the database says. */
+      guest: boolean;
+    }
+  | undefined
+> => {
+  const guest = by.guest === true;
+  // A guest is never an admin nor an App's owner, whatever else says so.
+  const admin = !guest && isAdmin(by.role);
+  const owns = !guest && app.owner === by.userId;
+  // Whom it is shared with matters only to someone neither admin nor
+  // owner; to a guest, only a share with them as a person counts.
+  const rows =
+    admin || owns
+      ? []
+      : await drizzle(env.DB)
+          .select({
+            role: appMembers.role,
+            // Read too, so a guest's identity that lost its mark is still
+            // held to a guest's rule.
+            guestNow: sql<number>`${guestNow(by.userId)}`,
+          })
+          .from(appMembers)
+          .where(
+            and(
+              eq(appMembers.appId, app.id),
+              guest
+                ? and(
+                    eq(appMembers.memberType, "person"),
+                    eq(appMembers.memberId, by.userId)
+                  )
+                : rowsOf(by)
+            )
+          );
+  const found = decidedAppRole(guest ? { role: "user" } : by, {
+    owns,
+    shares: rows.map((row) => row.role),
+    open: isOpenToUsers(app),
+  });
+  return found === undefined
+    ? undefined
+    : {
+        ...found,
+        guest: guest || rows.some((row) => row.guestNow === 1),
+      };
+};
+
+/**
+ * Refuses `by` unless they have `needed` or more in `app`: an App they
+ * have no role in with `app.not_found`, as one that isn't there, and too
+ * low a role with `role.forbidden`. Someone it is shared with is also
+ * refused, with `app.unreadable`, while the App has read data they can't
+ * read where it comes from (app-provenance.ts). Returns their role.
+ */
+export const requireAppRole = async (
+  env: Env,
+  by: Person,
+  app: Pick<App, "id" | "owner"> & AppOpening,
+  needed: MemberRole,
+  {
+    managing = false,
+    sources,
+  }: {
+    /**
+     * For what manages the App without reading its data (archive, restore,
+     * removal, a reset): its owner and admins outside a team its Brain
+     * grants name aren't refused it.
+     */
+    managing?: boolean;
+    /**
+     * What the App may have read, when the caller read it already for
+     * this same check (app-provenance.ts `holdingsOf`): not read again.
+     */
+    sources?: AppSources;
+  } = {}
+): Promise<MemberRole> => {
+  const found = await appRole(env, by, app);
+  if (found === undefined) {
+    throw appErrors.create("app.not_found");
+  }
+  const { role, shared, guest } = found;
+  if (needed === "builder" && role !== "builder") {
+    throw roleErrors.create("role.forbidden");
+  }
+  if (shared && guest) {
+    // An App that holds a source takes no guests (GRA-2235): read on
+    // every request, at a call's start and before each commit, so a
+    // guest's share lapses for good the moment the App gains one. One
+    // that holds none has nothing a guest can't read.
+    if (await holdsAnySource(env, app.id)) {
+      throw appErrors.create("app.unreadable");
+    }
+  } else if (shared) {
+    const unreadable = unreadableBy(
+      sources ?? (await sourcesOf(env, app.id)),
+      readerOf(
+        by.userId,
+        by.teams.map(({ id }) => id),
+        by.role
+      )
+    );
+    if (unreadable.length > 0) {
+      throw appErrors.create("app.unreadable");
+    }
+  } else if (
+    !managing &&
+    !(await mayReadBrainTeamsOf(
+      env,
+      app.id,
+      by.teams.map(({ id }) => id)
+    ))
+  ) {
+    throw appErrors.create("app.unreadable");
+  }
+  return role;
+};
+
+/**
+ * Refuses `by` unless they still have a role in the App `app` names, as
+ * `requireAppRole` decides it: for checking again, on each step of
+ * something already under way, that someone let in on their role still
+ * has it. Whom the App is shared with, its owner and the teams `by` is in
+ * are read now; their role in the organization is the session's that let
+ * them in (Grasp staff are admins only by their session), which the
+ * session's own checks follow within seconds. Not `appFor` (apps.ts):
+ * apps.ts imports this file, and the workflow runs that call this
+ * (workflows/runs.ts) are reached from apps.ts through its workflow
+ * imports, so it would close a cycle. The role check is the same
+ * `requireAppRole`; only the App's row is read here.
+ */
+export const requireStillOpen = async (
+  env: Env,
+  by: Person,
+  app: AppId
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({
+      id: apps.id,
+      owner: apps.ownerId,
+      currentVersion: apps.currentVersion,
+      archivedAt: apps.archivedAt,
+    })
+    .from(apps)
+    .where(eq(apps.id, app))
+    .get();
+  if (row === undefined) {
+    throw appErrors.create("app.not_found");
+  }
+  await requireAppRole(
+    env,
+    { ...by, teams: await teamsOf(env.DB, by.userId) },
+    {
+      id: appIdSchema.parse(row.id),
+      owner: row.owner,
+      currentVersion: row.currentVersion,
+      archived: row.archivedAt !== null,
+    },
+    "user"
+  );
+  if (row.archivedAt !== null) {
+    throw appErrors.create("app.archived");
+  }
+};
+
+/**
+ * Of the Apps `ids`, those `by` may open now as far as what each App read
+ * goes (app-provenance.ts): for an admin, and of their own, every one but
+ * those holding a Brain team's content they aren't in; any other only
+ * while they can read everything it read. That they have a
+ * role in each is for the caller to have checked (`appsFoundBy`). For
+ * listing what belongs to many Apps at once, as `requireAppRole` decides
+ * for one: a few queries and connect calls, whatever the number of Apps.
+ */
+export const appsReadableBy = async (
+  env: Env,
+  by: Person,
+  ids: readonly string[],
+  /**
+   * For what manages them without reading their data (their permissions):
+   * an admin's and one's own aren't held to the Brain's teams.
+   */
+  { managing = false }: { managing?: boolean } = {}
+): Promise<Set<string>> => {
+  if (ids.length === 0) {
+    return new Set();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id, owner: apps.ownerId })
+    .from(apps)
+    .where(inList(apps.id, ids));
+  const reader = readerOf(
+    by.userId,
+    by.teams.map(({ id }) => id),
+    by.role
+  );
+  // An admin's every App, and anyone's own, are held to the Brain's teams
+  // alone; any other to everything it read.
+  const managed = rows
+    .filter(({ owner }) => isAdmin(by.role) || owner === by.userId)
+    .map(({ id }) => appIdSchema.parse(id));
+  const managedIds = new Set<string>(managed);
+  const shared = rows
+    .filter(({ id }) => !managedIds.has(id))
+    .map(({ id }) => appIdSchema.parse(id));
+  // All the Apps' sources at once, each decided in memory.
+  const [teams, sources] = await Promise.all([
+    managing ? new Map<AppId, string[]>() : brainTeamsOfApps(env, managed),
+    sourcesOfApps(env, shared),
+  ]);
+  return new Set([
+    ...managed.filter(
+      (id) => unreadableTeamsBy(teams.get(id) ?? [], reader).length === 0
+    ),
+    ...shared.filter((id) => {
+      const of = sources.get(id);
+      return of !== undefined && unreadableBy(of, reader).length === 0;
+    }),
+  ]);
+};
+
+/**
+ * Of the Apps `ids`, those `by` builds, as `requireAppRole` decides a
+ * builder for one: every one for an admin, none when their role in the
+ * organization doesn't build, otherwise their own and those shared with
+ * them (or a team of theirs) as builders. That each is one they may open
+ * (`appsReadableBy`) is for the caller to have checked. One read,
+ * whatever the number of Apps.
+ */
+export const appsBuiltBy = async (
+  env: Env,
+  by: Person,
+  ids: readonly string[]
+): Promise<Set<string>> => {
+  if (isAdmin(by.role)) {
+    return new Set(ids);
+  }
+  if (!canBuild(by.role) || ids.length === 0) {
+    return new Set();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id })
+    .from(apps)
+    .where(
+      and(
+        inList(apps.id, ids),
+        or(
+          eq(apps.ownerId, by.userId),
+          exists(
+            drizzle(env.DB)
+              .select({ one: sql`1` })
+              .from(appMembers)
+              .where(
+                and(
+                  eq(appMembers.appId, apps.id),
+                  eq(appMembers.role, "builder"),
+                  rowsOf(by)
+                )
+              )
+          )
+        )
+      )
+    );
+  return new Set(rows.map(({ id }) => id));
+};
+
+/**
+ * The Apps `by` has a role in, as a condition on `apps`: every App for an
+ * admin (undefined), otherwise their own and those shared with them. One
+ * shared with them that has read data they can't read is listed, and
+ * refused when they open it, with why.
+ */
+export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
+  // A removed App (app-removal.ts) is nobody's, an admin's included.
+  const kept = isNull(apps.removedAt);
+  if (isAdmin(by.role)) {
+    return kept;
+  }
+  const db = drizzle(env.DB);
+  return and(
+    kept,
+    or(
+      eq(apps.ownerId, by.userId),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(appMembers)
+          .where(and(eq(appMembers.appId, apps.id), rowsOf(by)))
+      )
+    ),
+    openInItsStatus(by)
+  );
+};
+
+/**
+ * The Apps `userId` owns or is shared with when the statement runs, as a
+ * person or through a team they are in then, as a condition on `apps`:
+ * those they have a role in unless they are an admin, who has one in
+ * every App. `appsFoundBy`, with their teams read by the statement
+ * itself, for a write that must see the teams its own batch has not taken
+ * away yet.
+ */
+export const appsOwnedOrSharedNow = (userId: string): SQL =>
+  sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, userId)})))`;
+
+/**
+ * That an `app_members` row is `by`'s when the statement runs: their own,
+ * a team's they are in then, or a project's (`viaProjectSql`).
+ */
+const theirRows = (by: Pick<Person, "userId">): SQL =>
+  sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, by.userId)})`;
+
+/** That `by` owns App `app` when the statement runs. */
+const ownedBy = (by: Pick<Person, "userId">, app: AppId): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId})`;
+
+/**
+ * That `by` owns App `app` or has it shared with them as a builder when
+ * the statement runs, whatever their role in the organization.
+ */
+const buildRole = (by: Pick<Person, "userId">, app: AppId): SQL =>
+  sql`${ownedBy(by, app)} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${appMembers.role} = 'builder' AND ${theirRows(by)})`;
+
+/** That App `app` isn't removed (app-removal.ts) when the statement runs. */
+const kept = (app: AppId): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.removedAt} IS NOT NULL)`;
+
+/**
+ * That `by` still has a role in `app` when the statement runs, as SQL: an
+ * admin (as their session said), the App's owner, or someone it is shared
+ * with, as a person or through a team they are in then. For guarding a
+ * write that an earlier check allowed, so a role lost since stops it.
+ * What the App read (`app.unreadable`) can't be decided in SQL, and isn't
+ * part of it.
+ */
+export const stillOpenTo = (by: Person, app: AppId): SQL => {
+  if (isAdmin(by.role)) {
+    return kept(app);
+  }
+  const role = sql`(${ownedBy(by, app)} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${theirRows(by)}))`;
+  // As `openInItsStatus`, read when the statement runs.
+  const builds = canBuild(by.role) ? sql` OR ${buildRole(by, app)}` : sql``;
+  return sql`(${role} AND (EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${openToUsersSql})${builds}) AND ${kept(app)})`;
+};
+
+/**
+ * That `by` still builds `app` when the statement runs, as SQL, as
+ * `appsBuiltBy` decides it: an admin (as their session said), or one whose
+ * role in the organization builds and who owns the App or has it shared
+ * with them (or a team of theirs) as builders. For guarding a builder's
+ * write an earlier check allowed, so a role lost since stops it.
+ */
+export const stillBuiltBy = (by: Person, app: AppId): SQL => {
+  if (isAdmin(by.role)) {
+    return kept(app);
+  }
+  if (!canBuild(by.role)) {
+    return sql`0`;
+  }
+  return sql`((${buildRole(by, app)}) AND ${kept(app)})`;
+};
+
+/**
+ * What `by` may do through the functions of App `app`, read now, as
+ * `requireStillOpen` reads it: a member of the App with any role in it, a
+ * builder with that role (what `appMembers` and `appBuilders` tables
+ * require), and the IDs of the teams they are in now (what a table's
+ * `team` row rules match, store-rules.ts: read here on every call, never
+ * from the session, so a team left or joined counts from the next read or
+ * commit). Refuses as `requireAppRole` does, `app.not_found` when they
+ * have no role. For the function host, which asks again just before a
+ * mutation commits (function-host.ts).
+ */
+export const functionRoles = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "guest">,
+  app: AppId
+): Promise<{ appMember: boolean; appBuilder: boolean; teams: string[] }> => {
+  const row = await drizzle(env.DB)
+    .select({
+      id: apps.id,
+      owner: apps.ownerId,
+      currentVersion: apps.currentVersion,
+      archivedAt: apps.archivedAt,
+    })
+    .from(apps)
+    .where(eq(apps.id, app))
+    .get();
+  if (row === undefined) {
+    throw appErrors.create("app.not_found");
+  }
+  const teams = await teamsOf(env.DB, by.userId);
+  const role = await requireAppRole(
+    env,
+    { ...by, teams },
+    {
+      id: appIdSchema.parse(row.id),
+      owner: row.owner,
+      currentVersion: row.currentVersion,
+      archived: row.archivedAt !== null,
+    },
+    "user"
+  );
+  // Nobody calls an archived App's functions, its builders included.
+  if (row.archivedAt !== null) {
+    throw appErrors.create("app.archived");
+  }
+  return {
+    appMember: true,
+    appBuilder: role === "builder",
+    teams: teams.map(({ id }) => id),
+  };
+};

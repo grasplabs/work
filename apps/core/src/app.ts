@@ -1,0 +1,623 @@
+import { fileLimits } from "@grasp-os/shared/app-file-limits";
+import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  actionMaxRunning,
+  streamMaxRunning,
+} from "@grasp-os/shared/function-limits";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
+import { log } from "@grasp-os/shared/log";
+import {
+  liveReadLimitsOf,
+  pageErrors,
+  pageLimits,
+} from "@grasp-os/shared/pages";
+import type { AppErrorLog, ServerLog } from "@grasp-os/shared/pages";
+import {
+  statisticErrors,
+  statisticReadLimitsOf,
+} from "@grasp-os/shared/statistics";
+import { TokenBuckets } from "@grasp-os/shared/token-bucket";
+import { DurableObject } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
+
+import { ErrorLog } from "./app-error-log.ts";
+import type { ReportedProblem } from "./app-error-log.ts";
+import { auditedBatch, outboxed } from "./audit-outbox.ts";
+
+// An App's host object: one per App, which every connection of every
+// person to the App ends at, so what it counts can't be skipped by opening
+// another. It keeps the App's restricted mode (restricted.ts), its error
+// log and its rate buckets, follows its runs and revocations for open
+// pages, and holds the places of its running invocations. No App code
+// runs here: an App's functions run in isolates of their own, from its
+// sealed release (app-functions.ts).
+
+/** How often, at most, the count of dropped reports is written to the log. */
+const suppressedWriteMs = 60_000;
+/** How often, at most, refused requests of an App's pages are logged. */
+const refusalLogMs = 60_000;
+/**
+ * How often, at most, the same refusal of the App's data to a page (who,
+ * which build, why, what and where) is audited (`auditOnce`).
+ */
+const refusalAuditMs = 10 * 60_000;
+/** How many refusals `auditOnce` remembers at most. */
+const refusalsKept = 1000;
+/** The one bucket all of an App's reports share, and its server lines. */
+const appBucket = "app";
+/**
+ * The lines kept a minute of what an App's server code writes with
+ * `console`, as many as of its pages' reports (`pageLimits.appReports`)
+ * but counted apart from them (`logServer`).
+ */
+const serverLinesLimit = { burst: 200, perMinute: 200 } as const;
+/** Where the App keeps its restricted mode (see restricted.ts). */
+const restrictedKey = "restricted";
+/**
+ * A connection's callback for the App's revocations (`followAccess`):
+ * called with `true` when its person's role in the App may have dropped,
+ * so it checks their access again now (query-subscriptions.ts), and with
+ * `false` only to see that it is still there. Called with `false, true`
+ * when the person's independent runs the App started changed
+ * (`workflowRunsChanged`), so its workflow queries read again, and with
+ * `false, false, true` when another version of the App was made current
+ * (`versionChanged`), so its pages see it, and with `false, false, false,
+ * true` when a decision of a run the App started changed
+ * (`workflowDecisionsChanged`), so its decision queries read again. It
+ * throws once the connection no longer follows the App.
+ */
+export type AccessWatcher = Rpc.Stub<
+  (
+    revoked: boolean,
+    runsChanged?: boolean,
+    versionChanged?: boolean,
+    decisionsChanged?: boolean
+  ) => void
+>;
+
+/**
+ * Most connections of one person that follow the App's revocations at
+ * once: one per open tab of the App's pages, so this only bounds what a
+ * page that follows over and over keeps here.
+ */
+const accessFollowersPerPerson = 64;
+/** Where the App's object keeps `userId`'s held places of one kind. */
+const invocationHoldsKey = (userId: string, streaming: boolean): string =>
+  `${streaming ? "stream" : "action"}-holds:${userId}`;
+
+/**
+ * One App's host object (see above): core reaches it through `appHost`;
+ * no App code does.
+ */
+export class App extends DurableObject<Env> {
+  /** Connections following the App's revocations, by ID (`followAccess`). */
+  readonly #accessFollowers = new Map<
+    string,
+    { readonly userId: string; readonly onRevoked: AccessWatcher }
+  >();
+
+  /** The platform's statistics the App read in the current minute. */
+  #statisticsMinute = { minute: 0, read: 0 };
+
+  /** The minute a read refused past its bounds was last audited. */
+  #limitedAuditMinute = -1;
+
+  // What the App's pages may ask and report, counted here because every
+  // connection of every person to this App ends at this one object: a
+  // count the page or one connection kept is skipped by opening another.
+  // Kept in memory: a restart of this object starts the buckets full,
+  // which an idle App's are anyway.
+
+  /** Each person's requests of the App's pages. */
+  readonly #requests = new TokenBuckets(pageLimits.requests);
+
+  /**
+   * Each person's reads of their live queries that writes caused
+   * (`querySubscriptionLimits.liveReads`, query-subscriptions.ts).
+   */
+  readonly #liveReads = new TokenBuckets(
+    liveReadLimitsOf(this.env.LIVE_READ_LIMITS)
+  );
+
+  /**
+   * Each person's chunk requests of the App's files: a budget of their
+   * own (an upload is many chunks), charged before a chunk costs anything.
+   */
+  readonly #chunks = new TokenBuckets(fileLimits.chunkRequests);
+
+  /** Chunks refused since the last line logged of them, and when that was. */
+  #refusedChunks = { chunks: 0, loggedAt: 0 };
+
+  /** The reports kept of each person's pages, and of all of them. */
+  readonly #callerReports = new TokenBuckets(pageLimits.callerReports);
+  readonly #appReports = new TokenBuckets(pageLimits.appReports);
+
+  /**
+   * The lines kept of what the App's server code writes with `console`:
+   * a budget apart from its pages' reports, so server code that logs
+   * a lot never crowds out a problem a page reports.
+   */
+  readonly #serverLines = new TokenBuckets(serverLinesLimit);
+
+  /** The App's error log, in this object's own storage. */
+  readonly #errorLog = new ErrorLog(this.ctx.storage);
+
+  /** Reports dropped unread and not yet in the log's count, and when it was last written. */
+  readonly #suppressed = { writtenAt: 0, writing: false };
+
+  /** Requests refused since the last line logged of them, and when that was. */
+  #refused = { requests: 0, loggedAt: 0 };
+
+  /** When each refusal of a page was last audited, oldest first (`auditOnce`). */
+  readonly #refusalsAudited = new Map<string, number>();
+
+  /** The refusals whose rows are being written now (`auditOnce`). */
+  readonly #refusalsWriting = new Map<string, Promise<void>>();
+
+  get #app(): AppId {
+    return appIdSchema.parse(this.ctx.id.name);
+  }
+
+  /** Whether the App has read restricted data. */
+  async isRestricted(): Promise<boolean> {
+    return (await this.ctx.storage.get(restrictedKey)) === true;
+  }
+
+  /**
+   * Puts the App in restricted mode, for good, and tells every connection
+   * following its live queries, the first time: a run's snapshot says what
+   * the App may send the run (page-workflows.ts, `canSend`), which the
+   * App's restricted mode decides, so its pages read it again.
+   */
+  async restrict(): Promise<void> {
+    if (await this.isRestricted()) {
+      return;
+    }
+    await this.ctx.storage.put(restrictedKey, true);
+    this.workflowPolicyChanged();
+  }
+
+  /**
+   * Audits what `refusal` names, with `entry`: a page's refusal of the
+   * App's data (who, which build, why, what and where); unless it was
+   * audited within `refusalAuditMs`, so a page opened over and over, or
+   * a page retrying, adds a row a window, not one a try. The check and the
+   * write are one operation per refusal here: the same refusal arriving
+   * while its row is being written waits for that write instead of
+   * writing its own. It counts as audited only once the row is written;
+   * a write that fails fails each that waited on it, and the next refusal
+   * writes again. Kept in memory, so a restart of this object audits each
+   * once more; past `refusalsKept`, the oldest are forgotten first, which
+   * only audits them again.
+   */
+  async auditOnce(refusal: string, entry: AuditEntry): Promise<void> {
+    const audited = this.#refusalsAudited.get(refusal);
+    if (audited !== undefined && Date.now() - audited < refusalAuditMs) {
+      return;
+    }
+    const writing = this.#refusalsWriting.get(refusal);
+    if (writing !== undefined) {
+      await writing;
+      return;
+    }
+    const write = this.#writeRefusal(refusal, entry);
+    this.#refusalsWriting.set(refusal, write);
+    try {
+      await write;
+    } finally {
+      this.#refusalsWriting.delete(refusal);
+    }
+  }
+
+  /** Writes `refusal`'s row, then notes it audited. */
+  async #writeRefusal(refusal: string, entry: AuditEntry): Promise<void> {
+    const db = drizzle(this.env.DB);
+    await auditedBatch(this.env, db, [outboxed(db, entry)]);
+    this.#refusalsAudited.delete(refusal);
+    this.#refusalsAudited.set(refusal, Date.now());
+    for (const [oldest] of this.#refusalsAudited) {
+      if (this.#refusalsAudited.size <= refusalsKept) {
+        break;
+      }
+      this.#refusalsAudited.delete(oldest);
+    }
+  }
+
+  /**
+   * Whether core may read one more of `userId`'s live queries of the App
+   * now because a write changed what it read
+   * (`querySubscriptionLimits.liveReads`): each page a paginated list
+   * follows is one. One that may not waits.
+   */
+  admitLiveRead(userId: string): boolean {
+    return this.#liveReads.take(userId, Date.now(), 1);
+  }
+
+  /**
+   * Whether `userId` may start the action invocation `name` now, which
+   * runs until `until` at most: holds a place for it if so. A person runs
+   * at most `streamMaxRunning` streaming actions and `actionMaxRunning`
+   * plain ones at once in the App, each kind counted apart. A hold past
+   * its time no longer counts, so a run whose end was never told frees its
+   * place by its deadline. Stored, not only in memory: a restart of this
+   * object while invocations run (each in an object of its own) must not
+   * give their places back.
+   */
+  holdInvocation(
+    userId: string,
+    name: string,
+    until: number,
+    streaming: boolean
+  ): boolean {
+    const now = Date.now();
+    const key = invocationHoldsKey(userId, streaming);
+    const held = Object.entries(this.#invocationHolds(key)).filter(
+      ([, end]) => end > now
+    );
+    const most = streaming ? streamMaxRunning : actionMaxRunning;
+    if (!held.some(([running]) => running === name) && held.length >= most) {
+      return false;
+    }
+    this.ctx.storage.kv.put(key, {
+      ...Object.fromEntries(held),
+      [name]: until,
+    });
+    return true;
+  }
+
+  /** Frees `userId`'s place for the invocation `name`, which has ended. */
+  releaseInvocation(userId: string, name: string, streaming: boolean): void {
+    const now = Date.now();
+    const key = invocationHoldsKey(userId, streaming);
+    const held = Object.entries(this.#invocationHolds(key)).filter(
+      ([running, end]) => running !== name && end > now
+    );
+    if (held.length === 0) {
+      this.ctx.storage.kv.delete(key);
+      return;
+    }
+    this.ctx.storage.kv.put(key, Object.fromEntries(held));
+  }
+
+  /** The places held under `key`, by invocation name, each until when. */
+  #invocationHolds(key: string): Readonly<Record<string, number>> {
+    return this.ctx.storage.kv.get<Record<string, number>>(key) ?? {};
+  }
+
+  /**
+   * Whether `userId`'s page may ask the App one more thing now
+   * (`pageLimits.requests`). Asked before the request is read, so one
+   * that is refused or malformed counts too.
+   */
+  admitRequest(userId: string): boolean {
+    const now = Date.now();
+    const admitted = this.#requests.take(userId, now, 1);
+    if (!admitted) {
+      this.#refused.requests += 1;
+      // One line a minute for whoever audits it, not one a request.
+      if (now - this.#refused.loggedAt >= refusalLogMs) {
+        log.warn("page.requests_limited", {
+          appId: this.#app,
+          refused: this.#refused.requests,
+        });
+        this.#refused = { requests: 0, loggedAt: now };
+      }
+    }
+    return admitted;
+  }
+
+  /**
+   * Whether `userId`'s page may send one more chunk of a file now
+   * (`fileLimits.chunkRequests`): asked before the chunk is read or
+   * anything is looked up, so a refused, duplicate or malformed chunk
+   * counts too. Refusals reach the log at most once a minute.
+   */
+  admitChunk(userId: string): boolean {
+    const now = Date.now();
+    const admitted = this.#chunks.take(userId, now);
+    if (!admitted) {
+      this.#refusedChunks.chunks += 1;
+      if (now - this.#refusedChunks.loggedAt >= refusalLogMs) {
+        log.warn("app_file.chunks_limited", {
+          appId: this.#app,
+          refused: this.#refusedChunks.chunks,
+        });
+        this.#refusedChunks = { chunks: 0, loggedAt: now };
+      }
+    }
+    return admitted;
+  }
+
+  /**
+   * Whether one more report of `userId`'s page is kept now: within what
+   * one person's pages may report, and all of the App's together. One
+   * that isn't is only counted. The count reaches the log at once the
+   * first time and at most once a minute after, so a flood of reports
+   * writes one number, not a record each.
+   */
+  async admitReport(userId: string): Promise<boolean> {
+    const now = Date.now();
+    // Asked of the App's bucket first, taken from it last: a report the
+    // App has no room for must not use up the person's own.
+    const admitted =
+      this.#appReports.has(appBucket, now) &&
+      this.#callerReports.take(userId, now) &&
+      this.#appReports.take(appBucket, now);
+    if (!admitted) {
+      await this.#dropReport(now);
+    }
+    return admitted;
+  }
+
+  /**
+   * Counts one report as dropped unread: written to the log at once the
+   * first time, and at most once a minute after.
+   */
+  async #dropReport(now: number): Promise<void> {
+    this.#errorLog.suppress();
+    if (
+      !this.#suppressed.writing &&
+      now - this.#suppressed.writtenAt >= suppressedWriteMs
+    ) {
+      await this.#writeSuppressed(now);
+    }
+  }
+
+  /**
+   * Writes the count of dropped reports to the log. The time of the write
+   * moves on only once the log has it: after one that fails, the next
+   * dropped report tries again.
+   */
+  async #writeSuppressed(now: number): Promise<void> {
+    this.#suppressed.writing = true;
+    try {
+      const reports = await this.#errorLog.writeSuppressed();
+      this.#suppressed.writtenAt = now;
+      // One line for the operator too, as often as the number is written.
+      if (reports > 0) {
+        log.warn("page.reports_suppressed", { appId: this.#app, reports });
+      }
+    } finally {
+      this.#suppressed.writing = false;
+    }
+  }
+
+  /** Adds an admitted report to the App's error log (app-error-log.ts). */
+  async logError(reported: ReportedProblem): Promise<void> {
+    await this.#errorLog.add(reported);
+  }
+
+  /**
+   * Adds what the App's server code at `version` wrote with `console` to
+   * its error log, for its tail alone (server-logs.ts): each line within
+   * what the App's server lines may use together (`serverLinesLimit`),
+   * apart from its pages' reports, and only counted past it, so code
+   * that logs in a loop writes no more, and suppresses no page's report.
+   */
+  async logServer(version: number, logs: ServerLog[]): Promise<void> {
+    for (const line of logs) {
+      const now = Date.now();
+      // oxlint-disable-next-line no-await-in-loop -- in order, each counted against the App's server lines
+      await (this.#serverLines.take(appBucket, now)
+        ? this.#errorLog.add({ ...line, source: "server", version })
+        : this.#dropReport(now));
+    }
+  }
+
+  /**
+   * The App's error log, with every report dropped so far counted.
+   * Reading it writes nothing: the count is written only as reports are
+   * dropped, at most once a minute (`admitReport`).
+   */
+  async errors(): Promise<AppErrorLog> {
+    return await this.#errorLog.read();
+  }
+
+  /**
+   * Keeps `onRevoked`, the callback of a connection of `userId`'s that
+   * follows the App's live queries, and calls it each time their role in
+   * the App may have dropped (`accessRevoked`), until calling it fails.
+   * Kept in memory: a restart of this object drops them, which tells each connection to check its access
+   * and follow again, so an event sent meanwhile is never missed. Past
+   * `accessFollowersPerPerson`, the person's connections that are gone
+   * are let go of first; refused if that frees no place. Returns the ID
+   * `unfollowAccess` drops it by.
+   */
+  async followAccess(
+    userId: string,
+    onRevoked: AccessWatcher
+  ): Promise<string> {
+    const held = onRevoked.dup();
+    const theirs = (): [string, AccessWatcher][] =>
+      [...this.#accessFollowers]
+        .filter(([, follower]) => follower.userId === userId)
+        .map(([id, follower]) => [id, follower.onRevoked]);
+    if (theirs().length >= accessFollowersPerPerson) {
+      await Promise.all(
+        theirs().map(async ([id, watcher]) => {
+          try {
+            await watcher(false);
+          } catch {
+            this.#dropFollower(id);
+          }
+        })
+      );
+    }
+    if (theirs().length >= accessFollowersPerPerson) {
+      held[Symbol.dispose]();
+      throw pageErrors.create("page.too_many_queries");
+    }
+    const id = crypto.randomUUID();
+    this.#accessFollowers.set(id, { userId, onRevoked: held });
+    return id;
+  }
+
+  /** Drops the callback `followAccess` kept as `id`, if it still does. */
+  unfollowAccess(id: string): void {
+    this.#dropFollower(id);
+  }
+
+  /**
+   * Tells the connections of `userIds` (of everyone, when `null`) that
+   * follow the App's live queries that their role in it may have dropped
+   * (access-revocations.ts): each checks again now, and clears what its
+   * pages show if it has. Returns at once, with how many connections it
+   * told; a connection that is gone is dropped.
+   */
+  accessRevoked(userIds: readonly string[] | null): number {
+    let told = 0;
+    for (const [id, { userId, onRevoked }] of this.#accessFollowers) {
+      if (userIds === null || userIds.includes(userId)) {
+        told += 1;
+        void this.#tellRevoked(id, onRevoked);
+      }
+    }
+    return told;
+  }
+
+  /**
+   * Tells every connection that follows the App that another of its
+   * versions was made current (apps.ts, `activateVersion`): each tells the
+   * pages that follow its version (pages-rpc.ts, `watchVersion`), which
+   * read it again as their person. Returns at once, with how many
+   * connections it told; a connection that is gone is dropped.
+   */
+  versionChanged(): number {
+    let told = 0;
+    for (const [id, { onRevoked }] of this.#accessFollowers) {
+      told += 1;
+      void this.#tellVersionChanged(id, onRevoked);
+    }
+    return told;
+  }
+
+  async #tellVersionChanged(
+    id: string,
+    onRevoked: AccessWatcher
+  ): Promise<void> {
+    try {
+      await onRevoked(false, false, true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
+  async #tellRevoked(id: string, onRevoked: AccessWatcher): Promise<void> {
+    try {
+      await onRevoked(true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
+  /**
+   * Tells the connections of `userId` that follow the App's live queries
+   * that their independent runs the App started changed (run-changes.ts,
+   * `tellQueryFollowers`): each reads its workflow queries of the App
+   * again, as its person. Returns at once, with how many connections it
+   * told; a connection that is gone is dropped.
+   */
+  workflowRunsChanged(userId: string): number {
+    let told = 0;
+    for (const [id, follower] of this.#accessFollowers) {
+      if (follower.userId === userId) {
+        told += 1;
+        void this.#tellRunsChanged(id, follower.onRevoked);
+      }
+    }
+    return told;
+  }
+
+  /**
+   * Tells every connection that follows the App's live queries that what
+   * the App may start may have changed (a permission of the App granted or
+   * revoked, permissions.ts): each reads its workflow queries
+   * of the App again, as its person, so a page's `canStart` and
+   * `canCancel` follow the grant (page-workflows.ts). Returns at once,
+   * with how many connections it told.
+   */
+  workflowPolicyChanged(): number {
+    for (const [id, follower] of this.#accessFollowers) {
+      void this.#tellRunsChanged(id, follower.onRevoked);
+    }
+    return this.#accessFollowers.size;
+  }
+
+  /**
+   * Tells every connection that follows the App's live queries that a
+   * decision of an independent run the App started opened, closed or was
+   * answered (run-changes.ts, `tellDecisionFollowers`): each reads its
+   * decision queries of the App again, as its person, since a decision
+   * asks people other than its run's. Nothing of the decision goes with
+   * it. Returns at once, with how many connections it told.
+   */
+  workflowDecisionsChanged(): number {
+    for (const [id, follower] of this.#accessFollowers) {
+      void this.#tellDecisionsChanged(id, follower.onRevoked);
+    }
+    return this.#accessFollowers.size;
+  }
+
+  async #tellDecisionsChanged(
+    id: string,
+    onRevoked: AccessWatcher
+  ): Promise<void> {
+    try {
+      await onRevoked(false, false, false, true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
+  async #tellRunsChanged(id: string, onRevoked: AccessWatcher): Promise<void> {
+    try {
+      await onRevoked(false, true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
+  #dropFollower(id: string): void {
+    const follower = this.#accessFollowers.get(id);
+    this.#accessFollowers.delete(id);
+    follower?.onRevoked[Symbol.dispose]();
+  }
+
+  /**
+   * Counts one read of the platform's statistics by a sealed function
+   * (resource-grasp.ts) against the App's minute, all the App's calls
+   * together. `statistics.rate_limited` past it. Each call's own bound is
+   * core's (the invocation's counts).
+   */
+  claimStatisticMinute(): void {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (this.#statisticsMinute.minute !== minute) {
+      this.#statisticsMinute = { minute, read: 0 };
+    }
+    const { perCall, perMinute } = statisticReadLimitsOf(
+      this.env.STATISTICS_READ_LIMITS
+    );
+    if (this.#statisticsMinute.read >= perMinute) {
+      throw statisticErrors.create("statistics.rate_limited", {
+        perCall,
+        perMinute,
+      });
+    }
+    this.#statisticsMinute.read += 1;
+  }
+
+  /**
+   * Whether a sealed function's platform read refused past its bounds is
+   * the App's first in this minute, the one audited, so a loop can't
+   * flood the audit log.
+   */
+  limitedReadAuditDue(): boolean {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (this.#limitedAuditMinute === minute) {
+      return false;
+    }
+    this.#limitedAuditMinute = minute;
+    return true;
+  }
+}

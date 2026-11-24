@@ -1,0 +1,555 @@
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { AppVersionPush } from "@grasp-os/shared/pages";
+/**
+ * Drives sign-in the way a browser on the client's page does, through the
+ * router: requests go to core's own address with the router secret.
+ */
+import type { Role } from "@grasp-os/shared/roles";
+import { routerSecretHeader } from "@grasp-os/shared/router";
+import type { CoreApi } from "@grasp-os/shared/rpc";
+import type { EndedSession } from "@grasp-os/shared/sign-in";
+import { newWebSocketRpcSession } from "capnweb";
+import { createExecutionContext } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { vi } from "vite-plus/test";
+import { z } from "zod";
+
+import worker from "../src/index.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
+import { eventsAfter, logHead } from "./audit-events.ts";
+import type { Claims, Idp } from "./idp.ts";
+import { closeWhenTestEnds, untilAnswered } from "./open-sockets.ts";
+import {
+  acmeTenant,
+  clientOrigin,
+  signInConfig,
+  staffOid,
+} from "./sign-in-config.ts";
+
+/** Where the router sends requests: core's own address. */
+export const coreOrigin = "https://grasp-os-core.acme.workers.test";
+
+export const sessionCookieName = "__Host-grasp.session_token";
+
+/** Core's env with a different sign-in config. */
+export const withSignIn = (changes: Record<string, unknown>): Env => ({
+  ...env,
+  SIGN_IN: { ...signInConfig, ...changes },
+});
+
+/**
+ * A request to the client's hostname, as core receives it from the router.
+ * What it leaves running after answering (`waitUntil`) goes on in `ctx`,
+ * for a test that waits for it.
+ */
+export const routed = async (
+  path: string,
+  init: RequestInit = {},
+  coreEnv: Env = env,
+  ctx: ExecutionContext = createExecutionContext()
+): Promise<Response> => {
+  const headers = new Headers(init.headers);
+  headers.set(routerSecretHeader, env.ROUTER_SECRET);
+  // A browser follows redirects to other origins; the tests look at them.
+  const request = new Request(`${coreOrigin}${path}`, {
+    redirect: "manual",
+    ...init,
+    headers,
+  });
+  return await untilAnswered(
+    `${request.method} ${path}`,
+    worker.fetch(request, coreEnv, ctx)
+  );
+};
+
+/** The `name=value` pairs a response sets, as a `Cookie` header. */
+const cookiesFrom = (response: Response): string =>
+  response.headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(";")[0] ?? "")
+    .filter((pair) => !pair.endsWith("="))
+    .join("; ");
+
+/** The session cookie a response sets, as a `Cookie` header, if any. */
+const sessionCookieFrom = (response: Response): string | undefined =>
+  cookiesFrom(response)
+    .split("; ")
+    .find((pair) => pair.startsWith(`${sessionCookieName}=`));
+
+const startedSchema = z.object({ url: z.url(), redirect: z.literal(true) });
+
+interface SignInOptions {
+  /** Cookies the browser already has. */
+  cookie?: string;
+  coreEnv?: Env;
+  /** Where the browser goes once signed in; the start page by default. */
+  callbackURL?: string;
+  /** The page sign-in starts from; the client's own by default. */
+  origin?: string;
+  /** The browser's user agent, as it sends it back from the IdP. */
+  userAgent?: string;
+}
+
+/** Asks core to start signing in; returns the IdP URL and the browser's cookies. */
+export const startSignIn = async (
+  providerId: string,
+  {
+    cookie = "",
+    coreEnv = env,
+    callbackURL = "/",
+    origin = clientOrigin,
+  }: SignInOptions = {}
+) => {
+  const response = await routed(
+    "/api/auth/sign-in/sso",
+    {
+      method: "POST",
+      headers: {
+        origin,
+        "content-type": "application/json",
+        cookie,
+      },
+      body: JSON.stringify({
+        providerId,
+        callbackURL,
+        errorCallbackURL: "/",
+      }),
+    },
+    coreEnv
+  );
+  if (!response.ok) {
+    throw new Error(`Sign-in did not start: ${response.status}`);
+  }
+  const { url } = startedSchema.parse(await response.json());
+  return { authorizationUrl: new URL(url), cookie: cookiesFrom(response) };
+};
+
+/** Follows the IdP's redirect back to core, as the browser would. */
+export const finishSignIn = async (
+  callback: URL,
+  { cookie = "", coreEnv = env, userAgent }: SignInOptions = {}
+) =>
+  await routed(
+    `${callback.pathname}${callback.search}`,
+    {
+      headers: {
+        cookie,
+        ...(userAgent === undefined ? {} : { "user-agent": userAgent }),
+      },
+    },
+    coreEnv
+  );
+
+/**
+ * Signs a person in end to end: core, the IdP, back to core. Returns core's
+ * final response (a redirect to the frontend) and the session cookie it set.
+ */
+export const signIn = async (
+  idp: Idp,
+  providerId: string,
+  claims: Claims,
+  options: SignInOptions = {}
+) => {
+  const started = await startSignIn(providerId, options);
+  const callback = idp.authorize(started.authorizationUrl, claims);
+  const cookie = [options.cookie, started.cookie].filter(Boolean).join("; ");
+  const response = await finishSignIn(callback, { ...options, cookie });
+  return {
+    response,
+    location: response.headers.get("location"),
+    session: sessionCookieFrom(response),
+    callback,
+    cookie,
+  };
+};
+
+/** Signs in and returns the session cookie; fails the test if refused. */
+export const signedIn = async (
+  idp: Idp,
+  providerId: string,
+  claims: Claims,
+  options: SignInOptions = {}
+): Promise<string> => {
+  const { session, location } = await signIn(idp, providerId, claims, options);
+  if (session === undefined) {
+    throw new Error(`Sign-in refused: ${location}`);
+  }
+  return session;
+};
+
+interface RpcOptions {
+  /** The page the connection comes from. */
+  origin?: string;
+  coreEnv?: Env;
+}
+
+/** Opens `/rpc` with `cookie`, from the client's own page unless told otherwise. */
+export const openRpc = async (
+  cookie?: string,
+  { origin = clientOrigin, coreEnv = env }: RpcOptions = {}
+) => {
+  const headers = new Headers({ Upgrade: "websocket", Origin: origin });
+  if (cookie !== undefined) {
+    headers.set("cookie", cookie);
+  }
+  const response = await routed("/rpc", { headers }, coreEnv);
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error(`Expected a WebSocket, got ${response.status}`);
+  }
+  const closed = Promise.withResolvers<number>();
+  socket.addEventListener("close", (event) => {
+    closed.resolve(event.code);
+  });
+  socket.accept();
+  closeWhenTestEnds(socket);
+  const core = newWebSocketRpcSession<CoreApi>(socket);
+  return { core, socket, closed: closed.promise };
+};
+
+/** How core settled a call made over a raw connection, as it sent it. */
+export type RawSettled = ["resolve" | "reject", number, unknown];
+
+/**
+ * Opens `/rpc` with `cookie` and speaks Cap'n Web's messages by hand, as a
+ * page someone changed can: `push` sends an expression and gives the ID
+ * it gets (1, 2, ... in order), `pull` asks for what one settled as.
+ */
+export const openRawRpc = async (cookie: string) => {
+  const response = await routed("/rpc", {
+    headers: { Upgrade: "websocket", Origin: clientOrigin, cookie },
+  });
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error(`Expected a WebSocket, got ${response.status}`);
+  }
+  const waiting = new Map<number, (settled: RawSettled) => void>();
+  socket.addEventListener("message", (event) => {
+    const message: unknown = JSON.parse(String(event.data));
+    if (
+      Array.isArray(message) &&
+      (message[0] === "resolve" || message[0] === "reject") &&
+      typeof message[1] === "number"
+    ) {
+      waiting.get(message[1])?.([message[0], message[1], message[2]]);
+    }
+  });
+  socket.accept();
+  closeWhenTestEnds(socket);
+  let pushed = 0;
+  return {
+    push: (expression: unknown): number => {
+      socket.send(JSON.stringify(["push", expression]));
+      pushed += 1;
+      return pushed;
+    },
+    pull: async (id: number): Promise<RawSettled> => {
+      const settled = Promise.withResolvers<RawSettled>();
+      waiting.set(id, settled.resolve);
+      socket.send(JSON.stringify(["pull", id]));
+      return await settled.promise;
+    },
+    close: () => {
+      socket.close();
+    },
+  };
+};
+
+/** A statement that reads the sessions table. */
+const readsSessions = /\bfrom\s+"sessions"/iu;
+
+/**
+ * `db`, counting in `reads.sessions` every statement it prepares that
+ * reads the sessions table: how often core looks up who is behind a
+ * cookie. Everything else goes to `db` as it is.
+ */
+export const countingSessionReads = (
+  db: D1Database,
+  reads: { sessions: number }
+): D1Database =>
+  new Proxy(db, {
+    get: (target, property) => {
+      if (property === "prepare") {
+        return (query: string): D1PreparedStatement => {
+          if (readsSessions.test(query)) {
+            reads.sessions += 1;
+          }
+          return target.prepare(query);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+
+/**
+ * Lets the few seconds pass that an open connection's reading of who is
+ * behind it holds (`sessionRecheckMs`), on a held clock, so its next call
+ * reads again. Only the date is moved, and it goes on from there until
+ * the returned clock is disposed.
+ */
+export const letSessionRecheckPass = (): Disposable => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(Date.now() + sessionRecheckMs);
+  return {
+    [Symbol.dispose]: () => {
+      vi.useRealTimers();
+    },
+  };
+};
+
+/** Who the session behind `cookie` is, on a connection of its own. */
+export const whoami = async (cookie?: string, coreEnv: Env = env) => {
+  const { core } = await openRpc(cookie, { coreEnv });
+  try {
+    using session = core.authenticate();
+    return await session.whoami();
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Ends every other session of the person behind `cookie`, as they do from
+ * Settings → Security; what each ending came to.
+ */
+export const endOtherSessions = async (
+  cookie: string
+): Promise<EndedSession[]> => {
+  const { core } = await openRpc(cookie);
+  try {
+    using session = core.authenticate();
+    const listed = await session.sessions.list();
+    const others = listed.filter(({ current }) => !current);
+    return await Promise.all(
+      others.map(async ({ id }) => await session.sessions.end(id))
+    );
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/** Calls Better Auth's API as a browser on the client's page. */
+export const callAuth = async (
+  path: string,
+  cookie: string,
+  body?: unknown
+): Promise<Response> => {
+  const headers = new Headers({ origin: clientOrigin, cookie });
+  if (body === undefined) {
+    return await routed(`/api/auth${path}`, { headers });
+  }
+  headers.set("content-type", "application/json");
+  return await routed(`/api/auth${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+};
+
+/**
+ * The code a promise was refused with, or "ok" if it wasn't: an error's
+ * `code` (every expected error has one, and keeps it over RPC), or else
+ * the error as text.
+ */
+/** The error a promise was refused with, or "ok" if it wasn't. */
+export const refusal = async (promise: Promise<unknown>): Promise<unknown> =>
+  await promise.then(
+    () => "ok",
+    (error: unknown) => error
+  );
+
+export const outcome = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "ok";
+  } catch (error) {
+    return typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof error.code === "string"
+      ? error.code
+      : String(error);
+  }
+};
+
+/**
+ * Follows an App's current version as a page does (`pages.watchVersion`,
+ * through `follow`): each push in turn as core sends it (`next`), and the
+ * hold to let go of (`release`).
+ */
+export const followedVersion = async (
+  follow: (
+    onVersion: (push: AppVersionPush) => void
+  ) => Promise<{ release: () => Promise<void> }>
+) => {
+  const pushes: AppVersionPush[] = [];
+  let waiting: PromiseWithResolvers<AppVersionPush> | undefined;
+  const hold = await follow((push) => {
+    const waiter = waiting;
+    waiting = undefined;
+    if (waiter === undefined) {
+      pushes.push(push);
+    } else {
+      waiter.resolve(push);
+    }
+  });
+  return {
+    next: async (): Promise<AppVersionPush> => {
+      const queued = pushes.shift();
+      if (queued !== undefined) {
+        return queued;
+      }
+      waiting = Promise.withResolvers();
+      return await waiting.promise;
+    },
+    release: async () => {
+      await hold.release();
+    },
+  };
+};
+
+/**
+ * Follows an App's version through `follow` until core's first push, then
+ * lets go: the version it pushed, or refused as core refuses following it,
+ * or as its first push refuses it (thrown with that push's code), so a
+ * refusal never reads as a version delivered.
+ */
+export const firstVersion = async (
+  follow: Parameters<typeof followedVersion>[0]
+): Promise<Extract<AppVersionPush, { type: "current" }>> => {
+  const followed = await followedVersion(follow);
+  let push: AppVersionPush;
+  try {
+    push = await followed.next();
+  } finally {
+    await followed.release();
+  }
+  if (push.type === "refused") {
+    throw Object.assign(new Error(push.error.message), {
+      code: push.error.code,
+    });
+  }
+  return push;
+};
+
+/**
+ * The audit events from core the log appended while `run` ran, in log
+ * order. The outboxes are drained before and after, so earlier events
+ * aren't counted and this run's are all in. A staff member's access
+ * entries (`staff.accessed`, core's staff-audit.ts), which come with each
+ * of their calls, are left out unless `staffAccesses` asks for them: their
+ * own tests read them (staff-audit.test.ts), and every other test reads
+ * what the call itself recorded.
+ */
+export const auditedDuring = async (
+  run: () => Promise<unknown>,
+  { staffAccesses = false }: { staffAccesses?: boolean } = {}
+): Promise<AuditEvent[]> => {
+  const after = await logHead();
+  await run();
+  const events = await eventsAfter(after);
+  return events.filter(
+    ({ source, action }) =>
+      source === "core" && (staffAccesses || action !== "staff.accessed")
+  );
+};
+
+/** A short random name part, so tests don't share people or things. */
+export const unique = () => crypto.randomUUID().slice(0, 8);
+
+/** How many random letters a `uniqueWord` holds after its "w". */
+const uniqueWordLetters = 10;
+
+/**
+ * A word no other test's text holds, for the Brain to find: "w" and a
+ * fixed number of random letters, a to z (26^10 of them). With digits it
+ * would be an ID whenever it held a letter and two of them (brain-next
+ * exact.ts), found as written rather than as a word, so how it is found
+ * and ranked would turn on the draw.
+ */
+export const uniqueWord = () =>
+  `w${Array.from(
+    crypto.getRandomValues(new Uint8Array(uniqueWordLetters)),
+    (byte) => String.fromCodePoint(97 + (byte % 26))
+  ).join("")}`;
+
+/**
+ * `unique()` in letters alone, for words a voice says: each digit a letter
+ * of its own, so two never become the same.
+ */
+export const uniqueLetters = (): string =>
+  unique().replaceAll(/\d/gu, (digit) => "ghijklmnop".charAt(Number(digit)));
+
+/** Someone in the client's Entra tenant. */
+export const entraPerson = (
+  tenantId: string,
+  domain = "acme.test",
+  claims: Claims = {}
+): Claims => {
+  const id = unique();
+  return {
+    sub: `entra-sub-${id}`,
+    oid: `entra-oid-${id}`,
+    tid: tenantId,
+    // A member of the tenant, not a B2B guest.
+    acct: 0,
+    email: `person-${id}@${domain}`,
+    name: `Person ${id}`,
+    ...claims,
+  };
+};
+
+/** The Grasp staff member the config lets in, signing in from Grasp's tenant. */
+export const staffPerson = (claims: Claims = {}): Claims =>
+  entraPerson(signInConfig.staff.tenantId, "grasp.test", {
+    oid: staffOid,
+    ...claims,
+  });
+
+/** Someone in the client's Google Workspace. */
+export const googlePerson = (claims: Claims = {}): Claims => {
+  const id = unique();
+  return {
+    sub: `google-sub-${id}`,
+    hd: "acme.test",
+    email: `person-${id}@acme.test`,
+    email_verified: true,
+    name: `Person ${id}`,
+    ...claims,
+  };
+};
+
+/** Someone signed in with `role`, as the configured admins or made so by one. */
+export const signedInWithRole = async (idp: Idp, role: Role) => {
+  const person = entraPerson(acmeTenant);
+  const session = await signedIn(idp, "microsoft", person, {
+    coreEnv: withSignIn({ admins: [person.email] }),
+  });
+  const { userId } = await whoami(session);
+  if (role !== "admin") {
+    await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
+      .bind(role, userId)
+      .run();
+  }
+  return { session, userId, person };
+};
+
+/** Someone signed in with `role`, and their API, on a connection of their own. */
+export const signedInApi = async (idp: Idp, role: Role) => {
+  const person = await signedInWithRole(idp, role);
+  const { core, closed } = await openRpc(person.session);
+  return { ...person, core, closed, api: core.authenticate() };
+};
+
+/** Makes the people `userIds` names the organization's only admins. */
+export const onlyAdmins = async (...userIds: string[]): Promise<void> => {
+  await env.DB.prepare(
+    `UPDATE members SET role = 'user'
+     WHERE role = 'admin' AND user_id NOT IN (${userIds.map(() => "?").join(", ")})`
+  )
+    .bind(...userIds)
+    .run();
+};

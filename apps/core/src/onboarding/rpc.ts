@@ -1,0 +1,529 @@
+import { dayOf } from "@grasp-os/shared/admin/org-record";
+import { actorOf } from "@grasp-os/shared/audit";
+import type {
+  DirectoryPeople,
+  DirectorySuite,
+  OnboardingDirectory,
+} from "@grasp-os/shared/directory";
+import type {
+  DocumentPlace,
+  OnboardingPlaces,
+  PlaceItem,
+  PlaceItemsInput,
+  PlacesSuite,
+  SharePlaceFileInput,
+} from "@grasp-os/shared/document-places";
+import type {
+  HrCredentials,
+  HrPeople,
+  HrPlatform,
+  OnboardingHr,
+} from "@grasp-os/shared/hr";
+import {
+  linksTakenSchema,
+  onboardingErrors,
+  planSchema,
+  programmeWeeks,
+  rosterSchema,
+  settleSchema,
+} from "@grasp-os/shared/onboarding";
+import type {
+  LinkToSend,
+  OnboardingApi,
+  OnboardingReview,
+  OnboardingView,
+  PlanInput,
+  Programme,
+  RosterInput,
+  SettleChoice,
+} from "@grasp-os/shared/onboarding";
+import { setupChoicesSchema } from "@grasp-os/shared/onboarding-choices";
+import type {
+  SetupChoices,
+  SetupChoicesInput,
+} from "@grasp-os/shared/onboarding-choices";
+import {
+  documentAnswerMaxLength,
+  documentErrors,
+  shareDocumentSchema,
+} from "@grasp-os/shared/onboarding-documents";
+import type {
+  OnboardingDocument,
+  ShareDocumentInput,
+} from "@grasp-os/shared/onboarding-documents";
+import {
+  onboardingBehind,
+  setupPlaceSchema,
+} from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+  SetupStepId,
+} from "@grasp-os/shared/onboarding-flow";
+import { requireAdmin } from "@grasp-os/shared/roles";
+import { uploadMaxBytes } from "@grasp-os/shared/uploads";
+import { waitUntil } from "cloudflare:workers";
+import { z } from "zod";
+
+import { readDirectoriesNow } from "../directory-people.ts";
+import { CoreRpcTarget } from "../rpc-target.ts";
+import { withPerson } from "../session-check.ts";
+import type { SessionCheck } from "../session-check.ts";
+import { intoMembersTeams, syncTeams } from "../staff-list-teams.ts";
+import {
+  inProgramme,
+  nextReport,
+  programmeWeek,
+  reportWindow,
+  todayUtc,
+} from "./cadence.ts";
+import {
+  connectDirectory,
+  onboardingDirectory,
+  readOnboardingDirectory,
+} from "./directory.ts";
+import {
+  connectPlaces,
+  listPlaces,
+  onboardingPlaces,
+  placeItems,
+  sharePlaceFile,
+} from "./document-places.ts";
+import { removeDocument, shareDocument } from "./documents.ts";
+import { gateOpen, gateView, openAsFlowSays } from "./gate.ts";
+import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
+import {
+  eraseOwedClaimsQuietly,
+  eraseOwedKickoffs,
+  eraseOwedRosters,
+} from "./new-brain.ts";
+import { mondayOf } from "./rules.ts";
+import { onboardingStore } from "./store.ts";
+import { summaryOf } from "./summary.ts";
+
+// The onboarding over `/rpc`. The company's admin (and Grasp's staff,
+// whose access is the admin role) gives the store who works where and the
+// plan, and reads back numbers per team, never anyone's words; and takes
+// everyone's own link, to send themselves as well (the threat model's L3:
+// a link opens only for the account whose address it was sent to, signed
+// in with the company's sign-in, whoever holds it; GRA-1790). At the end it
+// settles the steps people told two ways and nobody could explain, never
+// told who said which. What only Grasp's staff do is a command from
+// Grasp's admin (admin-command.ts). The admin also shares documents,
+// each read at once (documents.ts). Everything that comes in is checked
+// against the shared schemas before the store sees it. Its programme
+// (when it began, and where it stands) is for everyone signed in, for the
+// weekly report: the plan's first week and the stage, and nothing of the plan
+// or the roster past them. Who works where can also come from the
+// organization's directory, connected here and read for the admin's
+// browser to make the roster of (directory.ts); documents from where
+// they live, picked in the admin's browser (document-places.ts); and who
+// leads which team from its HR platform, the same way (hr.ts).
+
+/** The admin's answer to a document's question. */
+const answerSchema = z.strictObject({
+  id: z.string().min(1).max(64),
+  answer: z.string().trim().min(1).max(documentAnswerMaxLength),
+});
+
+/** The onboarding, for the client's admin. */
+export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
+  readonly #env: Env;
+  readonly #check: SessionCheck;
+
+  constructor(env: Env, check: SessionCheck) {
+    super();
+    this.#env = env;
+    this.#check = check;
+  }
+
+  async behind(): Promise<boolean> {
+    return await withPerson(this.#check, async () => {
+      const store = onboardingStore(this.#env);
+      const [{ flow }, place, open] = await Promise.all([
+        store.flow(),
+        store.place(),
+        gateOpen(this.#env),
+      ]);
+      return onboardingBehind({ flow, done: place.done, open });
+    });
+  }
+
+  async programme(): Promise<Programme | null> {
+    return await withPerson(this.#check, async () => {
+      const now = new Date().toISOString();
+      const view = await onboardingStore(this.#env).view(now);
+      if (view.plan === null) {
+        return null;
+      }
+      const { stage } = summaryOf(
+        view,
+        await gateView(this.#env, view, now),
+        now
+      );
+      const start = mondayOf(view.plan.start);
+      const today = todayUtc(new Date(now));
+      const week = programmeWeek(start, today);
+      return {
+        start,
+        weeks: programmeWeeks,
+        stage: stage === "none" ? null : stage,
+        today,
+        week,
+        inProgramme: inProgramme(week),
+        nextReport: nextReport(start, today),
+        reportWindow: reportWindow(start, today),
+      };
+    });
+  }
+
+  async view(): Promise<OnboardingView> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).view();
+    });
+  }
+
+  async saveRoster(roster: RosterInput): Promise<OnboardingView> {
+    return await this.#keepRoster(roster, false);
+  }
+
+  async confirmRoster(roster: RosterInput): Promise<OnboardingView> {
+    return await this.#keepRoster(roster, true);
+  }
+
+  async #keepRoster(
+    roster: RosterInput,
+    confirmed: boolean
+  ): Promise<OnboardingView> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        rosterSchema,
+        roster
+      );
+      const by = actorOf(person);
+      // The list names the members' teams (GRA-2055): each of its teams
+      // keeps one id from the first save that names it (a members' team's,
+      // one the store holds, or a new one core makes); a confirm makes and
+      // names its members' teams under those ids, in order with every other
+      // confirm and rename (`syncTeams`). A confirm changes no membership.
+      const store = onboardingStore(this.#env);
+      const { roster: named, minted } = await intoMembersTeams(
+        this.#env,
+        parsed,
+        { held: async () => await store.heldTeams() }
+      );
+      const view = await store.saveRoster(named, by, { confirmed, minted });
+      // Teams it made are filled from the directory now, by the daily
+      // read itself, in the background: the admin's confirm neither waits
+      // for the read nor fails with it (GRA-2248).
+      if (confirmed && (await syncTeams(this.#env, by))) {
+        waitUntil(readDirectoriesNow(this.#env));
+      }
+      // A team the save took under seven loses its claims in the Brain now,
+      // not only by core's clock (onboarding/new-brain.ts).
+      await eraseOwedClaimsQuietly(this.#env);
+      return view;
+    });
+  }
+
+  async directory(): Promise<OnboardingDirectory | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingDirectory(this.#env, person)
+    );
+  }
+
+  async connectDirectory(
+    suite: DirectorySuite,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectDirectory(this.#env, person, suite, returnTo)
+    );
+  }
+
+  async readDirectory(): Promise<DirectoryPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readOnboardingDirectory(this.#env, person)
+    );
+  }
+
+  async documentPlaces(): Promise<OnboardingPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingPlaces(this.#env, person)
+    );
+  }
+
+  async connectDocumentPlaces(
+    suite: PlacesSuite,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await connectPlaces(this.#env, person, suite, returnTo)
+    );
+  }
+
+  async listDocumentPlaces(): Promise<DocumentPlace[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listPlaces(this.#env, person)
+    );
+  }
+
+  async placeItems(
+    input: PlaceItemsInput
+  ): Promise<{ items: PlaceItem[]; next: string | null }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await placeItems(this.#env, person, input)
+    );
+  }
+
+  async sharePlaceFile(
+    input: SharePlaceFileInput
+  ): Promise<OnboardingDocument> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharePlaceFile(this.#env, person, input)
+    );
+  }
+
+  async hrPlatform(): Promise<OnboardingHr | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingHr(this.#env, person)
+    );
+  }
+
+  async connectHrPlatform(
+    platform: HrPlatform,
+    credentials: HrCredentials
+  ): Promise<OnboardingHr> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectHr(this.#env, person, platform, credentials)
+    );
+  }
+
+  async readHrPlatform(): Promise<HrPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readOnboardingHr(this.#env, person)
+    );
+  }
+
+  async savePlan(plan: PlanInput): Promise<OnboardingView> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        planSchema,
+        plan
+      );
+      if (parsed.start < dayOf(new Date().toISOString())) {
+        throw onboardingErrors.create("onboarding.past");
+      }
+      const store = onboardingStore(this.#env);
+      const { roster } = await store.view();
+      if (roster === null) {
+        throw onboardingErrors.create("onboarding.no_roster");
+      }
+      const saved = await store.savePlan(parsed, actorOf(person));
+      // What is due under it goes now, as a plan whose first moment has
+      // passed already says: the alarm only looks again within the hour.
+      const sent = await store.releaseDue();
+      return sent.length === 0 ? saved : await store.view();
+    });
+  }
+
+  async review(): Promise<OnboardingReview> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).review();
+    });
+  }
+
+  async settle(work: string, holds: SettleChoice): Promise<OnboardingReview> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        settleSchema,
+        { work, holds }
+      );
+      const review = await onboardingStore(this.#env).settle(
+        parsed.work,
+        parsed.holds,
+        actorOf(person)
+      );
+      if (review === null) {
+        throw onboardingErrors.create("onboarding.no_difference");
+      }
+      return review;
+    });
+  }
+
+  async links(): Promise<LinkToSend[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).linksToSend();
+    });
+  }
+
+  async linksTaken(people: string[]): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        linksTakenSchema,
+        people
+      );
+      await onboardingStore(this.#env).linksTaken(parsed, actorOf(person));
+    });
+  }
+
+  async deleteKickoff(): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      await onboardingStore(this.#env).deleteKickoff(actorOf(person));
+      // Its source in the new Brain goes now; whatever fails is core's
+      // clock's, and the admin may ask again.
+      if (!(await eraseOwedKickoffs(this.#env))) {
+        throw onboardingErrors.create("onboarding.kickoff_unfinished");
+      }
+    });
+  }
+
+  async eraseTeamsFromBrain(): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      await onboardingStore(this.#env).eraseTeamsFromBrain(actorOf(person));
+      // What the Brain kept goes now; whatever fails is core's clock's, and
+      // the admin may ask again.
+      if (!(await eraseOwedRosters(this.#env))) {
+        throw onboardingErrors.create("onboarding.teams_unfinished");
+      }
+    });
+  }
+
+  async choices(): Promise<SetupChoices> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).choices();
+    });
+  }
+
+  async saveChoices(choices: SetupChoicesInput): Promise<SetupChoices> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        setupChoicesSchema,
+        choices
+      );
+      return await onboardingStore(this.#env).saveChoices(
+        parsed,
+        actorOf(person)
+      );
+    });
+  }
+
+  async flow(): Promise<OnboardingFlow> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const { flow } = await onboardingStore(this.#env).flow();
+      return flow;
+    });
+  }
+
+  async place(): Promise<SetupPlace> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).place();
+    });
+  }
+
+  async finishSteps(steps: SetupStepId[]): Promise<SetupPlace> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        setupPlaceSchema,
+        { done: steps }
+      );
+      const place = await onboardingStore(this.#env).finishSteps(
+        parsed.done,
+        actorOf(person)
+      );
+      // The last screen of an onboarding that interviews nobody opens the
+      // company's Grasp, as its admin, where it was never opened before.
+      await openAsFlowSays(this.#env, actorOf(person), "finished");
+      return place;
+    });
+  }
+
+  async documents(): Promise<OnboardingDocument[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).documents();
+    });
+  }
+
+  async shareDocument(input: ShareDocumentInput): Promise<OnboardingDocument> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      // Its own reason, before the schema's refusal says only "invalid".
+      if (
+        input.bytes instanceof Uint8Array &&
+        input.bytes.byteLength > uploadMaxBytes
+      ) {
+        throw documentErrors.create("document.too_large");
+      }
+      const parsed = documentErrors.parse(
+        "document.invalid",
+        shareDocumentSchema,
+        input
+      );
+      return await shareDocument(this.#env, person, parsed);
+    });
+  }
+
+  async removeDocument(id: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = documentErrors.parse("document.invalid", z.string(), id);
+      await removeDocument(this.#env, person, parsed);
+    });
+  }
+
+  async answerDocument(
+    id: string,
+    answer: string
+  ): Promise<OnboardingDocument> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = documentErrors.parse("document.invalid", answerSchema, {
+        id,
+        answer,
+      });
+      const answered = await onboardingStore(this.#env).answerDocument(
+        parsed.id,
+        parsed.answer,
+        actorOf(person)
+      );
+      if (answered === null) {
+        throw documentErrors.create("document.not_found");
+      }
+      return answered;
+    });
+  }
+}

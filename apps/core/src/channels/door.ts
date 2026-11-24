@@ -1,0 +1,1214 @@
+/**
+ * The door chat platforms post to, `/api/channels/<platform>`: each a Chat
+ * SDK adapter that checks every request it is handed as really sent by its
+ * platform before anything reaches a handler (src/channels/teams.ts).
+ * Every adapter here must have such a check: core's tests send each an
+ * unsigned request and expect it refused.
+ *
+ * What comes in through it, and what stops each:
+ *
+ * - A platform the deployment hasn't set up answers 404, as a path core
+ *   has no route for.
+ * - A request its platform didn't send for the client's own bot, or from
+ *   another tenant, is refused with a 401 before its body is read as
+ *   anything (teams.ts).
+ * - A resent message (a platform retries a delivery it thinks failed) is
+ *   taken once: the door keeps each message's id for a day, before
+ *   anything else, so a resend sends no second line and costs no second
+ *   token. The Chat SDK dedupes again for its handlers.
+ * - A flood from one person. Messages are limited per sender, by the id
+ *   the platform verified, before anything is looked up; past the limit
+ *   they are dropped, with one line a minute to say so.
+ * - Someone writing who isn't one of the client's people: who writes is
+ *   only ever the platform's verified id (who.ts), never a name, an email
+ *   or a phone number. Other companies, guests, removed people and people
+ *   Grasp doesn't know each get one line, in the language their app is set
+ *   to, and nothing they wrote is read. The lines go out through connect
+ *   like every send.
+ * - Talk in a group chat or channel that isn't for Stephen: only a message
+ *   that @mentions the bot is taken; the rest is dropped unread, uncounted
+ *   and unanswered.
+ * - Someone Settings › Stephen doesn't let reach him, here or at all
+ *   (`stephenFor`), is told so in one line, and nothing they wrote is read.
+ * - One of the client's own people Grasp hasn't seen yet whom the
+ *   organization's directory holds, by the object id Teams verified, is
+ *   made a member from it and answered at once, with no sign-in first
+ *   (auth/directory-members.ts). Someone the directory made a member, who
+ *   never signed in since, is answered only while the directory still
+ *   holds them, looked up again at most once an hour.
+ * - One of the client's own people Grasp hasn't seen yet and the directory
+ *   can't vouch for (Teams' roster says they are of the client's tenant,
+ *   and no guest) is sent a link to
+ *   the deployment's own sign-in, once a day: it carries no token and
+ *   binds nothing, as their sign-in's ID token names them by the object
+ *   id their messages carry. Their first question is kept for the hour,
+ *   and answered with their next message once they have signed in.
+ *   Nobody from outside the tenant is ever sent the link.
+ *
+ * Only a member's message reaches the Chat SDK, with who they are: in their
+ * own private chat with the bot, whose conversation is kept
+ * (`channel_conversations`) so a later message, and the answer, find it;
+ * or one that @mentions the bot in a group chat or channel, with who is
+ * in it, read from the platform's roster then (`audienceIn`). It is
+ * answered in the person's own chat for the platform, or their one chat
+ * for that group or channel thread, whose agent reads only what everyone
+ * in it may (answer.ts, chat-audiences.ts).
+ *
+ * Slack (slack.ts) comes in the same way, by its own signature and ids:
+ * its people are known only by the Slack account they linked to Grasp, and
+ * someone who hasn't linked one gets the link, once, and nothing more. A
+ * press on a card's button comes the same way too, form-encoded, and is
+ * handled as a press in Teams is (`slackPressResponse`).
+ */
+import { durableObjectState } from "@grasp-os/chat/state";
+import type { DirectoryPerson } from "@grasp-os/shared/directory";
+import { requestErrors } from "@grasp-os/shared/errors";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { TokenBuckets } from "@grasp-os/shared/token-bucket";
+import { Chat } from "chat";
+import type { Message, StateAdapter, Thread } from "chat";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { activeMember } from "../auth/auth.ts";
+import { signInConfig } from "../auth/config.ts";
+import { memberFromDirectory } from "../auth/directory-members.ts";
+import { audienceMaxMembers } from "../chat-audiences.ts";
+import type { Audience } from "../chat-audiences.ts";
+import { channelConversations } from "../db/core/schema.ts";
+import { inJurisdiction } from "../durable-objects.ts";
+import { errorResponse } from "../errors.ts";
+import { boundedText, jsonOf } from "../request-body.ts";
+import { stephenFor } from "../stephen-reach.ts";
+import { offerChannelLink } from "./accounts.ts";
+import { answerInChat } from "./answer.ts";
+import {
+  cancelAction,
+  confirmAction,
+  helpfulAction,
+  lineCard,
+  notHelpfulAction,
+  signInCard,
+  startAction,
+  undoAction,
+} from "./cards.tsx";
+import { inertInMessage } from "./inert.ts";
+import { pressCard } from "./press.ts";
+import { withoutQuotedReply } from "./quoted-reply.ts";
+import { isSetUp } from "./set-up.ts";
+import { countSignal } from "./signals.ts";
+import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
+import { rateRequest } from "./stephen-requests.ts";
+import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
+import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
+import type { TeamsKeys } from "./teams.ts";
+import { pressUndo } from "./undo.ts";
+import { inDirectory, teamsMembers, writerOf } from "./who.ts";
+import { channelLocales, say } from "./words.ts";
+import type { ChannelLocale } from "./words.ts";
+import { pressOffer } from "./workflow-offers.ts";
+import type { PressLine } from "./workflow-offers.ts";
+
+/**
+ * Every platform's adapter, keyed by the platform's name, checking
+ * against the keys this isolate fetched, or `teamsKeys` when given.
+ */
+export const channelAdapters = async (
+  env: Env,
+  { teamsKeys }: { teamsKeys?: TeamsKeys } = {}
+) => ({
+  teams: await teamsAdapter(env, teamsKeys),
+  slack: slackAdapter(env),
+});
+
+/** A platform the door has an adapter for. */
+type Platform = keyof Awaited<ReturnType<typeof channelAdapters>>;
+
+/** Largest request a platform may post: a Teams activity is far smaller. */
+const maxBodyBytes = 256 * 1024;
+
+/**
+ * Messages one person may send: ten at once, then one every three
+ * seconds. Someone typing fast stays well inside it; a script doesn't.
+ */
+const messageRate = { burst: 10, perMinute: 20 };
+
+/** How often a person over the limit is told so: once a minute. */
+const toldRate = { burst: 1, perMinute: 1 };
+
+/** How often someone Grasp hasn't seen is sent the sign-in link: once a day. */
+const signInEveryMs = 24 * 60 * 60 * 1000;
+
+/** How long a newcomer's first question waits for their sign-in. */
+const keptMs = 60 * 60 * 1000;
+
+/** The longest question kept: what a chat message holds, near enough. */
+const maxKeptChars = 4000;
+
+/** The web's sign-in page (apps/web/src/routes/sign-in.tsx). */
+const signInPath = "/sign-in";
+
+/**
+ * Where a newcomer's first question waits, by their object id. Read only
+ * in their direct message (`keptIn`), so even one an earlier build kept
+ * from a group chat is answered to them alone.
+ */
+const keptKey = (oid: string): string => `door:teams:kept:${oid}`;
+
+/** How long the directory's word that it holds someone is taken. */
+const heldMs = 60 * 60 * 1000;
+
+/** How long the directory's word that it doesn't is taken. */
+const notHeldMs = 5 * 60 * 1000;
+
+/** How long the door remembers a message it took, to take a resend once. */
+const seenTtlMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Each sender's messages and lines, per isolate: a restart starts them
+ * full. The router's limit per client address bounds the rest.
+ */
+const messages = new TokenBuckets(messageRate);
+const told = new TokenBuckets(toldRate);
+
+/**
+ * The clock the door's limits count by: the real one. A test that sends
+ * one person's many messages in a row moves this one on
+ * (test/permission-probing.ts), not the whole clock, which also dates the
+ * grant core signs for each model call, which connect checks by its own.
+ */
+export const doorClock = { now: (): number => Date.now() };
+
+/** The lines the door sends: each instead of reading what was sent. */
+type DoorLine =
+  | "tooFast"
+  | "privateOnly"
+  | "otherCompany"
+  | "guest"
+  | "removed"
+  | "signIn"
+  | "signInAskAgain"
+  | "notTurnedOn";
+
+/**
+ * A Teams activity, as far as the door reads it. Its text is read only to
+ * keep the first question of one of the client's people Grasp hasn't seen
+ * yet, for after their sign-in.
+ */
+const activitySchema = z.object({
+  type: z.string(),
+  text: z.string().optional(),
+  id: z.string().min(1).max(256).optional(),
+  serviceUrl: z.string(),
+  locale: z.string().max(64).optional(),
+  from: z.object({
+    id: z.string().min(1).max(256),
+    aadObjectId: z.string().min(1).max(256).optional(),
+  }),
+  conversation: z.object({
+    id: z.string().min(1).max(1024),
+    conversationType: z.enum(["personal", "groupChat", "channel"]),
+  }),
+  // Only whether it names a meeting (`isMeeting`): any value counts.
+  channelData: z.looseObject({ meeting: z.unknown().optional() }).optional(),
+  entities: z
+    .array(
+      z.looseObject({
+        type: z.string().optional(),
+        mentioned: z.object({ id: z.string().optional() }).optional(),
+      })
+    )
+    .optional(),
+});
+type Activity = z.infer<typeof activitySchema>;
+
+/** Every field of an activity the door took, to send on as Teams sent it. */
+const activityFieldsSchema = z.looseObject({});
+
+/** The language `locale` (`nl-NL`, `de`) names, or English. */
+const localeOf = (locale: string | undefined): ChannelLocale => {
+  const language = locale?.split("-")[0]?.toLowerCase();
+  return channelLocales.find((each) => each === language) ?? "en";
+};
+
+/** Where a member asked in a chat others share, as the door hands it on. */
+export interface SharedPlace {
+  kind: "group" | "channel";
+  /** Who is in it, as the platform's roster says now. */
+  audience: Audience;
+}
+
+/**
+ * Where a member asked, as the door hands it on: a direct message only
+ * when the platform's own data for this message names a conversation of
+ * the person and the bot alone (Teams' `personal`, Slack's `im`), which
+ * can't gain a member; anything else is a chat others share. Taken from
+ * each message as it comes, never kept or guessed from what came before.
+ */
+export type ChannelPlace = { kind: "direct" } | SharedPlace;
+
+/** A direct message, as the platform named it. */
+const direct: ChannelPlace = { kind: "direct" };
+
+/** What Stephen says of a press on Start, in `locale`. */
+const pressSaid = (
+  said: PressLine,
+  locale: ChannelLocale,
+  workflow = ""
+): string => {
+  switch (said) {
+    case "started":
+    case "startRefused": {
+      return say(said, locale, { workflow });
+    }
+    case "startGone":
+    case "notYours":
+    case "alreadyAnswered": {
+      return say(said, locale);
+    }
+    default: {
+      return said satisfies never;
+    }
+  }
+};
+
+/** A member's message, as the door hands it on. */
+export interface ChannelMessage {
+  platform: Platform;
+  /** The member who wrote it. */
+  userId: string;
+  /**
+   * Whether Settings › Stephen lets him do things for them here, or only
+   * answer (`stephenFor`): what holds writes for a press must ask it.
+   */
+  acts: boolean;
+  thread: Thread;
+  message: Message;
+  /**
+   * What they asked before Grasp knew them, kept since their first
+   * message, to be answered first: once, within the hour.
+   */
+  kept?: string;
+  /** Where they asked: their direct message, or a chat others share. */
+  place: ChannelPlace;
+}
+
+/** What takes a member's message on from the door. */
+export type ChannelHandoff = (accepted: ChannelMessage) => Promise<void>;
+
+/**
+ * Keeps the conversation `userId` wrote in, or notes they wrote again, with
+ * the language they wrote in where the door knows it (Teams). Only while
+ * they are a member, checked in the write itself: a message checked before
+ * they were removed, and kept after (they were erased meanwhile, say),
+ * keeps nothing of theirs.
+ */
+const keepConversation = async (
+  env: Env,
+  platform: Platform,
+  threadId: string,
+  userId: string,
+  locale?: ChannelLocale,
+  now = new Date()
+): Promise<void> => {
+  await drizzle(env.DB)
+    .insert(channelConversations)
+    .select(
+      sql`SELECT ${platform}, ${threadId}, ${userId}, ${now.getTime()},
+        ${now.getTime()}, ${locale ?? null}
+        WHERE ${activeMember(userId)}`
+    )
+    .onConflictDoUpdate({
+      target: [channelConversations.platform, channelConversations.threadId],
+      set: { userId, locale, lastMessageAt: now },
+    });
+};
+
+/**
+ * Sends one of Stephen's lines to the conversation `activity` came from:
+ * for someone who should sign in, with a button to the deployment's own
+ * sign-in page. The link carries nothing of theirs and binds nothing: the
+ * sign-in's ID token names them, by the object id their messages carry.
+ */
+const sendLine = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity,
+  line: DoorLine
+): Promise<void> => {
+  const threadId = adapter.encodeThreadId({
+    conversationId: activity.conversation.id,
+    serviceUrl: activity.serviceUrl,
+    conversationType: activity.conversation.conversationType,
+  });
+  const locale = localeOf(activity.locale);
+  const origin = signInConfig(env)?.origin;
+  try {
+    await adapter.postMessage(
+      threadId,
+      (line === "signIn" || line === "signInAskAgain") && origin !== undefined
+        ? signInCard({ locale, url: `${origin}${signInPath}`, line })
+        : say(line, locale)
+    );
+  } catch (error) {
+    log.warn("channel.line_failed", {
+      platform: "teams",
+      line,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Why a Teams sender Grasp doesn't know can't be helped: a guest in the
+ * client's tenant, someone from another company, or one of the client's
+ * people who never signed in to Grasp. Read from the conversation's
+ * roster; if Teams can't say, they are taken for someone from outside.
+ */
+const unknownLine = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<DoorLine> => {
+  try {
+    const member = await adapter.memberOf(
+      activity.serviceUrl,
+      activity.conversation.id,
+      activity.from.id
+    );
+    if (member.userRole === "guest") {
+      return "guest";
+    }
+    const tenant = signInConfig(env)?.entra?.tenantId;
+    return member.tenantId === tenant ? "signIn" : "otherCompany";
+  } catch (error) {
+    log.warn("channel.member_unread", {
+      platform: "teams",
+      ...errorFields(error),
+    });
+    return "otherCompany";
+  }
+};
+
+/**
+ * One of the client's own people Grasp hasn't seen: the sign-in link once
+ * a day, nothing in between. Their first question is kept for the hour
+ * only when it was asked in their direct message, and is answered there
+ * alone (`keptIn`); asked where others read it, it isn't kept, and the
+ * link asks them to ask again.
+ */
+const newcomer = async (
+  state: StateAdapter,
+  activity: Activity,
+  oid: string
+): Promise<{ line?: DoorLine }> => {
+  const inDirect = activity.conversation.conversationType === "personal";
+  const text = activity.text?.trim().slice(0, maxKeptChars) ?? "";
+  if (inDirect && text !== "") {
+    await state.setIfNotExists(keptKey(oid), text, keptMs);
+  }
+  const offered = await state.setIfNotExists(
+    `door:teams:sign-in:${oid}`,
+    true,
+    signInEveryMs
+  );
+  if (!offered) {
+    return {};
+  }
+  return { line: inDirect ? "signIn" : "signInAskAgain" };
+};
+
+/**
+ * Whether `activity` @mentions the client's bot, as Teams marks a mention:
+ * by the bot's id, alone or after its `28:` prefix.
+ */
+const mentionsBot = (env: Env, activity: Activity): boolean =>
+  (activity.entities ?? []).some(
+    ({ type, mentioned }) =>
+      type === "mention" &&
+      mentioned?.id !== undefined &&
+      env.TEAMS_BOT_ID !== undefined &&
+      env.TEAMS_BOT_ID !== "" &&
+      (mentioned.id === env.TEAMS_BOT_ID ||
+        mentioned.id.endsWith(`:${env.TEAMS_BOT_ID}`))
+  );
+
+/**
+ * Whether `activity` came from a Teams meeting's chat: its channel data
+ * names the meeting, or its conversation id is a meeting's. Anonymous
+ * attendees, and those who dial in, can be in a meeting's chat without
+ * being on the roster Teams gives a bot, so a meeting's roster is never
+ * shown complete: read as having someone Grasp can't name (GRA-1820).
+ */
+const isMeeting = (activity: Activity): boolean =>
+  activity.channelData?.meeting !== undefined ||
+  // A meeting's chat's conversation id, as Teams names one.
+  activity.conversation.id.startsWith("19:meeting_");
+
+/**
+ * Who is in the group chat or channel `activity` came from, read from the
+ * conversation's roster (a channel's: its team's, or a private channel's
+ * own): its members Grasp knows as the organization's active people, and
+ * whether anyone else is in it, a guest, another tenant's, someone Grasp
+ * hasn't seen, or anyone at all when the roster can't be read or is too
+ * large, or in a meeting's chat (`isMeeting`). Whoever is not named
+ * narrows what the answer reads to nothing.
+ */
+const audienceIn = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<Audience> => {
+  const nobody = { members: [], outsiders: true };
+  if (isMeeting(activity)) {
+    return nobody;
+  }
+  // A channel thread's conversation is the channel's, with `;messageid=`.
+  const [conversationId = activity.conversation.id] =
+    activity.conversation.id.split(";");
+  let roster: Awaited<ReturnType<ConnectedTeamsAdapter["rosterOf"]>>;
+  try {
+    roster = await adapter.rosterOf(
+      activity.serviceUrl,
+      conversationId,
+      audienceMaxMembers
+    );
+  } catch (error) {
+    log.warn("channel.roster_unread", {
+      platform: "teams",
+      ...errorFields(error),
+    });
+    return nobody;
+  }
+  if (roster === undefined) {
+    return nobody;
+  }
+  const tenant = signInConfig(env)?.entra?.tenantId;
+  const ours = roster.flatMap(({ aadObjectId, tenantId, userRole }) =>
+    aadObjectId !== undefined && tenantId === tenant && userRole !== "guest"
+      ? [aadObjectId]
+      : []
+  );
+  const known = await teamsMembers(env, ours);
+  return {
+    members: [...new Set(known.values())],
+    outsiders:
+      roster.length === 0 ||
+      roster.some(({ aadObjectId }) => !known.has(aadObjectId ?? "")),
+  };
+};
+
+/**
+ * Where `activity` was written, by Teams' own word for its conversation:
+ * a direct message only for `personal`, the person and the bot alone;
+ * a group chat or channel with who is in it now.
+ */
+const placeOf = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<ChannelPlace> => {
+  const { conversationType } = activity.conversation;
+  if (conversationType === "personal") {
+    return direct;
+  }
+  return {
+    kind: conversationType === "groupChat" ? "group" : "channel",
+    audience: await audienceIn(env, adapter, activity),
+  };
+};
+
+/**
+ * What a member asked before Grasp knew them, if it is still kept: taken
+ * once, and only in their direct message, where it was asked. Written
+ * anywhere else, it waits there for their next direct message.
+ */
+const keptIn = async (
+  state: StateAdapter,
+  oid: string,
+  place: ChannelPlace | undefined
+): Promise<string | undefined> => {
+  if (place?.kind !== "direct") {
+    return undefined;
+  }
+  const kept = await state.get<string>(keptKey(oid));
+  if (kept === null) {
+    return undefined;
+  }
+  await state.delete(keptKey(oid));
+  return kept;
+};
+
+/**
+ * The person the organization's directory holds under `oid`. Its word that
+ * it holds them is taken for the hour when `keepHeld` (for a member it
+ * made, so their messages don't each ask it again), and that it holds
+ * nobody for five minutes. While it can't be read, it holds nobody, and
+ * that isn't kept.
+ */
+const heldInDirectory = async (
+  env: Env,
+  state: StateAdapter,
+  oid: string,
+  { keepHeld }: { keepHeld: boolean }
+): Promise<DirectoryPerson | null> => {
+  const key = `door:teams:directory:${oid}`;
+  const said = await state.get<{ person: DirectoryPerson | null }>(key);
+  if (said !== null) {
+    return said.person;
+  }
+  const person = await inDirectory(env, oid);
+  if (person === null) {
+    await state.set(key, { person }, notHeldMs);
+  } else if (person !== undefined && keepHeld) {
+    await state.set(key, { person }, heldMs);
+  }
+  return person ?? null;
+};
+
+/**
+ * Someone neither a sign-in nor the directory vouches for: the sign-in
+ * link if Teams' roster has them as one of the client's own people,
+ * otherwise the line for who they are.
+ */
+const notKnown = async (
+  env: Env,
+  state: StateAdapter,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity,
+  oid: string
+): Promise<{ line?: DoorLine }> => {
+  const line = await unknownLine(env, adapter, activity);
+  return line === "signIn" ? await newcomer(state, activity, oid) : { line };
+};
+
+/**
+ * What the door does with a message before the Chat SDK sees it: the line
+ * it sends and nothing more, or the member it is from.
+ */
+const gate = async (
+  env: Env,
+  state: StateAdapter,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<{
+  line?: DoorLine;
+  userId?: string;
+  acts?: boolean;
+  kept?: string;
+  place?: ChannelPlace;
+}> => {
+  // A message without an id can't be told from its resends: dropped.
+  if (activity.id === undefined) {
+    return {};
+  }
+  const { conversationType } = activity.conversation;
+  // In a group chat or channel, only what is said to Stephen is his.
+  if (conversationType !== "personal" && !mentionsBot(env, activity)) {
+    return {};
+  }
+  const first = await state.setIfNotExists(
+    `door:teams:${activity.conversation.id}:${activity.id}`,
+    true,
+    seenTtlMs
+  );
+  if (!first) {
+    return {};
+  }
+  // Teams always says who wrote by their object id; without one, nobody
+  // can be known.
+  const sender = activity.from.aadObjectId ?? `id:${activity.from.id}`;
+  if (!messages.take(`teams:${sender}`, doorClock.now())) {
+    log.info("channel.limited", { platform: "teams" });
+    return told.take(`teams:${sender}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
+  }
+  if (activity.from.aadObjectId === undefined) {
+    return { line: "otherCompany" };
+  }
+  const oid = activity.from.aadObjectId;
+  const writer = await writerOf(env, "teams", oid);
+  switch (writer.kind) {
+    case "member": {
+      // Known only from the directory: answered while it still holds them.
+      if (
+        writer.fromDirectory &&
+        (await heldInDirectory(env, state, oid, { keepHeld: true })) === null
+      ) {
+        return await notKnown(env, state, adapter, activity, oid);
+      }
+      // Settings › Stephen: whether he answers them here at all, asked
+      // before anything they wrote is read.
+      const reach = await stephenFor(env, writer.userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      const place = await placeOf(env, adapter, activity);
+      return {
+        userId: writer.userId,
+        acts: reach.acts,
+        kept: await keptIn(state, oid, place),
+        place,
+      };
+    }
+    case "removed": {
+      return { line: "removed" };
+    }
+    case "unknown": {
+      const person = await heldInDirectory(env, state, oid, {
+        keepHeld: false,
+      });
+      if (person === null) {
+        return await notKnown(env, state, adapter, activity, oid);
+      }
+      const userId = await memberFromDirectory(env, oid, person);
+      if (userId === null) {
+        return { line: "removed" };
+      }
+      // Settings › Stephen, as for any member.
+      const reach = await stephenFor(env, userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      // As before the place was said: their first message is taken in
+      // their direct message alone, and left unanswered anywhere else.
+      if (conversationType !== "personal") {
+        return { userId, acts: reach.acts };
+      }
+      return {
+        userId,
+        acts: reach.acts,
+        kept: await keptIn(state, oid, direct),
+        place: direct,
+      };
+    }
+    default: {
+      return writer satisfies never;
+    }
+  }
+};
+
+/**
+ * What a press on a card's button does, on any platform, by the member
+ * the door let in, in their own private chat: Confirm or Cancel on a card
+ * of held writes (press.ts), Start on a card offering a workflow
+ * (workflow-offers.ts), which starts it if it is theirs, or Undo on the
+ * notice of a memory of theirs, taken only from their direct message
+ * (`inDirect`, undo.ts).
+ */
+const onPresses = (
+  env: Env,
+  chat: Chat,
+  {
+    platform,
+    userId,
+    state,
+    locale,
+    inDirect,
+  }: {
+    platform: "teams" | "slack";
+    userId: string;
+    state: StateAdapter;
+    locale: ChannelLocale;
+    inDirect: boolean;
+  }
+): void => {
+  chat.onAction([confirmAction, cancelAction], async (event) => {
+    await pressCard(env, { platform, userId, event, state });
+  });
+  chat.onAction(undoAction, async (event) => {
+    await pressUndo(env, { platform, userId, event, state }, inDirect);
+  });
+  chat.onAction(startAction, async (event) => {
+    if (event.thread === null) {
+      return;
+    }
+    const pressed = await pressOffer(env, {
+      offerId: event.value ?? "",
+      userId,
+      platform,
+      threadId: event.threadId,
+      locale,
+    });
+    // The workflow's name, which the model may have written, inert
+    // (inert.ts); on Slack on a card, where no mention in it resolves.
+    const line = pressSaid(
+      pressed.line,
+      locale,
+      inertInMessage(platform)(pressed.workflow ?? "")
+    );
+    await event.thread.post(platform === "slack" ? lineCard(line) : line);
+  });
+};
+
+/**
+ * A press on a button in Slack, as far as the door reads one
+ * (`block_actions`, form-encoded as `payload=`): who pressed, where, and
+ * the interaction's own id; never what the button carries, which the
+ * press's handler reads.
+ */
+const slackPressSchema = z.object({
+  type: z.string(),
+  trigger_id: z.string().min(1).max(256),
+  user: z.object({ id: z.string().min(1).max(64) }),
+  channel: z.object({ id: z.string().min(1).max(64) }).optional(),
+});
+
+/** A Slack direct message's channel: its id starts with `D`. */
+const directMessagePattern = /^D[A-Z0-9]+$/u;
+
+/**
+ * Answers a press on a button of a card Stephen sent in Slack, signed by
+ * Slack for this client's app (the caller checked): as a message is let
+ * in (`slackGate`), only a linked member's, in their own direct message,
+ * taken once by its interaction's id, within their rate, while Settings ›
+ * Stephen lets him answer them in Slack; then the same handlers as a press
+ * in Teams (`onPresses`). Anything else is acknowledged and runs nothing,
+ * without a word: nobody else was ever sent a card to press.
+ */
+const slackPressResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
+): Promise<Response> => {
+  const acknowledged = new Response(null, { status: 200 });
+  const parsed = slackPressSchema.safeParse(
+    jsonOf(new URLSearchParams(body).get("payload") ?? "")
+  );
+  if (!parsed.success || parsed.data.type !== "block_actions") {
+    return acknowledged;
+  }
+  const { trigger_id: triggerId, user, channel } = parsed.data;
+  if (channel === undefined || !directMessagePattern.test(channel.id)) {
+    return acknowledged;
+  }
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const first = await state.setIfNotExists(
+    `door:slack:press:${triggerId}`,
+    true,
+    seenTtlMs
+  );
+  if (!first || !messages.take(`slack:${user.id}`)) {
+    return acknowledged;
+  }
+  const writer = await writerOf(env, "slack", user.id);
+  if (writer.kind !== "member") {
+    return acknowledged;
+  }
+  const reach = await stephenFor(env, writer.userId, "slack");
+  if (!reach.reaches) {
+    return acknowledged;
+  }
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { slack: slackAdapter(env) },
+    state,
+    logger: "silent",
+    concurrency: "queue",
+  });
+  // Slack names no language a person reads: in English, as its lines are.
+  onPresses(env, chat, {
+    platform: "slack",
+    userId: writer.userId,
+    state,
+    locale: "en",
+    // Only a press in their direct message gets this far.
+    inDirect: true,
+  });
+  return await chat.webhooks.slack(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
+};
+
+/**
+ * A Slack request, as far as the door reads one: Slack's URL check, or an
+ * event's envelope and who sent it where, never its text.
+ */
+const slackPayloadSchema = z.object({
+  type: z.string(),
+  challenge: z.string().min(1).max(256).optional(),
+  event_id: z.string().min(1).max(256).optional(),
+  event: z
+    .object({
+      type: z.string(),
+      subtype: z.string().optional(),
+      bot_id: z.string().optional(),
+      user: z.string().min(1).max(64).optional(),
+      channel: z.string().min(1).max(64),
+      channel_type: z.string().optional(),
+      ts: z.string().max(64),
+      thread_ts: z.string().max(64).optional(),
+    })
+    .optional(),
+});
+type SlackEvent = NonNullable<z.infer<typeof slackPayloadSchema>["event"]>;
+
+/**
+ * The thread a Slack message is in, as the adapter names it: a direct
+ * message's conversation itself, a channel's message's own thread.
+ */
+const slackThreadOf = (event: SlackEvent): string => {
+  const threadTs =
+    event.channel_type === "im"
+      ? (event.thread_ts ?? "")
+      : (event.thread_ts ?? event.ts);
+  return `slack:${event.channel}:${threadTs}`;
+};
+
+/**
+ * What the door does with a Slack message before the Chat SDK sees it, as
+ * `gate` does with Teams': the line it sends and nothing more, a link for
+ * someone who hasn't linked their Slack account, or the member it is from.
+ * Slack names no language a person reads, so lines are in English.
+ */
+const slackGate = async (
+  env: Env,
+  state: StateAdapter,
+  eventId: string,
+  event: SlackEvent & { user: string }
+): Promise<{ line?: DoorLine; link?: true; userId?: string }> => {
+  const first = await state.setIfNotExists(
+    `door:slack:${eventId}`,
+    true,
+    seenTtlMs
+  );
+  if (!first) {
+    return {};
+  }
+  if (!messages.take(`slack:${event.user}`, doorClock.now())) {
+    log.info("channel.limited", { platform: "slack" });
+    return told.take(`slack:${event.user}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
+  }
+  // A direct message only as Slack names one, both ways it does: its
+  // event's type and its conversation's id. A group DM (`mpim`) or a
+  // channel is no one's alone.
+  if (
+    event.channel_type !== "im" ||
+    !directMessagePattern.test(event.channel)
+  ) {
+    return { line: "privateOnly" };
+  }
+  const writer = await writerOf(env, "slack", event.user);
+  return writer.kind === "member" ? { userId: writer.userId } : { link: true };
+};
+
+/** Sends one of Stephen's lines, or a link to sign in by, to `event`'s thread. */
+const sendSlackLine = async (
+  env: Env,
+  origin: string,
+  event: SlackEvent & { user: string },
+  line: DoorLine | "link"
+): Promise<void> => {
+  const adapter = slackAdapter(env);
+  try {
+    if (line === "link") {
+      const { path } = await offerChannelLink(env, {
+        platform: "slack",
+        platformUserId: event.user,
+      });
+      await adapter.postMessage(
+        slackThreadOf(event),
+        signInCard({ locale: "en", url: new URL(path, origin).href })
+      );
+      return;
+    }
+    await adapter.postMessage(slackThreadOf(event), say(line, "en"));
+  } catch (error) {
+    log.warn("channel.line_failed", {
+      platform: "slack",
+      line,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Answers a Slack request whose body the door read: 401 unless Slack
+ * signed it for this client's app, the URL check's challenge, and
+ * otherwise 200 at once, Slack's event handled in the background.
+ */
+const slackResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  handoff: ChannelHandoff | undefined
+): Promise<Response> => {
+  if (!(await verifiedSlackRequest(env, request, body))) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  // A press on a button comes form-encoded, every event as JSON.
+  if (
+    request.headers
+      .get("content-type")
+      ?.startsWith("application/x-www-form-urlencoded") === true
+  ) {
+    return await slackPressResponse(request, env, body, ctx);
+  }
+  const parsed = slackPayloadSchema.safeParse(jsonOf(body));
+  if (!parsed.success) {
+    return new Response(null, { status: 200 });
+  }
+  const { type, challenge, event_id: eventId, event } = parsed.data;
+  if (type === "url_verification" && challenge !== undefined) {
+    return Response.json({ challenge });
+  }
+  // Only a person's new message: the bot's own, edits and the rest are
+  // acknowledged and dropped.
+  if (
+    type !== "event_callback" ||
+    eventId === undefined ||
+    event?.type !== "message" ||
+    event.subtype !== undefined ||
+    event.bot_id !== undefined ||
+    event.user === undefined
+  ) {
+    return new Response(null, { status: 200 });
+  }
+  const from = { ...event, user: event.user };
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const { line, link, userId } = await slackGate(env, state, eventId, from);
+  const { origin } = new URL(request.url);
+  if (line !== undefined || link !== undefined) {
+    ctx.waitUntil(sendSlackLine(env, origin, from, line ?? "link"));
+  }
+  if (userId === undefined) {
+    return new Response(null, { status: 200 });
+  }
+  // Settings › Stephen, as for Teams: whether he answers them in Slack at
+  // all, asked before anything they wrote is read.
+  const reach = await stephenFor(env, userId, "slack");
+  if (!reach.reaches) {
+    ctx.waitUntil(sendSlackLine(env, origin, from, "notTurnedOn"));
+    return new Response(null, { status: 200 });
+  }
+  // As for Teams: one turn at a time per conversation, answered by the
+  // same agent in the person's own chat for Slack (answer.ts).
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { slack: slackAdapter(env) },
+    state,
+    logger: "silent",
+    concurrency: "queue",
+  });
+  const takeOn = handoff ?? answerInChat(env);
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, "slack", thread.id, userId);
+    await takeOn({
+      platform: "slack",
+      userId,
+      thread,
+      message,
+      acts: reach.acts,
+      place: direct,
+    });
+  });
+  return await chat.webhooks.slack(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
+};
+
+/** Options the tests set: the keys to check against, and the handoff. */
+export interface DoorOptions {
+  teamsKeys?: TeamsKeys;
+  handoff?: ChannelHandoff;
+}
+
+/**
+ * Answers a request to `/api/channels/<platform>`: 404 for a platform the
+ * deployment hasn't set up, 401 for one its platform didn't send, and
+ * otherwise what the platform expects, the rest done in the background.
+ */
+export const channelResponse = async (
+  request: Request,
+  env: Env,
+  platform: string,
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  { teamsKeys, handoff }: DoorOptions = {}
+): Promise<Response> => {
+  if (!isSetUp(env, platform)) {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (request.method !== "POST") {
+    return errorResponse(
+      405,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  const body = await boundedText(request.body, maxBodyBytes);
+  if (body === undefined) {
+    return errorResponse(
+      413,
+      requestErrors.create("request.too_large"),
+      requestId
+    );
+  }
+  if (platform === "slack") {
+    return await slackResponse(request, env, body, ctx, handoff);
+  }
+  if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
+    ctx.waitUntil(countSignal(env, platform, "refused"));
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const sent = jsonOf(body);
+  const parsed = activitySchema.safeParse(sent);
+  // Verified, but nothing the door takes (a typing indicator has a
+  // `from`; an installation update may not): acknowledged, and dropped.
+  if (!parsed.success || parsed.data.type !== "message") {
+    return new Response(null, { status: 200 });
+  }
+  // In a direct message, what they said, without a message their reply
+  // quotes (quoted-reply.ts): read so by the door and every handler after
+  // it. Only there, where `remember` may keep their words: in a group chat
+  // or channel the quote is the only copy the turn gets of what it answers.
+  const text =
+    parsed.data.text === undefined ||
+    parsed.data.conversation.conversationType !== "personal"
+      ? parsed.data.text
+      : await withoutQuotedReply(parsed.data.text);
+  const activity = { ...parsed.data, text };
+  const theirs =
+    text === parsed.data.text
+      ? body
+      : JSON.stringify({ ...activityFieldsSchema.parse(sent), text });
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const adapter = await teamsAdapter(env, teamsKeys);
+  const { line, userId, acts, kept, place } = await gate(
+    env,
+    state,
+    adapter,
+    activity
+  );
+  if (line !== undefined) {
+    ctx.waitUntil(sendLine(env, adapter, activity, line));
+  }
+  if (userId === undefined) {
+    return new Response(null, { status: 200 });
+  }
+
+  // One turn at a time per conversation: a message sent while one is
+  // answered waits for it, in order, rather than being dropped.
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { teams: adapter },
+    state,
+    logger: "silent",
+    concurrency: "queue",
+  });
+  const takeOn = handoff ?? answerInChat(env);
+  chat.onDirectMessage(async (thread, message) => {
+    // Only what the door itself took for a direct message: never one it
+    // read as a group chat or channel, whatever the SDK makes of it.
+    if (place?.kind !== "direct") {
+      return;
+    }
+    await keepConversation(
+      env,
+      platform,
+      thread.id,
+      userId,
+      localeOf(activity.locale)
+    );
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      place,
+    });
+  });
+  onPresses(env, chat, {
+    platform,
+    userId,
+    state,
+    locale: localeOf(activity.locale),
+    inDirect: place?.kind === "direct",
+  });
+  // A thumb on one of his answers: kept on the request it is for, only
+  // when that request is the presser's own (stephen-requests.ts).
+  chat.onAction([helpfulAction, notHelpfulAction], async (event) => {
+    if (event.thread === null || event.value === undefined) {
+      return;
+    }
+    const rated = await rateRequest(env, {
+      userId,
+      requestId: event.value,
+      rating: event.actionId === helpfulAction ? "up" : "down",
+    });
+    if (rated) {
+      await event.thread.post(say("rated", localeOf(activity.locale)));
+    }
+  });
+  // A group chat's or channel's: only ever one that @mentioned the bot,
+  // which the door let through with who is in it.
+  chat.onNewMention(async (thread, message) => {
+    if (place === undefined || place.kind === "direct" || thread.isDM) {
+      return;
+    }
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      place,
+    });
+  });
+  // Answered at once: the platform gives up on a webhook long before an
+  // answer is ready, and sends it again. The message is handled after,
+  // as the request's background work.
+  const settled = async (promise: Promise<unknown>): Promise<void> => {
+    try {
+      await promise;
+    } catch (error) {
+      log.error("channel.handle_failed", { platform, ...errorFields(error) });
+    }
+  };
+  const background = (promise: Promise<unknown>): void => {
+    ctx.waitUntil(settled(promise));
+  };
+  const handled = async (): Promise<void> => {
+    await chat.webhooks.teams(
+      new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: theirs,
+      }),
+      { waitUntil: background }
+    );
+  };
+  background(handled());
+  return new Response(null, { status: 200 });
+};

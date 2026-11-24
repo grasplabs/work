@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_schema_activations` ADD `answers` text DEFAULT '[]' NOT NULL;

@@ -1,0 +1,1 @@
+ALTER TABLE `run_brain_evidence` ADD `recalled` integer DEFAULT true NOT NULL;

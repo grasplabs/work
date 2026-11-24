@@ -1,0 +1,288 @@
+// Compile-time guarantees of `useWorkflow` (spec 10.4.1, 10.4.4, 10.4.7,
+// 10.7.2, 10.7.3), against workflow references as the generator writes
+// them: a run's args and result are inferred from the reference without
+// a cast or generic argument; a wrong table's ID, an unknown field, an
+// function's reference, an internal or string one are refused; a result
+// exists only once completed and an error only once failed, each read off
+// the narrowed view itself; the compensating variant carries its cause;
+// the pending control and the waits narrow by kind. Type-checked by
+// `vp check`, never run: every `@ts-expect-error` must stay an error.
+import { expectTypeOf } from "vite-plus/test";
+
+import type { DecisionValueOf, Id, RunHandle } from "../src/index.ts";
+import { useWorkflow } from "../src/react.ts";
+import type { AppErrorPayload, PendingControl } from "../src/react.ts";
+import { api, workflows } from "./notes/server/_generated/api.ts";
+
+declare const noteId: Id<"notes">;
+declare const taskId: Id<"tasks">;
+declare const runId: string;
+
+export const useRunChecks = (): void => {
+  const summary = useWorkflow(workflows.summarizeNote);
+  expectTypeOf(summary.start({ noteId })).toEqualTypeOf<Promise<RunHandle>>();
+  // A defaulted field may be left out, or given.
+  void summary.start({ noteId, style: "long" });
+  expectTypeOf(summary.pause()).toEqualTypeOf<Promise<void>>();
+  expectTypeOf(summary.resume()).toEqualTypeOf<Promise<void>>();
+  expectTypeOf(summary.cancel()).toEqualTypeOf<Promise<void>>();
+  expectTypeOf(summary.canStart).toEqualTypeOf<boolean>();
+  expectTypeOf(summary.isStarting).toEqualTypeOf<boolean>();
+  // @ts-expect-error -- a note's ID, not a task's
+  void summary.start({ noteId: taskId });
+  // @ts-expect-error -- a field the workflow doesn't take
+  void summary.start({ noteId, priority: 1 });
+  // @ts-expect-error -- its required field left out
+  void summary.start({});
+  // @ts-expect-error -- a value outside the enum
+  void summary.start({ noteId, style: "medium" });
+  // @ts-expect-error -- `start` takes the args themselves, not a string
+  void summary.start("summarize");
+
+  const archive = useWorkflow(workflows.archiveNotes);
+  void archive.start({});
+  if (archive.status === "completed") {
+    expectTypeOf(archive.result).toEqualTypeOf<null>();
+  }
+};
+
+export const useViewChecks = (): void => {
+  const summary = useWorkflow(workflows.summarizeNote, { runId });
+  if (summary.status === "completed") {
+    expectTypeOf(summary.result).toEqualTypeOf<{
+      summary: string;
+      words: number;
+    }>();
+    expectTypeOf(summary.finishedAt).toEqualTypeOf<number>();
+    expectTypeOf(summary.runId).toEqualTypeOf<string>();
+    // @ts-expect-error -- a completed run has no execution error
+    void summary.error;
+  }
+  if (summary.status === "failed") {
+    expectTypeOf(summary.error).toEqualTypeOf<Readonly<AppErrorPayload>>();
+    // @ts-expect-error -- a failed run has no result
+    void summary.result;
+  }
+  if (summary.status === "cancelled") {
+    // @ts-expect-error -- a cancelled run has neither result nor error
+    void summary.result;
+    // @ts-expect-error -- as above
+    void summary.error;
+  }
+  if (
+    summary.status === "queued" ||
+    summary.status === "running" ||
+    summary.status === "waiting" ||
+    summary.status === "paused"
+  ) {
+    expectTypeOf(summary.finishedAt).toEqualTypeOf<null>();
+    expectTypeOf(summary.startedAt).toEqualTypeOf<number | null>();
+    // @ts-expect-error -- no result before it completed
+    void summary.result;
+  }
+  if (summary.status === "compensating") {
+    expectTypeOf(summary.activity).toEqualTypeOf<
+      "running" | "waiting" | "paused"
+    >();
+    if (summary.cause === "failure") {
+      expectTypeOf(summary.originalError).toEqualTypeOf<
+        Readonly<AppErrorPayload>
+      >();
+    } else {
+      // @ts-expect-error -- a cancellation's cleanup has no original error
+      void summary.originalError;
+    }
+    // @ts-expect-error -- cleanup is not a terminal outcome
+    void summary.result;
+  }
+  if (summary.status === "loading") {
+    expectTypeOf(summary.runId).toEqualTypeOf<string>();
+    // @ts-expect-error -- nothing of the run is known while loading
+    void summary.workflowVersion;
+  }
+  if (summary.status === "idle") {
+    // @ts-expect-error -- no run is selected while idle
+    void summary.runId;
+  }
+  // @ts-expect-error -- no result before narrowing to completed
+  void summary.result;
+  // @ts-expect-error -- no error before narrowing to failed
+  void summary.error;
+  // @ts-expect-error -- the status is a literal union, not any string
+  expectTypeOf(summary.status).toEqualTypeOf<string>();
+};
+
+export const usePendingChecks = (): void => {
+  const workflow = useWorkflow(workflows.summarizeNote, { runId });
+  expectTypeOf(workflow.pendingControl).toEqualTypeOf<PendingControl | null>();
+  if (workflow.pendingControl?.kind === "pause") {
+    expectTypeOf(workflow.pendingControl.stage).toEqualTypeOf<
+      "submitting" | "applying"
+    >();
+  }
+  if (workflow.pendingControl !== null) {
+    expectTypeOf(workflow.pendingControl.kind).toEqualTypeOf<
+      "pause" | "resume" | "cancel"
+    >();
+    // @ts-expect-error -- progress of a request, not an engine status
+    void workflow.pendingControl.status;
+  }
+};
+
+export const useWaitChecks = (): void => {
+  const workflow = useWorkflow(workflows.summarizeNote, { runId });
+  for (const wait of workflow.waits) {
+    expectTypeOf(wait.id).toEqualTypeOf<string>();
+    expectTypeOf(wait.deadline).toEqualTypeOf<number | null>();
+    if (wait.kind === "timer") {
+      expectTypeOf(wait.purpose).toEqualTypeOf<"sleep" | "retry">();
+      expectTypeOf(wait.deadline).toEqualTypeOf<number>();
+    }
+    if (wait.kind === "event" && wait.key === "do/0/chooseStyle") {
+      // The hook's waits are the reference's: narrowed to the very event.
+      expectTypeOf(wait.event).toEqualTypeOf<
+        typeof workflows.summarizeNote.events.styleChosen
+      >();
+      expectTypeOf(wait.canSend).toEqualTypeOf<boolean>();
+    }
+    if (wait.kind === "decision" && wait.key === "approveSummary") {
+      // And to the decision, with its response's value type.
+      expectTypeOf<DecisionValueOf<typeof wait>>().toEqualTypeOf<{
+        comment: string;
+        rating?: number;
+      }>();
+    }
+    if (wait.kind === "blocked") {
+      expectTypeOf(wait.reason).toEqualTypeOf<
+        "policy" | "quota" | "uncertain"
+      >();
+      // @ts-expect-error -- a hold is never answerable
+      void wait.canRespond;
+    }
+  }
+};
+
+export const useRefusedReferences = (): void => {
+  // @ts-expect-error -- a hand-written workflow name
+  void useWorkflow("summarizeNote");
+  // @ts-expect-error -- a function's reference, not a workflow's
+  void useWorkflow(api.notes.create);
+  // @ts-expect-error -- a workflow's own event, not the workflow
+  void useWorkflow(workflows.summarizeNote.events.styleChosen);
+  // @ts-expect-error -- a decision's reference, not the workflow's
+  void useWorkflow(workflows.summarizeNote.decisions.approveSummary);
+  // @ts-expect-error -- options are exactly { runId }
+  void useWorkflow(workflows.summarizeNote, { runId: null });
+  // @ts-expect-error -- no hidden generic arguments
+  void useWorkflow<typeof workflows.summarizeNote, string>(
+    workflows.summarizeNote
+  );
+};
+
+declare const anything: unknown;
+declare const json: Record<string, unknown>;
+
+/**
+ * `send` (spec 10.4.6): the data is inferred from the event reference,
+ * never widened by what the caller passes; another workflow's event, a
+ * string, an object made up and data as unknown or loose JSON are
+ * refused; a workflow that declares no event a page sends has nothing
+ * `send` takes.
+ */
+export const useSendChecks = (): void => {
+  const summary = useWorkflow(workflows.summarizeNote, { runId });
+  expectTypeOf(
+    summary.send(workflows.summarizeNote.events.styleChosen, {
+      style: "short",
+    })
+  ).toEqualTypeOf<Promise<void>>();
+  void summary.send(workflows.summarizeNote.events.noteEdited, { noteId });
+  void summary.send(workflows.summarizeNote.events.noteEdited, {
+    noteId,
+    title: "Renamed",
+  });
+  void summary.send(workflows.summarizeNote.events.styleChosen, {
+    // @ts-expect-error -- a value outside the event's enum
+    style: "medium",
+  });
+  void summary.send(workflows.summarizeNote.events.styleChosen, {
+    style: "short",
+    // @ts-expect-error -- a field the event doesn't declare
+    source: "urn:forged",
+  });
+  // @ts-expect-error -- its required field left out
+  void summary.send(workflows.summarizeNote.events.noteEdited, {});
+  void summary.send(workflows.summarizeNote.events.noteEdited, {
+    // @ts-expect-error -- a task's ID, not a note's
+    noteId: taskId,
+  });
+  // @ts-expect-error -- data typed as nothing in particular
+  void summary.send(workflows.summarizeNote.events.styleChosen, anything);
+  // @ts-expect-error -- loose JSON in place of the declared schema
+  void summary.send(workflows.summarizeNote.events.styleChosen, json);
+  // @ts-expect-error -- another workflow's event
+  void summary.send(workflows.archiveNotes.events.confirmed, {
+    confirmed: true,
+  });
+  // @ts-expect-error -- an event's name, not its reference
+  void summary.send("styleChosen", { style: "short" });
+  void summary.send(
+    // @ts-expect-error -- an object made up, not the generated reference
+    { kind: "workflowEvent", alias: "styleChosen" },
+    { style: "short" }
+  );
+  // The data isn't inferred from the call: one event's data for another's.
+  void summary.send(
+    workflows.summarizeNote.events.styleChosen,
+    // @ts-expect-error -- the other event's data
+    { noteId }
+  );
+
+  const archive = useWorkflow(workflows.archiveNotes);
+  void archive.send(workflows.archiveNotes.events.confirmed, {
+    confirmed: true,
+  });
+  // @ts-expect-error -- the summary workflow's event, on the archive's hook
+  void archive.send(workflows.summarizeNote.events.styleChosen, {
+    style: "short",
+  });
+};
+
+/**
+ * `respond` (spec 10.4.5, 10.7.2): a decision wait of the hook's own
+ * workflow, narrowed by its key, and that decision's value inferred from
+ * the wait alone; an event wait, another workflow's decision, a wrong or
+ * missing value and an untyped one are refused.
+ */
+export const useRespondChecks = (): void => {
+  const summary = useWorkflow(workflows.summarizeNote, { runId });
+  const archive = useWorkflow(workflows.archiveNotes, { runId });
+  for (const wait of summary.waits) {
+    if (wait.kind === "decision" && wait.key === "approveSummary") {
+      expectTypeOf(
+        summary.respond(wait, { approved: true, value: { comment: "Fine" } })
+      ).toEqualTypeOf<Promise<void>>();
+      void summary.respond(wait, {
+        approved: false,
+        value: { comment: "Too long", rating: 2 },
+      });
+      // @ts-expect-error -- chooseLength's value, not approveSummary's
+      void summary.respond(wait, { approved: true, value: "short" });
+      // @ts-expect-error -- no value where one is declared
+      void summary.respond(wait, { approved: true });
+      // @ts-expect-error -- untyped where the decision declares its value
+      void summary.respond(wait, { approved: true, value: anything });
+      // @ts-expect-error -- another workflow's hook answers none of this one's
+      void archive.respond(wait, { approved: true, value: null });
+    }
+    if (wait.kind === "decision" && wait.key === "chooseLength") {
+      void summary.respond(wait, { approved: true, value: "long" });
+      // @ts-expect-error -- outside the enum
+      void summary.respond(wait, { approved: true, value: "medium" });
+    }
+    if (wait.kind === "event") {
+      // @ts-expect-error -- an event wait is no decision to answer
+      void summary.respond(wait, { approved: true, value: null });
+    }
+  }
+};

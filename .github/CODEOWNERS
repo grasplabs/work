@@ -1,0 +1,4 @@
+# The owners, requested as reviewers on every pull request. An approval isn't
+# required: the merge queue lands a pull request once `check` passes on top
+# of main (.github/rulesets/main.json).
+*  @nickruigrok @jkobgnther

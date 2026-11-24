@@ -1,0 +1,194 @@
+// What core reads from its env besides wrangler.jsonc's bindings, which
+// `wrangler types` can't see: deployment config the admin sets per
+// deployment, and switches local dev, tests and on-prem pass. Every one is
+// optional: core works, or fails closed, without it. Merged into the
+// interface worker-configuration.d.ts generates, which both `Env` and
+// `cloudflare:workers`' `env` extend.
+interface __BaseEnv_Env {
+  /** Sign-in (src/auth/config.ts): JSON, parsed with `deploymentConfig`. */
+  SIGN_IN?: unknown;
+  ENTRA_CLIENT_SECRET?: string;
+  /**
+   * The client's Teams bot: its Microsoft app id, the audience of every
+   * request Teams sends it (src/channels/teams.ts). Unset, every request
+   * from Teams is refused.
+   */
+  TEAMS_BOT_ID?: string;
+  /**
+   * The client's Slack app's signing secret, a Worker secret: every request
+   * Slack sends the app is signed with it (src/channels/slack.ts). Unset,
+   * Slack's door answers 404.
+   */
+  SLACK_SIGNING_SECRET?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  /**
+   * The change that made this version (src/platform-updates.ts): JSON,
+   * `{by, what, release, at}`, set by the admin on every version it
+   * deploys.
+   */
+  /**
+   * For testing only, on a staging deployment: the providers whose
+   * platform features go to their usual host, not their EU data residency
+   * host, comma-separated (`usualHostProviders`, @grasp-os/shared/
+   * ai-providers). The admin sets it on core and connect alike; never on
+   * production.
+   */
+  PLATFORM_AI_USUAL_HOSTS?: unknown;
+  PLATFORM_CHANGE?: unknown;
+  /**
+   * The flow the company's onboarding starts with (src/onboarding/store.ts):
+   * the name of one of the flows staff start from, read with
+   * `startingFlowOf` (the shared onboarding-flow module), as staff chose it
+   * in Grasp's admin when they added the company. Read once, as its
+   * onboarding is first kept; unset, it starts with all of it.
+   */
+  ONBOARDING_START?: unknown;
+  /**
+   * When the deployment was made, where it starts closed
+   * (src/onboarding/gate.ts): an ISO date and time, set by Grasp's admin
+   * for a company staff added with an onboarding, so its gate is closed
+   * before anyone signs in, without staff closing it. Read only while the
+   * gate was never moved; unset, a deployment starts open.
+   */
+  ONBOARDING_CLOSED_FROM?: unknown;
+  /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
+  MAIL_FROM?: unknown;
+  /**
+   * `cloudflare` where core runs on Cloudflare's runtime, which enforces
+   * Code Mode's CPU limit; anything else, unset included, is taken as a
+   * runtime that doesn't (src/code-mode.ts). Tests, local development and
+   * on-prem say `workerd`.
+   */
+  RUNTIME_PROFILE?: string;
+  /**
+   * The client this deployment is, as the admin deploys it: what core
+   * answers the admin's provisioning probe with (src/provision-probe.ts).
+   * Unset in local development and on-prem.
+   */
+  CLIENT_ID?: string;
+  /**
+   * On-prem only: the sandbox supervisor (scripts/workerd-sandbox.ts), as an
+   * external service, where untrusted isolates run in workerd processes of
+   * their own with a deadline (src/sandboxed.ts). Plain workerd enforces no
+   * CPU limit. Unbound, core loads them itself only on Cloudflare, or where
+   * `SANDBOX_IN_PROCESS` says so; anywhere else it refuses.
+   */
+  SANDBOX_HOST?: Fetcher;
+  /**
+   * On-prem only: the install's release directory's model files
+   * (`blobs/models/<sha256>`), read-only, as workerd's disk service
+   * (scripts/workerd-model-files.ts). The clock copies the model's files
+   * from it into `MODEL_FILES` (src/embedder.ts). On Cloudflare the admin's
+   * deploy copies them, and this is unbound.
+   */
+  MODEL_SOURCE?: Fetcher;
+  /**
+   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
+   * and for an extraction, a page build and a package build on the
+   * sandbox host (src/files/extract.ts, src/platform-sandbox.ts).
+   */
+  SANDBOX_DEADLINE_MS?: string;
+  /**
+   * `unbounded` where core may run untrusted isolates itself without
+   * `SANDBOX_HOST` off Cloudflare, accepting that nothing bounds their CPU:
+   * tests and local development only, never on-prem (src/sandboxed.ts).
+   * No isolate core loads prints anything (@grasp-os/shared/quiet-loader):
+   * what a draft's preview writes goes to its tail's report, recorded in
+   * the isolate rather than printed (GRA-919). That holds as long as the
+   * process isn't served `--verbose`, which core can't detect: served so,
+   * a timer imported by name from `node:timers` in core's own Node code
+   * (the compiler, extraction) still has its throw reported. An operator
+   * who sets this doesn't serve core so (GRA-939).
+   */
+  SANDBOX_IN_PROCESS?: string;
+  /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
+  DURABLE_OBJECT_JURISDICTION?: string;
+  /**
+   * Tests only: a shorter bound on one load of a workflow build, before it
+   * is taken for abandoned (src/workflow-builds.ts).
+   */
+  WORKFLOW_BUILD_READ_MS?: string;
+  /**
+   * Tests only: a shorter wait between a run's checks of a held side
+   * effect (src/workflows/host.ts).
+   */
+  WORKFLOW_OFF_WAIT_MS?: string;
+  /**
+   * Tests only: lower quota limits than the platform's, so a test reaches
+   * one cheaply (src/workflows/quotas.ts, `quotaLimits`): JSON, partial.
+   */
+  TEST_QUOTA_LIMITS?: unknown;
+  /**
+   * Tests only: a shorter deadline for a run waiting on an unknown outcome
+   * its person hasn't resolved (src/workflows/host.ts).
+   */
+  WORKFLOW_UNKNOWN_HOLD_MS?: string;
+  /**
+   * Tests only: a shorter hold for a run waiting for a working AI provider
+   * key (src/workflows/host.ts).
+   */
+  WORKFLOW_AI_KEY_HOLD_MS?: string;
+  /**
+   * Tests only: a shorter budget for the time one activation of a run
+   * spends outside its steps (src/workflows/between-steps.ts).
+   */
+  WORKFLOW_BETWEEN_STEPS_MS?: string;
+  /**
+   * Tests only: the delay before every step's retry, in place of the one
+   * its config says (src/workflows/dispatcher.ts).
+   */
+  WORKFLOW_RETRY_DELAY_MS?: string;
+  /**
+   * Tests only: the UTC month model spend counts in, such as `2031-01`
+   * (src/model-spend.ts).
+   */
+  SPEND_MONTH?: string;
+  /**
+   * Tests only: fewer connector events one clock run delivers
+   * (src/workflows/connector-events.ts).
+   */
+  CONNECTOR_EVENTS_PER_RUN?: string;
+  /** Tests only: a shorter wall-clock limit for one code run (src/code-mode.ts). */
+  CODE_RUN_TIMEOUT_MS?: string;
+  /**
+   * Tests only: fewer restarts that may cut a chat's task off before pi
+   * parks it (`restartLimit`, src/chat-harness.ts).
+   */
+  CHAT_RESTART_LIMIT?: string;
+  /** Tests only: a shorter limit for one call into an App (src/app.ts). */
+  APP_CALL_TIMEOUT_MS?: string;
+  /**
+   * Tests only: shorter limits on an App's tests, in milliseconds,
+   * `test/suite/run/cleanup/cpu` (src/app-tests.ts): never longer than
+   * the defaults; a part left empty keeps its default.
+   */
+  APP_TEST_LIMITS_MS?: string;
+  /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
+  BUILD_WAIT_MS?: string;
+  /**
+   * Tests only: a shorter bound on one load of a release, before it is
+   * taken for abandoned (src/app-releases.ts).
+   */
+  RELEASE_READ_MS?: string;
+  /**
+   * Tests only: lowers how many bytes of text a definition export packages
+   * (src/definition-export.ts); never raises it.
+   */
+  DEFINITION_EXPORT_MAX_BYTES?: string;
+  /**
+   * Tests only: lower bounds on an App's statistics reads, `perCall/
+   * perMinute` (src/app.ts, `claimStatisticMinute`).
+   */
+  STATISTICS_READ_LIMITS?: string;
+  /**
+   * Tests only: a lower live-read budget of a person's pages,
+   * `burst/perMinute` (`liveReadLimitsOf`, src/app.ts); never higher.
+   */
+  LIVE_READ_LIMITS?: string;
+  /** The router secret before the current one, while rotating (src/router-secret.ts). */
+  ROUTER_SECRET_PREVIOUS?: string;
+  /** Local dev only (src/router-secret.ts). */
+  DEV_SKIP_ROUTER_SECRET?: string;
+  /** Local dev and e2e only: a stand-in for Entra (src/auth/config.ts). */
+  DEV_IDP_ORIGIN?: string;
+}

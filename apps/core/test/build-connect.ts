@@ -1,0 +1,71 @@
+/**
+ * Bundles the connect Worker the way its deploy does, so core's tests call
+ * the real one over the CONNECT service binding.
+ */
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { buildConnectors, connectorEntries } from "../../connect/build.ts";
+import { testComposioClassesFile } from "../../connect/test/global-setup.ts";
+import { runNode } from "./run-node.ts";
+import { testRun } from "./test-run.ts";
+
+const connect = path.join(import.meta.dirname, "../../connect");
+const wrangler = path.join(connect, "node_modules/wrangler/bin/wrangler.js");
+
+/**
+ * Where core's global setup writes the bundle for its tests: in the run's
+ * own directory, so another run can't rewrite it while this one's config
+ * reads it.
+ */
+export const connectBundle = path.join(testRun, "connect.js");
+
+/**
+ * The native connectors core's tests bundle: the release's, and connect's
+ * sample connector that syncs (its test/fixtures), whose items name what
+ * they are part of, as a mailbox's attachments do (brain-sync.test.ts).
+ * Written beside the bundle, never over connect's own build output.
+ */
+const testConnectors = path.join(testRun, "connectors.js");
+
+/** The connect Worker's bundle, as one ES module, its connectors in it. */
+export const bundleConnect = async (): Promise<string> => {
+  await buildConnectors(
+    [
+      ...connectorEntries(),
+      path.join(connect, "test/fixtures/sample-sync-connector.ts"),
+    ],
+    testConnectors
+  );
+  const out = mkdtempSync(path.join(tmpdir(), "grasp-os-connect-"));
+  try {
+    // Its output is only shown if bundling fails, in the error. The fake
+    // Composio's tools are classed as in connect's own tests. Not
+    // blocking: the global setup builds the App compiler meanwhile.
+    await runNode(
+      [
+        wrangler,
+        "deploy",
+        "--dry-run",
+        "--outdir",
+        out,
+        "--alias",
+        `#composio-classes:${testComposioClassesFile}`,
+        "--alias",
+        `#connectors:${testConnectors}`,
+      ],
+      { cwd: connect, output: "quiet" }
+    );
+    const bundle = path.join(out, "index.js");
+    // The launcher reports its CLI dying of a signal as success.
+    if (!existsSync(bundle)) {
+      throw new Error(
+        "Wrangler exited without writing connect's bundle. Its launcher reports a CLI killed by a signal as success, so check for a crash."
+      );
+    }
+    return readFileSync(bundle, "utf-8");
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+};

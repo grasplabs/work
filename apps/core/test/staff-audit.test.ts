@@ -1,0 +1,550 @@
+import { appFilesPath } from "@grasp-os/shared/app-file-limits";
+import { appLinksPath } from "@grasp-os/shared/app-link-limits";
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import { auditExportPath } from "@grasp-os/shared/audit-log";
+import { connectionCallbackPath } from "@grasp-os/shared/connect";
+import { errorReportPath } from "@grasp-os/shared/error-reports";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { labPath } from "@grasp-os/shared/lab";
+import {
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/page-limits";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
+import { createExecutionContext } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import worker from "../src/index.ts";
+import { PageFrameRpc } from "../src/pages-rpc.ts";
+import { CoreRpcTarget } from "../src/rpc-target.ts";
+import { SessionRpc } from "../src/session-rpc.ts";
+import { staffAudited } from "../src/staff-audit.ts";
+import { mockIdp } from "./idp.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  routed,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  whoami,
+} from "./sign-in.ts";
+
+// Every view and action of Grasp's staff is in the client's audit log
+// (GRA-1087, its threat model): each ask, over `/rpc` or a route, writes
+// one entry the client's admins see, as "(Grasp staff)", naming what was
+// asked and never what it holds. Outside the onboarding a staff session is
+// refused (staff-scope.test.ts), and the attempt is still on record. The
+// ways it can fail, tried here:
+// 1. A surface staff ask, answered or refused, writes no entry.
+// 2. A page asking again floods the log, or a view of something else is
+//    folded into another's entry.
+// 3. An entry repeats what was read: a search's terms, a document's text.
+// 4. A person who isn't staff writes staff entries.
+
+const idp = mockIdp();
+
+/** A staff session and its API, on a connection of its own. */
+const staffOn = async () => {
+  const session = await signedIn(idp, "grasp-staff", staffPerson());
+  const { core } = await openRpc(session);
+  return { session, api: core.authenticate() };
+};
+
+/** The staff entries among `events`. */
+const staffViews = (events: readonly AuditEvent[]): AuditEvent[] =>
+  events.filter(({ action }) => action === "staff.accessed");
+
+/** The surface each staff entry among `events` names. */
+const surfacesOf = (events: readonly AuditEvent[]): unknown[] =>
+  staffViews(events).map(({ detail }) => detail.surface);
+
+/** How long the walk waits for one call before it goes on. */
+const callWaitMs = 3000;
+
+/**
+ * Every method of `target` and of every target its getters hand out, by
+ * path, with how many parameters it declares: what a browser can call.
+ */
+const targetMethods = (
+  target: object,
+  path: string,
+  seen = new Set<object>()
+): { name: string; call: (...args: unknown[]) => unknown; arity: number }[] => {
+  if (seen.has(target)) {
+    return [];
+  }
+  seen.add(target);
+  const found: {
+    name: string;
+    call: (...args: unknown[]) => unknown;
+    arity: number;
+  }[] = [];
+  for (
+    let prototype: object | null = Reflect.getPrototypeOf(target);
+    prototype !== null && prototype !== CoreRpcTarget.prototype;
+    prototype = Reflect.getPrototypeOf(prototype)
+  ) {
+    for (const key of Reflect.ownKeys(prototype)) {
+      const property = Reflect.getOwnPropertyDescriptor(prototype, key);
+      if (typeof key !== "string" || key === "constructor" || !property) {
+        continue;
+      }
+      const name = `${path}.${key}`;
+      if (property.get !== undefined) {
+        const inner: unknown = Reflect.apply(property.get, target, []);
+        if (inner instanceof CoreRpcTarget) {
+          found.push(...targetMethods(inner, name, seen));
+        }
+      } else if (typeof property.value === "function") {
+        const method: unknown = property.value;
+        found.push({
+          name,
+          arity: typeof method === "function" ? Math.max(method.length, 1) : 0,
+          call: (...args: unknown[]): unknown => {
+            if (typeof method !== "function") {
+              return undefined;
+            }
+            const answer: unknown = Reflect.apply(method, target, args);
+            return answer;
+          },
+        });
+      }
+    }
+  }
+  return found;
+};
+
+/** A text that must never reach the log. */
+const secret = `Salary${crypto.randomUUID().slice(0, 8)}`;
+
+describe("Grasp staff's views, audited", () => {
+  it("write one entry for each ask, answered or refused, over /rpc or a route, without content", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const uploadId = crypto.randomUUID();
+    const { session, api } = await staffOn();
+    const { userId } = await api.whoami();
+    const app = crypto.randomUUID();
+    const reads: [string, () => Promise<unknown>][] = [
+      ["chats.search", async () => await api.chats.search(secret)],
+      [
+        "brainSources.uploadOf",
+        async () => await api.brainSources.uploadOf(uploadId),
+      ],
+      ["chats.list", async () => await api.chats.list()],
+      ["decisions.waiting", async () => await api.decisions.waiting()],
+      ["audit.search", async () => await api.audit.search()],
+      ["workflows.runs", async () => await api.workflows.runs()],
+      [
+        "audit.export",
+        async () =>
+          await routed(`${auditExportPath}?format=csv`, {
+            headers: { cookie: session },
+          }),
+      ],
+      [
+        "app.files",
+        async () =>
+          await routed(`${appFilesPath}/${app}/notes/files/f1`, {
+            headers: { cookie: session, [pageLeaseHeader]: "lease" },
+          }),
+      ],
+      [
+        "app.link.check",
+        async () =>
+          await routed(`${appLinksPath}/${app}/links/check`, {
+            method: "POST",
+            headers: {
+              cookie: session,
+              origin: clientOrigin,
+              "content-type": "application/json",
+              [pageLeaseHeader]: "lease",
+            },
+            body: JSON.stringify({}),
+          }),
+      ],
+      [
+        "connections.callback",
+        async () =>
+          await routed(`${connectionCallbackPath}?state=staff-probe`, {
+            headers: { cookie: session },
+          }),
+      ],
+      [
+        "error.report",
+        async () =>
+          await routed(errorReportPath, {
+            method: "POST",
+            headers: {
+              cookie: session,
+              origin: clientOrigin,
+              "content-type": "application/json",
+            },
+            body: "{}",
+          }),
+      ],
+      [
+        "onboarding.lab",
+        async () =>
+          await worker.fetch(
+            new Request(`http://localhost:8787${labPath}`, {
+              method: "POST",
+              headers: { "content-type": "application/json", cookie: session },
+              body: "{}",
+            }),
+            { ...env, DEV_SKIP_ROUTER_SECRET: "true" },
+            createExecutionContext()
+          ),
+      ],
+      [
+        "onboarding.speech",
+        async () =>
+          await routed(speechPath, {
+            method: "POST",
+            headers: { "content-type": "application/json", cookie: session },
+            body: JSON.stringify({ text: "Hello.", language: "en" }),
+          }),
+      ],
+      [
+        "onboarding.transcription",
+        async () => {
+          const response = await routed(transcriptionPath, {
+            headers: {
+              Upgrade: "websocket",
+              Origin: clientOrigin,
+              cookie: session,
+            },
+          });
+          const socket = response.webSocket;
+          if (socket === null) {
+            throw new Error(`Expected a WebSocket, got ${response.status}`);
+          }
+          const answered = Promise.withResolvers<null>();
+          socket.addEventListener("message", () => {
+            answered.resolve(null);
+          });
+          socket.addEventListener("close", () => {
+            answered.resolve(null);
+          });
+          socket.accept();
+          // Who listens is read once the page says how it will talk.
+          socket.send(
+            JSON.stringify({
+              type: "start",
+              language: "en",
+              sampleRate: 16_000,
+            })
+          );
+          await Promise.race([answered.promise, scheduler.wait(callWaitMs)]);
+          socket.close();
+        },
+      ],
+      [
+        "app.functions",
+        async () =>
+          await routed(`/api/app-functions/${app}`, {
+            method: "POST",
+            headers: {
+              cookie: session,
+              origin: clientOrigin,
+              "content-type": "application/json",
+              [pagePersonHeader]: userId,
+            },
+            body: JSON.stringify({}),
+          }),
+      ],
+    ];
+    const written: Record<string, unknown[]> = {};
+    const all: AuditEvent[] = [];
+    for (const [surface, read] of reads) {
+      // oxlint-disable-next-line no-await-in-loop -- one read, then its entries
+      const events = await auditedDuring(
+        async () => {
+          await outcome(read());
+        },
+        { staffAccesses: true }
+      );
+      written[surface] = surfacesOf(events);
+      all.push(...staffViews(events));
+    }
+    const seen = await admin.api.audit.search({ action: "staff.accessed" });
+
+    expect(written).toStrictEqual(
+      Object.fromEntries(reads.map(([surface]) => [surface, [surface]]))
+    );
+    expect({
+      actors: [...new Set(all.map(({ actor }) => actor.type))],
+      upload: all.find(
+        ({ detail }) => detail.surface === "brainSources.uploadOf"
+      )?.provenance,
+      content: JSON.stringify(all).includes(secret),
+      // The client's admins read them in their own log.
+      visible: all.every(({ id }) =>
+        seen.records.some(({ event }) => event?.id === id)
+      ),
+    }).toStrictEqual({
+      actors: ["staff"],
+      upload: [uploadId],
+      content: false,
+      visible: true,
+    });
+  });
+
+  it("write the same view once a window, and every other view apart", async () => {
+    const [first, second] = [crypto.randomUUID(), crypto.randomUUID()];
+    const { api } = await staffOn();
+    await api.whoami();
+
+    const events = await auditedDuring(
+      async () => {
+        for (let time = 0; time < 5; time += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- a page asking again
+          await outcome(api.brainSources.uploadOf(first));
+        }
+        await outcome(api.brainSources.uploadOf(second));
+      },
+      { staffAccesses: true }
+    );
+
+    expect(
+      staffViews(events).map(({ detail, provenance }) => [
+        detail.surface,
+        provenance,
+      ])
+    ).toStrictEqual([
+      ["brainSources.uploadOf", [first]],
+      ["brainSources.uploadOf", [second]],
+    ]);
+  });
+
+  it("name an argument that isn't a platform ID by its kind alone, and tell distinct asks apart", async () => {
+    const { api } = await staffOn();
+    await api.whoami();
+    const asked = [
+      // Shaped like an ID, but a query: its kind alone.
+      crypto.randomUUID(),
+      "salary_review",
+      "anna_de_vries",
+      `sk_live_${"4eC39HqLyjWDarjtT1zdp7dc".repeat(2)}`,
+      `ghp_${"16C7e42F292c6912E7710c838347Ae178B4a".slice(0, 36)}`,
+    ];
+
+    const events = await auditedDuring(
+      async () => {
+        for (const query of asked) {
+          // oxlint-disable-next-line no-await-in-loop -- one ask after another
+          await outcome(api.chats.search(query));
+        }
+      },
+      { staffAccesses: true }
+    );
+    const views = staffViews(events);
+
+    expect({
+      entries: views.map(({ detail, provenance }) => [
+        detail.surface,
+        detail.kinds,
+        provenance,
+      ]),
+      leaked: asked.filter((query) => JSON.stringify(views).includes(query)),
+    }).toStrictEqual({
+      entries: asked.map(() => ["chats.search", "query", []]),
+      leaked: [],
+    });
+  });
+
+  it("never name a roster person's ID on any of the onboarding's methods, only kinds", async () => {
+    const { api } = await staffOn();
+    await api.whoami();
+    const person = crypto.randomUUID();
+
+    const events = await auditedDuring(
+      async () => {
+        await outcome(api.onboarding.linksTaken([person]));
+        await outcome(api.onboarding.settle(person, "both"));
+      },
+      { staffAccesses: true }
+    );
+    const views = staffViews(events);
+
+    expect({
+      surfaces: views.map(({ detail }) => detail.surface),
+      named: JSON.stringify(views).includes(person),
+    }).toStrictEqual({
+      surfaces: ["onboarding.linksTaken", "onboarding.settle"],
+      named: false,
+    });
+  });
+
+  it("write the same view asked at once only once, and the same method of two targets apart", async () => {
+    const uploadId = crypto.randomUUID();
+    const { api } = await staffOn();
+    await api.whoami();
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const staff = await whoami(session);
+    const check = staffAudited(env, async () => await Promise.resolve(staff));
+    const frames = [crypto.randomUUID(), crypto.randomUUID()].map(
+      (app) =>
+        new PageFrameRpc({
+          env,
+          check,
+          userId: staff.userId,
+          app: appIdSchema.parse(app),
+          lease: undefined,
+          // SAFETY: never reached: the Apps don't exist, so no call goes
+          // past its check to follow a query.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          queries: {} as never,
+        })
+    );
+
+    const events = await auditedDuring(
+      async () => {
+        await Promise.all(
+          Array.from(
+            { length: 5 },
+            async () => await outcome(api.brainSources.uploadOf(uploadId))
+          )
+        );
+        for (const frame of frames) {
+          // oxlint-disable-next-line no-await-in-loop -- one frame, then the other
+          await outcome(frame.delivery());
+        }
+      },
+      { staffAccesses: true }
+    );
+
+    expect(
+      staffViews(events).map(({ detail }) => detail.surface)
+    ).toStrictEqual([
+      "brainSources.uploadOf",
+      "pageFrame.delivery",
+      "pageFrame.delivery",
+    ]);
+  });
+
+  it("write no staff entry for an admin who isn't staff", async () => {
+    const admin = await signedInApi(idp, "admin");
+
+    const events = await auditedDuring(
+      async () => {
+        await admin.api.brainSources.uploadOf(crypto.randomUUID());
+        await admin.api.chats.search("handbook");
+        await admin.api.chats.list();
+        await routed(`${auditExportPath}?format=csv`, {
+          headers: { cookie: admin.session },
+        });
+      },
+      { staffAccesses: true }
+    );
+
+    expect(staffViews(events)).toStrictEqual([]);
+  });
+
+  it("write an entry for a call of every method of every namespace", async () => {
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const staff = await whoami(session);
+    // Each call on a connection of its own: a namespace that reads
+    // through others (`waiting.list`) records their views too, so on one
+    // connection a later call of theirs would be a repeat, written once.
+    const connection = () =>
+      targetMethods(
+        new SessionRpc(
+          env,
+          async () => await Promise.resolve(staff),
+          crypto.randomUUID()
+        ),
+        "session"
+      );
+    const calls = connection();
+    const unaudited: string[] = [];
+    const naming: string[] = [];
+    let onboarding = 0;
+    for (const { name, arity } of calls) {
+      const call = connection().find((method) => method.name === name)?.call;
+      if (call === undefined) {
+        throw new Error(`${name} isn't on a new connection`);
+      }
+      // The onboarding's methods take the roster's people by ID: each is
+      // called with an ID in every place, which its entry must never name.
+      const id = crypto.randomUUID();
+      const isOnboarding = name.startsWith("session.onboarding");
+      onboarding += isOnboarding ? 1 : 0;
+      const args = isOnboarding ? Array.from({ length: arity }, () => id) : [];
+      // oxlint-disable-next-line no-await-in-loop -- one call, then its entry
+      const events = await auditedDuring(
+        async () => {
+          await Promise.race([
+            outcome(Promise.resolve().then(() => call(...args))),
+            scheduler.wait(callWaitMs),
+          ]);
+        },
+        { staffAccesses: true }
+      );
+      const method = name.split(".").at(-1) ?? "";
+      const views = staffViews(events);
+      if (
+        !views.some(({ detail }) =>
+          String(detail.surface).endsWith(`.${method}`)
+        )
+      ) {
+        unaudited.push(name);
+      }
+      if (isOnboarding && JSON.stringify(views).includes(id)) {
+        naming.push(name);
+      }
+    }
+
+    expect(calls.length).toBeGreaterThan(100);
+    expect(onboarding).toBeGreaterThan(20);
+    expect({ unaudited, naming }).toStrictEqual({ unaudited: [], naming: [] });
+  });
+
+  it("write an entry for a call of every method of a target a call hands out: a page's frame", async () => {
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const staff = await whoami(session);
+    const frame = new PageFrameRpc({
+      env,
+      check: staffAudited(env, async () => await Promise.resolve(staff)),
+      userId: staff.userId,
+      app: appIdSchema.parse(crypto.randomUUID()),
+      lease: undefined,
+      // SAFETY: never reached: every call is checked first, and the App
+      // doesn't exist, so none follows a query.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      queries: {} as never,
+    });
+    // Closing lets go of what the frame follows: it reads and changes
+    // nothing of the client's.
+    const calls = targetMethods(frame, "frame").filter(
+      ({ name }) => name !== "frame.close"
+    );
+    const unaudited: string[] = [];
+    for (const { name, call } of calls) {
+      // oxlint-disable-next-line no-await-in-loop -- one call, then its entry
+      const events = await auditedDuring(
+        async () => {
+          await Promise.race([
+            outcome(Promise.resolve().then(call)),
+            scheduler.wait(callWaitMs),
+          ]);
+        },
+        { staffAccesses: true }
+      );
+      const method = name.split(".").at(-1) ?? "";
+      if (
+        !staffViews(events).some(({ detail }) =>
+          String(detail.surface).endsWith(`.${method}`)
+        )
+      ) {
+        unaudited.push(name);
+      }
+    }
+
+    expect(calls.length).toBeGreaterThan(3);
+    expect(unaudited).toStrictEqual([]);
+  });
+});

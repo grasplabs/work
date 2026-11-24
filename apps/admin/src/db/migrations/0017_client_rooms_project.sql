@@ -1,0 +1,1 @@
+ALTER TABLE `clients` ADD `rooms_project_id` text;

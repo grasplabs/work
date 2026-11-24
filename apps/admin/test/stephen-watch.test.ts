@@ -1,0 +1,200 @@
+/**
+ * The admin's hourly watch of Stephen at every client (src/clients/watch.ts),
+ * through its own cron, against fake client cores.
+ * Written from how watching could fail: a signal over its bar the client's
+ * Setup doesn't say needs a look, or still says so once it's back under, a
+ * client nobody watches because its core is older, or what the watch read
+ * not on the client's page.
+ */
+import type {
+  AdminSnapshot,
+  AdminStephenSignals,
+} from "@grasp-os/shared/admin-snapshot";
+import { createScheduledController } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
+
+import { fetchClientSetup } from "../src/clients/functions.ts";
+import { overBars } from "../src/clients/watch-signals.ts";
+import type { WatchedSignals } from "../src/clients/watch-signals.ts";
+import { adminDatabase } from "../src/db/act.ts";
+import { clients } from "../src/db/schema.ts";
+import worker from "../src/server.ts";
+import { mockAccess } from "./access.ts";
+import type { CoreState } from "./cloudflare-api-kit.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { callServerFn } from "./pages.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
+import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
+
+const token = "test-deployer-token-watch-7a2c90";
+const cloudflare = mockCloudflareApi(token);
+mockAccess();
+
+const db = adminDatabase(env.DB);
+const staff = { email: "ops@grasp.test", sub: "sub-ops" };
+const watchCron = "45 * * * *";
+
+/** A day of Stephen with nothing amiss: answers, quick. */
+const quiet: AdminStephenSignals = {
+  hours: 24,
+  refused: 2,
+  answered: 40,
+  failed: 1,
+  busy: 0,
+  sendFailed: 0,
+  uninstalled: 0,
+  p50Ms: 4000,
+  p90Ms: 8000,
+};
+
+/** An active client running a fresh release, as a deploy made it live. */
+const liveClient = async (): Promise<{
+  clientId: string;
+  core: CoreState;
+}> => {
+  const release = await placedRelease("feat(core): count Stephen");
+  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
+  const { core } = await livePlacedClient(cloudflare, release, {
+    id: clientId,
+    name: `Acme ${clientId}`,
+    signIn: null,
+  });
+  return { clientId, core };
+};
+
+/** What `core` answers: its company, and Stephen's counts. */
+const answering = (core: CoreState, stephen?: AdminStephenSignals): void => {
+  const snapshot: AdminSnapshot = {
+    ...emptyAdminSnapshot(core.name),
+    ...(stephen === undefined ? {} : { stephen }),
+  };
+  core.admin = snapshot;
+};
+
+/** Runs the watch's cron once. */
+const watch = async (): Promise<void> => {
+  await worker.scheduled(
+    createScheduledController({ cron: watchCron, scheduledTime: Date.now() }),
+    env
+  );
+};
+
+/**
+ * How many of Stephen's signals client `clientId`'s Setup reads as over
+ * their bar (src/admin/setup.test.tsx shows what it says of them).
+ */
+const overOf = async (clientId: string): Promise<number> => {
+  const setup = await callServerFn(
+    fetchClientSetup,
+    { clientId },
+    { email: staff.email }
+  );
+  return setup?.watched ? overBars(setup.watched.signals).size : 0;
+};
+
+describe("the watch of Stephen", () => {
+  useStoreSecrets({ deployer: token });
+  beforeEach(async () => {
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.status, "active"));
+  });
+
+  it("reads for the client's Setup that a signal is over its bar, until it's back under", async () => {
+    const acme = await liveClient();
+    const calm = await liveClient();
+    answering(acme.core, { ...quiet, failed: 10 });
+    answering(calm.core, quiet);
+
+    await watch();
+    const whileOver = await overOf(acme.clientId);
+    const calmOver = await overOf(calm.clientId);
+    answering(acme.core, quiet);
+    await watch();
+    const onceUnder = await overOf(acme.clientId);
+
+    expect({ whileOver, calm: calmOver, onceUnder }).toStrictEqual({
+      whileOver: 1,
+      calm: 0,
+      onceUnder: 0,
+    });
+  });
+
+  it("puts what it read on the client's page, a line a signal, and leaves a client whose core doesn't count Stephen yet unwatched", async () => {
+    const acme = await liveClient();
+    const older = await liveClient();
+    answering(acme.core, { ...quiet, p90Ms: 15_000 });
+    answering(older.core);
+
+    await watch();
+
+    // One after another: in the test pool a request waiting on a module
+    // another request is loading is cancelled as hung (test/pages.ts).
+    const acmeSetup = await callServerFn(
+      fetchClientSetup,
+      { clientId: acme.clientId },
+      { email: staff.email }
+    );
+    const olderSetup = await callServerFn(
+      fetchClientSetup,
+      { clientId: older.clientId },
+      { email: staff.email }
+    );
+    expect({
+      acme: acmeSetup?.watched?.signals,
+      older: olderSetup?.watched,
+    }).toStrictEqual({
+      acme: {
+        hours: 24,
+        answered: 40,
+        failed: 1,
+        refused: 2,
+        busy: 0,
+        sendFailed: 0,
+        uninstalled: 0,
+        p50Ms: 4000,
+        p90Ms: 15_000,
+        companyAgain: 0,
+        personalAgain: 0,
+      },
+      older: null,
+    });
+  });
+});
+
+describe("each of Stephen's bars", () => {
+  const calm: WatchedSignals = {
+    ...quiet,
+    sendFailed: 0,
+    companyAgain: 0,
+    personalAgain: 0,
+  };
+
+  it("is over for what a person at Grasp should look at, and under for a quiet day", () => {
+    const cases: [string, Partial<WatchedSignals>][] = [
+      ["stephen_refused", { refused: 21 }],
+      ["stephen_failing", { failed: 6 }],
+      ["stephen_slow", { p90Ms: 15_000 }],
+      ["stephen_busy", { busy: 11 }],
+      ["stephen_sends_failing", { sendFailed: 1 }],
+      ["stephen_uninstalled", { uninstalled: 3 }],
+      ["stephen_connections_again", { companyAgain: 1 }],
+      ["stephen_connections_again", { personalAgain: 5 }],
+    ];
+
+    expect({
+      quiet: [...overBars(calm)],
+      // Too few turns or answers to say anything by.
+      few: [...overBars({ ...calm, answered: 2, failed: 2, p90Ms: 30_000 })],
+      each: cases.map(([, changes]) => [...overBars({ ...calm, ...changes })]),
+    }).toStrictEqual({
+      quiet: [],
+      few: [],
+      each: cases.map(([kind]) => [kind]),
+    });
+  });
+});

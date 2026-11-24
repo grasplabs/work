@@ -1,0 +1,1025 @@
+import { createAuditEvent } from "@grasp-os/shared/audit";
+/* oxlint-disable no-template-curly-in-string -- text that looks like an expression is written as ${ … } strings */
+import {
+  connectionIdSchema,
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import {
+  drainAuditOutboxesNoticing,
+  noticeStoppedSources,
+} from "../src/connector-source-notices.ts";
+import { listNotifications } from "../src/notifications.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import {
+  grantPermission,
+  requestPermission,
+  revokePermission,
+} from "../src/permissions.ts";
+import {
+  createTriggerResource,
+  setTriggerEnabled,
+} from "../src/trigger-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
+import {
+  deliverConnectorEvent,
+  listenersOf,
+} from "../src/workflows/connector-events.ts";
+import {
+  holdsKeptMs,
+  maxHeldMs,
+  sweepConnectorTriggerHolds,
+  sweptPerStatement,
+} from "../src/workflows/connector-triggers.ts";
+import { stampedMail } from "../src/workflows/mail-stamps.ts";
+import {
+  resourceRunFor,
+  terminateResourceRun,
+} from "../src/workflows/resource-runs.ts";
+import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
+import { allEvents } from "./audit-events.ts";
+import { configuredLimits } from "./quota-limits.ts";
+import { outcome, unique } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
+
+// Connector triggers (workflows/connector-triggers.ts), from their threat
+// model: an event starts each trigger that takes it once, however often
+// it is delivered, and a run cancelled since stays cancelled; only a
+// trigger of the event's connection, type and part, granted to hear it,
+// takes it; its input is a mapping of JSON Pointers and literals, never
+// code; a revoked grant to hear starts nothing, and a refusal for good is
+// audited; a connection its creator may not use, and a grant on any
+// connection but its own, are refused; connect listens where it does;
+// and when connect stops hearing a source, the owners of the triggers
+// listening there are told, once, and nobody else.
+
+const person = async (role: Role): Promise<Identity> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
+});
+
+/** A workflow of `admin`'s taking `{ subject, folder }` and handing it back. */
+const filing = async (admin: Identity) => {
+  const workflow = await createWorkflowResource(env, admin, `file-${unique()}`);
+  const fields = { subject: { kind: "string" }, folder: { kind: "string" } };
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
+      $schema: workflowSchemaUrl,
+      args: objectSchema(fields),
+      returns: objectSchema(fields),
+      result: {
+        subject: { $expr: "args.subject" },
+        folder: { $expr: "args.folder" },
+      },
+      steps: [],
+    })
+  );
+  return workflow;
+};
+
+/** A mail connection in connect's registry: shared, or `owner`'s own. */
+const connection = async ({
+  owner,
+  status = "active",
+  account = `watched-${unique()}@acme.test`,
+}: {
+  owner?: string;
+  status?: string;
+  account?: string;
+} = {}): Promise<string> => {
+  const id = `connection-${unique()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, account_name, account_email, created_at, updated_at) VALUES (?, 'microsoft', ?, ?, ?, 'native', 'microsoft-365', '[]', ?, ?, ?, ?)"
+    )
+    .bind(
+      id,
+      owner === undefined ? "shared" : "personal",
+      owner ?? null,
+      status,
+      account,
+      account,
+      now,
+      now
+    )
+    .run();
+  return id;
+};
+
+/** The account a connection `connection()` made is of. */
+const accountOf = async (connectionId: string): Promise<string> => {
+  const row = await connectDb()
+    .prepare("SELECT account_email AS email FROM connections WHERE id = ?")
+    .bind(connectionId)
+    .first<{ email: string }>();
+  return row?.email ?? "";
+};
+
+/**
+ * The stamp of mail run `run`
+ * sends from `mailbox` to it, through `connectionId`, as its step's call
+ * records it (mail-stamps.ts).
+ */
+const mailFrom = async (
+  run: string,
+  connectionId: string,
+  mailbox: string
+): Promise<string> => {
+  const { stamp } = await stampedMail(
+    env,
+    { run, stepKey: `step-${unique()}` },
+    {
+      connectionId,
+      action: "mail.send",
+      input: { mailbox, to: [mailbox], subject: "Again", body: "Again." },
+    }
+  );
+  if (stamp === undefined) {
+    throw new Error("Expected the mail stamped");
+  }
+  return stamp;
+};
+
+/** `request`, asked for and granted by `admin`: the permission's ID. */
+const granted = async (
+  admin: Identity,
+  request: Omit<PermissionRequest, "binding">
+): Promise<string> => {
+  const { id } = await requestPermission(
+    env,
+    admin,
+    {
+      ...request,
+      binding: `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`,
+    },
+    {
+      app: () => {
+        throw new Error("No App here");
+      },
+      resource: async (ref, needed) => {
+        await requireResourceRole(env, admin, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, admin, id, { version: null });
+  return id;
+};
+
+const mapping = {
+  fields: { subject: "/payload/subject", folder: "/payload/folder" },
+  defaults: { folder: "inbox" },
+};
+
+/**
+ * A connector trigger of `owner`'s on workflow `id`, on mail received at
+ * `connectionId` (in `resource`, when given), granted by `admin` to start
+ * the workflow and to hear the connection unless told otherwise.
+ */
+const connectorTrigger = async (
+  admin: Identity,
+  id: string,
+  connectionId: string,
+  {
+    owner = admin,
+    resource,
+    hears = true,
+  }: { owner?: Identity; resource?: string; hears?: boolean } = {}
+) => {
+  const trigger = await createTriggerResource(env, owner, {
+    kind: "connector",
+    workflowId: id,
+    config: {
+      connection: {
+        connectionId,
+        ...(resource === undefined ? {} : { resource }),
+      },
+      event: "m365.mail.received",
+      input: mapping,
+    },
+  });
+  const subject = {
+    type: "trigger",
+    triggerId: triggerIdSchema.parse(trigger.id),
+  } as const;
+  const start = await granted(admin, {
+    subject,
+    object: {
+      type: "workflow",
+      workflowId: workflowResourceIdSchema.parse(id),
+    },
+    actions: ["start"],
+  });
+  const hear = hears
+    ? await granted(admin, {
+        subject,
+        object: {
+          type: "connection",
+          connectionId: connectionIdSchema.parse(connectionId),
+          ...(resource === undefined ? {} : { resource }),
+        },
+        actions: ["mail.list"],
+      })
+    : undefined;
+  return { ...trigger, start, hear };
+};
+
+/** A mail event at `connectionId`, as connect reports it. */
+const mailEvent = (
+  connectionId: string,
+  changes: {
+    id?: string;
+    type?: string;
+    resource?: string;
+    owner?: string;
+    payload?: unknown;
+    stamp?: string;
+  } = {}
+) => ({
+  id: changes.id ?? crypto.randomUUID(),
+  connection: connectionId,
+  owner: changes.owner ?? null,
+  ...(changes.resource === undefined ? {} : { resource: changes.resource }),
+  ...(changes.stamp === undefined ? {} : { stamp: changes.stamp }),
+  action: "mail.list",
+  type: changes.type ?? "m365.mail.received",
+  payload: changes.payload ?? { subject: "Invoice INV-7", folder: "archive" },
+});
+
+/** The runs trigger `trigger` started, with each one's key. */
+const runsOf = async (trigger: string) => {
+  const rows = await env.DB.prepare(
+    "SELECT run.id, receipt.idempotency_key AS key, receipt.input FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ? ORDER BY receipt.created_at"
+  )
+    .bind(trigger)
+    .all<{ id: string; key: string; input: string | null }>();
+  return rows.results;
+};
+
+/**
+ * Fills trigger `id`'s hourly room, but for `left` places: places taken by
+ * events of their own this hour (trigger_hour_slots).
+ */
+const fillHour = async (id: string, left = 0): Promise<void> => {
+  await env.DB.batch(
+    Array.from({ length: triggeredRunsPerHour - left }, () =>
+      env.DB.prepare(
+        "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+      ).bind(id, `filler-${unique()}`, Date.now())
+    )
+  );
+};
+
+/** The sources connect stopped hearing that `who` is told of, as listed. */
+const stopsToldTo = async (who: Identity) => {
+  const { notifications } = await listNotifications(env, who);
+  return notifications.flatMap((notification) =>
+    notification.type === "events_stopped"
+      ? [{ ...notification, id: "", at: "" }]
+      : []
+  );
+};
+
+describe("connector triggers", { timeout: 120_000 }, () => {
+  it("start one run per event with the mapped input, however often it is delivered, and never again once cancelled", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    const event = mailEvent(shared);
+
+    const first = await deliverConnectorEvent(env, event);
+    const again = await deliverConnectorEvent(env, event);
+    const [started] = await runsOf(trigger.id);
+    const run = await vi.waitFor(
+      async () => {
+        const found = await resourceRunFor(
+          env,
+          admin,
+          workflow.id,
+          started?.id
+        );
+        expect(found.endedAt).not.toBeNull();
+        return found;
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    // A second event without a folder: the default fills it. Its run is
+    // cancelled, then the event delivered again.
+    const second = mailEvent(shared, { payload: { subject: "Order 12" } });
+    await deliverConnectorEvent(env, second);
+    const [, secondRun] = await runsOf(trigger.id);
+    await terminateResourceRun(env, admin, workflow.id, secondRun?.id);
+    await deliverConnectorEvent(env, second);
+    const runs = await runsOf(trigger.id);
+    const cancelled = await resourceRunFor(
+      env,
+      admin,
+      workflow.id,
+      secondRun?.id
+    );
+
+    expect({
+      first,
+      again,
+      output: run.result,
+      keys: runs.map(({ key }) =>
+        /^grasp:connector:[\w-]+:[0-9a-f]{64}$/u.test(key)
+      ),
+      inputs: runs.map(({ input }): unknown => JSON.parse(input ?? "null")),
+      cancelled: cancelled.status,
+    }).toStrictEqual({
+      first: { runs: 1 },
+      again: { runs: 1 },
+      output: { subject: "Invoice INV-7", folder: "archive" },
+      keys: [true, true],
+      inputs: [
+        { subject: "Invoice INV-7", folder: "archive" },
+        { subject: "Order 12", folder: "inbox" },
+      ],
+      cancelled: "cancelled",
+    });
+  });
+
+  it("reach only triggers of the event's connection, type and part, granted to hear it", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const other = await connection();
+    const ofOther = await connectorTrigger(admin, workflow.id, other);
+    const mailbox = await connectorTrigger(admin, workflow.id, shared, {
+      resource: "mailbox-ben",
+    });
+    const deaf = await connectorTrigger(admin, workflow.id, shared, {
+      hears: false,
+    });
+    const whole = await connectorTrigger(admin, workflow.id, shared);
+
+    await deliverConnectorEvent(env, mailEvent(shared));
+    await deliverConnectorEvent(
+      env,
+      mailEvent(shared, { type: "m365.file.created" })
+    );
+    await deliverConnectorEvent(
+      env,
+      mailEvent(shared, { resource: "mailbox-ann" })
+    );
+    const counts = await Promise.all(
+      [ofOther, mailbox, deaf, whole].map(async ({ id }) => {
+        const runs = await runsOf(id);
+        return runs.length;
+      })
+    );
+
+    expect(counts).toStrictEqual([0, 0, 0, 1]);
+  });
+
+  it("tell their owners, once, when connect stops hearing where they listen, and nobody else", async () => {
+    const admin = await person("admin");
+    const other = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    await connectorTrigger(admin, workflow.id, shared, {
+      resource: "mailbox-ben",
+    });
+    const othersWorkflow = await filing(other);
+    await connectorTrigger(other, othersWorkflow.id, shared, {
+      resource: "mailbox-ann",
+    });
+    // As connect records it, at its tenth failure in a row (events.ts).
+    const stopped = createAuditEvent(
+      {
+        actor: { type: "system" },
+        action: "connection.events.refused",
+        target: { type: "connection", id: shared },
+        detail: {
+          type: "m365.mail.received",
+          resource: "mailbox-ben",
+          status: 403,
+          failures: 10,
+        },
+      },
+      "connect"
+    );
+    // In connect's outbox, as the clock drains it into the log.
+    await connectDb()
+      .prepare(
+        "INSERT INTO audit_outbox (id, event, created_at) VALUES (?, ?, ?)"
+      )
+      .bind(stopped.id, JSON.stringify(stopped), Date.now())
+      .run();
+    await drainAuditOutboxesNoticing(env);
+    // A drain cut short hands the same event over again.
+    await noticeStoppedSources(env, [stopped]);
+    // The same action recorded by anyone but connect tells nobody.
+    await noticeStoppedSources(env, [
+      createAuditEvent(
+        {
+          actor: { type: "system" },
+          action: "connection.events.failed",
+          target: { type: "connection", id: shared },
+          detail: { type: "m365.mail.received", resource: "mailbox-ben" },
+        },
+        "core"
+      ),
+    ]);
+
+    const logged = await allEvents();
+    expect({
+      inLog: logged.some(({ id }) => id === stopped.id),
+      owner: await stopsToldTo(admin),
+      other: await stopsToldTo(other),
+    }).toStrictEqual({
+      inLog: true,
+      owner: [
+        {
+          id: "",
+          type: "events_stopped",
+          connection: shared,
+          event: "m365.mail.received",
+          resource: "mailbox-ben",
+          reason: "refused",
+          at: "",
+          read: false,
+        },
+      ],
+      other: [],
+    });
+  });
+
+  it("hear a personal connection only for its owner, who alone may make one on it", async () => {
+    const admin = await person("admin");
+    const ann = await person("builder");
+    const workflow = await filing(admin);
+    const annsMail = await connection({ owner: ann.userId });
+    const gone = await connection({ status: "disconnected" });
+
+    const create = async (connectionId: string) =>
+      await outcome(
+        createTriggerResource(env, admin, {
+          kind: "connector",
+          workflowId: workflow.id,
+          config: {
+            connection: { connectionId },
+            event: "m365.mail.received",
+            input: mapping,
+          },
+        })
+      );
+
+    expect({
+      notTheirs: await create(annsMail),
+      disconnected: await create(gone),
+      unknown: await create(`connection-${unique()}`),
+    }).toStrictEqual({
+      notTheirs: "workflow.resource_invalid",
+      disconnected: "workflow.resource_invalid",
+      unknown: "workflow.resource_invalid",
+    });
+  });
+
+  it("build their input from pointers and literals, never code", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    const create = async (input: unknown) =>
+      await outcome(
+        createTriggerResource(env, admin, {
+          kind: "connector",
+          workflowId: workflow.id,
+          config: {
+            connection: { connectionId: shared },
+            event: "m365.mail.received",
+            input,
+          },
+        })
+      );
+    const expression = "${ $secrets }";
+
+    await deliverConnectorEvent(
+      env,
+      mailEvent(shared, {
+        payload: { subject: expression, folder: "{{ env.KEY }}" },
+      })
+    );
+    const [run] = await runsOf(trigger.id);
+
+    expect({
+      expressionField: await create({ fields: { subject: expression } }),
+      jqField: await create({ fields: { subject: ".payload.subject" } }),
+      otherKey: await create({ fields: {}, defaults: {}, eval: "1" }),
+      eventKind: await outcome(
+        createTriggerResource(env, admin, {
+          kind: "connector",
+          workflowId: workflow.id,
+          config: {
+            connection: { connectionId: shared },
+            event: "m365.anything",
+            input: mapping,
+          },
+        })
+      ),
+      // What the event says is data: taken as it is.
+      input: z.json().parse(JSON.parse(run?.input ?? "null")),
+    }).toStrictEqual({
+      expressionField: "workflow.resource_invalid",
+      jqField: "workflow.resource_invalid",
+      otherKey: "workflow.resource_invalid",
+      eventKind: "workflow.resource_invalid",
+      input: { subject: expression, folder: "{{ env.KEY }}" },
+    });
+  });
+
+  it("start nothing once a grant to hear is revoked, and audit a start refused for good", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const deafened = await connectorTrigger(admin, workflow.id, shared);
+    const unstartable = await connectorTrigger(admin, workflow.id, shared);
+    await revokePermission(env, admin, deafened.hear);
+    await revokePermission(env, admin, unstartable.start);
+
+    const delivered = await deliverConnectorEvent(env, mailEvent(shared));
+    const deafenedRuns = await runsOf(deafened.id);
+    const unstartableRuns = await runsOf(unstartable.id);
+    const logged = await allEvents();
+    const refusals = logged.filter(
+      ({ action, target }) =>
+        action === "workflow.event.refused" &&
+        (target?.id === deafened.id || target?.id === unstartable.id)
+    );
+
+    expect({
+      delivered,
+      runs: [deafenedRuns.length, unstartableRuns.length],
+      refusals: refusals.map(({ target, detail }) => ({
+        trigger: target?.id,
+        detail,
+      })),
+    }).toStrictEqual({
+      delivered: { runs: 0 },
+      runs: [0, 0],
+      refusals: [
+        {
+          trigger: unstartable.id,
+          detail: {
+            event: "m365.mail.received",
+            code: "workflow.start_denied",
+          },
+        },
+      ],
+    });
+  });
+
+  it("start at most the hourly limit of runs, the rest delivered again later", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    await deliverConnectorEvent(env, mailEvent(shared));
+    await fillHour(trigger.id);
+    const logged = vi.spyOn(console, "warn").mockReturnValue();
+
+    const over = await outcome(deliverConnectorEvent(env, mailEvent(shared)));
+    logged.mockRestore();
+    const runs = await runsOf(trigger.id);
+
+    expect({ over: over === "ok", runs: runs.length }).toStrictEqual({
+      over: false,
+      runs: 1,
+    });
+  });
+
+  it("end a workflow mailing its own watched mailbox at its lineage's limit, each run under the last", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const mailbox = await accountOf(shared);
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    env.TEST_QUOTA_LIMITS = { workflowNestingLevels: 3 };
+    try {
+      // Mail from outside: a root.
+      await deliverConnectorEvent(env, mailEvent(shared));
+      // Each new run mails the mailbox again; its copy arrives stamped.
+      let mailed = 0;
+      for (let hop = 0; hop < 5; hop += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one hop after another
+        const runs = await runsOf(trigger.id);
+        const last = runs.at(-1);
+        if (last === undefined || runs.length === mailed) {
+          break;
+        }
+        mailed = runs.length;
+        // oxlint-disable-next-line no-await-in-loop -- one hop after another
+        const stamp = await mailFrom(last.id, shared, mailbox);
+        // oxlint-disable-next-line no-await-in-loop -- one hop after another
+        await deliverConnectorEvent(
+          env,
+          mailEvent(shared, {
+            stamp,
+            payload: {
+              subject: "Again",
+              folder: "inbox",
+              from: { address: mailbox },
+            },
+          })
+        );
+      }
+    } finally {
+      env.TEST_QUOTA_LIMITS = configuredLimits;
+    }
+    const lineage = await env.DB.prepare(
+      "SELECT run.depth, run.root_run_id AS root FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_id = ? ORDER BY run.depth"
+    )
+      .bind(trigger.id)
+      .all<{ depth: number; root: string | null }>();
+    const [first] = lineage.results;
+    const logged = await allEvents();
+    const refused = logged.filter(
+      ({ action, target }) =>
+        action === "workflow.event.refused" && target?.id === trigger.id
+    );
+
+    expect({
+      depths: lineage.results.map(({ depth }) => depth),
+      oneLineage: lineage.results
+        .slice(1)
+        .every(
+          ({ root }) => root !== null && root === lineage.results[1]?.root
+        ),
+      rootFirst: first?.depth,
+      refused: refused.map(({ detail }) => detail.code),
+    }).toStrictEqual({
+      // The root, then two levels under it: the third is past the limit.
+      depths: [0, 1, 2],
+      oneLineage: true,
+      rootFirst: 0,
+      refused: ["workflow.lineage_limit"],
+    });
+  });
+
+  it("refuse an event that isn't one", async () => {
+    const shared = await connection();
+
+    expect({
+      unshaped: await outcome(
+        deliverConnectorEvent(env, { id: "e", type: "x" })
+      ),
+      tooLarge: await outcome(
+        deliverConnectorEvent(
+          env,
+          mailEvent(shared, { payload: { body: "x".repeat(64 * 1024) } })
+        )
+      ),
+    }).toStrictEqual({
+      unshaped: "workflow.invalid",
+      tooLarge: "workflow.invalid",
+    });
+  });
+
+  it("drop an event held back at the hourly limit for over a day, audited", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    await deliverConnectorEvent(env, mailEvent(shared));
+    await fillHour(trigger.id);
+    const held = mailEvent(shared);
+    const logged = vi.spyOn(console, "warn").mockReturnValue();
+
+    const firstTry = await outcome(deliverConnectorEvent(env, held));
+    // A day and more on.
+    await env.DB.prepare(
+      "UPDATE connector_trigger_holds SET held_since = ? WHERE trigger_id = ?"
+    )
+      .bind(Date.now() - maxHeldMs - 1000, trigger.id)
+      .run();
+    const dayOn = await outcome(deliverConnectorEvent(env, held));
+    logged.mockRestore();
+    const runsAfter = await runsOf(trigger.id);
+    const events = await allEvents();
+    const dropped = events.filter(
+      ({ action, target }) =>
+        action === "workflow.event.dropped" && target?.id === trigger.id
+    );
+
+    expect({
+      firstTry: firstTry === "ok",
+      dayOn,
+      runs: runsAfter.length,
+      dropped: dropped.map(({ detail }) => detail.reason),
+    }).toStrictEqual({
+      firstTry: false,
+      dayOn: "ok",
+      runs: 1,
+      dropped: ["hourly_limit"],
+    });
+  });
+
+  // Each trigger's turn at an event is a small state machine: started
+  // already, settled already (a tombstone), held past its day, or tried.
+  // Each case: what `subject` came to for one event, delivered again as
+  // connect does while another trigger on the connection (`other`) fails
+  // the shared delivery.
+  const scenes = [
+    {
+      scene: "delivered again after it was dropped",
+      atLimit: ["subject"],
+      before: "aged",
+      expected: { runs: 1, dropped: 1, refused: 0, holds: ["dropped"] },
+    },
+    {
+      scene: "held past its day though its hour has room again",
+      atLimit: ["subject"],
+      before: "aged and freed",
+      expected: { runs: 1, dropped: 1, refused: 0, holds: ["dropped"] },
+    },
+    {
+      scene: "held, then its trigger disabled",
+      atLimit: ["subject"],
+      before: "disabled",
+      expected: { runs: 1, dropped: 0, refused: 0, holds: ["held"] },
+    },
+    {
+      scene: "refused for good, its start revoked",
+      atLimit: ["other"],
+      before: "revoked",
+      expected: { runs: 1, dropped: 0, refused: 1, holds: ["refused"] },
+    },
+    {
+      scene:
+        "started, then the shared delivery failed and its grant was revoked",
+      atLimit: ["other"],
+      before: "started then revoked",
+      expected: { runs: 2, dropped: 0, refused: 0, holds: [] },
+    },
+  ] as const;
+
+  it.each(scenes)(
+    "settle an event once for a trigger when $scene, however often it is delivered, and sweep what's left past retention",
+    async ({ atLimit, before, expected }) => {
+      const admin = await person("admin");
+      const workflow = await filing(admin);
+      const shared = await connection();
+      const subject = await connectorTrigger(admin, workflow.id, shared);
+      const other = await connectorTrigger(admin, workflow.id, shared);
+      const triggers = { subject, other };
+      // One run each, then the hours asked for filled.
+      await deliverConnectorEvent(env, mailEvent(shared));
+      for (const name of atLimit) {
+        // oxlint-disable-next-line no-await-in-loop -- one trigger at a time
+        await fillHour(triggers[name].id);
+      }
+      const warned = vi.spyOn(console, "warn").mockReturnValue();
+      const event = mailEvent(shared);
+      const deliver = async () =>
+        await outcome(deliverConnectorEvent(env, event));
+      if (before === "revoked") {
+        await revokePermission(env, admin, subject.start);
+      }
+      // The first delivery: the subject held back, refused, or started.
+      await deliver();
+      if (before === "aged" || before === "aged and freed") {
+        await env.DB.prepare(
+          "UPDATE connector_trigger_holds SET held_since = ? WHERE trigger_id = ?"
+        )
+          .bind(Date.now() - maxHeldMs - 1000, subject.id)
+          .run();
+      }
+      if (before === "aged and freed") {
+        // An hour on: its hour has room again.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(Date.now() + 61 * 60 * 1000);
+      }
+      if (before === "disabled") {
+        await setTriggerEnabled(env, admin, subject.id, false);
+      }
+      if (before === "started then revoked") {
+        await revokePermission(env, admin, subject.start);
+      }
+      // Delivered again, twice: the other trigger still fails it.
+      await deliver();
+      await deliver();
+      warned.mockRestore();
+      vi.useRealTimers();
+      const all = await allEvents();
+      const logged = all.filter(({ target }) => target?.id === subject.id);
+      // What its rows say: held, or the tombstone of how it was settled.
+      const holdsOf = async () => {
+        const { results } = await env.DB.prepare(
+          "SELECT settled FROM connector_trigger_holds WHERE trigger_id = ?"
+        )
+          .bind(subject.id)
+          .all<{ settled: string | null }>();
+        return results.map(({ settled }) => settled ?? "held");
+      };
+      const subjectRuns = await runsOf(subject.id);
+      const observed = {
+        runs: subjectRuns.filter(({ key }) => !key.startsWith("filler-"))
+          .length,
+        dropped: logged.filter(
+          ({ action }) => action === "workflow.event.dropped"
+        ).length,
+        refused: logged.filter(
+          ({ action }) => action === "workflow.event.refused"
+        ).length,
+        holds: await holdsOf(),
+      };
+      await sweepConnectorTriggerHolds(
+        env,
+        // Past retention, however far a scene's clock moved on.
+        new Date(Date.now() + holdsKeptMs + 2 * 60 * 60 * 1000)
+      );
+
+      expect({ ...observed, swept: await holdsOf() }).toStrictEqual({
+        ...expected,
+        swept: [],
+      });
+    }
+  );
+
+  it("are granted only their own connection, for their event's read, and connect listens where they do", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const other = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared, {
+      hears: false,
+    });
+    const subject = {
+      type: "trigger",
+      triggerId: triggerIdSchema.parse(trigger.id),
+    } as const;
+    const ask = async (connectionId: string, actions: string[]) =>
+      await outcome(
+        granted(admin, {
+          subject,
+          object: {
+            type: "connection",
+            connectionId: connectionIdSchema.parse(connectionId),
+          },
+          actions,
+        })
+      );
+    const before = await listenersOf(env);
+    const refused = {
+      otherConnection: await ask(other, ["mail.list"]),
+      otherAction: await ask(shared, ["mail.send"]),
+      more: await ask(shared, ["mail.list", "mail.send"]),
+    };
+    const own = await ask(shared, ["mail.list"]);
+    const after = await listenersOf(env);
+    // A grant it can no longer use (another action than its event reads):
+    // connect listens there no more.
+    await env.DB.prepare(
+      "UPDATE permissions SET actions = '[\"mail.send\"]' WHERE subject_type = 'trigger' AND subject_id = ?"
+    )
+      .bind(trigger.id)
+      .run();
+    const unusable = await listenersOf(env);
+    const listening = (listeners: typeof after) =>
+      listeners.some(
+        (listener) =>
+          listener.connection === shared &&
+          listener.owner === admin.userId &&
+          listener.type === "m365.mail.received" &&
+          listener.resource === null
+      );
+
+    expect({
+      refused,
+      own,
+      before: listening(before),
+      after: listening(after),
+      unusable: listening(unusable),
+    }).toStrictEqual({
+      refused: {
+        otherConnection: "permission.invalid",
+        otherAction: "permission.invalid",
+        more: "permission.invalid",
+      },
+      own: "ok",
+      before: false,
+      after: true,
+      unusable: false,
+    });
+  });
+
+  it("are listened for no more while their person is suspended, and again once it lifts", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared, {
+      hears: false,
+    });
+    await granted(admin, {
+      subject: {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(trigger.id),
+      },
+      object: {
+        type: "connection",
+        connectionId: connectionIdSchema.parse(shared),
+      },
+      actions: ["mail.list"],
+    });
+    const listening = async () => {
+      const listeners = await listenersOf(env);
+      return listeners.some(
+        (listener) =>
+          listener.connection === shared && listener.owner === admin.userId
+      );
+    };
+    const suspended = async (at: number | null) => {
+      await env.DB.prepare(
+        "UPDATE members SET suspended_at = ?, suspended_by = ? WHERE user_id = ?"
+      )
+        .bind(at, at === null ? null : "directory", admin.userId)
+        .run();
+    };
+    const before = await listening();
+    // Suspended as the directory's read suspends someone (GRA-2056).
+    await suspended(Date.now());
+    const whileSuspended = await listening();
+    await suspended(null);
+
+    expect({ before, whileSuspended, lifted: await listening() }).toStrictEqual(
+      { before: true, whileSuspended: false, lifted: true }
+    );
+  });
+
+  it("sweep a backlog of places past their hour larger than one statement deletes, in one clock run", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const trigger = await connectorTrigger(
+      admin,
+      workflow.id,
+      await connection()
+    );
+    const backlog = 2 * sweptPerStatement + 7;
+    const past = Date.now() - 2 * 60 * 60 * 1000;
+    const inserts = Array.from({ length: backlog }, () =>
+      env.DB.prepare(
+        "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+      ).bind(trigger.id, `old-${unique()}`, past)
+    );
+    // In batches D1 takes.
+    for (let at = 0; at < inserts.length; at += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one batch after another
+      await env.DB.batch(inserts.slice(at, at + 100));
+    }
+    await fillHour(trigger.id, triggeredRunsPerHour - 1);
+    const left = async (when: "past" | "current") => {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM trigger_hour_slots WHERE trigger_id = ? AND taken_at ${when === "past" ? "<=" : ">"} ?`
+      )
+        .bind(trigger.id, Date.now() - 60 * 60 * 1000)
+        .first<{ n: number }>();
+      return row?.n;
+    };
+
+    await sweepConnectorTriggerHolds(env, new Date());
+
+    expect({
+      past: await left("past"),
+      current: await left("current"),
+    }).toStrictEqual({ past: 0, current: 1 });
+  });
+});

@@ -1,0 +1,235 @@
+/**
+ * A client's own Grasp as the admin reads and changes it (its Setup, and
+ * the overview's and Platform's live columns), behind the Access check
+ * every request passes (src/access.ts). The
+ * changes act as the verified staff member the request comes from, and
+ * answer a refusal as its code (`SettingsErrorCode`), which the page
+ * words; anything else fails.
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { env } from "cloudflare:workers";
+import { z } from "zod";
+
+import { adminDatabase } from "../db/act.ts";
+import { rotateClientSecrets } from "../deploy/rotation.ts";
+import {
+  clientAdmins,
+  defaultAdminReadOptions,
+  pageReadOptions,
+} from "./admin.ts";
+import type { ClientAdmin } from "./admin.ts";
+import { clientAiStatus } from "./ai-status.ts";
+import { applySettings } from "./apply.ts";
+import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
+import type { LiveStatus } from "./grid.ts";
+import {
+  sealedSecretInputSchema,
+  setSealedSecret,
+  closeStaffWindow,
+  openStaffWindow,
+  setSignIn,
+  setTeamsBot,
+  SettingsError,
+  signInInputSchema,
+  staffWindowInputSchema,
+  teamsBotInputSchema,
+} from "./settings.ts";
+import type { SettingsErrorCode } from "./settings.ts";
+import { getClientSetup } from "./setup.ts";
+import { clientTeamsPackage } from "./teams-package.ts";
+
+const clientSchema = z.object({ clientId: z.string().min(1) });
+
+/** What a change answers: whether it changed anything, or why it was refused. */
+export type SettingsChange =
+  | { changed: boolean; refused: null }
+  | { changed: null; refused: SettingsErrorCode };
+
+/** Runs `task`, a refusal answered as its code. */
+const change = async (
+  task: () => Promise<boolean>
+): Promise<SettingsChange> => {
+  try {
+    return { changed: await task(), refused: null };
+  } catch (error) {
+    if (error instanceof SettingsError) {
+      return { changed: null, refused: error.code };
+    }
+    throw error;
+  }
+};
+
+/** Every client, as the grid shows it at once: what the admin recorded. */
+export const fetchClientGrid = createServerFn({ method: "GET" }).handler(
+  async () => await clientGrid(env)
+);
+
+/**
+ * Each active client's live columns, by id, read after the grid shows
+ * (`gridLive`): a few at a time, each within a deadline, kept a minute
+ * unless anything in them is unknown.
+ */
+export const fetchGridLive = createServerFn({ method: "GET" }).handler(
+  async () => await gridLive(env)
+);
+
+/**
+ * One active client's live columns, as the grid reads them (`gridLive`),
+ * for its Setup in the admin; null for a client that isn't active.
+ */
+export const fetchClientLive = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }): Promise<LiveStatus | null> => {
+    // Read anew each time, never from the grid's minute-old answer: its
+    // Setup asks again right after a deploy, when that answer is the one
+    // from before it.
+    const live = await gridLive(
+      env,
+      { ...defaultLiveOptions, cache: false },
+      data.clientId
+    );
+    return live[data.clientId] ?? null;
+  });
+
+/**
+ * Every client's admin snapshot, as its core answers the verified staff
+ * member asking (whom its audit log records), or as not reachable since it
+ * last answered (`clientAdmins`), but those in `except`: the one whose
+ * page is open, which that page reads on its own (`fetchClientAdmin`).
+ * A POST, though it reads: it keeps when each core answered, and every
+ * core's audit log records the read, as staff opening it, which a page
+ * elsewhere mustn't make happen: Start's CSRF check (src/start.ts) refuses
+ * any call another site could send, GET or POST.
+ */
+export const fetchClientAdmins = createServerFn({ method: "POST" })
+  .validator(z.object({ except: z.array(z.string().min(1)).max(1) }).optional())
+  .handler(
+    async ({ data, context }) =>
+      await clientAdmins(env, context.staff, defaultAdminReadOptions, {
+        except: data?.except,
+      })
+  );
+
+/**
+ * One client's admin snapshot, as its core answers the verified staff
+ * member asking, within an organization page's deadline
+ * (`pageReadOptions`); null for a client the admin doesn't know, or has
+ * offboarded. A POST for the reasons `fetchClientAdmins` is.
+ */
+export const fetchClientAdmin = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(async ({ data, context }): Promise<ClientAdmin | null> => {
+    const [admin] = await clientAdmins(env, context.staff, pageReadOptions, {
+      only: data.clientId,
+    });
+    return admin ?? null;
+  });
+
+/** A client's own Grasp as the admin runs it, for the admin's Setup; null for no such client. */
+export const fetchClientSetup = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await getClientSetup(env, data.clientId));
+
+/**
+ * A client's AI as its core reports it, read live: the providers its
+ * organization connected and how their calls last fared; null when
+ * unknown.
+ */
+export const fetchClientAiStatus = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await clientAiStatus(env, data.clientId));
+
+/** Applies a client's settings now: a deploy of the release it runs, live at once. */
+export const applySettingsFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await applySettings(env, context.staff, data.clientId);
+        return true;
+      })
+  );
+
+export const setSignInFn = createServerFn({ method: "POST" })
+  .validator(signInInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setSignIn(env, context.staff, data))
+  );
+
+/**
+ * Opens Grasp's staff window on a client, for 1 to 7 days, so staff can
+ * bring in its kickoff and steer its onboarding once it is applied.
+ */
+export const openStaffWindowFn = createServerFn({ method: "POST" })
+  .validator(staffWindowInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await openStaffWindow(env, context.staff, data);
+        return true;
+      })
+  );
+
+/** Closes Grasp's staff window on a client, once it is applied. */
+export const closeStaffWindowFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await closeStaffWindow(env, context.staff, data))
+  );
+
+/**
+ * Seals a secret of a client's own, such as its Teams bot's, replacing the
+ * one it had. It answers whether it changed, never the value: nothing
+ * reads one back.
+ */
+export const setSealedSecretFn = createServerFn({ method: "POST" })
+  .validator(sealedSecretInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setSealedSecret(env, context.staff, data))
+  );
+
+/**
+ * Sets a client's Teams bot (its app id, tenant and secret's expiry), or
+ * takes it away with null: its connect and core get it with the next
+ * deploy.
+ */
+export const setTeamsBotFn = createServerFn({ method: "POST" })
+  .validator(teamsBotInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setTeamsBot(env, context.staff, data))
+  );
+
+/**
+ * A client's Teams app package (src/clients/teams-package.ts), for its IT
+ * to upload to Teams; null for a client without a bot. Nothing in it is
+ * secret: the bot's id and the client's name.
+ */
+export const fetchTeamsPackageFn = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data }) =>
+      await clientTeamsPackage(adminDatabase(env.DB), data.clientId)
+  );
+
+/**
+ * Rotates a client's derived secrets (src/deploy/rotation.ts): changed
+ * false when its last rotation isn't live yet, or went live too recently.
+ */
+export const rotateSecretsFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(
+        async () =>
+          await rotateClientSecrets(
+            adminDatabase(env.DB),
+            context.staff,
+            data.clientId,
+            new Date()
+          )
+      )
+  );

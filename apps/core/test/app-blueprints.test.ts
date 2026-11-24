@@ -1,0 +1,636 @@
+import type { CreatedFromBlueprint } from "@grasp-os/shared/apps";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import type { Role } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { createFromBlueprint } from "../src/app-blueprints.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import { commitApp, outlook, release, requestGranted } from "./apps.ts";
+import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
+import { racingDb } from "./racing-db.ts";
+import { calledAs } from "./sealed-apps.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
+import { connectDb } from "./test-env.ts";
+
+// Blueprints: a builder marks a version of an App as a blueprint, and
+// whoever has a role in the App and builds creates an App of their own
+// from it: the same code, none of the data, and requests for what the
+// blueprint declares. The ways this could go wrong, tried below: data,
+// settings or people coming along, a grant
+// coming along instead of a request, a request naming a connection or
+// another App the creator may not see, a blueprint made of a version
+// nobody marked, someone without a role in the App (or who doesn't build,
+// or staff) copying it, and a change nobody recorded. Gone with App
+// workflows: a copy's own workflows typed by the bindings the code it
+// copies was written for.
+
+const idp = mockIdp();
+
+type Person = Awaited<ReturnType<typeof signedInApi>>;
+
+const personApi = async (role: Role): Promise<Person> =>
+  await signedInApi(idp, role);
+
+/**
+ * The App's notes, sealed when a version becomes current: each a row of
+ * its store, which any member reads, so a note that came along to a copy
+ * would show to whoever has a role in it.
+ */
+const notesCode = testApp(
+  {
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { text: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
+
+export const add = mutation({
+  args: { text: v.string().min(1).max(200) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const list = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.text),
+});
+`,
+  }
+);
+
+/** The App's notes, as `person` reads them through its sealed query. */
+const notesOf = async (person: Person, app: string): Promise<unknown> =>
+  await calledAs(await person.api.whoami(), app, {
+    name: "notes.list",
+    kind: "query",
+  });
+
+/** A copy has every file of it, whatever its name: `AGENTS.md` too. */
+const v1 = withFiles(notesCode, {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@grasp-os/sdk/react";
+import { api } from "@server/_generated/api";
+
+function Notes() {
+  const notes = useQuery(api.notes.list, {});
+  return <p>{notes?.join(", ")}</p>;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
+  "AGENTS.md": "# Notes\n",
+});
+
+/** A released App of `owner`'s at version 1, with a version 2 after it. */
+const notesApp = async (owner: Person): Promise<string> => {
+  const { id } = await owner.api.apps.create({ name: `Notes ${unique()}` });
+  await release(owner, id, v1);
+  await commitApp(owner.api, id, { "AGENTS.md": "# Notes, v2\n" });
+  return id;
+};
+
+/** Shares `app` with `person` in `role`. */
+const share = async (
+  owner: Person,
+  app: string,
+  person: Person,
+  role: "user" | "builder"
+): Promise<void> => {
+  await owner.api.apps.members.add(app, {
+    type: "person",
+    id: person.userId,
+    role,
+  });
+};
+
+const named = { name: "My notes", description: "Mine" };
+
+/** How many files the Apps' storage holds. */
+const appFiles = async (): Promise<number> => {
+  const listed = await env.FILES.list({ prefix: "apps/" });
+  return listed.objects.length;
+};
+
+/** A personal connection of `owner`'s, such as their mailbox. */
+const mailboxOf = async (owner: Person): Promise<string> => {
+  const id = `connection-mailbox-${unique()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?)"
+    )
+    .bind(id, owner.userId, now, now)
+    .run();
+  return id;
+};
+
+/** A permission for `app` to read the platform's statistics, declarable. */
+const statisticsOf = (app: string): PermissionRequest => ({
+  subject: { type: "app", appId: app },
+  object: { type: "platform" },
+  actions: ["statistics"],
+  binding: "HANDBOOK",
+});
+
+// The test of the same code seals two Apps' releases, the source's and the
+// copy's, one after the other, and calls each. That is the point of it:
+// the copy runs the same code with none of the data. Nothing polls or
+// sleeps; sixty seconds is room for a slow runner, as the other tests
+// that release Apps give theirs.
+describe("blueprints", { timeout: 60_000 }, () => {
+  it("ask only for what the blueprint declares as it is marked: never a grant, a connection, or a workflow", async () => {
+    const [owner, maker] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const source = await notesApp(owner);
+    const [mail, mailbox] = await Promise.all([
+      mailConnection(),
+      mailboxOf(owner),
+    ]);
+    // Granted, and asked for: what the platform offers is declared, the
+    // rest not.
+    await requestGranted(idp, owner, statisticsOf(source));
+    await requestGranted(idp, owner, {
+      ...outlook(source, "MAIL"),
+      object: { type: "connection", connectionId: mail.id },
+    });
+    // An independent workflow the owner may start: the creator may not see it.
+    const flow = await owner.api.workflowResources.create(`report-${unique()}`);
+    const asked: PermissionRequest[] = [
+      {
+        ...outlook(source, "MAILBOX"),
+        object: { type: "connection", connectionId: mailbox },
+      },
+      {
+        subject: { type: "app", appId: source },
+        object: { type: "workflow", workflowId: flow.id },
+        actions: ["start"],
+        binding: "REPORT",
+      },
+    ];
+    for (const request of asked) {
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await owner.api.permissions.request(request);
+    }
+    await share(owner, source, maker, "user");
+    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+    // Asked for after the version was marked: not declared.
+    await owner.api.permissions.request({
+      subject: { type: "app", appId: source },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "LATER",
+    });
+
+    const listed = await maker.api.apps.blueprints.list();
+    const created = await maker.api.apps.blueprints.create(blueprint, named);
+    const theirs = await maker.api.permissions.list({
+      type: "app",
+      appId: created.app.id,
+    });
+
+    const { subject: _subject, ...declared } = statisticsOf(source);
+    expect({
+      declared: listed.find(({ app }) => app === source)?.permissions,
+      asked: created.permissions.map(
+        ({
+          subject,
+          object,
+          actions,
+          binding,
+          status,
+          requestedBy,
+          grantedBy,
+        }) => ({
+          subject,
+          object,
+          actions,
+          binding,
+          status,
+          requestedBy,
+          grantedBy,
+        })
+      ),
+      // Nothing it answers or lists names another App, a connection or a
+      // workflow.
+      names: [mail.id, mailbox, flow.id].filter(
+        (id) =>
+          JSON.stringify(created).includes(id) ||
+          JSON.stringify(theirs).includes(id)
+      ),
+    }).toStrictEqual({
+      declared: [declared],
+      asked: [
+        {
+          subject: { type: "app", appId: created.app.id },
+          ...declared,
+          // A request, never a grant, even of what was granted.
+          status: "requested",
+          requestedBy: maker.userId,
+          grantedBy: null,
+        },
+      ],
+      names: [],
+    });
+  });
+
+  // Knowledge is gone (GRA-1735): a blueprint that declared a grant on a
+  // collection before is refused whole, never asked for, and never an
+  // internal error.
+  it("ask for no Knowledge collection, whatever a blueprint held from before", async () => {
+    const owner = await personApi("builder");
+    const source = await notesApp(owner);
+    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+    const marked = await owner.api.apps.blueprints.list();
+    await env.DB.prepare("UPDATE blueprints SET permissions = ? WHERE id = ?")
+      .bind(
+        JSON.stringify([
+          {
+            object: { type: "collection", collectionId: "handbook" },
+            actions: ["read"],
+            binding: "HANDBOOK",
+          },
+        ]),
+        blueprint
+      )
+      .run();
+    const name = `Copy ${unique()}`;
+    const storedBefore = await appFiles();
+    const created = await outcome(
+      owner.api.apps.blueprints.create(blueprint, { name })
+    );
+    // Refused before any of the copy's files were stored.
+    const storedAfter = await appFiles();
+    const copies = await env.DB.prepare(
+      "SELECT count(*) AS copies FROM apps WHERE name = ?"
+    )
+      .bind(name)
+      .first<number>("copies");
+
+    expect({
+      declared: marked.find(({ id }) => id === blueprint)?.permissions,
+      created,
+      copies,
+      filesLeft: storedAfter - storedBefore,
+    }).toStrictEqual({
+      declared: [],
+      created: "permission.invalid",
+      copies: 0,
+      filesLeft: 0,
+    });
+  });
+
+  it("create an App with the same code and none of the data, audited", async () => {
+    const [owner, maker] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const source = await notesApp(owner);
+    await owner.api.permissions.request(statisticsOf(source));
+    await calledAs(
+      await owner.api.whoami(),
+      source,
+      { name: "notes.add", kind: "mutation" },
+      { text: "Only the source's" }
+    );
+    await share(owner, source, maker, "user");
+    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+
+    await expect(maker.api.apps.blueprints.list()).resolves.toContainEqual(
+      expect.objectContaining({ id: blueprint, app: source, version: 1 })
+    );
+    const made: CreatedFromBlueprint[] = [];
+    const events = await auditedDuring(async () => {
+      made.push(await maker.api.apps.blueprints.create(blueprint, named));
+    });
+    const [created] = made;
+    if (!created) {
+      throw new Error("Nothing was created");
+    }
+    const { app, version, permissions } = created;
+
+    expect({ app, version }).toMatchObject({
+      app: {
+        name: "My notes",
+        description: "Mine",
+        owner: maker.userId,
+        blueprint,
+        currentVersion: null,
+      },
+      version: { version: 1, parent: null, author: maker.userId },
+    });
+    expect(
+      events.map(({ action, target, detail }) => [
+        action,
+        target?.id,
+        detail.blueprint ?? null,
+      ])
+    ).toStrictEqual([
+      ["app.created", app.id, blueprint],
+      ["app.committed", app.id, null],
+      ...permissions.map(({ id }) => ["permission.requested", id, blueprint]),
+    ]);
+
+    // The same code and none of the data: the new App starts empty, and
+    // shared with nobody.
+    const theirs = await maker.api.apps.list();
+    await maker.api.versions.rollback({ kind: "app", id: app.id }, 1);
+    // The source's version 1, as its draft saved it.
+    const sourceFiles = await owner.api.versions.files(
+      { kind: "app", id: source },
+      1
+    );
+    expect({
+      listed: theirs.some(({ id }) => id === app.id),
+      files: await maker.api.versions.files({ kind: "app", id: app.id }, 1),
+      // The maker has a role in the source, so its notes would show to
+      // them had any come along.
+      sourceNotes: await notesOf(maker, source),
+      notes: await notesOf(maker, app.id),
+      members: await maker.api.apps.members.list(app.id),
+      forOwner: await outcome(owner.api.apps.get(app.id)),
+    }).toStrictEqual({
+      listed: true,
+      // The same code, every file of it.
+      files: sourceFiles,
+      sourceNotes: { ok: true, value: ["Only the source's"] },
+      notes: { ok: true, value: [] },
+      members: [],
+      forOwner: "app.not_found",
+    });
+  });
+
+  it("come only from a marked version, for those with a role in the App who build", async () => {
+    const [owner, builder, user, outsider] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+      personApi("builder"),
+    ]);
+    const source = await notesApp(owner);
+    await share(owner, source, builder, "builder");
+    await share(owner, source, user, "user");
+    const { core } = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    const staff = core.authenticate();
+
+    let marks: string[] = [];
+    let id = "";
+    const events = await auditedDuring(async () => {
+      marks = [
+        // Grasp staff don't decide which of a client's Apps get copied.
+        await outcome(staff.apps.blueprints.mark(source, 1)),
+        await outcome(user.api.apps.blueprints.mark(source, 1)),
+        await outcome(builder.api.apps.blueprints.mark(source, 9)),
+      ];
+      ({ id } = await builder.api.apps.blueprints.mark(source, 1));
+      // Marking it again changes and records nothing.
+      const again = await owner.api.apps.blueprints.mark(source, 1);
+      marks.push(
+        again.id === id ? "same" : "another",
+        await outcome(staff.apps.blueprints.unmark(id)),
+        await outcome(user.api.apps.blueprints.unmark(id))
+      );
+    });
+    expect(marks).toStrictEqual([
+      "role.forbidden",
+      "role.forbidden",
+      "app.version_not_found",
+      "same",
+      "role.forbidden",
+      "role.forbidden",
+    ]);
+    await expect(
+      Promise.all([
+        outcome(owner.api.apps.blueprints.create(`${id}-not`, named)),
+        outcome(outsider.api.apps.blueprints.create(id, named)),
+        outcome(user.api.apps.blueprints.create(id, named)),
+        outcome(staff.apps.blueprints.create(id, named)),
+        outcome(builder.api.apps.blueprints.create(id, { name: " " })),
+      ])
+    ).resolves.toStrictEqual([
+      "app.blueprint_not_found",
+      "app.not_found",
+      // The organization's users don't create Apps.
+      "role.forbidden",
+      "role.forbidden",
+      "app.invalid",
+    ]);
+    await expect(
+      outsider.api.apps.blueprints.list()
+    ).resolves.not.toContainEqual(expect.objectContaining({ app: source }));
+
+    const unmarked = await auditedDuring(async () => {
+      await owner.api.apps.blueprints.unmark(id);
+      await owner.api.apps.blueprints.unmark(id);
+    });
+    const listed = await builder.api.apps.blueprints.list();
+    expect({
+      create: await outcome(builder.api.apps.blueprints.create(id, named)),
+      listed: listed.some(({ app }) => app === source),
+    }).toStrictEqual({ create: "app.blueprint_not_found", listed: false });
+    expect(
+      [...events, ...unmarked].map(({ actor, action, detail }) => ({
+        actor,
+        action,
+        detail,
+      }))
+    ).toStrictEqual([
+      {
+        actor: { type: "person", userId: builder.userId },
+        action: "app.blueprint.marked",
+        detail: { version: 1, blueprint: id },
+      },
+      {
+        actor: { type: "person", userId: owner.userId },
+        action: "app.blueprint.unmarked",
+        detail: { version: 1, blueprint: id },
+      },
+    ]);
+  });
+
+  it("aren't copied from a version unmarked while it was being copied", async () => {
+    const owner = await personApi("builder");
+    const source = await notesApp(owner);
+    const { id } = await owner.api.apps.blueprints.mark(source, 1);
+    const by = await owner.api.whoami();
+    // Unmarked just before the batch that creates the App lands.
+    const racing = racingDb(
+      async (db) =>
+        await db.prepare("DELETE FROM blueprints WHERE id = ?").bind(id).run()
+    );
+
+    const refused = await outcome(
+      createFromBlueprint({ ...env, DB: racing }, by, id, {
+        name: `Raced ${unique()}`,
+      })
+    );
+    const apps = await owner.api.apps.list();
+    expect({
+      refused,
+      created: apps.some(({ name }) => name.startsWith("Raced")),
+    }).toStrictEqual({ refused: "app.blueprint_not_found", created: false });
+  });
+
+  it("aren't copied by someone the App was unshared with while it was being copied", async () => {
+    const owner = await personApi("builder");
+    const maker = await personApi("builder");
+    const source = await notesApp(owner);
+    await share(owner, source, maker, "user");
+    const { id } = await owner.api.apps.blueprints.mark(source, 1);
+    const by = await maker.api.whoami();
+    // Unshared just before the batch that creates the App lands.
+    const racing = racingDb(
+      async (db) =>
+        await db
+          .prepare("DELETE FROM app_members WHERE app_id = ? AND member_id = ?")
+          .bind(source, maker.userId)
+          .run()
+    );
+
+    const refused = await outcome(
+      createFromBlueprint({ ...env, DB: racing }, by, id, {
+        name: `Unshared ${unique()}`,
+      })
+    );
+    const created = await env.DB.prepare(
+      "SELECT count(*) AS count FROM apps WHERE owner_id = ?"
+    )
+      .bind(maker.userId)
+      .first<{ count: number }>();
+    expect({ refused, created: created?.count }).toStrictEqual({
+      refused: "app.not_found",
+      created: 0,
+    });
+  });
+
+  it("aren't copied by someone who can't read what the App read, and gain nothing from a read raced in after the check", async () => {
+    const owner = await personApi("builder");
+    const maker = await personApi("builder");
+    const [unreadable, raced] = await Promise.all([
+      notesApp(owner),
+      notesApp(owner),
+    ]);
+    const marked: string[] = [];
+    for (const source of [unreadable, raced]) {
+      // oxlint-disable-next-line no-await-in-loop -- two, one at a time
+      await share(owner, source, maker, "user");
+      // oxlint-disable-next-line no-await-in-loop -- two, one at a time
+      const { id } = await owner.api.apps.blueprints.mark(source, 1);
+      marked.push(id);
+    }
+    const [unreadableBlueprint = "", racedBlueprint = ""] = marked;
+    const mailbox = await mailboxOf(owner);
+    const readsMailbox = async (app: string): Promise<void> => {
+      await storedGrant(
+        { type: "app", id: app },
+        { type: "connection", id: mailbox },
+        ["mail.list"],
+        "MAILBOX"
+      );
+    };
+    await readsMailbox(unreadable);
+    const by = await maker.api.whoami();
+    // The other App granted the owner's mailbox just before the batch that
+    // creates its copy lands, once: after the check, which it passed.
+    let granted = false;
+    const racing = racingDb(async () => {
+      if (!granted) {
+        granted = true;
+        await readsMailbox(raced);
+      }
+    });
+
+    const refused = await outcome(
+      maker.api.apps.blueprints.create(unreadableBlueprint, named)
+    );
+    const copy = await createFromBlueprint(
+      { ...env, DB: racing },
+      by,
+      racedBlueprint,
+      named
+    );
+    const owned = await env.DB.prepare("SELECT id FROM apps WHERE owner_id = ?")
+      .bind(maker.userId)
+      .all<{ id: string }>();
+    expect({
+      refused,
+      owned: owned.results.map(({ id }) => id),
+      // Neither the mailbox nor a request for it: the copy asks only for
+      // what the blueprint declared as it was marked.
+      permissions: await maker.api.permissions.list({
+        type: "app",
+        appId: copy.app.id,
+      }),
+    }).toStrictEqual({
+      refused: "app.unreadable",
+      owned: [copy.app.id],
+      permissions: [],
+    });
+  });
+
+  it("leave nothing behind in storage, marked and unmarked again and again", async () => {
+    const owner = await personApi("builder");
+    const source = await notesApp(owner);
+    /** What is stored under blueprints/ and under the App. */
+    const stored = async (): Promise<string[]> => {
+      const [blueprintObjects, appObjects] = await Promise.all([
+        env.FILES.list({ prefix: "blueprints/" }),
+        env.FILES.list({ prefix: `apps/${source}/` }),
+      ]);
+      return [...blueprintObjects.objects, ...appObjects.objects]
+        .map(({ key }) => key)
+        .toSorted();
+    };
+    const before = await stored();
+
+    const markAndUnmark = async (): Promise<void> => {
+      const { id } = await owner.api.apps.blueprints.mark(source, 1);
+      await owner.api.apps.blueprints.unmark(id);
+    };
+    await markAndUnmark();
+    await markAndUnmark();
+    await markAndUnmark();
+
+    await expect(stored()).resolves.toStrictEqual(before);
+  });
+
+  it("are listed newest first", async () => {
+    const owner = await personApi("builder");
+    const source = await notesApp(owner);
+    await owner.api.apps.blueprints.mark(source, 2);
+    await owner.api.apps.blueprints.mark(source, 1);
+    // Version 2 marked a second before version 1, so what orders them is
+    // when they were marked, not the newer version first.
+    await env.DB.prepare(
+      "UPDATE blueprints SET marked_at = marked_at - 1000 WHERE app_id = ? AND version = 2"
+    )
+      .bind(source)
+      .run();
+
+    const listed = await owner.api.apps.blueprints.list();
+    expect(
+      listed.filter(({ app }) => app === source).map(({ version }) => version)
+    ).toStrictEqual([1, 2]);
+  });
+});

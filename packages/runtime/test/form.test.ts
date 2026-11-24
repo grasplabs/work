@@ -1,0 +1,1087 @@
+import { FormApi } from "@tanstack/react-form";
+import { describe, expect, it } from "vite-plus/test";
+
+import { clientInternals, GraspClient } from "../src/client-core.ts";
+import { GraspError } from "../src/client-error.ts";
+import type { ClientTransport } from "../src/client-transport.ts";
+import { bindForm } from "../src/form-binding.ts";
+import type { FormBinding } from "../src/form-binding.ts";
+import type { FormApiOf, FormOptionsInput } from "../src/form-types.ts";
+import { v } from "../src/index.ts";
+import type { Id } from "../src/index.ts";
+import { readWorkflowReference } from "../src/workflow-reference-read.ts";
+import { respondToDecision } from "../src/workflow-respond.ts";
+import { functions } from "./notes/.grasp/functions.ts";
+import { api, workflows } from "./notes/server/_generated/api.ts";
+
+// A form's submission state through the real session client, against the
+// network it reaches the host through: an outcome it can't tell, given up
+// only by the person, and never sent again as anyone else; server issues
+// where they belong; an edit sent as only what changed, and its failure
+// shown at the form's level;
+// and its callback's own failures.
+
+/** What the host answers one call: core's `{ result }`, a refusal, or nothing. */
+type Answer =
+  | { readonly value: unknown }
+  | {
+      readonly failed: string;
+      readonly category?: string;
+      readonly details?: unknown;
+    }
+  | { readonly refused: string }
+  | "lost"
+  /**
+   * An outcome the host itself can't tell (`function.sandbox_lost`):
+   * what leaves an action's key unknown, as a lost answer is sent again
+   * for the action's receipt.
+   */
+  | "unknown";
+
+/** One request the host was sent, as the client wrote it. */
+interface Sent {
+  readonly contractId: string;
+  readonly input: unknown;
+  readonly idempotencyKey: string | undefined;
+}
+
+/** What `body` names: its function, input and key. */
+const sentOf = (body: string): Sent => {
+  const parsed: unknown = JSON.parse(body);
+  const read = (key: string): unknown =>
+    typeof parsed === "object" && parsed !== null
+      ? Reflect.get(parsed, key)
+      : undefined;
+  const reference = read("reference");
+  const contractId: unknown =
+    typeof reference === "object" && reference !== null
+      ? Reflect.get(reference, "name")
+      : undefined;
+  const key = read("idempotencyKey");
+  return {
+    contractId: typeof contractId === "string" ? contractId : "",
+    input: read("args"),
+    idempotencyKey: typeof key === "string" ? key : undefined,
+  };
+};
+
+/**
+ * A session client over the page's transport, the host answering each call
+ * as `answer` says; and every request sent, in order.
+ */
+const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
+  const sent: Sent[] = [];
+  const guards: boolean[] = [];
+  const transport: ClientTransport = {
+    call: async (request) => {
+      const call = sentOf(request);
+      sent.push(call);
+      const answered = await answer(call);
+      if (answered === "lost") {
+        throw new Error("The connection was reset.");
+      }
+      if (answered === "unknown") {
+        return {
+          result: {
+            ok: false,
+            error: {
+              code: "function.sandbox_lost",
+              message: "function.sandbox_lost",
+              category: "uncertain",
+              retryable: false,
+              requestId: "r",
+            },
+          },
+        };
+      }
+      if ("refused" in answered) {
+        throw Object.assign(new Error(answered.refused), {
+          code: answered.refused,
+        });
+      }
+      if ("failed" in answered) {
+        return {
+          result: {
+            ok: false,
+            error: {
+              code: answered.failed,
+              message: answered.failed,
+              category: answered.category ?? "domain",
+              retryable: false,
+              requestId: "r",
+              ...(answered.details === undefined
+                ? {}
+                : { details: answered.details }),
+            },
+          },
+        };
+      }
+      return { result: { ok: true, value: answered.value } };
+    },
+    // These cases only make calls; live queries are core's own test
+    // (page-client-live.test.ts).
+    watch: async () => {
+      await Promise.resolve();
+      throw new Error("Nothing here follows a query.");
+    },
+    // What the host is told of leaving the App (spec 10.7.7).
+    leaveGuard: (guarded) => {
+      guards.push(guarded);
+    },
+  };
+  return { client: new GraspClient(transport, functions), sent, guards };
+};
+
+/** A form of `target` through `client`, connected to a TanStack form as `useForm` does. */
+const formOf = (
+  client: GraspClient,
+  target: unknown,
+  options: FormOptionsInput
+) => {
+  const binding: FormBinding = bindForm(client, target, options);
+  const form = new FormApi({
+    defaultValues: binding.initialValues,
+    validators: {
+      onChange: binding.validate,
+      onSubmit: binding.validate,
+    },
+  });
+  form.mount();
+  // SAFETY: the binding reads the form's values, validation and reset,
+  // which a plain FormApi has; the React parts it never touches here.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+  binding.attach(form as unknown as FormApiOf<Record<string, unknown>>);
+  return { binding, form };
+};
+
+/** Why `promise` rejected, or that it resolved. */
+const settle = async (promise: Promise<unknown>): Promise<unknown> => {
+  try {
+    return { resolved: await promise };
+  } catch (error) {
+    return { rejected: error };
+  }
+};
+
+/** Resolves once the loop's queued turns have run. */
+const turns = async (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<null>();
+  setTimeout(() => {
+    resolve(null);
+  }, 0);
+  await promise;
+};
+
+/** A local form's schema: whatever it is given, as it was given. */
+const anything = {
+  "~standard": {
+    version: 1,
+    vendor: "test",
+    validate: (value: unknown) => ({ value }),
+  },
+} as const;
+
+const noteId =
+  // SAFETY: the form of the store's IDs; nothing here reads it further.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  "01890000-0000-7000-8000-000000000001" as Id<"notes">;
+
+describe("a form whose submission's outcome is unknown", () => {
+  it("locks its fields and sends it again under the client's key, until the person discards it", async () => {
+    // The host can't tell an action's outcome, twice: unknown each time.
+    const { client, sent } = host(({ contractId }) =>
+      contractId === "notes.tally" && sent.length <= 2
+        ? "unknown"
+        : { value: 3 }
+    );
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+
+    await settle(binding.submit());
+    expect(binding.status()).toMatchObject({
+      phase: "uncertain",
+      locked: true,
+    });
+    // Asking again sends the same submission, under the key the client
+    // picked for it.
+    await settle(binding.submit());
+    expect(sent[1]?.idempotencyKey).toBe(sent[0]?.idempotencyKey);
+
+    // Given up, knowingly: the fields unlock and the next is new.
+    binding.discard();
+    expect(binding.status()).toMatchObject({ phase: "idle", locked: false });
+    await expect(binding.submit()).resolves.toBe(3);
+    expect(sent[2]?.idempotencyKey).not.toBe(sent[0]?.idempotencyKey);
+  });
+
+  it("never sends it again once access was lost since, whoever signs in next", async () => {
+    let signedOut = false;
+    const { client, sent } = host(({ contractId }) => {
+      if (contractId === "notes.get") {
+        return signedOut
+          ? { refused: "auth.unauthenticated" }
+          : { value: null };
+      }
+      return sent.length === 1 ? "unknown" : { value: 3 };
+    });
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    await settle(binding.submit());
+    // The person's session ended, and someone signs in again.
+    signedOut = true;
+    await settle(client.query(api.notes.get, { id: noteId }));
+    signedOut = false;
+
+    const actions = () =>
+      sent.filter(({ contractId }) => contractId === "notes.tally").length;
+    const refused = await settle(binding.submit());
+    expect({ refused, actions: actions() }).toMatchObject({
+      refused: { rejected: { code: "auth.principal_changed" } },
+      actions: 1,
+    });
+    expect(binding.status()).toMatchObject({ phase: "idle", locked: false });
+    // The next submit is a submission of its own, under a key of its own.
+    await expect(binding.submit()).resolves.toBe(3);
+    expect(sent.at(-1)?.idempotencyKey).not.toBe(sent[0]?.idempotencyKey);
+  });
+
+  it("never sends it as whoever signs in after the resend that found the sign-out", async () => {
+    let signedOut = false;
+    const { client, sent } = host(() => {
+      if (sent.length === 1) {
+        return "unknown";
+      }
+      return signedOut ? { refused: "auth.unauthenticated" } : { value: 3 };
+    });
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    await settle(binding.submit());
+    // The resend finds the session ended: refused before it ran, so the
+    // form keeps it, unknown as it was.
+    signedOut = true;
+    await settle(binding.submit());
+    const found = binding.status();
+    // Someone signs in: what the form kept is never sent as them.
+    signedOut = false;
+    const refused = await settle(binding.submit());
+    expect({
+      found: { phase: found.phase, locked: found.locked },
+      refused,
+      sent: sent.length,
+      after: binding.status().phase,
+    }).toMatchObject({
+      found: { phase: "uncertain", locked: true },
+      refused: { rejected: { code: "auth.principal_changed" } },
+      sent: 2,
+      after: "idle",
+    });
+  });
+
+  it.each([
+    "function.sandbox_busy",
+    "function.sandbox_unavailable",
+    "mutation.concurrent_change",
+    "submission.superseded",
+    // Answered while the first call's receipt has no outcome yet.
+    "submission.key_conflict",
+    "submission.expired",
+    "function.deadline_exceeded",
+  ])(
+    "never sends it as whoever signs in after a resend refused with %s",
+    async (code) => {
+      let signedOut = false;
+      const { client, sent } = host(({ contractId }) => {
+        if (contractId === "notes.get") {
+          return signedOut
+            ? { refused: "auth.unauthenticated" }
+            : { value: null };
+        }
+        if (sent.length === 1) {
+          return "unknown";
+        }
+        return sent.filter((call) => call.contractId === "notes.tally")
+          .length === 2
+          ? {
+              failed: code,
+              category:
+                code === "submission.key_conflict" ? "contract" : "operational",
+            }
+          : { value: 3 };
+      });
+      const { binding } = formOf(client, api.notes.tally, {
+        defaultValues: {},
+      });
+      await settle(binding.submit());
+      // The resend may not have run: the form keeps it, key and all.
+      await settle(binding.submit());
+      const kept = binding.status().phase;
+      // A's session ends, and B signs in and submits.
+      signedOut = true;
+      await settle(client.query(api.notes.get, { id: noteId }));
+      signedOut = false;
+      const refused = await settle(binding.submit());
+      expect({
+        kept,
+        refused,
+        actions: sent.filter((call) => call.contractId === "notes.tally")
+          .length,
+      }).toMatchObject({
+        kept: "uncertain",
+        refused: { rejected: { code: "auth.principal_changed" } },
+        actions: 2,
+      });
+    }
+  );
+
+  it("sends it again under its key after a resend refused before it ran, never anew", async () => {
+    const { client, sent } = host(() => {
+      if (sent.length === 1) {
+        return "unknown";
+      }
+      // The host refuses it before it runs: nothing ran.
+      return sent.length === 2
+        ? { refused: "request.forbidden" }
+        : { value: 3 };
+    });
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    await settle(binding.submit());
+    await settle(binding.submit());
+    const refused = binding.status();
+    await expect(binding.submit()).resolves.toBe(3);
+    expect({
+      refused: { phase: refused.phase, locked: refused.locked },
+      keys: new Set(sent.map(({ idempotencyKey }) => idempotencyKey)).size,
+    }).toStrictEqual({
+      refused: { phase: "uncertain", locked: true },
+      keys: 1,
+    });
+  });
+
+  it("never discards a submission still in flight", async () => {
+    const { promise: held, resolve } = Promise.withResolvers<null>();
+    const { client } = host(async () => {
+      await held;
+      return { value: noteId };
+    });
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "Held", body: "" },
+    });
+    const submitting = binding.submit();
+    await expect.poll(() => binding.status().phase).toBe("submitting");
+    binding.discard();
+    expect(binding.status()).toMatchObject({
+      phase: "submitting",
+      locked: true,
+    });
+    resolve(null);
+    await expect(submitting).resolves.toBe(noteId);
+  });
+});
+
+describe("a form's issues", () => {
+  it("rejects values that don't pass with the issues found, sending nothing", async () => {
+    const { client, sent } = host(() => ({ value: noteId }));
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: 5, body: "" },
+    });
+    await expect(settle(binding.submit())).resolves.toMatchObject({
+      rejected: {
+        code: "contract.invalid_args",
+        details: { issues: [{ path: ["title"] }] },
+      },
+    });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("shows the server's issue beside an argument the defaults left out, and clears it once a save goes through", async () => {
+    const { client, sent } = host(() =>
+      sent.length === 1
+        ? {
+            failed: "contract.invalid_args",
+            category: "contract",
+            details: { issues: [{ message: "Too long.", path: ["body"] }] },
+          }
+        : { value: noteId }
+    );
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "Only a title" },
+    });
+    await settle(binding.submit());
+    expect(binding.status()).toMatchObject({
+      fieldIssues: { body: "Too long." },
+      failure: undefined,
+    });
+    await binding.submit();
+    expect(binding.status().fieldIssues).toStrictEqual({});
+  });
+
+  it("keeps the refusal's reason when it names no field it can show", async () => {
+    const { client } = host(() => ({
+      failed: "contract.invalid_args",
+      category: "contract",
+    }));
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "A" },
+    });
+    await settle(binding.submit());
+    expect(binding.status()).toMatchObject({
+      fieldIssues: {},
+      failure: { code: "contract.invalid_args", category: "contract" },
+    });
+  });
+
+  it("names an array item's field as TanStack does, so the issue shows beside it", async () => {
+    const { client } = host(() => ({ value: null }));
+    const { binding } = formOf(client, anything, {
+      defaultValues: { items: [{ name: "" }] },
+      onSubmit: () => {
+        throw new GraspError({
+          code: "contract.invalid_args",
+          message: "Invalid arguments.",
+          category: "contract",
+          retryable: false,
+          requestId: null,
+          details: {
+            issues: [{ message: "Name it.", path: ["items", 0, "name"] }],
+          },
+        });
+      },
+    });
+    await settle(binding.submit());
+    expect(binding.status().fieldIssues).toStrictEqual({
+      "items[0].name": "Name it.",
+    });
+  });
+});
+
+describe("a form editing a record", () => {
+  const record = {
+    _id: noteId,
+    _ownerId: "u1",
+    _createdAt: 1,
+    _updatedAt: 1,
+    title: "Before",
+    body: "Notes",
+    summary: null,
+  };
+
+  it("sends the record's ID and only the fields the person changed since it opened or last saved", async () => {
+    const { client, sent } = host(() => ({ value: record }));
+    const { binding, form } = formOf(client, api.notes.update, {
+      defaultValues: { id: record._id, title: record.title, body: record.body },
+    });
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    form.setFieldValue("body", "More notes");
+    await binding.submit();
+    // Changed and changed back: nothing of it to send.
+    form.setFieldValue("title", "Other");
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    expect(sent.map(({ input }) => input)).toStrictEqual([
+      { id: record._id, title: "Edited" },
+      { id: record._id, body: "More notes" },
+      { id: record._id },
+    ]);
+  });
+
+  it("sends after a reset every field that differs from what was last saved", async () => {
+    const { client, sent } = host(() => ({ value: record }));
+    const { binding, form } = formOf(client, api.notes.update, {
+      defaultValues: { id: record._id, title: record.title, body: record.body },
+    });
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    // Back to the defaults it opened with: the title shows "Before" again,
+    // which the record no longer holds.
+    binding.reset();
+    form.setFieldValue("body", "More notes");
+    await binding.submit();
+    expect(sent.map(({ input }) => input)).toStrictEqual([
+      { id: record._id, title: "Edited" },
+      { id: record._id, title: "Before", body: "More notes" },
+    ]);
+  });
+
+  it("shows a save of a record that is gone as the form's own data.conflict, keeping the person's values", async () => {
+    const { client } = host(() => ({
+      failed: "data.conflict",
+      category: "domain",
+    }));
+    const { binding, form } = formOf(client, api.notes.update, {
+      defaultValues: { id: record._id, title: record.title, body: record.body },
+    });
+    form.setFieldValue("title", "Edited");
+    const outcome = await settle(binding.submit());
+    expect({
+      outcome,
+      status: binding.status(),
+      values: form.state.values,
+    }).toMatchObject({
+      outcome: { rejected: { code: "data.conflict" } },
+      status: {
+        phase: "idle",
+        failure: { code: "data.conflict" },
+        fieldIssues: {},
+      },
+      values: { title: "Edited" },
+    });
+  });
+});
+
+describe("a form's callbacks", () => {
+  it("rejects a local form's submit with a structured error carrying its callback's message", async () => {
+    const { client } = host(() => ({ value: null }));
+    const { binding } = formOf(client, anything, {
+      defaultValues: { name: "x" },
+      onSubmit: () => {
+        throw new Error("The printer is out of paper.");
+      },
+    });
+    await expect(settle(binding.submit())).resolves.toMatchObject({
+      rejected: {
+        code: "form.failed",
+        category: "operational",
+        message: "The printer is out of paper.",
+      },
+    });
+  });
+
+  it("reports what onSuccess threw after a save went through, apart from the save", async () => {
+    const { client } = host(() => ({ value: noteId }));
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "Saved", body: "" },
+      onSuccess: () => {
+        throw new Error("Couldn't open the note.");
+      },
+    });
+    await expect(binding.submit()).resolves.toBe(noteId);
+    await turns();
+    expect(binding.status()).toMatchObject({
+      phase: "idle",
+      failure: undefined,
+      applicationError: "Couldn't open the note.",
+    });
+  });
+
+  it("runs onSuccess only while the form is mounted", async () => {
+    let succeeded = 0;
+    const { client } = host(() => ({ value: noteId }));
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "Saved", body: "" },
+      onSuccess: () => {
+        succeeded += 1;
+      },
+    });
+    await binding.submit();
+    binding.setMounted(false);
+    await binding.submit();
+    await turns();
+    expect(succeeded).toBe(1);
+  });
+
+  it("never lets an onSuccess that fails late speak over a later submission that went through", async () => {
+    const { promise: firstCallback, reject } = Promise.withResolvers<null>();
+    const callbacks = [
+      async () => {
+        await firstCallback;
+      },
+      async () => {
+        await Promise.resolve();
+      },
+    ];
+    const { client } = host(() => ({ value: noteId }));
+    const { binding } = formOf(client, api.notes.create, {
+      defaultValues: { title: "Twice", body: "" },
+      onSuccess: async () => {
+        await callbacks.shift()?.();
+      },
+    });
+    await binding.submit();
+    await binding.submit();
+    reject(new Error("The first one's follow-up failed."));
+    await turns();
+    expect(binding.status().applicationError).toBeUndefined();
+  });
+});
+
+describe("leaving a page with a form", () => {
+  it("is confirmed by the host while the form holds unsaved edits, or a submission whose outcome is unknown, and no longer once it doesn't", async () => {
+    const { client, guards } = host(({ contractId }) =>
+      contractId === "notes.tally" ? "unknown" : { value: 3 }
+    );
+    const edited = formOf(client, api.notes.create, {
+      defaultValues: { title: "", body: "" },
+    });
+    edited.binding.setMounted(true);
+    edited.form.setFieldValue("title", "Groceries");
+    edited.binding.fieldChanged("title");
+    const whileEdited = [...guards];
+    edited.form.setFieldValue("title", "");
+    edited.binding.fieldChanged("title");
+    const afterUndo = [...guards];
+    edited.form.setFieldValue("title", "Again");
+    edited.binding.fieldChanged("title");
+    // An unmounted form holds nothing a leave would lose.
+    edited.binding.setMounted(false);
+    const afterUnmount = [...guards];
+
+    const tallied = formOf(client, api.notes.tally, { defaultValues: {} });
+    tallied.binding.setMounted(true);
+    await settle(tallied.binding.submit());
+    const whileUnknown = [...guards];
+    tallied.binding.discard();
+    expect({
+      whileEdited,
+      afterUndo,
+      afterUnmount,
+      whileUnknown,
+      afterDiscard: guards,
+    }).toStrictEqual({
+      whileEdited: [true],
+      afterUndo: [true, false],
+      afterUnmount: [true, false, true, false],
+      whileUnknown: [true, false, true, false, true],
+      afterDiscard: [true, false, true, false, true, false],
+    });
+  });
+
+  it("is no longer confirmed once a submission saved the values, kept in the fields or reset, until they are edited again", async () => {
+    const { client, guards } = host(() => ({ value: noteId }));
+    const kept = formOf(client, api.notes.create, {
+      defaultValues: { title: "", body: "" },
+    });
+    kept.binding.setMounted(true);
+    kept.form.setFieldValue("title", "Groceries");
+    kept.binding.fieldChanged("title");
+    await kept.binding.submit();
+    const afterSave = [...guards];
+    kept.form.setFieldValue("title", "Groceries, again");
+    kept.binding.fieldChanged("title");
+    const afterEdit = [...guards];
+    kept.binding.setMounted(false);
+
+    const reset = formOf(client, api.notes.create, {
+      defaultValues: { title: "", body: "" },
+      resetOnSuccess: true,
+    });
+    reset.binding.setMounted(true);
+    reset.form.setFieldValue("title", "Errands");
+    reset.binding.fieldChanged("title");
+    await reset.binding.submit();
+    expect({ afterSave, afterEdit, afterReset: guards }).toStrictEqual({
+      afterSave: [true, false],
+      afterEdit: [true, false, true],
+      afterReset: [true, false, true, false, true, false],
+    });
+  });
+});
+
+/** The code of the structured error `promise` rejected with, or that it didn't. */
+const refusedWith = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "resolved";
+  } catch (error) {
+    return error instanceof GraspError ? error.code : "not structured";
+  }
+};
+
+/**
+ * A decision form (spec 10.7.2) as an App composes one: the form of an
+ * answer to `decision` (`useForm(workflows.<wf>.decisions.<key>)`), an
+ * explicit approval and the value the page's build declares for it, whose
+ * submit answers the exact wait as `useWorkflow`'s `respond` does; and
+ * what the page's trusted decision UI was asked, each answer in order.
+ */
+const decisionForm = (
+  page: (answer: unknown) => Promise<unknown>,
+  onSubmitted: () => void = () => {
+    // Counted where a test asks.
+  },
+  decision: unknown = workflows.summarizeNote.decisions.approveSummary
+) => {
+  const asked: unknown[] = [];
+  const client = new GraspClient(
+    {
+      call: async () => await Promise.reject(new Error("Nothing is called.")),
+      watch: async () =>
+        await Promise.reject(new Error("Nothing is followed.")),
+      decisions: {
+        respond: async (run, decided, answer) => {
+          asked.push({ run, decision: decided, answer });
+          return await page(answer);
+        },
+      },
+    },
+    functions
+  );
+  const read = readWorkflowReference(
+    clientInternals(client),
+    workflows.summarizeNote
+  );
+  const wait = {
+    kind: "decision",
+    id: "decision-1",
+    taskId: "review",
+    key: "approveSummary",
+    title: "review",
+    openedAt: 1000,
+    deadline: null,
+    canRespond: true,
+  };
+  const { binding, form } = formOf(client, decision, {
+    defaultValues: { approved: false, value: { comment: "" } },
+    onSubmit: async (response: unknown) => {
+      onSubmitted();
+      await respondToDecision(
+        clientInternals(client),
+        read,
+        "run-1",
+        wait,
+        response
+      );
+    },
+  });
+  return { binding, form, asked };
+};
+
+describe("a decision form", () => {
+  it("keeps an answer whose outcome is lost, locked, and sends exactly it again, never asking its callback again", async () => {
+    let calls = 0;
+    let pages = 0;
+    const { binding, form, asked } = decisionForm(
+      async () => {
+        pages += 1;
+        if (pages === 1) {
+          throw new Error("The connection was reset.");
+        }
+        return await Promise.resolve({ status: "approved" });
+      },
+      () => {
+        calls += 1;
+      }
+    );
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    const lost = await refusedWith(binding.submit());
+    const whileUnknown = binding.status();
+    await binding.submit();
+
+    expect({
+      lost,
+      whileUnknown: {
+        phase: whileUnknown.phase,
+        locked: whileUnknown.locked,
+      },
+      after: binding.status().phase,
+      // The callback ran once: the second answer is the first, as it went.
+      calls,
+      asked,
+    }).toStrictEqual({
+      lost: "decision.outcome_unknown",
+      whileUnknown: { phase: "uncertain", locked: true },
+      after: "idle",
+      calls: 1,
+      asked: Array.from({ length: 2 }, () => ({
+        run: "run-1",
+        decision: "decision-1",
+        answer: { approved: true, payload: { comment: "Fine" } },
+      })),
+    });
+  });
+
+  it("unlocks once an answer sent again finds its decision closed, which it shows, sending nothing more", async () => {
+    let pages = 0;
+    const { binding, form, asked } = decisionForm(async () => {
+      pages += 1;
+      await Promise.resolve();
+      if (pages === 1) {
+        throw new Error("The connection was reset.");
+      }
+      // Answered by someone else, or past its deadline, meanwhile.
+      throw Object.assign(new Error("Closed."), { code: "decision.closed" });
+    });
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    await refusedWith(binding.submit());
+    const closed = await refusedWith(binding.submit());
+    const status = binding.status();
+
+    expect({
+      closed,
+      status: {
+        phase: status.phase,
+        locked: status.locked,
+        failure: status.failure?.code,
+      },
+      asked: asked.length,
+    }).toStrictEqual({
+      closed: "decision.closed",
+      // A definite end: no answer left to send again.
+      status: { phase: "idle", locked: false, failure: "decision.closed" },
+      asked: 2,
+    });
+  });
+
+  it("keeps the draft when the person cancels the page's confirmation, recording nothing", async () => {
+    const { binding, form, asked } = decisionForm(async () => {
+      await Promise.resolve();
+      throw Object.assign(new Error("Cancelled."), {
+        code: "decision.cancelled",
+      });
+    });
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    const cancelled = await refusedWith(binding.submit());
+
+    expect({
+      cancelled,
+      status: {
+        phase: binding.status().phase,
+        locked: binding.status().locked,
+      },
+      draft: form.state.values,
+      asked: asked.length,
+    }).toStrictEqual({
+      cancelled: "decision.cancelled",
+      status: { phase: "idle", locked: false },
+      draft: { approved: true, value: { comment: "Fine" } },
+      asked: 1,
+    });
+  });
+
+  it("checks the value with the decision's descriptor in the page's build, whatever the reference carries", async () => {
+    const answered = async (decision: unknown) => {
+      const { binding, form, asked } = decisionForm(
+        async () => await Promise.resolve({ status: "approved" }),
+        undefined,
+        decision
+      );
+      form.setFieldValue("approved", true);
+      // Longer than the 500 characters `approveSummary`'s comment takes.
+      form.setFieldValue("value", { comment: "x".repeat(501) });
+      return {
+        submitted: await settle(binding.submit()),
+        comment: binding.fieldDescriptor("value.comment"),
+        asked: asked.length,
+      };
+    };
+    // A forged one that brings a value schema of its own changes nothing:
+    // only its name is read.
+    const looseValue = v.object({ comment: v.string() });
+    const loose = looseValue.descriptor;
+    const forged = {
+      name: "workflows.summarizeNote.decisions.approveSummary",
+      kind: "mutation",
+      args: v.object({ approved: v.boolean(), value: looseValue }).descriptor,
+      valueSchema: { kind: "descriptor", descriptor: loose },
+      value: loose,
+    };
+    const [genuine, read] = await Promise.all([
+      answered(workflows.summarizeNote.decisions.approveSummary),
+      answered(forged),
+    ]);
+    expect(genuine).toMatchObject({
+      submitted: {
+        rejected: {
+          code: "contract.invalid_args",
+          details: { issues: [{ path: ["value", "comment"] }] },
+        },
+      },
+      comment: { kind: "string", max: 500 },
+      asked: 0,
+    });
+    expect(read).toStrictEqual(genuine);
+  });
+
+  it.each([
+    [
+      "a decision the workflow doesn't declare",
+      "workflows.summarizeNote.decisions.approveDraft",
+    ],
+    [
+      "another workflow's decision under this one's name",
+      "workflows.summarizeNote.decisions.confirmArchive",
+    ],
+    [
+      "a workflow the release doesn't declare",
+      "workflows.translateNote.decisions.approveSummary",
+    ],
+    ["an inherited key", "workflows.summarizeNote.decisions.constructor"],
+    ["an inherited workflow", "workflows.constructor.decisions.approveSummary"],
+    ["the prototype's key", "workflows.__proto__.decisions.approveSummary"],
+  ])("makes no form of %s, which no function is either", (_case, name) => {
+    const { client, sent } = host(() => ({ value: null }));
+    expect(() =>
+      bindForm(
+        client,
+        { name },
+        {
+          defaultValues: { approved: true, value: null },
+          onSubmit: () => null,
+        }
+      )
+    ).toThrow(expect.objectContaining({ code: "contract.invalid_request" }));
+    expect(sent).toHaveLength(0);
+  });
+});
+
+// A function's form checks what it sends with the arguments the page's
+// release declares for the function its reference names: a reference is
+// a name, so whatever else an object carries (an argument descriptor
+// that takes anything, another kind) changes nothing, and a name the
+// release has no public mutation or action at (a query, an internal
+// function, a key every object inherits) makes no form. Core checks the
+// submission again with the function's own validator in the release
+// current then.
+describe("what a function's form checks a submission with", () => {
+  it("is the release's arguments for the name, whatever else the reference carries", async () => {
+    const { client, sent } = host(() => ({ value: noteId }));
+    const forged = {
+      name: "notes.create",
+      kind: "action",
+      args: v.object({}).descriptor,
+    };
+    const { binding } = formOf(client, forged, {
+      defaultValues: { title: 5, body: "" },
+    });
+    await expect(settle(binding.submit())).resolves.toMatchObject({
+      rejected: {
+        code: "contract.invalid_args",
+        details: { issues: [{ path: ["title"] }] },
+      },
+    });
+    expect({
+      sent: sent.length,
+      title: binding.fieldDescriptor("title")?.kind,
+    }).toStrictEqual({ sent: 0, title: "string" });
+  });
+
+  it("is a bound workflow's arguments for its start, as for the App's own functions", async () => {
+    const { client, sent } = host(() => ({ value: null }));
+    const { binding } = formOf(
+      client,
+      workflows.summarizeNote.mutations.start,
+      { defaultValues: { args: { noteId: 5 } } }
+    );
+    await expect(settle(binding.submit())).resolves.toMatchObject({
+      rejected: {
+        code: "contract.invalid_args",
+        details: { issues: [{ path: ["args", "noteId"] }] },
+      },
+    });
+    expect(sent).toHaveLength(0);
+  });
+
+  it.each([
+    ["a query", "notes.get"],
+    ["an internal function", "notes.count"],
+    ["a name nothing is at", "notes.missing"],
+    ["an inherited key", "constructor"],
+    ["the prototype's key", "__proto__"],
+    ["an inherited key under a module", "notes.toString"],
+    ["a name with nothing after it", ""],
+  ])("makes no form of %s", (_case, name) => {
+    const { client } = host(() => ({ value: null }));
+    expect(() => bindForm(client, { name }, { defaultValues: {} })).toThrow(
+      expect.objectContaining({ code: "contract.invalid_request" })
+    );
+  });
+
+  it("makes no form of a function in a client given no release's functions", () => {
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("Nothing is called.")),
+      watch: async () =>
+        await Promise.reject(new Error("Nothing is followed.")),
+    });
+    expect(() =>
+      bindForm(client, api.notes.create, { defaultValues: {} })
+    ).toThrow(expect.objectContaining({ code: "contract.invalid_request" }));
+  });
+});
+
+describe("what a form declares of its fields", () => {
+  it("reads a field's schema by its path, into objects and arrays", () => {
+    const { client } = host(() => ({ value: null }));
+    const binding = bindForm(
+      client,
+      v.object({
+        address: v.object({ country: v.enum(["nl", "de"]) }),
+        lines: v.array(v.object({ amount: v.number().min(1) })),
+      }),
+      { defaultValues: {} }
+    );
+    expect({
+      country: binding.fieldDescriptor("address.country")?.kind,
+      amount: binding.fieldDescriptor("lines[0].amount")?.kind,
+      missing: binding.fieldDescriptor("address.city"),
+      intoText: binding.fieldDescriptor("address.country.code"),
+    }).toStrictEqual({
+      country: "enum",
+      amount: "number",
+      missing: undefined,
+      intoText: undefined,
+    });
+  });
+});
+
+/** An upload's cancel that has nothing to cancel. */
+const cancelNothing = (): void => {
+  // Nothing runs here: only the form's hold is tested.
+};
+
+describe("a form with a file uploading", () => {
+  it("refuses to submit until every upload ended, and sends nothing", async () => {
+    const { client, sent } = host(() => ({ value: 1 }));
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    const first = binding.startUpload(cancelNothing).end;
+    const second = binding.startUpload(cancelNothing).end;
+    const whileUploading = await settle(binding.submit());
+    const refusal =
+      typeof whileUploading === "object" &&
+      whileUploading !== null &&
+      "rejected" in whileUploading &&
+      whileUploading.rejected instanceof GraspError
+        ? whileUploading.rejected.code
+        : undefined;
+    first();
+    // Ending it twice ends it once: the other still holds the form.
+    first();
+    const whileOneUploads = binding.status().uploading;
+    second();
+    expect({
+      refusal,
+      whileOneUploads,
+      after: await settle(binding.submit()),
+      sent: sent.length,
+    }).toStrictEqual({
+      refusal: "form.uploading",
+      whileOneUploads: true,
+      after: { resolved: 1 },
+      sent: 1,
+    });
+  });
+});
+
+describe("a form whose edits are discarded while a file uploads", () => {
+  it("cancels the upload, and says its file belongs to no edits any more", async () => {
+    const { client } = host(() => ({ value: 1 }));
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    let cancelled = 0;
+    const upload = binding.startUpload(() => {
+      cancelled += 1;
+    });
+    binding.reset();
+    // The upload's own end, which comes after: nothing more to undo.
+    upload.end();
+    expect({
+      cancelled,
+      current: upload.current(),
+      uploading: binding.status().uploading,
+      submitted: await settle(binding.submit()),
+    }).toStrictEqual({
+      cancelled: 1,
+      current: false,
+      uploading: false,
+      submitted: { resolved: 1 },
+    });
+  });
+});

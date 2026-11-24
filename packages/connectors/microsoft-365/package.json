@@ -1,0 +1,20 @@
+{
+  "name": "@grasp-os/connector-microsoft-365",
+  "private": true,
+  "description": "Native Microsoft 365 connector (Graph), loaded by connect into its own isolate",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./graph": "./src/graph.ts",
+    "./mail-sync": "./src/mail-sync.ts"
+  },
+  "dependencies": {
+    "@grasp-os/connector-kit": "workspace:*",
+    "fflate": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

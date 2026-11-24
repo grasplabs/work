@@ -1,0 +1,1175 @@
+/**
+ * Turns a definition package (`@grasp-os/shared/definition-packages`, what
+ * core's `apps.definition` exports) into a standalone project a developer
+ * installs, type-checks, lints, formats and builds outside Grasp: the
+ * App's source with the references generated from its sealed
+ * registration, the code of the workflow versions it binds (never their
+ * definitions), and the checkout's own SDK, UI kit, Brain and shared
+ * packages under `vendor/`, with their licence and the notices of every
+ * direct dependency. Its `lint` and `format` hold the App's code to what
+ * Grasp holds it to (`planTooling`): oxlint and oxfmt, the releases Grasp
+ * runs as WebAssembly, with the config Grasp lints and formats it with.
+ *
+ * Threat model (GRA-713), and how each is closed:
+ *
+ * - A package's file path writes outside where it belongs, or where a tool
+ *   reads it: every path is checked before anything is written
+ *   (`safePath`): relative, `/` separated, at most 255 bytes a segment, no
+ *   empty, `.` or `..` segment, no separator, drive, colon or control
+ *   character, no trailing dot or space, no name Windows reserves, and no
+ *   a tool's or package manager's file or folder (`.git`, `.npmrc`,
+ *   `.vscode`, `node_modules`, a pnpmfile, pnpm's, Yarn's or Bun's
+ *   settings); and each lands inside its subtree once
+ *   resolved. Two paths the same once folded (NFC, full case folding) are
+ *   refused, as is an App file where the references are generated.
+ * - It writes through something already there, or leaves half a project:
+ *   the whole project is planned and checked first, then built in a new
+ *   directory beside `--out`, each file created anew (`wx`), and renamed
+ *   onto `--out` only while that is missing or an empty directory, never
+ *   a link.
+ * - The package isn't one the platform made, or of another format: it is
+ *   parsed with the strict package schema and its registration with the
+ *   SDK's strict reader, and a format other than the checkout's is
+ *   refused by name.
+ * - Packages are fetched that nothing pinned, or replace one the project
+ *   pins, or the network is reached: nothing here makes a network call.
+ *   Every package the project installs is pinned, exactly and with its
+ *   integrity, in its pnpm-lock.yaml (package-definition-lockfile.ts,
+ *   GRA-723): the App's approved packages from its own lock (GRA-737),
+ *   the vendored packages' and the project's own, transitive ones
+ *   included, from the checkout's lockfile; and its installs are frozen
+ *   to it. Two locks that pin one package at different versions, or one
+ *   package with other dependencies, are refused, since a project
+ *   installs one of each. A lock that
+ *   names a package the project pins itself (Grasp's scope, React, the
+ *   type-checker), anywhere in its graph but its peers, is refused.
+ *   Installing is the developer's step, after.
+ * - Code from the package runs: none does. The references are generated
+ *   from the registration as data (`generateModules`).
+ * - Licences: the vendored packages ship with their AGPL-3.0 text, and the
+ *   notices list each direct dependency with the licence its lock or
+ *   installed package declares when it reads as an SPDX expression,
+ *   "unknown" otherwise.
+ * - It checks outside Grasp but fails on it, or the other way round: each
+ *   kind of code gets a tsconfig of the compiler's own options for it
+ *   (`planTypeCheck`), the project pins the compiler's TypeScript, and its
+ *   check (`typecheck`, and `build`) is the compiler's (standalone-check.ts),
+ *   which refuses what the platform's build refuses before its check.
+ */
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
+
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
+import {
+  generateModules,
+  generatedServerFolder,
+  readAppManifest,
+} from "@grasp-os/runtime/host";
+import {
+  definitionPackageFormatVersion,
+  definitionPackageSchema,
+} from "@grasp-os/shared/definition-packages";
+import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
+import { graspLockSchema } from "@grasp-os/shared/packages";
+import type { GraspLock } from "@grasp-os/shared/packages";
+import { parse } from "yaml";
+import { z } from "zod";
+
+import {
+  oxcWasmModule,
+  oxcWasmPin,
+} from "../packages/compiler/oxc-wasm/wasm.ts";
+import {
+  buildFiles,
+  codeExtensions,
+  declarationExtension,
+  hostGeneratedFolder,
+  isGeneratedPath,
+  routeTreePath,
+  sourceFolder,
+} from "../packages/compiler/src/inputs.ts";
+import { pageReferences } from "../packages/compiler/src/kit.ts";
+import { startOxc } from "../packages/compiler/src/oxc.ts";
+import { routeTree } from "../packages/compiler/src/route-tree.ts";
+import {
+  appCodeTarget,
+  compilerOptions,
+  generatedTarget,
+} from "../packages/compiler/src/type-check.ts";
+import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
+import {
+  leftOut,
+  pageOverride,
+  sdkTestOverride,
+  ultraciteFormat,
+  ultracitePresets,
+} from "../packages/compiler/ultracite-config.ts";
+import {
+  LockfileError,
+  projectLockfile,
+} from "./package-definition-lockfile.ts";
+import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
+
+/** The workspace packages a project vendors, each with what it depends on. */
+const vendored = ["shared", "runtime", "sdk", "app-kit"] as const;
+
+/** The catalog packages every project depends on itself. */
+const projectDependencies = [
+  "@tanstack/react-router",
+  "react",
+  "react-dom",
+] as const;
+/**
+ * Its own development tools, each pinned as the catalog pins it: what its
+ * check (`grasp/check.ts`) runs as the platform does, the checker App code
+ * is type-checked with (`@tsrs/wasm`, the compiler's) and the parser that
+ * reads its comments and ambient declarations (`oxc-parser`, the release
+ * of the oxc Grasp parses App code with).
+ */
+const projectDevDependencies = [
+  "oxc-parser",
+  "@tsrs/wasm",
+  "@types/react",
+  "@types/react-dom",
+  // Its lint and format, as Grasp holds App code to them (`planTooling`):
+  // oxlint and oxfmt, the releases Grasp's isolate runs (`oxcReleases`),
+  // with Ultracite's presets and config.
+  "oxlint",
+  "oxfmt",
+  "ultracite",
+] as const;
+
+/** Why packaging refused, naming what, never a file's contents. */
+export class PackagingError extends Error {
+  override readonly name = "PackagingError";
+}
+
+const refuse = (message: string): never => {
+  throw new PackagingError(message);
+};
+
+const drivePattern = /^[A-Za-z]:/u;
+const workflowKeyPattern =
+  /^workspace\/(?<name>[a-z0-9-]+)\/(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/u;
+
+/** Characters no segment holds: separators, Windows' reserved, controls. */
+// oxlint-disable-next-line no-control-regex -- control characters are what it refuses
+const forbiddenCharacters = /[\\/:*?"<>|\u0000-\u001F\u007F]/u;
+/** Names Windows reserves for devices, with or without an extension. */
+const reservedName = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/u;
+/**
+ * Segments that configure a tool or repository when written anywhere, or
+ * that a package manager reads or installs into: a package manager run
+ * inside `app/` would load a planted pnpmfile, which runs code, and its
+ * settings over the project's own.
+ */
+const toolSegments: ReadonlySet<string> = new Set([
+  ".git",
+  ".npmrc",
+  ".vscode",
+  "pnpm-workspace.yaml",
+  "pnpm-lock.yaml",
+  ".pnpmfile.cjs",
+  ".pnpmfile.mjs",
+  ".pnpmfile.js",
+  "node_modules",
+  ".yarnrc",
+  ".yarnrc.yml",
+  "bunfig.toml",
+]);
+const encoder = new TextEncoder();
+
+/**
+ * `text` folded as file systems that ignore case compare names: NFC, then
+ * full case folding (`ſ` as `s`, `ß` as `ss`) by way of upper case.
+ */
+export const folded = (text: string): string =>
+  text.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC");
+
+/**
+ * `relative` as a path inside a project subtree: `/`-separated segments,
+ * at most 512 characters, refusing anything else, naming `where`. No
+ * segment is empty, `.` or `..`; holds a separator, colon, character
+ * Windows reserves or control character; ends in a dot or space; is a
+ * name Windows reserves for a device; is one of `toolSegments`
+ * in any case; or takes more than 255 bytes.
+ */
+export const safePath = (relative: string, where: string): string => {
+  if (
+    relative.length === 0 ||
+    relative.length > 512 ||
+    relative.startsWith("/") ||
+    drivePattern.test(relative)
+  ) {
+    return refuse(`${where}: a file path must be relative.`);
+  }
+  for (const segment of relative.split("/")) {
+    const name = folded(segment);
+    if (
+      segment === "" ||
+      segment === "." ||
+      segment === ".." ||
+      forbiddenCharacters.test(segment) ||
+      segment.endsWith(".") ||
+      segment.endsWith(" ") ||
+      reservedName.test(name) ||
+      toolSegments.has(name) ||
+      encoder.encode(segment).byteLength > 255
+    ) {
+      return refuse(`${where}: a file path has a segment it may not have.`);
+    }
+  }
+  return relative;
+};
+
+/** A file's contents: text, or a vendored source's bytes, copied exactly. */
+type Contents = string | Uint8Array;
+
+/** A project as planned: every file by its path, before any is written. */
+interface Plan {
+  readonly files: Map<string, Contents>;
+  /** Adds `contents` at `file` (already safe), once, whatever its case. */
+  readonly add: (file: string, contents: Contents) => void;
+}
+
+const newPlan = (): Plan => {
+  const files = new Map<string, Contents>();
+  const seen = new Set<string>();
+  return {
+    files,
+    add: (file, text) => {
+      const key = folded(file);
+      if (seen.has(key)) {
+        refuse(
+          `${file}: another file has this path, or one that differs only by case.`
+        );
+      }
+      seen.add(key);
+      files.set(file, text);
+    },
+  };
+};
+
+/** `value` as JSON text, as the project's files hold it. */
+const jsonText = (value: unknown): string =>
+  `${JSON.stringify(value, null, 2)}\n`;
+
+const catalogEntriesSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number()]).transform(String)
+);
+
+const workspaceCatalogsSchema = z.object({
+  catalog: catalogEntriesSchema.optional(),
+  catalogs: z.record(z.string(), catalogEntriesSchema).optional(),
+});
+
+/**
+ * The versions `pnpm-workspace.yaml`'s catalog pins, by name: its default
+ * `catalog:`, or with `named`, that catalog under `catalogs:`.
+ */
+export const readCatalog = (
+  text: string,
+  named?: string
+): Map<string, string> => {
+  const { catalog, catalogs } = workspaceCatalogsSchema.parse(parse(text));
+  return new Map(
+    Object.entries((named === undefined ? catalog : catalogs?.[named]) ?? {})
+  );
+};
+
+const exactVersionPattern =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
+
+/**
+ * Refuses an `oxc` catalog whose oxlint and oxfmt aren't the releases
+ * Grasp's isolate runs (oxc-wasm/pin.json): the project would lint and format by
+ * other rules than Grasp.
+ */
+const oxcReleases = (catalog: ReadonlyMap<string, string>): void => {
+  const { oxlint, oxfmt } = oxcWasmPin;
+  if (catalog.get("oxlint") !== oxlint || catalog.get("oxfmt") !== oxfmt) {
+    refuse(
+      `The oxc catalog's oxlint and oxfmt must be ${oxlint} and ${oxfmt}, the releases Grasp lints and formats App code with (packages/compiler/oxc-wasm/pin.json).`
+    );
+  }
+};
+
+/** `name`'s exact catalog version, or a refusal. */
+const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
+  const version = catalog.get(name);
+  if (version === undefined || !exactVersionPattern.test(version)) {
+    return refuse(`${name}: the catalog pins no exact version of it.`);
+  }
+  return version;
+};
+
+const packageJsonSchema = z.looseObject({
+  name: z.string(),
+  license: z.string().optional(),
+  type: z.string().optional(),
+  exports: z.record(z.string(), z.string()).optional(),
+  dependencies: z.record(z.string(), z.string()).optional(),
+  peerDependencies: z.record(z.string(), z.string()).optional(),
+});
+
+/**
+ * Every file under `dir`, by path relative to it, sorted: a package's
+ * `src/`, which holds what it exports and nothing else (its tests live
+ * beside it, in `test/`). A link is skipped, never followed.
+ */
+const sourcesUnder = (dir: string, prefix = ""): string[] =>
+  readdirSync(path.join(dir, prefix), { withFileTypes: true })
+    .flatMap((entry) => {
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) {
+        return sourcesUnder(dir, relative);
+      }
+      return entry.isFile() ? [relative] : [];
+    })
+    .toSorted();
+
+/** A dependency's licence as its installed package declares it. */
+const installedLicence = (
+  repo: string,
+  from: string,
+  name: string
+): string | null => {
+  for (const dir of [
+    path.join(repo, "packages", from, "node_modules"),
+    path.join(repo, "node_modules"),
+  ]) {
+    try {
+      const declared: unknown = JSON.parse(
+        readFileSync(path.join(dir, name, "package.json"), "utf-8")
+      );
+      const licence = z
+        .object({
+          license: z.union([z.string(), z.object({ type: z.string() })]),
+        })
+        .safeParse(declared);
+      if (licence.success) {
+        return typeof licence.data.license === "string"
+          ? licence.data.license
+          : licence.data.license.type;
+      }
+    } catch {
+      // Not installed there: the next place, or unknown.
+    }
+  }
+  return null;
+};
+
+/** A dependency the project names, with what its notice says. */
+interface Notice {
+  readonly name: string;
+  readonly version: string;
+  readonly licence: string | null;
+  readonly from: string;
+}
+
+/** What packaging takes: the package, and the checkout it vendors from. */
+export interface PackagingInput {
+  /** The definition package, as parsed JSON. */
+  readonly definition: unknown;
+  /** The directory to create the project in. */
+  readonly out: string;
+  /** The Grasp OS checkout: its packages, catalog and licence. */
+  readonly repo: string;
+  /** The checkout's commit, recorded with what it vendors. */
+  readonly commit: string;
+}
+
+/** Just the format a package says it has, to refuse another one by name. */
+const formatSchema = z.object({ formatVersion: z.int() });
+
+/** The package `definition`, of the format this checkout reads, or a refusal. */
+const readDefinition = (definition: unknown): DefinitionPackage => {
+  const format = formatSchema.safeParse(definition);
+  if (
+    format.success &&
+    format.data.formatVersion !== definitionPackageFormatVersion
+  ) {
+    const remedy =
+      format.data.formatVersion < definitionPackageFormatVersion
+        ? "Export the App's definition again."
+        : "Update this checkout to package it.";
+    return refuse(
+      `The package is format ${format.data.formatVersion}; this checkout reads format ${definitionPackageFormatVersion}. ${remedy}`
+    );
+  }
+  const parsed = definitionPackageSchema.safeParse(definition);
+  if (!parsed.success) {
+    return refuse("The file isn't a definition package this checkout reads.");
+  }
+  return parsed.data;
+};
+
+/**
+ * The App: its source as packaged, and what Grasp generates for it anew,
+ * whatever the package holds of it: its references from its sealed
+ * registration, which names no deployment's workflow, and the functions
+ * its server modules' syntax declares.
+ */
+const planApp = async (
+  project: Plan,
+  app: DefinitionPackage["app"]
+): Promise<void> => {
+  const generated = await generateModules(
+    readAppManifest(app.manifest),
+    serverFunctionsIn(app.files)
+  );
+  for (const [file, text] of Object.entries(generated)) {
+    project.add(`app/${safePath(file, "generated")}`, text);
+  }
+  // Its pages as the platform's build routes them (route-tree.ts), their
+  // route tree, and the root route the build gives pages without one of
+  // their own, so the project's pages type-check against the routes they
+  // have.
+  const built = buildFiles(app.files);
+  startOxc(await oxcWasmModule());
+  const tree = await routeTree(built);
+  for (const [file, text] of Object.entries({ ...app.files, ...tree.routes })) {
+    // What Grasp generates is written above, anew.
+    if (!isGeneratedPath(file)) {
+      project.add(`app/${safePath(file, "app")}`, text);
+    }
+  }
+  if (tree.source !== undefined) {
+    project.add(`app/${routeTreePath}`, tree.source);
+  }
+  // What the build adds of its own (the root route), never what the host
+  // generates: those modules, the data model the build reads among them,
+  // are written above, once, from the registration.
+  for (const [file, text] of Object.entries(built)) {
+    if (
+      !Object.hasOwn(app.files, file) &&
+      !Object.hasOwn(tree.routes, file) &&
+      !isGeneratedPath(file)
+    ) {
+      project.add(`app/${safePath(file, "app")}`, text);
+    }
+  }
+};
+
+/** Each workflow version, under its own name and version. */
+const planWorkflows = (
+  project: Plan,
+  workflows: DefinitionPackage["workflows"]
+): void => {
+  for (const [key, workflow] of Object.entries(workflows)) {
+    const groups = workflowKeyPattern.exec(key)?.groups;
+    if (groups?.name === undefined || groups.version === undefined) {
+      refuse("A workflow's key isn't one a package names workflows by.");
+      return;
+    }
+    const base = `workflows/${groups.name}/${groups.version}`;
+    for (const [file, text] of Object.entries(workflow.files)) {
+      // Only code: the TypeScript generated from the definition, which is
+      // what runs. The definition stays with the version, in Grasp.
+      if (file !== "workflow.json") {
+        project.add(`${base}/${safePath(file, key)}`, text);
+      }
+    }
+  }
+};
+
+const declaredDependenciesSchema = z.object({
+  dependencies: z.record(z.string(), z.string()).optional(),
+});
+
+/** What a lock pins: its direct dependencies, and theirs. */
+interface LockPins {
+  readonly direct: Record<string, string>;
+  /**
+   * For each locked package, by `<name>@<version>`, the exact version of
+   * each of its dependencies and required peers, as the lock resolved
+   * them: two locks must agree on them.
+   */
+  readonly overrides: Record<string, Record<string, string>>;
+}
+
+/** Whether the project pins `name` itself, so no App lock may name it. */
+const ownedByProject = (name: string): boolean =>
+  name.startsWith("@grasp-os/") ||
+  [...projectDependencies, ...projectDevDependencies].some(
+    (each) => each === name
+  );
+
+/**
+ * What `lock`, `owner`'s, pins: its direct dependencies exactly as it
+ * resolved them, and each locked package's dependencies, each
+ * direct one in the notices. A lock that names one the project pins itself
+ * (the vendored packages, React, the type-checker) is refused: it would
+ * swap it for whatever the registry serves.
+ */
+const lockPins = (
+  lock: GraspLock,
+  owner: string,
+  notices: Notice[]
+): LockPins => {
+  const locked = Object.values(lock.packages);
+  // Nothing the project pins itself is the lock's to replace, anywhere in
+  // the graph.
+  const named = locked.flatMap((entry) => [
+    entry.name,
+    ...Object.keys(entry.dependencies),
+  ]);
+  if (
+    Object.keys(lock.direct).some(ownedByProject) ||
+    named.some(ownedByProject)
+  ) {
+    refuse(`A package the project pins itself is named in ${owner}'s lock.`);
+  }
+  for (const [name, version] of Object.entries(lock.direct)) {
+    notices.push({
+      name,
+      version,
+      licence:
+        locked.find((entry) => entry.name === name && entry.version === version)
+          ?.license ?? null,
+      from: `${owner}'s lock`,
+    });
+  }
+  const overrides: Record<string, Record<string, string>> = {};
+  for (const entry of locked) {
+    if (Object.keys(entry.dependencies).length > 0) {
+      overrides[`${entry.name}@${entry.version}`] = { ...entry.dependencies };
+    }
+  }
+  return { direct: { ...lock.direct }, overrides };
+};
+
+/** The App's own dependencies, as its lock pins them (`lockPins`). */
+const appDependencies = (
+  files: Readonly<Record<string, string>>,
+  notices: Notice[]
+): LockPins => {
+  const lockText = files["grasp.lock.json"];
+  if (lockText === undefined) {
+    const declared =
+      files["package.json"] === undefined
+        ? {}
+        : declaredDependenciesSchema.parse(JSON.parse(files["package.json"]))
+            .dependencies;
+    if (Object.keys(declared ?? {}).length > 0) {
+      refuse("The App declares dependencies but carries no lock for them.");
+    }
+    return { direct: {}, overrides: {} };
+  }
+  const lock = graspLockSchema.safeParse(JSON.parse(lockText));
+  if (!lock.success) {
+    return refuse(
+      "The App's grasp.lock.json isn't a lock this checkout reads."
+    );
+  }
+  return lockPins(lock.data, "the App", notices);
+};
+
+/** A locked package's pinned edges, by name, as one text to compare. */
+const edgesText = (edges: Readonly<Record<string, string>>): string =>
+  JSON.stringify(
+    Object.entries(edges).toSorted(([a], [b]) => (a < b ? -1 : 1))
+  );
+
+/**
+ * One project's pins of every lock in `all`: a package pinned at two
+ * versions, directly or in what one locked package depends on, is
+ * refused, since the project installs one of it.
+ */
+const mergedPins = (all: readonly { owner: string; pins: LockPins }[]) => {
+  const direct: Record<string, string> = {};
+  const directBy: Record<string, string> = {};
+  const overrides: Record<string, Record<string, string>> = {};
+  for (const { owner, pins } of all) {
+    for (const [name, version] of Object.entries(pins.direct)) {
+      const before = direct[name];
+      if (before !== undefined && before !== version) {
+        refuse(
+          `${name} is pinned at ${before} by ${directBy[name] ?? "another lock"} and at ${version} by ${owner}; a project installs one.`
+        );
+      }
+      direct[name] = version;
+      directBy[name] ??= owner;
+    }
+    for (const [locked, edges] of Object.entries(pins.overrides)) {
+      const before = overrides[locked];
+      if (before !== undefined && edgesText(before) !== edgesText(edges)) {
+        refuse(`${locked} depends on other versions in ${owner}'s lock.`);
+      }
+      overrides[locked] = edges;
+    }
+  }
+  return { direct, overrides };
+};
+
+/** What a vendored package needs from the checkout. */
+interface Vendoring {
+  readonly repo: string;
+  readonly catalog: ReadonlyMap<string, string>;
+  readonly version: string;
+  readonly notices: Notice[];
+}
+
+/** `name`'s dependencies, pinned: siblings by path, the rest by the catalog. */
+const pinnedDependenciesOf = (
+  name: string,
+  manifest: z.infer<typeof packageJsonSchema>,
+  vendoring: Vendoring
+): Record<string, string> => {
+  const pinnedDependencies: Record<string, string> = {};
+  for (const [dependency, spec] of Object.entries(
+    manifest.dependencies ?? {}
+  )) {
+    const sibling = dependency.replace("@grasp-os/", "");
+    if (spec === "workspace:*" && vendored.some((each) => each === sibling)) {
+      pinnedDependencies[dependency] = `link:../${sibling}`;
+    } else if (spec === "catalog:") {
+      const version = pinned(vendoring.catalog, dependency);
+      pinnedDependencies[dependency] = version;
+      vendoring.notices.push({
+        name: dependency,
+        version,
+        licence: installedLicence(vendoring.repo, name, dependency),
+        from: manifest.name,
+      });
+    } else {
+      refuse(
+        `${manifest.name} names ${dependency} by a version this can't pin.`
+      );
+    }
+  }
+  return pinnedDependencies;
+};
+
+/** The checkout's package `name`, vendored: its sources and pinned manifest. */
+const planVendored = (
+  project: Plan,
+  name: (typeof vendored)[number],
+  vendoring: Vendoring
+): Importer => {
+  const dir = path.join(vendoring.repo, "packages", name);
+  const manifest = packageJsonSchema.parse(
+    JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8"))
+  );
+  // Only what the vendored sources serve: entries outside `src/` (the UI
+  // kit's catalog, the SDK's test fixture) stay behind.
+  const exports = Object.fromEntries(
+    Object.entries(manifest.exports ?? {}).filter(([, target]) =>
+      target.startsWith("./src/")
+    )
+  );
+  const base = `vendor/@grasp-os/${name}`;
+  const dependencies = pinnedDependenciesOf(name, manifest, vendoring);
+  project.add(
+    `${base}/package.json`,
+    jsonText({
+      name: manifest.name,
+      version: vendoring.version,
+      private: true,
+      license: manifest.license,
+      type: manifest.type,
+      exports,
+      dependencies,
+      ...(manifest.peerDependencies === undefined
+        ? {}
+        : { peerDependencies: manifest.peerDependencies }),
+    })
+  );
+  for (const file of sourcesUnder(path.join(dir, "src"))) {
+    // As bytes: the sources are copied exactly, binaries included.
+    project.add(
+      `${base}/src/${file}`,
+      readFileSync(path.join(dir, "src", file))
+    );
+  }
+  return {
+    dependencies,
+    devDependencies: {},
+    peerDependencies: manifest.peerDependencies ?? {},
+  };
+};
+
+/**
+ * Where the compiler's check of a standalone project is: the check itself
+ * and what it reads of the platform's own steering refusals, each written
+ * as the compiler has it (standalone-check.ts).
+ */
+const compilerSource = "packages/compiler/src";
+const checkFiles = {
+  "grasp/check.ts": "standalone-check.ts",
+  "grasp/steering.ts": "steering.ts",
+} as const;
+
+/** Server code as spec 8 lays it out, as the platform's check reads it. */
+const serverCodeIncludes = [
+  "grasp.config.ts",
+  "values.ts",
+  "server/**/*.ts",
+  ".grasp/*.ts",
+];
+
+/**
+ * A tsconfig for one kind of code: the compiler's options for it
+ * (type-check.ts, written as a tsconfig writes them), the files it checks, and
+ * under `grasp` what the project's check holds them to besides: their
+ * kind, and the modules they may resolve by name (`TypeTarget.allowed`).
+ */
+const kindConfig = (
+  kind: string,
+  target: TypeTarget,
+  files: { include: string[]; exclude?: string[] }
+) => ({
+  compilerOptions: target.options,
+  ...files,
+  grasp: {
+    kind,
+    ...(target.allowed === undefined
+      ? {}
+      : { allowed: [...target.allowed].toSorted() }),
+  },
+});
+
+/**
+ * The project's tsconfigs, one a kind of code, each as the platform checks
+ * it, and the root tsconfig.json that lists them (an editor's, and the
+ * check's): the App's pages with the DOM and JSX; its server code with
+ * a worker's lib and no DOM; and the module the host generated from each
+ * workflow version's definition.
+ */
+const planTypeCheck = (project: Plan): void => {
+  const configs: Record<string, ReturnType<typeof kindConfig>> = {
+    "app/tsconfig.pages.json": kindConfig(
+      "pages",
+      // Pages resolve whatever the kit holds: the kit's list is the
+      // compiler's build output, not a module this can read.
+      { options: compilerOptions, mapped: new Set() },
+      {
+        include: [
+          `${sourceFolder}**/*.ts`,
+          `${sourceFolder}**/*.tsx`,
+          "*.d.ts",
+          pageReferences.path,
+          // The release's functions, built into the pages, and the server
+          // code the references' types read, which the server's check
+          // reports.
+          ".grasp/functions.ts",
+          ...serverCodeIncludes.filter((include) => include !== ".grasp/*.ts"),
+        ],
+        exclude: ["server/**/*.test.ts"],
+      }
+    ),
+    "app/tsconfig.server.json": kindConfig("server", appCodeTarget, {
+      include: [...serverCodeIncludes, "tests/**/*.ts"],
+      exclude: ["**/*.d.ts"],
+    }),
+  };
+  const versions = new Set(
+    [...project.files.keys()].flatMap((file) => {
+      const version = /^(?<base>workflows\/[^/]+\/[^/]+)\//u.exec(file)?.groups
+        ?.base;
+      return version === undefined ? [] : [version];
+    })
+  );
+  for (const base of versions) {
+    if (project.files.has(`${base}/.grasp/workflow.ts`)) {
+      configs[`${base}/tsconfig.generated.json`] = kindConfig(
+        "generated",
+        generatedTarget,
+        { include: [".grasp/workflow.ts"] }
+      );
+    }
+  }
+  for (const [file, config] of Object.entries(configs)) {
+    project.add(file, jsonText(config));
+  }
+  project.add(
+    "tsconfig.json",
+    jsonText({
+      files: [],
+      references: Object.keys(configs).map((file) => ({ path: `./${file}` })),
+    })
+  );
+};
+
+/**
+ * What the project's lint and format leave alone in `app/`, the only
+ * folder they read: all but the App's TypeScript as Grasp lints and
+ * formats it (core's `lintedFiles`), so not its declarations, nor the
+ * modules the host generates. The workflow versions, the vendored
+ * packages and the compiler's check are outside `app/`.
+ */
+const ignoredGlobs = [
+  `**/*${declarationExtension}`,
+  ...[generatedServerFolder, hostGeneratedFolder].map(
+    (folder) => `app/${folder}**`
+  ),
+  `app/${routeTreePath}`,
+];
+
+/**
+ * What the project's format formats: the App's TypeScript, as Grasp's
+ * `tidy` formats it, less `ignoredGlobs` (the config's `ignorePatterns`).
+ * A project whose App has none of it formats nothing, and passes.
+ */
+const formatted = `--no-error-on-unmatched-pattern "app/**/*.{${codeExtensions.join(",")}}"`;
+
+/** `value` as data in the oxlint config's object, at its indent. */
+const configData = (value: unknown): string =>
+  JSON.stringify(value, null, 2).replaceAll("\n", "\n  ");
+
+/**
+ * The project's oxlint config, App code held to exactly what Grasp's lint
+ * holds it to, every list read from where Grasp reads it
+ * (ultracite-config.ts), as data:
+ * - Ultracite's `core`, `react`, `tanstack` and `vitest` presets, less the
+ *   rules Grasp leaves out (`leftOut`);
+ * - on tests, the SDK's test blocks as test blocks (`sdkTestOverride`);
+ * - on pages and components, the pages' own rules (`pageOverride`).
+ */
+const oxlintConfigText = (): string => {
+  const presets = Object.entries(ultracitePresets);
+  return `// Written by Grasp when it exported this App: App code held to what
+// Grasp holds it to. Ultracite's presets, less the rules Grasp leaves
+// out, the SDK's test blocks counted as test blocks, and the pages' own
+// rules on pages and components.
+import { defineConfig } from "oxlint";
+${presets
+  .map(([name]) => `import ${name} from "ultracite/oxlint/${name}";`)
+  .join("\n")}
+
+export default defineConfig({
+  extends: [${presets.map(([name]) => name).join(", ")}],
+  ignorePatterns: ${configData(ignoredGlobs)},
+  rules: ${configData(Object.fromEntries(leftOut.map((rule) => [rule, "off"])))},
+  overrides: ${configData([sdkTestOverride(), pageOverride("app/")])},
+});
+`;
+};
+
+/**
+ * The project's lint and format: oxlint (`oxlintConfigText`), and oxfmt
+ * with the config Grasp formats App code with (ultracite.ts `tidy`).
+ */
+const planTooling = (project: Plan): void => {
+  project.add("oxlint.config.ts", oxlintConfigText());
+  project.add(
+    ".oxfmtrc.json",
+    jsonText({ ...ultraciteFormat(), ignorePatterns: ignoredGlobs })
+  );
+};
+
+/** A licence as an SPDX expression may be written: anything else is unknown. */
+const spdxLike =
+  /^[A-Za-z0-9][A-Za-z0-9.+-]*(?: (?:AND|OR|WITH) \(?[A-Za-z0-9][A-Za-z0-9.+-]*\)?)*$/u;
+
+/** `licence` as the notices print it: SPDX-like, or "unknown". */
+const licenceText = (licence: string | null): string =>
+  licence !== null && licence.length <= 128 && spdxLike.test(licence)
+    ? licence
+    : "unknown";
+
+/** The notices of `notices`, each package and version once, by name. */
+const noticesText = (notices: readonly Notice[]): string => {
+  const unique = new Map<string, Notice>();
+  for (const notice of notices) {
+    unique.set(
+      `${notice.name}@${notice.version}`,
+      unique.get(`${notice.name}@${notice.version}`) ?? notice
+    );
+  }
+  const rows = [...unique.values()]
+    .toSorted((a, b) => (a.name < b.name ? -1 : 1))
+    .map(
+      ({ name, version, licence, from }) =>
+        `| ${name} | ${version} | ${licenceText(licence)} | ${from} |`
+    );
+  return [
+    "# Third-party notices",
+    "",
+    "The packages under `vendor/@grasp-os/` are Grasp OS, licensed AGPL-3.0-only (`LICENSES/AGPL-3.0-only.txt`).",
+    "",
+    "Each package this project depends on directly, with the licence it declares. Their own dependencies carry their own notices.",
+    "",
+    "| Package | Version | Licence | Required by |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+    "",
+  ].join("\n");
+};
+
+/** `projectLockfile`, its refusals packaging's. */
+const lockfileOf = (input: LockfileInput): string => {
+  try {
+    return projectLockfile(input);
+  } catch (error) {
+    if (error instanceof LockfileError) {
+      return refuse(error.message);
+    }
+    throw error;
+  }
+};
+
+/**
+ * A `preinstall` that fails unless pnpm runs the install, by the user
+ * agent every package manager gives the scripts it runs.
+ */
+const onlyPnpm =
+  "node -e \"process.exitCode = /^pnpm\\//.test(process.env.npm_config_user_agent ?? '') ? 0 : 1\"";
+
+const minimumReleaseAgePattern = /^minimumReleaseAge:\s*(?<minutes>\d+)\s*$/mu;
+
+/** How long the checkout waits before it installs a new version, in minutes. */
+const minimumReleaseAgeOf = (workspace: string): number => {
+  const minutes = minimumReleaseAgePattern.exec(workspace)?.groups?.minutes;
+  return minutes === undefined
+    ? refuse("The checkout sets no minimumReleaseAge.")
+    : Number(minutes);
+};
+
+/** The checkout's package manager, exactly, as its package.json pins it. */
+const packageManagerOf = (repo: string): string =>
+  z
+    .object({ packageManager: z.string().startsWith("pnpm@") })
+    .parse(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf-8")))
+    .packageManager;
+
+/** The App's lock, as the lockfile reads it, when it carries one. */
+const appLock = (
+  files: Readonly<Record<string, string>>
+): { owner: string; lock: GraspLock }[] => {
+  const text = files["grasp.lock.json"];
+  // `appDependencies` read it already, and refused what it doesn't read.
+  return text === undefined
+    ? []
+    : [{ owner: "the App", lock: graspLockSchema.parse(JSON.parse(text)) }];
+};
+
+/** The project's files for `input`, planned and checked; nothing written. */
+export const planProject = async (
+  input: PackagingInput
+): Promise<Map<string, Contents>> => {
+  const definition = readDefinition(input.definition);
+  const project = newPlan();
+  await planApp(project, definition.app);
+  planWorkflows(project, definition.workflows);
+
+  const notices: Notice[] = [];
+  const pins = mergedPins([
+    { owner: "the App", pins: appDependencies(definition.app.files, notices) },
+  ]);
+  const catalogText = readFileSync(
+    path.join(input.repo, "pnpm-workspace.yaml"),
+    "utf-8"
+  );
+  const catalog = readCatalog(catalogText);
+  const vendoring: Vendoring = {
+    repo: input.repo,
+    catalog,
+    version: `0.0.0-grasp.${input.commit.slice(0, 12)}`,
+    notices,
+  };
+  const importers: Record<string, Importer> = {};
+  for (const name of vendored) {
+    importers[`vendor/@grasp-os/${name}`] = planVendored(
+      project,
+      name,
+      vendoring
+    );
+  }
+  // oxlint and oxfmt from the catalog of their own, App code's.
+  const oxc = readCatalog(catalogText, "oxc");
+  oxcReleases(oxc);
+  const versionOf = (name: string): string =>
+    pinned(oxc.has(name) ? oxc : catalog, name);
+  for (const name of [...projectDependencies, ...projectDevDependencies]) {
+    notices.push({
+      name,
+      version: versionOf(name),
+      // As the compiler installs it: its tooling is the project's.
+      licence: installedLicence(input.repo, "compiler", name),
+      from: "the project",
+    });
+  }
+  const pinnedAll = (names: readonly string[]) =>
+    Object.fromEntries(names.map((name) => [name, versionOf(name)]));
+  const root: Importer = {
+    dependencies: {
+      ...Object.fromEntries(
+        vendored.map((name) => [
+          `@grasp-os/${name}`,
+          `link:vendor/@grasp-os/${name}`,
+        ])
+      ),
+      ...pins.direct,
+      ...pinnedAll(projectDependencies),
+    },
+    devDependencies: pinnedAll(projectDevDependencies),
+    peerDependencies: {},
+  };
+  importers["."] = root;
+  planTypeCheck(project);
+  // The project is pnpm's, as the checkout is: the same package manager,
+  // exactly, installing only what its lockfile pins (package-definition-
+  // lockfile.ts). Its own packages are linked by `link:`, which npm
+  // refuses. Yarn and Bun accept it and would ignore the lockfile: its
+  // `preinstall` fails any install that isn't pnpm's. Not
+  // `devEngines.packageManager`: with it, pnpm 11 also locks its own
+  // binaries for every platform, which the checkout's lockfile doesn't
+  // hold, so a frozen install couldn't start.
+  project.add(
+    "package.json",
+    jsonText({
+      // npm's convention for a comment in package.json: the one gotcha of
+      // the project's own scripts.
+      "//": "Run lint outside a vp command: with VP_VERSION set, oxlint reads Vite+'s config instead of oxlint.config.ts.",
+      name: "grasp-app",
+      version: `${definition.app.version}.0.0`,
+      private: true,
+      type: "module",
+      // Its check runs as TypeScript, which Node strips without a flag
+      // from 22.18.
+      engines: { node: ">=22.18" },
+      packageManager: packageManagerOf(input.repo),
+      scripts: {
+        preinstall: onlyPnpm,
+        typecheck: "node grasp/check.ts",
+        build: "node grasp/check.ts",
+        lint: "oxlint app",
+        format: `oxfmt ${formatted}`,
+        "format:check": `oxfmt --check ${formatted}`,
+      },
+      dependencies: root.dependencies,
+      devDependencies: root.devDependencies,
+    })
+  );
+  project.add(
+    "pnpm-workspace.yaml",
+    [
+      // pnpm 11, as `packageManager` pins it, reads its settings here.
+      "# Installs only what pnpm-lock.yaml pins, never resolving anew, with",
+      "# the checkout's supply-chain settings whatever pnpm's defaults or a",
+      "# global config say.",
+      "packages:",
+      '  - "vendor/@grasp-os/*"',
+      "frozenLockfile: true",
+      // As the lockfile records them: a frozen install refuses a config
+      // that differs, whatever a global config says.
+      "autoInstallPeers: true",
+      "excludeLinksFromLockfile: false",
+      `minimumReleaseAge: ${minimumReleaseAgeOf(catalogText)}`,
+      "blockExoticSubdeps: true",
+      "strictDepBuilds: true",
+      "dangerouslyAllowAllBuilds: false",
+      "allowBuilds: {}",
+      "",
+    ].join("\n")
+  );
+  project.add(
+    "pnpm-lock.yaml",
+    lockfileOf({
+      checkoutLock: readFileSync(
+        path.join(input.repo, "pnpm-lock.yaml"),
+        "utf-8"
+      ),
+      importers,
+      locks: appLock(definition.app.files),
+    })
+  );
+  for (const [file, source] of Object.entries(checkFiles)) {
+    project.add(
+      file,
+      readFileSync(path.join(input.repo, compilerSource, source), "utf-8")
+    );
+  }
+  project.add(
+    "grasp-project.json",
+    jsonText({
+      app: {
+        version: definition.app.version,
+        provenance: definition.app.provenance,
+      },
+      workflows: Object.fromEntries(
+        Object.entries(definition.workflows).map(([key, workflow]) => [
+          key,
+          { provenance: workflow.provenance },
+        ])
+      ),
+      unresolved: definition.unresolved,
+      vendor: { commit: input.commit, version: vendoring.version },
+    })
+  );
+  project.add(
+    "LICENSES/AGPL-3.0-only.txt",
+    readFileSync(path.join(input.repo, "LICENSE"), "utf-8")
+  );
+  project.add("THIRD-PARTY-NOTICES.md", noticesText(notices));
+  planTooling(project);
+  return project.files;
+};
+
+/** Refuses `out` unless it is missing or an empty directory, never a link. */
+const requireFreshOut = (out: string): void => {
+  let stat;
+  try {
+    stat = lstatSync(out);
+  } catch {
+    return;
+  }
+  if (
+    stat.isSymbolicLink() ||
+    !stat.isDirectory() ||
+    readdirSync(out).length > 0
+  ) {
+    refuse("--out must be a new or empty directory.");
+  }
+};
+
+/**
+ * Writes the project for `input` into `input.out`, once all of it is
+ * planned and checked: built in a new directory beside it, then renamed
+ * onto it (missing, or empty), so `--out` holds all of it or none.
+ * Answers the paths written, sorted.
+ */
+export const packageProject = async (
+  input: PackagingInput
+): Promise<string[]> => {
+  const out = path.resolve(input.out);
+  requireFreshOut(out);
+  const files = await planProject(input);
+  mkdirSync(path.dirname(out), { recursive: true });
+  const building = mkdtempSync(path.join(path.dirname(out), ".grasp-project-"));
+  try {
+    for (const [file, text] of files) {
+      const target = path.resolve(building, file);
+      if (!target.startsWith(`${building}${path.sep}`)) {
+        refuse(`${file}: lands outside the project.`);
+      }
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, text, { flag: "wx" });
+    }
+    // Checked again just before, and an empty `--out` removed first: not
+    // every platform renames onto a directory, and removing one refuses
+    // unless it is empty.
+    requireFreshOut(out);
+    if (existsSync(out)) {
+      rmdirSync(out);
+    }
+    renameSync(building, out);
+  } catch (error) {
+    rmSync(building, { recursive: true, force: true });
+    throw error;
+  }
+  return [...files.keys()].toSorted();
+};

@@ -1,0 +1,173 @@
+/**
+ * Runs before each test file. Files share a runtime, one per Vitest worker
+ * (`isolate: false` in vite.config.ts), so each starts from empty storage,
+ * the env as configured, real timers, no spies, the databases at the
+ * committed migrations, and the files of the model core ships in
+ * `MODEL_FILES`, as a deployment's deploy put them there. Module state in
+ * core's isolate carries over, as it does between requests in
+ * production: caches keyed by IDs a reset never
+ * reuses, and once-per-isolate state, such as the built-ins' install,
+ * which the first file's setup runs and waits for (builtins-first.ts), and
+ * the missing-table warning (platform-updates.test.ts), which only that
+ * file may trip.
+ */
+import { shippedModel } from "@grasp-os/embed/model-files";
+import { applyD1Migrations } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { afterAll, afterEach, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import {
+  isTestModel,
+  putTestModel,
+} from "../../../packages/embed/test/test-models.ts";
+import {
+  backgroundCallsQuiet,
+  countBackgroundCalls,
+  quietHookMs,
+} from "./background-calls.ts";
+import { installBuiltinsFirst } from "./builtins-first.ts";
+import { configuredEnv } from "./configured-env.ts";
+import { traceD1Calls } from "./d1-calls.ts";
+import { stopModelProviders } from "./model-provider.ts";
+import { endTest, waitingOnNow } from "./open-sockets.ts";
+import { resetStorage } from "./reset-storage.ts";
+import { connectDb, testBinding } from "./test-env.ts";
+
+// Every module core loads on first use rather than at startup (each
+// `await import(` under src),
+// loaded here up front, for two reasons. A core module that adds one adds
+// it here.
+//
+// Transform time: Vite transforms a module the first time a test imports
+// it, seconds for some, which would land in the middle of a test's timing.
+// On a laptop the agent loop took 1.6 s at a chat's first turn and the
+// channels' door 0.3 s at their first message; on loaded CI runners,
+// together, long enough that a streamed answer's first words missed their
+// 15 s (channels-stream.test.ts).
+//
+// Imports cut off mid-load: a module whose first import starts inside a
+// Durable Object can never load at all. A workflow step imports
+// postal-mime, a workspace imports the agent loop at a chat's first
+// turn. The module runner keeps that import's
+// promise for every later import of the module in this runtime, but the
+// next file's reset (reset-storage.ts) aborts the object mid-import, so
+// the promise never settles: each later import, such as a test running
+// the quarter-hour tasks itself (maintenance.ts), waited until its test
+// timed out. Loaded here, in the runner's own context and before any
+// object runs, they are already evaluated when one asks.
+await Promise.all([
+  // models.ts (model-catalog.ts)
+  import("@earendil-works/pi-ai/api/anthropic-messages"),
+  import("@earendil-works/pi-ai/api/openai-responses"),
+  import("@earendil-works/pi-ai/api/openai-completions"),
+  // auth/auth.ts
+  import("@better-auth/sso"),
+  // channels/teams.ts
+  import("../src/channels/teams-adapter.ts"),
+  // entry.ts, clock.ts, agent-workflows.ts
+  import("../src/channels/door.ts"),
+  import("../src/channels/answer.ts"),
+  import("../src/channels/workflow-offers.ts"),
+  // workflows/kept-email.ts
+  import("postal-mime"),
+  // workspace.ts
+  import("../src/agent.ts"),
+  import("../src/agent-thinking.ts"),
+  // builtins.ts
+  import("#blueprints"),
+  // apps.ts, lazy because these modules import it back
+  import("../src/app-schema.ts"),
+  import("../src/app-tests.ts"),
+  import("../src/app-publish.ts"),
+  import("../src/app-releases.ts"),
+  import("../src/page-references.ts"),
+]);
+
+/** Migrations, read by vite.config.ts into bindings. */
+const migrationsSchema = z.array(
+  z.object({ name: z.string(), queries: z.array(z.string()) })
+);
+
+/** Empty storage, the env as configured, the databases migrated and the model's files in place. */
+const startEmpty = async (): Promise<void> => {
+  // Real timers first: a file that faked them and stopped mid-test would
+  // otherwise hold the reset's own timers (reset-storage.ts).
+  vi.useRealTimers();
+  // Every Durable Object's storage, and with it every D1 database, R2 bucket
+  // and workflow, connect's included: they are all Durable Objects locally.
+  // Objects that went quiet are woken first, or the reset misses them
+  // (reset-storage.ts).
+  await resetStorage();
+
+  // What a test changed in the env and didn't put back: restore it.
+  for (const name of Object.keys(env)) {
+    if (!configuredEnv.has(name)) {
+      Reflect.deleteProperty(env, name);
+    }
+  }
+  for (const [name, value] of configuredEnv) {
+    Reflect.set(env, name, value);
+  }
+
+  vi.restoreAllMocks();
+
+  await applyD1Migrations(
+    env.DB,
+    migrationsSchema.parse(testBinding("CORE_MIGRATIONS"))
+  );
+
+  // Connect's database too: core's tests call the real connect Worker, which
+  // reads its connection registry there.
+  await applyD1Migrations(
+    connectDb(),
+    migrationsSchema.parse(testBinding("CONNECT_MIGRATIONS"))
+  );
+
+  // The model core runs in tests is the embed package's test model
+  // (`coreProject` in vite.config.ts), whose files are put here; the
+  // evaluation's own model comes from its release directory instead
+  // (vite.brain-eval.config.ts).
+  if (isTestModel(shippedModel)) {
+    await putTestModel(env.MODEL_FILES, shippedModel);
+  }
+};
+
+countBackgroundCalls();
+traceD1Calls();
+await startEmpty();
+// The built-ins' install, once per runtime, then empty storage again.
+if (await installBuiltinsFirst()) {
+  await startEmpty();
+}
+
+/** Vitest's own words for a test it timed out (@vitest/runner). */
+const timedOutMessage = /\bTest timed out in \d+ms/u;
+
+afterEach(({ task }) => {
+  // What a test that timed out was still waiting on, before its sockets
+  // close: the log otherwise says only that it timed out.
+  const timedOut = (task.result?.errors ?? []).some(({ message }) =>
+    timedOutMessage.test(message)
+  );
+  if (timedOut) {
+    const waiting = waitingOnNow();
+    const lines =
+      waiting.length === 0
+        ? ["no request it sent through the router, and no socket it opened"]
+        : waiting;
+    console.error(
+      `"${task.name}" timed out. Still going:\n- ${lines.join("\n- ")}`
+    );
+  }
+  endTest();
+});
+
+// The model providers a file's tests answer for stop looking for requests
+// once its tests are done (model-provider.ts).
+afterAll(stopModelProviders);
+
+// Setup files' afterAll hooks run last: once the file's tests and their
+// hooks are done, it waits for the calls they left going
+// (background-calls.ts).
+afterAll(backgroundCallsQuiet, quietHookMs);

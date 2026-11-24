@@ -1,0 +1,56 @@
+import { defineConnector } from "@grasp-os/connector-kit/connector";
+
+import { calendarSync } from "./calendar-sync.ts";
+import { calendarTools } from "./calendar.ts";
+import { draftTools } from "./drafts.ts";
+import { driveSync } from "./drive-sync.ts";
+import { driveTools } from "./drive.ts";
+import { gmailSync } from "./gmail-sync.ts";
+import { gmailTools } from "./gmail.ts";
+import { apisHost, gmailHost, sheetsHost } from "./google.ts";
+import { sharedDriveSync } from "./shared-drive-sync.ts";
+import { sheetsTools } from "./sheets.ts";
+
+/**
+ * Native Google Workspace connector, on Google's APIs: Gmail of one
+ * mailbox, one calendar, and the files and spreadsheets of one shared
+ * drive, per call, and drafts in the person's own Drive.
+ *
+ * Scopes, the least the tools need: `gmail.modify` (read, label, draft
+ * and send; applying labels to a message needs it, and it can't delete
+ * for good), `calendar.events` (events only, not calendar settings or
+ * sharing; it writes, and calendar.ts holds writes to the person's own
+ * calendar), `calendar.calendarlist.readonly` (which calendar is their
+ * own), `drive.readonly` (reading a file's content needs it, and Sheets
+ * takes it to read a spreadsheet's cells) and `drive.file` (drafts: only
+ * the files this app made).
+ *
+ * It syncs the person's own Drive (drive-sync.ts), on `drive.readonly`,
+ * mailbox (gmail-sync.ts), on `gmail.modify`, and primary calendar
+ * (calendar-sync.ts), on `calendar.events`, for the Brain; and, on a
+ * shared connection, the shared drives an admin picked
+ * (shared-drive-sync.ts), on `drive.readonly`.
+ */
+export default defineConnector({
+  name: "google-workspace",
+  version: "0.4.0",
+  provider: "google",
+  // The most any class asks for: connect asks only the rights of the
+  // classes a company turned on (apps/connect/src/provider-rights.ts).
+  scopes: [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+  ],
+  hosts: [gmailHost, apisHost, sheetsHost],
+  tools: [
+    ...gmailTools,
+    ...calendarTools,
+    ...driveTools,
+    ...sheetsTools,
+    ...draftTools,
+  ],
+  syncs: [driveSync, gmailSync, calendarSync, sharedDriveSync],
+});

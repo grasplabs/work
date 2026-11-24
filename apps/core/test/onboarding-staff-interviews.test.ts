@@ -1,0 +1,188 @@
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import type { Roster } from "@grasp-os/shared/onboarding";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
+import {
+  onLink,
+  openLinkAs,
+  participate,
+  sentToOf,
+  signedInAs,
+} from "./interview-link.ts";
+import { onboardingLog } from "./onboarding-log.ts";
+import { auditedDuring, outcome, unique } from "./sign-in.ts";
+
+// The interviews by name as Grasp's admin reads and steers them (the
+// admin snapshot and admin commands): where everyone stands, the one
+// reminder, and a team asked in.
+// The ways it can fail, tried here:
+//
+// - A read that names people without a trace in the audit log; or a trace
+//   that names the person, or holds their words (the company's admin
+//   reads the audit log).
+// - The one reminder going twice, or to someone who already talked.
+
+/** Words nobody else uses, to look for where they must not be. */
+const sentinel = "Quince barometer satchel";
+
+const progress = (): InterviewProgress => ({
+  person: "completed",
+  told: true,
+  mode: "type",
+  lines: [{ from: "person", text: sentinel, typed: true }],
+  facts: [],
+  phase: "readback",
+  wants: "end",
+  startedAt: Date.now(),
+  confirmed: 0,
+  adding: false,
+  addedAt: 0,
+  rating: 4,
+  interviewer: "claire",
+});
+
+/**
+ * An onboarding running since yesterday: Ops (no lead), whose two
+ * people's links are out, Oli having talked; and Labs, which doesn't take
+ * part, led by Lia.
+ */
+const running = async () => {
+  const store = onboardingStore(env);
+  const id = unique();
+  const ids = { oli: `oli-${id}`, ona: `ona-${id}`, lia: `lia-${id}` };
+  const roster: Roster = {
+    teams: [
+      { id: "ops", name: "Ops", lead: null, does: "", off: false },
+      { id: "labs", name: "Labs", lead: ids.lia, does: "", off: true },
+    ],
+    people: [
+      { id: ids.oli, name: "Oli Olsen", team: "ops" },
+      { id: ids.ona, name: "Ona Ek", team: "ops" },
+      { id: ids.lia, name: "Lia Berg", team: "labs" },
+    ].map((one) => ({
+      ...one,
+      email: `person-${unique()}@acme.test`,
+      title: "",
+      away: false,
+    })),
+  };
+  const by = { type: "system" } as const;
+  await store.setPaused(false, by);
+  await store.saveRoster(roster, by);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  await store.savePlan(
+    { start: yesterday.toISOString().slice(0, 10), days: 14 },
+    by
+  );
+  await store.setAgreements(
+    { processing: true, assessment: true, council: "none" },
+    by
+  );
+  await store.releaseDue();
+  const path = (await store.linkOf(ids.oli)) ?? "";
+  // Oli opens it, signed in as the address it went to, as the page does.
+  const { link: oli } = await openLinkAs(
+    path.split("#")[1] ?? "",
+    await signedInAs(await sentToOf(ids.oli))
+  );
+  // They take part before anything they say is kept, as their page has them.
+  await participate(oli);
+  const saved = await onLink({
+    action: "save",
+    ...oli,
+    version: 0,
+    progress: progress(),
+  });
+  if (!saved.ok) {
+    throw new Error(`Oli's interview wasn't kept (${saved.status})`);
+  }
+  return { store, ids, oli };
+};
+
+describe("the interviews, as Grasp's admin sees and steers them", () => {
+  it("show staff where everyone stands by name, without a word anyone said, and every read is on record", async () => {
+    const { ids } = await running();
+
+    const reads: AdminSnapshot[] = [];
+    const events = await auditedDuring(async () => {
+      reads.push(await adminSnapshot());
+    });
+    const links = reads[0]?.links ?? [];
+    const stateOf = (person: string) =>
+      links.find((link) => link.person === person)?.state;
+    const oli = reads[0]?.interviews.find(({ person }) => person === ids.oli);
+    expect({
+      states: [stateOf(ids.oli), stateOf(ids.ona), stateOf(ids.lia)],
+      oli: [oli?.rating, oli?.interviewer, oli?.agreed],
+      words: JSON.stringify(reads).includes(sentinel),
+      audited: events.map(({ action, actor, target }) => [
+        action,
+        actor.type,
+        target?.type,
+      ]),
+    }).toStrictEqual({
+      states: ["completed", "invited", "waiting"],
+      oli: [4, "claire", true],
+      words: false,
+      // On record as the admin's read, naming no one.
+      audited: [["admin.snapshot.read", "staff", "organization"]],
+    });
+  });
+
+  it("note the one reminder once, only for whom the link is out and who hasn't talked", async () => {
+    const { ids } = await running();
+
+    const events = await auditedDuring(async () => {
+      await adminCommands().remind([ids.oli, ids.ona, ids.lia]);
+    });
+    const again = await auditedDuring(async () => {
+      await adminCommands().remind([ids.ona]);
+    });
+    const { links } = await adminSnapshot();
+    const reminded = links
+      .filter(({ remindedAt }) => remindedAt !== null)
+      .map(({ person }) => person)
+      .filter((person) => Object.values(ids).includes(person));
+    const entries = await onboardingLog("interview.reminded");
+    const text = JSON.stringify(events);
+    expect({
+      reminded,
+      again: again.length,
+      logged: entries
+        .filter(({ about }) => about === ids.ona)
+        .map(({ by }) => by.split(":")[0]),
+      audited: events.map(({ action, detail }) => [action, detail]),
+      named: text.includes(ids.ona),
+    }).toStrictEqual({
+      reminded: [ids.ona],
+      // Given again, the command is on record, though nothing changed.
+      again: 1,
+      logged: ["staff"],
+      audited: [
+        ["admin.command", { type: "onboarding.remind", outcome: "applies" }],
+        ["onboarding.reminded", { count: 1 }],
+      ],
+      named: false,
+    });
+  });
+
+  it("ask a team in that didn't take part: its lead's link goes out", async () => {
+    const { ids } = await running();
+
+    await adminCommands().askIn("labs");
+    const { roster, links } = await adminSnapshot();
+    expect({
+      off: roster?.teams.find(({ id }) => id === "labs")?.off,
+      lia: links.find(({ person }) => person === ids.lia)?.state,
+      unknown: await outcome(adminCommands().askIn("nowhere")),
+    }).toStrictEqual({
+      off: false,
+      lia: "invited",
+      unknown: "onboarding.no_team",
+    });
+  });
+});

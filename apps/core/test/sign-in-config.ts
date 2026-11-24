@@ -1,0 +1,88 @@
+/**
+ * The sign-in config and IdP secrets the tests run with: a client at
+ * `https://acme.grasp.test` with both an Entra tenant and a Google Workspace,
+ * and a staff window open from a day ago until three days ahead. Imported by vite.config.ts (Node)
+ * and by the tests (workerd), so it only holds data.
+ */
+import { acmeTenant } from "../../connect/test/provider-config.ts";
+
+export const clientOrigin = "https://acme.grasp.test";
+
+// The same tenant connect's fake Entra knows, so people connect accounts
+// from the tenant they sign in from.
+export { acmeTenant, otherTenant } from "../../connect/test/provider-config.ts";
+const graspTenant = "22222222-2222-4222-8222-222222222222";
+/** The one Grasp staff member allowed in. */
+export const staffOid = "44444444-4444-4444-8444-444444444444";
+
+export const entraClient = { id: "grasp-os-entra-app", secret: "entra-secret" };
+export const googleClient = {
+  id: "grasp-os-google-app",
+  secret: "google-secret",
+};
+
+const day = 24 * 60 * 60 * 1000;
+
+export const signInConfig = {
+  origin: clientOrigin,
+  domains: ["acme.test"],
+  admins: ["ada@acme.test"],
+  entra: { tenantId: acmeTenant, clientId: entraClient.id },
+  google: { hostedDomain: "acme.test", clientId: googleClient.id },
+  staff: {
+    tenantId: graspTenant,
+    clientId: entraClient.id,
+    domains: ["grasp.test"],
+    oids: [staffOid],
+    role: "admin",
+    opened: new Date(Date.now() - day).toISOString(),
+    until: new Date(Date.now() + 3 * day).toISOString(),
+  },
+};
+
+export const testSignIn = {
+  SIGN_IN: signInConfig,
+  ENTRA_CLIENT_SECRET: entraClient.secret,
+  GOOGLE_CLIENT_SECRET: googleClient.secret,
+};
+
+/** Where the fake IdP runs for `vp run dev`; e2e/stack.ts picks the e2e one. */
+export const localIdpPort = 8788;
+export const localIdpOrigin = `http://localhost:${localIdpPort}`;
+
+/** Who is admin when they join a local stack. */
+export const localAdmin = "admin@acme.test";
+
+/**
+ * The one Grasp staff member of a local stack: the fake IdP gives them
+ * the staff object id when they sign in through Grasp's tenant.
+ */
+export const localStaff = "staff@grasp.test";
+
+/**
+ * Core's sign-in vars for a local stack at `origin`: the client's Entra
+ * tenant, answered by the fake IdP (test/idp-worker.ts) at `idpOrigin`, so
+ * people sign in through the product as they do in production; and a
+ * staff window, open from a day ago for three days from when the stack
+ * starts, for Grasp's staff ({@link localStaff}) through Grasp's own
+ * tenant. Only test values.
+ */
+export const localSignIn = (origin: string, idpOrigin = localIdpOrigin) => ({
+  SIGN_IN: {
+    origin,
+    domains: ["acme.test"],
+    admins: [localAdmin],
+    entra: { tenantId: acmeTenant, clientId: entraClient.id },
+    staff: {
+      tenantId: graspTenant,
+      clientId: entraClient.id,
+      domains: ["grasp.test"],
+      oids: [staffOid],
+      role: "admin",
+      opened: new Date(Date.now() - day).toISOString(),
+      until: new Date(Date.now() + 3 * day).toISOString(),
+    },
+  },
+  ENTRA_CLIENT_SECRET: entraClient.secret,
+  DEV_IDP_ORIGIN: idpOrigin,
+});

@@ -1,0 +1,1345 @@
+import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
+import {
+  capabilityErrors,
+  heldBindingSchema,
+} from "@grasp-os/shared/capability";
+import type {
+  CapabilityClaims,
+  HeldBinding,
+} from "@grasp-os/shared/capability";
+import type { ChatPlatform } from "@grasp-os/shared/chat";
+import {
+  appDropRequestSchema,
+  bindingDropRequestSchema,
+  connectCallSchema,
+  connectErrors,
+  connectionPersonSchema,
+  declineChatActionsSchema,
+  endedRunsSchema,
+  heldCallRequestSchema,
+  heldInSchema,
+  heldRequestSchema,
+  pendingKeySchema,
+  refuseConfirmationSchema,
+} from "@grasp-os/shared/connect";
+import type {
+  ActionDescription,
+  ConnectCall,
+  ConnectionPerson,
+  HeldCall,
+  PendingAction,
+  PendingReference,
+} from "@grasp-os/shared/connect";
+import {
+  attachmentsProperty,
+  attachmentsSchema,
+  shownAttachment,
+} from "@grasp-os/shared/connector-attachments";
+import type { AttachmentEntry } from "@grasp-os/shared/connector-attachments";
+import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  codeSubjectId,
+  codeSubjectOf,
+  workContextSchema,
+} from "@grasp-os/shared/permissions";
+import type { WorkContext } from "@grasp-os/shared/permissions";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+
+import { recordEvents, recordEventsIf } from "./audit.ts";
+import type { GuardedChange } from "./audit.ts";
+import { nativeConnector } from "./bundled-connectors.ts";
+import { providerName } from "./catalog.ts";
+import type { Connection } from "./connections.ts";
+import {
+  connections,
+  erasedPeople,
+  idempotentCalls,
+  pendingActions,
+} from "./db/schema.ts";
+import type { DecidedCall } from "./decisions.ts";
+import { erasureBegan } from "./erased-people.ts";
+
+// Side effects that wait for their person (threat model R7, R12). A side
+// effect a person is there for (`interactive`: from chat, or from a person
+// using an App), and every side effect of a context that read restricted
+// data, is stored here, exactly, bound to the person it acts for and to the
+// connection's account, and connect returns a reference to it instead of
+// carrying it out. The person sees it, with its exact input, through core,
+// from their own session; confirming runs that stored input through the
+// normal call path, with its idempotency key, and declining drops it.
+// Nothing of it is left but the audit events and, for a workflow run's
+// or a chat's under a key connect made, its key, spent as declined (see
+// `deletion`): never its input. As in the reference design,
+// a held action waits until it is decided: it doesn't expire. Except one
+// held in a chat on a chat platform (a Teams card scrolls away, and its
+// days and values may have moved on): it ends when core said it does
+// (`CapabilityClaims.heldUntil`, midnight of the company's day), and is
+// then declined as expired (`expired`), pressed or not.
+//
+// A restricted context's held actions are marked `restricted`, so the
+// person sees a warning and every event records it. A workflow run's held
+// side effect answers its call with `connect.held`; core then waits before
+// running the step again, under the same key, until the person decided
+// (workflows/host.ts): confirmed, the repeat gets the stored answer;
+// declined or dropped, its key is spent as declined, and the repeat fails
+// with `connect.declined`.
+//
+// A held action is taken once: confirming and declining each delete its
+// row, in one batch with their audit event, only while it is there, so of
+// two decisions made at once exactly one wins (CN7). Confirming runs the
+// call only after that, so a crash in between drops the action rather
+// than running it twice; the call's idempotency key still guards against
+// running it twice as ever. Unlike the reference design, a held action is
+// bound to the one person it acts for (CN8).
+//
+// A repeat of the call in the moment between a confirmation taking the
+// row and its call claiming the idempotency key finds neither, and is
+// held again. Confirming that one only answers with the first call's
+// stored answer (or its unknown outcome): the key runs it once.
+//
+// A held write that attaches files (GRA-887) keeps their digests only,
+// as the rest of its input: name, type, size and SHA-256 of each, which is
+// all its person is shown (`heldFilesOf`). The bytes are dropped when it is
+// held and come again with the confirmation, read from the run by core;
+// connect checks them against the digests before it takes the action, so
+// bytes that differ (a file deleted or not the same) leave it waiting, and
+// the only bytes sent are those its person was shown.
+//
+// The account fence (CN15) compares the connection's provider account; a
+// Composio connection has none recorded, so it never trips there.
+
+type Row = typeof pendingActions.$inferSelect;
+
+/** A held action, as connect keeps it: the row. */
+export type HeldAction = Row;
+
+const subjectOf = (row: Row) => codeSubjectOf(row.subjectType, row.subjectId);
+
+/** The call a held action makes once confirmed. */
+export const callOf = (row: Row): Omit<ConnectCall, "capability"> => {
+  const input: unknown = JSON.parse(row.input);
+  return connectCallSchema.omit({ capability: true }).parse({
+    connectionId: row.connectionId,
+    resource: row.resource ?? undefined,
+    action: row.action,
+    input,
+    idempotencyKey: row.idempotencyKey,
+    ...(row.stamp === null ? {} : { stamp: row.stamp }),
+  });
+};
+
+/** A held action with its connection, as a list reads them together. */
+/** A connection's columns a list shows it by (`ShownConnection`). */
+export const shownConnection = {
+  provider: connections.provider,
+  accountName: connections.accountName,
+  serverKind: connections.serverKind,
+  server: connections.server,
+};
+
+const withConnection = { row: pendingActions, connection: shownConnection };
+
+/** What a held action's connection is, if connect still has it. */
+export type ShownConnection = Pick<
+  Connection,
+  "provider" | "accountName" | "serverKind" | "server"
+> | null;
+
+/** One value of a call's input, as a description shows it (`ActionDescription`). */
+const shownValue = (value: Json): string | string[] => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const strings = value.filter((item) => typeof item === "string");
+    if (strings.length === value.length) {
+      return strings;
+    }
+  }
+  return JSON.stringify(value, null, 2);
+};
+
+/**
+ * The files a held call attaches (GRA-887), by digest: those its input
+ * names, if it is a native action that takes files; nothing for any other
+ * call; `unreadable` for an input that doesn't name them as the
+ * platform's schema has them, which can't be confirmed.
+ */
+export const heldFilesOf = (
+  call: Pick<ConnectCall, "action" | "input">,
+  connection: ShownConnection
+): AttachmentEntry[] | "unreadable" | undefined => {
+  if (connection?.serverKind !== "native") {
+    return undefined;
+  }
+  const manifest = nativeConnector(connection.server)?.manifest;
+  if (
+    manifest?.provider !== connection.provider ||
+    !Object.hasOwn(manifest.actions, call.action) ||
+    manifest.actions[call.action]?.takesFiles !== true
+  ) {
+    return undefined;
+  }
+  const { input } = call;
+  const named =
+    typeof input === "object" && input !== null && !Array.isArray(input)
+      ? input[attachmentsProperty]
+      : undefined;
+  const entries = attachmentsSchema.safeParse(named ?? []);
+  return entries.success ? entries.data : "unreadable";
+};
+
+/**
+ * The held call as its tool describes it: only a native connector's tool
+ * does, in this release's manifest, which is ours and reviewed. The values
+ * are the stored input's own, so the person reads what will run; whatever
+ * a Composio server says of its tools is never shown as a description.
+ */
+export const descriptionOf = (
+  call: Pick<ConnectCall, "action" | "input">,
+  connection: ShownConnection
+): ActionDescription | undefined => {
+  if (connection?.serverKind !== "native") {
+    return undefined;
+  }
+  const manifest = nativeConnector(connection.server)?.manifest;
+  if (
+    manifest?.provider !== connection.provider ||
+    !Object.hasOwn(manifest.actions, call.action)
+  ) {
+    return undefined;
+  }
+  const describe = manifest.actions[call.action]?.describe;
+  if (describe === undefined) {
+    return undefined;
+  }
+  const { input } = call;
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return undefined;
+  }
+  const held: Readonly<Record<string, Json | undefined>> = input;
+  const shown = new Set(describe.fields.map((field) => field.input));
+  const files = heldFilesOf(call, connection);
+  return {
+    title: describe.title,
+    fields: describe.fields.flatMap((field) => {
+      const value = Object.hasOwn(held, field.input)
+        ? held[field.input]
+        : undefined;
+      if (value === undefined) {
+        return [];
+      }
+      // Each attached file by name, type, size and digest, never its content.
+      const shownValueOf =
+        field.input === attachmentsProperty &&
+        files !== undefined &&
+        files !== "unreadable"
+          ? files.map(shownAttachment)
+          : shownValue(value);
+      return [
+        {
+          input: field.input,
+          label: field.label,
+          value: shownValueOf,
+        },
+      ];
+    }),
+    complete: Object.keys(held).every((key) => shown.has(key)),
+  };
+};
+
+/**
+ * The binding a held action pins, as stored: null when it came through
+ * none, `unreadable` when what is stored doesn't read as one, which core
+ * refuses to confirm.
+ */
+const bindingOf = (row: Row): HeldBinding | "unreadable" | null => {
+  if (row.binding === null) {
+    return null;
+  }
+  let stored: unknown;
+  try {
+    stored = JSON.parse(row.binding);
+  } catch {
+    return "unreadable";
+  }
+  const parsed = heldBindingSchema.safeParse(stored);
+  return parsed.success ? parsed.data : "unreadable";
+};
+
+/**
+ * The held action `row`, as a decision on it is checked (decisions.ts):
+ * whose it is and where it came from. One whose context or binding can't
+ * be read has no origin, and can't be confirmed.
+ */
+export const decidedCallOf = (row: Row): DecidedCall => {
+  const binding = bindingOf(row);
+  let context: unknown;
+  try {
+    context = JSON.parse(row.context);
+  } catch {
+    context = undefined;
+  }
+  const parsed = workContextSchema.safeParse(context);
+  return {
+    subjectType: row.subjectType,
+    subjectId: row.subjectId,
+    onBehalfOf: row.onBehalfOf,
+    origin:
+      binding === "unreadable" || !parsed.success
+        ? null
+        : {
+            mode: row.mode,
+            appVersion: row.appVersion,
+            permissionId: row.permissionId,
+            context: parsed.data,
+            ...(binding === null ? {} : { binding }),
+          },
+  };
+};
+
+/** The connection's name for people: what it reaches, and its account. */
+export const nameOf = (connection: ShownConnection): string | null => {
+  if (connection === null) {
+    return null;
+  }
+  const name = providerName(connection);
+  return connection.accountName === null
+    ? name
+    : `${name} (${connection.accountName})`;
+};
+
+const summaryOf = ({
+  row,
+  connection,
+}: {
+  row: Row;
+  connection: ShownConnection;
+}): PendingAction => {
+  const call = callOf(row);
+  const description = descriptionOf(call, connection);
+  const attachments = heldFilesOf(call, connection);
+  return {
+    id: row.id,
+    subject: subjectOf(row),
+    appVersion: row.appVersion,
+    mode: row.mode,
+    context: workContextSchema.parse(JSON.parse(row.context)),
+    restricted: row.restricted,
+    permissionId: row.permissionId,
+    connectionId: row.connectionId,
+    connectionName: nameOf(connection),
+    resource: row.resource,
+    action: row.action,
+    ...(description === undefined ? {} : { description }),
+    ...(attachments === undefined || attachments === "unreadable"
+      ? {}
+      : { attachments }),
+    idempotencyKey: row.idempotencyKey,
+    input: row.input,
+    inputHash: row.inputHash,
+    requestedAt: row.createdAt.toISOString(),
+    ...(row.endsAt === null ? {} : { endsAt: row.endsAt.toISOString() }),
+    ...(row.unattended ? { unattended: true as const } : {}),
+    binding: bindingOf(row),
+  };
+};
+
+/**
+ * What a held action's events say of it: identifiers, never its input;
+ * `restricted` when it was asked for, or is confirmed, in a restricted
+ * context.
+ */
+const detailOf = (
+  row: Row,
+  restricted = row.restricted
+): Record<string, AuditDetailValue> => ({
+  pendingActionId: row.id,
+  action: row.action,
+  resource: row.resource,
+  subjectType: row.subjectType,
+  subjectId: row.subjectId,
+  onBehalfOf: row.onBehalfOf,
+  mode: row.mode,
+  inputHash: row.inputHash,
+  ...(restricted ? { restricted: true } : {}),
+});
+
+/**
+ * Deleting one held action with `entry`, its event, only while it is still
+ * there. With `spentAs` (why it won't run), a workflow run's held action
+ * spends its key in the same batch, so its step's retry fails
+ * (`connect.declined`) rather than asking again. So does a chat's under a
+ * key connect made (`madeKey`), so its chat can be told it was declined
+ * (`heldCall`, `heldOutcome`): the key, never the input. And so does an
+ * App action's call through a resource binding, whose key core derived
+ * from the action's call, but only when its person declined it: the same
+ * call made again fails as declined. A dropped one leaves its key free.
+ */
+const deletion = (
+  env: Env,
+  row: HeldAction,
+  entry: AuditEntry,
+  spentAs?: string,
+  /** What must still hold of it as it goes, read in the same transaction. */
+  guard?: SQL
+): GuardedChange => {
+  const db = drizzle(env.DB);
+  const still =
+    guard === undefined
+      ? eq(pendingActions.id, row.id)
+      : and(eq(pendingActions.id, row.id), guard);
+  const spend = db
+    .insert(idempotentCalls)
+    .select(
+      db
+        .select({
+          subjectType: pendingActions.subjectType,
+          subjectId: pendingActions.subjectId,
+          onBehalfOf: pendingActions.onBehalfOf,
+          connectionId: pendingActions.connectionId,
+          action: pendingActions.action,
+          idempotencyKey: pendingActions.idempotencyKey,
+          inputHash: pendingActions.inputHash,
+          state: sql<"declined">`'declined'`.as("state"),
+          output: sql<string | null>`${spentAs ?? null}`.as("output"),
+          provenance: sql<null>`NULL`.as("provenance"),
+          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+          claimedAt: sql<Date>`${Date.now()}`.as("claimed_at"),
+          connectorVersion: sql<null>`NULL`.as("connector_version"),
+          resource: pendingActions.resource,
+          // Never of unknown outcome: nothing of the call is kept.
+          input: sql<null>`NULL`.as("input"),
+          origin: sql<null>`NULL`.as("origin"),
+          // Declined, never listed as of unknown outcome.
+          listId: sql<string>`''`.as("list_id"),
+        })
+        .from(pendingActions)
+        .where(
+          and(
+            still,
+            or(
+              eq(pendingActions.mode, "workflow"),
+              sql`${pendingActions.idempotencyKey} = json_extract(${pendingActions.context}, '$.chatId') || ':' || ${pendingActions.id}`,
+              // An App action's call through a resource binding, only when
+              // its person declined it: its key is core's, derived from the
+              // action's call, so the same call made again is told it was
+              // declined, not asked again. A drop (its binding revoked or
+              // stale, its connection gone, its person removed) leaves the
+              // key free: the person declined nothing, and the same call
+              // made again is decided afresh.
+              spentAs === "declined"
+                ? isNotNull(pendingActions.binding)
+                : sql`0`
+            )
+          )
+        )
+    )
+    // A key its person freed for one more send (it didn't happen), held
+    // since: spent as this decision says, for that same input only, so
+    // the call made again is told so rather than asked again.
+    .onConflictDoUpdate({
+      target: [
+        idempotentCalls.subjectType,
+        idempotentCalls.subjectId,
+        idempotentCalls.onBehalfOf,
+        idempotentCalls.connectionId,
+        idempotentCalls.action,
+        idempotentCalls.idempotencyKey,
+      ],
+      set: {
+        state: sql`excluded.state`,
+        output: sql`excluded.output`,
+        claimedAt: sql`excluded.claimed_at`,
+        input: null,
+        origin: null,
+      },
+      setWhere: sql`${idempotentCalls.state} = 'freed' AND ${idempotentCalls.inputHash} = excluded.input_hash`,
+    });
+  const remove = db.delete(pendingActions).where(still);
+  return {
+    entry,
+    from: pendingActions,
+    where: sql`${still}`,
+    writes: spentAs === undefined ? [remove] : [spend, remove],
+  };
+};
+
+/** `deletion`, carried out: whether the held action was still there. */
+const deleteWith = async (
+  env: Env,
+  row: HeldAction,
+  entry: AuditEntry,
+  spentAs?: string
+): Promise<boolean> => {
+  const [deleted = false] = await recordEventsIf(env, [
+    deletion(env, row, entry, spentAs),
+  ]);
+  return deleted;
+};
+
+/**
+ * Held actions one drop takes in one transaction: each its own few
+ * statements (every one well within D1's 100 bound values), so a large
+ * backlog goes in steady steps.
+ */
+const dropBatchSize = 50;
+
+/**
+ * Drops every held action `where` selects, each with a
+ * `connection.action.dropped` event saying why: when its connection is
+ * disconnected, or the person it waits for was removed. The rows hold
+ * exact inputs, which nothing may keep once nobody can confirm them.
+ * By `person`, or by core itself (`null`). Those whose day ended go as
+ * `connection.action.expired` (`event`).
+ */
+export const dropPendingActions = async (
+  env: Env,
+  where: SQL,
+  reason: string,
+  person: ConnectionPerson | null,
+  event:
+    | "connection.action.dropped"
+    | "connection.action.expired" = "connection.action.dropped"
+): Promise<void> => {
+  const actor = person === null ? { type: "system" as const } : actorOf(person);
+  // A batch at a time until none are left: each batch deletes its rows with
+  // their events in one transaction, and a drop that fails part way leaves
+  // the rest for a retry (a disconnect again, or core's offboarding retry).
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+    const rows = await drizzle(env.DB)
+      .select()
+      .from(pendingActions)
+      .where(where)
+      .orderBy(asc(pendingActions.createdAt))
+      .limit(dropBatchSize);
+    const [first, ...more] = rows.map((row) =>
+      deletion(
+        env,
+        row,
+        {
+          actor,
+          action: event,
+          target: { type: "connection", id: row.connectionId },
+          detail: { ...detailOf(row), reason },
+        },
+        reason,
+        // Read again as each goes: one that no longer matches (its tool
+        // allowed again meanwhile, say) stays.
+        where
+      )
+    );
+    if (first === undefined) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+    await recordEventsIf(env, [first, ...more]);
+    if (rows.length < dropBatchSize) {
+      return;
+    }
+  }
+};
+
+/** A value to insert, as a column of the select that inserts it. */
+const value = <T>(literal: T, column: string) => sql<T>`${literal}`.as(column);
+
+/**
+ * The idempotency key connect makes for a side effect held without one: a
+ * chat's carries the chat, so the chat can later be told how the action
+ * ended by the held action's ID alone (`heldCall`), and no other chat
+ * can.
+ */
+const madeKey = (context: WorkContext, id: string): string =>
+  context.type === "chat" ? `${context.chatId}:${id}` : id;
+
+/**
+ * Holds a side effect for the person `claims` act for: the reference to
+ * it, the one already held for this call if there is one. The same call
+ * repeated with the same key finds the same held action; with another
+ * input, it is refused.
+ *
+ * A call a person is there for may come without a key (`idempotencyKey`
+ * null; call.ts refuses a workflow run's): it is held and taken exactly
+ * once whatever its key, so connect makes one (`madeKey`). While it waits,
+ * the same call made again (the same App or agent, person, context,
+ * connection, action, resource and input) finds that held action rather
+ * than holding a second: a model that asks twice doesn't get the person
+ * two cards, and one slip of theirs two sends. Once it is decided, the
+ * same call is a new action.
+ */
+export const hold = async (
+  env: Env,
+  claims: CapabilityClaims,
+  connection: Connection,
+  {
+    input,
+    inputHash,
+    idempotencyKey,
+    stamp,
+  }: {
+    input: Record<string, Json>;
+    inputHash: string;
+    idempotencyKey: string | null;
+    stamp: string | null;
+  }
+): Promise<PendingReference> => {
+  const { authority, origin } = claims;
+  // Null for a read with no grant, held because of where it was asked
+  // (`restricted`): core decides it by the same rule as the read.
+  const { permissionId } = origin;
+  const db = drizzle(env.DB);
+  const { subject } = authority;
+  const subjectType = subject.type;
+  const subjectId = codeSubjectId(subject);
+  const id = crypto.randomUUID();
+  const context = JSON.stringify(origin.context);
+  const heldAt = Date.now();
+  const sameCaller = and(
+    eq(pendingActions.subjectType, subjectType),
+    eq(pendingActions.subjectId, subjectId),
+    eq(pendingActions.onBehalfOf, authority.onBehalfOf),
+    eq(pendingActions.connectionId, connection.id),
+    eq(pendingActions.action, claims.action)
+  );
+  // The call this one repeats: by its key, or, without one, by what it
+  // would do and where it was asked, while it hasn't ended: asked again
+  // the next day, it is a new action, with that day's end.
+  const sameCall =
+    idempotencyKey === null
+      ? and(
+          sameCaller,
+          eq(pendingActions.inputHash, inputHash),
+          eq(pendingActions.context, context),
+          // One a person asked for and one a turn nobody was there for
+          // asked for are never the same action: the second ends with the
+          // day and says so, whatever the first does.
+          eq(pendingActions.unattended, claims.unattended),
+          or(
+            isNull(pendingActions.endsAt),
+            gt(pendingActions.endsAt, new Date(heldAt))
+          )
+        )
+      : and(sameCaller, eq(pendingActions.idempotencyKey, idempotencyKey));
+  // Only while the connection is still active: a disconnect that dropped
+  // its held actions a moment ago must not find a new one behind it.
+  const [inserted] = await db
+    .insert(pendingActions)
+    .select(
+      db
+        .select({
+          id: value(id, "id"),
+          subjectType: value(subjectType, "subject_type"),
+          subjectId: value(subjectId, "subject_id"),
+          onBehalfOf: value(authority.onBehalfOf, "on_behalf_of"),
+          mode: value(authority.mode, "mode"),
+          appVersion: value(authority.appVersion ?? null, "app_version"),
+          connectionId: value(connection.id, "connection_id"),
+          accountId: value(connection.accountId, "account_id"),
+          resource: value(claims.resource, "resource"),
+          action: value(claims.action, "action"),
+          idempotencyKey: value(
+            idempotencyKey ?? madeKey(origin.context, id),
+            "idempotency_key"
+          ),
+          input: value(JSON.stringify(input), "input"),
+          inputHash: value(inputHash, "input_hash"),
+          permissionId: value(permissionId, "permission_id"),
+          context: value(context, "context"),
+          restricted: value(claims.restricted ? 1 : 0, "restricted"),
+          createdAt: value(heldAt, "created_at"),
+          binding: value(
+            origin.binding === undefined
+              ? null
+              : JSON.stringify(origin.binding),
+            "binding"
+          ),
+          stamp: value(stamp, "stamp"),
+          endsAt: value(claims.heldUntil ?? null, "ends_at"),
+          unattended: value(claims.unattended ? 1 : 0, "unattended"),
+          chatApp: value(claims.chatApp ? 1 : 0, "chat_app"),
+        })
+        .from(connections)
+        .where(
+          and(
+            eq(connections.id, connection.id),
+            eq(connections.status, "active"),
+            // Never for someone whose erasure began, on any connection:
+            // a held action asks them, so it is theirs (person-erasure.ts).
+            sql`NOT ${erasureBegan(authority.onBehalfOf)}`,
+            // In the one statement, so of two such calls at once one is
+            // held and the other finds it. A call with a key is kept to
+            // one by the unique index on it.
+            idempotencyKey === null
+              ? notExists(db.select().from(pendingActions).where(sameCall))
+              : undefined
+          )
+        )
+    )
+    .onConflictDoNothing()
+    .returning({ id: pendingActions.id });
+  if (inserted !== undefined) {
+    return inserted;
+  }
+  // The same call, held before: the same action, unless its input changed.
+  const held = await db.select().from(pendingActions).where(sameCall).get();
+  if (held === undefined) {
+    // Nothing inserted and nothing held: the person it acts for is being
+    // erased, the connection went inactive, or the held call was taken
+    // (decided) a moment ago, and a repeat finds its outcome.
+    const [erased] = await db
+      .select({ userId: erasedPeople.userId })
+      .from(erasedPeople)
+      .where(eq(erasedPeople.userId, authority.onBehalfOf));
+    if (erased !== undefined) {
+      throw capabilityErrors.create("capability.invalid", {
+        reason: "scope",
+      });
+    }
+    const now = await db
+      .select({ status: connections.status })
+      .from(connections)
+      .where(eq(connections.id, connection.id))
+      .get();
+    throw connectErrors.create(
+      now?.status === "active"
+        ? "connect.call_in_progress"
+        : "connect.connection_inactive"
+    );
+  }
+  if (held.inputHash !== inputHash) {
+    throw connectErrors.create("connect.idempotency_conflict");
+  }
+  return { id: held.id };
+};
+
+type Decision = "confirm" | "decline";
+
+/**
+ * A person's decision's event, naming the chat platform they decided on
+ * (`via`, a press on a Teams card) when it wasn't Grasp's own app.
+ */
+const decisionEvent = (
+  person: ConnectionPerson,
+  action: string,
+  connectionId: string | undefined,
+  detail: Record<string, AuditDetailValue>,
+  via?: ChatPlatform
+): AuditEntry => ({
+  actor: actorOf(person, via),
+  action,
+  target:
+    connectionId === undefined
+      ? undefined
+      : { type: "connection", id: connectionId },
+  detail,
+});
+
+/**
+ * Records a decision that was refused (not the person's, gone, changed);
+ * if that fails too, it is logged: the person learns why it was refused.
+ */
+export const auditRefusedDecision = async (
+  env: Env,
+  person: ConnectionPerson,
+  decision: Decision,
+  id: string,
+  reason: string,
+  row?: HeldAction,
+  restricted = false,
+  via?: ChatPlatform
+): Promise<void> => {
+  try {
+    await recordEvents(env, [
+      decisionEvent(
+        person,
+        `connection.action.${decision}_refused`,
+        row?.connectionId,
+        {
+          ...(row === undefined
+            ? {}
+            : detailOf(row, row.restricted || restricted)),
+          pendingActionId: id,
+          reason,
+        },
+        via
+      ),
+    ]);
+  } catch (error) {
+    log.error("audit.record_failed", errorFields(error));
+  }
+};
+
+/**
+ * The held action `id`, waiting for `person`: only their own, never for
+ * Grasp staff, who decide nothing for a client's people. Refused (and
+ * recorded) as not found otherwise, so nobody learns of another's.
+ */
+export const heldFor = async (
+  env: Env,
+  person: ConnectionPerson,
+  id: string,
+  decision: Decision,
+  via?: ChatPlatform
+): Promise<HeldAction> => {
+  const row = await drizzle(env.DB)
+    .select()
+    .from(pendingActions)
+    .where(eq(pendingActions.id, id))
+    .get();
+  const theirs =
+    row !== undefined && !person.staff && row.onBehalfOf === person.userId;
+  if (!theirs) {
+    // The log names what was tried on; the caller learns nothing of it.
+    await auditRefusedDecision(
+      env,
+      person,
+      decision,
+      id,
+      "connect.pending_not_found",
+      row,
+      false,
+      via
+    );
+    throw connectErrors.create("connect.pending_not_found");
+  }
+  return row;
+};
+
+/**
+ * Takes the held action out of waiting, with its event, in one batch: only
+ * while it is there, so it is taken at most once. Refused as not found
+ * when a concurrent decision took it first. `restricted`: confirmed for a
+ * context in restricted mode by now.
+ */
+export const take = async (
+  env: Env,
+  person: ConnectionPerson,
+  row: HeldAction,
+  decision: Decision,
+  restricted = false,
+  via?: ChatPlatform
+): Promise<void> => {
+  const taken = await deleteWith(
+    env,
+    row,
+    decisionEvent(
+      person,
+      decision === "confirm"
+        ? "connection.action.confirmed"
+        : "connection.action.declined",
+      row.connectionId,
+      detailOf(row, row.restricted || restricted),
+      via
+    ),
+    decision === "decline" ? "declined" : undefined
+  );
+  if (!taken) {
+    await auditRefusedDecision(
+      env,
+      person,
+      decision,
+      row.id,
+      "connect.pending_not_found",
+      row,
+      restricted,
+      via
+    );
+    throw connectErrors.create("connect.pending_not_found");
+  }
+};
+
+/** Whether the held action `row` has ended unconfirmed by `now`. */
+export const hasEnded = (row: HeldAction, now = Date.now()): boolean =>
+  row.endsAt !== null && row.endsAt.getTime() <= now;
+
+/**
+ * Refuses (`connect.pending_expired`) confirming the held action `row`,
+ * whose day ended: it is declined as expired there and then, by its
+ * person's press, with its event, and its refused confirmation recorded.
+ * It runs nothing, whatever else the press carries.
+ */
+export const refuseEnded = async (
+  env: Env,
+  person: ConnectionPerson,
+  row: HeldAction
+): Promise<void> => {
+  if (!hasEnded(row)) {
+    return;
+  }
+  // Gone already if the clock or another press ended it meanwhile.
+  await deleteWith(
+    env,
+    row,
+    decisionEvent(person, "connection.action.expired", row.connectionId, {
+      ...detailOf(row),
+      reason: "expired",
+    }),
+    "expired"
+  );
+  await auditRefusedDecision(
+    env,
+    person,
+    "confirm",
+    row.id,
+    "connect.pending_expired",
+    row
+  );
+  throw connectErrors.create("connect.pending_expired");
+};
+
+/**
+ * Declines every held action whose day ended by `at`, each as
+ * `connection.action.expired` by core itself: nobody can confirm them,
+ * so nothing keeps their inputs. Run by connect's clock every minute.
+ */
+export const expireHeldActions = async (env: Env, at: Date): Promise<void> => {
+  await dropPendingActions(
+    env,
+    lte(pendingActions.endsAt, at),
+    "expired",
+    null,
+    "connection.action.expired"
+  );
+};
+
+/** Most held actions one list answers: the newest. */
+const listLimit = 200;
+
+/**
+ * The held actions waiting for `person`, newest first, at most
+ * {@link listLimit}: older ones wait on, and show once newer ones are
+ * decided. Only those held where `heldIn` says, in the same statement
+ * as the limit: Grasp's own list never loses one to a chat app's
+ * (`pending_actions.chat_app`), nor a chat app's card to Grasp's.
+ */
+export const listPendingActions = async (
+  env: Env,
+  request: unknown,
+  heldIn: unknown
+): Promise<PendingAction[]> => {
+  const parsed = connectionPersonSchema.safeParse(request);
+  const where = heldInSchema.safeParse(heldIn);
+  if (!parsed.success || !where.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  // Staff act for nobody here: nothing waits for them.
+  if (parsed.data.staff) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select(withConnection)
+    .from(pendingActions)
+    .leftJoin(connections, eq(connections.id, pendingActions.connectionId))
+    .where(
+      and(
+        eq(pendingActions.onBehalfOf, parsed.data.userId),
+        // One whose day ended can only be declined as expired: never shown.
+        or(
+          isNull(pendingActions.endsAt),
+          gt(pendingActions.endsAt, new Date())
+        ),
+        eq(pendingActions.chatApp, where.data === "chat_app")
+      )
+    )
+    .orderBy(desc(pendingActions.createdAt), desc(pendingActions.id))
+    .limit(listLimit);
+  return rows.map(summaryOf);
+};
+
+/**
+ * The held action `id` waiting for `person`, or `null`: never another's,
+ * and never one for Grasp staff.
+ */
+export const pendingActionFor = async (
+  env: Env,
+  request: unknown
+): Promise<PendingAction | null> => {
+  const parsed = heldRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { person, id } = parsed.data;
+  if (person.staff) {
+    return null;
+  }
+  const held = await drizzle(env.DB)
+    .select(withConnection)
+    .from(pendingActions)
+    .leftJoin(connections, eq(connections.id, pendingActions.connectionId))
+    .where(
+      and(
+        eq(pendingActions.id, id),
+        eq(pendingActions.onBehalfOf, person.userId)
+      )
+    )
+    .get();
+  return held === undefined ? null : summaryOf(held);
+};
+
+/**
+ * Which call a held action of a chat was (`ConnectApi.heldCall`), for the
+ * chat whose agent asked for it. A chat's code has only the ID its held
+ * call was answered with, so that finds it: while it waits, the held
+ * action itself; once decided, the stored call under the key connect made
+ * for it, which carries the chat (`madeKey`). Anything else is not found:
+ * another chat's, agent's or person's, one held under its caller's own
+ * key, and one taken by a confirmation whose call hasn't claimed its key
+ * yet, which a moment later is found. It says nothing of how the call
+ * ended: that is read with a capability for the call (`heldOutcome`).
+ */
+export const heldCall = async (
+  env: Env,
+  request: unknown
+): Promise<HeldCall> => {
+  const parsed = heldCallRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { agentId, onBehalfOf, workspaceId, chatId, id } = parsed.data;
+  const db = drizzle(env.DB);
+  const idempotencyKey = madeKey({ type: "chat", workspaceId, chatId }, id);
+  const waiting = await db
+    .select({
+      connectionId: pendingActions.connectionId,
+      resource: pendingActions.resource,
+      action: pendingActions.action,
+    })
+    .from(pendingActions)
+    .where(
+      and(
+        eq(pendingActions.id, id),
+        eq(pendingActions.subjectType, "agent"),
+        eq(pendingActions.subjectId, agentId),
+        eq(pendingActions.onBehalfOf, onBehalfOf),
+        eq(pendingActions.idempotencyKey, idempotencyKey)
+      )
+    )
+    .get();
+  const found =
+    waiting ??
+    (await db
+      .select({
+        connectionId: idempotentCalls.connectionId,
+        resource: idempotentCalls.resource,
+        action: idempotentCalls.action,
+      })
+      .from(idempotentCalls)
+      .where(
+        and(
+          eq(idempotentCalls.idempotencyKey, idempotencyKey),
+          eq(idempotentCalls.subjectType, "agent"),
+          eq(idempotentCalls.subjectId, agentId),
+          eq(idempotentCalls.onBehalfOf, onBehalfOf)
+        )
+      )
+      .get());
+  if (found === undefined) {
+    throw connectErrors.create("connect.pending_not_found");
+  }
+  return { ...found, idempotencyKey };
+};
+
+/**
+ * The held action waiting under the call `claims` name, if one still is:
+ * its ID.
+ */
+export const waitingUnder = async (
+  env: Env,
+  {
+    authority,
+    connectionId,
+    resource,
+    action,
+    idempotencyKey,
+  }: CapabilityClaims
+): Promise<string | undefined> => {
+  if (idempotencyKey === null) {
+    return undefined;
+  }
+  const { subject } = authority;
+  const held = await drizzle(env.DB)
+    .select({ id: pendingActions.id, resource: pendingActions.resource })
+    .from(pendingActions)
+    .where(
+      and(
+        eq(pendingActions.subjectType, subject.type),
+        eq(pendingActions.subjectId, codeSubjectId(subject)),
+        eq(pendingActions.onBehalfOf, authority.onBehalfOf),
+        eq(pendingActions.connectionId, connectionId),
+        eq(pendingActions.action, action),
+        eq(pendingActions.idempotencyKey, idempotencyKey)
+      )
+    )
+    .get();
+  return held?.resource === resource ? held.id : undefined;
+};
+
+/** Most held actions one round of `declineChatActions` reads and declines. */
+const declineChunk = 100;
+
+/**
+ * Declines every held action of one chat waiting for the person, as the
+ * person declines one (`take`, each with its event): a chunk at a time,
+ * until none is left, so however many there are, none is missed and no
+ * read is unbounded. One decided meanwhile is gone already, which is what
+ * this wants. How many it declined; none for Grasp staff.
+ */
+export const declineChatActions = async (
+  env: Env,
+  request: unknown
+): Promise<number> => {
+  const parsed = declineChatActionsSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { person, workspaceId, chatId } = parsed.data;
+  if (person.staff) {
+    return 0;
+  }
+  let declined = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a chunk at a time
+    const rows = await drizzle(env.DB)
+      .select()
+      .from(pendingActions)
+      .where(
+        and(
+          eq(pendingActions.onBehalfOf, person.userId),
+          sql`json_extract(${pendingActions.context}, '$.type') = 'chat'`,
+          sql`json_extract(${pendingActions.context}, '$.workspaceId') = ${workspaceId}`,
+          sql`json_extract(${pendingActions.context}, '$.chatId') = ${chatId}`
+        )
+      )
+      .limit(declineChunk);
+    if (rows.length === 0) {
+      return declined;
+    }
+    for (const row of rows) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, each recorded
+        await take(env, person, row, "decline");
+        declined += 1;
+      } catch (error) {
+        if (connectErrors.codeOf(error) !== "connect.pending_not_found") {
+          throw error;
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Drops the held action `id` of a workflow run that has ended, which core
+ * found when `person` came to confirm it: it can no longer run for the
+ * run, so nothing keeps its input. Recorded as `connection.action.dropped`
+ * with reason `run.ended`.
+ */
+export const dropForEndedRun = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = heldRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { person, id } = parsed.data;
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.id} = ${id} AND ${pendingActions.onBehalfOf} = ${person.userId} AND ${pendingActions.mode} = 'workflow'`,
+    "run.ended",
+    person
+  );
+};
+
+/**
+ * Drops every held action of the workflow runs core names, whose
+ * retention is over (core's src/workflows/retention.ts): a run that ended
+ * while a side effect of it was held leaves the action, with its exact
+ * input, until its person comes to confirm it (`dropForEndedRun`), which
+ * they may never do. A held action's idempotency key starts with its
+ * run's ID (`stepIdempotencyKey`). A run's actions are its workflow's,
+ * and those of every App its calls reached, however many hops on (a call
+ * into another App's carries the run's key on): dropped by the run,
+ * whatever their subject, so none is missed. Each is recorded as
+ * `connection.action.dropped` with reason `run.ended`, by core itself.
+ */
+export const dropForEndedRuns = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = endedRunsSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  if (parsed.data.runs.length === 0) {
+    return;
+  }
+  // Each run's keys as a range of the key index: those starting with the
+  // run's encoded ID and `:`, which `encodeURIComponent` never leaves in
+  // an ID (nor `;`, the next character), so `abc` never takes `abcd`.
+  const keyed = JSON.stringify(
+    parsed.data.runs.map(({ runId }) => encodeURIComponent(runId))
+  );
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.mode} = 'workflow' AND ${pendingActions.id} IN (SELECT held.id FROM json_each(${keyed}) AS run
+      JOIN ${pendingActions} AS held
+        ON held.idempotency_key >= run.value || ':'
+          AND held.idempotency_key < run.value || ';')`,
+    "run.ended",
+    null
+  );
+  // Its calls of unknown outcome stay obligations of their person (the
+  // effect may have happened), but nothing keeps their inputs past the
+  // run's retention either: listed on, by what they were, without it.
+  // Only a run's own (`workflow` mode): a key of the same shape from
+  // anywhere else keeps its input.
+  await drizzle(env.DB)
+    .update(idempotentCalls)
+    .set({ input: null })
+    .where(
+      sql`${idempotentCalls.input} IS NOT NULL
+        AND json_extract(${idempotentCalls.origin}, '$.mode') = 'workflow'
+        AND rowid IN (SELECT called.rowid FROM json_each(${keyed}) AS run
+          JOIN ${idempotentCalls} AS called
+            ON called.idempotency_key >= run.value || ':'
+              AND called.idempotency_key < run.value || ';')`
+    );
+};
+
+/**
+ * Drops every held action App `appId` made through resource binding
+ * `bindingId`, which core revoked or replaced: recorded, by core itself,
+ * with reason `binding.revoked`.
+ */
+export const dropForBinding = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = bindingDropRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { appId, bindingId } = parsed.data;
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.subjectType} = 'app' AND ${pendingActions.subjectId} = ${appId} AND json_extract(${pendingActions.binding}, '$.id') = ${bindingId}`,
+    "binding.revoked",
+    null
+  );
+};
+
+/**
+ * Declines every held action of App `appId`, which core removed: nobody
+ * can confirm them, as nobody can one whose day ended, so they go the way
+ * an expired one goes, each as `connection.action.expired` by core itself,
+ * with reason `app.removed`, keeping none of their inputs.
+ */
+export const dropForRemovedApp = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = appDropRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.subjectType} = 'app' AND ${pendingActions.subjectId} = ${parsed.data.appId}`,
+    "app.removed",
+    null,
+    "connection.action.expired"
+  );
+};
+
+/**
+ * Drops one held action of an App's call through a resource binding that
+ * core refused to confirm because the binding no longer serves it (a
+ * drifted contract, a widened declaration): it could never be confirmed,
+ * so it leaves its person's list, by core, recorded with reason
+ * `binding.stale`. Its key stays free (`deletion`).
+ */
+export const dropStaleBinding = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = heldRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { person, id } = parsed.data;
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.id} = ${id} AND ${pendingActions.onBehalfOf} = ${person.userId} AND ${pendingActions.binding} IS NOT NULL`,
+    "binding.stale",
+    null
+  );
+};
+
+/**
+ * Records a confirmation core refused before signing it (the permission is
+ * gone, the person has left, the context is invalid), under the person
+ * core names from their session: the held action keeps waiting.
+ */
+export const refuseConfirmation = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = refuseConfirmationSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { person, id, reason } = parsed.data;
+  const row = await drizzle(env.DB)
+    .select()
+    .from(pendingActions)
+    .where(eq(pendingActions.id, id))
+    .get();
+  await auditRefusedDecision(env, person, "confirm", id, reason, row);
+};
+
+/**
+ * Whether any side effect with the idempotency key `idempotencyKey`,
+ * acting for `onBehalfOf`, still waits for that person. Core asks for a
+ * workflow run that waits before running a step whose side effect was held
+ * again: the step's key (the run's ID and the step's name) is the run's
+ * own, whichever of its App's code made the call.
+ */
+export const anyPending = async (
+  env: Env,
+  request: unknown
+): Promise<boolean> => {
+  const parsed = pendingKeySchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const waiting = await drizzle(env.DB)
+    .select({ id: pendingActions.id })
+    .from(pendingActions)
+    .where(
+      and(
+        eq(pendingActions.onBehalfOf, parsed.data.onBehalfOf),
+        eq(pendingActions.idempotencyKey, parsed.data.idempotencyKey),
+        eq(pendingActions.mode, "workflow")
+      )
+    )
+    .limit(1);
+  return waiting.length > 0;
+};

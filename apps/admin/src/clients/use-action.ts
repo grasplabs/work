@@ -1,0 +1,31 @@
+import { useAction } from "../use-action.ts";
+import type { SettingsErrorCode } from "./settings.ts";
+
+/** What staff read when the admin refuses a settings change, by its code. */
+const refusals: Readonly<Record<SettingsErrorCode, string>> = {
+  unknown_client: "There's no such client.",
+  sign_in_invalid:
+    "That sign-in isn't complete: give an Entra tenant or a Google Workspace, its email domains, and its first admins.",
+  admin_unreachable:
+    "Name at least one first admin, each with an email in the email domains, or nobody could ever sign in as admin.",
+  sign_in_app_missing:
+    "The admin has no OAuth app for that IdP yet: set ENTRA_CLIENT_ID or GOOGLE_CLIENT_ID on it first.",
+  not_active:
+    "The client isn't live yet, so there's nothing to apply its settings to.",
+  nothing_deployed:
+    "Its Workers don't run one release the admin made live: roll a release out to it instead.",
+  client_busy:
+    "Something else is deploying to this client right now: try again once it's done.",
+  store_secret_missing:
+    "Secrets Store has no CLIENT_KEY, which the admin needs to record or seal the change: have Deploy platform copy it in, then try again.",
+  secret_invalid:
+    "That isn't a secret: paste the client secret's value as Entra shows it, without spaces.",
+  teams_bot_invalid:
+    "That isn't a Teams bot: give its app id and tenant as the GUIDs Entra shows, and the day its secret expires.",
+  staff_window_unavailable:
+    "Give the company a sign-in first: its core keeps the staff window there.",
+  staff_window_invalid: "A staff window lasts 1 to 7 days.",
+};
+
+/** A staff change to a client's settings (`useAction`), its refusals worded. */
+export const useSettingsAction = () => useAction(refusals);

@@ -1,0 +1,83 @@
+import { fileURLToPath } from "node:url";
+
+import linguiMacro from "@lingui/babel-plugin-lingui-macro";
+import { getConfig } from "@lingui/conf";
+import { lingui } from "@lingui/vite-plugin";
+import babel from "@rolldown/plugin-babel";
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import { defineConfig } from "vite-plus";
+
+import { localePreload } from "./locale-preload.ts";
+
+// Lingui looks for its config from the working directory, which is the repo
+// root when Vite+ runs this build, so both of its plugins get this app's.
+const linguiConfigPath = fileURLToPath(
+  new URL("lingui.config.ts", import.meta.url)
+);
+const linguiConfig = getConfig({ configPath: linguiConfigPath });
+
+export default defineConfig({
+  plugins: [
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+      // Only a page itself is a file of its own: its component and its
+      // loader together, so what the loader reads with comes with the page,
+      // not with the app, in one file. What stands in its place (failed,
+      // not found, loading) comes with the app: when a page's file can't be
+      // fetched, as after a new release, the error that says so must not
+      // need a file of its own too. What a route checks before it loads
+      // (`validateSearch`, `beforeLoad`) comes with the app too, so it
+      // imports only small modules of plain checks.
+      codeSplittingOptions: { defaultBehavior: [["loader", "component"]] },
+    }),
+    react(),
+    babel({
+      // Lingui's macros turn the English in the code into catalog lookups
+      // first (Babel runs plugins before presets), so the React Compiler
+      // sees the code that runs.
+      // The plugin itself, not its name: Babel would look a name up from
+      // the working directory, the repo root under `vp test`, where only
+      // this app has it installed.
+      plugins: [[linguiMacro, { linguiConfig }]],
+      // Fail the build on anything the React Compiler can't compile,
+      // instead of silently shipping it uncompiled.
+      presets: [reactCompilerPreset({ panicThreshold: "all_errors" })],
+    }),
+    // Compiles a `.po` catalog when the page imports it.
+    lingui({ configPath: linguiConfigPath }),
+    localePreload(),
+    tailwindcss(),
+  ],
+  define: {
+    // The build a page runs, in the error reports it sends: the commit CI
+    // built it from, or `local`.
+    "import.meta.env.VITE_GRASP_BUILD": JSON.stringify(
+      process.env.GITHUB_SHA ?? "local"
+    ),
+  },
+  build: {
+    // Fonts are always files of their own: Vite would inline the smallest
+    // (a few of JetBrains Mono's subsets) as `data:` URLs, which the page's
+    // CSP refuses (font-src is default-src, 'self'; core's security-headers.ts).
+    assetsInlineLimit: (file) => (file.endsWith(".woff2") ? false : undefined),
+  },
+  test: {
+    setupFiles: ["./src/test-setup.ts"],
+  },
+  server: {
+    // Core (wrangler dev) serves the API and Cap'n Web.
+    proxy: {
+      "/api": "http://localhost:8787",
+      "/rpc": { target: "ws://localhost:8787", ws: true },
+      // The document pages run in, with its own policy, and the modules
+      // it runs (core's page-frame.ts).
+      "/page-frame": "http://localhost:8787",
+      "/page-modules": "http://localhost:8787",
+      // The SDK docs, which core's build adds to its static files.
+      "/docs": "http://localhost:8787",
+    },
+  },
+});

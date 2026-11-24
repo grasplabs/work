@@ -1,0 +1,394 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/app-kit/components/empty";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
+import { use, useEffect, useEffectEvent } from "react";
+import type { ComponentType, ReactNode, SVGProps } from "react";
+
+import { ErrorText } from "../error-text.tsx";
+import { notLoadedText } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
+import { InFrame } from "./in-frame.ts";
+import { SiteHeader } from "./site-header.tsx";
+import type { Crumb } from "./site-header.tsx";
+
+/** What wasn't found, as the sidebar draws it: a Lucide icon or one of Grasp's own. */
+type StateIcon = ComponentType<SVGProps<SVGSVGElement>>;
+
+// How every page finds nothing, fails and loads, the same on each: the
+// prototype's not-found pattern (an empty state under the page's crumbs
+// that says why it isn't there), the error with core's reason and its
+// request ID and a way to try again, and skeletons while a slow read
+// comes. Where one stands for the whole page in the frame, it also offers
+// the way to Chat, so nobody is left on it with nowhere to go. Inside the
+// frame each keeps the site header, and with it the way to the sidebar on
+// a phone; outside it (core out of reach, a page such as sign-in) the
+// state fills the window on its own.
+
+/** The page's place: in the frame's <main> under its header, or a window of its own. */
+const Place = ({
+  crumbs,
+  children,
+}: {
+  crumbs: readonly Crumb[];
+  children: ReactNode;
+}) =>
+  use(InFrame) ? (
+    <>
+      <SiteHeader crumbs={crumbs} />
+      <div className="flex flex-1 flex-col">{children}</div>
+    </>
+  ) : (
+    <main className="flex min-h-svh flex-col">{children}</main>
+  );
+
+/**
+ * The level of a state's title: `h1` where it stands for the page, lower
+ * where it sits under the page's own heading (a settings section's `h3`,
+ * under the page's and the section's).
+ */
+type StateHeading = "h1" | "h2" | "h3";
+
+/**
+ * Whether a state offers the way to Chat: where it stands for the page in
+ * the frame. Not under a page's own heading, which leaves the page around
+ * it to go on from, nor outside the frame, where nobody may be signed in.
+ */
+const offersChat = (heading: StateHeading, inFrame: boolean): boolean =>
+  heading === "h1" && inFrame;
+
+/** The way on from a page that isn't there or didn't load: Chat, the product's home. */
+const GoToChat = () => (
+  <Button nativeButton={false} render={<Link to="/" />} variant="outline">
+    <Trans>Go to Chat</Trans>
+  </Button>
+);
+
+/** Not found, in a page that keeps its own frame, such as the Brain with its navigation. */
+export const NotFoundState = ({
+  title,
+  icon: Icon = SearchXIcon,
+  heading: Heading = "h1",
+}: {
+  title?: string;
+  /** What wasn't found, as the sidebar draws it: a workflow's icon, say. */
+  icon?: StateIcon;
+  /** Its title's level: the page's own heading unless it sits in a section that has one. */
+  heading?: StateHeading;
+}) => {
+  const { t } = useLingui();
+  const inFrame = use(InFrame);
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Icon />
+        </EmptyMedia>
+        <EmptyTitle>
+          <Heading>{title ?? t`This page is not here`}</Heading>
+        </EmptyTitle>
+        <EmptyDescription>
+          {/* An address no page has, or a named thing that went away. */}
+          {title === undefined ? (
+            <Trans>
+              The address may be wrong, or the page was moved or removed.
+            </Trans>
+          ) : (
+            <Trans>It may have been renamed or removed.</Trans>
+          )}
+        </EmptyDescription>
+      </EmptyHeader>
+      {offersChat(Heading, inFrame) ? (
+        <EmptyContent>
+          <GoToChat />
+        </EmptyContent>
+      ) : null}
+    </Empty>
+  );
+};
+
+/**
+ * What a page shows when what it names isn't there: an unknown address, or
+ * an App, collection or workflow that was renamed or removed. `crumbs` lead
+ * to it, ending in the page; `title` says what wasn't found.
+ */
+export const NotFound = ({
+  crumbs,
+  title,
+  icon,
+}: {
+  crumbs?: readonly Crumb[];
+  title?: string;
+  icon?: StateIcon;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Place crumbs={crumbs ?? [{ label: t`Not found` }]}>
+      <NotFoundState icon={icon} title={title} />
+    </Place>
+  );
+};
+
+/**
+ * Asks for the page again (its loaders read from core once more), or for
+ * what a section reads itself (`again`), while not already `trying`; or,
+ * to `reload`, loads Grasp anew.
+ */
+const TryAgain = ({
+  trying,
+  reload,
+  again,
+}: {
+  trying: boolean;
+  reload: boolean;
+  again: (() => void) | undefined;
+}) => {
+  const router = useRouter();
+  const { t } = useLingui();
+  return (
+    <Button
+      disabled={trying}
+      onClick={() => {
+        if (reload) {
+          window.location.reload();
+          return;
+        }
+        if (again === undefined) {
+          void router.invalidate();
+          return;
+        }
+        again();
+      }}
+    >
+      <RotateCcwIcon data-icon="inline-start" />
+      {trying ? t`Trying again…` : t`Try again`}
+    </Button>
+  );
+};
+
+/** The error, in a page that keeps its own frame, such as the Brain with its navigation. */
+export const ErrorState = ({
+  reason,
+  title,
+  heading: Heading = "h1",
+  reload = false,
+  again,
+}: {
+  reason: string | undefined;
+  /** What failed; "This page didn't load" without it. */
+  title?: string;
+  /** Its title's level: the page's own heading unless it sits in a section that has one. */
+  heading?: StateHeading;
+  /** Whether trying again loads Grasp anew: the page's file is gone after a new release. */
+  reload?: boolean;
+  /**
+   * Reads again what a section reads itself, rather than the page's
+   * loaders: what Try again does then.
+   */
+  again?: () => void;
+}) => {
+  const { t } = useLingui();
+  const loading = useRouterState({ select: (state) => state.isLoading });
+  // Only the page's own loaders say they are on their way.
+  const trying = again === undefined && loading;
+  const inFrame = use(InFrame);
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <TriangleAlertIcon />
+        </EmptyMedia>
+        <EmptyTitle>
+          <Heading>{title ?? t`This page didn't load`}</Heading>
+        </EmptyTitle>
+        <EmptyDescription>
+          {/* Gone while trying, so the alert is announced again if it fails again. */}
+          {trying ? null : <ErrorText>{reason}</ErrorText>}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <div className="flex flex-wrap justify-center gap-2">
+          <TryAgain again={again} reload={reload} trying={trying} />
+          {offersChat(Heading, inFrame) ? <GoToChat /> : null}
+        </div>
+      </EmptyContent>
+    </Empty>
+  );
+};
+
+/**
+ * What a page shows in place of itself when it didn't load: `reason` says
+ * why, with the request ID to quote where there is one, and the page can
+ * be asked for again.
+ */
+export const PageError = ({
+  crumbs,
+  reason,
+  title,
+  reload,
+}: {
+  crumbs?: readonly Crumb[];
+  reason: string | undefined;
+  title?: string;
+  /** Whether trying again loads Grasp anew. */
+  reload?: boolean;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Place crumbs={crumbs ?? [{ label: title ?? t`This page didn't load` }]}>
+      <ErrorState reason={reason} reload={reload} title={title} />
+    </Place>
+  );
+};
+
+/**
+ * Reads again once core can be reached, while `page` says its read found
+ * core out of reach: the page's loaders, or what a section reads itself
+ * (`again`). At once when a connection is open already (it answered since
+ * the read failed, or the read alone hung), otherwise as soon as the next
+ * one answers. So "can't be reached" stays only while core can't be; a
+ * read that fails again waits for the connection after. A refusal, or
+ * something core doesn't have, is core's answer: never read again.
+ */
+const useReadAgainWhenBack = (
+  page: Loaded<unknown>,
+  again?: () => void
+): void => {
+  const router = useRouter();
+  const core = useCore();
+  const offline = page.state === "offline";
+  // The latest `again`, which a section may make anew at each render.
+  const readAgain = useEffectEvent((): void => {
+    if (again === undefined) {
+      void router.invalidate();
+      return;
+    }
+    again();
+  });
+  useEffect(() => {
+    const stop = offline
+      ? core.onConnected(() => {
+          readAgain();
+        })
+      : undefined;
+    if (offline && core.connected) {
+      readAgain();
+    }
+    return stop;
+  }, [core, offline]);
+};
+
+/**
+ * A page whose own read from core came back without its data: not found
+ * when core has no such thing (`notFound` says what), otherwise the error.
+ * `crumbs` lead to the page, ending in it. Out of reach, it reads again by
+ * itself once core is back (`useReadAgainWhenBack`).
+ */
+export const PageNotLoaded = ({
+  page,
+  crumbs,
+  notFound,
+  icon,
+}: {
+  page: Exclude<Loaded<unknown>, { state: "ready" }>;
+  crumbs: readonly Crumb[];
+  notFound?: string;
+  /** What wasn't found, as the sidebar draws it. */
+  icon?: StateIcon;
+}) => {
+  const { i18n, t } = useLingui();
+  useReadAgainWhenBack(page);
+  if (page.state === "missing") {
+    return (
+      <NotFound
+        crumbs={[...crumbs.slice(0, -1), { label: t`Not found` }]}
+        icon={icon}
+        title={notFound}
+      />
+    );
+  }
+  return <PageError crumbs={crumbs} reason={notLoadedText(page, i18n)} />;
+};
+
+/** `PageNotLoaded` in a page that keeps its own frame, such as the Brain with its navigation. */
+export const NotLoadedState = ({
+  page,
+  notFound,
+  icon,
+  heading,
+  again,
+}: {
+  page: Exclude<Loaded<unknown>, { state: "ready" }>;
+  notFound?: string;
+  icon?: StateIcon;
+  heading?: StateHeading;
+  /**
+   * Reads it again, for a section that reads it itself rather than the
+   * page's loaders: on Try again, and once core is back.
+   */
+  again?: () => void;
+}) => {
+  const { i18n } = useLingui();
+  useReadAgainWhenBack(page, again);
+  return page.state === "missing" ? (
+    <NotFoundState heading={heading} icon={icon} title={notFound} />
+  ) : (
+    <ErrorState
+      again={again}
+      heading={heading}
+      reason={notLoadedText(page, i18n)}
+    />
+  );
+};
+
+/** Skeleton lines where a list or text will be, announced once as loading. */
+export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
+  const { t } = useLingui();
+  return (
+    <output
+      aria-busy="true"
+      aria-label={t`Loading…`}
+      className="flex w-full flex-col gap-2"
+    >
+      {Array.from({ length: lines }, (_, line) => (
+        <Skeleton
+          className={line === lines - 1 ? "h-4 w-2/3" : "h-4 w-full"}
+          key={line}
+        />
+      ))}
+    </output>
+  );
+};
+
+/**
+ * What a page in the frame shows while a slow read comes: the header and
+ * the pages' usual layout (a heading, a line under it, then its content,
+ * from the page's top left) as skeletons. Each page under the shell whose
+ * address alone decides what it reads names it as its `pendingComponent`.
+ * Not the shell itself, so while it asks who is in again after core was
+ * out of reach, what it showed stays; and not a page that reads again as
+ * its search changes (a tab of Activity),
+ * which keeps what it shows rather than turning back into a skeleton.
+ */
+export const PageLoading = () => (
+  <>
+    <SiteHeader crumbs={[]} />
+    <div className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-72 max-w-full" />
+      </div>
+      <LoadingLines lines={4} />
+    </div>
+  </>
+);

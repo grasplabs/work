@@ -1,0 +1,2279 @@
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
+import { valueDepth } from "@grasp-os/shared/value-depth";
+import {
+  workflowResourceErrors,
+  workflowRunsListed,
+} from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowResourceRun,
+  WorkflowRunStatus,
+} from "@grasp-os/shared/workflow-resources";
+import { workflowErrors } from "@grasp-os/shared/workflows";
+import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
+import { namedError } from "@grasp-os/workerflow/errors";
+import type { AttemptLease } from "@grasp-os/workerflow/run";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { requireStillOpen } from "../app-access.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  outboxedWhere,
+  storedEvent,
+} from "../audit-outbox.ts";
+import { currentMembership } from "../auth/auth.ts";
+import type { Acting } from "../auth/identity.ts";
+import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
+import {
+  members,
+  workflowResourceRunControls,
+  workflowResourceRunTerminations,
+  workflowResourceRuns,
+  workflowStartReceipts,
+} from "../db/core/schema.ts";
+import { requireNotStaff } from "../sharing.ts";
+import { loadWorkflowBuild } from "../workflow-builds.ts";
+import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
+import { aiWaitsOf } from "./ai-waits.ts";
+import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
+import type { AttemptCall } from "./attempt-calls.ts";
+import { writeJson } from "./bounded-json.ts";
+import { markResourceRunStopped, runEngine } from "./engine.ts";
+import type { PinnedResourceRun } from "./engine.ts";
+import {
+  countedStep,
+  forIsolate,
+  fromIsolate,
+  modelCallLimitOf,
+  RunHost,
+  settle,
+  stepLimitOf,
+  unadmitted,
+} from "./host.ts";
+import type { AiCalls, RunStep } from "./host.ts";
+import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
+import { callingRunOf } from "./resource-authority.ts";
+import type { CallingRun } from "./resource-authority.ts";
+import {
+  endedRunResultWithheld,
+  requireResourceRunEvidenceReadable,
+} from "./resource-reads.ts";
+import { detailsRemoved, removedText } from "./retention.ts";
+import { tellQueryFollowers } from "./run-changes.ts";
+import { compensationFailedError } from "./runs.ts";
+import type { EngineStatus } from "./runs.ts";
+import {
+  attemptHostMethods,
+  loadSealedIsolate,
+  sealedMainModule,
+} from "./sealed-isolate.ts";
+import type { Settled, StepError } from "./sealed-isolate.ts";
+import {
+  sealedRun,
+  sealedRunFrom,
+  sealedRunModules,
+  sealedRunStart,
+} from "./sealed-run.ts";
+import type {
+  RunModelCalls,
+  HostedResourceRun,
+  HostedSealedRun,
+  SealedRunKind,
+  SentCalls,
+} from "./sealed-run.ts";
+import { snapshotOf } from "./state-snapshots.ts";
+
+// Runs of independent workflows (platform specification 13.1, 14, 24):
+// a start's receipt admits its run, under the receipt's own ID, in the
+// same statement (workflow-starts.ts), for a version with an executable
+// build (workflow-builds.ts). The run is pinned to that version, its
+// manifest and its build, and acts for the person the start acted for,
+// with the parameter values and bindings the start froze; nothing about
+// it is read again from the workflow as it is now.
+//
+// Whose word the row takes, and whose clock, at each transition: one rule,
+// so the row and the engine never disagree about a run in time.
+//
+// - Until the engine has the run (`starting`), core alone knows of it, so
+//   core decides: a terminate ends it cancelled, and a start the engine
+//   never confirmed ends failed (`workflow.start_unconfirmed`, kept as
+//   the row's `failureCode`, as the engine has no error of it), both at
+//   core's time. Each is written before anything is asked of the engine,
+//   and every activation reads the row first (`loadedRun`), so an
+//   instance a late start makes runs nothing of an ended run.
+// - Once the engine has it, the engine decides: the row takes the
+//   engine's notifications, each with the engine's sequence and time
+//   (`projectResourceRun`). Core's repair, which
+//   asks the engine's status, only moves a row off `starting`, never ends
+//   it: the status says nothing of when, and the end's own notification
+//   follows. A terminate asks the engine, and takes the end the engine
+//   confirms in answer, at once.
+// - Readers go by the row and the run retention (`detailsRemoved`),
+//   never by what the engine still holds.
+//
+// Threat model, and how each is closed:
+//
+// - A run with other authority than its start's. Its version, manifest,
+//   build and principal are its row's, written with its receipt and
+//   pinned by the database (migration 0089); its parameters and input are
+//   the receipt's, frozen as the start was admitted. A parameter edit,
+//   a new version or a changed grant after the start changes nothing it
+//   runs; the engine's pin names the same manifest, and every activation
+//   checks the row, the receipt and the pin agree before anything runs.
+// - Code that isn't the version's. The build is loaded from the sealed
+//   manifest the pin names, every hash checked (workflow-builds.ts), and
+//   must be the identity the run was admitted for.
+// - A start lost between its receipt and the engine. The run's row says
+//   `starting` until the engine's first notification; a start sent again
+//   under the same key, and the clock's repair, send it again, which the
+//   engine takes once (its admission is keyed by the run's ID).
+// - Output the workflow doesn't declare. The run's result must match its
+//   version's output schema, by the SDK's own validator, or the run fails
+//   (`workflow.output_invalid`).
+// - A run getting past the quotas. Each run is the
+//   root of its own lineage (quotas.ts), in the same tables, and each of
+//   its steps' attempts is admitted by the same admission, against the
+//   lineage's active time, host calls, age and steps and the client's
+//   shares of attempts running at once: a retry, a restart or a replay
+//   counts on, never afresh. A run its own start admitted is its
+//   lineage's root. A run a trigger starts in another run's lineage (an
+//   event or a stamped message of that run) joins that lineage, one level
+//   deeper, admitted against its levels and descendant runs, but counts
+//   on its workflow's account in it (quotas.ts,
+//   `triggeredAccountClaimed`). A workflow's own
+//   `limits` lower those: `maxSteps` the step limit and `maxModelCalls`
+//   the model requests a lineage may make (the lower of each and the
+//   host's, `loadedRun`, one request per call). A `maxActiveMs` isn't
+//   lowered (generate.ts).
+
+/** The statuses of a run that hasn't ended. */
+export const unended: WorkflowRunStatus[] = ["starting", "running", "paused"];
+
+/** Where the engine says a run is, as its row has it. */
+const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
+  queued: "running",
+  running: "running",
+  waiting: "running",
+  waitingForPause: "running",
+  rollingBack: "running",
+  paused: "paused",
+  complete: "completed",
+  errored: "failed",
+  terminated: "cancelled",
+};
+
+/**
+ * Whose runs a run's isolate is among, for the sandbox's share; and whose
+ * App slots of the attempts running at once its attempts take
+ * (admission.ts): the workflow's own.
+ */
+export const workflowOwnerOf = (workflow: string): string =>
+  `workflow-resource:${workflow}`;
+
+/** What a start's run is admitted as: its pins, from the authorization. */
+export interface RunAdmission {
+  receipt: string;
+  workflowId: string;
+  version: number;
+  manifestHash: string;
+  buildHash: string;
+  principal: string;
+  /** Whether its start was decided in restricted mode: pinned with it. */
+  restricted: boolean;
+  createdAt: number;
+  /**
+   * For a run an event's trigger started in another run's lineage, where
+   * it sits there (quotas.ts, `admitInLineage`). None for the root of its own.
+   */
+  lineage?: { rootRunId: string; depth: number };
+}
+
+/**
+ * The account a start's run is charged to, as SQL (quotas.ts): for a run
+ * a trigger started in another run's lineage, its workflow's account
+ * there, which its start claimed just before (`triggeredAccountClaimed`);
+ * none for a root.
+ */
+const accountOfAdmitted = (run: RunAdmission): SQL =>
+  run.lineage === undefined
+    ? sql`NULL`
+    : triggeredAccountOf(run.lineage.rootRunId, run.workflowId);
+
+/**
+ * The statement that admits a start's run, for the receipt's own batch:
+ * the run's row, only once the receipt was written.
+ */
+export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
+  // Every column by its name: drizzle refuses a selection whose names or
+  // order aren't the table's, so a column another change adds can't take
+  // a value meant for another.
+  db.insert(workflowResourceRuns).select((query) =>
+    query
+      .select({
+        id: sql<string>`${run.receipt}`.as("id"),
+        workflowResourceId: sql<string>`${run.workflowId}`.as("wf"),
+        version: sql<number>`${run.version}`.as("version"),
+        manifestHash: sql<string>`${run.manifestHash}`.as("manifest"),
+        buildHash: sql<string>`${run.buildHash}`.as("build"),
+        principalId: sql<string>`${run.principal}`.as("principal"),
+        status: sql<string>`'starting'`.as("status"),
+        engineSequence: sql<number>`0`.as("sequence"),
+        createdAt: sql<number>`${run.createdAt}`.as("created"),
+        endedAt: sql<null>`NULL`.as("ended"),
+        startAttempts: sql<number>`0`.as("attempts"),
+        nextStartAt: sql<null>`NULL`.as("next_start"),
+        failureCode: sql<null>`NULL`.as("failure"),
+        sharesFencedThrough: sql<number>`0`.as("fenced"),
+        restricted: sql<number>`${run.restricted ? 1 : 0}`.as("restricted"),
+        // NULL on every row until GRA-1589 drops the column: an insert
+        // from a select names every column.
+        parentRunId: sql<null>`NULL`.as("parent"),
+        rootRunId: sql<string | null>`${run.lineage?.rootRunId ?? null}`.as(
+          "root"
+        ),
+        depth: sql<number>`${run.lineage?.depth ?? 0}`.as("depth"),
+        stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
+        stopTakenAt: sql<null>`NULL`.as("stop_taken"),
+        controlGeneration: sql<number>`0`.as("control_generation"),
+        summaryRevision: sql<number>`0`.as("summary_revision"),
+        compensation: sql<null>`NULL`.as("compensation"),
+        accountRunId: sql<string | null>`${accountOfAdmitted(run)}`.as(
+          "account"
+        ),
+        failedTask: sql<null>`NULL`.as("failed_task"),
+        capturedAt: sql<null>`NULL`.as("captured"),
+      })
+      .from(sql`(SELECT 1)`)
+      .where(
+        sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
+      )
+  );
+
+/** A run's row, as core keeps it. */
+export type RunRow = typeof workflowResourceRuns.$inferSelect;
+
+/** Run `id`'s row, if there is one. */
+export const runOf = async (
+  env: Env,
+  id: string
+): Promise<RunRow | undefined> =>
+  await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRuns)
+    .where(eq(workflowResourceRuns.id, id))
+    .get();
+
+/** The input, frozen parameters and state a run reads from its receipt. */
+export const receiptOf = async (env: Env, id: string) =>
+  await drizzle(env.DB)
+    .select({
+      manifestHash: workflowStartReceipts.manifestHash,
+      input: workflowStartReceipts.input,
+      params: workflowStartReceipts.params,
+      stateHash: workflowStartReceipts.stateHash,
+      invokerType: workflowStartReceipts.invokerType,
+      invokerId: workflowStartReceipts.invokerId,
+    })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, id))
+    .get();
+
+const jsonObjectSchema = z.record(z.string(), z.json());
+
+/** A run's audit entry of `action`, its pins named. */
+export const runEntry = (row: RunRow, action: string): AuditEntry => ({
+  actor: { type: "system" },
+  action,
+  target: { type: "workflow_run", id: row.id },
+  detail: {
+    workflow: row.workflowResourceId,
+    version: row.version,
+    manifestHash: row.manifestHash,
+    buildHash: row.buildHash,
+  },
+});
+
+/** `entry`, naming `failureCode` when it records a failed end that has one. */
+const withFailure = (
+  entry: AuditEntry,
+  status: WorkflowRunStatus,
+  failureCode: string | null
+): AuditEntry =>
+  status === "failed" && failureCode !== null
+    ? { ...entry, detail: { ...entry.detail, failureCode } }
+    : entry;
+
+/** A page's control of a run, as its receipt keeps it. */
+export type ResourceControlRow =
+  typeof workflowResourceRunControls.$inferSelect;
+
+/**
+ * Settles `control` of run `run` as `state`, if it is still admitted,
+ * audited as it settles (by the system, naming the person who asked):
+ * while the run hasn't ended, its snapshot moves on with it, in the same
+ * batch, and the run's pages read it again. The page's apply and the
+ * engine's notification can settle the same control at once: only the one
+ * whose update changed the row audits it and moves the snapshot on.
+ */
+export const settleControl = async (
+  env: Env,
+  run: RunRow,
+  control: Pick<ResourceControlRow, "id" | "kind" | "principalId">,
+  state: "applied" | "superseded",
+  /** What else settling it records, once, with its own event. */
+  also?: AuditEntry
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const entry = runEntry(run, `workflow.run.control_${state}`);
+  const event = createAuditEvent(
+    {
+      ...entry,
+      detail: {
+        ...entry.detail,
+        control: control.id,
+        kind: control.kind,
+        onBehalfOf: control.principalId,
+      },
+    },
+    "core"
+  );
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRunControls)
+      .set({ state, settledAt: new Date() })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, control.id),
+          eq(workflowResourceRunControls.state, "admitted")
+        )
+      ),
+    // Stored only if the update just before it changed the row.
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    // And what else it records, with it, once.
+    ...(also === undefined
+      ? []
+      : [outboxedWhere(db, also, storedEvent(event.id))]),
+    db
+      .update(workflowResourceRuns)
+      .set({
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, run.id),
+          inArray(workflowResourceRuns.status, unended),
+          storedEvent(event.id)
+        )
+      ),
+  ]);
+  await tellQueryFollowers(env, run.id);
+};
+
+/**
+ * Settles run `row`'s admitted controls (a page's, page-workflows.ts)
+ * by how it ended: its cancel `applied` when it was cancelled after the
+ * receipt asked its stop, `superseded` when it ended otherwise first (on
+ * its own, or by a builder's terminate before the receipt's stop went
+ * out); a pause or resume still admitted, overtaken by the end. A run
+ * that hasn't ended settles none. A cancel applied is audited as the
+ * page's termination now, once, with its receipt: only a stop the engine
+ * took and that ended the run is recorded as one (`applyCancel`).
+ */
+const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
+  if (unended.includes(row.status)) {
+    return;
+  }
+  const admitted = await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRunControls)
+    .where(
+      and(
+        eq(workflowResourceRunControls.runId, row.id),
+        eq(workflowResourceRunControls.state, "admitted")
+      )
+    );
+  for (const control of admitted) {
+    // Applied only when it was cancelled and this receipt's stop was
+    // asked: one a builder's terminate, say, ended first is superseded.
+    // A stop core asks never rolls back (engine.ts terminates with
+    // `rollback: false`), so one it took ends the run cancelled; a run
+    // that failed in a compensation was rolled back by something else.
+    const applied =
+      control.kind === "cancel" &&
+      row.status === "cancelled" &&
+      control.stopRequestedAt !== null;
+    const entry = runEntry(row, "workflow.run.terminated");
+    // oxlint-disable-next-line no-await-in-loop -- one run's, a few
+    await settleControl(
+      env,
+      row,
+      control,
+      applied ? "applied" : "superseded",
+      applied
+        ? {
+            ...entry,
+            actor: {
+              type: "app",
+              appId: appIdSchema.parse(control.appId),
+              part: "page",
+            },
+            detail: { ...entry.detail, onBehalfOf: control.principalId },
+          }
+        : undefined
+    );
+  }
+};
+
+const endActions: Partial<Record<WorkflowRunStatus, string>> = {
+  completed: "workflow.run.completed",
+  failed: "workflow.run.failed",
+  cancelled: "workflow.run.cancelled",
+};
+
+/** Sends `row`'s start to the engine; throws when the engine didn't take it. */
+const sendStart = async (env: Env, row: RunRow): Promise<void> => {
+  const receipt = await receiptOf(env, row.id);
+  if (receipt?.input === null || receipt?.input === undefined) {
+    // Nothing to start it with: the repair marks it failed.
+    throw new Error(`Run ${row.id}'s receipt holds no input`);
+  }
+  await runEngine(env).createResource({
+    id: row.id,
+    pinned: {
+      workflow: workflowResourceIdSchema.parse(row.workflowResourceId),
+      version: row.version,
+      manifest: row.manifestHash,
+    },
+    input: z.json().parse(JSON.parse(receipt.input)),
+  });
+};
+
+/**
+ * Sends the start of the run receipt `id` admitted to the engine, while
+ * its row says it is still starting: the engine takes a start once, so
+ * sending it again is safe. Answers the run's ID, which every admitted
+ * start has. A start the engine didn't take is left to the repair
+ * (`repairResourceStarts`).
+ */
+export const startResourceRun = async (
+  env: Env,
+  id: string
+): Promise<string> => {
+  const row = await runOf(env, id);
+  if (row === undefined) {
+    throw new Error(`Start ${id} admitted no run`);
+  }
+  if (row.status === "starting") {
+    try {
+      await sendStart(env, row);
+    } catch (error) {
+      log.error("workflow.resource_run_start_failed", {
+        runId: row.id,
+        ...errorFields(error),
+      });
+    }
+  }
+  return row.id;
+};
+
+/** How long a run may say `starting` before the repair sends it again. */
+const repairAfterMs = 60_000;
+/** Most runs one repair looks at. */
+const repairsPerRun = 50;
+/** The most times the repair sends one run's start. */
+const maxStartAttempts = 8;
+/** The longest wait before the repair sends a run's start again. */
+const maxStartBackoffMs = 30 * 60_000;
+/**
+ * How long a run may say `starting` before it is marked failed: well under
+ * the shortest run retention a deployment may set (a day), so the engine
+ * still holds the record or tombstone of any instance a start created, and
+ * a start sent again can't make a second one.
+ */
+const maxStartingMs = 6 * 3_600_000;
+
+/**
+ * The termination core owes the engine for run `id`, which core ended
+ * while it was starting (as `ended`), as a statement for the batch that
+ * ends it: written only if the row did end so, and kept until the engine
+ * confirms (`repairResourceTerminations`). The row, ended, never changes
+ * again, so it can't hold it; and the engine may have made an instance
+ * the row never heard of (a start sent again as core ended it), which
+ * would otherwise run on behind it.
+ */
+const owedTermination = (
+  db: DrizzleD1Database,
+  id: string,
+  ended: "cancelled" | "failed",
+  now: Date
+) =>
+  db
+    .insert(workflowResourceRunTerminations)
+    .select(
+      db
+        .select({
+          runId: workflowResourceRuns.id,
+          attempts: sql<number>`0`.as("attempts"),
+          nextAt: sql<Date>`${now.getTime()}`.as("next_at"),
+        })
+        .from(workflowResourceRuns)
+        .where(
+          and(
+            eq(workflowResourceRuns.id, id),
+            eq(workflowResourceRuns.status, ended)
+          )
+        )
+    )
+    .onConflictDoNothing();
+
+/**
+ * Marks a run that never started failed, from `now`, once: it holds its
+ * workflow's deletion no more, and its receipt's input goes with run
+ * retention like any ended run's. The engine is owed a termination with
+ * it: a start sent again just after the repair asked the engine may have
+ * made an instance since, which reads the row before this commits.
+ */
+const startAbandoned = async (
+  env: Env,
+  row: RunRow,
+  now: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRuns)
+      .set({
+        status: "failed",
+        endedAt: now,
+        failureCode: "workflow.start_unconfirmed",
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, row.id),
+          eq(workflowResourceRuns.status, "starting")
+        )
+      ),
+    outboxedIfChanged(db, {
+      ...runEntry(row, "workflow.run.failed"),
+      detail: {
+        ...runEntry(row, "workflow.run.failed").detail,
+        reason: "workflow.start_unconfirmed",
+        attempts: row.startAttempts,
+      },
+    }),
+    owedTermination(db, row.id, "failed", now),
+  ]);
+  // A page's pause, resume or cancel of it, superseded by the failed end
+  // now, as any end settles them (`settleCancels`): none stays admitted
+  // behind a run that never started until the next repair.
+  const ended = await runOf(env, row.id);
+  if (ended !== undefined) {
+    await settleCancels(env, ended);
+  }
+  await tellQueryFollowers(env, row.id);
+};
+
+/**
+ * One repair of run `row`, still starting: the engine asked first. A run
+ * it has is the engine's from then on: its row moves off `starting`, and
+ * nothing more. Even one the engine says has ended waits for that end's
+ * notification, which carries when it ended (the status doesn't): ended
+ * now, its row would say the repair's time, and never change again.
+ * Otherwise its start is sent again, counted, the next try backing off;
+ * past {@link maxStartAttempts} tries or {@link maxStartingMs}, it is
+ * marked failed.
+ */
+/**
+ * Whether run `runId`'s start may no longer be sent for the App its
+ * receipt names, as a start would be decided now: the App archived, or
+ * its person no longer able to use it, their role and teams read now
+ * (`requireStillOpen`: a draft is its builders' alone). A start no App
+ * made passes.
+ */
+const appRefusesStart = async (env: Env, runId: string): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const receipt = await db
+    .select({
+      app: workflowStartReceipts.invokerId,
+      principal: workflowStartReceipts.principalId,
+    })
+    .from(workflowStartReceipts)
+    .where(
+      and(
+        eq(workflowStartReceipts.id, runId),
+        eq(workflowStartReceipts.invokerType, "app")
+      )
+    )
+    .get();
+  if (receipt === undefined) {
+    return false;
+  }
+  const membership = await db
+    .select({ role: members.role })
+    .from(members)
+    .where(currentMembership(receipt.principal))
+    .get();
+  const role = roleSchema.safeParse(membership?.role);
+  if (!role.success) {
+    return true;
+  }
+  try {
+    // Their teams are read again by the check itself.
+    await requireStillOpen(
+      env,
+      { userId: receipt.principal, role: role.data, teams: [] },
+      appIdSchema.parse(receipt.app)
+    );
+    return false;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return true;
+    }
+    throw error;
+  }
+};
+
+const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
+  const backoff = Math.min(
+    repairAfterMs * 2 ** row.startAttempts,
+    maxStartBackoffMs
+  );
+  const pastStarting = now.getTime() - row.createdAt.getTime() > maxStartingMs;
+  let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
+  try {
+    live = await runEngine(env).status(row.id);
+  } catch (error) {
+    // Past its time to start, the run is abandoned all the same: the
+    // termination that owes the engine (`startAbandoned`) ends any instance
+    // it had, so an engine whose lookup keeps failing never keeps a run
+    // starting, or its workflow undeletable, for good.
+    if (pastStarting) {
+      await startAbandoned(env, row, now);
+      throw error;
+    }
+    // The engine couldn't say: the run may well be there, so it is neither
+    // sent again nor counted, but it yields its place in the queue until
+    // its backoff is over, so runs whose lookup keeps failing never keep
+    // the others from their repair.
+    await drizzle(env.DB)
+      .update(workflowResourceRuns)
+      .set({ nextStartAt: new Date(now.getTime() + backoff) })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, row.id),
+          eq(workflowResourceRuns.status, "starting"),
+          eq(workflowResourceRuns.startAttempts, row.startAttempts)
+        )
+      );
+    throw error;
+  }
+  if (live !== undefined) {
+    await drizzle(env.DB)
+      .update(workflowResourceRuns)
+      .set({
+        status: "running",
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, row.id),
+          eq(workflowResourceRuns.status, "starting")
+        )
+      );
+    await tellQueryFollowers(env, row.id);
+    return;
+  }
+  // Started by an App archived since, or for someone who may no longer
+  // use it: nothing of it starts for them any more (app-status.ts), so the
+  // start is abandoned rather than sent again.
+  if (
+    row.startAttempts >= maxStartAttempts ||
+    pastStarting ||
+    (await appRefusesStart(env, row.id))
+  ) {
+    await startAbandoned(env, row, now);
+    return;
+  }
+  // Claimed by its count, so two repairs never send it at once.
+  const claimed = await drizzle(env.DB)
+    .update(workflowResourceRuns)
+    .set({
+      startAttempts: row.startAttempts + 1,
+      nextStartAt: new Date(now.getTime() + backoff),
+    })
+    .where(
+      and(
+        eq(workflowResourceRuns.id, row.id),
+        eq(workflowResourceRuns.status, "starting"),
+        eq(workflowResourceRuns.startAttempts, row.startAttempts)
+      )
+    )
+    .returning({ id: workflowResourceRuns.id });
+  if (claimed.length > 0) {
+    await sendStart(env, row);
+  }
+};
+
+/**
+ * Repairs runs still `starting` a minute after their receipt (core
+ * stopped between the receipt and the engine, or the engine refused),
+ * those due first: each backs off on its own, so runs that can't start
+ * don't keep newer ones from their turn, and end failed (`repairStart`).
+ * From the clock, at `now`.
+ */
+export const repairResourceStarts = async (
+  env: Env,
+  now: Date = new Date()
+): Promise<void> => {
+  const stale = await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRuns)
+    .where(
+      and(
+        eq(workflowResourceRuns.status, "starting"),
+        lt(
+          workflowResourceRuns.createdAt,
+          new Date(now.getTime() - repairAfterMs)
+        ),
+        or(
+          isNull(workflowResourceRuns.nextStartAt),
+          lte(workflowResourceRuns.nextStartAt, now)
+        )
+      )
+    )
+    .orderBy(
+      asc(
+        sql`coalesce(${workflowResourceRuns.nextStartAt}, ${workflowResourceRuns.createdAt})`
+      )
+    )
+    .limit(repairsPerRun);
+  for (const row of stale) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one start at a time
+      await repairStart(env, row, now);
+    } catch (error) {
+      log.error("workflow.resource_run_repair_failed", {
+        runId: row.id,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/**
+ * How the run's code ended: as it reports it (`reported`), or as the host
+ * failed it (loading it, or stopping it past its CPU time), which is the
+ * host's own word, never held to what the build seals.
+ */
+const settledRun = async (
+  run: () => Promise<unknown>
+): Promise<{ result: Settled<unknown>; reported: boolean }> => {
+  const outer = await settle(run);
+  return outer.ok
+    ? { result: fromIsolate(outer.value), reported: true }
+    : { result: outer, reported: false };
+};
+
+/** What an activation of a run is given by its object (run-object.ts). */
+export interface ResourceRunMemory {
+  /** The engine's lease of a step's attempt, while it holds. */
+  leaseOf: (key: string, attempt: number) => AttemptLease | undefined;
+  /** The model calls it made (`RunModelCalls`). */
+  modelCalls?: RunModelCalls;
+  /** A sealed build's calls tried once that went out (sealed-run.ts). */
+  sentCalls?: SentCalls;
+  /**
+   * Keeps the task whose step's failure the run ends with, as the run's
+   * host names it (`SealedRunKind.endingTask`), before it ends.
+   */
+  keepFailedTask?: (task: string | null) => void;
+  /** Its AI calls in flight and answers no attempt took (host.ts). */
+  aiCalls?: AiCalls;
+  /** Aborts once the activation running the run is over. */
+  over?: AbortSignal;
+  /** Whether the run is still this activation's. */
+  current?: () => boolean;
+  /**
+   * Ends the activation as a process that died would, and runs the run
+   * again from its journal (run-object.ts): an App's test's fault alone
+   * asks it (fixture-runs.ts).
+   */
+  restart?: () => Promise<void>;
+  /**
+   * The run's time (workerflow's `runTime`): the wall clock unless an
+   * App's test moved its clock on. The wall clock without it.
+   */
+  now?: () => number;
+}
+
+/**
+ * When run `row`'s lineage started, in ms: its root's admission, which its
+ * waits are bounded by.
+ */
+const lineageStartOf = async (env: Env, row: RunRow): Promise<number> => {
+  const root = row.rootRunId === null ? row : await runOf(env, row.rootRunId);
+  if (root === undefined) {
+    throw new Error(`Run ${row.id}'s lineage root has no record`);
+  }
+  return root.createdAt.getTime();
+};
+
+/**
+ * What an activation of run `runId` loads, checked against each other and
+ * the pin: its row, its receipt's input and frozen parameters, its
+ * version's sealed build (the identity it was admitted for) and contract.
+ */
+const loadedRun = async (
+  env: Env,
+  pin: PinnedResourceRun,
+  runId: string
+): Promise<{ run: HostedResourceRun; output: string }> => {
+  const row = await runOf(env, runId);
+  if (
+    row === undefined ||
+    row.workflowResourceId !== pin.workflow ||
+    row.version !== pin.version ||
+    row.manifestHash !== pin.manifest
+  ) {
+    throw new Error(`Run ${runId} doesn't match its record`);
+  }
+  if (!unended.includes(row.status)) {
+    throw new Error(`Run ${runId} has ended: ${row.status}`);
+  }
+  const lineageStartedAt = await lineageStartOf(env, row);
+  const receipt = await receiptOf(env, runId);
+  if (
+    receipt?.manifestHash !== pin.manifest ||
+    receipt.input === null ||
+    receipt.params === null
+  ) {
+    throw new Error(`Run ${runId}'s receipt doesn't admit it`);
+  }
+  if (receipt.stateHash === null) {
+    throw new Error(`Run ${runId}'s start froze no state: start it again`);
+  }
+  const state = await snapshotOf(env, receipt.stateHash);
+  if (state === undefined) {
+    throw new Error(`Run ${runId}'s snapshot isn't stored`);
+  }
+  const build = await loadWorkflowBuild(
+    env,
+    pin.workflow,
+    pin.version,
+    pin.manifest
+  );
+  if (build.hash !== row.buildHash) {
+    log.error("workflow.build_corrupt", {
+      workflow: pin.workflow,
+      version: pin.version,
+      what: "run's build",
+    });
+    throw workflowResourceErrors.create("workflow.version_corrupt");
+  }
+  const contract = await versionContract(env, pin.workflow, pin.version);
+  if (contract === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  const modelCalls = modelCallLimitOf(env);
+  const calling = await callingRunOf(env, pin.workflow, runId);
+  if (calling === undefined) {
+    throw new Error(`Run ${runId} has ended`);
+  }
+  return {
+    run: {
+      runId,
+      workflowId: pin.workflow,
+      version: pin.version,
+      principal: row.principalId,
+      input: z.json().parse(JSON.parse(receipt.input)),
+      params: jsonObjectSchema.parse(JSON.parse(receipt.params)),
+      state,
+      createdAt: row.createdAt.getTime(),
+      rootRunId: row.rootRunId ?? runId,
+      depth: row.depth,
+      lineageStartedAt,
+      build,
+      calling,
+      maxModelCalls: modelCalls,
+    },
+    output: JSON.stringify(contract.returns),
+  };
+};
+
+/** What a run's output may take as JSON: a step's result. */
+const maxResultBytes = platformLimits.stepPayloadBytes;
+
+/**
+ * `value` as plain JSON if it is within what a step's result may take:
+ * written once by the bounded writer, so nothing larger is walked, then
+ * read back from that text. `undefined` otherwise.
+ */
+const resultJson = (value: unknown): Json | undefined => {
+  const written = writeJson(value, {
+    maxBytes: maxResultBytes,
+    maxDepth: valueDepth + 2,
+    maxNodes: maxResultBytes,
+  });
+  return written.ok
+    ? z.json().safeParse(JSON.parse(written.text)).data
+    : undefined;
+};
+
+/**
+ * `value`, from the isolate, if it is what the version's output schema
+ * (`descriptor`) takes, by the SDK's own validator, and within what a
+ * step's result may take, before and after its defaults are filled in:
+ * the module's own result, never read past that bound.
+ * `workflow.output_invalid` otherwise.
+ */
+const acceptedOutput = (descriptor: string, value: unknown): unknown => {
+  const bounded = resultJson(value);
+  if (bounded === undefined) {
+    throw workflowResourceErrors.create("workflow.output_invalid");
+  }
+  const checked =
+    schemaFromDescriptor(descriptor)["~standard"].validate(bounded);
+  if ("then" in checked || checked.issues !== undefined) {
+    throw workflowResourceErrors.create("workflow.output_invalid");
+  }
+  // As the validator answered it: its defaults filled in.
+  if (resultJson(checked.value) === undefined) {
+    throw workflowResourceErrors.create("workflow.output_invalid");
+  }
+  return checked.value;
+};
+
+/**
+ * The refusal of a run's end once it may no longer read what it recalled
+ * (`requireResourceRunEvidenceReadable`), as the isolate's errors are
+ * reported; undefined when it may. A passing failure propagates, so the
+ * engine tries the activation again.
+ */
+const evidenceRefusal = async (
+  env: Env,
+  run: CallingRun
+): Promise<StepError | undefined> => {
+  try {
+    await requireResourceRunEvidenceReadable(env, run);
+    return undefined;
+  } catch (error) {
+    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return forIsolate(error);
+  }
+};
+
+/** What one activation of a hosted run runs, and what holds it to account. */
+export interface HostedActivation {
+  readonly run: HostedResourceRun;
+  /** Its version's output schema's descriptor (`acceptedOutput`). */
+  readonly output: string;
+  /** Whose share of the sandbox its isolate takes, and of the attempts running at once. */
+  readonly owner: string;
+  /**
+   * Its lineage, which admits each attempt against the quotas and the
+   * slots of the attempts running at once (quotas.ts); or, for a run an
+   * App's test started, the test's own admission, which counts nothing of
+   * the organization's (fixture-runs.ts), with the host's fixture checks
+   * (`fixture`).
+   */
+  readonly admission:
+    | { readonly run: string; readonly root: string }
+    | "fixture";
+}
+
+/** What one activation of a sealed build's run runs (`sealedActivation`). */
+export interface SealedActivation {
+  readonly run: HostedSealedRun;
+  /** Its version's output schema's descriptor (`acceptedOutput`). */
+  readonly output: string;
+  /** Whose share of the sandbox its isolate takes, and of the attempts running at once. */
+  readonly owner: string;
+  /**
+   * Its lineage, which admits each attempt (quotas.ts); or, for a run an
+   * App's test started, the test's own admission, which counts nothing of
+   * the organization's (`HostedActivation.admission`).
+   */
+  readonly admission: HostedActivation["admission"];
+}
+
+/**
+ * What a run whose code ended as `result` fails with, if it failed: what
+ * its code reported as the build may fail it (a raise it seals, a failure
+ * no catch took, else the platform's: `SealedRunKind.runFailure`); what
+ * the host failed it with (`reported` false) as the host did.
+ */
+const codeFailure = (
+  result: Settled<unknown>,
+  reported: boolean,
+  kind: SealedRunKind | undefined
+): StepError | undefined => {
+  if (result.ok) {
+    return undefined;
+  }
+  return reported && kind !== undefined
+    ? kind.runFailure(result.error)
+    : result.error;
+};
+
+/**
+ * Runs one activation of a sealed build's run, `activation.run`: its
+ * modules (`modules`, its verified build's: `sealedRunModules`) in an
+ * isolate of its own, on the run host as a sealed run (sealed-run.ts),
+ * whose sent calls and model calls its object keeps across activations
+ * (run-object.ts). It fails with the refusal that caught its isolate
+ * tampering; with the failure no catch may take, should its code end
+ * well past one (`SealedRunKind.failureUntaken`); or as its code failed,
+ * a raise only as its build seals it (`SealedRunKind.runFailure`). Its end is the engine's,
+ * recorded and audited as any run's (`projectResourceRun`). Answers the
+ * run's output, once it matches its version's output schema.
+ */
+export const sealedActivation = async (
+  env: Env,
+  engineStep: RunStep,
+  memory: ResourceRunMemory,
+  { run, output, owner, admission }: SealedActivation,
+  modules: () => Record<string, string>
+): Promise<unknown> => {
+  const { runId } = run;
+  const { sentCalls, modelCalls } = memory;
+  if (sentCalls === undefined || modelCalls === undefined) {
+    throw new Error(`Run ${runId} has no object to keep its calls with`);
+  }
+  const step = countedStep(engineStep, stepLimitOf(env));
+  const calls: AttemptCall[] = [];
+  let tampered: StepError | undefined;
+  let kind: SealedRunKind | undefined;
+  const host = new RunHost(
+    env,
+    step,
+    (controls) => {
+      kind = sealedRun(env, run, { sentCalls, modelCalls })(controls);
+      return kind;
+    },
+    {
+      stepFailed: () => {
+        // A resource run keeps no failure report of its own: its end is
+        // the engine's, which the trace reads (resource-run-trace.ts).
+      },
+      attemptCall: trackAttemptCalls(calls),
+      ...(memory.aiCalls === undefined ? {} : { aiCalls: memory.aiCalls }),
+      leaseOf: memory.leaseOf,
+      ...(memory.now === undefined ? {} : { now: memory.now }),
+      tampered: (error) => {
+        tampered ??= error;
+      },
+      waiting: async () => {
+        // A resource run's waits are read from its journal (run-waits.ts).
+        await Promise.resolve();
+      },
+      admitAttempt: async (attempt) =>
+        admission === "fixture"
+          ? await Promise.resolve(unadmitted)
+          : await admitAttempt(env, { ...admission, resource: owner }, attempt),
+    }
+  );
+  const code = loadSealedIsolate(
+    env,
+    {
+      owner,
+      mainModule: sealedMainModule,
+      modules: async () => await Promise.resolve(modules()),
+      attemptHostMethods,
+    },
+    {
+      ...(memory.over === undefined ? {} : { over: memory.over }),
+      ...(memory.current === undefined ? {} : { current: memory.current }),
+    }
+  );
+  const { result, reported } = await settledRun(async () => {
+    try {
+      return await code.run(host, await sealedRunStart(env, run));
+    } catch (error) {
+      return await afterCpuKill(error, calls);
+    }
+  });
+  if (!result.ok && memory.current?.() === false) {
+    throw new Error(`Run ${runId} is no longer this activation's`);
+  }
+  // Ended well past a failure no catch took: its code went on past it.
+  const untaken = result.ok ? kind?.failureUntaken : undefined;
+  // Its output and its failure leave the run, neither once it may no
+  // longer read what it recalled, a tampered run's checked first: the
+  // refusal can hold what the run said.
+  const evidenceRefused = await evidenceRefusal(env, run.calling);
+  const failed =
+    evidenceRefused ??
+    tampered ??
+    untaken ??
+    codeFailure(result, reported, kind);
+  if (failed !== undefined) {
+    // Which task's failure it is, by the very failure its host has
+    // pending, never by what the failure says: kept with the run.
+    memory.keepFailedTask?.(kind?.endingTask(failed) ?? null);
+    throw namedError(failed.name, failed.message, failed.code);
+  }
+  return acceptedOutput(output, result.ok ? result.value : undefined);
+};
+
+/**
+ * `activation` as the run host runs it (`sealedActivation`), whatever
+ * started it: an independent workflow's run, a test run of a draft at
+ * one revision (its calls answered from its start's fixtures, its waits held
+ * short: `calling.candidate`, `maxSleepMs`), or a run an App's test started
+ * (its calls served by its test: `calling.fixture`).
+ */
+export const sealedActivationOf = ({
+  run,
+  output,
+  owner,
+  admission,
+}: HostedActivation): SealedActivation => ({
+  run: sealedRunFrom(run),
+  output,
+  owner,
+  admission,
+});
+
+/**
+ * Runs one activation of `activation.run` (an independent workflow's run,
+ * a run an App's test started, fixture-runs.ts, or a test run of its draft at
+ * one revision, candidate-runs.ts): the build's generated module in an
+ * isolate of its own on the run host (`sealedActivation`).
+ * Answers the run's output, once it matches its version's output schema.
+ */
+export const runActivation = async (
+  env: Env,
+  engineStep: RunStep,
+  memory: ResourceRunMemory,
+  activation: HostedActivation
+): Promise<unknown> => {
+  const sealed = sealedActivationOf(activation);
+  return await sealedActivation(env, engineStep, memory, sealed, () =>
+    sealedRunModules(sealed.run)
+  );
+};
+
+/**
+ * What one activation of run `runId` of an independent workflow runs, as
+ * `pin` names it (`loadedRun`), and whose its attempts are: its
+ * workflow's, counted on its account.
+ */
+export const loadedActivation = async (
+  env: Env,
+  pin: PinnedResourceRun,
+  runId: string
+): Promise<HostedActivation & { admission: { run: string; root: string } }> => {
+  const { run, output } = await loadedRun(env, pin, runId);
+  return {
+    run,
+    output,
+    owner: workflowOwnerOf(pin.workflow),
+    // Counted on its account: its own, as its lineage's root, or its
+    // workflow's account in the lineage a trigger started it in
+    // (quotas.ts, `triggeredAccountClaimed`).
+    admission: { run: runId, root: run.calling.accountRunId },
+  };
+};
+
+/**
+ * Runs (or resumes) one activation of a run of an independent workflow,
+ * as `pin` names it (`loadedActivation`): the build's generated module run
+ * in an isolate of its own against a host of the run (`runActivation`).
+ * Answers the run's output, once it matches its version's output schema.
+ */
+export const runResourceWorkflow = async (
+  env: Env,
+  pin: PinnedResourceRun,
+  runId: string,
+  engineStep: RunStep,
+  memory: ResourceRunMemory
+): Promise<unknown> =>
+  await runActivation(
+    env,
+    engineStep,
+    memory,
+    await loadedActivation(env, pin, runId)
+  );
+
+/** Where the engine has a run's result: what it returned, or why it failed. */
+export const engineResultOf = async (
+  env: Env,
+  id: string
+): Promise<Pick<WorkflowResourceRun, "result" | "error">> => {
+  const live = await runEngine(env).status(id);
+  if (live?.status === "complete") {
+    return { result: live.output };
+  }
+  if (live?.status === "errored") {
+    return {
+      error: { code: live.error.code ?? null, message: live.error.message },
+    };
+  }
+  return {};
+};
+
+/**
+ * Why a run failed as its row keeps it (`failureCode`): core's own reason
+ * for a run the engine never had, or the engine's code once the engine no
+ * longer holds the run.
+ */
+export const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
+  const known = workflowResourceErrors.codeOf({ code });
+  return {
+    code,
+    message:
+      known === undefined
+        ? "The run failed."
+        : workflowResourceErrors.create(known).message,
+  };
+};
+
+/**
+ * What run `row` returned or why it failed: where the engine has its
+ * result, or else why its row says it failed (its `failureCode`: core's
+ * reason, or the engine's code, kept as it ended). Once its retention, as
+ * the deployment has it now, is over, or the sweep removed them from its
+ * receipt (`detailsRemoved`, by the rows alone, as every reader of a run),
+ * nothing of what it returned, and of why it
+ * failed only the code: the engine keeps a run for the retention it was
+ * admitted with, which may since have been shortened, or lengthened.
+ */
+export const resultOf = async (
+  env: Env,
+  row: RunRow
+): Promise<Pick<WorkflowResourceRun, "result" | "error">> => {
+  // The sweep's mark on its receipt too: details removed once stay removed,
+  // whatever the retention says after.
+  const receipt = await drizzle(env.DB)
+    .select({
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
+      stateHash: workflowStartReceipts.stateHash,
+    })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, row.id))
+    .get();
+  const removed = detailsRemoved({
+    endedAt: row.endedAt,
+    detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
+  });
+  // Only what the row's own end says: an output for a completed run, why
+  // for a failed one, nothing for any other, whatever the engine holds (a
+  // late start of a run core ended runs on to a failure of its own). A
+  // completed run past its retention keeps nothing to say: the engine
+  // isn't asked for an output nobody may read.
+  if (
+    (row.status !== "completed" && row.status !== "failed") ||
+    (removed && row.status === "completed")
+  ) {
+    return {};
+  }
+  // Past its retention, a failed run says only the code its row kept, if
+  // any: the engine, which may be unreachable, or no longer hold it, isn't
+  // asked.
+  if (removed) {
+    return { error: { code: row.failureCode, message: removedText } };
+  }
+  // What it returned or why it failed may hold what it recalled, or what
+  // the kept state it started from copied: withheld once the company may
+  // no longer read that, as before it ended, or once the runs that set
+  // that state weren't recorded (`endedRunResultWithheld`, GRA-1996).
+  if (
+    await endedRunResultWithheld(
+      env,
+      {
+        runId: row.id,
+        workflowId: row.workflowResourceId,
+        principal: row.principalId,
+      },
+      receipt?.stateHash ?? null
+    )
+  ) {
+    return {
+      error: {
+        code: "brain.revoked",
+        message: workflowResourceErrors.create("brain.revoked").message,
+      },
+    };
+  }
+  let engine: Pick<WorkflowResourceRun, "result" | "error">;
+  try {
+    engine = await engineResultOf(env, row.id);
+  } catch (error) {
+    // The engine unreachable: a failure its row keeps the code of is read
+    // from the row, a start core abandoned the same as any.
+    if (row.status === "failed" && row.failureCode !== null) {
+      return { error: keptFailureOf(row.failureCode) };
+    }
+    throw error;
+  }
+  if (row.status === "completed") {
+    return engine.result === undefined ? {} : { result: engine.result };
+  }
+  // Core's reason for a run it ended, or the engine's code once the engine
+  // no longer has the run: as the row keeps it.
+  if (row.failureCode !== null && engine.error?.code !== row.failureCode) {
+    return { error: keptFailureOf(row.failureCode) };
+  }
+  return engine.error === undefined ? {} : { error: engine.error };
+};
+
+/**
+ * What run projection `engine` makes of a run's row: its status, its
+ * failure code (`failureCode`, the engine's), and, while it rolls back,
+ * why (`compensating`, kept as JSON), which its snapshot shows as
+ * compensating. A run whose compensation failed is failed, as that,
+ * however it ended (spec 10.7.3), a cancelled run's included.
+ */
+const projectedOf = (
+  engine: EngineStatus,
+  failureCode: string | null
+): {
+  status: (typeof projected)[keyof typeof projected];
+  failure: string | null;
+  compensating: string | undefined;
+} => {
+  const compensationFailed = engine.rollback === "errored";
+  return {
+    status: compensationFailed ? "failed" : projected[engine.status],
+    failure: compensationFailed ? compensationFailedError.code : failureCode,
+    compensating:
+      engine.status === "rollingBack" && engine.compensation !== undefined
+        ? JSON.stringify(engine.compensation)
+        : undefined,
+  };
+};
+
+/**
+ * Makes run `id`'s row say where the engine says it is: a notification no
+ * newer than the last the row took changes nothing, and an ended run never
+ * changes again. Its end is audited with the change, once. A failed end
+ * keeps the engine's error code (`failureCode`), and the task whose step
+ * it failed at (`failedTask`, read only for the end it projects), which
+ * outlive the engine's record of the
+ * run.
+ */
+export const projectResourceRun = async (
+  env: Env,
+  id: string,
+  engine: EngineStatus,
+  failureCode: string | null = null,
+  failedTask?: () => Promise<string | null>
+): Promise<void> => {
+  const row = await runOf(env, id);
+  if (row === undefined) {
+    return;
+  }
+  if (!unended.includes(row.status)) {
+    // Told again, as the engine tells an end until core takes it: what
+    // follows an end is done again, so none of it is lost to a failure.
+    await tellOfferedRunEnd(env, row);
+    return;
+  }
+  const { status, failure, compensating } = projectedOf(engine, failureCode);
+  const task =
+    status === "failed" && failedTask !== undefined ? await failedTask() : null;
+  const ended = !unended.includes(status);
+  const action = endActions[status];
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRuns)
+      .set({
+        status,
+        // Every status the engine takes: a wait opened or closed is one,
+        // and a page's snapshot shows its waits (run-waits.ts).
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+        ...(engine.sequence === undefined
+          ? {}
+          : { engineSequence: engine.sequence }),
+        ...(ended ? { endedAt: new Date(engine.at) } : {}),
+        ...(status === "failed" && failure !== null
+          ? { failureCode: failure }
+          : {}),
+        ...(task === null ? {} : { failedTask: task }),
+        ...(compensating === undefined ? {} : { compensation: compensating }),
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, id),
+          inArray(workflowResourceRuns.status, unended),
+          engine.sequence === undefined
+            ? undefined
+            : lt(workflowResourceRuns.engineSequence, engine.sequence)
+        )
+      ),
+    // A failure names its code, as the run keeps it: a run that failed for
+    // packages revoked, say, says so in the audit log.
+    ...(action === undefined
+      ? []
+      : [
+          outboxedIfChanged(
+            db,
+            withFailure(runEntry(row, action), status, failure)
+          ),
+        ]),
+  ]);
+  // A page's controls of it, settled by how it ended.
+  const now = ended ? await runOf(env, id) : undefined;
+  if (now !== undefined) {
+    await settleCancels(env, now);
+  }
+  // Every status the engine takes is a revision of the run's snapshot.
+  await tellQueryFollowers(env, id);
+  // Last: a failure here has the engine tell the end again, which repeats
+  // only this (above), never skipping what came before it.
+  if (now !== undefined) {
+    // Where a press on Stephen's card started it: told once, best effort.
+    await tellOfferedRunEnd(env, now);
+  }
+};
+
+/** The most runs `listResourceRuns` answers: the newest. */
+const runsListed = workflowRunsListed;
+
+/**
+ * Workflow `id`'s runs, newest first, the latest {@link runsListed}, for
+ * anyone with a role, as `resourceRunFor` decides each: its builders (admins
+ * among them) see every run, a user only their own, and learns nothing of
+ * others'. Never what a run returned or why it failed: those are
+ * `resourceRunFor`'s, under its own rule for who sees them.
+ */
+export const listResourceRuns = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<WorkflowResourceRun[]> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const runs = workflowResourceRuns;
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(runs)
+    .where(
+      and(
+        eq(runs.workflowResourceId, workflow.id),
+        workflow.role === "builder"
+          ? undefined
+          : eq(runs.principalId, by.userId)
+      )
+    )
+    .orderBy(desc(runs.createdAt), desc(runs.id))
+    .limit(runsListed);
+  // A running run may wait for its AI provider (ai-waits.ts).
+  const waits = await aiWaitsOf(
+    drizzle(env.DB),
+    rows.flatMap(({ id: run, status }) => (status === "running" ? [run] : []))
+  );
+  return rows.map((row) => {
+    const aiProvider = waits.get(row.id);
+    return {
+      id: row.id,
+      workflowId: row.workflowResourceId,
+      version: row.version,
+      manifestHash: row.manifestHash,
+      buildHash: row.buildHash,
+      principal: row.principalId,
+      status: row.status,
+      ...(aiProvider === undefined ? {} : { aiProvider }),
+      createdAt: row.createdAt.toISOString(),
+      endedAt: row.endedAt?.toISOString() ?? null,
+    };
+  });
+};
+
+/**
+ * Run `runId` of workflow `id`, for `by`, who must have a role in it. What
+ * it returned or why it failed only for the person it acts for and the
+ * organization's admins: it can hold what the run read for them.
+ */
+export const resourceRunFor = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  runId: unknown
+): Promise<WorkflowResourceRun> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const row = typeof runId === "string" ? await runOf(env, runId) : undefined;
+  if (row?.workflowResourceId !== workflow.id) {
+    throw workflowResourceErrors.create("workflow.run_unavailable");
+  }
+  // Someone else's run, only to its workflow's builders (admins among
+  // them): a user sees their own, and learns nothing of others'.
+  if (row.principalId !== by.userId) {
+    try {
+      await requireWorkflowRole(env, by, workflow.id, "builder");
+    } catch (error) {
+      if (!isExpectedError(error)) {
+        throw error;
+      }
+      throw workflowResourceErrors.create("workflow.run_unavailable");
+    }
+  }
+  // A running run may wait for its AI provider (ai-waits.ts).
+  const waits = await aiWaitsOf(
+    drizzle(env.DB),
+    row.status === "running" ? [row.id] : []
+  );
+  const aiProvider = waits.get(row.id);
+  // How many kept keys it started without, as its receipt froze it.
+  const receipt = await drizzle(env.DB)
+    .select({ stateWithheld: workflowStartReceipts.stateWithheld })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, row.id))
+    .get();
+  const stateWithheld = receipt?.stateWithheld ?? null;
+  const run: WorkflowResourceRun = {
+    id: row.id,
+    workflowId: row.workflowResourceId,
+    version: row.version,
+    manifestHash: row.manifestHash,
+    buildHash: row.buildHash,
+    principal: row.principalId,
+    status: row.status,
+    ...(aiProvider === undefined ? {} : { aiProvider }),
+    ...(stateWithheld === null ? {} : { stateWithheld }),
+    createdAt: row.createdAt.toISOString(),
+    endedAt: row.endedAt?.toISOString() ?? null,
+  };
+  const seesDetails = by.userId === row.principalId || isAdmin(by.role);
+  return seesDetails && row.endedAt !== null
+    ? { ...run, ...(await resultOf(env, row)) }
+    : run;
+};
+
+/** `actor`'s terminate of run `row`, as audited, the row then `status`. */
+const terminatedEntry = (
+  actor: AuditActor,
+  row: RunRow,
+  status: WorkflowRunStatus
+): AuditEntry => ({
+  ...runEntry(row, "workflow.run.terminated"),
+  actor,
+  detail: { ...runEntry(row, "workflow.run.terminated").detail, status },
+});
+
+/**
+ * Cancels run `row` while it is still `starting`, the engine yet to
+ * confirm it, so core's to end: its row first, audited with it, before
+ * anything is asked of the engine. Whether it was still starting.
+ */
+const cancelStarting = async (
+  env: Env,
+  actor: AuditActor,
+  row: RunRow,
+  audited: boolean
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const now = new Date();
+  const [cancelled] = await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRuns)
+      .set({
+        status: "cancelled",
+        endedAt: now,
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, row.id),
+          eq(workflowResourceRuns.status, "starting")
+        )
+      )
+      .returning({ id: workflowResourceRuns.id }),
+    ...(audited
+      ? [outboxedIfChanged(db, terminatedEntry(actor, row, "cancelled"))]
+      : []),
+    owedTermination(db, row.id, "cancelled", now),
+  ]);
+  if (cancelled.length > 0) {
+    // A page's cancel of it settled, and audited, by how it ended.
+    const ended = await runOf(env, row.id);
+    if (ended !== undefined) {
+      await settleCancels(env, ended);
+    }
+    await tellQueryFollowers(env, row.id);
+  }
+  return cancelled.length > 0;
+};
+
+/**
+ * Tells the engine to terminate run `runId`, which core cancelled while it
+ * was starting, and settles what it owed: once the engine confirms (it
+ * terminates an instance it has, and has nothing to do for one it hasn't
+ * or that has ended), the termination is no longer kept. Throws as the
+ * engine refuses, the termination kept for the repair.
+ */
+const sendTermination = async (env: Env, runId: string): Promise<void> => {
+  await runEngine(env).terminate(runId);
+  await drizzle(env.DB)
+    .delete(workflowResourceRunTerminations)
+    .where(eq(workflowResourceRunTerminations.runId, runId));
+};
+
+/**
+ * Stops run `row`, which hasn't ended, as `actor` asks, audited under
+ * them: whoever asks has been decided already (`terminateResourceRun`, a
+ * builder's; a page's cancel, page-workflows.ts, the run's person's).
+ * See `terminateResourceRun` for how a run still starting is ended.
+ */
+const stopResourceRun = async (
+  env: Env,
+  actor: AuditActor,
+  row: RunRow,
+  /**
+   * Whether this stop audits itself: a page's cancel is audited once, as
+   * its receipt settles (`settleCancels`), however often it is applied.
+   */
+  audited = true
+): Promise<"taken" | "rolling_back"> => {
+  if (
+    row.status === "starting" &&
+    (await cancelStarting(env, actor, row, audited))
+  ) {
+    try {
+      await sendTermination(env, row.id);
+    } catch (error) {
+      // Cancelled all the same: the repair tells the engine.
+      log.error("workflow.resource_run_terminate_failed", {
+        runId: row.id,
+        ...errorFields(error),
+      });
+    }
+    return "taken";
+  }
+  // First, in the run's object, the stop's record (run-object.ts,
+  // `markStopped`): from then on no attempt of the run holds, so none of
+  // its calls is taken, and should the engine refuse the terminate below,
+  // or this request die, the object terminates the run itself on its next
+  // alarm, seconds on, with no repair to wait for. A run rolling back
+  // isn't cut short (spec 10.7.3): nothing is marked or terminated, so
+  // nothing is audited as terminated.
+  const marked = await markResourceRunStopped(env, row.id, actor);
+  if (marked === "rolling_back") {
+    return "rolling_back";
+  }
+  try {
+    if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
+      return "rolling_back";
+    }
+  } catch (error) {
+    // Unmarked (the engine has no journal of it), nothing will stop it:
+    // the caller hears so.
+    if (marked !== "marked") {
+      throw error;
+    }
+    log.error("workflow.resource_run_terminate_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+    // Nothing terminated yet: the stop is audited as asked, under whoever
+    // asked, and the termination as it happens, when the object ends the
+    // run and its end is told (`workflow.run.cancelled`). A page's
+    // cancel is audited as its receipt settles.
+    if (audited) {
+      const db = drizzle(env.DB);
+      await auditedBatch(env, db, [
+        outboxed(db, {
+          ...runEntry(row, "workflow.run.stop_requested"),
+          actor,
+        }),
+      ]);
+    }
+    return "taken";
+  }
+  // The engine took the terminate: audited below whatever this lookup
+  // does, the row left to the end's notification if it can't be read.
+  let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
+  try {
+    live = await runEngine(env).status(row.id);
+  } catch (error) {
+    log.error("workflow.resource_run_status_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+  }
+  if (live?.status === "terminated") {
+    // The end the engine confirms in answer to this, at once (no
+    // sequence): an ended run never changes again, so no later
+    // notification can be newer. A run that ended on its own first is
+    // left to its end's notification, which carries when it ended: the
+    // status doesn't, and taken now its row would say this call's time.
+    // With how its rollback went, if it rolled back: a cancellation whose
+    // compensation failed ends failed (spec 10.7.3), and the late end's
+    // notification can't change an ended row.
+    await projectResourceRun(env, row.id, {
+      status: live.status,
+      at: Date.now(),
+      ...(live.rollback === undefined
+        ? {}
+        : { rollback: live.rollback.status }),
+    });
+  }
+  if (!audited) {
+    return "taken";
+  }
+  const now = await runOf(env, row.id);
+  // The engine took it: audited under whoever asked, with the status the
+  // row has now. The engine tells the run's projection of the termination
+  // as it happens, so the row may say cancelled before the statement above
+  // does.
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
+  ]);
+  return "taken";
+};
+
+/**
+ * Stops run `row` as `stopResourceRun` does, refusing
+ * (`workflow.control_refused`) a run the engine is rolling back: a
+ * builder's stop or an archive's, which aren't left for a repair.
+ */
+const stopOrRefuse = async (
+  env: Env,
+  actor: AuditActor,
+  row: RunRow
+): Promise<void> => {
+  if ((await stopResourceRun(env, actor, row)) === "rolling_back") {
+    throw workflowErrors.create("workflow.control_refused");
+  }
+};
+
+/**
+ * How long a stop an archive asked for is left to the engine before a
+ * later pass asks again: a crash between asking and sending never leaves
+ * the run unstopped.
+ */
+export const stopRetryMs = 5 * 60 * 1000;
+
+/**
+ * That run's stop is due, as SQL: never asked, or asked longer than
+ * `stopRetryMs` ago and still not ended.
+ */
+const stopDue = (): SQL =>
+  sql`(${workflowResourceRuns.stopRequestedAt} IS NULL OR ${workflowResourceRuns.stopRequestedAt} <= ${Date.now() - stopRetryMs})`;
+
+/**
+ * Stops the unfinished runs of independent workflows that App `app`'s
+ * pages or code started (their start receipt names the App as invoker),
+ * created by `before`, while the App is archived (app-status.ts): at most
+ * `limit`, oldest first, each as a builder's stop is, audited under
+ * `actor`. A stop that fails is logged and left to the next pass. Answers
+ * how many it asked to stop, and how many of those failed.
+ */
+export const stopRunsStartedBy = async (
+  env: Env,
+  actor: AuditActor,
+  app: string,
+  before: Date,
+  limit: number
+): Promise<{ asked: number; failed: string[] }> => {
+  if (limit <= 0) {
+    return { asked: 0, failed: [] };
+  }
+  const rows = await drizzle(env.DB)
+    .select({ run: workflowResourceRuns })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(
+      and(
+        eq(workflowStartReceipts.invokerType, "app"),
+        eq(workflowStartReceipts.invokerId, app),
+        inArray(workflowResourceRuns.status, unended),
+        stopDue(),
+        lte(workflowResourceRuns.createdAt, before),
+        sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${app} AND apps.archived_at IS NOT NULL)`
+      )
+    )
+    .orderBy(asc(workflowResourceRuns.createdAt), asc(workflowResourceRuns.id))
+    .limit(limit);
+  const failed = await Promise.all(
+    rows.map(async ({ run }): Promise<boolean> => {
+      const db = drizzle(env.DB);
+      // Claimed first: a later pass, or another archive's, never asks it
+      // again, nor audits a second stop, while the engine ends it.
+      const claimedAt = new Date();
+      const [claimed] = await db
+        .update(workflowResourceRuns)
+        .set({ stopRequestedAt: claimedAt })
+        .where(and(eq(workflowResourceRuns.id, run.id), stopDue()))
+        .returning({ id: workflowResourceRuns.id });
+      if (claimed === undefined) {
+        return false;
+      }
+      try {
+        await stopOrRefuse(env, actor, run);
+        return false;
+      } catch (error) {
+        log.error("workflow.archive_stop_failed", {
+          runId: run.id,
+          appId: app,
+          ...errorFields(error),
+        });
+        // Asked again by the next pass: only this claim is let go of, never
+        // a later pass's that took the run since.
+        await db
+          .update(workflowResourceRuns)
+          .set({ stopRequestedAt: null })
+          .where(
+            and(
+              eq(workflowResourceRuns.id, run.id),
+              eq(workflowResourceRuns.stopRequestedAt, claimedAt)
+            )
+          );
+        return true;
+      }
+    })
+  );
+  return {
+    asked: rows.length,
+    failed: rows.flatMap(({ run }, at) =>
+      failed[at] === true ? [run.id] : []
+    ),
+  };
+};
+
+/**
+ * Stops the unfinished runs of independent workflows that ran for
+ * `personId` (their principal), as an admin erased them (core's
+ * person-erasure.ts): each as a builder's stop is, audited under `actor`,
+ * claimed first so no pass asks it twice. A stop that fails is logged and
+ * left to the next pass. Answers how many it asked to stop, and how many
+ * unfinished runs of theirs no stop was taken for yet (`stopTakenAt`):
+ * never asked, or claimed by a pass that may have died before sending it,
+ * which a pass asks again once the claim is old (`stopDue`).
+ */
+export const stopRunsFor = async (
+  env: Env,
+  actor: AuditActor,
+  personId: string
+): Promise<{ asked: number; unasked: number }> => {
+  const db = drizzle(env.DB);
+  const ofTheirs = and(
+    eq(workflowResourceRuns.principalId, personId),
+    inArray(workflowResourceRuns.status, unended)
+  );
+  const rows = await db
+    .select()
+    .from(workflowResourceRuns)
+    .where(and(ofTheirs, stopDue()))
+    .orderBy(asc(workflowResourceRuns.createdAt), asc(workflowResourceRuns.id));
+  let asked = 0;
+  for (const run of rows) {
+    const claimedAt = new Date();
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    const [claimed] = await db
+      .update(workflowResourceRuns)
+      .set({ stopRequestedAt: claimedAt })
+      .where(and(eq(workflowResourceRuns.id, run.id), stopDue()))
+      .returning({ id: workflowResourceRuns.id });
+    if (claimed === undefined) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await stopResourceRun(env, actor, run);
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await db
+        .update(workflowResourceRuns)
+        .set({ stopTakenAt: new Date() })
+        .where(eq(workflowResourceRuns.id, run.id));
+      asked += 1;
+    } catch (error) {
+      log.error("workflow.erasure_stop_failed", {
+        runId: run.id,
+        ...errorFields(error),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await db
+        .update(workflowResourceRuns)
+        .set({ stopRequestedAt: null })
+        .where(
+          and(
+            eq(workflowResourceRuns.id, run.id),
+            eq(workflowResourceRuns.stopRequestedAt, claimedAt)
+          )
+        );
+    }
+  }
+  const [left] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(workflowResourceRuns)
+    .where(and(ofTheirs, isNull(workflowResourceRuns.stopTakenAt)));
+  return { asked, unasked: left?.count ?? 0 };
+};
+
+/**
+ * That an independent run App `app` started still has a stop claimed for
+ * it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
+ * whose sender died between the claim and the send. Read by the statement
+ * it is part of, so a write can wait for these where it lands
+ * (app-removal.ts).
+ */
+export const stopsUnsettledSql = (app: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} INNER JOIN ${workflowStartReceipts} ON ${workflowStartReceipts.id} = ${workflowResourceRuns.id} WHERE ${and(
+    eq(workflowStartReceipts.invokerType, "app"),
+    eq(workflowStartReceipts.invokerId, app),
+    inArray(workflowResourceRuns.status, unended),
+    isNotNull(workflowResourceRuns.stopRequestedAt)
+  )})`;
+
+/**
+ * Whether App `app` has a stop unsettled (`stopsUnsettledSql`). A restore
+ * waits for these (app-status.ts).
+ */
+export const stopsUnsettled = async (
+  env: Env,
+  app: string
+): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ unsettled: number }>(
+    sql`SELECT ${stopsUnsettledSql(app)} AS unsettled`
+  );
+  return row?.unsettled === 1;
+};
+
+/**
+ * Asks the engine to stop run `runId` for cancel receipt `receiptId` (a
+ * page's, page-workflows.ts), as `actor`, unless it ended already,
+ * then settles the receipt once the run has ended (`settleCancels`); one
+ * whose end isn't told yet stays admitted until it is. Stopping is
+ * idempotent, so a cancel whose answer was lost, or whose stop failed, is
+ * applied again.
+ */
+export const applyCancel = async (
+  env: Env,
+  receipt: {
+    readonly id: string;
+    readonly appId: string;
+    readonly principalId: string;
+  },
+  runId: string
+): Promise<void> => {
+  const before = await runOf(env, runId);
+  if (before !== undefined && unended.includes(before.status)) {
+    const actor: AuditActor = {
+      type: "app",
+      appId: appIdSchema.parse(receipt.appId),
+      part: "page",
+    };
+    // Noted as asked before the engine is, so the run's end, which the
+    // engine may tell before this call goes on, finds the receipt asked
+    // and settles it applied (`settleCancels`), audited then, once.
+    const asked = new Date();
+    const db = drizzle(env.DB);
+    await db
+      .update(workflowResourceRunControls)
+      .set({ stopRequestedAt: asked })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, receipt.id),
+          eq(workflowResourceRunControls.state, "admitted"),
+          isNull(workflowResourceRunControls.stopRequestedAt)
+        )
+      );
+    // A run the engine rolls back isn't cut short (spec 10.7.3), though the
+    // cancel was admitted on what the engine said before its rollback
+    // began: nothing is recorded as terminated now, and the run's end
+    // settles the receipt, superseded unless it ended cancelled.
+    await stopResourceRun(env, actor, before, false);
+  }
+  const after = await runOf(env, runId);
+  // Still running (the engine took the stop, its end not yet told): left
+  // admitted, settled as the run's end is projected (`settleCancels`).
+  if (after === undefined || unended.includes(after.status)) {
+    return;
+  }
+  await settleCancels(env, after);
+};
+
+/** Whether the engine's `live` status is what a control of `kind` asked. */
+const holdsFor = (
+  kind: ResourceControlRow["kind"],
+  live: InstanceStatus
+): boolean =>
+  kind === "pause"
+    ? live.status === "paused"
+    : kind === "resume" &&
+      live.status !== "paused" &&
+      live.status !== "waitingForPause";
+
+/** Where the engine has a run, with the newest control generation it took. */
+export interface ResourceControlState {
+  readonly status: InstanceStatus;
+  readonly fence: number | null;
+}
+
+/**
+ * Settles run `runId`'s admitted pauses and resumes from `state`, the
+ * engine's own word on which controls reached it, read together with its
+ * status, never from a status alone: one of a generation the engine hasn't
+ * taken yet (above `fence`) stays as it is; one of the generation it took
+ * last is applied once the run is where it asked; one older was overtaken
+ * by a newer control, and is superseded.
+ */
+export const settleResourceControls = async (
+  env: Env,
+  runId: string,
+  state: ResourceControlState | undefined
+): Promise<void> => {
+  const fence = state?.fence ?? null;
+  if (state === undefined || fence === null) {
+    return;
+  }
+  const admitted = await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRunControls)
+    .where(
+      and(
+        eq(workflowResourceRunControls.runId, runId),
+        eq(workflowResourceRunControls.state, "admitted"),
+        inArray(workflowResourceRunControls.kind, ["pause", "resume"])
+      )
+    );
+  const run = admitted.length === 0 ? undefined : await runOf(env, runId);
+  if (run === undefined) {
+    return;
+  }
+  for (const control of admitted) {
+    if (control.generation < fence) {
+      // oxlint-disable-next-line no-await-in-loop -- one run's, a few
+      await settleControl(env, run, control, "superseded");
+    } else if (
+      control.generation === fence &&
+      holdsFor(control.kind, state.status)
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one run's, a few
+      await settleControl(env, run, control, "applied");
+    }
+  }
+};
+
+/**
+ * Sends an admitted pause or resume (a page's, page-workflows.ts) to
+ * the engine with its generation, which the engine takes only if no newer
+ * control reached the run (engine.ts), and settles it from what the
+ * engine then says it took (`settleResourceControls`). One a newer control
+ * overtook in core, or of a run that has ended, is superseded unsent. A
+ * run the engine has no record of yet is still starting: the receipt
+ * stays admitted, and the repair sends it again once it has started. One
+ * whose run the engine has ended is settled by that end's projection.
+ */
+export const applyResourceControl = async (
+  env: Env,
+  control: ResourceControlRow
+): Promise<void> => {
+  if (control.state !== "admitted" || control.kind === "cancel") {
+    return;
+  }
+  const row = await runOf(env, control.runId);
+  if (row === undefined) {
+    return;
+  }
+  if (
+    control.generation < row.controlGeneration ||
+    !unended.includes(row.status)
+  ) {
+    await settleControl(env, row, control, "superseded");
+    return;
+  }
+  const engine = runEngine(env);
+  if ((await engine.status(row.id)) === undefined) {
+    return;
+  }
+  await (control.kind === "pause"
+    ? engine.pause(row.id, control.generation)
+    : engine.resume(row.id, control.generation));
+  await settleResourceControls(env, row.id, await engine.controlState(row.id));
+};
+
+/**
+ * How long a page's cancel stays admitted before the repair first applies
+ * it (its `next_at` as written, page-workflows.ts): the request that
+ * admitted it applies it at once, unless its stop failed.
+ */
+export const cancelRepairAfterMs = 60_000;
+
+/** Most admitted cancels one repair applies. */
+const cancelsPerRepair = 20;
+
+/**
+ * Applies again the page controls left admitted (a cancel whose stop
+ * failed, a pause or resume the engine hasn't confirmed, or whose request
+ * ended first), those due first, as the App asked them:
+ * each claimed by its count and backing off on its own as its stop keeps
+ * failing, so one the engine always refuses never crowds out newer ones.
+ * Never given up, as an owed termination isn't: its run is left to end.
+ */
+const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
+  const db = drizzle(env.DB);
+  const due = await db
+    .select()
+    .from(workflowResourceRunControls)
+    .where(
+      and(
+        eq(workflowResourceRunControls.state, "admitted"),
+        lte(workflowResourceRunControls.nextAt, now)
+      )
+    )
+    .orderBy(asc(workflowResourceRunControls.nextAt))
+    .limit(cancelsPerRepair);
+  for (const control of due) {
+    const { id, runId, appId, principalId, attempts } = control;
+    const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
+    // oxlint-disable-next-line no-await-in-loop -- one at a time
+    const claimed = await db
+      .update(workflowResourceRunControls)
+      .set({
+        attempts: attempts + 1,
+        nextAt: new Date(now.getTime() + backoff),
+      })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, id),
+          eq(workflowResourceRunControls.state, "admitted"),
+          eq(workflowResourceRunControls.attempts, attempts)
+        )
+      )
+      .returning({ id: workflowResourceRunControls.id });
+    if (claimed.length === 0) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await (control.kind === "cancel"
+        ? applyCancel(env, { id, appId, principalId }, runId)
+        : applyResourceControl(env, control));
+    } catch (error) {
+      log.error("workflow.resource_run_control_failed", {
+        runId,
+        kind: control.kind,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/** Most owed terminations one repair sends. */
+const terminationsPerRepair = 50;
+
+/**
+ * Applies the page cancels left admitted (`repairAdmittedCancels`), then
+ * sends again the terminations core still owes the engine, those due
+ * first, each backing off on its own as the engine refuses it (claimed by
+ * its count, so two repairs never send one at once). Never given up: an
+ * instance made before its cancel would otherwise keep its lease, or
+ * sleep on to its alarm. From the clock, at `now`.
+ */
+export const repairResourceTerminations = async (
+  env: Env,
+  now: Date = new Date()
+): Promise<void> => {
+  await repairAdmittedCancels(env, now);
+  const db = drizzle(env.DB);
+  const owed = await db
+    .select()
+    .from(workflowResourceRunTerminations)
+    .where(lte(workflowResourceRunTerminations.nextAt, now))
+    .orderBy(asc(workflowResourceRunTerminations.nextAt))
+    .limit(terminationsPerRepair);
+  for (const { runId, attempts } of owed) {
+    const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
+    // oxlint-disable-next-line no-await-in-loop -- one at a time
+    const claimed = await db
+      .update(workflowResourceRunTerminations)
+      .set({
+        attempts: attempts + 1,
+        nextAt: new Date(now.getTime() + backoff),
+      })
+      .where(
+        and(
+          eq(workflowResourceRunTerminations.runId, runId),
+          eq(workflowResourceRunTerminations.attempts, attempts)
+        )
+      )
+      .returning({ runId: workflowResourceRunTerminations.runId });
+    if (claimed.length === 0) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await sendTermination(env, runId);
+    } catch (error) {
+      log.error("workflow.resource_run_terminate_failed", {
+        runId,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/**
+ * Stops run `runId` of workflow `id` for `by`, a builder of it (an admin
+ * builds every workflow) who isn't Grasp staff, audited under `by`. The
+ * way to end a run that waits long, or never started, before the workflow
+ * can be deleted. `workflow.run_ended` for a run that has ended already.
+ *
+ * A run still starting is core's to end: its row ends cancelled first,
+ * and only then is the engine told, so a start sent before the cancel
+ * that makes an instance since is terminated, and one that makes it later
+ * still runs nothing: each activation reads the row first (`loadedRun`).
+ * The engine told first, a start between its answer and the row's write
+ * would run on behind a row about to say cancelled. The termination the
+ * engine is told is kept with the cancel until it confirms, the repair
+ * sending it again (`repairResourceTerminations`), so an instance made
+ * before the cancel never keeps its lease or alarm. A run the engine has
+ * is the engine's to end: it terminates it, and the row takes the end the
+ * engine confirms. Its stop is marked in its object first
+ * (`stopResourceRun`): its calls are refused from then on, and should the
+ * engine refuse the terminate, the object terminates it within seconds,
+ * so the stop is answered and never lost.
+ */
+export const terminateResourceRun = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  runId: unknown
+): Promise<WorkflowResourceRun> => {
+  requireNotStaff(by);
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const row = typeof runId === "string" ? await runOf(env, runId) : undefined;
+  if (row?.workflowResourceId !== workflow.id) {
+    throw workflowResourceErrors.create("workflow.run_unavailable");
+  }
+  if (!unended.includes(row.status)) {
+    throw workflowResourceErrors.create("workflow.run_ended");
+  }
+  await stopOrRefuse(env, actorOf(by), row);
+  return await resourceRunFor(env, by, workflow.id, row.id);
+};

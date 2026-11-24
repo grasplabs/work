@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_runs` ADD `started_by_staff` integer DEFAULT false NOT NULL;

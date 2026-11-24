@@ -1,0 +1,836 @@
+import type {
+  InterviewFact,
+  InterviewLine,
+  InterviewProgress,
+  InterviewSaved,
+} from "@grasp-os/shared/interview-links";
+import type { FactTag } from "@grasp-os/shared/interview-turn";
+import type { Roster } from "@grasp-os/shared/onboarding";
+import { env } from "cloudflare:workers";
+import { z } from "zod";
+
+import { onboardingStore } from "../src/onboarding/store.ts";
+import { claimsAbout } from "../src/onboarding/team-claims.ts";
+import {
+  answering,
+  answeringWith,
+  approveAgreed,
+  participate,
+  onLink,
+  openLinkAs,
+  sentToOf,
+  signedInAs,
+} from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
+import { unique } from "./sign-in.ts";
+
+// A team on its way through the onboarding into the brain, as the tests
+// of the brain's intake (brain-intake*.test.ts) and of deleting an
+// interview (interview-deletion.test.ts) share it: Lea leads Ops, with
+// Max, Mia, Mo, Noor, Pim and Rik; her map, their agreements, and the drawing of
+// their tickets, with the model provider faked behind connect.
+
+const dayMs = 24 * 60 * 60 * 1000;
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** The people of a team, by key. */
+export type Key =
+  | "lea"
+  | "max"
+  | "mia"
+  | "mo"
+  | "noor"
+  | "pim"
+  | "rik"
+  | "sam"
+  | "ada"
+  | "bo"
+  | "cas"
+  | "dirk"
+  | "eva";
+
+const names: Record<Key, [string, string]> = {
+  lea: ["Lea Lind", "Team lead"],
+  max: ["Max Mol", "Agent"],
+  mia: ["Mia Moor", "Agent"],
+  mo: ["Mo Mertens", "Agent"],
+  noor: ["Noor Nijs", "Agent"],
+  pim: ["Pim Peeters", "Agent"],
+  rik: ["Rik Rooms", "Agent"],
+  sam: ["Sam Smit", "Agent"],
+  ada: ["Ada Aerts", "Agent"],
+  bo: ["Bo Bakker", "Agent"],
+  cas: ["Cas Claes", "Agent"],
+  dirk: ["Dirk Dekker", "Agent"],
+  eva: ["Eva Engels", "Agent"],
+};
+
+/** Each person's and the team's id, by key. */
+const idsOf = (id: string) => ({
+  team: `ops-${id}`,
+  lea: `lea-${id}`,
+  max: `max-${id}`,
+  mia: `mia-${id}`,
+  mo: `mo-${id}`,
+  noor: `noor-${id}`,
+  pim: `pim-${id}`,
+  rik: `rik-${id}`,
+  sam: `sam-${id}`,
+  ada: `ada-${id}`,
+  bo: `bo-${id}`,
+  cas: `cas-${id}`,
+  dirk: `dirk-${id}`,
+  eva: `eva-${id}`,
+});
+
+/** The staff list of Ops, led by Lea, with the people `keys`. */
+export const rosterOf = (
+  ids: ReturnType<typeof idsOf>,
+  keys: readonly Key[],
+  emails: Partial<Record<Key, string>> = {}
+): Roster => ({
+  teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
+  people: keys.map((key) => ({
+    id: ids[key],
+    name: names[key][0],
+    team: ids.team,
+    email: emails[key] ?? "",
+    title: names[key][1],
+    away: false,
+  })),
+});
+
+/**
+ * A team led by Lea, with Max, Mia, Mo and Noor (or only some of them), in
+ * a fresh onboarding that started yesterday.
+ */
+export const team = async (
+  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"],
+  /**
+   * Each person's address on the list, from their id: one of their own at
+   * the company's domain by default, which holds nothing of their id (the
+   * tests look for that where it must not be), and which they sign in with
+   * to open their link (`openLink`).
+   */
+  emailOf: (person: string) => string = () => `person-${unique()}@acme.test`
+) => {
+  const store = onboardingStore(env);
+  const ids = idsOf(unique());
+  const by = { type: "system" } as const;
+  const emails = Object.fromEntries(
+    keys.map((key) => [key, emailOf(ids[key])])
+  );
+  await store.setPaused(false, by);
+  await store.saveRoster(rosterOf(ids, keys, emails), by);
+  await store.savePlan({ start: isoDay(Date.now() - dayMs), days: 14 }, by);
+  await store.setAgreements(
+    { processing: true, assessment: true, council: "none" },
+    by
+  );
+  return ids;
+};
+
+export type Ids = Awaited<ReturnType<typeof team>>;
+
+/** The links opened so far, by person: signed in once, as the page stays. */
+const opened = new Map<string, Device>();
+
+/** Forgets someone's opened link, as after a new start gives them another: the next `openLink` opens the one they have now. */
+export const linkReplaced = (person: string): void => {
+  opened.delete(person);
+};
+
+/**
+ * Someone's link opened as the page opens it: signed in with the company's
+ * sign-in as the address the list has for them, their link's secret and
+ * that session.
+ */
+export const openLink = async (person: string): Promise<Device> => {
+  const open = opened.get(person);
+  if (open !== undefined) {
+    return open;
+  }
+  const link = await onboardingStore(env).linkOf(person);
+  const secret = link?.split("#")[1] ?? "";
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(await sentToOf(person))
+  );
+  opened.set(person, device);
+  return device;
+};
+
+/**
+ * A fact as agreed: what they said, as Stephen read it back to them
+ * (`text`), and the record; shared with their team as how they work, as
+ * any line but who does the work may be (GRA-1987). `anonymous` makes it
+ * one only counted anonymously.
+ */
+export const fact = (
+  id: string,
+  tag: FactTag,
+  record: string
+): InterviewFact => ({
+  id,
+  tag,
+  text: `You said: ${record}`,
+  record,
+  agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
+});
+
+/** `shared` only counted anonymously: where every line approved before there was a choice stands. */
+export const anonymous = ({
+  share: _share,
+  ...shared
+}: InterviewFact): InterviewFact => shared;
+
+/**
+ * Saves someone's interview as agreed to, with `facts`, after `lines`, on
+ * their link as their page does: core's answer, kept or refused.
+ */
+export const saveAgreed = async (
+  person: string,
+  facts: InterviewFact[],
+  version = 0,
+  lines: InterviewLine[] = [{ from: "stephen", text: "What starts one?" }]
+): Promise<Response> => {
+  const link = await openLink(person);
+  const progress: InterviewProgress = {
+    person: "completed",
+    told: true,
+    mode: "type",
+    lines,
+    facts,
+    phase: "readback",
+    wants: "end",
+    startedAt: Date.now(),
+    confirmed: facts.length,
+    adding: false,
+    addedAt: 0,
+  };
+  return await onLink({ action: "save", ...link, version, progress });
+};
+
+/**
+ * Saves someone's interview as agreed to (`saveAgreed`), and approves on
+ * their link those of its facts marked agreed, as they stand; returns the
+ * new version.
+ */
+export const agree = async (
+  person: string,
+  facts: InterviewFact[],
+  version = 0,
+  lines?: InterviewLine[]
+): Promise<number> => {
+  // They take part before anything they say is kept, as their page has them.
+  await participate(await openLink(person));
+  const response = await saveAgreed(person, facts, version, lines);
+  const saved: InterviewSaved = await response.json();
+  await approveAgreed(await openLink(person), facts);
+  return saved.version;
+};
+
+/** The map: tickets, by Max, Mia and Mo, and the rota, Lea's own. */
+export const mapReply = (ids: Ids): ProviderReply => ({
+  text: JSON.stringify({
+    does: "Answers customers' questions",
+    works: [
+      {
+        name: "handling new tickets",
+        local: "nieuwe tickets afhandelen",
+        one: "ticket",
+        many: "tickets",
+        doers: [ids.max, ids.mia, ids.mo],
+        share: 0.8,
+      },
+      {
+        name: "planning the rota",
+        local: "het rooster plannen",
+        one: "rota",
+        many: "rotas",
+        doers: [ids.lea],
+        share: 0.2,
+      },
+    ],
+  }),
+  inputTokens: 2000,
+  outputTokens: 300,
+});
+
+/** Tickets as drawn: a step that names Noor, as a model might slip. */
+export const ticketsReply = (
+  ids: Ids,
+  last = "Send the answer."
+): ProviderReply => ({
+  text: JSON.stringify({
+    starts: "A customer email arrives as a ticket in Zendesk.",
+    starts_by: [ids.max],
+    steps: [
+      {
+        text: "Open the ticket.",
+        who: "Agent",
+        tool: "Zendesk",
+        by: [ids.max, ids.mia, ids.mo],
+        minutes: [1, 2, 5],
+      },
+      {
+        text: "Ask Noor when the customer number is missing.",
+        who: "Agent",
+        tool: "",
+        by: [ids.max],
+        minutes: [],
+      },
+      { text: last, who: "Agent", tool: "Zendesk", by: [ids.mia] },
+    ],
+    notes: [
+      { kind: "wait", text: "Waits for the customer's reply.", by: [ids.mo] },
+    ],
+    numbers: [
+      {
+        person: ids.max,
+        quiet: 30,
+        busy: 50,
+        of: "me",
+        per: "week",
+        minutes: [3, 10, 45],
+        wrong: 2,
+      },
+      {
+        person: ids.mia,
+        quiet: -1,
+        busy: 45,
+        of: "me",
+        per: "week",
+        minutes: [-1, 12, -1],
+        wrong: -1,
+      },
+    ],
+    open: ["Why do some ask Noor?"],
+  }),
+  inputTokens: 4000,
+  outputTokens: 900,
+});
+
+/**
+ * Tickets as drawn, with what five who tell their own work told alike, as
+ * the brain may take it (GRA-1084): how one starts, opening the ticket
+ * (with the minutes of `minutesFrom` of them),
+ * the last step, what they decide by and their numbers; besides, what
+ * fewer told, which stays out of it: a step only Max told, naming Noor, a
+ * wait only Mo told, Max's own list, and a question for the next
+ * interviews.
+ */
+export const fiveToldReply = (
+  ids: Ids,
+  last = "Send the answer.",
+  minutesFrom = 5,
+  decides = "The priority of the ticket."
+): ProviderReply => {
+  const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+  return {
+    text: JSON.stringify({
+      starts: "A customer email arrives as a ticket in Zendesk.",
+      starts_by: five,
+      steps: [
+        {
+          text: "Open the ticket.",
+          who: "Agent",
+          tool: "Zendesk",
+          by: five,
+          minutes: [1, 2, 6],
+          // Each one's own normal minutes: 2 to 6, a median of 4.
+          minutes_by: five.slice(0, minutesFrom).map((person, index) => ({
+            person,
+            minutes: [1, 2 + index, 6],
+          })),
+        },
+        {
+          text: "Ask Noor when the customer number is missing.",
+          who: "Agent",
+          tool: "",
+          by: [ids.max],
+        },
+        { text: last, who: "Agent", tool: "Zendesk", by: five },
+      ],
+      notes: [
+        { kind: "wait", text: "Waits for the customer's reply.", by: [ids.mo] },
+        { kind: "decides", text: decides, by: five },
+        { kind: "own", text: "A sheet of open tickets.", by: [ids.max] },
+      ],
+      numbers: five.map((person, index) => ({
+        person,
+        quiet: 30 + index,
+        busy: 50 + index,
+        of: "me",
+        per: "week",
+        minutes: [3, 10 + index, 45],
+        wrong: 2,
+      })),
+      open: ["Why do some ask Noor?"],
+    }),
+    inputTokens: 4000,
+    outputTokens: 900,
+  };
+};
+
+/** Lea's map drawn, from `more` she said too, and everyone's links out. */
+export const mapped = async (
+  ids: Ids,
+  more: {
+    facts?: InterviewFact[];
+    lines?: InterviewLine[];
+    /** The map as drawn, when not `mapReply`'s. */
+    map?: ProviderReply;
+  } = {}
+) => {
+  const store = onboardingStore(env);
+  await store.releaseDue();
+  await agree(
+    ids.lea,
+    [
+      fact("l1", "work", "Max, Mia and Mo handle new tickets."),
+      fact(
+        "l2",
+        "system",
+        "The team lives in Zendesk and the lead's own rota sheet."
+      ),
+      ...(more.facts ?? []),
+    ],
+    0,
+    more.lines
+  );
+  await answering(
+    [more.map ?? mapReply(ids)],
+    async () => await store.drawNext()
+  );
+  await store.releaseDue();
+  // The rota, Lea's own, is drawn from her alone, and out of the way.
+  await answering(
+    [
+      {
+        text: JSON.stringify({
+          steps: [{ text: "Plan the rota.", by: [ids.lea] }],
+        }),
+        inputTokens: 1,
+        outputTokens: 1,
+      },
+    ],
+    async () => await store.drawNext()
+  );
+};
+
+/**
+ * Noor, Pim and Rik agree to a step each, and Noor and Pim that tickets
+ * arrive in Zendesk and wait for the customer: with Max, Mia and Mo they
+ * make six who tell their own work (the lead isn't counted).
+ */
+export const othersTold = async (ids: Ids) => {
+  await agree(ids.noor, [
+    fact("n1", "step", "Reads the ticket first."),
+    fact("n2", "system", "Tickets arrive in Zendesk."),
+    fact("n3", "wait", "Tickets wait for the customer."),
+  ]);
+  await agree(ids.pim, [
+    fact("p1", "step", "Tags the ticket."),
+    fact("p2", "system", "Tickets arrive in Zendesk."),
+    fact("p3", "wait", "Tickets wait for the customer."),
+  ]);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+};
+
+/**
+ * Max, Mia, Mo, Noor, Pim and Rik agree to what they told about tickets:
+ * five of them say tickets come in through Zendesk, each in their own
+ * words; Max alone hands billing questions to Noor, Mia alone wishes for
+ * the customer number and Mo alone waits for replies.
+ */
+export const told = async (ids: Ids) => {
+  await agree(ids.max, [
+    fact("m1", "step", "Opens the ticket in Zendesk."),
+    fact("m2", "system", "Tickets arrive in Zendesk."),
+    fact("m3", "handoff", "Max hands billing questions to Noor."),
+  ]);
+  await agree(ids.mia, [
+    fact("i1", "system", "Tickets arrive in Zendesk."),
+    fact("i2", "wish", "Would like the customer number filled in for them."),
+  ]);
+  await agree(ids.mo, [
+    fact("o1", "wait", "A ticket waits days for the customer's reply."),
+    fact("o2", "system", "New tickets come in through Zendesk."),
+  ]);
+  await agree(ids.noor, [
+    fact("n1", "step", "Reads the ticket first."),
+    fact("n2", "system", "Zendesk is where the tickets land."),
+  ]);
+  await agree(ids.pim, [
+    fact("p1", "step", "Tags the ticket."),
+    fact("p2", "system", "Tickets arrive in Zendesk."),
+  ]);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+};
+
+/**
+ * The team with Sam in it too: with him seven tell their own work (the
+ * lead isn't counted), so the Brain and its page hold the team's claims.
+ */
+export const sevenTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam"]);
+
+/**
+ * As `sevenTeam`, Ada in it too: eight who tell their own work, so one of
+ * them leaving still leaves seven, and what the rest told still shows.
+ */
+export const eightTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam", "ada"]);
+
+/** What the six tell (`told`), and Sam a step of his own. */
+export const sevenTold = async (ids: Ids) => {
+  await told(ids);
+  await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+};
+
+/** What the five who spoke of Zendesk said of it, in their own words. */
+export const zendeskSaid = [
+  "Tickets arrive in Zendesk.",
+  "New tickets come in through Zendesk.",
+  "Zendesk is where the tickets land.",
+];
+
+/** A claim as the fake model makes it: its kind, its words, and the words of the facts it cites. */
+export interface FakeClaim {
+  kind: string;
+  text: string;
+  /** Every fact shown with these words is cited; a label as is (`F99`) too. */
+  cites: readonly string[];
+  /** The words of the facts that say it, as the check answers: all it cites, unless given. */
+  says?: readonly string[];
+  /** Its words as the check is asked about them, once names are taken out: `text`, unless given. */
+  checked?: string;
+  /** Every check of it fails at the provider. */
+  fails?: true;
+}
+
+const shownSchema = z.array(
+  z.object({
+    facts: z.array(
+      z.object({ id: z.string(), kind: z.string(), text: z.string() })
+    ),
+  })
+);
+/** A backing check as sent (team-claims.ts `backingOf`): lines by label, and items each with the labels it may rest on. */
+const backingSchema = z.strictObject({
+  about: z.string(),
+  lines: z.array(z.strictObject({ id: z.string(), text: z.string() })),
+  items: z.array(
+    z.strictObject({
+      id: z.string(),
+      kind: z.string().optional(),
+      text: z.string(),
+      lines: z.array(z.string()),
+    })
+  ),
+});
+/** A judgment check as sent (team-claims.ts `howItRunsOf`): only the items' words. */
+const judgmentSchema = z.strictObject({
+  items: z.array(z.strictObject({ id: z.string(), text: z.string() })),
+});
+
+/**
+ * Whether a description of the team's work (a claim, a drawing's part)
+ * says only how the work runs, as the fake judgment check answers
+ * (`howItRunsOf`): `true` keeps it, `false` drops it, `"fails"` fails
+ * the call at the provider.
+ */
+export type Describes = (description: string) => boolean | "fails";
+
+/** The fake judgment check's answer, unless a test gives one: it says only how the work runs. */
+const keeps: Describes = () => true;
+
+/**
+ * Whether a line someone shared says a part of a drawing, or gives a
+ * number the drawing says is theirs, as the fake checker answers: a plain
+ * one agrees. Asked of each line apart, as `facts`.
+ */
+export type PartJudge = (
+  part: string,
+  facts: readonly string[],
+  /** The piece of work the part or number is said to be of. */
+  work: string,
+  /** For a part: what kind of part it is; none for a number. */
+  kind?: string
+) => boolean;
+
+/** The fake checker's answer for parts, unless a test gives one: yes. */
+const agrees: PartJudge = () => true;
+
+/** What a request gave the model as data between `<tag>` and `</tag>`, parsed; none when it gave none. */
+const dataOf = (request: SentRequest | undefined, tag: string): unknown => {
+  // The request as sent, read back to its text: the data is JSON in it.
+  const sent: string = JSON.stringify(request?.body ?? null);
+  const found = new RegExp(`<${tag}>\\\\n(?<data>.*?)\\\\n</${tag}>`, "u").exec(
+    sent
+  );
+  const data = found?.groups?.data;
+  if (data === undefined) {
+    return undefined;
+  }
+  const text: unknown = JSON.parse(`"${data}"`);
+  return typeof text === "string" ? JSON.parse(text) : undefined;
+};
+
+/** The backing checks of claims in `requests`: each claim beside each fact it may rest on. */
+export const checksIn = (
+  requests: readonly SentRequest[]
+): { claim: string; fact: string }[] =>
+  requests.flatMap((request) => {
+    const asked = backingSchema.safeParse(dataOf(request, "data"));
+    if (!asked.success || asked.data.about !== claimsAbout) {
+      return [];
+    }
+    const words = new Map(asked.data.lines.map(({ id, text }) => [id, text]));
+    return asked.data.items.flatMap(({ text, lines }) =>
+      lines.map((label) => ({ claim: text, fact: words.get(label) ?? "" }))
+    );
+  });
+
+/** What a backing check in `request` was given, as sent; none for any other call. */
+export const backingAsked = (
+  request: SentRequest | undefined
+): z.output<typeof backingSchema> | undefined => {
+  const asked = backingSchema.safeParse(dataOf(request, "data"));
+  return asked.success ? asked.data : undefined;
+};
+
+/** The claims the quick model was asked to check in `requests`, each once, sorted. */
+export const checkedClaimsIn = (requests: readonly SentRequest[]): string[] =>
+  [...new Set(checksIn(requests).map(({ claim }) => claim))].toSorted();
+
+/** What every judgment check in `requests` was given, as sent: only items' words, or so it must be. */
+export const judgedIn = (requests: readonly SentRequest[]): unknown[] =>
+  requests.flatMap((request) => {
+    const data = dataOf(request, "data");
+    return judgmentSchema.safeParse(data).success ? [data] : [];
+  });
+
+/** The facts a claims request showed the model, by label. */
+const shownIn = (request: SentRequest | undefined) =>
+  shownSchema
+    .parse(dataOf(request, "facts") ?? [])
+    .flatMap(({ facts }) => facts);
+
+/** A fake model's answer, as JSON. */
+const answered = (value: unknown): ProviderReply => ({
+  text: JSON.stringify(value),
+  inputTokens: 1000,
+  outputTokens: 200,
+});
+
+/**
+ * The model, faked: a backing check answered line by line, a claim's by
+ * `says` and a drawing's part or number by `part`; a judgment check item
+ * by item by `describes`; anything else, the claims, by `claims`. Any
+ * answer of `"fails"` fails the whole call at the provider.
+ */
+const claimsOrCheck =
+  (
+    claims: (request: SentRequest | undefined) => unknown,
+    says: (claim: string, fact: string) => boolean | "fails",
+    part: PartJudge = agrees,
+    describes: Describes = keeps
+  ) =>
+  (requests: readonly SentRequest[]): ProviderReply => {
+    const request = requests.at(-1);
+    const data = dataOf(request, "data");
+    const backing = backingSchema.safeParse(data);
+    const judged = judgmentSchema.safeParse(data);
+    const failed = { status: 400, errorType: "invalid_request_error" } as const;
+    if (judged.success) {
+      const verdicts = judged.data.items.map(({ id, text }) => ({
+        id,
+        howItRuns: describes(text),
+      }));
+      return verdicts.some(({ howItRuns }) => howItRuns === "fails")
+        ? failed
+        : answered({ verdicts });
+    }
+    if (backing.success) {
+      const { about, lines, items } = backing.data;
+      const words = new Map(lines.map(({ id, text }) => [id, text]));
+      const said = items.map(({ id, kind, text, lines: own }) => ({
+        id,
+        lines: own.map((label) => {
+          const line = words.get(label) ?? "";
+          return [
+            label,
+            about === claimsAbout
+              ? says(text, line)
+              : part(text, [line], about, kind),
+          ] as const;
+        }),
+      }));
+      if (
+        said.some(({ lines: own }) => own.some(([, yes]) => yes === "fails"))
+      ) {
+        return failed;
+      }
+      return answered({
+        backing: said.map(({ id, lines: own }) => ({
+          id,
+          lines: own.flatMap(([label, yes]) => (yes === true ? [label] : [])),
+        })),
+      });
+    }
+    return answered(claims(request));
+  };
+
+/**
+ * The model putting a team's claims together, faked: `claims`, each citing
+ * the labels the prompt gave the facts it names by their words; checked,
+ * a fact says a claim when it is among those it `says`.
+ */
+export const claimsReply = (
+  claims: readonly FakeClaim[],
+  part: PartJudge = agrees,
+  describes: Describes = keeps
+) =>
+  claimsOrCheck(
+    (request) => {
+      const shown = shownIn(request);
+      return {
+        claims: claims.map(({ kind, text, cites }) => ({
+          kind,
+          text,
+          facts: cites.flatMap((cited) => {
+            const labels = shown
+              .filter((each) => each.text === cited)
+              .map(({ id }) => id);
+            return labels.length === 0 ? [cited] : labels;
+          }),
+        })),
+      };
+    },
+    (claim, said) => {
+      const of = claims.filter(
+        ({ text, checked }) => (checked ?? text) === claim
+      );
+      if (of.some(({ fails }) => fails === true)) {
+        return "fails";
+      }
+      return of.some(({ cites, says }) => (says ?? cites).includes(said));
+    },
+    part,
+    describes
+  );
+
+/**
+ * The model putting a team's claims together as a plain one would, faked:
+ * a claim for each kind of fact shown, citing every fact of it, in the
+ * words most of them used (the first, when as many used others); checked,
+ * every fact says the claim of its kind.
+ */
+export const alikeReply = claimsOrCheck(
+  (request) => {
+    const byKind = new Map<string, { id: string; text: string }[]>();
+    for (const { id, kind, text } of shownIn(request)) {
+      byKind.set(kind, [...(byKind.get(kind) ?? []), { id, text }]);
+    }
+    return {
+      claims: [...byKind].map(([kind, facts]) => {
+        const counts = new Map<string, number>();
+        let text = "";
+        for (const shown of facts) {
+          const count = (counts.get(shown.text) ?? 0) + 1;
+          counts.set(shown.text, count);
+          if (count > (counts.get(text) ?? 0)) {
+            ({ text } = shown);
+          }
+        }
+        return { kind, text, facts: facts.map(({ id }) => id) };
+      }),
+    };
+  },
+  () => true
+);
+
+/** The onboarding giving the brain its next team, with the model putting claims together as a plain one would. */
+export const intakeAlike = async (): Promise<string | null> => {
+  const { result } = await answeringWith(
+    alikeReply,
+    async () => await onboardingStore(env).intakeNext()
+  );
+  return result;
+};
+
+/** The team's claim that tickets come in through Zendesk, as the five said it. */
+export const zendeskClaim: FakeClaim = {
+  kind: "tool",
+  text: "Tickets come in through Zendesk.",
+  cites: zendeskSaid,
+};
+
+/**
+ * The onboarding giving the brain `ids`' team, with the model putting
+ * `claims` together: a team an earlier test left due goes first, as the
+ * alarm would give it. What reached the provider for that team alone.
+ */
+export const intake = async (
+  ids: { team: string },
+  claims: readonly FakeClaim[] = [zendeskClaim],
+  part: PartJudge = agrees,
+  describes: Describes = keeps
+) => {
+  let given: Awaited<ReturnType<typeof answeringWith<string | null>>> = {
+    requests: [],
+    result: null,
+  };
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+    given = await answeringWith(
+      claimsReply(claims, part, describes),
+      async () => await onboardingStore(env).intakeNext()
+    );
+    if (given.result === null || given.result === `brain:${ids.team}`) {
+      break;
+    }
+  }
+  return { gave: given.result, requests: given.requests };
+};
+
+/**
+ * The team's claims and drawings standing now, which the onboarding keeps
+ * itself (GRA-1748): each as the record it was, by its id on the Brain
+ * page.
+ */
+export const kept = async (ids: Ids) => {
+  const store = onboardingStore(env);
+  const [claims, drawings] = await Promise.all([
+    store.standingClaims(),
+    store.standingDrawings(),
+  ]);
+  return [
+    ...claims
+      .filter(({ team: of }) => of === ids.team)
+      .map(({ source, kind, text }) => ({
+        type: "statement",
+        id: `onb-claim-${source}`,
+        body: JSON.stringify({ kind, text, teamIds: [`team-${ids.team}`] }),
+      })),
+    // Each piece of work with its one drawing, as the Brain page shows them.
+    ...drawings
+      .filter(({ team: of }) => of === ids.team)
+      .flatMap(({ workflow, name, local, drawing }) => [
+        {
+          type: "workflow",
+          id: workflow,
+          body: JSON.stringify({ name, local, teamId: `team-${ids.team}` }),
+        },
+        {
+          type: "workflowVersion",
+          id: drawing.id,
+          body: JSON.stringify(drawing),
+        },
+      ]),
+  ];
+};

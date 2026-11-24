@@ -1,0 +1,7431 @@
+import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
+import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
+import type { AgentProposer } from "@grasp-os/shared/apps";
+import { auditRejectReasons } from "@grasp-os/shared/audit";
+import type { ChatFileType } from "@grasp-os/shared/chat";
+import type { DependencyFinding } from "@grasp-os/shared/dependencies";
+import { modelRoles } from "@grasp-os/shared/deployment-config";
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "@grasp-os/shared/directory";
+import {
+  directoryGroupHelds,
+  directoryGroupKinds,
+  directoryGroupMembersFrom,
+} from "@grasp-os/shared/directory";
+import type { Json } from "@grasp-os/shared/json";
+import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
+import type {
+  BlueprintWorkflow,
+  DeclaredPermission,
+} from "@grasp-os/shared/permissions";
+import { signalKinds } from "@grasp-os/shared/signals";
+import { subjectKinds } from "@grasp-os/shared/subject";
+import type { RunFailure } from "@grasp-os/shared/workflows";
+/**
+ * Core D1 database: identity (Better Auth), permissions and the App registry.
+ *
+ * The identity tables are the ones Better Auth and its organization and SSO
+ * plugins expect (`src/auth/auth.ts` maps them by these export names), with
+ * plural table names and snake_case columns. Better Auth fills ids and
+ * timestamps itself.
+ */
+import { sql } from "drizzle-orm";
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
+
+const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
+
+/** A person. Found by their IdP account, never by email alone. */
+export const users = sqliteTable("users", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  email: text().notNull().unique(),
+  emailVerified: integer("email_verified", { mode: "boolean" }).notNull(),
+  image: text(),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/** A signed-in browser. The cookie holds the token; revoking deletes the row. */
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text().primaryKey(),
+    token: text().notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    activeOrganizationId: text("active_organization_id"),
+    activeTeamId: text("active_team_id"),
+    /** A Grasp staff session: time-bound, and not a member of the organization. */
+    staff: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A session for someone's own interview alone, made while the gate is
+     * closed (onboarding/gate.ts, GRA-1790): it opens their interview and
+     * nothing else of Grasp, and the gate's opening ends it.
+     */
+    interview: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A guest's session (roles.ts `guestRole`), made by a code mailed to
+     * them (auth/guest-codes.ts): it tells their browser they are one.
+     * What they reach is decided by their membership, never by this.
+     */
+    guest: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("sessions_user_id_idx").on(table.userId)]
+);
+
+/**
+ * A person's identity at an IdP: the provider and its stable subject. Sign-in
+ * tokens are never stored here (see `src/auth/auth.ts`); the columns exist
+ * because Better Auth's model has them.
+ */
+export const accounts = sqliteTable(
+  "accounts",
+  {
+    id: text().primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at"),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+    scope: text(),
+    password: text(),
+    /**
+     * The Entra object id (`oid`) from the ID token of the latest sign-in,
+     * so staff sessions can be checked against the current staff list.
+     */
+    oid: text(),
+    /**
+     * The address the ID token of the latest sign-in gave and marked
+     * verified (`email_verified`, Google's): what an item's reader list
+     * may name this account by (source-readers.ts). Null for Entra, whose
+     * `email` claim is not verified.
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the latest sign-in confirmed `verified_email`: the address
+     * counts only within a day of it (source-readers.ts,
+     * `readerProofMaxAgeMs`), as every proof of an address does.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The tenant the ID token of the latest sign-in was checked against
+     * (Entra's `tid`, Google's `hd`): this account counts as a reader in a
+     * copied list only while the sign-in config names that tenant
+     * (source-readers.ts).
+     */
+    verifiedTenant: text("verified_tenant"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("accounts_user_id_idx").on(table.userId),
+    // Who writes in Teams, by the object id its messages carry
+    // (channels/who.ts).
+    index("accounts_oid_idx").on(table.oid),
+    // The directory's people by the object id a sign-in of a provider
+    // kept, compared lower case as the daily read keeps it
+    // (directory-ties.ts), with no other comparison of the id changed.
+    index("accounts_provider_oid_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.oid})`
+    ),
+    // Google's directory people by the sign-in's own ID (its `sub`), as
+    // directory-ties.ts compares it: through `lower()`, like Entra's.
+    index("accounts_provider_account_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.accountId})`
+    ),
+    uniqueIndex("accounts_provider_account_idx").on(
+      table.providerId,
+      table.accountId
+    ),
+  ]
+);
+
+/** Short-lived values, such as the state of a sign-in in progress. */
+export const verifications = sqliteTable(
+  "verifications",
+  {
+    id: text().primaryKey(),
+    identifier: text().notNull(),
+    value: text().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [index("verifications_identifier_idx").on(table.identifier)]
+);
+
+/**
+ * The signing keys of the removed App tokens. Nothing reads or writes it
+ * now; it stays until a later release drops it (expand, then contract),
+ * since the release before this one still runs against it while a deploy
+ * rolls out.
+ */
+export const jwks = sqliteTable("jwks", {
+  id: text().primaryKey(),
+  publicKey: text("public_key").notNull(),
+  privateKey: text("private_key").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  expiresAt: timestamp("expires_at"),
+  alg: text(),
+  crv: text(),
+});
+
+/** The deployment's one organization. */
+export const organizations = sqliteTable("organizations", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  slug: text().notNull().unique(),
+  logo: text(),
+  metadata: text(),
+  createdAt: timestamp("created_at").notNull(),
+  /** The IANA time zone an admin set (organization.ts); `UTC` until then. */
+  timeZone: text("time_zone"),
+});
+
+/**
+ * The organization's settings an admin keeps beside its name and time zone
+ * (org-settings.ts): one row per kind (`billing`, `own_agents`), its value as
+ * JSON, checked again as it is read. None until an admin saves one.
+ */
+export const orgSettings = sqliteTable("org_settings", {
+  kind: text().primaryKey(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/** A person's place in the organization, with their role. */
+export const members = sqliteTable(
+  "members",
+  {
+    id: text().primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the member was suspended: they may not act or be read as
+     * (membership-sql.ts `mayAct`), and everything of theirs stays as it
+     * is, for when it is lifted. Null while they may act. Written by the
+     * directory's daily read alone (directory-suspensions.ts); no client
+     * can (Better Auth's `input: false`, auth.ts).
+     */
+    suspendedAt: timestamp("suspended_at"),
+    /**
+     * What suspended them: `directory`, the daily read, which alone lifts
+     * the suspensions it made. Null while they may act.
+     */
+    suspendedBy: text("suspended_by"),
+    /**
+     * Unused, and always null: the lift by hand it was added for was
+     * taken back (GRA-2141), as only the directory lifts a suspension.
+     * Nothing reads or writes it. Dropped by a later contract migration,
+     * as columns go only once no release a client may roll back to has
+     * them.
+     */
+    keptActiveAt: timestamp("kept_active_at"),
+  },
+  (table) => [
+    uniqueIndex("members_organization_user_idx").on(
+      table.organizationId,
+      table.userId
+    ),
+    index("members_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * People an admin removed from the organization. Everyone else from the
+ * client's IdP gets a membership when they sign in if they have none (also
+ * repairing one whose creation failed); a removal recorded here keeps them
+ * out. Kept apart from `members`, whose rows the organization plugin treats
+ * as live memberships. Who removed them is in the audit log.
+ */
+export const memberRemovals = sqliteTable(
+  "member_removals",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    removedAt: timestamp("removed_at").notNull(),
+    /**
+     * When connect completed disconnecting their personal connections;
+     * until then the clock retries it (`retryDisconnects`).
+     */
+    disconnectedAt: timestamp("disconnected_at"),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.userId] })]
+);
+
+/**
+ * People an admin erased (GRA-903): someone removed, whose email, sign-ins
+ * and personal content went, their name and ID kept on the company's
+ * records (`users` keeps both, and nothing else). `name` is the name the
+ * admin confirmed, frozen. `emailHash` is a keyed hash of the email they
+ * had (erased-people.ts), never the email: what keeps them out when they
+ * sign in or are invited again under it, until an admin releases it.
+ * Each area of the erasure is a row of `personErasureAreas`; it is done
+ * once every one of them is (`completedAt`).
+ */
+export const personErasures = sqliteTable("person_erasures", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  name: text().notNull(),
+  /** Null once an admin released the address (`releaseAddress`). */
+  emailHash: text("email_hash").unique(),
+  /** The version of the key `emailHash` was made with (erased-people.ts). */
+  emailKeyVersion: integer("email_key_version").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: timestamp("requested_at").notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+/**
+ * The sign-in identities of people an admin erased (GRA-903), each a keyed
+ * hash of the subject an IdP or the directory named them by
+ * (erased-people.ts), never the subject: what keeps them from coming back
+ * through Teams, the directory or a sign-in once their accounts are gone.
+ */
+export const erasedSubjects = sqliteTable("erased_subjects", {
+  subjectHash: text("subject_hash").primaryKey(),
+  /** The version of the key `subjectHash` was made with (erased-people.ts). */
+  keyVersion: integer("key_version").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => personErasures.userId),
+});
+
+/**
+ * Where one area of a person's erasure stands: `pending` until its step
+ * erased everything of theirs in it, retried by the clock until then
+ * (person-erasure.ts), then `complete`.
+ */
+export const personErasureAreas = sqliteTable(
+  "person_erasure_areas",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => personErasures.userId),
+    area: text().notNull(),
+    state: text({ enum: ["pending", "complete", "skipped"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.area] })]
+);
+
+/**
+ * A person's account on a chat platform that carries no Entra object id
+ * (Slack), linked to them (`channels/accounts.ts`):
+ * one person per platform account, by the platform's own verified sender
+ * id. Its id names it to the person and in the audit log, which never
+ * holds the platform id itself.
+ */
+export const channelAccounts = sqliteTable(
+  "channel_accounts",
+  {
+    id: text().primaryKey(),
+    platform: text().notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** What the platform called them when they linked it; never who they are. */
+    name: text(),
+    linkedAt: timestamp("linked_at").notNull(),
+    /** How it was linked: a sign-in link the chat sent, so far the only way. */
+    linkedHow: text("linked_how", { enum: ["sign_in_link"] }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("channel_accounts_platform_user_idx").on(
+      table.platform,
+      table.platformUserId
+    ),
+    index("channel_accounts_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * One-use links a chat sent someone it doesn't know, each bound to the
+ * platform account it was sent to (`channels/accounts.ts`). Only the
+ * secret's hash is kept. Used or not, a link is gone soon after it
+ * expires.
+ */
+export const channelLinks = sqliteTable(
+  "channel_links",
+  {
+    secretHash: text("secret_hash").primaryKey(),
+    platform: text().notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    name: text(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** Set once, by the sign-in it linked, with whose. */
+    usedAt: timestamp("used_at"),
+    usedBy: text("used_by"),
+    /** Set when the chat sent the same account a newer link. */
+    replacedAt: timestamp("replaced_at"),
+  },
+  (table) => [
+    index("channel_links_platform_user_idx").on(
+      table.platform,
+      table.platformUserId
+    ),
+    index("channel_links_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * The chat conversations people write to the agent in, each the person's
+ * own private chat with the client's bot on its platform (`channels/door.ts`),
+ * so a later message, or the agent's answer, finds it again. `threadId` is
+ * the Chat SDK's thread id, which names the conversation and where the
+ * platform takes its replies.
+ */
+export const channelConversations = sqliteTable(
+  "channel_conversations",
+  {
+    platform: text().notNull(),
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+    /**
+     * The language the person's app was set to when they last wrote
+     * (`en`, `nl`, `de`, `fr`, `es`), which Stephen tells them in when
+     * he writes first (channels/reach.ts); null before it was kept.
+     */
+    locale: text(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.threadId] }),
+    index("channel_conversations_user_id_idx").on(table.userId),
+  ]
+);
+/**
+ * A workflow Stephen offered to start, on a card in a person's chat app:
+ * the workflow and the input the card shows, and, once the
+ * person pressed Start, where they pressed it and the start it made, so
+ * the run's end is told there once (`toldAt`). Good for a day unpressed
+ * (`expiresAt`). Kept by channels/workflow-offers.ts.
+ */
+export const chatWorkflowOffers = sqliteTable(
+  "chat_workflow_offers",
+  {
+    id: text().primaryKey(),
+    /** The person it is offered to, whom the start acts for. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The chat whose turn offered it, and its Workspace object. */
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Its name when offered, as the card shows it. */
+    workflowName: text("workflow_name").notNull(),
+    /**
+     * Unused since a press starts the version live as it is pressed:
+     * written and read by nothing. Dropped in a later release (expand,
+     * then contract).
+     */
+    version: integer(),
+    /**
+     * Its input, as the live version's contract took it as it was
+     * offered: canonical JSON, checked again by the start.
+     */
+    input: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** When its card was posted: each is posted once. */
+    postedAt: timestamp("posted_at"),
+    /** Where the person pressed Start, by the Chat SDK's names. */
+    platform: text(),
+    threadId: text("thread_id"),
+    locale: text(),
+    pressedAt: timestamp("pressed_at"),
+    /** The start's receipt and its run, once it started. */
+    startId: text("start_id"),
+    runId: text("run_id"),
+    /** When the run's end was told where it was pressed. */
+    toldAt: timestamp("told_at"),
+  },
+  (table) => [
+    index("chat_workflow_offers_chat_idx").on(table.chatId),
+    index("chat_workflow_offers_run_idx").on(table.runId),
+    index("chat_workflow_offers_user_idx").on(table.userId),
+  ]
+);
+
+/**
+ * How Stephen fared in the chat apps, counted by the hour
+ * (src/channels/signals.ts): requests refused at the door, turns by how
+ * they ended, answer times by bucket, sends that failed. Counts only,
+ * never who or what; kept a week, for Grasp's admin to watch.
+ */
+export const channelSignals = sqliteTable(
+  "channel_signals",
+  {
+    /** The hour it counts, as its first millisecond. */
+    hour: timestamp("hour").notNull(),
+    platform: text().notNull(),
+    /** Such as `refused`, `answered` or `answered_within_8000`. */
+    signal: text().notNull(),
+    count: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.hour, table.platform, table.signal] }),
+  ]
+);
+
+/**
+ * Who is in a chat that others share, a group chat or channel on a chat
+ * platform, as its agent reads for it (chat-audiences.ts): kept by the
+ * Workspace object that holds the chat, before each turn, from the
+ * platform's roster then. The agent reads only what every member may
+ * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
+ * as one of the organization's active members (a guest, another company,
+ * someone the roster couldn't say).
+ */
+export const chatAudiences = sqliteTable("chat_audiences", {
+  chatId: text("chat_id").primaryKey(),
+  /** The Workspace object that holds the chat. */
+  workspaceId: text("workspace_id").notNull(),
+  /** The members Grasp knows, by user id. */
+  members: text({ mode: "json" }).$type<string[]>().notNull(),
+  outsiders: integer({ mode: "boolean" }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
+ * Part of the organization plugin's model. Invitations aren't offered: people
+ * join by signing in with the deployment's IdP.
+ */
+export const invitations = sqliteTable(
+  "invitations",
+  {
+    id: text().primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text().notNull(),
+    role: text(),
+    teamId: text("team_id"),
+    status: text().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    inviterId: text("inviter_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    index("invitations_organization_id_idx").on(table.organizationId),
+    index("invitations_email_idx").on(table.email),
+  ]
+);
+
+export const teams = sqliteTable(
+  "teams",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    memberCount: integer("member_count").notNull().default(0),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at"),
+  },
+  (table) => [index("teams_organization_id_idx").on(table.organizationId)]
+);
+
+export const teamMembers = sqliteTable(
+  "team_members",
+  {
+    id: text().primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    membershipKey: text("membership_key").unique(),
+    createdAt: timestamp("created_at"),
+  },
+  (table) => [
+    index("team_members_team_id_idx").on(table.teamId),
+    index("team_members_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * The confirmed staff list whose teams were last made in Settings ›
+ * Members (GRA-2055), by the onboarding store's version of them: one row
+ * for the company. Each sync claims its version here, only when it is
+ * newer, in the same batch as its writes, and each write holds only while
+ * the row names that version (staff-list-teams.ts `syncTeams`): an older
+ * confirm never makes a team after a newer one.
+ */
+export const staffListSynced = sqliteTable("staff_list_synced", {
+  organizationId: text("organization_id").primaryKey(),
+  version: integer().notNull(),
+});
+
+/**
+ * The ids of every team deleted (GRA-2055), kept for good: written by the
+ * trigger `teams_delete_retires` (migration 0278, staff_list_teams) in the statement that
+ * deletes the row, so no code of any release, before this one or after a
+ * rollback, deletes a team without it. The staff list makes a members'
+ * team only under an id not here, checked in the statement that makes it
+ * (staff-list-teams.ts `syncTeams`), so a deleted team's id never
+ * comes back with what was shared with it, whatever the onboarding's
+ * store holds.
+ */
+export const retiredTeamIds = sqliteTable("retired_team_ids", {
+  id: text().primaryKey(),
+});
+
+/**
+ * Everyone the organization's directory listed at its last daily read
+ * that was applied whole (GRA-2056, directory-people.ts): the provider's
+ * ID of each, in the tenant read, with what later reads act on, and the
+ * member they are tied to. Written by that read alone, which replaces
+ * every row of its provider in one batch, and by the tie at sign-in
+ * (`userId` alone). No name, address, title or manager: nothing reads
+ * them here. A person's erasure deletes their rows.
+ */
+export const directoryPeople = sqliteTable(
+  "directory_people",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The provider's tenant the read came from (Entra's tenant ID). */
+    tenant: text().notNull(),
+    /** The provider's ID of the person (Entra's object ID), lower case. */
+    accountId: text("account_id").notNull(),
+    /** Their department, as connect cleaned it; empty for none. */
+    department: text().notNull(),
+    /** Whether their account is turned on; nothing acts on it yet. */
+    enabled: integer({ mode: "boolean" }).notNull(),
+    /**
+     * Whether their account is turned off because it was deleted (Entra
+     * keeps a deleted account 30 days), as the read found it.
+     */
+    deleted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The member whose sign-in account names the same ID in the same
+     * tenant, while they are a member (`tieDirectoryPeople`); null for
+     * nobody.
+     */
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.tenant, table.accountId] }),
+    index("directory_people_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * Which members' team each department of the directory fills (GRA-2056,
+ * directory-teams.ts): by the team's id, linked by name once, when the
+ * read first met the department and exactly one team had its name
+ * (`teamNameKey`); held by id after, so a rename of either never breaks
+ * it. Goes with the team. Names a department and a team, no person.
+ */
+export const directoryDepartments = sqliteTable(
+  "directory_departments",
+  {
+    provider: text().notNull(),
+    /** The department as the read keeps it (`directory_people.department`). */
+    department: text().notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.department] }),
+    index("directory_departments_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The team memberships the directory's daily read made (GRA-2056,
+ * directory-teams.ts), by the membership's own key: the only ones it ever
+ * takes away. Goes with the membership however it goes (by hand, with
+ * the team, a removal or an erasure). Better Auth's `team_members` takes
+ * no field of ours, so this is the mark beside it.
+ */
+export const directoryMemberships = sqliteTable("directory_memberships", {
+  membershipKey: text("membership_key")
+    .primaryKey()
+    .references(() => teamMembers.membershipKey, { onDelete: "cascade" }),
+});
+
+/**
+ * A member an admin put in a team, or took out of it, by hand (GRA-2056):
+ * the directory's read never changes that pair until an admin lets it
+ * (`releaseTeamPin`, members.ts). Written in Better Auth's before hooks
+ * of the two routes that change a membership by hand (auth.ts).
+ */
+export const teamPins = sqliteTable(
+  "team_pins",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Kept in the team (true) or out of it (false): the read never takes
+     * them out of it, or never puts them in it (directory-teams.ts).
+     */
+    kept: integer({ mode: "boolean" }).notNull(),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.teamId] }),
+    index("team_pins_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The directory's groups an admin mapped to a members' team (GRA-2056,
+ * directory-groups.ts): the daily read places each group's members in its
+ * team. One team per group, by the group's Entra object ID, so a rename
+ * changes only the name kept here. Goes with the team. Holds no person:
+ * who mapped it is in the audit log.
+ */
+export const directoryGroupTeams = sqliteTable(
+  "directory_group_teams",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The group's Entra object ID, lower case. */
+    groupId: text("group_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** The group's name, kind and who decides its members, as Microsoft last answered. */
+    name: text().notNull(),
+    kind: text({ enum: directoryGroupKinds }).notNull(),
+    membersFrom: text("members_from", {
+      enum: directoryGroupMembersFrom,
+    }).notNull(),
+    mappedAt: timestamp("mapped_at").notNull(),
+    /**
+     * When the daily read last read the group whole: until it has, since
+     * the group was mapped to this team, the mapping places nobody.
+     */
+    readAt: timestamp("read_at"),
+    /**
+     * Why the last read left the group as it was, null when it didn't:
+     * `gone` (Microsoft has no such group), `refused` (Microsoft refused
+     * to read it), `not_mappable` (it can't be a team's now) or `empty`.
+     */
+    held: text({ enum: directoryGroupHelds }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.groupId] }),
+    index("directory_group_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The members of each group mapped to a team (GRA-2056,
+ * directory-group-reads.ts) or named by a copied reader list (GRA-2146,
+ * directory-reader-groups.ts), nested groups' included, as the last read
+ * that read the group whole listed them: one row per group and person the
+ * read keeps (`directory_people`), by the provider's ID. Goes with the
+ * person's row, so with them leaving the directory or being erased; and
+ * once the group is neither mapped nor named (`unneededGroupRows`).
+ */
+export const directoryGroupMembers = sqliteTable(
+  "directory_group_members",
+  {
+    provider: text().notNull(),
+    tenant: text().notNull(),
+    groupId: text("group_id").notNull(),
+    accountId: text("account_id").notNull(),
+    /**
+     * When the read that last listed them in the group started: a proof
+     * of the group for a reader list counts a day from it
+     * (source-readers.ts `provedGroupsOf`). 0 proves nothing.
+     */
+    readAt: timestamp("read_at")
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.provider, table.groupId, table.tenant, table.accountId],
+    }),
+    index("directory_group_members_person_idx").on(
+      table.provider,
+      table.tenant,
+      table.accountId
+    ),
+    foreignKey({
+      columns: [table.provider, table.tenant, table.accountId],
+      foreignColumns: [
+        directoryPeople.provider,
+        directoryPeople.tenant,
+        directoryPeople.accountId,
+      ],
+    }).onDelete("cascade"),
+  ]
+);
+
+/**
+ * Where each provider's daily read of the directory stands (GRA-2056,
+ * directory-people.ts), for the admin: the read last applied, what it
+ * counted, and the last failure since. `run` and `startedAt` are the
+ * claim of the newest read, taken in the batch that applies it, which
+ * holds only while no later-started read claimed it: an older read never
+ * lands after a newer one.
+ */
+export const directoryReads = sqliteTable("directory_reads", {
+  provider: text().$type<DirectoryProvider>().primaryKey(),
+  /** The directory connection last read or tried. */
+  connectionId: text("connection_id").notNull(),
+  tenant: text().notNull(),
+  run: text(),
+  startedAt: timestamp("started_at"),
+  /** When the last read was applied; null before one was. */
+  readAt: timestamp("read_at"),
+  /** How many people that read listed, and how many of them were turned off. */
+  people: integer(),
+  disabled: integer(),
+  /** The last read's failure since `readAt`, as a directory error code. */
+  failure: text().$type<DirectoryReadFailure>(),
+  failedAt: timestamp("failed_at"),
+  /**
+   * Why the last applied read went on without the deleted accounts, as a
+   * directory error code (`directory.deleted_refused` or
+   * `directory.deleted_unsupported`): nobody was suspended for having
+   * left. Null when it read them.
+   */
+  deletedFailure: text("deleted_failure").$type<DirectoryDeletedFailure>(),
+});
+
+/**
+ * Part of the SSO plugin's model, and stays empty: sign-in providers come
+ * only from deployment config, and registering one in-product is refused.
+ */
+export const ssoProviders = sqliteTable("sso_providers", {
+  id: text().primaryKey(),
+  issuer: text().notNull(),
+  oidcConfig: text("oidc_config"),
+  samlConfig: text("saml_config"),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  providerId: text("provider_id").notNull().unique(),
+  organizationId: text("organization_id"),
+  domain: text().notNull(),
+});
+
+/**
+ * Audit events of changes to this database that haven't reached the audit
+ * log yet. Each is written in the same batch as its change, so a change is
+ * never kept without its event; `src/audit-outbox.ts` appends them to the
+ * log and removes them. `event` is the event as JSON.
+ */
+export const auditOutbox = sqliteTable("audit_outbox", {
+  id: text().primaryKey(),
+  event: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * Outbox rows a drain moved out because the audit log can't take them:
+ * `refused` (not an event to the release that drained it, or over the size
+ * cap) or `conflict` (the log holds its ID with other content, a bug or a
+ * forgery). Kept as they were, for someone to look at; the chain records
+ * each with an `audit.gap` naming its ID and reason (src/audit-outbox.ts in
+ * core). Nothing reads them.
+ */
+export const auditOutboxRejected = sqliteTable(
+  "audit_outbox_rejected",
+  {
+    // Its own key, so a second row with the same event ID is kept too.
+    seq: integer().primaryKey(),
+    id: text().notNull(),
+    event: text().notNull(),
+    reason: text({ enum: auditRejectReasons }).notNull(),
+    /** When the row was stored in the outbox. */
+    createdAt: timestamp("created_at").notNull(),
+    rejectedAt: timestamp("rejected_at").notNull(),
+  },
+  (table) => [index("audit_outbox_rejected_id").on(table.id)]
+);
+
+/**
+ * What each App, agent, independent workflow and trigger may use: one row
+ * per permission, never deleted, so who asked, who granted and who revoked
+ * stays readable. Only its status and the grant
+ * and revoke columns ever change.
+ *
+ * The object is stored by type: a connection is `object_id`, with
+ * `resource` naming one resource in it or null for all of it; a workflow
+ * is its workflow resource's ID in `object_id`; an App is its ID in
+ * `object_id`: an agent's, to call its functions, with `resource` null; a
+ * workflow's, to call one of them, with that function's stable ID in
+ * `resource`. `actions` is a JSON array of action names. Rows of a kind
+ * the platform removed (a store's) may remain, which every read takes as
+ * not there (`servedSql` in permissions.ts).
+ */
+export const permissions = sqliteTable(
+  "permissions",
+  {
+    id: text().primaryKey(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow", "trigger"],
+    }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    objectType: text("object_type", {
+      enum: ["connection", "workflow", "app", "platform"],
+    }).notNull(),
+    objectId: text("object_id").notNull(),
+    resource: text(),
+    actions: text().notNull(),
+    binding: text().notNull(),
+    status: text({ enum: ["requested", "active", "revoked"] }).notNull(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    grantedBy: text("granted_by"),
+    grantedAt: timestamp("granted_at"),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+    /**
+     * The chat's agent that asked for it, for `requested_by` (JSON,
+     * `AgentProposer`); null when the person asked themselves. A row the
+     * previous release writes gets none.
+     */
+    requestedVia: text("requested_via", {
+      mode: "json",
+    }).$type<AgentProposer>(),
+    /**
+     * The one chat an agent's permission holds in (chat-connections.ts),
+     * by its ID (a random UUID, unique across Workspace objects), and only
+     * for its `requested_by`. Null for a permission that holds wherever
+     * its subject works.
+     */
+    chatId: text("chat_id"),
+    /** Why the chat's agent asked for it, in its words; null otherwise. */
+    reason: text(),
+    /**
+     * A chat's request for its person's own personal connection: only
+     * they see and decide it, never an admin. A connection's owner never
+     * changes, so this is read from connect once, as it is asked for.
+     */
+    personal: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The teams an App's `brain` permission reaches, by ID: a JSON array
+     * as text (`PermissionObject`'s `teams`), read with `storedTeamsOf`
+     * (brain-grant-teams.ts) so a malformed row breaks no one else's read;
+     * null for every other permission, and for a `brain` one that reaches
+     * the company alone. Set as it is asked for, never changed after.
+     */
+    teams: text(),
+  },
+  (table) => [
+    index("permissions_subject_idx").on(
+      table.subjectType,
+      table.subjectId,
+      table.status
+    ),
+    // Revocations of a subject's permissions since a moment: what ends a
+    // chat's code runs (`revokedSince` in agent-scope.ts).
+    index("permissions_revoked_idx").on(
+      table.subjectType,
+      table.subjectId,
+      table.status,
+      table.revokedAt
+    ),
+    // The permissions on one object, found from it: by object, not
+    // subject.
+    index("permissions_object_idx").on(table.objectType, table.objectId),
+    // A binding name is one stub in the subject's env, so it is unique
+    // among the permissions that aren't revoked: those that hold anywhere,
+    // and within each chat, those that hold in it alone.
+    uniqueIndex("permissions_live_binding_idx")
+      .on(table.subjectType, table.subjectId, table.binding)
+      .where(sql`status <> 'revoked' AND chat_id IS NULL`),
+    uniqueIndex("permissions_live_chat_binding_idx")
+      .on(table.chatId, table.subjectType, table.subjectId, table.binding)
+      .where(sql`status <> 'revoked' AND chat_id IS NOT NULL`),
+  ]
+);
+
+/**
+ * The App registry. Each App's code is a series of versions
+ * (`app_versions`); `current_version` is the live one, the one that runs,
+ * and only ever names a version the App has.
+ */
+export const apps = sqliteTable(
+  "apps",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** The user who created it, whom its triggered runs act for. */
+    ownerId: text("owner_id").notNull(),
+    /**
+     * Who answers for it (apps.ts `updateApp`), when a builder named someone
+     * other than its owner; null for its owner. Grants nothing.
+     */
+    responsibleId: text("responsible_id"),
+    /**
+     * Whom it is made for, a person or a team, when a builder said; both
+     * null otherwise. Grants nothing.
+     */
+    audienceType: text("audience_type", { enum: ["person", "team"] }),
+    audienceId: text("audience_id"),
+    /**
+     * The business process it serves (@grasp-os/shared/business-processes),
+     * when a builder said; null otherwise. Grants nothing.
+     */
+    process: text(),
+    blueprint: text(),
+    /**
+     * The live version; null until its first publish, while the App is
+     * open to its builders alone (app-access.ts).
+     */
+    currentVersion: integer("current_version"),
+    /**
+     * The live version's label (`app_versions.label`), set with it in one
+     * statement, so reading an App needs no join; null while none is live.
+     */
+    liveLabel: text("live_label"),
+    /**
+     * When it was archived (app-status.ts), and who archived it; null
+     * while it isn't. An archived App is open to nobody and runs nothing.
+     */
+    archivedAt: timestamp("archived_at"),
+    archivedBy: text("archived_by", { mode: "json" }).$type<{
+      userId: string;
+      staff: boolean;
+    }>(),
+    /**
+     * The version put up for review, and where the App was in its life
+     * (draft, published, archived), with when and by whom that last
+     * changed. Unused since publishing went straight from the App's draft:
+     * nothing reads them, `pending_version` is never written either, and
+     * only `status` is still written (as a
+     * publish, an archive and a restore change it), so a roll back to the
+     * release before finds each App open or closed as it is. Dropped in a
+     * later release (expand, then contract).
+     */
+    pendingVersion: integer("pending_version"),
+    status: text({ enum: ["draft", "published", "archived"] })
+      .notNull()
+      .default("draft"),
+    statusChangedAt: timestamp("status_changed_at"),
+    statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+      userId: string;
+      staff: boolean;
+    }>(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * The last part of its own address under the workspace's (app-own-links.ts),
+     * one App's at most; null while its builders gave it none. It opens the
+     * App only while it is live.
+     */
+    link: text(),
+    /**
+     * When it was removed (app-removal.ts), and by whom: a removed App is a
+     * tombstone, kept so what names it stays history, and answers nothing.
+     * Null while it is an App.
+     */
+    removedAt: timestamp("removed_at"),
+    removedBy: text("removed_by"),
+  },
+  (table) => [uniqueIndex("apps_link").on(table.link)]
+);
+
+/**
+ * The integrations a builder added to an App by hand (app-integrations.ts):
+ * catalog entries by source and ID, for what it needs besides those it
+ * holds permissions on. One row each; taking one off deletes it, and who
+ * did which is in the audit log. Grants and connects nothing.
+ */
+export const appIntegrations = sqliteTable(
+  "app_integrations",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    source: text({ enum: ["native", "composio"] }).notNull(),
+    connectorId: text("connector_id").notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.source, table.connectorId] }),
+  ]
+);
+
+/**
+ * A company's webhooks for an App (src/app-webhooks.ts): the https URL
+ * Grasp POSTs the App's `events` to. Its secret is derived from its ID,
+ * never kept. `approved_by` and `approved_at` say which admin let the
+ * App's data go to the URL, and when; null until one did. A URL never
+ * changes, so an approval is always of the URL it was given for.
+ * `dropped` counts the deliveries it missed because too many were
+ * waiting.
+ */
+export const appWebhooks = sqliteTable(
+  "app_webhooks",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    url: text().notNull(),
+    events: text({ mode: "json" }).notNull().$type<AppWebhookEvent[]>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at"),
+    dropped: integer().notNull().default(0),
+  },
+  (table) => [index("app_webhooks_app").on(table.appId)]
+);
+
+/**
+ * The deliveries waiting for, or made to, a webhook (src/app-webhooks.ts):
+ * core's outbox, drained every minute through connect. Each is one event,
+ * once per webhook (`dedupe`); its ID is its idempotency key. `values`
+ * holds what a form sent only when the webhook was approved as it was
+ * sent, and is cleared once the delivery settles. `delivery_at` is when
+ * it is next due, or the lease of the drain sending it. `person_id` is
+ * who sent a `form_sent`'s form (null for any other event), so erasing
+ * them takes their forms' deliveries out (person-erasure.ts).
+ */
+export const appWebhookDeliveries = sqliteTable(
+  "app_webhook_deliveries",
+  {
+    id: text().primaryKey(),
+    webhookId: text("webhook_id")
+      .notNull()
+      .references(() => appWebhooks.id, { onDelete: "cascade" }),
+    appId: text("app_id").notNull(),
+    event: text({ enum: appWebhookEvents }).notNull(),
+    dedupe: text().notNull(),
+    occurredAt: timestamp("occurred_at").notNull(),
+    version: integer(),
+    submission: text(),
+    function: text("operation"),
+    values: text({ mode: "json" }).$type<Json>(),
+    valuesLeftOut: integer("values_left_out", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    attempts: integer().notNull().default(0),
+    deliveryAt: timestamp("delivery_at"),
+    deliveredAt: timestamp("delivered_at"),
+    /** `delivered`, or why it was given up on: a refusal or the last failure. */
+    outcome: text(),
+    personId: text("person_id"),
+  },
+  (table) => [
+    index("app_webhook_deliveries_person").on(table.personId),
+    uniqueIndex("app_webhook_deliveries_dedupe").on(
+      table.webhookId,
+      table.dedupe
+    ),
+    index("app_webhook_deliveries_due")
+      .on(table.deliveryAt)
+      .where(sql`delivered_at IS NULL`),
+    index("app_webhook_deliveries_settled")
+      .on(table.deliveredAt)
+      .where(sql`delivered_at IS NOT NULL`),
+  ]
+);
+
+/**
+ * The forms an App's pages sent that its webhooks were told of
+ * (src/app-webhook-queue.ts): one per submission, whoever sent it to
+ * whichever function under whichever key, in whichever run (`id`, a hash
+ * of all of it), so each run is told once. `told_at` is when; `claim`
+ * is the batch's that told it, which alone counts what it told.
+ */
+export const appFormSubmissions = sqliteTable(
+  "app_form_submissions",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    toldAt: timestamp("told_at").notNull(),
+    claim: text().notNull(),
+  },
+  (table) => [index("app_form_submissions_told").on(table.toldAt)]
+);
+
+/**
+ * Revocations an App's host couldn't be told of (src/access-revocations.ts):
+ * told again by the clock until it takes them, so a host away for
+ * longer than its retries still clears the pages of whoever lost a
+ * role. `user_ids` is null for everyone the host knows of. A null
+ * `app_id` is a revocation for every App (an admin's role lost), kept as
+ * one row so the change's batch stays one row however many Apps there
+ * are; it is expanded into one row per App a page at a time, in App ID
+ * order, `after_app_id` the last App it has expanded to (GRA-650).
+ */
+export const accessRevocations = sqliteTable(
+  "access_revocations",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id").references(() => apps.id, { onDelete: "cascade" }),
+    userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
+    attempts: integer().notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    afterAppId: text("after_app_id"),
+  },
+  // The clock tells the least tried first, oldest first among them,
+  // once it dropped those a day old.
+  (table) => [
+    index("access_revocations_due").on(table.attempts, table.createdAt),
+    index("access_revocations_age").on(table.createdAt),
+  ]
+);
+
+/**
+ * Whom each App is shared with (src/app-access.ts): a person
+ * (`member_type` `person`, `member_id` their user ID), a team, or everyone
+ * in a project (`project`, src/projects.ts), with their role in it.
+ * Sharing again changes the role; unsharing deletes the row.
+ * Who did which is in the audit log. The App's owner has no row: they are
+ * always one of its builders.
+ */
+export const appMembers = sqliteTable(
+  "app_members",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    memberType: text("member_type", {
+      enum: ["person", "team", "project"],
+    }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["user", "builder"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.memberType, table.memberId] }),
+    // Which Apps are shared with someone, for listing theirs.
+    index("app_members_member_idx").on(table.memberType, table.memberId),
+  ]
+);
+
+/**
+ * An App's data policy (src/data-policy.ts), one row per App once
+ * anything set it (none yet is `sensitive`, generation 0): what its data
+ * is to code Grasp didn't serve (`output`), and a
+ * generation that goes up, in the batch that makes the change, with every
+ * change of `output` and every grant widening the App's reach. A
+ * classification lands only under the generation its admin read.
+ */
+// Still the table the previous release named for screens: a data
+// policy is the one thing here a release serving next to this one may
+// still write while both run (the admin migrates before it uploads), and
+// two tables could disagree on it. Renamed once no release reads it.
+export const pagePolicies = sqliteTable("screen_policies", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  output: text({ enum: ["sensitive", "ordinary"] }).notNull(),
+  generation: integer().notNull(),
+});
+
+/**
+ * Blueprints (src/app-blueprints.ts), to create Apps from: code (`tree`,
+ * a marked one's its version's, a built-in's stored as a version's files
+ * are), and what each App created
+ * from it asks for. One is a version of an App a builder marked (`app_id`
+ * and `version`, at most one per version), or one the release ships
+ * (`blueprints/` in core), which has neither and is changed only by the
+ * install, which deletes it once a release no longer ships it. Unmarking
+ * deletes the row; who marked, unmarked, installed or removed which is in
+ * the audit log.
+ */
+export const blueprints = sqliteTable(
+  "blueprints",
+  {
+    /** Random for a marked version; a built-in's folder name. */
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    tree: text().notNull(),
+    /**
+     * Its App definition (`app_versions.definition`): a marked one's
+     * version's, a built-in's from the release. Nullable only as the
+     * column was added (expand, then contract): every row is written with
+     * one.
+     */
+    definition: text(),
+    appId: text("app_id").references(() => apps.id),
+    version: integer(),
+    /**
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written false. Dropped in a later release
+     * (expand, then contract).
+     */
+    approved: integer({ mode: "boolean" }).notNull(),
+    /**
+     * What each App created from it asks for (JSON, `DeclaredPermission[]`),
+     * each waiting for an admin there.
+     */
+    permissions: text({ mode: "json" }).$type<DeclaredPermission[]>().notNull(),
+    /**
+     * The independent workflows each App created from it gets (JSON,
+     * `BlueprintWorkflow[]`): a built-in's, from the release; a marked
+     * version ships none.
+     */
+    workflows: text({ mode: "json" })
+      .$type<BlueprintWorkflow[]>()
+      .notNull()
+      .default([]),
+    /** Who marked it; null for a built-in. */
+    markedBy: text("marked_by"),
+    /** When it was marked, or last installed changed. */
+    markedAt: timestamp("marked_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("blueprints_app_version_idx").on(table.appId, table.version),
+  ]
+);
+
+/**
+ * Where an App created from a blueprint came from (src/app-blueprints.ts):
+ * the blueprint, the version of its App a marked one was (null for a
+ * built-in), the tree it was copied from, and that tree's code as it was
+ * taken, stored under the App as a version's tree is, for an
+ * update to be merged over. Written in the batch that creates the App
+ * from the blueprint, and moved on to a built-in's newer code only in the
+ * batch that commits an update a builder accepted, and deleted, which
+ * detaches the App, when a release removes the built-in. Unlike
+ * `apps.blueprint`, a label a creator may give any App, this is core's
+ * record, which only a built-in's updates read.
+ */
+export const appOrigins = sqliteTable("app_origins", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  blueprintId: text("blueprint_id").notNull(),
+  blueprintVersion: integer("blueprint_version"),
+  tree: text().notNull(),
+  code: text().notNull(),
+  /**
+   * The blueprint's definition the App last took, as `tree` its code: what
+   * an update merges the App's definition over. Nullable only as the
+   * column was added (expand, then contract): every row is written with
+   * one.
+   */
+  definition: text(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * Every committed version of an App, never deleted, and never changed but
+ * its publishing `status`. `tree` is
+ * the SHA-256 of the version's files, its code, which are stored under it
+ * in R2 (`src/apps.ts`); `definition` is what the App is, as data, held
+ * here beside it. Versions count up from 1 per App, and the primary key
+ * makes two commits of the same version conflict instead of both landing.
+ */
+export const appVersions = sqliteTable(
+  "app_versions",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    parent: integer(),
+    tree: text().notNull(),
+    /**
+     * The hash of the version's code: its tree, the whole of its code.
+     * Null for a version committed before the column, which is no
+     * blueprint's.
+     */
+    code: text(),
+    /**
+     * The version's App definition (@grasp-os/runtime's definition-types.ts), as its
+     * text (`definitionText`): its name, tables with their stable IDs, access and
+     * permissions, from which its `grasp.config.ts` and `server/schema.ts`
+     * were generated as it was committed. Written once, never changed (a
+     * trigger refuses it). Null only while the column is nullable
+     * (expand, then contract); a version without one is refused.
+     */
+    definition: text(),
+    /** The SHA-256 of `definition`, which its sealed release names. */
+    definitionHash: text("definition_hash"),
+    files: integer().notNull(),
+    authorId: text("author_id").notNull(),
+    /**
+     * Unused since every version is a published draft, which says nothing
+     * of its own: written empty. Dropped in a later release (expand, then
+     * contract).
+     */
+    message: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written null. Dropped in a later release
+     * (expand, then contract).
+     */
+    approved: integer(),
+    /**
+     * The previous release's names of the version's screens (JSON). Read
+     * by nothing here: kept while that release may still serve next to
+     * this one, and dropped once none does (expand, then contract).
+     */
+    screens: text({ mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /**
+     * Whether the version has pages (`hasPages`), written when it is
+     * committed: so listing every App someone can open is one query and
+     * reads no files (`listAppOverviews`). Migration 0218 sets it from
+     * `screens`; a version the previous release commits while both serve
+     * gets none (the default) until its next version.
+     */
+    pages: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The chat's agent that wrote and proposed it (JSON, `AgentProposer`).
+     * Unused since a builder publishes the App's shared draft themselves:
+     * nothing reads or writes it. Kept so a roll back to the release before
+     * still has it; dropped in a later release (expand, then contract).
+     */
+    proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
+    /**
+     * What people call it, `YY.MM.N` as the platform's releases are
+     * (@grasp-os/shared/release-id): given in the statement that first
+     * makes it live (apps.ts, `activateVersion`), so only a version that went
+     * live has one and the count has no gaps; kept when a roll back makes
+     * it live again. Null for a version never live. The integer `version`
+     * stays its ID.
+     */
+    label: text(),
+    /**
+     * Where publishing left the version (src/app-publish.ts): `published`
+     * once it was built, sealed and its tests passed, `failed` when its
+     * last publish was refused, null for one never published. With
+     * `published_manifest_hash`, the only columns of a version that change.
+     */
+    status: text({ enum: ["published", "failed"] }),
+    /**
+     * The hash of the sealed manifest its publish tested: the version
+     * counts as published only while a release with this hash is stored
+     * (src/apps.ts, `publishedSql`), so one deleted, by whatever release of
+     * core, or sealed again, is published again. Null until it is.
+     */
+    publishedManifestHash: text("published_manifest_hash"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.version] }),
+    uniqueIndex("app_versions_label").on(table.appId, table.label),
+  ]
+);
+
+/**
+ * Unused since every subject's draft is in `drafts` (src/drafts.ts),
+ * which started empty (migration 0250): nothing reads or writes
+ * it. Kept while a release that writes it may serve or be rolled back to
+ * (expand, then contract); dropped in a later release, as are the four
+ * tables after it.
+ *
+ * Each App's draft: the one every builder of the App
+ * and their chats' agents write, over the version it began from (`base`,
+ * null for an App with none). Each write is the next `revision`, and
+ * lands only over the revision it read, so of two writes made from the
+ * same read the second is refused. A draft whose changes are all gone
+ * (published or discarded) keeps its row and its revision.
+ */
+export const appDrafts = sqliteTable("app_drafts", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  base: integer(),
+  revision: integer().notNull(),
+  /**
+   * The draft's own App definition, as its text (`definitionText`), next
+   * to its changed files: what the definition tools change. Null while it
+   * is its base's (none for an App without a version).
+   */
+  definition: text(),
+  updatedAt: timestamp("updated_at").notNull(),
+  /** Who wrote it last: the person, themselves or through their chat's agent. */
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
+ * Unused (as `appDrafts`): a draft's changes, a file's new content by
+ * path, or null to delete it, a row each. Dropped in a later release.
+ */
+export const appDraftFiles = sqliteTable(
+  "app_draft_files",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => appDrafts.appId),
+    path: text().notNull(),
+    content: text(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.path] })]
+);
+
+/**
+ * Unused (as `appDrafts`), dropped in a later release: the undo points of
+ * each App's draft, now `draft_checkpoints`. One per agent turn that wrote it,
+ * kept as the turn left the draft, one per person's own edit, and one per
+ * restore. `number` counts up from 1 per App in the order they landed;
+ * `revision` is the draft's revision it made, `base` the version it is
+ * over, `definition` its own definition (as `app_drafts.definition`), and
+ * `contentHash` the SHA-256 of what it holds (the canonical JSON of
+ * `base`, each path's content hash and its definition). Who wrote it:
+ * `personId`, through the agent of chat `chatId` in turn `turnId` (its
+ * last write in the code step `callId`), or themselves, restoring point
+ * `restoredFrom`. The draft's own rows hold only the latest; these hold
+ * every one, to list, preview and restore, and to say what a chat worked
+ * on.
+ */
+export const appDraftPoints = sqliteTable(
+  "app_draft_points",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    definition: text(),
+    contentHash: text("content_hash").notNull(),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id"),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.number] }),
+    // What a chat worked on, and what its turn wrote, without a scan.
+    index("app_draft_points_chat").on(table.chatId, table.turnId),
+  ]
+);
+
+/**
+ * Unused (as `appDrafts`), dropped in a later release, now
+ * `draft_checkpoint_files`: what an undo point (`appDraftPoints`) changes over its base: each
+ * path's content by its SHA-256 (`appDraftContents`), or null to delete
+ * the file, a row each.
+ */
+export const appDraftPointFiles = sqliteTable(
+  "app_draft_point_files",
+  {
+    appId: text("app_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.number, table.path] }),
+    index("app_draft_point_files_content").on(table.appId, table.sha256),
+  ]
+);
+
+/**
+ * Unused (as `appDrafts`), dropped in a later release, now `draft_blobs`:
+ * the contents an App's undo points name, each once, by its SHA-256.
+ */
+export const appDraftContents = sqliteTable(
+  "app_draft_contents",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.sha256] })]
+);
+
+/**
+ * The draft of each App and workflow (src/drafts.ts), keyed by its
+ * subject (`subject_kind`, `subject_id`): the one every builder of it and
+ * their chats' agents write, over the version it began from (`base`, null
+ * for one with none). Each write is the next `revision`, and lands only
+ * over the revision it read, so of two writes made from the same read the
+ * second is refused. A draft whose changes are all gone (published or
+ * discarded) keeps its row and its revision. A workflow's draft is one
+ * file, `workflow.json`.
+ */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    base: integer(),
+    revision: integer().notNull(),
+    /**
+     * An App draft's own definition, as its text (`definitionText`), next
+     * to its changed files: what the definition tools change. Null while
+     * it is its base's, and always for a workflow.
+     */
+    definition: text(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /** Who wrote it last: the person, themselves or through their chat's agent. */
+    updatedBy: text("updated_by").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectKind, table.subjectId] })]
+);
+
+/**
+ * A draft's changes (`drafts`): a file's new content by path, or null to
+ * delete it, a row each, so no row holds more than one file.
+ */
+export const draftFiles = sqliteTable(
+  "draft_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    path: text().notNull(),
+    content: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.path],
+    }),
+  ]
+);
+
+/**
+ * The checkpoints of each draft: one per agent turn that wrote it, kept
+ * as the turn left the draft, one per person's own edit, and one per
+ * restore, discard, publish and roll back. `number` counts up from 1 per
+ * subject in the order they landed; `revision` is the draft's revision
+ * it made, `base` the version it is over, `definition` its own definition
+ * (as `drafts.definition`), and `content_hash` the SHA-256 of what it
+ * holds (the canonical JSON of `base`, each path's content hash and its
+ * definition). Who wrote it: `person_id`, through the agent of chat
+ * `chat_id` in turn `turn_id` (its last write in the code step
+ * `call_id`), or themselves, restoring checkpoint `restored_from`. The
+ * draft's own rows hold only the latest; these hold every one, to list,
+ * preview and restore, and to say what a chat worked on.
+ */
+export const draftCheckpoints = sqliteTable(
+  "draft_checkpoints",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    definition: text(),
+    contentHash: text("content_hash").notNull(),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id"),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number],
+    }),
+    // What a chat worked on, and what its turn wrote, without a scan.
+    index("draft_checkpoints_chat").on(table.chatId, table.turnId),
+  ]
+);
+
+/**
+ * What a checkpoint (`draftCheckpoints`) changes over its base: each
+ * path's content by its SHA-256 (`draftBlobs`), or null to delete the
+ * file, a row each.
+ */
+export const draftCheckpointFiles = sqliteTable(
+  "draft_checkpoint_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number, table.path],
+    }),
+    index("draft_checkpoint_files_content").on(
+      table.subjectKind,
+      table.subjectId,
+      table.sha256
+    ),
+  ]
+);
+
+/**
+ * The contents a subject's checkpoints name, each once, by its SHA-256:
+ * most writes change a file or two, so the checkpoints share the rest.
+ */
+export const draftBlobs = sqliteTable(
+  "draft_blobs",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.sha256],
+    }),
+  ]
+);
+
+/**
+ * Unused: candidates were replaced by one publish (src/app-publish.ts) and
+ * a version's `status`. Kept, unread and unwritten, while a release that
+ * still writes it may serve or be rolled back to (expand, then contract);
+ * dropped in a later release, with its reports and triggers.
+ */
+export const appCandidates = sqliteTable(
+  "app_candidates",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    sourceTree: text("source_tree").notNull(),
+    basedOn: integer("based_on").notNull(),
+    /** The candidate this one repairs, if it does. */
+    previousCandidate: text("previous_candidate"),
+    state: text().notNull(),
+    /** How many runs claimed it, the one running included. */
+    attempt: integer().notNull().default(0),
+    /** Whose run holds it, and until when; null while none does. */
+    lease: text(),
+    leaseUntil: timestamp("lease_until"),
+    /** The code of what ended it, for an outcome. */
+    outcome: text(),
+    /** Its report's SHA-256, once verified (`app_candidate_reports`). */
+    reportHash: text("report_hash"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // One open candidate per version and the version it would replace:
+    // freezing it again finds this one.
+    uniqueIndex("app_candidates_open_idx")
+      .on(table.appId, table.version, table.basedOn)
+      .where(
+        sql`${table.state} IN ('frozen', 'checking', 'building', 'verifying', 'verified')`
+      ),
+    // An App's candidates, newest first, and those a commit supersedes.
+    index("app_candidates_app_idx").on(table.appId, table.createdAt),
+  ]
+);
+
+/** Unused, as `app_candidates` is: dropped with it in a later release. */
+export const appCandidateReports = sqliteTable("app_candidate_reports", {
+  candidateId: text("candidate_id")
+    .primaryKey()
+    .references(() => appCandidates.id),
+  report: text().notNull(),
+  hash: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The sealed release of an App version of spec 8's layout (spec 16;
+ * src/app-releases.ts): its manifest's canonical text, which pins the
+ * version's source tree, schema, contracts, runtime and artifacts, and the
+ * SHA-256 of that text. Written once, by the seal, and never changed: a
+ * seal of the same version with another manifest is refused. Its trust
+ * isn't here: the manifest always says `unreviewed`.
+ */
+export const sdkReleaseManifests = sqliteTable(
+  "sdk_release_manifests",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    manifest: text().notNull(),
+    sealedAt: timestamp("sealed_at").notNull(),
+    /**
+     * Unused since retention keeps the last versions rather than 90 days
+     * (src/release-retention.ts): dropped in a later release.
+     */
+    lastCurrentAt: timestamp("last_current_at"),
+    /**
+     * Unused since the sweep deletes a release in the one statement that
+     * checks nothing keeps it: dropped in a later release.
+     */
+    unreferencedSince: timestamp("unreferenced_since"),
+    /**
+     * When an admin revoked it: it runs no more (`version.revoked`), but
+     * its bytes stay for audit and recovery, under the same retention.
+     */
+    revokedAt: timestamp("revoked_at"),
+    /**
+     * The seal whose references (`sdk_artifact_refs`) keep its artifacts
+     * (src/sealed-artifacts.ts). Null for a release sealed before seals,
+     * which this release refuses as of another format.
+     */
+    sealId: text("seal_id"),
+    /**
+     * The hashes of the approved package graphs the release bundles, in
+     * its server modules and its pages alike: what keeps a replaced
+     * approval in force (packages/approvals.ts). Null for a release sealed
+     * before it was recorded, taken as keeping every graph of its App.
+     */
+    packageGraphs: text("package_graphs", { mode: "json" }).$type<string[]>(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * The artifacts seals name (src/sealed-artifacts.ts): one live row per
+ * SHA-256, with the random generation made as the row was, its bytes at
+ * `artifacts/<sha256>/<generation>`. Deleted only in the statement that
+ * finds no reference to it; a row made again gets a new generation.
+ */
+export const sdkArtifacts = sqliteTable("sdk_artifacts", {
+  sha256: text().primaryKey(),
+  generation: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * Which seal references which artifact (src/sealed-artifacts.ts): `seal`
+ * is the random ID the row naming the seal keeps (a release's or a
+ * workflow version's `seal_id`, a test run's `reservation`).
+ */
+export const sdkArtifactRefs = sqliteTable(
+  "sdk_artifact_refs",
+  {
+    seal: text().notNull(),
+    sha256: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.seal, table.sha256] }),
+    index("sdk_artifact_refs_sha256").on(table.sha256),
+  ]
+);
+
+/**
+ * Unused since artifacts are rows with a generation each
+ * (`sdk_artifacts`): kept while a release that writes it may serve or be
+ * rolled back to, and dropped in a later release, with the
+ * `release-artifacts/` objects it counted.
+ */
+export const sdkReleaseArtifacts = sqliteTable(
+  "sdk_release_artifacts",
+  {
+    sha256: text().notNull(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    reservedAt: timestamp("reserved_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sha256, table.appId, table.version] }),
+    index("sdk_release_artifacts_release").on(table.appId, table.version),
+  ]
+);
+
+/**
+ * Unused since an artifact's bytes go once nothing references them
+ * (`sdk_release_artifacts`), with no deletion marks: dropped in a later
+ * release.
+ */
+export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
+  sha256: text().primaryKey(),
+  owner: text().notNull(),
+  startedAt: timestamp("started_at").notNull(),
+});
+
+/** Unused, as `sdk_release_artifacts` is: dropped with it in a later release. */
+export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
+  sha256: text().primaryKey(),
+  queuedAt: timestamp("queued_at").notNull(),
+});
+
+/**
+ * Unused since a version whose release was deleted is published again,
+ * tests and all, before it runs (src/app-publish.ts): dropped in a later
+ * release.
+ */
+export const sdkReleaseTombstones = sqliteTable(
+  "sdk_release_tombstones",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    deletedAt: timestamp("deleted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * What keeps a sealed release past its retention (spec 16.3): an open
+ * page's lease, which lapses 15 minutes after its last renewal, or a
+ * run, a compatible migration, a pinned trigger or a legal hold, held
+ * until released.
+ */
+export const sdkReleasePins = sqliteTable(
+  "sdk_release_pins",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    holderKind: text("holder_kind", {
+      enum: ["frame", "run", "migration", "trigger", "hold"],
+    }).notNull(),
+    holderId: text("holder_id").notNull(),
+    /** When it lapses, for a frame's lease; null for a held pin. */
+    expiresAt: timestamp("expires_at"),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.version, table.holderKind, table.holderId],
+    }),
+  ]
+);
+
+/**
+ * What a sealed release binds, by alias (spec 16.1): the store it reads and
+ * writes, which only the host chose when it sealed the release, or, for a
+ * workflow version (`resource_id` a workflow resource's), the exact version
+ * of another workflow it runs (`kind` `workflow`, `schema_hash` that
+ * version's contract hash, workflow-resources.ts). A workflow version's
+ * catalog binding names its contract key: the single binding inventory
+ * (spec 24).
+ * Routing, not a grant: whoever calls is authorized on every call. Also
+ * how a store finds the releases that still rely on it: it can't be
+ * deleted while one does (data-stores.ts), and retention deletes a
+ * release's rows here with it.
+ */
+export const sdkResourceBindings = sqliteTable(
+  "sdk_resource_bindings",
+  {
+    resourceId: text("resource_id").notNull(),
+    resourceVersion: integer("resource_version").notNull(),
+    alias: text().notNull(),
+    // An older row may still say `template`: no binding is of that kind
+    // since workflows lost their template reads, and every read filters
+    // by the kinds still served.
+    kind: text({
+      enum: [
+        "store",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "brain",
+        "files",
+      ],
+    }).notNull(),
+    targetId: text("target_id").notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    /**
+     * The target's version: for a store, the definition this release
+     * binds (`business_store_versions.version`).
+     */
+    targetVersion: integer("target_version"),
+    /**
+     * The contract key the binding's source named, as the host resolved
+     * it (a workflow's `namespace/name/semver`); null for a store's.
+     */
+    contractId: text("contract_id"),
+    /**
+     * Unused since workflows lost their `operation` bindings: kept only
+     * until a later release drops it, with `approval_id` and the triggers
+     * that read both (migration 0183), as an older core may still run on
+     * this schema (expand, then contract).
+     */
+    targetPath: text("target_path"),
+    /** Unused, as `target_path` is. */
+    approvalId: text("approval_id"),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.resourceId, table.resourceVersion, table.alias],
+    }),
+    index("sdk_resource_bindings_target").on(table.kind, table.targetId),
+  ]
+);
+
+/**
+ * The definitions an App's store serves, in core's inventory (spec 24):
+ * each distinct schema and function manifest a sealed release bound the
+ * store with, numbered per store as it first appears, with the source
+ * tree of the release that first bound it. Written in the seal's batch
+ * (app-releases.ts), never changed. The store's object holds the schemas
+ * themselves, its receipts and its outbox, and stays their authority.
+ */
+export const businessStoreVersions = sqliteTable(
+  "business_store_versions",
+  {
+    storeId: text("store_id").notNull(),
+    version: integer().notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    functionManifestHash: text("operation_manifest_hash").notNull(),
+    sourceTreeHash: text("source_tree_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.version] }),
+    uniqueIndex("business_store_versions_definition").on(
+      table.storeId,
+      table.schemaHash,
+      table.functionManifestHash
+    ),
+  ]
+);
+
+/**
+ * Who first claimed each store. Unused since each App has one store of its own: kept only until a later
+ * release drops it, as an older core may still run on this schema (expand,
+ * then contract).
+ */
+export const sdkStoreOwners = sqliteTable(
+  "sdk_store_owners",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    claimedAt: timestamp("claimed_at").notNull(),
+  },
+  () => [
+    check(
+      "sdk_store_owners_one_owner",
+      sql`(app_id IS NULL) <> (workflow_id IS NULL)`
+    ),
+  ]
+);
+
+/**
+ * The stores workflows declared before workflows stopped owning stores.
+ * Unused since each App has one store of its own: kept only until a later
+ * release drops it, as an older core may still run on this schema (expand,
+ * then contract).
+ */
+export const workflowStores = sqliteTable(
+  "workflow_stores",
+  {
+    workflowId: text("workflow_id").notNull(),
+    name: text().notNull(),
+    storeId: text("store_id").notNull().unique(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workflowId, table.name] })]
+);
+
+/**
+ * The one store of each App of spec 8's layout, keyed by the App: created
+ * by the host when it first seals a version of the App that needs one
+ * (data-stores.ts, `appStoreFor`), in the batch that lists it in the
+ * inventory, and bound to every later version, so the App's data outlives
+ * its versions. A store ID enters here only as it is minted, so no store
+ * ever serves a second App. Never chosen by a request.
+ */
+export const appDefaultStores = sqliteTable("app_default_stores", {
+  appId: text("app_id").primaryKey(),
+  storeId: text("store_id").notNull().unique(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The fixture stores an App's tests run on (app-tests.ts), each recorded
+ * before its object is first touched and deleted once the object is
+ * discarded: a row left behind is a test run that died between the two,
+ * whose store the sweep discards. A fixture store is never in the store
+ * inventory (`business_stores`), so nothing opens or binds it as a store.
+ */
+export const appTestFixtures = sqliteTable(
+  "app_test_fixtures",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("app_test_fixtures_created_at").on(table.createdAt)]
+);
+
+/**
+ * The inventory of action invocations' objects (action-invocation.ts),
+ * one row per object that may hold an invocation: written before the
+ * object records its run and deleted after the object empties itself, so
+ * every object holding a run, a receipt or a tombstone has a row (a row
+ * left behind names an empty object). Where the invocation stands is the
+ * object's own; the row only names it and whose it is.
+ */
+export const actionInvocations = sqliteTable("action_invocations", {
+  /** The object's name (`invocationName`). */
+  name: text().primaryKey(),
+  personId: text("person_id").notNull(),
+  appId: text("app_id").notNull(),
+  /** Whether it is a streaming action's (spec 10.7.6) or a plain one's. */
+  streaming: integer({ mode: "boolean" }).notNull(),
+  /** When it was listed, as its first run started. */
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The workflow runs an App's tests started (workflows/fixture-runs.ts),
+ * each recorded before the engine is asked for it and deleted once the
+ * engine removed it: a row left behind is a test run that died between
+ * the two, whose run the sweep removes past its deadline. What a run is
+ * and runs with is here, never in the organization's runs and receipts:
+ * its pinned version and build, the fixture principal it acts for, its
+ * input and the parameter values its fixture gave it (or their defaults:
+ * never the organization's).
+ */
+export const appTestRuns = sqliteTable(
+  "app_test_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    /** The App whose tests started it, and the version under test. */
+    appId: text("app_id").notNull(),
+    appVersion: integer("app_version").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    /** The fixture's principal it acts for (`fixture-<name>`). */
+    principal: text().notNull(),
+    input: text().notNull(),
+    params: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When its test's time is up: no activation runs it after, and the
+     * sweep removes it once it is past.
+     */
+    deadline: timestamp("deadline").notNull(),
+    /**
+     * Who each decision binding covers in its test, by the binding's
+     * alias: its fixture's principals, by name, as JSON
+     * (workflows/fixture-decisions.ts).
+     */
+    deciders: text().notNull().default("{}"),
+    /**
+     * What each model binding answers in its test, by the binding's alias,
+     * as JSON: no model is ever asked (workflows/fixture-calls.ts).
+     */
+    models: text().notNull().default("{}"),
+    /**
+     * Unused since a test's runs make no store calls: kept only until a
+     * later release drops it, with `store_id`, as an older core may still
+     * run on this schema (expand, then contract).
+     */
+    operations: text().notNull().default("{}"),
+    /** Unused, as `operations` is. */
+    storeId: text("store_id"),
+    /**
+     * A fault its test gave it (`restartAfterStep`): the task after whose
+     * step's first journaled outcome its activation is restarted, once.
+     */
+    restartAfterStep: text("restart_after_step"),
+    /** When that fault restarted it: it restarts the run once. */
+    restartedAt: timestamp("restarted_at"),
+    /**
+     * How many model requests each of its tasks made, by task, as JSON:
+     * counted as the test's provider answers each (fixture-calls.ts), apart
+     * from the engine's journal.
+     */
+    modelRequests: text("model_requests").notNull().default("{}"),
+  },
+  (table) => [index("app_test_runs_deadline").on(table.deadline)]
+);
+
+/**
+ * The decisions a run an App's test started waits for
+ * (workflows/fixture-decisions.ts): its test's own, answered only by the
+ * fixture principal it asks, and removed with the run's record.
+ */
+export const appTestDecisions = sqliteTable(
+  "app_test_decisions",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => appTestRuns.runId, { onDelete: "cascade" }),
+    /** The task that asks it, and its step in the task's scope. */
+    task: text().notNull(),
+    step: text().notNull(),
+    /** The fixture principals it asks, by name: any one of them answers. */
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
+    description: text().notNull(),
+    input: text({ mode: "json" }).$type<Json>().notNull(),
+    /** The descriptor text of what an answer's payload must be. */
+    response: text().notNull(),
+    status: text({
+      enum: ["open", "approved", "rejected", "timed_out"],
+    }).notNull(),
+    openedAt: timestamp("opened_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    payload: text({ mode: "json" }).$type<Json>(),
+  },
+  (table) => [
+    uniqueIndex("app_test_decisions_run_step_idx").on(table.runId, table.step),
+    index("app_test_decisions_run_task_idx").on(
+      table.runId,
+      table.task,
+      table.status
+    ),
+  ]
+);
+
+/**
+ * The fixture stores chats' previews ran on before a preview ran on a
+ * throwaway store that empties itself (draft-runs.ts). Nothing writes or
+ * reads it: dropped by the next contract migration.
+ */
+export const previewFixtureStores = sqliteTable(
+  "preview_fixture_stores",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id").notNull(),
+    /**
+     * Whose chat's preview it is: what their removal discards at once
+     * (`discardPreviewStoresOf`). Null for one recorded before core kept
+     * it, left to the sweep.
+     */
+    personId: text("person_id"),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the sweep tries it again, once a discard of it failed or ran out
+     * of time: until then it steps past it, so a store that keeps failing
+     * never holds up the rest. Null until one did.
+     */
+    retryAfter: timestamp("retry_after"),
+  },
+  (table) => [
+    index("preview_fixture_stores_created_at").on(table.createdAt),
+    index("preview_fixture_stores_person").on(table.personId),
+  ]
+);
+
+/**
+ * Published templates: each version's content, written once by an admin
+ * and never changed, for a workflow's template binding to read.
+ *
+ * Unused since workflows lost their own actions, the only readers of a
+ * template (GRA-1641): nothing reads or writes it. Kept so a rollback to
+ * the release before still has it; a later release drops it (expand,
+ * then contract).
+ */
+export const resourceTemplates = sqliteTable(
+  "resource_templates",
+  {
+    id: text().notNull(),
+    version: integer().notNull(),
+    contract: text().notNull(),
+    /** The content, as canonical JSON. */
+    content: text().notNull(),
+    /** The SHA-256 of `content`. */
+    contentHash: text("content_hash").notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: timestamp("published_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.id, table.version] })]
+);
+
+/**
+ * Which provider serves each resource an App of spec 8's layout declares
+ * for its actions (resource-bindings.ts): approved by an admin, for the
+ * exact declaration they reviewed (`declaration_hash`) and the contract it
+ * serves as it was then (`contract_id`, `fingerprint`). `target` is the
+ * provider (JSON, `BindingTarget`): a model, or one of the App's
+ * permissions. At most one active binding per alias; approving
+ * another revokes it in the same batch. Revoked rows stay, for the audit
+ * log's references.
+ */
+export const appResourceBindings = sqliteTable(
+  "app_resource_bindings",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    alias: text().notNull(),
+    kind: text({
+      enum: ["model", "connector", "brain", "grasp"],
+    }).notNull(),
+    target: text().notNull(),
+    declarationHash: text("declaration_hash").notNull(),
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    reviewedVersion: integer("reviewed_version").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("app_resource_bindings_active_idx")
+      .on(table.appId, table.alias)
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
+/**
+ * The runs of Apps' own workflows, which went with them (GRA-1367). Nothing
+ * writes or reads it: dropped by the next contract migration.
+ */
+export const workflowRuns = sqliteTable(
+  "workflow_runs",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    workflowId: text("workflow_id").notNull(),
+    version: integer().notNull(),
+    startedBy: text("started_by"),
+    /**
+     * Unused: nothing reads or writes it any more, and every new row takes
+     * the default. Grasp staff start no work in a client's workspace (a
+     * staff session reaches the onboarding alone), so no run is marked as
+     * staff-started. Kept because the release before this one still reads
+     * and writes it (expand, then contract); drop it in a later release.
+     */
+    startedByStaff: integer("started_by_staff", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    status: text({
+      // `starting`: written, its engine instance not yet known to exist
+      // (src/workflows/runs.ts, `startRun`).
+      enum: [
+        "starting",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ],
+    }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    endedAt: timestamp("ended_at"),
+    failure: text({ mode: "json" }).$type<RunFailure>(),
+    /**
+     * What a trigger started it for (src/workflows/triggers.ts): one key
+     * per scheduled time, so the same one delivered twice starts one run.
+     * Null for a run a person started, and for one whose start failed,
+     * which gives its key up for the delivery tried again.
+     */
+    triggerKey: text("trigger_key"),
+    detailsRemovedAt: timestamp("details_removed_at"),
+    /**
+     * The run its lineage started from, for a run another run started
+     * (src/workflows/runs.ts, `startRun`'s `parent`): the parent's own
+     * root, so every descendant names the same one. Null for a run that
+     * is its own root. Written once, with the row, and never from what the
+     * run is given: the model gateway counts the lineage's model calls and
+     * spend by it, unless the run is charged to an account
+     * (`accountRunId`, src/model-spend.ts).
+     */
+    rootRunId: text("root_run_id"),
+    /**
+     * For a run of another App than its lineage root's (a run's own mail
+     * starts other Apps' runs under it, src/workflows/connector-events.ts),
+     * or of the root's App under another App's run: the run whose
+     * allowances its work is charged to, the first run of its kind in the
+     * lineage (`run_lineage_accounts`). Its attempts, host
+     * calls, model spend and share count there; its place (descendants,
+     * depth, age) stays the lineage's. A run of the root's App whose parent
+     * is of that App too takes its parent's: so under a run of the root's
+     * App charged to an account (one under another App's run), it is
+     * charged there as well. Null for a root, and for a run of the root's
+     * App whose parent, of that App, is charged to the lineage's own
+     * (src/workflows/quotas.ts, `accountClaimed`). Written once, with the
+     * row: never changed once set (migration 0112's trigger).
+     */
+    accountRunId: text("account_run_id"),
+    /**
+     * The sequence of the engine's latest status notification this row
+     * took (src/workflows/projection.ts): one at or below it is late, and
+     * changes nothing. The engine alone decides a run's status; this row
+     * follows it.
+     */
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    /**
+     * The start the engine was still to confirm, as it was sent
+     * (`{ input }`). Nothing starts an App run any more, nor repairs one:
+     * left until the table goes. Null once confirmed, and for a run whose
+     * start failed.
+     */
+    pendingStart: text("pending_start", { mode: "json" }).$type<{
+      input?: Json;
+    }>(),
+    /**
+     * When someone cancelled the run: its tombstone. From then on the
+     * dispatcher runs nothing more of it, whatever the engine still does,
+     * and the engine is told to terminate it; its status turns `cancelled`
+     * once the engine has.
+     */
+    cancelRequestedAt: timestamp("cancel_requested_at"),
+    /**
+     * The generation of the run's controls (src/workflows/controls.ts):
+     * one more with each pause or resume admitted, and with a cancel,
+     * which supersedes them. A control applies to the engine only while
+     * its own generation is the run's, so a late one can't undo a newer.
+     */
+    controlGeneration: integer("control_generation").notNull().default(0),
+    /**
+     * Where the engine last said the run is (its own status, a phase
+     * `status` folds away: waiting, rolling back), as the projection took
+     * it (src/workflows/runs.ts). Null until the engine's first notification.
+     */
+    engineStatus: text("engine_status"),
+    /**
+     * Why the engine rolls the run back, as it began to (src/workflows/
+     * runs.ts): a JSON object of its cause (`failure` or `cancellation`)
+     * and, for a failure, its code. What its summary's compensation says
+     * (spec 10.7.3).
+     */
+    compensation: text(),
+    /** When the engine first ran the run; null until it has. */
+    startedAt: timestamp("started_at"),
+    /**
+     * The revision of the run's summary (src/workflows/summary.ts): one
+     * more with every write that changes what it shows, in that write's own
+     * transaction, so a summary read in one statement is of one revision.
+     */
+    summaryRevision: integer("summary_revision").notNull().default(0),
+    /**
+     * How deep in its lineage the run is: 0 for a root, its parent's depth
+     * and one more for a run another started (src/workflows/quotas.ts).
+     * Written once, with the row, from the parent's row, never from what
+     * the run is given: a lineage nests no deeper than its limits
+     * allows however its runs start one another.
+     */
+    depth: integer().notNull().default(0),
+    /**
+     * The newest activation generation of the run whose attempts the
+     * engine has fenced, as its object last said (src/workflows/quotas.ts,
+     * `sharesReleased`): their shares of the attempts running at once were
+     * given back, and an attempt of this generation, or an older one, takes
+     * none again, however late its admission lands. Only grows.
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+  },
+  (table) => [
+    index("workflow_runs_app_idx").on(table.appId, table.createdAt),
+    // Runs across Apps, newest first: the Workflows page's Runs tab
+    // (src/workflows/overview.ts).
+    index("workflow_runs_created_idx").on(table.createdAt, table.id),
+    // An App's runs of one workflow, newest first: what its pages list.
+    index("workflow_runs_app_workflow_idx").on(
+      table.appId,
+      table.workflowId,
+      table.createdAt
+    ),
+    // Starts the engine was still to confirm, by ID, as the App runs' start
+    // repair paged them; it went with App workflows, and this with the
+    // table.
+    index("workflow_runs_pending_start_idx")
+      .on(table.id)
+      .where(sql`pending_start IS NOT NULL`),
+    // The improvement signals (src/signals.ts): runs that failed in a
+    // window, latest first. Runs started in one are counted per App
+    // workflow by the index above.
+    index("workflow_runs_status_ended_idx").on(
+      table.status,
+      table.endedAt,
+      table.id
+    ),
+    uniqueIndex("workflow_runs_trigger_key_idx").on(table.triggerKey),
+    // A lineage's runs by its root. Only runs another run started have
+    // one.
+    index("workflow_runs_root_idx")
+      .on(table.rootRunId)
+      .where(sql`root_run_id IS NOT NULL`),
+    // The retention sweep (src/workflows/retention.ts): ended runs that
+    // still have their details, longest ended first, then by ID, which
+    // the sweep pages by. Only those: a live run has no `ended_at`, and a
+    // swept one leaves the index.
+    index("workflow_runs_details_kept_idx")
+      .on(table.endedAt, table.id)
+      .where(sql`ended_at IS NOT NULL AND details_removed_at IS NULL`),
+  ]
+);
+
+/**
+ * Each run lineage's durable counters (src/workflows/quotas.ts): a root
+ * run and every run started under it, at any depth, keyed by the root.
+ * Created with the root's row, or with the lineage's first admission
+ * after it, from the root's row. Every admission of the lineage's work
+ * checks these against the quota limits, in one statement
+ * that changes them only if the work fits, so admissions racing each
+ * other never pass a limit, and nothing a retry, a restart, a child or a
+ * branch does starts them afresh: they only grow (but for `active_held_ms`,
+ * which moves into `active_used_ms` as attempts settle, and `host_calls`,
+ * of which an attempt gives back what it reserved and didn't make).
+ *
+ * - `created_at`: the root's start, which the lineage's age counts from.
+ *   A wait doesn't move it, nor does a child.
+ * - `descendants`: runs admitted under the root, whether or not their
+ *   start then succeeded: a slot taken is never given back.
+ * - `active_used_ms`: wall time its steps' attempts used, settled.
+ * - `active_held_ms`: what attempts under way hold, each its whole
+ *   allowance until it settles (`run_lineage_attempts`).
+ * - `host_calls`: host calls its attempts reserved, in blocks; once an
+ *   attempt settles, only those it made.
+ */
+export const runLineages = sqliteTable("run_lineages", {
+  /**
+   * The root run's ID: an App's run (`workflow_runs`) or an independent
+   * workflow's (`workflow_resource_runs`). No foreign key can name both,
+   * so a trigger refuses a root neither has (migration 0093).
+   */
+  rootRunId: text("root_run_id").primaryKey(),
+  createdAt: timestamp("created_at").notNull(),
+  descendants: integer().notNull().default(0),
+  activeUsedMs: integer("active_used_ms").notNull().default(0),
+  activeHeldMs: integer("active_held_ms").notNull().default(0),
+  hostCalls: integer("host_calls").notNull().default(0),
+});
+
+/**
+ * The reservation receipt of each step attempt a run lineage admitted
+ * (src/workflows/quotas.ts): one per attempt, as the engine names it (its
+ * run, its step's key, its number and the generation of the activation
+ * that claimed it), so the same attempt admitted twice holds once, and an
+ * attempt of another activation is admitted afresh: it runs again. It
+ * holds `reserved_ms` (its allowance up to its deadline, at most an
+ * attempt's default active wall time) until it settles with what it used
+ * (`used_ms`, `settled_at`), up to its `deadline`; one that never settles
+ * (its activation died) is settled as having used what it ran once the
+ * engine fenced it (its run paused, ended or cancelled, its activation
+ * taken over), or all it could, once its deadline has passed.
+ */
+export const runLineageAttempts = sqliteTable(
+  "run_lineage_attempts",
+  {
+    /**
+     * The attempt's run, of either table, as `run_lineages.root_run_id`:
+     * a trigger refuses one neither has (migration 0093).
+     */
+    runId: text("run_id").notNull(),
+    stepKey: text("step_key").notNull(),
+    attempt: integer().notNull(),
+    generation: integer().notNull(),
+    rootRunId: text("root_run_id")
+      .notNull()
+      .references(() => runLineages.rootRunId),
+    reservedMs: integer("reserved_ms").notNull(),
+    /** When the engine gives up on the attempt: the most it can use ends here. */
+    deadline: timestamp("deadline").notNull(),
+    usedMs: integer("used_ms"),
+    admittedAt: timestamp("admitted_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    /**
+     * Host calls the attempt reserved of its lineage while it runs, then,
+     * once it settled, those it made; all it reserved if it never did.
+     */
+    hostCalls: integer("host_calls").notNull().default(0),
+    /**
+     * The attempt's App: whose slots of the attempts running at once it
+     * takes while it holds (src/workflows/admission.ts).
+     */
+    resource: text().notNull().default(""),
+    /**
+     * Whether the attempt's own settle gave back the host calls it
+     * reserved and didn't make (src/workflows/quotas.ts): once only, also
+     * after the engine fenced it and its receipt settled sooner.
+     */
+    callsSettled: integer("calls_settled", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.stepKey, table.attempt, table.generation],
+    }),
+    // A lineage's attempts still holding, by when they were admitted: what
+    // an admission settles once their allowance has passed, and how long a
+    // refusal for a busy lineage says to wait.
+    index("run_lineage_attempts_held_idx")
+      .on(table.rootRunId, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+    // The attempts running at once, in all and of an App: what admission
+    // counts (src/workflows/admission.ts), each until its hold ends, an
+    // attempt's wall time at most after its admission.
+    index("run_lineage_attempts_running_idx")
+      .on(table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+    index("run_lineage_attempts_resource_idx")
+      .on(table.resource, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * The build jobs that were building, a lease each: at most a fixed number
+ * built at once. A lease counts while it is
+ * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
+ * of the step that took it. One row per lease a job's step took, by the
+ * job's own sequence (`seq`): its step, the round it waited and the
+ * engine's attempt.
+ *
+ * Unused since build jobs went (GRA-1633): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later
+ * release drops it (expand, then contract).
+ */
+export const buildLeases = sqliteTable(
+  "build_leases",
+  {
+    jobId: text("job_id").notNull(),
+    seq: integer().notNull(),
+    admittedAt: timestamp("admitted_at").notNull(),
+    reservedMs: integer("reserved_ms").notNull(),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.jobId, table.seq] }),
+    // By when they were taken: what admission counts (those unsettled),
+    // what a lease checks it still holds by (any taken since it ended),
+    // and what retention drops.
+    index("build_leases_admitted_idx").on(table.admittedAt),
+  ]
+);
+
+/**
+ * The steps of workflow runs, App runs and independent ones, held because
+ * the organization's AI provider refused its key, isn't answering, or is
+ * limiting requests
+ * (src/workflows/ai-waits.ts): one row per step from its first failed call
+ * until it runs again, so the run's summary says what it waits for, and
+ * replacing a key wakes it.
+ */
+export const workflowAiWaits = sqliteTable(
+  "workflow_ai_waits",
+  {
+    runId: text("run_id").notNull(),
+    /** An App's run (`workflow_runs`) or an independent one's (`workflow_resource_runs`). */
+    runKind: text("run_kind", { enum: ["app", "resource"] }).notNull(),
+    stepHash: text("step_hash").notNull(),
+    /** The provider its call went to (`AiProviderId`). */
+    provider: text().notNull(),
+    /** What its last call showed (`ProviderTrouble`). */
+    trouble: text().notNull(),
+    /** When its step's call first failed so. */
+    since: timestamp("since").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.stepHash] })]
+);
+
+/**
+ * Written and read no more: model calls no longer wait in a queue. Dropped
+ * in a later release, once no running version reads it (expand, then
+ * contract).
+ */
+export const workflowModelWaits = sqliteTable(
+  "workflow_model_waits",
+  {
+    runId: text("run_id").notNull(),
+    stepHash: text("step_hash").notNull(),
+    owner: text().notNull(),
+    waitingFor: text("waiting_for", { enum: ["client", "person"] }),
+    retryAt: timestamp("retry_at").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepHash] }),
+    index("workflow_model_waits_seen_idx").on(table.seenAt),
+  ]
+);
+
+/**
+ * The token core put on each address of the deployment's mail domain that
+ * a workflow run's step mailed through a native mail connector
+ * (src/workflows/mail-stamps.ts): `local+<token>@domain`. Mail back to
+ * the tokened address starts its runs under the run, in its lineage, only
+ * when it goes to `address` (the address the run mailed, without the
+ * token) and comes from one of `senders` (the mailbox the run sent from,
+ * and its connection's account). `origin` is the SHA-256 of the step's
+ * key, the connection and the address, so the same call made again under
+ * its key carries the same token. Removed with its run's details
+ * (src/workflows/retention.ts).
+ */
+export const runMailStamps = sqliteTable(
+  "run_mail_stamps",
+  {
+    token: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    origin: text().notNull(),
+    address: text().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_mail_stamps_origin_idx").on(table.origin),
+    index("run_mail_stamps_run_idx").on(table.runId),
+  ]
+);
+
+/**
+ * What each mail call of a workflow run's step was sent with
+ * (src/workflows/mail-stamps.ts): its recipients that carry a token, as
+ * they were and as they went, none for a call that stamped nothing; and,
+ * for a native mail connector's call, the call's stamp, which its message
+ * carries as a header, with every recipient the call named and who sent
+ * it (the mailbox it names, its connection's account and that account's
+ * email address). A copy of the message that reaches a watched mailbox
+ * starts its runs under the run only when the mailbox is one of
+ * `recipients` and its From one of `senders`. Keyed by the SHA-256 of the
+ * step's key, the connection, the action and the call's input, so the
+ * same call made again under its key sends what it sent the first time,
+ * whatever core learned since. Removed with its run's details
+ * (src/workflows/retention.ts).
+ */
+export const runMailCalls = sqliteTable(
+  "run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    replaced: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    stamp: text(),
+    recipients: text({ mode: "json" }).$type<string[]>(),
+    senders: text({ mode: "json" }).$type<string[]>(),
+  },
+  (table) => [
+    index("run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("run_mail_calls_stamp_idx").on(table.stamp),
+  ]
+);
+
+/**
+ * The messages that claimed each stamp at each source of connector events
+ * (src/workflows/mail-stamps.ts): a source is a connection and the
+ * mailbox it reads (`[connection, resource]`), and a message is what an
+ * event there that names the stamp is about (`eventKey`, the SHA-256 of
+ * its connection and ID). At most a few per stamp and source
+ * (`maxClaimsPerSource`): each starts runs under the stamp's run there,
+ * the same event delivered again included, and any message past them is
+ * a root. Removed with its run's details (src/workflows/retention.ts).
+ */
+export const runMailStampClaims = sqliteTable(
+  "run_mail_stamp_claims",
+  {
+    stamp: text().notNull(),
+    source: text().notNull(),
+    eventKey: text("event_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.stamp, table.source, table.eventKey] }),
+  ]
+);
+
+/**
+ * Each run a stamp's run lineage refused to start
+ * (src/workflows/connector-events.ts), by the trigger key it would have
+ * had, with the stamp that made it the lineage's: its refusal is audited
+ * once, however often its event is delivered again. Removed with the
+ * stamp's run's details (src/workflows/retention.ts).
+ */
+export const runMailStampRefusals = sqliteTable(
+  "run_mail_stamp_refusals",
+  {
+    triggerKey: text("trigger_key").primaryKey(),
+    stamp: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("run_mail_stamp_refusals_stamp_idx").on(table.stamp)]
+);
+
+/**
+ * A workflow's account in a run lineage (src/workflows/quotas.ts,
+ * `triggeredAccountClaimed`): the first run its triggers started in the
+ * lineage of `root_run_id`, claimed once, so every run charged to it is
+ * charged to the one account, whose `run_lineages` row counts its
+ * attempts and host calls. Never changed or deleted (migration 0112's
+ * triggers).
+ */
+export const runLineageAccounts = sqliteTable(
+  "run_lineage_accounts",
+  {
+    rootRunId: text("root_run_id")
+      .notNull()
+      .references(() => runLineages.rootRunId),
+    /** The independent workflow whose runs it is charged. */
+    appId: text("app_id").notNull(),
+    /**
+     * `triggered`, for an independent workflow's runs its triggers started
+     * in the lineage. `joined` and `rejoined` were App runs' accounts.
+     */
+    kind: text({ enum: ["joined", "rejoined", "triggered"] }).notNull(),
+    accountRunId: text("account_run_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.rootRunId, table.appId, table.kind] }),
+  ]
+);
+
+/**
+ * The children each run lineage admitted by a trigger's key
+ * (src/workflows/quotas.ts, `admitInLineage`): a delivery of the same message
+ * admitted again, at once or later, is the same child, in the same place,
+ * and takes no other slot of its lineage. Removed with its run's details
+ * (src/workflows/retention.ts).
+ */
+export const runLineageChildren = sqliteTable("run_lineage_children", {
+  triggerKey: text("trigger_key").primaryKey(),
+  rootRunId: text("root_run_id")
+    .notNull()
+    .references(() => runLineages.rootRunId),
+  depth: integer().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The domains Email Routing delivered mail for (src/workflows/
+ * inbound-email.ts): the deployment's mail domain, learned from the
+ * envelope recipient Email Routing sets, which no sender can choose. A
+ * run's mail to an address on one is stamped (`run_mail_stamps`).
+ */
+export const mailDomains = sqliteTable("mail_domains", {
+  domain: text().primaryKey(),
+  firstSeenAt: timestamp("first_seen_at").notNull(),
+});
+
+/**
+ * Settled outcomes of Apps' own workflows' runs (`workflow_runs`) owed to
+ * the Brain. Nothing writes or reads it: dropped by the next contract
+ * migration.
+ */
+export const brainCaptureIntents = sqliteTable(
+  "brain_capture_intents",
+  {
+    seq: integer().primaryKey({ autoIncrement: true }),
+    /** The Brain's event ID: one intent per event. */
+    eventId: text("event_id").notNull(),
+    /** The run the outcome rests on: its erasure drops the intent. */
+    evidenceId: text("evidence_id").notNull(),
+    state: text({ enum: ["pending", "dead"] })
+      .notNull()
+      .default("pending"),
+    /** Failed deliveries. */
+    attempts: integer().notNull().default(0),
+    /** The code of the last failed delivery. */
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_capture_intents_event_idx").on(table.eventId),
+    index("brain_capture_intents_evidence_idx").on(table.evidenceId),
+    index("brain_capture_intents_state_idx").on(
+      table.state,
+      table.attempts,
+      table.seq
+    ),
+  ]
+);
+
+/**
+ * What a run's recalls of the old Brain cited (GRA-299). Nothing writes or
+ * reads it since GRA-1941; it stays for a rollback to the release before, which
+ * still does, and the next contract migration drops it (expand, then contract).
+ */
+export const runBrainEvidence = sqliteTable(
+  "run_brain_evidence",
+  {
+    runId: text("run_id").notNull(),
+    documentId: text("document_id").notNull(),
+    collectionId: text("collection_id").notNull(),
+    /** The document's version it recalled. */
+    version: integer().notNull(),
+    /**
+     * What stood for that version's text as it was recalled, by today's
+     * Brain's recall, gone since GRA-1941.
+     */
+    pinned: text().notNull(),
+    /**
+     * The permission of the binding it came through: an App's `brain`
+     * permission, or a JSON workflow's knowledge binding's.
+     */
+    permissionId: text("permission_id").notNull(),
+    /**
+     * Whether a recall cited it, so the Brain must still admit the run:
+     * a JSON workflow's knowledge search or read pins it without (GRA-299).
+     * Only ever set, never cleared, as the rest only grows.
+     */
+    recalled: integer({ mode: "boolean" }).notNull().default(true),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.documentId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
+ * Each App that read the Brain by default, declaring no permission to
+ * (resource-brain.ts, GRA-2218), from the first such read on: written
+ * before what it read is handed over, never removed, as what it read may
+ * stay in its data. Counted as a grant to read the Brain is
+ * (app-provenance.ts `holdsAnySource`): such an App takes no guests.
+ * `subject_type` leaves room for a workflow's.
+ */
+export const brainDefaultReads = sqliteTable(
+  "brain_default_reads",
+  {
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    firstReadAt: timestamp("first_read_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectType, table.subjectId] })]
+);
+
+/**
+ * Every version of the Brain a run's recalls handed it (workflows/
+ * run-evidence.ts), by its source as its producer names it and its
+ * number, with the permission to read the Brain it came through:
+ * identifiers only. A version never changes, so a row means the same text
+ * for as long as it is kept. It only grows while the run lives, and
+ * before the run's next model, connection or App call, decision or
+ * output, the host checks the run may still read them all: each grant
+ * still the run's, and each version still one its person may read. A run
+ * that may no longer is refused from then on. Goes with the run's details,
+ * unless a key of its workflow's state names the run (`keptRunEvidence`).
+ */
+export const runBrainVersions = sqliteTable(
+  "run_brain_versions",
+  {
+    runId: text("run_id").notNull(),
+    producer: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    version: integer().notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.producer,
+        table.sourceId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
+ * Every memory of the Brain's shared store a run's entity reads rested on
+ * (workflows/run-evidence.ts, GRA-1985): the memories of a card or a page
+ * of entities, the ones that named them and made them seen, by id, with
+ * the permission to read the Brain it came through: identifiers only, no
+ * person's. An id is never used again, so a row means the same memory for
+ * as long as it is kept. It only grows while the run lives, and before
+ * the run's next model, connection or App call, decision or output, the
+ * host checks the company may still read them all and their writers
+ * haven't retired them: one a person's erasure took, retired or taken
+ * back, or whose source was erased or narrowed, refuses the run from then
+ * on. Goes with the run's details, unless a key of its workflow's state
+ * names the run (`keptRunEvidence`).
+ */
+export const runBrainMemories = sqliteTable(
+  "run_brain_memories",
+  {
+    runId: text("run_id").notNull(),
+    memoryId: text("memory_id").notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.memoryId, table.permissionId],
+    }),
+  ]
+);
+
+/**
+ * The runs whose evidence (`runBrainVersions`, `runBrainMemories`,
+ * `runChatSources`) retention kept past their details, as a key of their
+ * workflow's state named them then (workflows/retention.ts, GRA-1996):
+ * that key is read only while what they read holds (workflow-state.ts).
+ * Once no key names one any more, its evidence and its row here go.
+ * Identifiers only.
+ */
+export const keptRunEvidence = sqliteTable("kept_run_evidence", {
+  runId: text("run_id").primaryKey(),
+  keptAt: timestamp("kept_at").notNull(),
+});
+
+/**
+ * The runs that wrote the keys of the state a run started from
+ * (workflow-state.ts `readableStateOf`, GRA-1996), written as it is
+ * admitted (workflow-starts.ts): every check of the run covers their own
+ * evidence too (workflows/resource-reads.ts), one hop, so a copy it
+ * carries from that state follows what they read. Identifiers only. Goes
+ * with the run's details, unless a key of its workflow's state names the
+ * run itself; then with the run's release, once no key does
+ * (workflows/retention.ts). A run kept only as another run's writer keeps
+ * none of its own.
+ */
+export const runStateWriters = sqliteTable(
+  "run_state_writers",
+  {
+    runId: text("run_id").notNull(),
+    writerRunId: text("writer_run_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.writerRunId] }),
+    index("run_state_writers_writer_idx").on(table.writerRunId),
+  ]
+);
+
+/**
+ * Nothing writes or reads it. Kept until GRA-1589 drops it, so a core
+ * still serving during a rollout keeps working (expand, then contract).
+ */
+export const runEvidenceHolds = sqliteTable(
+  "run_evidence_holds",
+  {
+    runId: text("run_id").notNull(),
+    heldRunId: text("held_run_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.heldRunId] }),
+    index("run_evidence_holds_held_run_id_idx").on(table.heldRunId),
+  ]
+);
+
+/**
+ * What the chat whose agent had a run started had read (GRA-1093;
+ * workflow-starts.ts): each of its sources still unwithheld then, with the
+ * chat's scope, copied once as the start is admitted. Before anything
+ * leaves the run, the host checks the chat's agent may still read them all
+ * for its person (history-access.ts, `readableSources`): a run is held to
+ * what its input may carry. Goes with the run's details, unless a key of
+ * its workflow's state names the run (`keptRunEvidence`).
+ */
+export const runChatSources = sqliteTable(
+  "run_chat_sources",
+  {
+    runId: text("run_id").notNull(),
+    sourceId: text("source_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.sourceId] })]
+);
+
+/**
+ * A run's inboxes (src/workflows/run-inboxes.ts): one for each event
+ * binding its start froze whose pinned contract takes replies to the
+ * run's mail (`ingress`), written as the start is admitted. `token_hash`
+ * is the SHA-256 of its token, which is derived (never stored) from
+ * core's key, the run and `binding`. It takes nothing once the run ended,
+ * and goes with the run's details (src/workflows/retention.ts).
+ */
+export const runInboxes = sqliteTable(
+  "run_inboxes",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    runId: text("run_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    binding: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_inboxes_run_binding_idx").on(table.runId, table.binding),
+  ]
+);
+
+/**
+ * The pauses, resumes and cancels of Apps' own workflows' runs
+ * (`workflow_runs`). Nothing writes or reads it: dropped by the next
+ * contract migration.
+ */
+export const workflowRunControls = sqliteTable(
+  "workflow_run_controls",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    kind: text({ enum: ["pause", "resume", "cancel"] }).notNull(),
+    state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
+    generation: integer().notNull(),
+    /** Who asked for it: a person, by their user ID. */
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    /**
+     * When the repair next sends it again (src/workflows/controls.ts),
+     * moved on further each time it does, so receipts that never settle
+     * don't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it again. */
+    retries: integer().notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("workflow_run_controls_unresolved_idx")
+      .on(table.runId, table.kind)
+      .where(sql`state = 'admitted'`),
+    // The repair (src/workflows/controls.ts): receipts the engine is
+    // still to confirm, next due first.
+    index("workflow_run_controls_admitted_idx")
+      .on(table.retryAt, table.id)
+      .where(sql`state = 'admitted'`),
+  ]
+);
+
+/**
+ * Wakes core owes waiting runs (src/workflows/wakes.ts): one row per
+ * outstanding wake, written in the same batch as what it wakes the run
+ * for (a decision's answer), or before it (a held side effect's
+ * decision, which connect keeps), and deleted once the engine took the
+ * event. `id` is the delivery's key, which the engine takes once, and
+ * `type` the event type the run's wait waits for. The run is an App's
+ * (`run_id`) or an independent workflow's (`resource_run_id`), exactly
+ * one of them: the engine knows either by its ID.
+ */
+export const workflowRunWakes = sqliteTable(
+  "workflow_run_wakes",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id").references(() => workflowRuns.id),
+    resourceRunId: text("resource_run_id").references(
+      // oxlint-disable-next-line no-use-before-define -- declared with the independent runs, below
+      () => workflowResourceRuns.id
+    ),
+    type: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the repair next sends it, moved on further each time it does,
+     * so a wake the engine keeps refusing doesn't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it. */
+    retries: integer().notNull().default(0),
+    /**
+     * Set on a wake owed before what it is for is known to have happened
+     * (a held side effect's decision, still with connect): sent again by
+     * the repair, each time as a new delivery, until then, and dropped
+     * after. None on a wake the engine settles by taking it once.
+     */
+    resendUntil: timestamp("resend_until"),
+  },
+  (table) => [
+    check(
+      "workflow_run_wakes_one_run",
+      // Unqualified: a check naming its table by name would keep the name
+      // of the table its migration made it in.
+      sql`(run_id IS NULL) <> (resource_run_id IS NULL)`
+    ),
+    // The repair (src/workflows/wakes.ts): next due first.
+    index("workflow_run_wakes_due_idx").on(table.retryAt, table.id),
+    // The repair's drop of wakes sent again for as long as they may be.
+    index("workflow_run_wakes_resend_idx")
+      .on(table.resendUntil)
+      .where(sql`resend_until IS NOT NULL`),
+  ]
+);
+
+/**
+ * Every decision a workflow run waits for (`ctx.decisions.<alias>.ask`, src/decisions/),
+ * one per run and step: who answers it (`deciders`: `person:<id>`,
+ * `role:<role>` or `team:<id>`), until when (`expires_at`), and how it
+ * ended. `status` moves from `open` once, in one conditional update, to an
+ * answer (`approved`, `rejected`) or `timed_out`, so the first answer is
+ * the only one. An answer keeps who gave it, when, and the payload they
+ * sent (JSON), which the run gets. The run is an App's (`run_id`) or an
+ * independent workflow's (`resource_run_id`, a JSON workflow's
+ * `grasp.decision` call), exactly one of them; an independent run's
+ * decision keeps what it is about (`input`), which its reviewer sees.
+ */
+export const workflowDecisions = sqliteTable(
+  "workflow_decisions",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id").references(() => workflowRuns.id),
+    resourceRunId: text("resource_run_id").references(
+      // oxlint-disable-next-line no-use-before-define -- declared with the independent runs, below
+      () => workflowResourceRuns.id
+    ),
+    step: text().notNull(),
+    deciders: text().notNull(),
+    /**
+     * Whether the run's starter never answers it, even when it names
+     * exactly them (`person:<their id>`): set when the step takes its
+     * reviewer only at run time, so the starter may have chosen it (R8).
+     */
+    starterExcluded: integer("starter_excluded", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    description: text().notNull(),
+    status: text({
+      enum: ["open", "approved", "rejected", "timed_out"],
+    }).notNull(),
+    openedAt: timestamp("opened_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    payload: text({ mode: "json" }).$type<Json>(),
+    input: text({ mode: "json" }).$type<Json>(),
+    /**
+     * What an answer's payload must be, as the descriptor text of an
+     * independent run's decision contract's response schema: an answer
+     * it doesn't take is refused, never recorded. None takes any payload.
+     */
+    response: text(),
+  },
+  (table) => [
+    check(
+      "workflow_decisions_one_run",
+      // Unqualified: a check naming its table by name would keep the name
+      // of the table its migration made it in.
+      sql`(run_id IS NULL) <> (resource_run_id IS NULL)`
+    ),
+    uniqueIndex("workflow_decisions_run_step_idx").on(table.runId, table.step),
+    uniqueIndex("workflow_decisions_resource_run_step_idx").on(
+      table.resourceRunId,
+      table.step
+    ),
+    // A run's open decisions (src/workflows/overview.ts): whether it waits.
+    index("workflow_decisions_run_status_idx").on(table.runId, table.status),
+    // The improvement signals (src/signals.ts): open decisions, oldest
+    // first, and decisions answered in a window, latest first. The runs
+    // waiting for a decision (src/workflows/overview.ts), counted and
+    // listed from the open ones.
+    index("workflow_decisions_status_opened_idx").on(
+      table.status,
+      table.openedAt,
+      table.id
+    ),
+    index("workflow_decisions_decided_idx").on(table.decidedAt, table.id),
+  ]
+);
+
+/**
+ * The recipients of a decision asked of more than one (a JSON workflow's
+ * `grasp.decision` naming several, src/decisions/decisions.ts): each
+ * `person:<id>`, `team:<id>` or `role:<role>`, any of whom may answer it,
+ * the first answer the only one. Written once, with the decision; a
+ * decision of one recipient has none here, its `deciders` alone saying
+ * who answers.
+ */
+export const workflowDecisionRecipients = sqliteTable(
+  "workflow_decision_recipients",
+  {
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id),
+    deciders: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.decisionId, table.deciders] }),
+    // The decisions asked of someone (`waitingDecisions`).
+    index("workflow_decision_recipients_deciders_idx").on(
+      table.deciders,
+      table.decisionId
+    ),
+  ]
+);
+
+/**
+ * One-use confirmations of a person's answer to a decision
+ * (src/decisions/confirmations.ts), minted by the trusted host decision UI
+ * once the person confirmed exactly what they answer, and taken by the
+ * answer that uses it, in the same batch. Only the token's SHA-256 is
+ * kept. Each binds the person, the decision, the review context they saw
+ * (`context_fingerprint`) and the normalized response they confirmed
+ * (`response_fingerprint`), until `expires_at`.
+ */
+export const workflowDecisionConfirmations = sqliteTable(
+  "workflow_decision_confirmations",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    contextFingerprint: text("context_fingerprint").notNull(),
+    responseFingerprint: text("response_fingerprint").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    // Minting again replaces the person's earlier one for the decision.
+    index("workflow_decision_confirmations_decision_user_idx").on(
+      table.decisionId,
+      table.userId
+    ),
+    // Minting drops the expired ones.
+    index("workflow_decision_confirmations_expires_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * npm packages asked for an App (src/packages/requests.ts), one row per
+ * request. What was asked never changes: the subject, the
+ * graph's hash, and the review (`snapshot`: the lock and its findings, as
+ * JSON). `status` moves from `pending` once, in one conditional update,
+ * to a builder's decision (`approved`, `denied`), which keeps who made it,
+ * when and why. A subject has one current approval: approving another
+ * retires it (`retired`), still in force for what was built on it; the
+ * clock's rescan revokes every row of a graph reported as malware, and an
+ * App's removal withdraws its own (`revoked`,
+ * `ended_at`, `ended_reason`). A decided row is never
+ * deleted; a pending one is deleted when another request for the subject
+ * takes its place, and its audit event keeps its ID and hash.
+ *
+ * Unused since GRA-1636, kept for a rollback to the release before and
+ * dropped by GRA-1547 (expand, then contract): `source_revision`,
+ * `targets`, `summary`, `refused`, `previous`, `policy_generation`,
+ * `decided_generation`, `ended_by`, `ended_generation`, written only as
+ * the NOT NULL ones must be.
+ */
+export const dependencyRequests = sqliteTable(
+  "dependency_requests",
+  {
+    id: text().primaryKey(),
+    /**
+     * Whose it is: an App (`app`, its ID). Workflows had packages of
+     * their own until GRA-1662 (`workflow`, a workflow resource's ID);
+     * nothing writes one now. No foreign key names the App, so a trigger
+     * refuses a subject `apps` (or `workflow_resources`) lacks (migration
+     * 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    sourceRevision: text("source_revision").notNull(),
+    graphHash: text("graph_hash").notNull(),
+    targets: text().notNull(),
+    purpose: text().notNull(),
+    snapshot: text().notNull(),
+    summary: text({ mode: "json" })
+      .$type<{ direct: string[]; findings: DependencyFinding[] }>()
+      .notNull(),
+    /** How many packages it asks for directly, and brings in all. */
+    direct: integer().notNull(),
+    packages: integer().notNull(),
+    findings: integer().notNull(),
+    refused: integer().notNull(),
+    /** The request approved for the App when this one was asked, if any. */
+    previous: text(),
+    status: text({
+      enum: ["pending", "approved", "denied", "retired", "revoked"],
+    }).notNull(),
+    requestedBy: text("requested_by").notNull(),
+    /** The chat's agent that proposed it (JSON); null for a person's own. */
+    requestedVia: text("requested_via", {
+      mode: "json",
+    }).$type<AgentProposer>(),
+    /**
+     * Every chat whose agent asked for it, the first included: each shows
+     * its card and is told the decision. Null for a request asked before
+     * it was recorded, whose one chat is `requested_via`'s.
+     */
+    requestedIn: text("requested_in", {
+      mode: "json",
+    }).$type<AgentProposer[]>(),
+    requestedAt: timestamp("requested_at").notNull(),
+    /** The policy generation it was asked under. */
+    policyGeneration: integer("policy_generation").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    /** The policy generation the decision was made under. */
+    decidedGeneration: integer("decided_generation"),
+    reason: text(),
+    /** Who retired or revoked the approval, and when: null until then. */
+    endedBy: text("ended_by"),
+    endedAt: timestamp("ended_at"),
+    /**
+     * The policy generation retiring or revoking it moved on to: what was
+     * pinned under an earlier one is what a retired approval keeps.
+     */
+    endedGeneration: integer("ended_generation"),
+    endedReason: text("ended_reason"),
+    /**
+     * When an approval was last scanned for malware and advisories by the
+     * clock (src/packages/rescan.ts): null until it was.
+     */
+    malwareCheckedAt: timestamp("malware_checked_at"),
+    /**
+     * The IDs of the advisories known of an approval's packages: those its
+     * review showed as it was approved, and each a rescan told its
+     * builders of since. Null while it isn't approved.
+     */
+    advisories: text({ mode: "json" }).$type<string[]>(),
+  },
+  (table) => [
+    // One request waits per subject: a second pending row is refused.
+    uniqueIndex("dependency_requests_pending_idx")
+      .on(table.subjectType, table.subjectId)
+      .where(sql`status = 'pending'`),
+    // The approval a subject got last (its status, and what a new request
+    // is compared with).
+    index("dependency_requests_subject_idx").on(
+      table.subjectType,
+      table.subjectId,
+      table.status,
+      table.decidedAt
+    ),
+    // Whether a graph is approved for a subject: a proposal, and admission.
+    index("dependency_requests_graph_idx").on(
+      table.subjectType,
+      table.subjectId,
+      table.graphHash,
+      table.status
+    ),
+    // The approvals the malware re-check is due to read: by when each was
+    // last found clean, never checked first. Led by that time, not the
+    // status, so the approvers' list of what is in force keeps reading the
+    // subject index in its order.
+    index("dependency_requests_malware_idx").on(
+      table.malwareCheckedAt,
+      table.status
+    ),
+  ]
+);
+
+/**
+ * Whether the deployment is open to the company, in its one row (`id` is
+ * `gate`; none yet is open). Grasp's staff close it while the company is
+ * onboarding, and open it with their go: until then only the admins named
+ * in `SIGN_IN` and staff sign in (src/onboarding/gate.ts). `threshold` is
+ * how much of what Grasp needs to know (percent) makes it ready to open.
+ */
+export const onboardingGate = sqliteTable("onboarding_gate", {
+  id: text().primaryKey(),
+  closedAt: timestamp("closed_at"),
+  threshold: integer().notNull(),
+  /** When Grasp's go last opened it: staff with the onboarding scope keep 7 days after. */
+  openedAt: timestamp("opened_at"),
+  /**
+   * When the company's admin last ended Grasp's staff access: a staff
+   * window the admin opened before then lets nobody in.
+   */
+  staffEndedAt: timestamp("staff_ended_at"),
+});
+
+/**
+ * Every command from Grasp's admin this core took, by its id
+ * (`@grasp-os/shared/admin-command`): a command delivered again applies
+ * once. Claimed before it applies and marked once it did; one that failed
+ * is let go, so delivering it again applies it, and one claimed by a run
+ * that died can be claimed again after a while.
+ */
+export const adminCommands = sqliteTable("admin_commands", {
+  id: text().primaryKey(),
+  type: text().notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+  /** When it applied; null while it is being applied. */
+  appliedAt: timestamp("applied_at"),
+});
+
+/**
+ * Unused since GRA-1636: nothing reads or writes it; kept for a rollback
+ * to the release before, and dropped by GRA-1547 (expand, then contract).
+ *
+ * The dependency policy generation, in its one row (`id` is `policy`;
+ * none yet counts as 0). It goes up, in the batch that makes the change,
+ * each time who holds `dependencies.approve` changes. A decision lands
+ * only under the generation its person reviewed, and a build is admitted
+ * only under the one it read: what was checked before a change isn't
+ * acted on after it.
+ */
+export const dependencyPolicy = sqliteTable("dependency_policy", {
+  id: text().primaryKey(),
+  generation: integer().notNull(),
+});
+
+/**
+ * Unused since GRA-1636, when the App's builder came to approve its
+ * packages: nothing reads or writes it; kept for a rollback to the
+ * release before, and dropped by GRA-1547 (expand, then contract).
+ *
+ * Who held `dependencies.approve` (src/dependencies/approvers.ts): a
+ * member (`subject_type` `person`, `subject_id` their user ID) or a team.
+ * One row per grant, never deleted, so who granted and who revoked stays
+ * readable; only its status and the revoke columns ever change. Whether
+ * the member or team is still there is read from the organization's own
+ * tables each time.
+ */
+export const dependencyApprovers = sqliteTable(
+  "dependency_approvers",
+  {
+    id: text().primaryKey(),
+    subjectType: text("subject_type", { enum: ["person", "team"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    // A member or team holds it once: a second live grant is refused.
+    uniqueIndex("dependency_approvers_live_idx")
+      .on(table.subjectType, table.subjectId)
+      .where(sql`status = 'active'`),
+  ]
+);
+
+/**
+ * Unused since GRA-1636, when the lock moved into its request's snapshot:
+ * nothing reads or writes it; kept for a rollback to the release before,
+ * and dropped by GRA-1547 (expand, then contract).
+ *
+ * The exact lock (`grasp.lock.json`) the resolver produced for one of an
+ * App's dependency graphs (src/packages/resolve.ts), by the graph's hash:
+ * what a build of an approved graph unpacks, by integrity, and with which
+ * export conditions per target. One per App and graph. Its packages never
+ * change (the graph's hash covers them; the first lock's ranges and times
+ * stay its provenance); a later resolve of the same graph sets the
+ * targets it asks for (`mergedLock`), each write conditional on the lock
+ * as it was read. At most `packageLimits.lockBytes`.
+ */
+export const dependencyLocks = sqliteTable(
+  "dependency_locks",
+  {
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    graphHash: text("graph_hash").notNull(),
+    lock: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * Until when an address of one of its artifacts handed out holds
+     * (src/packages/address.ts): until then the lock never gives up its
+     * room to a new one (src/packages/locks.ts), so what was handed out
+     * keeps being served. Null when none was.
+     */
+    servedUntil: timestamp("served_until"),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectType, table.subjectId, table.graphHash],
+    }),
+  ]
+);
+
+/**
+ * Unused since GRA-1636, when core stopped keeping tarballs and package
+ * builds of its own: nothing reads or writes it; kept for a rollback to
+ * the release before, and dropped by GRA-1547 (expand, then contract),
+ * with the `npm-tarballs/` and `package-builds/` objects.
+ *
+ * Files of the deployment's package store that may no longer be needed,
+ * recorded before they could be left behind (src/packages/cleanup.ts): a
+ * tarball (`kind` `tarball`, `key` its integrity) as it is stored, and the
+ * tarballs and pinned artifacts of a lock as it is deleted; an artifact
+ * (`kind` `build`, `key` its hash) as a build writes its files. The clock
+ * deletes the files of one no lock names once it is an hour old, then the
+ * row; one a lock names loses its row only. Recording one again moves its
+ * time on.
+ */
+export const packageCleanups = sqliteTable(
+  "package_cleanups",
+  {
+    key: text().primaryKey(),
+    kind: text({ enum: ["tarball", "build"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    // The clock's sweep: records an hour old, oldest first.
+    index("package_cleanups_created_at_idx").on(table.createdAt),
+  ]
+);
+
+/**
+ * The trusted record of each compiler build core keeps in R2
+ * (src/build-cache.ts), by its cache key: the SHA-256 and size of the
+ * bytes the build that passed its gates wrote, which a cached object must
+ * hash to before it is served. Only core writes it, and only the build
+ * that holds the key's lease. Also the key's lease (`holder`,
+ * `lease_expires_at`), so builds of the same files in any isolate run
+ * once, and its integrity failures: past a few, the key is quarantined
+ * (`quarantined_at`) and nothing is served from or written to the cache
+ * for it.
+ *
+ * Unused since build jobs went (GRA-1633): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later
+ * release drops it (expand, then contract).
+ */
+export const buildReceipts = sqliteTable("build_receipts", {
+  key: text().primaryKey(),
+  /**
+   * The R2 object holding the bytes: the key and the holder that kept
+   * them, so a holder that lost its lease writes only an object of its
+   * own, which no receipt names.
+   */
+  objectKey: text("object_key"),
+  sha256: text(),
+  bytes: integer(),
+  builtAt: timestamp("built_at"),
+  holder: text(),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  integrityFailures: integer("integrity_failures").notNull().default(0),
+  /**
+   * The `built_at` of the build whose bytes last failed their check: each
+   * kept build counts one failure at most, however many read it.
+   */
+  failedBuiltAt: timestamp("failed_built_at"),
+  quarantinedAt: timestamp("quarantined_at"),
+});
+
+/**
+ * Unused since GRA-1636: nothing reads or writes it; kept for a rollback
+ * to the release before, and dropped by GRA-1547 (expand, then contract).
+ *
+ * The one build under way of each target of an App's graph
+ * (src/packages/build.ts): a build takes its lease before it builds, and
+ * gives it back when it ends; another of the same App, graph and target
+ * waits for it, then hands out what it pinned. A lease that outlived
+ * `expiresAt` (a build that died) may be taken, and the clock deletes it
+ * once nobody did (src/packages/cleanup.ts).
+ */
+export const dependencyBuildLeases = sqliteTable(
+  "dependency_build_leases",
+  {
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    graphHash: text("graph_hash").notNull(),
+    target: text().notNull(),
+    holder: text().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.subjectType,
+        table.subjectId,
+        table.graphHash,
+        table.target,
+      ],
+    }),
+    // The clock's sweep of leases that lapsed.
+    index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * Unused since GRA-1636: nothing reads or writes it; kept for a rollback
+ * to the release before, and dropped by GRA-1547 (expand, then contract).
+ *
+ * Each refused admission the audit trail recorded, once per App, graph,
+ * set of targets, policy generation in force and reason
+ * (src/dependencies/requests.ts):
+ * a build asking again and again for the same refused graph adds no more
+ * audit rows. Only for a graph some request of the App's names; a refusal
+ * of any other hash is logged, never stored.
+ */
+export const dependencyAdmissionRefusals = sqliteTable(
+  "dependency_admission_refusals",
+  {
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    graphHash: text("graph_hash").notNull(),
+    targets: text().notNull(),
+    policyGeneration: integer("policy_generation").notNull(),
+    reason: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.subjectType,
+        table.subjectId,
+        table.graphHash,
+        table.targets,
+        table.policyGeneration,
+        table.reason,
+      ],
+    }),
+  ]
+);
+
+/**
+ * The catalog entries an admin stopped offering (connections.ts): one row
+ * each, by its source (`native` or `composio`) and its ID there. Nobody
+ * starts connecting a hidden entry, admins included, until an admin offers
+ * it again, which deletes its row. Everything else is offered, a new
+ * Composio toolkit too. Connections made before an entry was hidden go on.
+ */
+export const hiddenConnectors = sqliteTable(
+  "hidden_connectors",
+  {
+    source: text({ enum: ["native", "composio"] }).notNull(),
+    connectorId: text("connector_id").notNull(),
+    hiddenBy: text("hidden_by").notNull(),
+    hiddenAt: timestamp("hidden_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.connectorId] })]
+);
+
+/**
+ * The classes of tools an admin changed (tool-classes.ts): one row each,
+ * for whom it is on now (`who`: `nobody`, `everyone` or `teams`, then the
+ * team IDs in `teams` as a JSON array). A class without a row is as
+ * `defaultToolClassAudiences` has it.
+ */
+export const toolClassSettings = sqliteTable("tool_class_settings", {
+  toolClass: text("tool_class").primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The company apps an admin pointed Stephen at (app-pointers.ts), by their
+ * connection in connect: the resources his reads there may name, as a
+ * JSON array (none is the whole app), and for whom it is on now (`who`,
+ * then the team IDs in `teams` as a JSON array).
+ */
+export const appPointers = sqliteTable("app_pointers", {
+  connectionId: text("connection_id").primaryKey(),
+  resources: text().notNull().default("[]"),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The shared mailboxes an admin pointed Stephen at (shared-mailboxes.ts),
+ * by address in lower case: for whom it is on now (`who`: `nobody`,
+ * `everyone` or `teams`, then the team IDs in `teams` as a JSON array).
+ */
+export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
+  mailbox: text().primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * Who may read in the Brain what agents read through a shared connection
+ * (connection-audiences.ts, GRA-1831): one row per shared connection an
+ * admin chose an audience for, by connect's connection ID. `team_id` is
+ * the one team; null is everyone in the company. No row is nobody.
+ */
+export const connectionBrainAudiences = sqliteTable(
+  "connection_brain_audiences",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    teamId: text("team_id"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  }
+);
+
+/**
+ * Each record kept in the Brain from what agents read through a shared
+ * connection (shared-reads.ts, GRA-1831), by its source's id under the
+ * `connected` kind: written before the Brain is given the key, so every key
+ * the Brain holds of a connection is named here, for its erasure to find.
+ * `generation` is the connection's erasure generation it was kept in
+ * (`connection_brain_erasures`); `read_at` when it was last read.
+ */
+export const connectionBrainReads = sqliteTable(
+  "connection_brain_reads",
+  {
+    sourceId: text("source_id").primaryKey(),
+    connectionId: text("connection_id").notNull(),
+    generation: integer().notNull(),
+    readAt: timestamp("read_at").notNull(),
+  },
+  (table) => [
+    index("connection_brain_reads_connection_idx").on(
+      table.connectionId,
+      table.generation
+    ),
+  ]
+);
+
+/**
+ * The erasures of what the Brain kept from a shared connection
+ * (shared-reads.ts, GRA-1831), one row per connection ever erased: the
+ * generation the keys it keeps from now on are under (every older one is
+ * erased or being erased), whether an erasure is under way (`erasing`,
+ * which the clock completes), the request it serves (an audit event's
+ * id), who asked and when (`actor`, an audit actor as JSON), how many
+ * records it has erased so far, and whether a disconnect closed the
+ * connection for good (`closed`: no audience is opened on it again).
+ */
+export const connectionBrainErasures = sqliteTable(
+  "connection_brain_erasures",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    generation: integer().notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    request: text().notNull(),
+    actor: text().notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erased: integer().notNull(),
+    closed: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("connection_brain_erasures_erasing_idx").on(table.erasing)]
+);
+
+/**
+ * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
+ * one row per connection, sync (`feed`) and place: whose connection it is
+ * (`personId`; null for a shared connection's picked places, which no
+ * one person owns: GRA-1719) and how to name its items' readers
+ * (`provider`, `tenant`,
+ * `account`, its own account as its items' readers name it, as connect
+ * last listed them), where its next page reads
+ * on from (`cursor`, null to list it from the start), the number of its
+ * latest listing (`listing`; an item a listing named carries it) and
+ * whether that listing is under way (`listingOpen`: from a null cursor
+ * until its first page with nothing more), when it is next due, the run
+ * that holds it (`leaseId` until `leaseUntil`), when a page last applied
+ * and the code of the latest failure and when it was (`lastErrorAt`),
+ * kept after a later page applies, for the staff's view, and what the page under way did so
+ * far in the Brain (`added`, `changed`, `removed`), counted once each,
+ * whichever run did it, for the page's one audit event. Beside it, the
+ * daily full relist: its own cursor (`relistCursor`), whether one is under
+ * way (`relisting`), when its next page is due, or the next one starts
+ * (`relistAt`), and when the one under way was due to start
+ * (`relistSince`), by which an overdue relist is seen; and whether an
+ * item of it may still be leaving a key a stopped run left unerased
+ * (`leavesOwed`), cleared when a page commits. The kind of items it
+ * brings (`kind`: mail and events relist names only), whether its place
+ * is no longer listed (`dropped`: read no more, its keys erased by the
+ * clock, then the row deleted), and whether its relist is fetching what
+ * its names-only listing found unknown or changed (`relistCatchUp`).
+ * For a sync that lists places, the places listing that named the place
+ * last (`seenIn`); its listing itself is a row of its own here, place
+ * `:places`, its cursor where the listing goes on, and, for a shared
+ * connection's picked places, the version of the picks whose un-picked
+ * places core last hid (`picksVersion`: connect's, one up with each save;
+ * brain-sync.ts `hideUnpickedPlaces`).
+ */
+export const brainSyncSources = sqliteTable(
+  "brain_sync_sources",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id"),
+    provider: text().notNull(),
+    tenant: text(),
+    account: text(),
+    cursor: text(),
+    listing: integer().notNull(),
+    listingOpen: integer("listing_open", { mode: "boolean" }).notNull(),
+    dueAt: timestamp("due_at").notNull(),
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+    lastSuccessAt: timestamp("last_success_at"),
+    lastError: text("last_error"),
+    added: integer().notNull(),
+    changed: integer().notNull(),
+    removed: integer().notNull(),
+    relistCursor: text("relist_cursor"),
+    relisting: integer({ mode: "boolean" }).notNull(),
+    relistAt: timestamp("relist_at").notNull(),
+    relistSince: timestamp("relist_since"),
+    leavesOwed: integer("leaves_owed", { mode: "boolean" }).notNull(),
+    kind: text({ enum: ["mail", "file", "event"] }).notNull(),
+    dropped: integer({ mode: "boolean" }).notNull(),
+    relistCatchUp: integer("relist_catch_up", { mode: "boolean" }).notNull(),
+    seenIn: integer("seen_in"),
+    lastErrorAt: timestamp("last_error_at"),
+    picksVersion: integer("picks_version"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+    index("brain_sync_sources_due_idx").on(table.dueAt),
+    // The live places of shared connections, read with every read of the
+    // Brain (connection-audiences.ts `sharedPlacesRead`).
+    index("brain_sync_sources_person_idx").on(table.personId, table.dropped),
+  ]
+);
+
+/**
+ * Each item native sync handed the Brain (brain-sync.ts), by connection,
+ * sync and the provider's ID of it (unique within the connection), the
+ * place whose source added it (`place`): its source's key under `sync:`
+ * (`key`, its `generation` the key's middle part, one up each time the
+ * item leaves the Brain, so a key erased is never added to again), the
+ * store it is in now (`own`, `shared`, or null when it is in neither),
+ * the change last added (null while an add is under way), the Brain's
+ * version of it as last answered, a hash of the provider's change marker
+ * it was added at (`marker`), the item it is part of (an attachment's
+ * message), the listing that last named it, and the key it is leaving
+ * (`leaving`, in the store `leavingStore`): named here before the Brain
+ * erases it, so an erase a stopped run left is finished on its next read,
+ * and a disconnect's erasure finds it; and since when its removal is held
+ * (`heldSince`: gone from one place of a sync that lists places, kept
+ * until the others have read, so a move between two leaves no hole), and
+ * when a page last saved a change of it (`savedAt`: one saved since its
+ * source last committed a page is the uncommitted page's own, whose step
+ * a replay of that page records again). Never its readers: each
+ * page gives them to the Brain again, so nothing here names a person.
+ * Core names a key here before the Brain is given it, so a disconnect's
+ * erasure finds every key it gave.
+ */
+export const brainSyncItems = sqliteTable(
+  "brain_sync_items",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    itemId: text("item_id").notNull(),
+    place: text().notNull(),
+    key: text().notNull(),
+    generation: integer().notNull(),
+    store: text({ enum: ["own", "shared"] }),
+    change: text(),
+    version: integer(),
+    marker: text(),
+    partOf: text("part_of"),
+    listing: integer().notNull(),
+    leaving: text(),
+    leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
+    heldSince: timestamp("held_since"),
+    savedAt: timestamp("saved_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
+    index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+    index("brain_sync_items_leaving_idx").on(
+      table.connectionId,
+      table.feed,
+      table.leaving
+    ),
+    index("brain_sync_items_place_idx").on(
+      table.connectionId,
+      table.feed,
+      table.place
+    ),
+    index("brain_sync_items_part_of_idx").on(
+      table.connectionId,
+      table.feed,
+      table.partOf
+    ),
+  ]
+);
+
+/**
+ * What a source's names-only relist (brain-sync.ts) found unknown, held
+ * without content, or at another version than held, by the provider's ID:
+ * fetched once in full after that listing, then forgotten. Emptied when a
+ * relist starts, so a relist catches up at most once.
+ */
+export const brainSyncCatchUps = sqliteTable(
+  "brain_sync_catch_ups",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    itemId: text("item_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.feed, table.place, table.itemId],
+    }),
+  ]
+);
+
+/**
+ * The connections a disconnect closed for native sync (brain-sync.ts),
+ * one row each, kept for good: nothing is synced or named under one again.
+ * The disconnect it serves (connect's event's id), who disconnected and
+ * when (`actor`, an audit actor as JSON, cleared once the erasure it owed
+ * ended and its event was written), whether erasing what it synced
+ * into the shared store is under way (`erasing`, which the clock
+ * completes), and how many sources it erased.
+ */
+export const brainSyncDisconnects = sqliteTable(
+  "brain_sync_disconnects",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    request: text().notNull(),
+    actor: text(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    erased: integer().notNull(),
+    /** The run that holds the erase, until when: its token (brain-sync.ts `takeErasure`). */
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+  },
+  (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
+);
+
+/**
+ * The company's agents an admin made or changed (agents.ts): one row per
+ * agent, by the ID its permissions, audit events and instruction file name.
+ * `face` is the figure it is drawn with; `job` one line on what it is
+ * for (what an agent is told is its instruction file in the Brain,
+ * instruction-files.ts; the database's `instructions` column, nullable and
+ * unnamed here, is dropped in a later release: expand, then contract);
+ * `modelRole` the role it asks the gateway for, or null for the model a
+ * chat would use anyway; `state` whether it answers. No row for the
+ * first agent, the organization's: as Grasp ships it.
+ */
+export const agents = sqliteTable(
+  "agents",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    /**
+     * The name as two agents may not share it (`agentNameKey`): folded
+     * by core, since SQLite's `lower` folds ASCII letters alone. Written
+     * with every name.
+     */
+    nameKey: text("name_key"),
+    face: text().notNull(),
+    job: text().notNull(),
+    modelRole: text("model_role", { enum: modelRoles }),
+    /** The model its turns use, `<provider>/<model>`; null: the asker's own. */
+    model: text(),
+    /**
+     * `deleted`: an admin deleted it. Its row stays, so a chat that still
+     * names it is refused its turn and never read as an agent nobody
+     * made, which takes one; its name's key is cleared, free for another.
+     */
+    state: text({ enum: ["on", "paused", "deleted"] }).notNull(),
+    /**
+     * The person whose own agent it is (agents.ts): only they see, ask
+     * and change it, and it goes when they are erased. Null: one of the
+     * company's. Its name's key is null, as two people may each call
+     * theirs the same.
+     */
+    ownerId: text("owner_id"),
+    /**
+     * When its owner offered a person's own agent to the company, for its
+     * admins to take on (agent-builder.ts, `adoptAgent`); null for none.
+     */
+    offeredAt: timestamp("offered_at"),
+    madeBy: text("made_by").notNull(),
+    madeAt: timestamp("made_at").notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [
+    // No two agents answer to one name, however it is capitalised: people
+    // say which agent they mean by it.
+    uniqueIndex("agents_name_key_idx").on(table.nameKey),
+    // A person's own agents, and dropping them when they are erased.
+    index("agents_owner_idx")
+      .on(table.ownerId)
+      .where(sql`${table.ownerId} IS NOT NULL`),
+  ]
+);
+
+/**
+ * Whether one of the company's agents answers at all, and for whom
+ * (agent-reach.ts): one row per agent an admin set it for, by the agent's
+ * ID. The organization's own agent keeps `stephen_reach`. No row: on, for
+ * everyone, as the organization's agent is until an admin changes it.
+ */
+export const agentReach = sqliteTable("agent_reach", {
+  agentId: text("agent_id").primaryKey(),
+  on: integer({ mode: "boolean" }).notNull(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * An agent's wake-ups (agent-wakes.ts): when it takes a turn nobody asked
+ * for, at the times `cron` names in `time_zone`, for the person
+ * `person_id`, with the opening line an admin wrote as its question. Such
+ * a turn only reads (`AgentScope.unattended`). `next_at` is the next time
+ * it fires, moved on as it fires, so one time fires once; `retry_at` is
+ * set once after a fire that couldn't start. `chat_id` is the chat its
+ * turns are in, in the person's own Workspace object, made at its first
+ * fire. `last_at` and `last_outcome` say how its last fire went: `started`,
+ * or the code of why it didn't.
+ */
+export const agentWakes = sqliteTable(
+  "agent_wakes",
+  {
+    id: text().primaryKey(),
+    agentId: text("agent_id").notNull(),
+    cron: text().notNull(),
+    timeZone: text("time_zone").notNull(),
+    personId: text("person_id").notNull(),
+    opening: text().notNull(),
+    state: text({ enum: ["on", "paused"] }).notNull(),
+    nextAt: timestamp("next_at"),
+    retryAt: timestamp("retry_at"),
+    chatId: text("chat_id"),
+    lastAt: timestamp("last_at"),
+    lastOutcome: text("last_outcome"),
+    madeBy: text("made_by").notNull(),
+    madeAt: timestamp("made_at").notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [
+    index("agent_wakes_agent_idx").on(table.agentId),
+    // Dropping a person's when they are erased.
+    index("agent_wakes_person_idx").on(table.personId),
+    // The clock's read of what is due.
+    index("agent_wakes_next_idx")
+      .on(table.nextAt)
+      .where(sql`${table.nextAt} IS NOT NULL`),
+  ]
+);
+
+/**
+ * The places an agent works in that an admin changed (agent-reach.ts):
+ * one row per agent and chat platform, by its adapter's name. `who`
+ * narrows who reaches the agent there (`asAgent`: as for the agent as a
+ * whole); `acts` says whether it does things there or only answers. The
+ * organization's own agent keeps `stephen_places`. No row: as the agent,
+ * and it acts.
+ */
+export const agentPlaces = sqliteTable(
+  "agent_places",
+  {
+    agentId: text("agent_id").notNull(),
+    place: text().notNull(),
+    who: text({ enum: ["asAgent", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    acts: integer({ mode: "boolean" }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.place] })]
+);
+
+/**
+ * The documents an admin gave an agent to answer from
+ * (agent-documents.ts): the text core read from each file, never the file
+ * itself, which nothing keeps. The agent reads the text in any chat it
+ * answers (`env.chat.readDocument`). Gone with the agent.
+ */
+export const agentDocuments = sqliteTable(
+  "agent_documents",
+  {
+    id: text().primaryKey(),
+    agentId: text("agent_id").notNull(),
+    name: text().notNull(),
+    type: text().$type<ChatFileType>().notNull(),
+    /** The file's size, in bytes. */
+    bytes: integer().notNull(),
+    /**
+     * How long `text` is, as JavaScript counts it (`text.length`): the
+     * units the agent's code slices it by, which SQLite's `length` isn't.
+     */
+    chars: integer().notNull(),
+    text: text().notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    // No two of an agent's documents share a name: the agent is told
+    // them by name.
+    uniqueIndex("agent_documents_name_idx").on(table.agentId, table.name),
+  ]
+);
+
+/**
+ * The apps an agent may use (agent-apps.ts), by catalog entry
+ * (`<source>:<id>`). An agent with no row uses any app its classes allow,
+ * as before agents had apps; one with rows, only those `on`. A `removed`
+ * row keeps an app someone took off from coming back when its apps are
+ * worked out again. Gone with the agent.
+ */
+export const agentApps = sqliteTable(
+  "agent_apps",
+  {
+    agentId: text("agent_id").notNull(),
+    app: text().notNull(),
+    name: text().notNull(),
+    state: text({ enum: ["on", "removed"] }).notNull(),
+    source: text({ enum: ["instructions", "person"] }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.app] })]
+);
+
+/**
+ * How an agent narrows a class of tools the company turned on
+ * (agent-reach.ts): one row per agent and class an admin changed.
+ * `asClass`: as the company has the class. It only narrows: the class
+ * gate checks the company's setting and the app's first. No row: as the
+ * class is.
+ */
+export const agentToolClasses = sqliteTable(
+  "agent_tool_classes",
+  {
+    agentId: text("agent_id").notNull(),
+    toolClass: text("tool_class").notNull(),
+    who: text({ enum: ["asClass", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.toolClass] })]
+);
+
+/**
+ * Settings › Stephen, as a whole (stephen-reach.ts): one row, `stephen`,
+ * once an admin changed it: whether he answers in chat apps at all, and
+ * for whom (`who` and `teams`, as in `tool_class_settings`). No row: on,
+ * for everyone.
+ */
+export const stephenReach = sqliteTable("stephen_reach", {
+  id: text().primaryKey(),
+  on: integer({ mode: "boolean" }).notNull(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The places Stephen works in that an admin changed (stephen-reach.ts):
+ * one row per chat platform, by its adapter's name. `who` narrows who
+ * reaches him there (`asStephen`: as for him as a whole); `acts` says
+ * whether he does things there or only answers. No row: as Stephen, and
+ * he acts.
+ */
+export const stephenPlaces = sqliteTable("stephen_places", {
+  place: text().primaryKey(),
+  who: text({ enum: ["asStephen", "nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  acts: integer({ mode: "boolean" }).notNull(),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * How an app narrows a class of tools the company turned on
+ * (stephen-reach.ts): one row per native app (its provider) and class an
+ * admin changed. `asClass`: as the class is. No row: as the class is.
+ */
+export const appToolClasses = sqliteTable(
+  "app_tool_classes",
+  {
+    app: text().notNull(),
+    toolClass: text("tool_class").notNull(),
+    who: text({ enum: ["asClass", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.app, table.toolClass] })]
+);
+
+/**
+ * Apps people asked Grasp to add, as the catalog doesn't have them
+ * (app-requests.ts): one row each, by its name in lower case, so the
+ * same app asked for twice is one request.
+ */
+export const appRequests = sqliteTable(
+  "app_requests",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    nameKey: text("name_key").notNull(),
+    why: text(),
+    url: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("app_requests_name_key_idx").on(table.nameKey),
+    index("app_requests_requested_at_idx").on(table.requestedAt),
+  ]
+);
+
+/**
+ * A person's ask to share one of their own skills with the company or one
+ * of their teams (skill-shares.ts, GRA-1754, GRA-1844). `text` is the exact
+ * `SKILL.md` they asked to share, kept only while it waits: an admin
+ * decides that text and no other (`skillDecisions` takes it on).
+ * `audience` is whom for: `company`, or `team:<teamId>` (brain-next.ts
+ * `audienceKeyOf`); nullable only as schemas expand, and a row without
+ * one is never decided or listed, never read as the company's. At most
+ * one waits per person, name and audience; asking again, deleting the
+ * skill or being removed takes the waiting one away, so a decision on it
+ * is refused, and one for a team is decided only while its person is in
+ * that team.
+ */
+export const skillShares = sqliteTable(
+  "skill_shares",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    text: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    audience: text(),
+  },
+  (table) => [
+    uniqueIndex("skill_shares_waiting_idx")
+      .on(table.requestedBy, table.name, table.audience)
+      .where(sql`status = 'pending'`),
+    index("skill_shares_status_idx").on(table.status, table.requestedAt),
+  ]
+);
+
+/**
+ * The admins' decisions on the shared skills, the one record of what
+ * should be live (skill-shares.ts): numbered per audience and name
+ * (`seq`), the latest is what the Brain follows, an approved share's text
+ * (`share_id`) or a retirement (none). `audience` as `skillShares`'s: a
+ * row without one is never reconciled, never read as the company's. `text` is what the decision writes, kept with it so
+ * an erasure of the asker never takes a decision's text away. `outcome` is
+ * what became of it in the Brain, recorded once by the reconciler:
+ * `landed` at `version`, or `superseded` by a later decision before it
+ * did; null while it is on its way.
+ */
+export const skillDecisions = sqliteTable(
+  "skill_decisions",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    seq: integer().notNull(),
+    shareId: text("share_id"),
+    text: text().notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at").notNull(),
+    outcome: text({ enum: ["landed", "superseded"] }),
+    version: integer(),
+    audience: text(),
+  },
+  (table) => [
+    uniqueIndex("skill_decisions_sequence_idx").on(
+      table.audience,
+      table.name,
+      table.seq
+    ),
+    index("skill_decisions_share_idx").on(table.shareId),
+    index("skill_decisions_open_idx")
+      .on(table.audience, table.name)
+      .where(sql`outcome IS NULL`),
+  ]
+);
+
+/**
+ * The names of their own skills people deleted for good: no ask of one is
+ * written from then on (skill-shares.ts). The name can't be used again
+ * (the Brain closes its key), so the row is never taken back; it goes with
+ * its person's erasure.
+ */
+export const skillDeletions = sqliteTable(
+  "skill_deletions",
+  {
+    personId: text("person_id").notNull(),
+    name: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.personId, table.name] })]
+);
+
+/**
+ * Each computation of the improvement signals (src/signals.ts), one a UTC
+ * day: `started_at` claims it, `finished_at` is set once all its signals
+ * are written. The signals people read are those of the finished one
+ * started last; finishing deletes every computation started before it,
+ * with its signals.
+ */
+export const improvementSignalComputations = sqliteTable(
+  "improvement_signal_computations",
+  {
+    id: text().primaryKey(),
+    /** The UTC day it is the computation of, such as `2026-09-27`. */
+    day: text().notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+  },
+  (table) => [
+    index("improvement_signal_computations_day_idx").on(table.day),
+    index("improvement_signal_computations_started_idx").on(table.startedAt),
+  ]
+);
+
+/**
+ * The improvement signals of a computation: one per kind, App, workflow
+ * and subject (the deciders, the step, a search's key). `app_id` and
+ * `workflow_id` are empty for the deployment's own signals and for none.
+ * `value` ranks it within its kind; `evidence` is JSON, IDs and counts
+ * only (@grasp-os/shared/signals).
+ */
+export const improvementSignals = sqliteTable(
+  "improvement_signals",
+  {
+    computation: text()
+      .notNull()
+      .references(() => improvementSignalComputations.id),
+    appId: text("app_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    kind: text({ enum: signalKinds }).notNull(),
+    subject: text().notNull(),
+    value: real().notNull(),
+    evidence: text({ mode: "json" }).$type<Json>().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.computation,
+        table.appId,
+        table.workflowId,
+        table.kind,
+        table.subject,
+      ],
+    }),
+    index("improvement_signals_kind_idx").on(
+      table.computation,
+      table.kind,
+      table.value
+    ),
+  ]
+);
+
+/**
+ * The statistics Apps recorded, added up by the UTC day: one row per App,
+ * measure, day and dimensions (canonical JSON), holding how many points,
+ * their sum, lowest and highest. Read and written by nothing since an
+ * App's own measures became its own tables (GRA-1533): kept for this
+ * release, as the schema expands before it contracts, and dropped in the
+ * next.
+ */
+export const appStatistics = sqliteTable(
+  "app_statistics",
+  {
+    appId: text("app_id").notNull(),
+    measure: text().notNull(),
+    /** `YYYY-MM-DD`, UTC. */
+    day: text().notNull(),
+    /** Canonical JSON of the point's dimensions, `{}` for none. */
+    dimensions: text().notNull(),
+    count: integer().notNull(),
+    sum: real().notNull(),
+    min: real().notNull(),
+    max: real().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.measure, table.day, table.dimensions],
+    }),
+    // A day's rows of an App, counted against its daily bound.
+    index("app_statistics_app_day_idx").on(table.appId, table.day),
+    // The sweep of rows past the retention.
+    index("app_statistics_day_idx").on(table.day),
+  ]
+);
+
+/**
+ * The statistics points the attempts of a workflow run's steps recorded
+ * through Apps' methods, not yet added up into `app_statistics`. Read and
+ * written by nothing since GRA-1533, like `app_statistics`: dropped with
+ * it in the next release.
+ */
+export const appStatisticSteps = sqliteTable(
+  "app_statistic_steps",
+  {
+    /** The step's idempotency key (`stepIdempotencyKey`): its run's ID first. */
+    stepKey: text("step_key").notNull(),
+    /** The attempt of the step, an ID the run's engine gives each. */
+    attempt: text().notNull(),
+    appId: text("app_id").notNull(),
+    measure: text().notNull(),
+    /** `YYYY-MM-DD`, UTC. */
+    day: text().notNull(),
+    /** Canonical JSON of the point's dimensions, `{}` for none. */
+    dimensions: text().notNull(),
+    count: integer().notNull(),
+    sum: real().notNull(),
+    min: real().notNull(),
+    max: real().notNull(),
+    /** Set on the step's marker only: the step completed with this attempt. */
+    committed: integer({ mode: "boolean" }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.stepKey,
+        table.attempt,
+        table.appId,
+        table.measure,
+        table.day,
+        table.dimensions,
+      ],
+    }),
+  ]
+);
+
+/**
+ * Every version of core the clock has seen running (src/platform-updates.ts),
+ * each recorded once: the insert of a version not here is audited as
+ * `platform.updated` in the same batch.
+ */
+export const platformVersions = sqliteTable("platform_versions", {
+  versionId: text("version_id").primaryKey(),
+  recordedAt: timestamp("recorded_at").notNull(),
+});
+
+/**
+ * What core tells a person in the product (src/notifications.ts): that an
+ * admin asked them one of the brain's open questions (`gap_asked`,
+ * src/brain-gaps.ts), that a schedule trigger of theirs stopped
+ * (`trigger_stopped`), that someone else made another version of a
+ * workflow their triggers start live (`trigger_workflow_changed`), that
+ * connect stopped hearing a source their
+ * triggers listen to (`events_stopped`), that packages of an App they
+ * build were revoked as malware
+ * (`package_revoked`), or what an App told them (`app_message`). A
+ * `gap_asked` row has its gap alone, one per person and gap, unread again
+ * each time the gap is asked. The person's rows read over 30 days ago go
+ * when they next read, and all of them when they are removed from the
+ * organization.
+ */
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text().primaryKey(),
+    personId: text("person_id").notNull(),
+    type: text({
+      enum: [
+        "gap_asked",
+        "trigger_stopped",
+        "trigger_workflow_changed",
+        "package_revoked",
+        "package_advisory",
+        "events_stopped",
+        "app_message",
+      ],
+    }).notNull(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    /** The gap a `gap_asked` row asks about: its brain record id. */
+    gapId: text("gap_id"),
+    createdAt: timestamp("created_at").notNull(),
+    /** When it last changed. */
+    updatedAt: timestamp("updated_at").notNull(),
+    readAt: timestamp("read_at"),
+    /**
+     * The schedule trigger a `trigger_stopped` row says stopped
+     * (workflows/schedule-triggers.ts), or a trigger of the person's whose
+     * workflow a `trigger_workflow_changed` row says changed; its
+     * `workflow_id` is the workflow resource the trigger starts.
+     */
+    triggerId: text("trigger_id"),
+    /**
+     * The package version a `package_revoked` row says was reported as
+     * malware, and the advisory that reported it
+     * (packages/rescan.ts); its `app_id` is the App whose packages were
+     * revoked. Rows written before GRA-1662 may name a workflow's
+     * (`workflow_id`) instead; they are no longer listed.
+     */
+    packageName: text("package_name"),
+    packageVersion: text("package_version"),
+    advisory: text(),
+    /**
+     * Where an `events_stopped` row says connect stopped hearing events
+     * (notifications.ts): the connection, the event type, the part of it
+     * (a mailbox, a drive; null for the account's own), and why
+     * (`refused`: the provider refused access; `failed`: its reads kept
+     * failing).
+     */
+    connectionId: text("connection_id"),
+    eventType: text("event_type"),
+    eventResource: text("event_resource"),
+    stopReason: text("stop_reason", { enum: ["refused", "failed"] }),
+    /**
+     * What an `app_message` row's App told the person
+     * (app-notifications.ts): its title and its body (null for none); its
+     * `app_id` is the App, which it opens.
+     */
+    title: text(),
+    body: text(),
+    /**
+     * The previous release's screen a message opened on. Neither read
+     * nor written here: kept while that release may still serve next to
+     * this one, and dropped once none does (expand, then contract).
+     */
+    screen: text(),
+  },
+  (table) => [
+    // A person's list, latest first.
+    index("notifications_person_idx").on(
+      table.personId,
+      table.updatedAt,
+      table.id
+    ),
+    // One unread row per person, kind, App and workflow, and the unread count.
+    uniqueIndex("notifications_unread_idx")
+      .on(table.personId, table.type, table.appId, table.workflowId)
+      .where(sql`read_at IS NULL`),
+    // What an App sent in the last hour: its hourly limit.
+    index("notifications_app_sent_idx")
+      .on(table.appId, table.createdAt)
+      .where(sql`type = 'app_message'`),
+    // A person's one notice of a gap, however often it is asked.
+    uniqueIndex("notifications_gap_idx")
+      .on(table.personId, table.gapId)
+      .where(sql`gap_id IS NOT NULL`),
+  ]
+);
+
+/**
+ * A chat an App once opened, through a link, for someone who wasn't a
+ * member, with a model.
+ *
+ * Unused since that feature went (GRA-2234): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later release
+ * drops it (expand, then contract).
+ */
+export const guestChats = sqliteTable(
+  "guest_chats",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id").notNull(),
+    permissionId: text("permission_id").notNull(),
+    invitedBy: text("invited_by").notNull(),
+    name: text().notNull(),
+    skill: text().notNull(),
+    model: text().notNull(),
+    tokenHash: text("token_hash").notNull(),
+    turns: integer().notNull(),
+    busyUntil: timestamp("busy_until"),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    openedAt: timestamp("opened_at"),
+    endedAt: timestamp("ended_at"),
+    ended: text({ enum: ["finished", "revoked"] }),
+    bindingAlias: text("binding_alias"),
+  },
+  (table) => [
+    uniqueIndex("guest_chats_token_idx").on(table.tokenHash),
+    index("guest_chats_app_idx").on(table.appId, table.createdAt, table.id),
+    index("guest_chats_open_idx")
+      .on(table.appId, table.createdAt, table.id)
+      .where(sql`ended IS NULL`),
+    index("guest_chats_expires_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * Who could open a published App without being a member: each address
+ * its builders listed, and each domain whose every address could.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
+ */
+export const appVisitorEntries = sqliteTable(
+  "app_visitor_entries",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    kind: text({ enum: ["address", "domain"] }).notNull(),
+    value: text().notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.kind, table.value] })]
+);
+
+/**
+ * The functions each version of an App granted its visitors, by path.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
+ */
+export const appVisitorGrants = sqliteTable(
+  "app_visitor_grants",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    version: integer().notNull(),
+    function: text().notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.version, table.function] }),
+  ]
+);
+
+/**
+ * The sign-in codes mailed to an App's visitors, each as its SHA-256.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
+ */
+export const appVisitorCodes = sqliteTable(
+  "app_visitor_codes",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    address: text().notNull(),
+    codeHash: text("code_hash").notNull(),
+    tries: integer().notNull(),
+    /** When it was used, or ran out of tries: it takes nothing after. */
+    usedAt: timestamp("used_at"),
+    sentAt: timestamp("sent_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    index("app_visitor_codes_address_idx").on(
+      table.appId,
+      table.address,
+      table.sentAt
+    ),
+    index("app_visitor_codes_sent_idx").on(table.appId, table.sentAt),
+    index("app_visitor_codes_sweep_idx").on(table.sentAt),
+  ]
+);
+
+/**
+ * The sessions of an App's signed-in visitors, each as its token's SHA-256.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
+ */
+export const appVisitorSessions = sqliteTable(
+  "app_visitor_sessions",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    address: text().notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("app_visitor_sessions_token_idx").on(table.tokenHash),
+    index("app_visitor_sessions_expires_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * The messages of a chat in `guest_chats`. Unused since GRA-2234, and kept
+ * for a rollback to the release before, as that table is.
+ */
+export const guestMessages = sqliteTable(
+  "guest_messages",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => guestChats.id, { onDelete: "cascade" }),
+    seq: integer().notNull(),
+    role: text({ enum: ["guest", "agent"] }).notNull(),
+    text: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.chatId, table.seq] })]
+);
+
+/**
+ * The deployment's stores, one per App (`app_default_stores`,
+ * src/data-stores.ts): an inventory, never a copy of their records. Each
+ * store's records, receipts and outbox live in its own Durable Object
+ * (src/data-store.ts), named by this ID, which the host mints and which no
+ * App, workflow or run ID becomes. `physical_namespace_role` says which
+ * namespace of objects holds it. A deleted store
+ * keeps its row, with `deleted_at` set, and is never served again.
+ */
+export const businessStores = sqliteTable("business_stores", {
+  id: text().primaryKey(),
+  /**
+   * The builder whose seal created it. It gives them nothing: the App's
+   * roles decide who reaches the store. Who owns each record is the
+   * record's own `_ownerId`, never this.
+   */
+  ownerId: text("owner_id").notNull(),
+  /**
+   * Unused; dropped in a later release (expand, then contract): nothing
+   * reads them, and the release a store serves is its App's current
+   * version's binding (`sdk_resource_bindings`).
+   */
+  activeSchemaVersion: integer("active_schema_version"),
+  activeSchemaHash: text("active_schema_hash"),
+  activeFunctionManifestHash: text("active_operation_manifest_hash"),
+  /**
+   * Unused since each App has one store of its own: kept only until a later
+   * release drops it, as an older core may still run on this schema (expand,
+   * then contract).
+   */
+  policyGeneration: integer("policy_generation").notNull().default(1),
+  physicalNamespaceRole: text("physical_namespace_role", {
+    enum: ["data_store"],
+  }).notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+  /**
+   * When a deletion of the store began, if one is in flight: set before
+   * its object is closed, only while no sealed release binds the store,
+   * and while set (for `storeClosingMs`) no seal binds it and no version
+   * bound to it is made current (data-stores.ts, app-releases.ts,
+   * apps.ts). Cleared, by its owner alone, if the close is refused; a
+   * deletion finished sets `deletedAt`.
+   */
+  closingAt: timestamp("closing_at"),
+  /** The deletion that set `closingAt`: only it closes the store, or clears the mark. */
+  closingOwner: text("closing_owner"),
+});
+
+/**
+ * Whom a store was shared with to manage it. Unused since each App has one store of its own: kept only until a later
+ * release drops it, as an older core may still run on this schema (expand,
+ * then contract).
+ */
+export const businessStoreMembers = sqliteTable(
+  "business_store_members",
+  {
+    storeId: text("store_id")
+      .notNull()
+      .references(() => businessStores.id),
+    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["manage"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.memberType, table.memberId] }),
+    index("business_store_members_member_idx").on(
+      table.memberType,
+      table.memberId
+    ),
+  ]
+);
+
+/**
+ * The deployment's independent workflows (spec 3, 13.2, 24;
+ * src/workflow-resources.ts): each a resource of its own, owned by the
+ * person who created it, never by an App, so nothing done to an App
+ * (sharing, grouping, deleting) reaches it. Its ID is minted at random by
+ * the host; its name is fixed at creation and unique among every workflow
+ * there has been, deleted ones included, until an admin releases a deleted
+ * one's name (`name_released_at`, GRA-562): then a new workflow may take
+ * it. `current_version` is the version published last. A deleted workflow
+ * keeps its row, with `deleted_at` set, and is never served again.
+ */
+export const workflowResources = sqliteTable(
+  "workflow_resources",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    ownerId: text("owner_id").notNull(),
+    currentVersion: integer("current_version"),
+    createdAt: timestamp("created_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    /**
+     * Moves on with every change of who may start or follow it: its members,
+     * and grants and revocations of permissions on it or of it
+     * (workflow-starts.ts). A start admitted under one generation is refused
+     * once it moved, so no start lands on authority that changed under it.
+     */
+    policyGeneration: integer("policy_generation").notNull().default(1),
+    /**
+     * The parameter revision in force (`workflow_resource_params`): 0 while
+     * no value was ever set. Every edit names the revision it read and
+     * moves it on; a start freezes the values of the revision it read, and
+     * is refused if an edit landed in between (workflow-starts.ts).
+     */
+    configRevision: integer("config_revision").notNull().default(0),
+    /**
+     * When an admin released the name of this deleted workflow, and who: it
+     * no longer holds the name, which a new workflow may take. Set once, on
+     * a deleted row only, and never cleared; the row is never live again
+     * (migration 0107's triggers).
+     */
+    nameReleasedAt: timestamp("name_released_at"),
+    nameReleasedBy: text("name_released_by"),
+    /**
+     * Its owner lets people ask Stephen to start it in a chat app: he may
+     * offer it on a card to anyone who could start it themselves, and the
+     * press starts it as them (channels/workflow-offers.ts). Off until the
+     * owner turns it on.
+     */
+    askable: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The name people gave it, shown where `name` would be; null for none.
+     * `name` stays the key everything references.
+     */
+    title: text(),
+  },
+  (table) => [
+    // Listing reads a person's own workflows by owner (`listWorkflowResources`).
+    index("workflow_resources_owner_idx").on(table.ownerId),
+    // Unique among the workflows that hold their name: every one but those
+    // whose name was released.
+    uniqueIndex("workflow_resources_name_unique")
+      .on(table.name)
+      .where(sql`name_released_at IS NULL`),
+    // Every read by name, released holders' included
+    // (`requireUnreleasedVersion`, `releaseWorkflowName`): the partial
+    // index above serves only those that say `name_released_at IS NULL`.
+    index("workflow_resources_name_released").on(
+      table.name,
+      table.nameReleasedAt
+    ),
+  ]
+);
+
+/**
+ * Each published version of a workflow: written once, by its publication,
+ * and never changed. `version` counts publications from 1;
+ * `definition_version` is the semantic version publication gives it,
+ * unique per workflow, so a semantic version always names the same
+ * content. `definition` is the workflow.json exactly as published (at
+ * most the format's 1 MiB), `profile_version` its format
+ * (`grasp-workflow/2`), `contract` the canonical JSON of its input, output
+ * and parameter schemas, and `manifest` the canonical JSON of what the
+ * version pins: its definition, contract, build and the exact versions its
+ * bindings resolved to (also in `sdk_resource_bindings`), each with its
+ * SHA-256. Expressions are compiled into the build, so its hash covers
+ * them: no evaluator is pinned beside it.
+ */
+export const workflowResourceVersions = sqliteTable(
+  "workflow_resource_versions",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    version: integer().notNull(),
+    /**
+     * The semantic version publication gives the version's contract (its
+     * catalog key's), unique per workflow: the column keeps its first
+     * name, which the release before writes too.
+     */
+    contractVersion: text("definition_version").notNull(),
+    definition: text().notNull(),
+    definitionJsonHash: text("definition_json_hash").notNull(),
+    profileVersion: text("profile_version").notNull(),
+    /**
+     * Nothing reads it: expressions are compiled into the build. Kept, and
+     * written empty, until the follow-up GRA-1605 drops it, so a core
+     * still serving during a rollout keeps working (expand, then contract).
+     */
+    evaluatorHash: text("evaluator_hash").notNull(),
+    contract: text().notNull(),
+    contractHash: text("contract_hash").notNull(),
+    manifest: text().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    authorId: text("author_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * The seal whose references (`sdk_artifact_refs`) keep its build's
+     * artifacts (src/sealed-artifacts.ts). Null for a version published
+     * before seals, which this release refuses, to publish again.
+     */
+    sealId: text("seal_id"),
+    /**
+     * What people call it, `YY.MM.N`, as an App's version
+     * (`app_versions.label`): given in the batch that first makes it live
+     * (src/workflow-publish.ts) and kept when a roll back makes it live
+     * again. Null for a version never live.
+     */
+    label: text(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.version] }),
+    uniqueIndex("workflow_resource_versions_definition_version").on(
+      table.workflowResourceId,
+      table.contractVersion
+    ),
+    uniqueIndex("workflow_resource_versions_label").on(
+      table.workflowResourceId,
+      table.label
+    ),
+  ]
+);
+
+/**
+ * Whom each workflow is shared with (src/workflow-resources.ts): a person
+ * (`member_type` `person`, `member_id` their user ID), a team or everyone
+ * in a project (`project`, src/projects.ts), in role `user` or `builder`.
+ * Sharing again changes the role; unsharing deletes the row; who did
+ * which is in the audit log. Its owner has no row.
+ */
+export const workflowResourceMembers = sqliteTable(
+  "workflow_resource_members",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    memberType: text("member_type", {
+      enum: ["person", "team", "project"],
+    }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["user", "builder"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.memberType, table.memberId],
+    }),
+    index("workflow_resource_members_member_idx").on(
+      table.memberType,
+      table.memberId
+    ),
+  ]
+);
+
+/**
+ * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
+ * starts one workflow on its own, at the version live as each run starts
+ * (a system event, a connector event, a webhook, a schedule, mail to its
+ * address), owned by whoever created it, never by the workflow's owner or
+ * an App, and configured once, as it is created: a trigger has no
+ * versions. `enabled` false, or `deleted_at`, stops future starts, never
+ * runs already started. Its starts need a permission of its own (`start`
+ * on the workflow) like any other subject's.
+ */
+export const triggerResources = sqliteTable(
+  "trigger_resources",
+  {
+    id: text().primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    kind: text({
+      enum: ["connector", "webhook", "schedule", "email"],
+    }).notNull(),
+    /**
+     * Unused since a trigger has no versions: written 1, as it is NOT
+     * NULL, and read by nothing. Dropped in a later release (expand, then
+     * contract).
+     */
+    currentVersion: integer("current_version").notNull(),
+    enabled: integer({ mode: "boolean" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    /**
+     * For an email trigger: the part before the `@` of the address it
+     * receives mail at, the name its builder chose or `trigger-<token>`
+     * (128 random bits), set as it is created and never changed, and set to
+     * null as it is deleted, which frees it (workflows/email-addresses.ts);
+     * null for any other kind. Unlike its ID, shown only to whoever may see
+     * the trigger; a chosen name is audited as it is created, a random one
+     * never logged or audited.
+     */
+    emailAddress: text("email_address").unique(),
+    /**
+     * Never written or read since webhook triggers start on event sources
+     * (GRA-1560, `event_sources`). Kept, with the token's index, until
+     * GRA-1659 drops them (expand, then contract).
+     */
+    webhookToken: text("webhook_token").unique(),
+    webhookSecretGeneration: integer("webhook_secret_generation"),
+    webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
+    /**
+     * The workflow it starts, the SHA-256 of its configuration, and the
+     * person its starts act for (`principal_binding`, a user ID the host
+     * bound at creation: who created it, never the workflow's owner). Every
+     * trigger is created with all three (trigger-resources.ts); the empty
+     * default is only there because SQLite adds a NOT NULL column only with
+     * one, and migration 0251 copied each existing trigger's from the
+     * version it ran (`trigger_resource_versions`).
+     */
+    workflowResourceId: text("workflow_resource_id").notNull().default(""),
+    configHash: text("config_hash").notNull().default(""),
+    principalBinding: text("principal_binding").notNull().default(""),
+    /** A connector trigger's event type, or a webhook trigger's. */
+    eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow's live version as the
+     * trigger was created, and checked again by every start), all checked as
+     * it was created (trigger-resources.ts). Null for any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as it
+     * was created (trigger-resources.ts). An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
+    /**
+     * For a webhook trigger (GRA-1560): the event source whose events
+     * start it (`event_sources`), of type `event_type`; each event's data
+     * is its run's input. Null for any other kind.
+     */
+    eventSourceId: text("event_source_id"),
+  },
+  (table) => [
+    // The webhook triggers that take a source's events.
+    index("trigger_resources_source")
+      .on(table.eventSourceId, table.eventType)
+      .where(sql`${table.eventSourceId} IS NOT NULL`),
+    // The connector triggers that take a connection's events.
+    index("trigger_resources_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
+  ]
+);
+
+/**
+ * The deployment's event sources (GRA-1560, event-sources.ts): where an
+ * outside system sends events, each created by an admin. `token` is what
+ * its URL ends in, 128 random bits, shown only to admins and never
+ * logged, set to null as it is deleted, so its URL takes nothing more.
+ * Its secret is never stored: it is derived from its ID and
+ * `secret_generation`, one more each time it is rotated, never reused;
+ * `secret_revoked_at` is when it was revoked, until a new one is made.
+ */
+export const eventSources = sqliteTable("event_sources", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  token: text().unique(),
+  secretGeneration: integer("secret_generation").notNull(),
+  secretRevokedAt: timestamp("secret_revoked_at"),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+/**
+ * What an event source accepted, for its admins to see
+ * (workflows/source-deliveries.ts): one row for each delivery it accepted
+ * (its ID the hash of the source and its `webhook-id`, so a sender's
+ * retry is the same row) and each test event an admin sent it (`test`), with the event's type,
+ * how many triggers it started (`triggers`; none for a test) and its data
+ * (`payload`, JSON), which is set to null a day after `received_at`; the
+ * row is deleted after seven days, or with its source. A source holds its
+ * newest `eventSourceRetention.perSource` at most. Never a refused
+ * delivery, and never a header, a signature or a sender's address.
+ */
+export const eventSourceDeliveries = sqliteTable(
+  "event_source_deliveries",
+  {
+    id: text().primaryKey(),
+    sourceId: text("source_id").notNull(),
+    receivedAt: timestamp("received_at").notNull(),
+    eventType: text("event_type").notNull(),
+    test: integer({ mode: "boolean" }).notNull(),
+    triggers: integer().notNull(),
+    payload: text(),
+  },
+  (table) => [
+    // A source's deliveries, newest first.
+    index("event_source_deliveries_source").on(
+      table.sourceId,
+      table.receivedAt,
+      table.id
+    ),
+    // What the clock clears and deletes by age.
+    index("event_source_deliveries_received").on(table.receivedAt),
+  ]
+);
+
+/**
+ * How many deliveries an event source accepted or refused, by the hour
+ * (workflows/source-deliveries.ts): one row for each source, outcome
+ * (`accepted`, or why it refused: `eventSourceRefusalReasons`) and hour
+ * (`hour`, when it began), with how many and when the last was. A flood
+ * of refused deliveries writes as many rows as there are reasons an hour,
+ * and nothing of any of them. Deleted after seven days, or with its
+ * source.
+ */
+export const eventSourceCounts = sqliteTable(
+  "event_source_counts",
+  {
+    sourceId: text("source_id").notNull(),
+    outcome: text().notNull(),
+    hour: timestamp("hour").notNull(),
+    count: integer().notNull(),
+    lastAt: timestamp("last_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sourceId, table.outcome, table.hour] }),
+    // What the clock deletes by age.
+    index("event_source_counts_hour").on(table.hour),
+  ]
+);
+
+/**
+ * The runs waiting now for an event source's event by a match
+ * (workflows/event-waits.ts): one row for each type an event wait at
+ * engine step `step` of run `run_id` takes, through its binding, from
+ * source `source_id`, by `match_hash` (the SHA-256 of the field it
+ * matches and the value its enter step recorded). Written as the wait is
+ * reached, deleted as it ends, and past `expires_at` (its deadline) taken
+ * by nothing.
+ */
+export const eventWaits = sqliteTable(
+  "event_waits",
+  {
+    runId: text("run_id").notNull(),
+    step: text().notNull(),
+    eventType: text("event_type").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    binding: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    matchHash: text("match_hash").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.step, table.eventType] }),
+    index("event_waits_match").on(
+      table.sourceId,
+      table.eventType,
+      table.matchHash
+    ),
+  ]
+);
+
+/**
+ * An event source's events, kept until `expires_at` (a day) for a wait
+ * reached after it came (workflows/event-waits.ts): its ID is its
+ * delivery's (the source and its `webhook-id`), its data the event's.
+ * Each run takes one at most once (`kept_event_takes`), however many
+ * runs take it. Deleted on the clock past `expires_at`, its data with it,
+ * and once its source is deleted, which no run takes it from.
+ */
+export const keptEvents = sqliteTable(
+  "kept_events",
+  {
+    id: text().primaryKey(),
+    sourceId: text("source_id").notNull(),
+    eventType: text("event_type").notNull(),
+    data: text().notNull(),
+    receivedAt: timestamp("received_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    index("kept_events_source").on(table.sourceId, table.receivedAt),
+    index("kept_events_expires").on(table.expiresAt),
+  ]
+);
+
+/**
+ * Which run took a kept event, and at which wait (workflows/event-
+ * waits.ts): a run takes an event once (its primary key), and a wait
+ * takes at most one (`run_id`, `step`), whether it was handed live or
+ * taken kept. Deleted with its event.
+ */
+export const keptEventTakes = sqliteTable(
+  "kept_event_takes",
+  {
+    eventId: text("event_id").notNull(),
+    runId: text("run_id").notNull(),
+    step: text().notNull(),
+    takenAt: timestamp("taken_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventId, table.runId] }),
+    uniqueIndex("kept_event_takes_wait").on(table.runId, table.step),
+  ]
+);
+
+/**
+ * What a kept event may be matched by (workflows/event-waits.ts): the
+ * SHA-256 of each JSON Pointer to a text, number or boolean in its data
+ * and that value, within bounds. Deleted with its event.
+ */
+export const keptEventKeys = sqliteTable(
+  "kept_event_keys",
+  {
+    eventId: text("event_id").notNull(),
+    matchHash: text("match_hash").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventId, table.matchHash] }),
+    index("kept_event_keys_match").on(table.matchHash),
+  ]
+);
+
+/**
+ * Unused since a trigger has no versions and keeps its configuration on
+ * its own row (`trigger_resources`, where migration 0251 copied each
+ * trigger's): written and read by nothing. Dropped in a later release
+ * (expand, then contract).
+ */
+export const triggerResourceVersions = sqliteTable(
+  "trigger_resource_versions",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    version: integer().notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    configHash: text("config_hash").notNull(),
+    principalBinding: text("principal_binding").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * Never written or read. Kept, with its index, until GRA-1592 drops
+     * it (expand, then contract).
+     */
+    eventContract: text("event_contract"),
+    /** A connector trigger's event type. */
+    eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow version it pins), all
+     * checked as the version was written (trigger-resources.ts). Null for
+     * any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as
+     * the version was written (trigger-resources.ts). Its event type is
+     * `event_type`, with no `event_contract`. An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
+    /**
+     * For a webhook trigger (GRA-1560): the event source whose events
+     * start it (`event_sources`), of type `event_type`; each event's data
+     * is its run's input. Null for any other kind.
+     */
+    eventSourceId: text("event_source_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.version] }),
+    // The webhook triggers' versions that take a source's events.
+    index("trigger_resource_versions_source")
+      .on(table.eventSourceId, table.eventType)
+      .where(sql`${table.eventSourceId} IS NOT NULL`),
+    // Dropped with its column (GRA-1592).
+    index("trigger_resource_versions_event")
+      .on(table.eventContract, table.eventType)
+      .where(sql`${table.eventContract} IS NOT NULL`),
+    // The connector triggers' versions that take a connection's events.
+    index("trigger_resource_versions_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
+  ]
+);
+
+/**
+ * When each schedule trigger next starts its run (workflows/schedule-
+ * triggers.ts): the occurrence due next, none once it stopped. Only a
+ * live, enabled trigger starts anything; a disabled one's waits here
+ * untouched until enabling it works out its next occurrence again, from
+ * then. `failed_starts` counts the starts in a
+ * row that were refused or failed in the workflow's own terms, toward
+ * stopping it; `attempts` counts every failed try of the occurrence due,
+ * core's own failures too, each try waiting twice as long as the one
+ * before, up to an hour.
+ */
+export const triggerSchedules = sqliteTable(
+  "trigger_schedules",
+  {
+    triggerId: text("trigger_id")
+      .primaryKey()
+      .references(() => triggerResources.id),
+    /**
+     * Unused since a trigger has no versions: written and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
+    version: integer(),
+    nextAt: timestamp("next_at"),
+    failedStarts: integer("failed_starts").notNull().default(0),
+    attempts: integer().notNull().default(0),
+    /**
+     * When the last try of the occurrence failed: what the next try's
+     * wait counts from. Null while no try of it has failed.
+     */
+    lastAttemptAt: timestamp("last_attempt_at"),
+  },
+  (table) => [
+    // The schedules due by a time.
+    index("trigger_schedules_next_at")
+      .on(table.nextAt)
+      .where(sql`${table.nextAt} IS NOT NULL`),
+  ]
+);
+
+/**
+ * The starts of independent workflows a chat's agent asked for, held
+ * until the person it acts for confirms them in Grasp (src/held-starts.ts):
+ * the workflow, whose version live as it is confirmed starts, the input
+ * exactly as it would start (canonical
+ * JSON, with its SHA-256), the agent, its person and its chat, and the
+ * agent's key, scoped to the chat. One per chat and key: the agent asking
+ * again is the same start. Decided once: confirmed (with the start it
+ * made, or why that was refused) or declined; one not started past
+ * `expires_at` lapsed. The input is kept only while the start is open:
+ * emptied once it started (its run keeps it from then on, under run
+ * retention), was refused, declined or lapsed; and the row goes with its
+ * chat, or its person's erasure.
+ */
+export const agentHeldStarts = sqliteTable(
+  "agent_held_starts",
+  {
+    id: text().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    /**
+     * Unused since a held start starts the version live as it is
+     * confirmed: written and read by nothing. Dropped in a later release
+     * (expand, then contract).
+     */
+    workflowResourceVersion: integer("workflow_resource_version"),
+    /** Null once the start is no longer open (held-starts.ts). */
+    input: text(),
+    inputHash: text("input_hash").notNull(),
+    key: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decision: text({ enum: ["confirmed", "declined"] }),
+    decidedAt: timestamp("decided_at"),
+    startId: text("start_id"),
+    /**
+     * Why its confirmed start was refused for good as it was admitted (the
+     * agent's grant or the person's role gone): it never starts. Null
+     * while it may: a confirmed start with neither this nor `start_id`
+     * stopped on the way, and its person may confirm it again.
+     */
+    refusal: text(),
+  },
+  (table) => [
+    uniqueIndex("agent_held_starts_key").on(table.chatId, table.key),
+    // A person's starts that wait.
+    index("agent_held_starts_person")
+      .on(table.personId, table.createdAt)
+      .where(sql`${table.decision} IS NULL`),
+    // Inputs still kept, by when they lapse: what the clock empties.
+    index("agent_held_starts_kept")
+      .on(table.expiresAt)
+      .where(sql`${table.input} IS NOT NULL`),
+  ]
+);
+
+/**
+ * Where an event stands for a connector trigger, or a message for an email
+ * trigger, that didn't start its run (src/workflows/connector-triggers.ts,
+ * `startOnce`), by the trigger and the event's key: held back at its
+ * hourly limit since `held_since` (`settled` null), or settled for it for
+ * good: `dropped`, held past a day, or `refused`,
+ * refused for good. A settled row is a tombstone, so the same event
+ * delivered again for another trigger's sake is known and starts nothing
+ * here. The clock sweeps both past their retention.
+ */
+export const connectorTriggerHolds = sqliteTable(
+  "connector_trigger_holds",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    heldSince: timestamp("held_since").notNull(),
+    settled: text({ enum: ["dropped", "refused"] }),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
+);
+
+/**
+ * The places taken in each trigger's hourly room (src/workflows/
+ * connector-triggers.ts, `startOnce`): one per event (or message) the
+ * trigger started or refused for good, taken in one conditional insert
+ * before either, so no more than `triggeredRunsPerHour` are taken an hour
+ * however many arrive at once, and an event held back for want of one
+ * writes no audit row. A place counts only within its hour: delivered
+ * again within it, an event takes no other; after it, it takes its place
+ * anew under the limit. The clock sweeps places past their hour.
+ */
+export const triggerHourSlots = sqliteTable(
+  "trigger_hour_slots",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    takenAt: timestamp("taken_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.eventKey] }),
+    // A trigger's places this hour.
+    index("trigger_hour_slots_taken").on(table.triggerId, table.takenAt),
+    // The places past their hour, for the sweep.
+    index("trigger_hour_slots_taken_at").on(table.takenAt),
+  ]
+);
+
+/**
+ * Each start of an independent workflow the host admitted
+ * (src/workflow-starts.ts): its durable receipt, written in one statement
+ * with the authorization it was admitted on, read again as the statement
+ * ran. One per invoker, person it acts for and idempotency key, so the
+ * same start sent again is the same start, and one person's key never
+ * reaches another's start. It pins the exact workflow version and manifest, who
+ * invoked it (a person, an App, an agent or a trigger, with the App
+ * version for an App), the person it acts for, the workflow's
+ * policy generation it was admitted under and its validated input
+ * (canonical JSON, with its SHA-256). Never changed after, but for its
+ * input and frozen parameter values, which run retention removes
+ * (workflows/retention.ts): set to null once, with `details_removed_at`,
+ * while every ID, hash and link stays, as the database enforces.
+ */
+export const workflowStartReceipts = sqliteTable(
+  "workflow_start_receipts",
+  {
+    id: text().primaryKey(),
+    invokerType: text("invoker_type", {
+      enum: ["person", "app", "agent", "trigger"],
+    }).notNull(),
+    invokerId: text("invoker_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    /** The App version, for an App's start; null otherwise. */
+    originAppVersion: integer("origin_app_version"),
+    /**
+     * Unused since a trigger has no versions: written null, and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
+    triggerVersion: integer("trigger_version"),
+    principalId: text("principal_id").notNull(),
+    authorityGeneration: integer("authority_generation").notNull(),
+    /** The validated input; null once retention removed it. */
+    input: text(),
+    inputHash: text("input_hash").notNull(),
+    /**
+     * The parameter values the start froze (canonical JSON of every
+     * parameter's value: set, or its default), and the revision they were
+     * read at; null once retention removed them. Sensitive values
+     * included: a receipt is never listed or audited with them, nor with a
+     * hash of them, which a guess at a short value could be checked
+     * against.
+     */
+    params: text(),
+    paramsRevision: integer("params_revision").notNull().default(0),
+    /**
+     * The bindings the start froze (canonical JSON: each alias, its kind,
+     * contract and fingerprint, and the exact workflow version or approved
+     * target serving it), and their SHA-256.
+     */
+    bindings: text().notNull().default("[]"),
+    bindingsHash: text("bindings_hash").notNull().default(""),
+    createdAt: timestamp("created_at").notNull(),
+    /** When retention removed its input and parameter values. */
+    detailsRemovedAt: timestamp("details_removed_at"),
+    /**
+     * Whether the start was decided in restricted mode (restricted.ts): an
+     * App's start while the App, or the chat of the agent whose call made
+     * it, had read restricted data. Its run is restricted for good.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * What the workflow kept between its runs as the start was admitted,
+     * read once and frozen: the hash of its snapshot
+     * (`workflowStateSnapshots`), which every activation of its run reads
+     * (`$state`); null for a start that admits no run, and once retention
+     * removed its details. The admitting statement writes every column in
+     * order.
+     */
+    stateHash: text("state_hash"),
+    /**
+     * How many keys of what the workflow kept its run started without:
+     * withheld, as the run that set each read what the company may no
+     * longer read (workflow-state.ts `readableStateOf`, GRA-1996); null
+     * for none. The run's page says so. Last, as the admitting statement
+     * writes every column in order.
+     */
+    stateWithheld: integer("state_withheld"),
+  },
+  (table) => [
+    uniqueIndex("workflow_start_receipts_key").on(
+      table.invokerType,
+      table.invokerId,
+      table.principalId,
+      table.idempotencyKey
+    ),
+    index("workflow_start_receipts_workflow").on(
+      table.workflowResourceId,
+      table.createdAt
+    ),
+    // The receipts retention has yet to reach, oldest first, by ID within
+    // a time: the order the sweep pages them in (workflows/retention.ts).
+    index("workflow_start_receipts_due_idx")
+      .on(table.createdAt, table.id)
+      .where(sql`${table.detailsRemovedAt} IS NULL`),
+    // The receipts that still hold a snapshot (workflows/state-snapshots.ts).
+    index("workflow_start_receipts_state_idx")
+      .on(table.stateHash)
+      .where(sql`${table.stateHash} IS NOT NULL`),
+  ]
+);
+
+/**
+ * Each run of an independent workflow (src/workflows/resource-runs.ts):
+ * the run a start's receipt admitted, under the receipt's own ID, written
+ * in the receipt's statement for a version with an executable build. It
+ * pins the exact version, its manifest and its build's executable
+ * identity, and the person it acts for; the engine runs it (engine.ts,
+ * pinned to the same) and is the only authority on where it is, which
+ * `status` follows by the engine's notifications, each applied only if
+ * newer than the last (`engine_sequence`). A run that hasn't ended keeps
+ * its workflow from being deleted (workflow-resources.ts). It holds no
+ * details: its input and parameters are the receipt's, its output and
+ * failure the engine's, both under run retention.
+ *
+ * Not a `workflow_runs` row: those are an App's runs (`app_id` is
+ * required), and making it optional would rebuild that table, which D1
+ * can't do under the tables that reference it.
+ */
+export const workflowResourceRuns = sqliteTable(
+  "workflow_resource_runs",
+  {
+    id: text()
+      .primaryKey()
+      .references(() => workflowStartReceipts.id),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    principalId: text("principal_id").notNull(),
+    status: text({
+      enum: [
+        "starting",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ],
+    }).notNull(),
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    endedAt: timestamp("ended_at"),
+    /**
+     * How often the repair sent its start (workflows/resource-runs.ts), and
+     * when it may next: each run backs off on its own, and ends failed
+     * past a bound, so runs that can't start never crowd out newer ones.
+     */
+    startAttempts: integer("start_attempts").notNull().default(0),
+    nextStartAt: timestamp("next_start_at"),
+    /**
+     * Why core ended a run the engine never had (its start abandoned), as
+     * an error code with nothing of the run in it: the engine, which
+     * holds every other run's error, has nothing to say of it.
+     */
+    failureCode: text("failure_code"),
+    /**
+     * The newest activation generation whose step attempts the engine has
+     * fenced (workflows/quotas.ts, `sharesReleased`): an attempt of it, or
+     * an older one, whose admission lands later takes no share. An ended
+     * run takes none whatever this says, so it moves only while the run
+     * hasn't ended.
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+    /**
+     * Its start's `restricted`, pinned with it: every call of the run reads
+     * it here (restricted.ts), so no step, retry or replay runs without it.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Never written or read. Kept, with its index, until GRA-1589 drops
+     * it (expand, then contract).
+     */
+    parentRunId: text("parent_run_id"),
+    /**
+     * For a run a trigger started from a run's stamped mail
+     * (workflows/connector-triggers.ts): its lineage's root and its depth
+     * under it (quotas.ts, `admitInLineage`), pinned with it. Null and 0 for
+     * a run its own start admitted, the root of its own lineage. It joins
+     * the mailing run's lineage, not its life, and is charged to its
+     * workflow's account there (`accountRunId`).
+     */
+    rootRunId: text("root_run_id"),
+    depth: integer().notNull().default(0),
+    /**
+     * When the archive of the App that started it asked it to stop
+     * (app-status.ts, `stopRunsStartedBy`): asked once, never again by a
+     * later pass while the engine ends it.
+     */
+    stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * When the stop an erasure claimed for it (`stopRequestedAt`) was taken
+     * (person-erasure.ts, `stopRunsFor`): the erasure's runs are done only
+     * once each has this or has ended. Null while a claim's sender may
+     * have died before it sent the stop.
+     */
+    stopTakenAt: timestamp("stop_taken_at"),
+    /**
+     * The newest control generation a page's pause, resume or cancel took
+     * (page-workflows.ts): each admitted one takes the next, and goes to
+     * the engine with it, which ignores one older than the newest it took.
+     */
+    controlGeneration: integer("control_generation").notNull().default(0),
+    /**
+     * Moves on with every write that changes what a page's snapshot of the
+     * run shows (its status, a control admitted or settled), in the write's
+     * own statement: the snapshot's revision is read from it.
+     */
+    summaryRevision: integer("summary_revision").notNull().default(0),
+    /**
+     * While the engine rolls the run back (its steps' compensations), why:
+     * a JSON object of its cause (`failure` or `cancellation`) and, for a
+     * failure, the code the run failed with. What a page's snapshot shows
+     * of its compensation (spec 10.7.3); kept once it ended.
+     */
+    compensation: text(),
+    /**
+     * The run whose allowances its work is charged to (quotas.ts,
+     * `triggeredAccountClaimed`), pinned with it: for a run a trigger
+     * started in another run's lineage, its workflow's account there.
+     * Null for a root.
+     */
+    accountRunId: text("account_run_id"),
+    /**
+     * The task whose step a failed run failed at last, as its journal had
+     * it when it ended (run-object.ts, `#failedTask`): the task's ID in
+     * its version, never a step's key or anything the run read. Null for
+     * a run that failed at no step of a task (a raise, or a start core
+     * abandoned). What the improvement signals count failures by
+     * (signals.ts).
+     */
+    failedTask: text("failed_task"),
+    /**
+     * When it first kept something it read through a connection in its
+     * person's own Brain store (connection-capture.ts `captureRunRead`),
+     * set before the Brain is written: such a run hands over only how it
+     * ended (run-evidence.ts `readAnything`), never a second copy that
+     * would outlive the capture's erasure. Null for a run that kept none.
+     */
+    capturedAt: timestamp("captured_at"),
+  },
+  (table) => [
+    // Dropped with its column (GRA-1589).
+    index("workflow_resource_runs_parent_idx")
+      .on(table.parentRunId, table.status)
+      .where(sql`${table.parentRunId} IS NOT NULL`),
+    // A workflow's runs that haven't ended, for its deletion check.
+    index("workflow_resource_runs_workflow_idx").on(
+      table.workflowResourceId,
+      table.status
+    ),
+    // Starts the engine is still to confirm, for the repair.
+    index("workflow_resource_runs_starting_idx")
+      .on(table.createdAt)
+      .where(sql`${table.status} = 'starting'`),
+    // Runs across workflows ended in a window, by how they ended: the
+    // Workflows page's counts, as an App's runs are read
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_status_ended_idx").on(
+      table.status,
+      table.endedAt,
+      table.id
+    ),
+    // A workflow's runs, newest first, for its page (`listResourceRuns`).
+    index("workflow_resource_runs_newest_idx").on(
+      table.workflowResourceId,
+      table.createdAt,
+      table.id
+    ),
+    // One person's runs of a workflow, newest first, for an App's
+    // `workflows.<wf>.queries.runs` (workflow-reference-queries.ts).
+    index("workflow_resource_runs_principal_idx").on(
+      table.workflowResourceId,
+      table.principalId,
+      table.createdAt,
+      table.id
+    ),
+    // Runs across workflows since a moment: how many ran today, of
+    // workflows the reader may see or not (workflows/today.ts); and newest
+    // first, as an App's runs are read, its ID breaking a tie
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_created_idx").on(table.createdAt, table.id),
+  ]
+);
+
+/**
+ * What each mail call of an independent workflow's run sent, for a native
+ * mail connector's send or draft (src/workflows/mail-stamps.ts): the
+ * call's stamp, which its message carries as a header, with every
+ * recipient the call named and who sent it, as `run_mail_calls` keeps an
+ * App run's. A copy that reaches a mailbox a connector trigger watches
+ * starts the trigger's run under the run, in its lineage
+ * (src/workflows/connector-triggers.ts). Keyed as `run_mail_calls` is.
+ * Removed with its run's details (src/workflows/retention.ts).
+ */
+export const resourceRunMailCalls = sqliteTable(
+  "resource_run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    createdAt: timestamp("created_at").notNull(),
+    stamp: text().notNull(),
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (table) => [
+    index("resource_run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("resource_run_mail_calls_stamp_idx").on(table.stamp),
+  ]
+);
+
+/**
+ * A workflow run's own files (GRA-724, workflows/run-files.ts): what its
+ * steps write through a files permission, and connector reads keep, to
+ * read back in later steps of the same run. Its bytes are in R2 (`FILES`,
+ * EU), one object per chunk; a file is its run's alone, found only with
+ * the run's ID, and goes with the run's details
+ * (`sweepWorkflowStartDetails` marks it deleted, then `sweepRunFiles`
+ * deletes its chunks and its row). No name or content of it reaches the
+ * audit log.
+ */
+export const workflowRunFiles = sqliteTable(
+  "workflow_run_files",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    /** The step whose task opened it: only that task writes it. */
+    openedBy: text("opened_by").notNull(),
+    /** The open's effect key: opening again with it answers this file. */
+    openKey: text("open_key").notNull().unique(),
+    name: text().notNull(),
+    type: text().notNull(),
+    /** Its bytes so far, reserved before they are stored. */
+    size: integer().notNull().default(0),
+    sha256: text(),
+    state: text({ enum: ["writing", "done", "deleted"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+    deletedAt: timestamp("deleted_at"),
+  },
+  (table) => [
+    index("workflow_run_files_run_idx").on(table.runId, table.state),
+    index("workflow_run_files_workflow_idx").on(
+      table.workflowResourceId,
+      table.state
+    ),
+    // Unfinished files, oldest first, for the sweep.
+    index("workflow_run_files_writing_idx")
+      .on(table.createdAt)
+      .where(sql`${table.state} = 'writing'`),
+    // Deleted files, for the sweep that deletes their chunks.
+    index("workflow_run_files_deleted_idx")
+      .on(table.deletedAt)
+      .where(sql`${table.state} = 'deleted'`),
+  ]
+);
+
+/**
+ * The chunks of a run file, in order: each its own R2 object, written
+ * once with its SHA-256 and reserved (counted against the limits) before
+ * it is stored. The append's effect key makes adding it again answer it.
+ */
+export const workflowRunFileChunks = sqliteTable(
+  "workflow_run_file_chunks",
+  {
+    fileId: text("file_id").notNull(),
+    index: integer().notNull(),
+    key: text().notNull().unique(),
+    appendKey: text("append_key").notNull().unique(),
+    size: integer().notNull(),
+    sha256: text().notNull(),
+    stored: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.fileId, table.index] })]
+);
+
+/**
+ * Terminations core owes the engine for runs it ended while they were
+ * still starting, cancelled or abandoned (workflows/resource-runs.ts):
+ * the run's row ends at once and never changes again, so what is still
+ * to tell the engine is kept here, written with that end, until the
+ * engine confirms. The repair
+ * sends each again, backing off, so an instance the engine made before
+ * that end never keeps its lease or alarm.
+ */
+/**
+ * Never written or read: workflows no longer emit events. Kept, with its
+ * indexes and trigger, until GRA-1592 drops it (expand, then contract).
+ */
+export const workflowEmittedEvents = sqliteTable(
+  "workflow_emitted_events",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    taskId: text("task_id").notNull(),
+    binding: text().notNull(),
+    contractId: text("contract_id").notNull(),
+    source: text().notNull(),
+    type: text().notNull(),
+    subject: text(),
+    dataschema: text(),
+    /** The data, canonical JSON; null once retention removed it. */
+    data: text(),
+    /** Whether its run was restricted (restricted.ts), pinned with it. */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+    createdAt: timestamp("created_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    detailsRemovedAt: timestamp("details_removed_at"),
+    /** How many deliveries of it failed and were tried again. */
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    /**
+     * Until when a drain holds it (its lease), or, after a failed
+     * delivery, when it is tried again; null for one never tried.
+     */
+    deliveryAt: timestamp("delivery_at"),
+    /**
+     * Why it was closed undeliverable (a workflow error code), set with
+     * `delivered_at`; null for one delivered, or closed by retention.
+     */
+    undeliverable: text(),
+  },
+  (table) => [
+    index("workflow_emitted_events_run").on(table.runId),
+    // The events still to deliver, oldest first.
+    index("workflow_emitted_events_undelivered")
+      .on(table.createdAt)
+      .where(sql`${table.deliveredAt} IS NULL`),
+  ]
+);
+
+export const workflowResourceRunTerminations = sqliteTable(
+  "workflow_resource_run_terminations",
+  {
+    runId: text("run_id")
+      .primaryKey()
+      .references(() => workflowResourceRuns.id),
+    attempts: integer().notNull().default(0),
+    nextAt: timestamp("next_at").notNull(),
+  },
+  (table) => [
+    index("workflow_resource_run_terminations_next_idx").on(table.nextAt),
+  ]
+);
+
+/**
+ * The controls a person asked of an independent run through an App's
+ * page (page-workflows.ts): one receipt per run and kind, whatever
+ * key asked for it, so a request sent again while its answer was lost,
+ * or asked again under another key, answers the same receipt rather than
+ * ask twice. `admitted` until the run's stop is asked of the engine, then
+ * `applied`, or `superseded` when the run ended otherwise first. Written
+ * once and settled once (migration 0108's triggers). Only `cancel` for
+ * now: an independent run can't be paused yet.
+ */
+export const workflowResourceRunControls = sqliteTable(
+  "workflow_resource_run_controls",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    principalId: text("principal_id").notNull(),
+    key: text().notNull(),
+    kind: text({ enum: ["pause", "resume", "cancel"] }).notNull(),
+    state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    /**
+     * How often the repair applied it while it stayed admitted, and when it
+     * may next (workflows/resource-runs.ts): each backs off on its own, so
+     * one whose stop keeps failing never crowds out newer ones.
+     */
+    attempts: integer().notNull().default(0),
+    nextAt: timestamp("next_at").notNull(),
+    /**
+     * When its stop was first asked of the engine, set once: what audits
+     * that stop exactly once, however often it is asked again.
+     */
+    stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * The run's control generation it was admitted under (its run's
+     * `control_generation`), which it goes to the engine with; one applied
+     * at once, the run already where it asked, keeps the run's current one.
+     */
+    generation: integer().notNull().default(0),
+  },
+  (table) => [
+    // One cancel per run, whatever key asks for it; pauses and resumes are
+    // as many as the run takes, one unresolved at a time, and one per key:
+    // two overlapping requests under one key write one receipt between
+    // them, even one the run is already past, which takes no generation.
+    uniqueIndex("workflow_resource_run_controls_cancel_idx")
+      .on(table.runId)
+      .where(sql`${table.kind} = 'cancel'`),
+    uniqueIndex("workflow_resource_run_controls_key_idx").on(
+      table.runId,
+      table.key,
+      table.kind
+    ),
+    index("workflow_resource_run_controls_run_idx").on(
+      table.runId,
+      table.state
+    ),
+    index("workflow_resource_run_controls_due_idx").on(
+      table.state,
+      table.nextAt
+    ),
+  ]
+);
+
+/**
+ * The keys a page's pause or resume of an independent run was asked
+ * under (page-workflows.ts), each with the receipt it was answered: its
+ * own, or, for one that joined a pause or resume already unresolved, that
+ * one's. One per run, kind and key, so a request sent again under a key
+ * is answered the receipt it was first, never decided anew: a retry of a
+ * request that joined another can't undo a control admitted since.
+ */
+export const workflowResourceRunControlKeys = sqliteTable(
+  "workflow_resource_run_control_keys",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    kind: text({ enum: ["pause", "resume"] }).notNull(),
+    key: text().notNull(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => workflowResourceRunControls.id),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.kind, table.key] })]
+);
+
+/**
+ * The host catalog of contracts independent workflows bind besides each
+ * other (spec 13.2; src/workflow-catalog.ts): connector, model, decision
+ * and event contracts, among others, each published once by an admin and
+ * never changed, so a key always names the same descriptors. `contract` is the
+ * canonical JSON a workflow's validation reads; `fingerprint` its SHA-256.
+ */
+export const workflowCatalogContracts = sqliteTable(
+  "workflow_catalog_contracts",
+  {
+    key: text().primaryKey(),
+    // An older row may still say `template`, `operation` or `knowledge`: read as not
+    // there, as every read filters by the kinds still served.
+    kind: text({
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
+    }).notNull(),
+    contract: text().notNull(),
+    fingerprint: text().notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: timestamp("published_at").notNull(),
+  }
+);
+
+/**
+ * Which concrete resource serves each catalog binding of an independent
+ * workflow (src/workflow-bindings.ts): approved by an admin for the
+ * declaration they reviewed (its alias, kind, contract key and
+ * fingerprint), in the version they reviewed it in (`reviewed_version`),
+ * and serving every version that declares it so. `target` is the resource
+ * (JSON, `WorkflowBindingTarget`). At most one active approval per
+ * binding; approving another revokes it in the same batch, and revoking
+ * one holds for every version. Revoked rows stay.
+ */
+export const workflowBindingApprovals = sqliteTable(
+  "workflow_binding_approvals",
+  {
+    id: text().primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    alias: text().notNull(),
+    // Migration 0252 removed the rows of kinds there are no more
+    // (`template`, `knowledge`, `operation`); every read still filters by
+    // the kinds served, for a row an older core writes after a roll back.
+    kind: text({
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
+    }).notNull(),
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    target: text().notNull(),
+    reviewedVersion: integer("reviewed_version").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    /**
+     * Unused since an approval serves every version declaring its binding
+     * (src/workflow-bindings.ts): kept while a release that relies on it
+     * may serve or be rolled back to, dropped in a later one.
+     */
+    uniqueIndex("workflow_binding_approvals_active_idx")
+      .on(table.workflowResourceId, table.reviewedVersion, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    // One active approval per binding: its alias's declaration.
+    uniqueIndex("workflow_binding_approvals_binding_idx")
+      .on(
+        table.workflowResourceId,
+        table.alias,
+        table.kind,
+        table.contractId,
+        table.fingerprint
+      )
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
+/**
+ * Each revision of an independent workflow's parameter values
+ * (src/workflow-params.ts): written once per edit, never changed, numbered
+ * from 1 per workflow; the workflow's `config_revision` names the one in
+ * force. `values` is the canonical JSON of the values set (a parameter
+ * left out has its default), sensitive ones included: they are never
+ * listed, audited or returned, only frozen into a start. A revision no
+ * longer in force has its values removed by run retention once it was
+ * replaced that long ago (workflows/retention.ts): set to null once, with
+ * `values_removed_at`, while the revision, who set it and when stay.
+ */
+export const workflowResourceParams = sqliteTable(
+  "workflow_resource_params",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    values: text(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+    valuesRemovedAt: timestamp("values_removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+    // The revisions whose values retention has yet to reach, oldest first
+    // (workflows/retention.ts).
+    index("workflow_resource_params_values_kept_idx")
+      .on(table.setAt)
+      .where(sql`${table.valuesRemovedAt} IS NULL`),
+  ]
+);
+
+/**
+ * What each independent workflow keeps between its runs (src/workflow-state.ts):
+ * a value by key, canonical JSON, written by the run whose step set it
+ * last. A run reads it once as it starts; at most `workflowStateMaxBytes`
+ * per workflow in all. Deleted with its workflow.
+ */
+export const workflowState = sqliteTable(
+  "workflow_state",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    key: text().notNull(),
+    value: text().notNull(),
+    runId: text("run_id").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.key] }),
+    // The keys a run set, as retention asks while it keeps the run's
+    // evidence (workflows/retention.ts, `keptEvidenceReleased`).
+    index("workflow_state_run_idx").on(table.runId),
+  ]
+);
+
+/**
+ * Each step that wrote a workflow's state (src/workflow-state.ts), by its
+ * idempotency key: written in the batch of the write, so a step replayed
+ * or tried again never writes twice. `bytes` is the workflow's state in
+ * all once it landed, which may not pass the cap: the batch fails else.
+ * `writeId` tells the batch's own receipt from one an earlier one wrote.
+ * Removed with its run's details (workflows/retention.ts), once no step of
+ * the run can replay.
+ */
+export const workflowStateWrites = sqliteTable(
+  "workflow_state_writes",
+  {
+    stepKey: text("step_key").primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    runId: text("run_id").notNull(),
+    writeId: text("write_id").notNull(),
+    bytes: integer().notNull(),
+    writtenAt: timestamp("written_at").notNull(),
+  },
+  (table) => [
+    index("workflow_state_writes_workflow_idx").on(table.workflowResourceId),
+  ]
+);
+
+/**
+ * What workflows kept between their runs as runs started
+ * (src/workflows/state-snapshots.ts): each snapshot once, by the SHA-256
+ * of its canonical JSON, which the starts' receipts and test runs that
+ * froze it name. Removed once none does (workflows/retention.ts). Names
+ * no person: the company's, as the state it copies.
+ */
+export const workflowStateSnapshots = sqliteTable("workflow_state_snapshots", {
+  hash: text().primaryKey(),
+  body: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * Unused since a workflow's draft is in `drafts` (src/drafts.ts): nothing
+ * reads or writes it. Kept while a release that writes it may serve or be
+ * rolled back to (expand, then contract); dropped in a later release.
+ *
+ * The draft of each independent workflow's next definition, as its
+ * builders edited it: one row per accepted edit,
+ * `revision` counting them from 1. An edit names the revision it read and
+ * inserts the next one, so of two concurrent edits the second is refused
+ * and the first stays. `source` is the text as edited, JSON or not;
+ * `problems` the profile's diagnostics of it (empty for one that passes),
+ * so a row with `checked` set is a checkpoint: a definition that passed,
+ * which the editor's diagram shows and which may be published. Only the
+ * latest row and the latest checkpoint are kept.
+ */
+export const workflowResourceDrafts = sqliteTable(
+  "workflow_resource_drafts",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    source: text().notNull(),
+    checked: integer({ mode: "boolean" }).notNull(),
+    problems: text().notNull(),
+    editedBy: text("edited_by").notNull(),
+    editedAt: timestamp("edited_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * Unused: the modules a draft revision carried, before workflows lost
+ * their own modules (GRA-1662). Nothing reads or writes it; kept, as
+ * schemas only expand, for a later release to drop.
+ */
+export const workflowResourceDraftModules = sqliteTable(
+  "workflow_resource_draft_modules",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    path: text().notNull(),
+    source: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.revision, table.path],
+    }),
+  ]
+);
+
+/**
+ * Unused: what the sandbox's inspection of a draft revision's modules
+ * answered, before workflows lost their own modules (GRA-1662). Nothing
+ * reads or writes it; kept, as schemas only expand, for a later release
+ * to drop.
+ */
+export const workflowResourceDraftInspections = sqliteTable(
+  "workflow_resource_draft_inspections",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    modulesHash: text("modules_hash").notNull(),
+    manifest: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * Whether each independent workflow is paused (src/workflow-pause.ts):
+ * one row, once it was paused, moved on by every write (`revision`), each
+ * write only over the revision it read. While `paused_at` is set it
+ * starts no runs (workflow-starts.ts). Its stage and go-live columns are
+ * unused since a workflow's live version is its current one, made live
+ * by a publish (src/workflow-publish.ts): nothing reads or writes them;
+ * kept while a release that writes them may serve or be rolled back to
+ * (expand, then contract), and dropped in a later release.
+ */
+export const workflowResourceLifecycles = sqliteTable(
+  "workflow_resource_lifecycles",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    stage: text({
+      enum: ["mapped", "designed", "testing", "live", "scaling"],
+    }),
+    liveVersion: integer("live_version"),
+    liveApprovedBy: text("live_approved_by"),
+    liveApprovedAt: timestamp("live_approved_at"),
+    /**
+     * Whether whoever asked for the live version approved it themselves,
+     * allowed only while nobody else could (GRA-1227).
+     */
+    liveSelfApproved: integer("live_self_approved", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    pausedBy: text("paused_by"),
+    pausedAt: timestamp("paused_at"),
+    goLiveVersion: integer("go_live_version"),
+    goLiveRequestedBy: text("go_live_requested_by"),
+    goLiveRequestedAt: timestamp("go_live_requested_at"),
+    updatedAt: timestamp("updated_at").notNull(),
+  }
+);
+
+/**
+ * Which independent workflow each App binds, by an alias of the App's
+ * (src/app-workflow-bindings.ts), whose live version its starts run. A
+ * binding grants nothing: starting it still takes the App's own
+ * `start` permission. At most one active binding per App and alias;
+ * binding another workflow is a new binding. Removed ones stay.
+ */
+export const appWorkflowBindings = sqliteTable(
+  "app_workflow_bindings",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    alias: text().notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    /**
+     * The version it was made at, whose contract was checked against the
+     * App's declaration. A binding follows its workflow's live version
+     * (src/app-workflow-bindings.ts): starts never run this one for it.
+     */
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    status: text({ enum: ["active", "removed"] }).notNull(),
+    boundBy: text("bound_by").notNull(),
+    boundAt: timestamp("bound_at").notNull(),
+    removedBy: text("removed_by"),
+    removedAt: timestamp("removed_at"),
+    /**
+     * What the App's live version declares of the workflow under the
+     * alias (its events, listen tasks and decisions), as canonical JSON,
+     * set each time an App version is made live (apps.ts,
+     * `activateVersion`); null while it declares nothing, none is live,
+     * or the App was restored and made none live since (app-status.ts).
+     * What a workflow's publish checks its version against
+     * (src/app-workflow-bindings.ts, `requireBoundAppsDeclare`), so it
+     * never loads an App's release.
+     */
+    contract: text(),
+  },
+  (table) => [
+    uniqueIndex("app_workflow_bindings_active_idx")
+      .on(table.appId, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    index("app_workflow_bindings_workflow_idx").on(
+      table.workflowResourceId,
+      table.status
+    ),
+  ]
+);
+
+/**
+ * Test runs of a workflow's draft checkpoint, never published
+ * (workflows/candidate-runs.ts, GRA-815): each of the exact checkpoint
+ * revision it names, compiled when it started into a build of its own,
+ * pinned by the manifest's hash (`manifest`, `manifest_hash`), whose
+ * artifacts the seal `reservation` names references
+ * (src/sealed-artifacts.ts) while the row is.
+ * Its input and parameters are frozen as it started (`input`, `params`:
+ * the start's own values or the defaults, never the workflow's set ones),
+ * and every named call it makes is answered from `fixtures`, never sent
+ * anywhere. Not a `workflow_resource_runs` row: it is no run of a version,
+ * nothing lists, binds or starts it but its workflow's builders, and it
+ * is kept briefly. `status` follows the engine's notifications, each
+ * applied only if newer than the last (`engine_sequence`).
+ */
+export const workflowCandidateRuns = sqliteTable(
+  "workflow_candidate_runs",
+  {
+    id: text().primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    draftRevision: integer("draft_revision").notNull(),
+    manifest: text().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    reservation: text().notNull(),
+    principalId: text("principal_id").notNull(),
+    input: text().notNull(),
+    params: text().notNull(),
+    /**
+     * What its workflow kept between its runs as it started: the hash of
+     * its snapshot (`workflowStateSnapshots`), frozen for every
+     * activation. A test run writes none back.
+     */
+    stateHash: text("state_hash"),
+    /** How many kept keys it started without, as a start's receipt says. */
+    stateWithheld: integer("state_withheld"),
+    fixtures: text().notNull(),
+    status: text({
+      enum: ["starting", "running", "completed", "failed", "cancelled"],
+    }).notNull(),
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    /**
+     * The newest activation generation whose attempts the engine fenced,
+     * as an independent run's (workflows/quotas.ts, `fenceRecorded`).
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+    /** Why core ended it, when the engine never had it (a start that failed). */
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at").notNull(),
+    endedAt: timestamp("ended_at"),
+  },
+  (table) => [
+    // A workflow's test runs, newest first, for its builders.
+    index("workflow_candidate_runs_workflow_idx").on(
+      table.workflowResourceId,
+      table.createdAt,
+      table.id
+    ),
+    // The sweep of test runs kept long enough.
+    index("workflow_candidate_runs_created_idx").on(table.createdAt),
+    // What keeps a build's artifacts reserved (release-retention.ts).
+    uniqueIndex("workflow_candidate_runs_reservation_idx").on(
+      table.reservation
+    ),
+    // The test runs that hold a snapshot (workflows/state-snapshots.ts).
+    index("workflow_candidate_runs_state_idx").on(table.stateHash),
+  ]
+);
+
+/**
+ * Tests of a draft at one revision over recent real items (GRA-513,
+ * workflows/item-tests.ts): one row per item, the run whose input it took,
+ * and the test run that ran it, or why none did. A started item's row is
+ * written with its test run's, and none changes; swept with the test runs,
+ * after a week.
+ */
+export const workflowItemTests = sqliteTable(
+  "workflow_item_tests",
+  {
+    id: text().primaryKey(),
+    testId: text("test_id").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    principalId: text("principal_id").notNull(),
+    draftRevision: integer("draft_revision").notNull(),
+    /** Its place in the test: 0 for the newest run's item. */
+    position: integer().notNull(),
+    sourceRunId: text("source_run_id").notNull(),
+    /** Its test run (`workflow_candidate_runs`); null when none started. */
+    candidateRunId: text("candidate_run_id"),
+    /** Why its test run never started, as an error code. */
+    refusalCode: text("refusal_code"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_item_tests_position_idx").on(
+      table.testId,
+      table.position
+    ),
+    // The sweep of tests kept long enough.
+    index("workflow_item_tests_created_idx").on(table.createdAt),
+    // Whose test run of an item is (candidate-runs.ts, `readsItemRun`).
+    index("workflow_item_tests_candidate_idx").on(table.candidateRunId),
+  ]
+);
+
+/**
+ * The business process each workflow serves (GRA-511,
+ * workflow-resources.ts `setWorkflowProcess`), when a builder said: one
+ * row per workflow, replaced when it changes and deleted when cleared.
+ * Who set which is in the audit log. Grants nothing.
+ */
+export const workflowResourceProcesses = sqliteTable(
+  "workflow_resource_processes",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    process: text().notNull(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  }
+);
+
+/**
+ * The brain's records (brain-records.ts): one row each, never written
+ * over, in the order they were added. `body` is the record as
+ * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
+ * compares as the same text. No row names who added it: the audit log does.
+ * The database's `purged_at` column, left from the Knowledge term purge
+ * (gone since GRA-1911), is unnamed here and dropped in a later release
+ * (expand, then contract).
+ */
+export const brainRecords = sqliteTable(
+  "brain_records",
+  {
+    /** The order records were added in: `brain.read` keeps it. */
+    position: integer().primaryKey({ autoIncrement: true }),
+    type: text({
+      enum: [
+        "source",
+        "tool",
+        "candidate",
+        "statement",
+        "team",
+        "teamCount",
+        "stakeholder",
+        "gap",
+        "workflow",
+        "workflowVersion",
+        "goal",
+        "goalVersion",
+        "goalLink",
+        "vision",
+      ],
+    }).notNull(),
+    id: text().notNull(),
+    body: text().notNull(),
+    addedAt: timestamp("added_at").notNull(),
+    /**
+     * When the record stopped counting: what a replaced kickoff transcript
+     * gave the brain, left out of `brain.read`. Nothing sets it any more
+     * (GRA-1748: the kickoff is a source of the new Brain, and its rows
+     * here were removed by migration 0259); dropped in a later release.
+     */
+    retiredAt: timestamp("retired_at"),
+    /**
+     * When an admin took the record out of the brain (brain-forget.ts):
+     * its body is then a tombstone holding no words, only what a removed
+     * source still shows (its kind and day). Kept, never deleted, so its
+     * id stays taken and the same record sent again is left as removed.
+     */
+    forgottenAt: timestamp("forgotten_at"),
+  },
+  // One id is one record, whatever its type.
+  (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
+);
+
+/**
+ * The company's groups of teams (brain-team-groups.ts): the brain's
+ * regions. One row per group, in the company's order. A group Grasp
+ * proposed has no `confirmedAt` until an admin confirms it, or changes it.
+ */
+export const brainTeamGroups = sqliteTable("brain_team_groups", {
+  id: text().primaryKey(),
+  /** The company's own name for it. */
+  name: text().notNull(),
+  /** The brain's team ids in it, as JSON: each team in one group at most. */
+  teamIds: text("team_ids").notNull(),
+  /** Its place in the company's order. */
+  position: integer().notNull(),
+  /**
+   * When it was kept: set on every row, as every group counts (GRA-1993).
+   * Kept for the release before, which reads a row without it as a
+   * proposal (expand, then contract).
+   */
+  confirmedAt: timestamp("confirmed_at"),
+  savedAt: timestamp("saved_at").notNull(),
+});
+
+/**
+ * Each time an admin saved the groups of teams, or Grasp arranged them
+ * (brain-team-groups.ts): the groups whole, as they were before and after,
+ * so an earlier set can be put back. Never changed or deleted; the audit
+ * event of the change names its id, and who made it.
+ */
+export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
+  id: text().primaryKey(),
+  savedAt: timestamp("saved_at").notNull(),
+  /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
+  before: text().notNull(),
+  /** The groups after, as JSON, the same way. */
+  after: text().notNull(),
+});
+
+/**
+ * What became of the brain's gaps (brain-gaps.ts): one row once a
+ * gap was asked about, answered or closed, never cleared: answered or
+ * closed once, `asked_at` the newest ask while it was open.
+ * A gap with no row is open and nobody was asked.
+ */
+export const brainGapStates = sqliteTable("brain_gap_states", {
+  /** The gap's record id. */
+  gapId: text("gap_id").primaryKey(),
+  askedAt: timestamp("asked_at"),
+  closedAt: timestamp("closed_at"),
+  /** The answer, in the words of who gave it; null when closed without one. */
+  answer: text(),
+  /** Their name when they answered, as they chose to give it. */
+  answeredBy: text("answered_by"),
+});
+
+// What is left of Knowledge's host tables: Grasp's own records about the
+// old Brain's Knowledge database, gone since GRA-1941.
+
+/**
+ * A file once uploaded into a Knowledge collection. Nothing writes or reads it
+ * since GRA-1941; it stays for a rollback to the release before, which still
+ * does, and the next contract migration drops it (expand, then contract).
+ */
+export const uploads = sqliteTable(
+  "uploads",
+  {
+    id: text().primaryKey(),
+    /** A collection in Knowledge. */
+    collectionId: text("collection_id").notNull(),
+    /** The file's name, and the path of its document. */
+    path: text().notNull(),
+    mediaType: text("media_type").notNull(),
+    /** The file's size. */
+    bytes: integer().notNull(),
+    /** The file's SHA-256, in hex, which R2 checks the original against. */
+    sha256: text().notNull(),
+    uploadedBy: text("uploaded_by").notNull(),
+    /** JSON: the audit log's actor for the person who uploaded it. */
+    actor: text().notNull(),
+    status: text({
+      enum: ["pending", "extracting", "saving", "ready", "failed"],
+    }).notNull(),
+    /** The code of the error it failed with. */
+    failure: text(),
+    /** The document and version it was saved as, once ready. */
+    documentId: text("document_id"),
+    version: integer(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("uploads_path_idx").on(
+      table.collectionId,
+      table.path,
+      table.createdAt
+    ),
+    index("uploads_original_idx").on(table.collectionId, table.sha256),
+    index("uploads_status_idx").on(table.status, table.updatedAt),
+  ]
+);
+
+/**
+ * Originals of `uploads` to delete from R2. Nothing writes or reads it since
+ * GRA-1941; it stays for a rollback to the release before, which still does,
+ * and the next contract migration drops it (expand, then contract).
+ */
+export const uploadCleanups = sqliteTable("upload_cleanups", {
+  /** The original's key in R2. */
+  key: text().primaryKey(),
+  /** The upload whose original it is. */
+  uploadId: text("upload_id").notNull(),
+  /**
+   * When its original may have been written, at the latest: the upload's
+   * creation, or 0 for one known to be written already.
+   */
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The daily computations of Knowledge's usage signals. Nothing writes or
+ * reads it; `knowledge_signals` references it, and the next contract
+ * migration drops both (expand, then contract).
+ */
+export const knowledgeSignalComputations = sqliteTable(
+  "knowledge_signal_computations",
+  {
+    id: text().primaryKey(),
+    /** The UTC day it is the computation of, such as `2026-09-29`. */
+    day: text().notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+  },
+  (table) => [
+    index("knowledge_signal_computations_day_idx").on(table.day),
+    index("knowledge_signal_computations_started_idx").on(
+      table.startedAt,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * Knowledge's usage signals. Nothing writes or reads it since GRA-1941; it
+ * stays for a rollback to the release before, which still does, and the next
+ * contract migration drops it (expand, then contract).
+ */
+export const knowledgeSignals = sqliteTable(
+  "knowledge_signals",
+  {
+    computation: text()
+      .notNull()
+      .references(() => knowledgeSignalComputations.id),
+    id: text().notNull(),
+    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    collectionId: text("collection_id").notNull(),
+    subject: text().notNull(),
+    /** User ID: the collection's owner when it was computed. */
+    owner: text().notNull(),
+    /**
+     * Ranks it within its kind: a question's searches, the days since an
+     * unread document changed. Null for an overdue document, ranked by its
+     * review date as it is when listed.
+     */
+    value: integer(),
+    evidence: text({ mode: "json" }).$type<Json>().notNull(),
+    evidenceAt: timestamp("evidence_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.computation, table.id] }),
+    uniqueIndex("knowledge_signals_subject_idx").on(
+      table.computation,
+      table.collectionId,
+      table.kind,
+      table.subject
+    ),
+    index("knowledge_signals_owner_idx").on(
+      table.computation,
+      table.owner,
+      table.kind,
+      table.value,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * One request Stephen took on outside Grasp (channels/stephen-requests.ts):
+ * labels and a day, never the words of the message or of his answer, and
+ * never the time of day. Kept by the place's own id for the message, so a
+ * resend counts once. Only `done` is billed. Kept 13 months, and gone with
+ * the person when they are erased (person-erasure.ts).
+ */
+export const stephenRequests = sqliteTable(
+  "stephen_requests",
+  {
+    /** `<platform>:<the platform's id for the message>`. */
+    id: text().primaryKey(),
+    /** `YYYY-MM-DD`, in the organization's time zone. */
+    day: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id").notNull(),
+    teamId: text("team_id"),
+    /**
+     * The person's chat it was answered in, only to find the request a
+     * later press on one of its cards belongs to; never shown.
+     */
+    chatId: text("chat_id"),
+    kind: text({
+      enum: ["answered", "lookedUp", "changed", "workflow"],
+    }).notNull(),
+    outcome: text({
+      enum: ["done", "unanswered", "notPossible", "stopped", "failed"],
+    }).notNull(),
+    topicId: text("topic_id"),
+    questionId: text("question_id"),
+    /** `[{ id, ok }]`: the tools he called, in order. */
+    tools: text().notNull(),
+    /** `[{ id, why }]`: the tools it would have taken that are off or missing. */
+    missing: text().notNull(),
+    rating: text({ enum: ["up", "down"] }),
+  },
+  (table) => [
+    index("stephen_requests_day_idx").on(table.day),
+    index("stephen_requests_person_idx").on(table.personId, table.chatId),
+    index("stephen_requests_question_idx").on(table.questionId),
+    index("stephen_requests_topic_idx").on(table.topicId),
+  ]
+);
+
+/**
+ * The cards a request's answer posted that can be pressed later (a held
+ * change, a workflow's Start), each by `write:<id>` or `offer:<id>`, with
+ * the request it belongs to: a press on it updates that request, never
+ * another the person made in the same chat since. Swept with its request.
+ */
+export const stephenRequestCards = sqliteTable("stephen_request_cards", {
+  key: text().primaryKey(),
+  requestId: text("request_id").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/** The company's topics Stephen's requests are sorted into (channels/request-sorting.ts). */
+export const stephenRequestTopics = sqliteTable("stephen_request_topics", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * A question people ask Stephen, in Grasp's own wording, without names or
+ * details, with the role best placed to answer it. A page names it only
+ * once five or more people asked it.
+ */
+export const stephenRequestQuestions = sqliteTable(
+  "stephen_request_questions",
+  {
+    id: text().primaryKey(),
+    topicId: text("topic_id").notNull(),
+    wording: text().notNull(),
+    role: text(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("stephen_request_questions_topic_idx").on(table.topicId)]
+);
+
+/**
+ * What an owner or admin was doing about one thing Needs you listed.
+ * Nothing writes it since Workflows › Requests went; it is dropped in a
+ * later release, and swept until then.
+ */
+export const stephenRequestNeeds = sqliteTable("stephen_request_needs", {
+  key: text().primaryKey(),
+  status: text({ enum: ["working", "fixed", "leftAsIs"] }).notNull(),
+  statusBy: text("status_by").notNull(),
+  statusAt: timestamp("status_at").notNull(),
+});
+
+/**
+ * Grasp's proposal for one thing Needs you listed, in one language.
+ * Nothing writes it since Workflows › Requests went; it is dropped in a
+ * later release, and swept until then.
+ */
+export const stephenRequestProposals = sqliteTable(
+  "stephen_request_proposals",
+  {
+    key: text().notNull(),
+    locale: text().notNull(),
+    text: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.key, table.locale] })]
+);
+
+/**
+ * Where an owner or admin had the weekly summary of Stephen's requests go.
+ * Nothing writes it since Workflows › Requests went; it is dropped in a
+ * later release, and erased until then.
+ */
+export const stephenSummaryReaders = sqliteTable("stephen_summary_readers", {
+  personId: text("person_id").primaryKey(),
+  via: text({ enum: ["teams", "email"] }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
+ * One weekly summary, queued for one reader. Nothing writes or sends it
+ * since Workflows › Requests went; it is dropped in a later release, and
+ * swept and erased until then.
+ */
+export const stephenSummaries = sqliteTable(
+  "stephen_summaries",
+  {
+    /** The Monday of the week it sums up. */
+    week: text().notNull(),
+    personId: text("person_id").notNull(),
+    via: text({ enum: ["teams", "email"] }).notNull(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    reason: text(),
+    queuedAt: timestamp("queued_at").notNull(),
+    /** While a run sends it: no other run takes it until then. */
+    claimedUntil: timestamp("claimed_until"),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.week, table.personId] })]
+);
+
+/**
+ * Projects (src/projects.ts): a grouping of Apps and workflows for a
+ * process, team or goal. Its owner, who made it, is always one of its
+ * builders; whoever else is in it has a row in `project_members`. Deleting
+ * one deletes its rows, never its Apps or workflows.
+ */
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** One of the icons `projectIcons` names (@grasp-os/shared/projects). */
+    icon: text().notNull(),
+    ownerId: text("owner_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  // Every access check reads the projects someone owns (`projectsOfSql`).
+  (table) => [index("projects_owner_idx").on(table.ownerId)]
+);
+
+/**
+ * Who is in each project besides its owner: a person (`member_type`
+ * `person`, `member_id` their user ID) or a team, as a `user`, who sees
+ * it, or a `builder`, who also changes it. Being in a project reaches only
+ * the Apps and workflows shared with it (`member_type` `project` in
+ * `app_members` and `workflow_resource_members`), never what is merely
+ * filed in it.
+ */
+export const projectMembers = sqliteTable(
+  "project_members",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["user", "builder"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.projectId, table.memberType, table.memberId],
+    }),
+    index("project_members_member_idx").on(table.memberType, table.memberId),
+  ]
+);
+
+/**
+ * What is filed in each project: an App (`item_type` `app`) or an
+ * independent workflow (`workflow`). Filing shares nothing: whom an item
+ * reaches is its own members' rows alone.
+ */
+export const projectItems = sqliteTable(
+  "project_items",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    itemType: text("item_type", { enum: ["app", "workflow"] }).notNull(),
+    itemId: text("item_id").notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.itemType, table.itemId] }),
+    index("project_items_item_idx").on(table.itemType, table.itemId),
+  ]
+);
+
+/**
+ * What each model request used and cost, one row per response, written
+ * after it (src/model-usage.ts) in the same batch as its `model.call`
+ * audit event: the spend overview is a query over these rows
+ * (src/model-spend.ts). Never on the request's path, so it can't fail a
+ * call; a row whose batch failed is logged and lost, as an overview may
+ * be. Identifiers and counts only, never the prompt or the answer.
+ */
+export const modelUsage = sqliteTable(
+  "model_usage",
+  {
+    /** The provider request's ID, so a batch tried again writes it once. */
+    id: text().primaryKey(),
+    /** The UTC month it counts in, such as `2026-11`. */
+    period: text().notNull(),
+    /** The person it was made by or for; null for none. */
+    personId: text("person_id"),
+    /** What asked: its trigger's type (`person`, `agent`, `workflow`, `system`). */
+    triggerType: text("trigger_type").notNull(),
+    /**
+     * The agent that asked, when an agent did: what each of the company's
+     * agents used is counted by it. Null for every other trigger, and for
+     * rows written before agents were told apart, which were all the
+     * organization's one agent's.
+     */
+    agentId: text("agent_id"),
+    /** The workflow it was made for: an App's, in its App, or an independent one (no App). */
+    workflowAppId: text("workflow_app_id"),
+    workflowId: text("workflow_id"),
+    /** The run lineage it counts in: its root run, or its account's. */
+    runId: text("run_id"),
+    /** The App's model binding it was made through, by its App and alias. */
+    bindingAppId: text("binding_app_id"),
+    bindingAlias: text("binding_alias"),
+    /** `<provider>/<model>`. */
+    model: text().notNull(),
+    /**
+     * What the call was for, as its `model.call` audit event says
+     * (`brain.recall_analysis`, say): the Brain's spend by purpose is read
+     * from it (model-spend.ts `brainSpendByPurpose`). Nullable as a schema
+     * expands: every row the gateway writes names it.
+     */
+    purpose: text(),
+    /** Whose key: `organization`, or `platform` for Grasp's own features. */
+    credential: text().notNull(),
+    /** Which of Grasp's own features, on Grasp's key. */
+    feature: text(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    cacheReadTokens: integer("cache_read_tokens").notNull(),
+    cacheWriteTokens: integer("cache_write_tokens").notNull(),
+    /** US dollars at the provider's list prices (pi's `calculateCost`). */
+    cost: real().notNull(),
+    /** Whether any of it is an estimate, not the provider's count. */
+    estimated: integer({ mode: "boolean" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("model_usage_period_idx").on(table.period, table.credential),
+    // The rows past their retention (`sweepModelUsage`).
+    index("model_usage_created_idx").on(table.createdAt),
+    index("model_usage_workflow_idx").on(
+      table.period,
+      table.workflowAppId,
+      table.workflowId
+    ),
+    index("model_usage_binding_idx").on(
+      table.period,
+      table.bindingAppId,
+      table.bindingAlias
+    ),
+  ]
+);
+
+/**
+ * How each provider's requests fared last, by whose key, noted after each
+ * response in the batch that records it (src/model-usage.ts): when one
+ * last worked, and when one last failed and how, never what it carried.
+ * What an admin reads as a provider's status (src/ai-providers.ts).
+ */
+export const providerHealth = sqliteTable(
+  "provider_health",
+  {
+    provider: text().notNull(),
+    /** `organization` or `platform`. */
+    credential: text().notNull(),
+    lastOkAt: integer("last_ok_at"),
+    lastFailedAt: integer("last_failed_at"),
+    /** How it last failed (`TransportFailure`'s kind). */
+    lastFailure: text("last_failure"),
+    /** The HTTP status it last failed with, if it answered. */
+    lastStatus: integer("last_status"),
+    /**
+     * What its failing requests show, by the HTTP class seen: `refused`,
+     * `not_answering` or `limiting` (`ProviderTrouble`); null while the
+     * last one worked, and once the organization replaced the key.
+     */
+    failingClass: text("failing_class"),
+    /** Since when: the first failure of that kind after the last that worked. */
+    failingSince: integer("failing_since"),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.credential] })]
+);
+
+/**
+ * Files people uploaded straight into the Brain (brain-uploads.ts), each
+ * a source `upload:<id>` there: who uploaded it and who may read it,
+ * fixed for its life, and, for one shared with a team or everyone, the
+ * name of the file its current version came from, for an admin's listing
+ * of shared uploads to erase (no content: the text is the Brain's alone,
+ * and an upload for one person keeps even its name in their own store).
+ * A row is written before the Brain is given anything under its key, and
+ * goes only once that key was erased, so every upload the Brain holds is
+ * named here for its deletion.
+ */
+export const brainUploads = sqliteTable(
+  "brain_uploads",
+  {
+    id: text().primaryKey(),
+    uploadedBy: text("uploaded_by").notNull(),
+    /** The file's name, as its uploader gave it: null for `me`. */
+    name: text(),
+    /** Who may read it: its uploader alone, a team, or everyone. */
+    readers: text({ enum: ["me", "team", "everyone"] }).notNull(),
+    /** The team, for `team`. */
+    teamId: text("team_id"),
+    /**
+     * Its current version, as the Brain answered the add that made it: 0
+     * until the first lands. A retried add the Brain answers with an older
+     * version changes nothing here.
+     */
+    version: integer().notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * When its uploader removed it, a shared one (only they remove):
+     * out of use in the Brain for good, its history kept, until an admin
+     * erases it (brain-uploads.ts). Null while it is in use. Written first,
+     * before the Brain is asked, with `removalOwed`.
+     */
+    removedAt: timestamp("removed_at"),
+    /**
+     * Whether the removal is still owed: the Brain's removal not yet known
+     * to have returned, or its event not yet stored. The clock completes it
+     * (`completeOwedRemovals`).
+     */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (table) => [
+    check(
+      "brain_uploads_team_named",
+      sql`${table.readers} <> 'team' OR ${table.teamId} IS NOT NULL`
+    ),
+    // The removals still owed, oldest first, for the clock to complete
+    // (brain-uploads.ts `completeOwedRemovals`): never the whole table. Its
+    // condition a literal, as the query writes it, so SQLite uses it.
+    index("brain_uploads_removal_owed_idx")
+      .on(table.removedAt)
+      .where(sql.raw("removal_owed = 1")),
+  ]
+);
+
+/**
+ * What core has still to hand over to the new Brain (src/brain-hand-overs.ts):
+ * a source by its producer's kind and that producer's id for it, noted from
+ * the audit event of the change that touched it, until its hand-over ended:
+ * the row goes in the same batch as the one event that says how
+ * (src/brain-sources.ts). Never content: what is handed over is read from
+ * core's records when the Brain's queue runs the hand-over. `noting` is the
+ * ID of the event that noted it, so the relay marks, and a hand-over ends,
+ * only the noting it took; a source noted anew by another event is handed
+ * over again.
+ */
+export const brainHandOvers = sqliteTable(
+  "brain_hand_overs",
+  {
+    /** A kind brain-hand-overs.ts registers; the relay drops one it doesn't. */
+    producer: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    noting: text().notNull(),
+    notedAt: timestamp("noted_at").notNull(),
+    /**
+     * When the relay put this noting on the Brain's queue; null until then,
+     * and again once it is noted anew.
+     */
+    relayedAt: timestamp("relayed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.producer, table.sourceId] }),
+    // What the relay reads, oldest first: only what it has yet to relay,
+    // so it never steps over notings already on the queue.
+    index("brain_hand_overs_unrelayed_idx")
+      .on(table.notedAt)
+      .where(sql`${table.relayedAt} IS NULL`),
+  ]
+);
+
+/**
+ * Whose run results the new Brain holds, by workflow (src/brain-run-sources.ts):
+ * one row per person and workflow a run of theirs was handed over for, in
+ * their own store (not one an App started). When they lose the workflow's
+ * role, the clock marks the row revoked and owed, then the Brain takes those
+ * runs' sources out of use a page at a time (history kept), then the
+ * removal is no longer owed and its one event is stored. A work record for the clock alone: no read of the Brain reads it.
+ */
+export const brainRunSources = sqliteTable(
+  "brain_run_sources",
+  {
+    personId: text("person_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Whether a run of theirs was handed over since the last revocation. */
+    inUse: integer("in_use", { mode: "boolean" }).notNull().default(true),
+    /** When the last revocation was marked: the runs created by then are its. */
+    revokedAt: timestamp("revoked_at"),
+    /** How many runs that revocation covers, counted when it was marked. */
+    runs: integer(),
+    /** Whether that revocation's removal or its event is still owed. */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
+     * Where the owed removal's next page starts, in the order of the index
+     * its runs are read by: after the run created at `removedThroughAt`
+     * with ID `removedThrough`, the last it took out of use. Before its
+     * first page, the last revocation's moment and no run (after every run
+     * that one covered), or both null for a first revocation.
+     */
+    removedThroughAt: timestamp("removed_through_at"),
+    removedThrough: text("removed_through"),
+    /**
+     * When a tick last took the owed removal for a page, whether the page
+     * went through or failed: the clock gives the one tried longest ago
+     * its turn first, those never tried before all. Null until then.
+     */
+    triedAt: timestamp("tried_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.personId, table.workflowId] }),
+    // What the clock checks each minute: the rows in use alone, and the
+    // removals still owed, those tried longest ago (or never) first. Each
+    // condition a literal, as the queries write it, so SQLite uses it.
+    index("brain_run_sources_in_use_idx")
+      .on(table.personId, table.workflowId)
+      .where(sql.raw("in_use = 1")),
+    index("brain_run_sources_owed_idx")
+      .on(table.triedAt, table.revokedAt)
+      .where(sql.raw("removal_owed = 1")),
+  ]
+);
+
+/**
+ * How each person's own store of the new Brain is doing, as its own alarm
+ * last found it (src/brain-own-stores.ts): one row per store, written by
+ * the store about itself when its tick ends, and removed once the person's
+ * erasure has erased the store. Numbers and flags only, keyed by the
+ * SHA-256 of the person's id, never the id: staff read only their sums
+ * (the Brain's staff report), never a row.
+ */
+export const brainOwnStores = sqliteTable("brain_own_stores", {
+  /** The SHA-256 of the person's id, in hex. */
+  store: text().primaryKey(),
+  /** When the store's tick ended: an older report never replaces a newer one. */
+  reportedAt: timestamp("reported_at").notNull(),
+  /** Items waiting in its queue. */
+  waiting: integer().notNull(),
+  /** When the one waiting longest was added; null while none waits. */
+  oldestWaitingAt: timestamp("oldest_waiting_at"),
+  /** Items parked in its queue. */
+  parked: integer().notNull(),
+  /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
+  failing: integer({ mode: "boolean" }).notNull(),
+  /** Whether its rebuild for the model core runs isn't done yet. */
+  notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
+  /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
+  nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
+});
+
+/**
+ * Every address a person's sign-ins proved (`accounts.verified_email`),
+ * the current one and those a later sign-in replaced (auth.ts): for their
+ * erasure alone, which forgets the reader tokens of each and then these
+ * rows (person-erasure.ts `identity`, source-readers.ts). Nothing reads
+ * it for access: a past address proves nothing.
+ */
+export const signInAddresses = sqliteTable(
+  "sign_in_addresses",
+  {
+    userId: text("user_id").notNull(),
+    address: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.address] })]
+);
+
+/**
+ * The token the Brain knows each account on a copied reader list by
+ * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
+ * object ID, and nor does this table: `key` is a keyed hash of the account
+ * as lists name it (`<provider>:<account>`, compared form), `token` random,
+ * minted the first time a list names the account. `person` is the member
+ * who last proved the account theirs as they read (null until one has):
+ * erasing them deletes their rows (person-erasure.ts `identity`), so the
+ * lists made before name a token nobody holds again; a later list naming
+ * the account mints a new one.
+ */
+export const sourceReaderTokens = sqliteTable(
+  "source_reader_tokens",
+  {
+    key: text().primaryKey(),
+    person: text(),
+    token: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("source_reader_tokens_person_idx").on(table.person)]
+);
+
+/**
+ * Every group of a provider's that a copied reader list ever named
+ * (source-readers.ts `readerPrincipalsOf`, GRA-1761), by the Brain's name
+ * of it (`group:<provider>:<tenant>:<group>`), written before the list
+ * reaches the Brain. A person reads as only those of their own groups
+ * that are here (`heldPrincipalsOf`): the groups sources are shared with,
+ * however many groups they are in. A group is no person; nothing is
+ * removed, as a name no source holds any more costs a reader nothing.
+ */
+export const sourceReaderGroups = sqliteTable("source_reader_groups", {
+  name: text().primaryKey(),
+  /**
+   * When the last whole read of an Entra group's members that was kept
+   * started (GRA-2146), by either read that keeps them: the daily read of
+   * a group mapped to a team (directory-group-reads.ts) or the read of
+   * the groups reader lists name (directory-reader-groups.ts); null while
+   * none was. No older read's rows land after it, and the second read
+   * paces itself by it. What proves a group is
+   * `directory_group_members.read_at`.
+   */
+  directoryReadAt: timestamp("directory_read_at"),
+  /**
+   * The clock's slot of the directory's last try of the group, whether it
+   * read it whole or not: the reads take groups the longest untried
+   * first, so one that keeps failing holds up no other.
+   */
+  directoryTriedAt: timestamp("directory_tried_at"),
+});
+
+/**
+ * No longer read or written (GRA-2207): what a place picked on a shared
+ * connection holds is read by the connection's audience, not by the
+ * readers its source names, so no pair of a place and a reader is kept.
+ * The table stays until a later release drops it (expand, then contract),
+ * so a release before this one, after a rollback, finds it as it left it.
+ * It held pairs of a place's group and a reader as the Brain names them
+ * (an account's token, a tenant, a group), never an address or an object
+ * ID.
+ */
+export const sourceReaderPairs = sqliteTable(
+  "source_reader_pairs",
+  {
+    place: text().notNull(),
+    principal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.place, table.principal] }),
+    // A read finds a person's pairs by the readers they proved.
+    index("source_reader_pairs_principal_idx").on(table.principal, table.place),
+  ]
+);
+
+/**
+ * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
+ * at the evidence it rests on: the model's answer, held to what it was
+ * given, kept so it is asked once per evidence. Only while that evidence
+ * stands: an opportunity list forgets the rest. No person's data: a form,
+ * an App's id, systems from the catalog and step numbers.
+ */
+export const opportunityProposals = sqliteTable(
+  "opportunity_proposals",
+  {
+    /** The onboarding's id for the team's piece of work. */
+    routine: text().notNull(),
+    /** The drawing it rests on, by its id in the Brain. */
+    evidence: text().notNull(),
+    /** The proposal, as JSON (opportunities.ts `proposalSchema`). */
+    proposal: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);
+
+/**
+ * Opportunities an admin dismissed (opportunities.ts, GRA-1750), each at
+ * the evidence it was shown with: hidden until that changes. Who dismissed
+ * it is in the audit log, not here.
+ */
+export const opportunityDismissals = sqliteTable(
+  "opportunity_dismissals",
+  {
+    routine: text().notNull(),
+    evidence: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);

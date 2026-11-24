@@ -1,0 +1,53 @@
+{
+  "name": "@grasp-os/web",
+  "private": true,
+  "description": "The Grasp OS frontend: a single-page app served by core",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "i18n:extract": "lingui extract --clean"
+  },
+  "dependencies": {
+    "@base-ui/react": "catalog:",
+    "@fontsource-variable/geist": "catalog:",
+    "@fontsource-variable/jetbrains-mono": "catalog:",
+    "@fontsource-variable/newsreader": "catalog:",
+    "@grasp-os/app-kit": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
+    "@grasp-os/shared": "workspace:*",
+    "@lingui/core": "catalog:",
+    "@lingui/react": "catalog:",
+    "@pierre/diffs": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "capnweb": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-markdown": "catalog:",
+    "rehype-highlight": "catalog:",
+    "remark-gfm": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@babel/core": "catalog:",
+    "@lingui/babel-plugin-lingui-macro": "catalog:",
+    "@lingui/cli": "catalog:",
+    "@lingui/conf": "catalog:",
+    "@lingui/format-po": "catalog:",
+    "@lingui/vite-plugin": "catalog:",
+    "@messageformat/parser": "catalog:",
+    "@rolldown/plugin-babel": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@tanstack/router-plugin": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "babel-plugin-react-compiler": "catalog:",
+    "happy-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

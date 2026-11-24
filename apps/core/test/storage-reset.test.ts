@@ -1,0 +1,137 @@
+/**
+ * The reset each test file starts with (start-each-file.ts): whatever an
+ * earlier file left behind, and in whatever state, the next file finds
+ * none of it.
+ */
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { resetStorage, wakeTimeoutMs } from "./reset-storage.ts";
+
+type Ledger = DurableObjectStub;
+
+/** A plain object named `name`, as most of core's objects are reached. */
+const namedLedger = (name: string): Ledger => env.CHAT_STATE.getByName(name);
+
+/** A plain object reached by ID, as the workflow engine reaches its runs. */
+const ledgerById = (id: DurableObjectId): Ledger => env.CHAT_STATE.get(id);
+
+const leaveNote = async (ledger: Ledger): Promise<void> => {
+  await runInDurableObject(ledger, (_object, state) => {
+    state.storage.kv.put("note", "left behind");
+  });
+};
+
+/** The note `ledger` keeps, if any. */
+const noteOf = async (ledger: Ledger): Promise<unknown> =>
+  await runInDurableObject(ledger, (_object, state) =>
+    state.storage.kv.get("note")
+  );
+
+/**
+ * Longer than workerd keeps an object's instance after its last request:
+ * 10 seconds, after which only its storage stays, on disk.
+ */
+const quietMs = 11_000;
+
+/**
+ * How long the importing object below goes on importing, past any reset:
+ * longer than the reset's wakes take.
+ */
+const importingMs = wakeTimeoutMs * 2;
+
+/** How long the busy object below goes on writing after it answered. */
+const busyMs = 500;
+
+describe("the reset between test files", () => {
+  it("empties objects, databases and buckets that went quiet", async () => {
+    const name = crypto.randomUUID();
+    const id = env.CHAT_STATE.newUniqueId();
+    await leaveNote(namedLedger(name));
+    await leaveNote(ledgerById(id));
+    await env.DB.exec("CREATE TABLE left_behind (note TEXT)");
+    await env.AUDIT_ARCHIVE.put("left-behind", "note");
+
+    await scheduler.wait(quietMs);
+    await resetStorage();
+
+    // New stubs: the reset breaks those of the objects it reached.
+    await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
+    await expect(noteOf(ledgerById(id))).resolves.toBeUndefined();
+    await expect(
+      env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE name = 'left_behind'"
+      ).first()
+    ).resolves.toBeNull();
+    await expect(env.AUDIT_ARCHIVE.head("left-behind")).resolves.toBeNull();
+  });
+
+  it("empties an object that is still writing", async () => {
+    const name = crypto.randomUUID();
+    await runInDurableObject(namedLedger(name), (_object, state) => {
+      state.storage.kv.put("note", "first");
+      // Work the object goes on with after answering, as an audit drain does.
+      state.waitUntil(
+        (async () => {
+          await scheduler.wait(busyMs);
+          state.storage.kv.put("note", "second");
+        })()
+      );
+    });
+
+    await resetStorage();
+    await scheduler.wait(busyMs * 2);
+
+    // A new stub: the reset breaks those of the objects it reached.
+    await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
+  });
+
+  it("empties an object that never answers, without waiting for it", async () => {
+    const name = crypto.randomUUID();
+    await runInDurableObject(namedLedger(name), (_object, state) => {
+      state.storage.kv.put("note", "left behind");
+      // Then holds every later request, as a hung request can.
+      state.waitUntil(
+        (async () => {
+          await scheduler.wait(busyMs);
+          await state.blockConcurrencyWhile(
+            async () => await Promise.withResolvers<never>().promise
+          );
+        })()
+      );
+    });
+    await scheduler.wait(busyMs * 2);
+
+    const started = Date.now();
+    await resetStorage();
+
+    expect(Date.now() - started).toBeLessThan(wakeTimeoutMs * 2);
+    await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
+  });
+
+  it("leaves a module importable that an object it aborted was importing", async () => {
+    // A request that imports a module already loaded, one import after
+    // another, as each new Auth does (auth/auth.ts), until the reset
+    // aborts its object mid-import.
+    const importing = runInDurableObject(
+      namedLedger(crypto.randomUUID()),
+      async () => {
+        const until = Date.now() + importingMs;
+        while (Date.now() < until) {
+          // oxlint-disable-next-line no-await-in-loop
+          await import("@better-auth/sso");
+        }
+      }
+    ).catch(() => "aborted");
+
+    await resetStorage();
+
+    const imported = await Promise.race([
+      import("@better-auth/sso").then(() => "imported"),
+      scheduler.wait(importingMs).then(() => "still importing"),
+    ]);
+    expect(imported).toBe("imported");
+    await importing;
+  });
+});

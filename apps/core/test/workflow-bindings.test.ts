@@ -1,0 +1,2165 @@
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
+import { connectErrors } from "@grasp-os/shared/connect";
+import type { ConnectorContract } from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
+import type {
+  Authority,
+  PermissionRequest,
+} from "@grasp-os/shared/permissions";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { env } from "cloudflare:workers";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { startAppBinding } from "../src/app-workflow-bindings.ts";
+import { appFor } from "../src/apps.ts";
+import { boundEventsOf } from "../src/bound-workflow-events.ts";
+import { policyOf } from "../src/data-policy.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
+import {
+  listWorkflowBindings,
+  pendingWorkflowBindings,
+  workflowPendingBindings,
+} from "../src/workflow-binding-requests.ts";
+import {
+  approveWorkflowBinding,
+  revokeWorkflowBinding,
+} from "../src/workflow-bindings.ts";
+import {
+  publishCatalogContract,
+  resolveCatalogKeys,
+} from "../src/workflow-catalog.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { workflowActivity } from "../src/workflow-own.ts";
+import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
+import {
+  workflowKind,
+  createWorkflowResource,
+  deleteWorkflowResource,
+  versionContract,
+  workflowVersions,
+} from "../src/workflow-resources.ts";
+import {
+  admitWorkflowStart,
+  decideWorkflowStart,
+  startWorkflow,
+} from "../src/workflow-starts.ts";
+import type {
+  StartAuthorization,
+  StartInvoker,
+} from "../src/workflow-starts.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { sweepRunDetails } from "../src/workflows/retention.ts";
+import { admitRunEvent } from "../src/workflows/run-events.ts";
+import { storeOfNewApp } from "./app-stores.ts";
+import { racingDb, standInBinding } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
+import { connectModels } from "./model-provider.ts";
+import { outcome, refusal, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
+
+// Catalog bindings, App bindings and parameters of independent workflows
+// (workflow-catalog.ts, workflow-bindings.ts, app-workflow-bindings.ts,
+// workflow-params.ts), and what a start freezes of them
+// (workflow-starts.ts), from their threat model: a binding to a resource
+// the workflow can't use, an approval racing a version or a start, a
+// parameter edit racing a start, a sensitive value leaking into listings
+// or the audit log, and a frozen snapshot changed afterwards.
+
+type Person = Identity;
+
+/** The model the organization chose, the only one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
+
+// No call reaches the model: its provider is connected, and the model
+// chosen, so that an admin may bind it.
+const chooseModel = async (): Promise<void> => {
+  await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
+};
+
+const person = async (role: Role, staff = false): Promise<Person> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+/** The descriptor of an object with no fields. */
+const emptyObject = {
+  descriptorVersion: 1,
+  kind: "object",
+  presence: "required",
+  nullable: false,
+  fields: {},
+};
+
+/** A descriptor's exact JSON Schema, as JSON text, as connect states one. */
+const shapeOf = (descriptor: unknown): string =>
+  JSON.stringify(
+    jsonSchemaOf(schemaFromDescriptor(JSON.stringify(descriptor)).descriptor, {
+      exact: true,
+    })
+  );
+
+/** The descriptor of null. */
+const nullValue = {
+  descriptorVersion: 1,
+  kind: "null",
+  presence: "required",
+  nullable: false,
+};
+
+/** A model capability contract key of this test's own. */
+const modelKey = () => `summary-${unique()}`;
+
+/**
+ * A grasp-workflow/2 document running `steps` through `permissions`, with
+ * `params`, on input `{ who }`, ending with `{ status }`.
+ */
+const documentOf = ({
+  steps = [],
+  permissions = {},
+  params = {},
+  status = "done",
+}: {
+  steps?: unknown[];
+  permissions?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  status?: string;
+}): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    params,
+    permissions,
+    steps,
+  });
+
+interface Draft {
+  /** What it ends with, so one version's document differs from another's. */
+  status?: string;
+  model?: string;
+  /**
+   * A `token` parameter, sensitive or not. A sensitive one has no
+   * default, so a run starts only once its value is set.
+   */
+  token?: "sensitive" | "plain";
+  /** Whether it waits an hour before it finishes. */
+  waits?: boolean;
+  /**
+   * An event contract it waits on, as binding `jobEvents`, for
+   * `listensFor` (by default its `grasp.job.completed`).
+   */
+  events?: string;
+  listensFor?: string;
+  /** How many event waits it has, one after the other (1 by default). */
+  listenTasks?: number;
+}
+
+/**
+ * A workflow's definition: a greeting with a `limit` parameter, and a
+ * `token` one if asked; with `model`, a model step through binding
+ * `summary` of that catalog contract.
+ */
+const definitionOf = ({
+  status,
+  model,
+  token,
+  waits = false,
+  events,
+  listensFor = "grasp.job.completed",
+  listenTasks = 1,
+}: Draft = {}): string =>
+  documentOf({
+    ...(status === undefined ? {} : { status }),
+    params: {
+      limit: {
+        label: "Limit",
+        type: { kind: "number", default: 3 },
+        sensitive: false,
+      },
+      ...(token === undefined
+        ? {}
+        : {
+            token:
+              token === "sensitive"
+                ? { label: "Token", type: { kind: "string" } }
+                : {
+                    label: "Token",
+                    type: { kind: "string", default: "none" },
+                    sensitive: false,
+                  },
+          }),
+    },
+    permissions: {
+      ...(model === undefined ? {} : { ai: { contract: model } }),
+      ...(events === undefined
+        ? {}
+        : { events: { jobEvents: { contract: events } } }),
+    },
+    steps: [
+      ...(model === undefined
+        ? []
+        : [
+            {
+              id: "summarize",
+              type: "generate",
+              instructions: "Greet them.",
+              input: { who: { $expr: "args.who" } },
+              returns: objectSchema({ line: { kind: "string" } }),
+            },
+          ]),
+      ...(waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : []),
+      ...(events === undefined
+        ? []
+        : Array.from({ length: listenTasks }, (_, index) => ({
+            id: index === 0 ? "awaitJob" : `awaitJob${index}`,
+            type: "waitForEvent",
+            events: "jobEvents",
+            eventType: listensFor,
+            timeout: "24 hours",
+          }))),
+    ],
+  });
+
+/**
+ * A workflow `owner` created and published at version 1: through `model`,
+ * if given, and with a sensitive `token` if `token` says so.
+ */
+const workflowOf = async (
+  owner: Person,
+  model?: string,
+  token?: "sensitive"
+) => {
+  const workflow = await createWorkflowResource(
+    env,
+    owner,
+    `greet-${unique()}`
+  );
+  await publishDefinition(
+    env,
+    owner,
+    workflow.id,
+    definitionOf({
+      ...(model === undefined ? {} : { model }),
+      ...(token === undefined ? {} : { token }),
+    })
+  );
+  return workflow;
+};
+
+/** A model contract `admin` publishes to the catalog. */
+const modelContract = async (admin: Person): Promise<string> => {
+  const key = modelKey();
+  await publishCatalogContract(env, admin, { key, kind: "model" });
+  return key;
+};
+
+const start = async (who: Person, id: string, version = 1) =>
+  await startWorkflow(env, { type: "person", person: who }, id, {
+    expected: version,
+    args: { who: "Ada" },
+    key: `key-${unique()}`,
+  });
+
+/** A start receipt as stored, by its ID. */
+const receiptRow = async (id: string) =>
+  await env.DB.prepare(
+    "SELECT input, params, params_revision, bindings, bindings_hash, details_removed_at FROM workflow_start_receipts WHERE id = ?"
+  )
+    .bind(id)
+    .first<{
+      input: string | null;
+      params: string | null;
+      params_revision: number;
+      bindings: string;
+      bindings_hash: string;
+      details_removed_at: number | null;
+    }>();
+
+/** What `ada` may hand a permission request: her App and resource roles. */
+const rolesOf = (by: Person) => ({
+  app: async (named: string, role: "user" | "builder") =>
+    await appFor(env, by, named, role),
+  resource: async (
+    ref: Parameters<typeof requireResourceRole>[2],
+    needed: Parameters<typeof requireResourceRole>[3]
+  ) => {
+    await requireResourceRole(env, by, ref, needed);
+  },
+});
+
+/** A permission `by` asks for and `admin` grants. */
+const granted = async (
+  by: Person,
+  admin: Person,
+  request: PermissionRequest
+): Promise<string> => {
+  const asked = await requestPermission(env, by, request, rolesOf(by));
+  await grantPermission(env, admin, asked.id, { version: null });
+  return asked.id;
+};
+
+/** An App `owner` owns, with a version 1, written as a stand-in. */
+const appOf = async (owner: Person): Promise<string> => {
+  const app = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
+    ).bind(app, owner.userId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
+    ).bind(app, owner.userId, Date.now()),
+  ]);
+  return app;
+};
+
+/**
+ * A new start `invoker` decided on, for version `version` of workflow
+ * `id`, with input of Ada's and a key of its own: admitted later, or not.
+ */
+const decide = async (
+  invoker: StartInvoker,
+  id: string,
+  version: number
+): Promise<StartAuthorization> => {
+  const decision = await decideWorkflowStart(env, invoker, id, {
+    expected: version,
+    args: { who: "Ada" },
+    key: `key-${unique()}`,
+  });
+  if ("start" in decision) {
+    throw new Error("A new start was answered as one already admitted");
+  }
+  return decision.authorization;
+};
+
+describe("the host catalog", () => {
+  beforeAll(chooseModel);
+
+  it("takes a contract once, from an admin, as the profile reads it, and never changes it", async () => {
+    const admin = await person("admin");
+    const builder = await person("builder");
+    const staff = await person("admin", true);
+    const key = modelKey();
+    const published = await publishCatalogContract(env, admin, {
+      key,
+      kind: "model",
+    });
+    expect({
+      fingerprint: published.fingerprint.length,
+      again: await outcome(
+        publishCatalogContract(env, admin, { key, kind: "model" })
+      ),
+      builder: await outcome(
+        publishCatalogContract(env, builder, { key: modelKey(), kind: "model" })
+      ),
+      staff: await outcome(
+        publishCatalogContract(env, staff, { key: modelKey(), kind: "model" })
+      ),
+      incomplete: await outcome(
+        publishCatalogContract(env, admin, {
+          key: modelKey(),
+          kind: "decision",
+        })
+      ),
+      tooLarge: await outcome(
+        publishCatalogContract(env, admin, {
+          key: `mail-${unique()}`,
+          kind: "connector",
+          operations: Object.fromEntries(
+            ["a", "b", "c"].map((name) => [
+              `mail.${name}`,
+              {
+                input: `${JSON.stringify(emptyObject)}${" ".repeat(200 * 1024)}`,
+                output: JSON.stringify(emptyObject),
+              },
+            ])
+          ),
+        })
+      ),
+    }).toStrictEqual({
+      fingerprint: 64,
+      again: "workflow.contract_exists",
+      builder: "role.forbidden",
+      staff: "role.forbidden",
+      incomplete: "workflow.contract_invalid",
+      tooLarge: "workflow.contract_invalid",
+    });
+  });
+
+  it("resolves a workflow's catalog binding by its exact key and records it in the version", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const [version] = await workflowVersions(env, ada, workflow.id);
+    const missing = await outcome(
+      publishDefinition(
+        env,
+        ada,
+        workflow.id,
+        definitionOf({
+          status: "2.0.0",
+          model: `missing-${unique()}`,
+        })
+      )
+    );
+    expect({
+      bindings: version?.bindings.map(({ alias, kind, contractId }) => ({
+        alias,
+        kind,
+        contractId,
+      })),
+      missing,
+    }).toStrictEqual({
+      bindings: [{ alias: "ai", kind: "model", contractId: key }],
+      missing: "workflow.definition_invalid",
+    });
+  });
+});
+
+/** An event contract `admin` publishes: a job's completion and timeout. */
+const eventContract = async (admin: Person): Promise<string> => {
+  const key = `job-events-${unique()}`;
+  const data = JSON.stringify({
+    descriptorVersion: 1,
+    kind: "object",
+    presence: "required",
+    nullable: false,
+    fields: {
+      jobId: {
+        descriptorVersion: 1,
+        kind: "string",
+        presence: "required",
+        nullable: false,
+        trim: false,
+        email: false,
+      },
+    },
+  });
+  await publishCatalogContract(env, admin, {
+    key,
+    kind: "event",
+    events: {
+      "grasp.job.completed": { data, browser: true },
+      "grasp.job.timeout": { data, browser: false },
+    },
+  });
+  return key;
+};
+
+describe("event contracts", () => {
+  beforeAll(chooseModel);
+
+  it("admit each event type only with its data's contract and whether a page sends it", async () => {
+    const admin = await person("admin");
+    const data = JSON.stringify(emptyObject);
+    const publish = async (events: unknown) =>
+      await outcome(
+        publishCatalogContract(env, admin, {
+          key: `events-${unique()}`,
+          kind: "event",
+          events,
+        })
+      );
+    expect({
+      typed: await publish({ "grasp.job.done": { data, browser: true } }),
+      noData: await publish({ "grasp.job.done": { browser: true } }),
+      noSender: await publish({ "grasp.job.done": { data } }),
+      unreadableData: await publish({
+        "grasp.job.done": { data: "{}", browser: false },
+      }),
+      twoForPages: await publish({
+        "grasp.job.done": { data, browser: true },
+        "grasp.job.failed": { data, browser: true },
+      }),
+      noTypes: await publish({}),
+      // A type no run's inbox takes, so no wait for it could be met.
+      paddedType: await publish({ "grasp.job.done ": { data, browser: true } }),
+      controlType: await publish({
+        "grasp.job\tdone": { data, browser: true },
+      }),
+      noEvents: await outcome(
+        publishCatalogContract(env, admin, {
+          key: `events-${unique()}`,
+          kind: "event",
+        })
+      ),
+    }).toStrictEqual({
+      typed: "ok",
+      noData: "workflow.contract_invalid",
+      noSender: "workflow.contract_invalid",
+      unreadableData: "workflow.contract_invalid",
+      twoForPages: "workflow.contract_invalid",
+      noTypes: "workflow.contract_invalid",
+      paddedType: "workflow.contract_invalid",
+      controlType: "workflow.contract_invalid",
+      noEvents: "workflow.contract_invalid",
+    });
+  });
+
+  it("record a version's event waits and the event binding each waits through, for a type the contract admits", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishDefinition(env, ada, workflow.id, definitionOf({ events }));
+    const [version] = await workflowVersions(env, ada, workflow.id);
+    const contract = await versionContract(env, workflow.id, 1);
+    const unadmitted = await outcome(
+      publishDefinition(
+        env,
+        ada,
+        workflow.id,
+        definitionOf({
+          status: "2.0.0",
+          events,
+          listensFor: "grasp.job.started",
+        })
+      )
+    );
+    expect({
+      bindings: version?.bindings.map(({ alias, kind, contractId }) => ({
+        alias,
+        kind,
+        contractId,
+      })),
+      listens: contract?.listens,
+      unadmitted,
+    }).toStrictEqual({
+      bindings: [{ alias: "jobEvents", kind: "event", contractId: events }],
+      listens: {
+        awaitJob: { alias: "jobEvents", types: ["grasp.job.completed"] },
+      },
+      unadmitted: "workflow.definition_invalid",
+    });
+  });
+
+  it("make an event wait one an App sends to only when it waits on the type a page sends", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishDefinition(env, ada, workflow.id, definitionOf({ events }));
+    // The same binding, waiting on the contract's other type, which no
+    // page sends.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({
+        status: "2.0.0",
+        events,
+        listensFor: "grasp.job.timeout",
+      })
+    );
+    const catalog = await resolveCatalogKeys(env, [events]);
+    const contractEvents = catalog.get(events)?.contract.events ?? {};
+    const boundAt = async (version: number) => {
+      const contract = await versionContract(env, workflow.id, version);
+      return boundEventsOf(
+        [{ alias: "jobEvents", events: contractEvents }],
+        contract?.listens ?? {}
+      );
+    };
+    const sent = await boundAt(1);
+    const timeout = await boundAt(2);
+    expect({
+      sent: sent.listens,
+      timeout: timeout.listens,
+      events: Object.keys(timeout.events),
+    }).toStrictEqual({
+      sent: { awaitJob: ["jobEvents"] },
+      timeout: {},
+      events: ["jobEvents"],
+    });
+  });
+
+  it("are approved for the version an admin reviewed, by an event target only", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishDefinition(env, ada, workflow.id, definitionOf({ events }));
+    const approve = async (by: Person, target: unknown) =>
+      await outcome(
+        approveWorkflowBinding(env, by, workflow.id, {
+          alias: "jobEvents",
+          target,
+          reviewed: { version: 1 },
+        })
+      );
+    expect({
+      builder: await approve(ada, { kind: "event" }),
+      wrongKind: await approve(admin, { kind: "model", model: allowedModel }),
+      extra: await approve(admin, { kind: "event", browser: true }),
+      approved: await approve(admin, { kind: "event" }),
+    }).toStrictEqual({
+      builder: "role.forbidden",
+      wrongKind: "workflow.binding_invalid",
+      extra: "workflow.binding_invalid",
+      approved: "ok",
+    });
+  });
+});
+
+describe("approving a workflow's binding", () => {
+  beforeAll(chooseModel);
+
+  it("is for admins, of a target that can serve it, in a version that declares it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const staff = await person("admin", true);
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const approve = async (by: Person, target: unknown, version = 1) =>
+      await approveWorkflowBinding(env, by, workflow.id, {
+        alias: "ai",
+        target,
+        reviewed: { version },
+      });
+    const model = { kind: "model", model: allowedModel };
+    expect({
+      builder: await outcome(approve(ada, model)),
+      staff: await outcome(approve(staff, model)),
+      notAllowed: await outcome(
+        // A model there is, but one the organization didn't choose.
+        approve(admin, { kind: "model", model: "openai/gpt-5.4" })
+      ),
+      wrongKind: await outcome(
+        approve(admin, { kind: "decision", deciders: ["role:admin"] })
+      ),
+      unpublished: await outcome(approve(admin, model, 2)),
+      approved: await outcome(approve(admin, model)),
+    }).toStrictEqual({
+      builder: "role.forbidden",
+      staff: "role.forbidden",
+      notAllowed: "workflow.binding_invalid",
+      wrongKind: "workflow.binding_invalid",
+      unpublished: "workflow.binding_invalid",
+      approved: "ok",
+    });
+  });
+
+  it("reads every approval once the migration removed those of kinds there are no more", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    // Approvals an earlier release wrote, of binding kinds there are no
+    // more: a Knowledge collection's, active and revoked, and a template's.
+    const stale = [
+      [
+        "notes",
+        "knowledge",
+        { kind: "knowledge", permissionId: "perm-old" },
+        "active",
+      ],
+      ["wiki", "knowledge", { kind: "knowledge", collections: {} }, "revoked"],
+      [
+        "letters",
+        "template",
+        { kind: "template", templateId: "t-old" },
+        "active",
+      ],
+    ] as const;
+    await env.DB.batch(
+      stale.map(([alias, kind, target, status]) =>
+        env.DB.prepare(
+          "INSERT INTO workflow_binding_approvals (id, workflow_resource_id, alias, kind, contract_id, fingerprint, target, reviewed_version, status, approved_by, approved_at, revoked_by, revoked_at) VALUES (?, ?, ?, ?, 'old/contract@1', 'f', ?, 1, ?, ?, ?, ?, ?)"
+        ).bind(
+          `approval-${unique()}`,
+          workflow.id,
+          alias,
+          kind,
+          JSON.stringify(target),
+          status,
+          admin.userId,
+          Date.now(),
+          status === "revoked" ? admin.userId : null,
+          status === "revoked" ? Date.now() : null
+        )
+      )
+    );
+    // The migration's own statements, as it ran them.
+    const removal = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .find(({ name }) => name.includes("_knowledge_approvals_removed"));
+    if (removal === undefined) {
+      throw new Error("No migration removes the knowledge approvals");
+    }
+    await env.DB.batch(removal.queries.map((query) => env.DB.prepare(query)));
+
+    const { results } = await env.DB.prepare(
+      "SELECT target FROM workflow_binding_approvals"
+    ).all<{ target: string }>();
+    const activity = await workflowActivity(env, ada, workflow.id);
+    const listed = await listWorkflowBindings(env, ada, workflow.id);
+    expect({
+      unreadable: results.filter(
+        ({ target }) =>
+          !workflowBindingTargetSchema.safeParse(JSON.parse(target)).success
+      ),
+      listed: listed.map(({ alias, target }) => ({ alias, target })),
+      activity: activity.flatMap((entry) =>
+        entry.kind === "binding" ? [[entry.alias, entry.bindingKind]] : []
+      ),
+    }).toStrictEqual({
+      unreadable: [],
+      listed: [{ alias: "ai", target: { kind: "model", model: allowedModel } }],
+      activity: [["ai", "model"]],
+    });
+  });
+
+  it("serves a connector only through the workflow's own permission, on actions of the contract's exact shapes connect serves now", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = `mail-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key,
+      kind: "connector",
+      operations: {
+        "mail.send": {
+          input: JSON.stringify({
+            descriptorVersion: 1,
+            kind: "object",
+            presence: "required",
+            nullable: false,
+            fields: {},
+          }),
+          output: JSON.stringify(nullValue),
+        },
+      },
+    });
+    const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
+        permissions: { connections: { mail: { contract: key } } },
+        steps: [
+          {
+            id: "send",
+            type: "call",
+            connection: "mail",
+            action: "mail.send",
+            args: {},
+          },
+        ],
+      })
+    );
+    // A permission an App holds on a connection: not the workflow's.
+    const app = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
+    )
+      .bind(app, ada.userId, Date.now())
+      .run();
+    const asked = async (subject: PermissionRequest["subject"]) =>
+      await requestPermission(
+        env,
+        ada,
+        {
+          subject,
+          object: { type: "connection", connectionId: "connection-mail" },
+          actions: ["mail.send"],
+          binding: `MAIL_${unique().toUpperCase()}`,
+        },
+        {
+          app: async (named, role) => await appFor(env, ada, named, role),
+          resource: async (ref, needed) => {
+            await requireResourceRole(env, ada, ref, needed);
+          },
+        }
+      );
+    const appsOwn = await asked({ type: "app", appId: appIdSchema.parse(app) });
+    await grantPermission(env, admin, appsOwn.id, { version: null });
+    const workflowsOwn = await asked({
+      type: "workflow",
+      workflowId: workflow.id,
+    });
+    await grantPermission(env, admin, workflowsOwn.id, { version: null });
+    // What connect serves the connection as, for this test: `serve`
+    // decides, so the connection's contract can change under an approval.
+    const exact = {
+      send: {
+        tool: "mail.send",
+        readOnly: false,
+        input: shapeOf(emptyObject),
+        output: shapeOf(nullValue),
+      },
+    };
+    let serve: () => ConnectorContract = () => ({
+      contract: "graph.mail@1",
+      actions: exact,
+    });
+    const connecting: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, name): unknown =>
+          name === "connectorContract"
+            ? async () => await Promise.resolve(serve())
+            : Reflect.get(target, name),
+      }),
+    };
+    const approve = async (permissionId: string) =>
+      await approveWorkflowBinding(connecting, admin, workflow.id, {
+        alias: "mail",
+        target: { kind: "connector", permissionId, contract: "graph.mail@1" },
+        reviewed: { version: 1 },
+      });
+    const appsOwnTry = await outcome(approve(appsOwn.id));
+    serve = () => ({
+      contract: "graph.mail@1",
+      actions: { send: { ...exact.send, output: shapeOf(emptyObject) } },
+    });
+    const otherShape = await outcome(approve(workflowsOwn.id));
+    serve = () => {
+      throw connectErrors.create("connect.contract_not_found");
+    };
+    const notServed = await outcome(approve(workflowsOwn.id));
+    serve = () => ({ contract: "graph.mail@1", actions: exact });
+    const approved = await outcome(approve(workflowsOwn.id));
+    const startsNow = await outcome(
+      startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
+        expected: 1,
+        args: { who: "Ada" },
+        key: `key-${unique()}`,
+      })
+    );
+    // The connection stops serving that contract: the approval can't
+    // outlive it, so the next start is refused.
+    serve = () => {
+      throw connectErrors.create("connect.contract_not_found");
+    };
+    const afterDrift = await outcome(
+      startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
+        expected: 1,
+        args: { who: "Ada" },
+        key: `key-${unique()}`,
+      })
+    );
+    expect({
+      appsOwn: appsOwnTry,
+      otherShape,
+      notServed,
+      approved,
+      startsNow,
+      afterDrift,
+    }).toStrictEqual({
+      appsOwn: "workflow.binding_invalid",
+      otherShape: "workflow.binding_invalid",
+      notServed: "workflow.binding_invalid",
+      approved: "ok",
+      startsNow: "ok",
+      afterDrift: "workflow.binding_unapproved",
+    });
+  });
+});
+
+describe("bindings waiting on an admin", () => {
+  beforeAll(chooseModel);
+
+  it("list a live version's unapproved bindings for admins, with the targets that would serve, until one is approved; a version made live after keeps the approvals of what it declares alike, and waits for what it declares anew", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const pendingOf = async () => {
+      const pending = await pendingWorkflowBindings(env, admin);
+      return pending.filter((each) => each.workflow.id === workflow.id);
+    };
+    const before = await pendingOf();
+    const refused = await outcome(start(ada, workflow.id));
+    const [offered] = before[0]?.bindings[0]?.offered ?? [];
+    if (offered === undefined) {
+      throw new Error("No target offered");
+    }
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: offered.target,
+      reviewed: { version: 1 },
+    });
+    const after = await pendingOf();
+    const started = await outcome(start(ada, workflow.id));
+    // Version 2 declares the model alike: it reaches nothing new.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "1.1.0", model: key })
+    );
+    const alike = {
+      pending: await pendingOf(),
+      started: await outcome(start(ada, workflow.id, 2)),
+    };
+    // Version 3 declares another model's contract: new access.
+    const other = await modelContract(admin);
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "1.2.0", model: other })
+    );
+    const anew = {
+      pending: await pendingOf(),
+      started: await outcome(start(ada, workflow.id, 3)),
+    };
+
+    const waiting = (version: number, contractId: string) => ({
+      workflow: { id: workflow.id, name: workflow.name },
+      version,
+      bindings: [
+        {
+          alias: "ai",
+          kind: "model",
+          contractId,
+          offered: [
+            {
+              target: { kind: "model", model: allowedModel },
+              label: allowedModel,
+            },
+          ],
+        },
+      ],
+    });
+    expect({ before, refused, after, started, alike, anew }).toStrictEqual({
+      before: [waiting(1, key)],
+      refused: "workflow.binding_unapproved",
+      after: [],
+      started: "ok",
+      alike: { pending: [], started: "ok" },
+      anew: {
+        pending: [waiting(3, other)],
+        started: "workflow.binding_unapproved",
+      },
+    });
+  });
+
+  it("offer, on the workflow's own page, a connector each contract its own connection grant serves, which approves its start", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const mailKey = `mail-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: mailKey,
+      kind: "connector",
+      operations: {
+        "mail.send": {
+          input: JSON.stringify(emptyObject),
+          output: JSON.stringify(nullValue),
+        },
+      },
+    });
+    const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
+        permissions: { connections: { mail: { contract: mailKey } } },
+        steps: [
+          {
+            id: "send",
+            type: "call",
+            connection: "mail",
+            action: "mail.send",
+            args: {},
+          },
+        ],
+      })
+    );
+    const binding = `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`;
+    const permissionId = await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId: "connection-mail" },
+      actions: ["mail.send"],
+      binding,
+    });
+    // Connect lists two contracts for the connection; only one serves.
+    const connecting: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, name): unknown => {
+          if (name === "connectorContracts") {
+            return async () =>
+              await Promise.resolve(["graph.calendar@1", "graph.mail@1"]);
+          }
+          if (name === "connectorContract") {
+            return async ({ contract }: { contract: string }) => {
+              await Promise.resolve();
+              if (contract !== "graph.mail@1") {
+                throw connectErrors.create("connect.contract_not_found");
+              }
+              return {
+                contract,
+                actions: {
+                  send: {
+                    tool: "mail.send",
+                    readOnly: false,
+                    input: shapeOf(emptyObject),
+                    output: shapeOf(nullValue),
+                  },
+                },
+              } satisfies ConnectorContract;
+            };
+          }
+          return Reflect.get(target, name);
+        },
+      }),
+    };
+    const offeredOf = async () =>
+      await workflowPendingBindings(connecting, admin, workflow.id);
+    const startOf = async () =>
+      await outcome(
+        startWorkflow(
+          connecting,
+          { type: "person", person: ada },
+          workflow.id,
+          { expected: 1, args: { who: "Ada" }, key: `key-${unique()}` }
+        )
+      );
+
+    // Live, it waits in the admins' inbox too, where a connector, slow to
+    // read, is offered nothing.
+    const inbox = await pendingWorkflowBindings(connecting, admin);
+    const before = await offeredOf();
+    const refused = await startOf();
+    const [offered] = before[0]?.bindings[0]?.offered ?? [];
+    if (offered === undefined) {
+      throw new Error("Nothing offered");
+    }
+    await approveWorkflowBinding(connecting, admin, workflow.id, {
+      alias: "mail",
+      target: offered.target,
+      reviewed: { version: 1 },
+    });
+    const listed = await listWorkflowBindings(env, admin, workflow.id);
+
+    expect({
+      // Named as it was offered.
+      listed: listed.map(({ alias, label }) => ({ alias, label })),
+      inbox: inbox
+        .filter((each) => each.workflow.id === workflow.id)
+        .flatMap(({ bindings }) => bindings.map(({ offered: each }) => each)),
+      before,
+      refused,
+      after: await offeredOf(),
+      started: await startOf(),
+    }).toStrictEqual({
+      inbox: [[]],
+      before: [
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          version: 1,
+          bindings: [
+            {
+              alias: "mail",
+              kind: "connector",
+              contractId: mailKey,
+              offered: [
+                {
+                  target: {
+                    kind: "connector",
+                    permissionId,
+                    contract: "graph.mail@1",
+                  },
+                  label: `${binding}: graph.mail@1`,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      refused: "workflow.binding_unapproved",
+      after: [],
+      started: "ok",
+      listed: [{ alias: "mail", label: `${binding}: graph.mail@1` }],
+    });
+  });
+
+  it("list a binding again once an admin revokes its approval, which refuses its starts until one approves it again", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const staff = await person("admin", true);
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const approve = async () =>
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "ai",
+        target: { kind: "model", model: allowedModel },
+        reviewed: { version: 1 },
+      });
+    const waiting = async () => {
+      const pending = await workflowPendingBindings(env, admin, workflow.id);
+      return pending.map(({ version, bindings }) => ({
+        version,
+        aliases: bindings.map(({ alias }) => alias),
+      }));
+    };
+    const approval = await approve();
+    const approved = {
+      waiting: await waiting(),
+      start: await outcome(start(ada, workflow.id)),
+    };
+    const refusedTo = {
+      builder: await outcome(
+        revokeWorkflowBinding(env, ada, workflow.id, approval.id)
+      ),
+      staff: await outcome(
+        revokeWorkflowBinding(env, staff, workflow.id, approval.id)
+      ),
+    };
+    const stillApproved = await outcome(start(ada, workflow.id));
+
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const revoked = {
+      waiting: await waiting(),
+      start: await outcome(start(ada, workflow.id)),
+    };
+    await approve();
+    const approvedAgain = {
+      waiting: await waiting(),
+      start: await outcome(start(ada, workflow.id)),
+    };
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target }) =>
+          action === "workflow.binding.revoked" && target?.id === workflow.id
+      )
+      .map(({ actor, detail }) => ({ actor, detail }));
+
+    expect({
+      approved,
+      refusedTo,
+      stillApproved,
+      revoked,
+      approvedAgain,
+      audited,
+    }).toStrictEqual({
+      approved: { waiting: [], start: "ok" },
+      refusedTo: { builder: "role.forbidden", staff: "role.forbidden" },
+      stillApproved: "ok",
+      revoked: {
+        waiting: [{ version: 1, aliases: ["ai"] }],
+        start: "workflow.binding_unapproved",
+      },
+      approvedAgain: { waiting: [], start: "ok" },
+      audited: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          detail: { approval: approval.id },
+        },
+      ],
+    });
+  });
+
+  it("are listed to the organization's own admins only, never builders, users or Grasp staff", async () => {
+    const [builder, user, staff] = await Promise.all([
+      person("builder"),
+      person("user"),
+      person("admin", true),
+    ]);
+
+    const refused = await Promise.all(
+      [builder, user, staff].map(
+        async (by) => await outcome(pendingWorkflowBindings(env, by))
+      )
+    );
+
+    expect(refused).toStrictEqual([
+      "role.forbidden",
+      "role.forbidden",
+      "role.forbidden",
+    ]);
+  });
+});
+
+describe("approving a store's operation", () => {
+  beforeAll(chooseModel);
+
+  // An App's store is its own: no workflow binding reaches it.
+  it("takes no App's store as its target, whatever the workflow's own grants, and approves nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const store = await storeOfNewApp(env, ada);
+    const approved = await outcome(
+      approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "ai",
+        target: {
+          kind: "storeOperation",
+          permissionId: crypto.randomUUID(),
+          storeId: store,
+          operation: "notes.list",
+          functionKind: "query",
+        },
+        reviewed: { version: 1 },
+      })
+    );
+    const approvals = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_binding_approvals WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .first<{ count: number }>();
+    expect({ approved, approvals: approvals?.count }).toStrictEqual({
+      approved: "workflow.binding_invalid",
+      approvals: 0,
+    });
+  });
+});
+
+describe("what a start freezes", () => {
+  beforeAll(chooseModel);
+
+  it("serves an approval to every version declaring its binding alike, so a publish of only approved bindings asks for none, and one declaring a binding anew asks for its own", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const other = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    const pendingOf = async () => {
+      const pending = await workflowPendingBindings(env, admin, workflow.id);
+      return pending.flatMap(({ version, bindings }) =>
+        bindings.map(({ alias }) => ({ version, alias }))
+      );
+    };
+    // Version 2 declares the alias the same: the approval serves it.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "2.0.0", model: key })
+    );
+    const alike = {
+      pending: await pendingOf(),
+      start: await outcome(start(ada, workflow.id, 2)),
+    };
+    // Version 3 binds the alias to another contract: a binding of its own.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "3.0.0", model: other })
+    );
+    expect({
+      alike,
+      anew: {
+        pending: await pendingOf(),
+        start: await outcome(start(ada, workflow.id, 3)),
+      },
+      earlier: await outcome(start(ada, workflow.id, 1)),
+    }).toStrictEqual({
+      alike: { pending: [], start: "ok" },
+      anew: {
+        pending: [{ version: 3, alias: "ai" }],
+        start: "workflow.binding_unapproved",
+      },
+      // Approved, but no longer live: only the live version starts.
+      earlier: "workflow.version_not_live",
+    });
+  });
+
+  it("keeps a revoked approval revoked for every version declaring its binding, a roll back to one included", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "2.0.0", model: key })
+    );
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const revoked = await outcome(start(ada, workflow.id, 2));
+    await rollback(env, workflowKind, ada, workflow.id, 1);
+
+    const pending = await workflowPendingBindings(env, admin, workflow.id);
+    expect({
+      revoked,
+      rolledBack: await outcome(start(ada, workflow.id, 1)),
+      pending: pending.map(({ version }) => version),
+    }).toStrictEqual({
+      revoked: "workflow.binding_unapproved",
+      rolledBack: "workflow.binding_unapproved",
+      pending: [1],
+    });
+  });
+
+  it("needs an approval for each catalog binding, freezes it, and is refused once it is revoked, but for a start sent again", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const unapproved = await outcome(start(ada, workflow.id));
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    const request = {
+      expected: 1,
+      args: { who: "Ada" },
+      key: `key-${unique()}`,
+    };
+    const asAda = { type: "person", person: ada } as const;
+    const started = await startWorkflow(env, asAda, workflow.id, request);
+    const stored = await receiptRow(started.id);
+    const decided = await decide(
+      { type: "person", person: ada },
+      workflow.id,
+      1
+    );
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const generation = async () =>
+      await env.DB.prepare(
+        "SELECT policy_generation AS n FROM workflow_resources WHERE id = ?"
+      )
+        .bind(workflow.id)
+        .first<number>("n");
+    const revoked = await generation();
+    // Revoking it again changes nothing, so refuses no start.
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const frozen: unknown = JSON.parse(stored?.bindings ?? "[]");
+    // The start admitted before the revocation, sent again, is that start.
+    const sentAgain = await startWorkflow(env, asAda, workflow.id, request);
+    const events = await allEvents();
+    expect({
+      // Recorded once, by the revocation that changed it.
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.binding.revoked" && target?.id === workflow.id
+        )
+        .map(({ detail }) => detail.approval),
+      revokedAgain: (await generation()) === revoked,
+      unapproved,
+      frozen,
+      decidedBefore: await outcome(admitWorkflowStart(env, decided)),
+      after: await outcome(start(ada, workflow.id)),
+      sentAgain: sentAgain.id,
+    }).toStrictEqual({
+      audited: [approval.id],
+      unapproved: "workflow.binding_unapproved",
+      frozen: [
+        {
+          alias: "ai",
+          kind: "model",
+          contractId: key,
+          fingerprint: approval.fingerprint,
+          approval: approval.id,
+          target: { kind: "model", model: allowedModel },
+        },
+      ],
+      decidedBefore: "workflow.start_denied",
+      after: "workflow.binding_unapproved",
+      revokedAgain: true,
+      sentAgain: started.id,
+    });
+  });
+
+  it("admits a version with as many catalog bindings as the profile allows", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await eventContract(admin);
+    // One workflow has one model (`ai`): what fills the profile's
+    // permissions is event permissions, each waited on once.
+    const aliases = Array.from({ length: 40 }, (_, index) => `events${index}`);
+    const workflow = await createWorkflowResource(env, ada, `many-${unique()}`);
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
+        permissions: {
+          events: Object.fromEntries(
+            aliases.map((alias) => [alias, { contract: key }])
+          ),
+        },
+        steps: aliases.map((alias) => ({
+          id: `wait${alias}`,
+          type: "waitForEvent",
+          events: alias,
+          eventType: "grasp.job.completed",
+          timeout: "1 hour",
+        })),
+      })
+    );
+    for (const alias of aliases) {
+      // oxlint-disable-next-line no-await-in-loop -- one approval at a time, as an admin gives them
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias,
+        target: { kind: "event" },
+        reviewed: { version: 1 },
+      });
+    }
+    await expect(outcome(start(ada, workflow.id))).resolves.toBe("ok");
+  });
+
+  it("freezes the parameter revision in force, refuses a start an edit raced, and never changes after", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 0,
+      values: { limit: 5 },
+    });
+    const first = await start(ada, workflow.id);
+    const decided = await decide(
+      { type: "person", person: ada },
+      workflow.id,
+      1
+    );
+    await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 1,
+      values: { limit: 7 },
+    });
+    const raced = await outcome(admitWorkflowStart(env, decided));
+    const mutated = await outcome(
+      env.DB.prepare(
+        "UPDATE workflow_start_receipts SET params = '{}' WHERE id = ?"
+      )
+        .bind(first.id)
+        .run()
+    );
+    // Even with its input and values removed, as retention would, nothing
+    // else of it changes.
+    const rebound = await outcome(
+      env.DB.prepare(
+        "UPDATE workflow_start_receipts SET input = NULL, params = NULL, details_removed_at = ?, bindings_hash = 'other' WHERE id = ?"
+      )
+        .bind(Date.now(), first.id)
+        .run()
+    );
+    const stored = await receiptRow(first.id);
+    const params: unknown = JSON.parse(stored?.params ?? "{}");
+    expect({
+      params,
+      revision: stored?.params_revision,
+      raced,
+      mutated: mutated.includes("immutable"),
+      rebound: rebound.includes("immutable"),
+    }).toStrictEqual({
+      params: { limit: 5 },
+      revision: 1,
+      raced: "workflow.start_denied",
+      mutated: true,
+      rebound: true,
+    });
+  });
+});
+
+describe("a run an earlier release started", () => {
+  it("is refused as of a format this release doesn't read, when its receipt froze a binding of a kind there is no more", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // A receipt and its running run as an earlier release froze them: a
+    // Knowledge collection's binding beside an event binding.
+    const runId = crypto.randomUUID();
+    const frozen = [
+      {
+        alias: "jobEvents",
+        kind: "event",
+        contractId: "old/events@1",
+        fingerprint: "f",
+        approval: "approval-events",
+        target: { kind: "event" },
+      },
+      {
+        alias: "notes",
+        kind: "knowledge",
+        contractId: "old/notes@1",
+        fingerprint: "f",
+        approval: "approval-notes",
+        target: { kind: "knowledge", permissionId: "perm-old" },
+      },
+    ];
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, bindings, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?, ?)"
+      ).bind(
+        runId,
+        ada.userId,
+        `key-${runId}`,
+        workflow.id,
+        ada.userId,
+        JSON.stringify(frozen),
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'm', 'b', ?, 'running', ?)"
+      ).bind(runId, workflow.id, ada.userId, Date.now()),
+    ]);
+
+    await expect(
+      outcome(
+        admitRunEvent(env, {
+          workflowId: workflow.id,
+          runId,
+          binding: "jobEvents",
+          type: "grasp.job.completed",
+          key: `event-${unique()}`,
+          data: {},
+          source: "urn:test:sender",
+          sender: "test",
+        })
+      )
+    ).resolves.toBe("workflow.format_unsupported");
+  });
+});
+
+describe("parameter configuration", () => {
+  beforeAll(chooseModel);
+
+  it("is revision-checked, checked against the current version, and edited by builders, never staff", async () => {
+    const ada = await person("builder");
+    const reader = await person("builder");
+    const staff = await person("admin", true);
+    const workflow = await workflowOf(ada, undefined, "sensitive");
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    const secret = `secret-${unique()}`;
+    const set = async (by: Person, input: unknown) =>
+      await setWorkflowParams(env, by, workflow.id, input);
+    // Text, for a number: refused, without the value in the refusal.
+    const wrongKindAttempt = set(ada, {
+      expectedRevision: 0,
+      values: { limit: "ninety-nine" },
+    });
+    const [wrongKindCode, wrongKind] = await Promise.all([
+      outcome(wrongKindAttempt),
+      refusal(wrongKindAttempt),
+    ]);
+    const first = await set(ada, {
+      expectedRevision: 0,
+      values: { token: secret },
+    });
+    expect({
+      reader: await outcome(
+        set(reader, { expectedRevision: 1, values: { limit: 2 } })
+      ),
+      staff: await outcome(
+        set(staff, { expectedRevision: 1, values: { limit: 2 } })
+      ),
+      unknown: await outcome(
+        set(ada, { expectedRevision: 0, values: { other: 1 } })
+      ),
+      wrongKind: wrongKindCode,
+      leaks: JSON.stringify(wrongKind).includes("ninety-nine"),
+      first: first.revision,
+      stale: await outcome(
+        set(ada, { expectedRevision: 0, values: { limit: 2 } })
+      ),
+    }).toStrictEqual({
+      reader: "role.forbidden",
+      staff: "role.forbidden",
+      unknown: "workflow.params_invalid",
+      wrongKind: "workflow.params_invalid",
+      leaks: false,
+      first: 1,
+      stale: "workflow.params_conflict",
+    });
+  });
+
+  it("refuses an edit checked against a version another replaced as it was written", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // A new version is published between the check and the write.
+    const db = racingDb(
+      async () =>
+        await publishDefinition(
+          env,
+          ada,
+          workflow.id,
+          definitionOf({ status: "2.0.0" })
+        ),
+      /insert into "workflow_resource_params"/iu
+    );
+    const raced = await outcome(
+      setWorkflowParams({ ...env, DB: db }, ada, workflow.id, {
+        expectedRevision: 0,
+        values: { limit: 4 },
+      })
+    );
+    const read = await workflowParams(env, ada, workflow.id);
+    expect({
+      raced,
+      revision: read.revision,
+      again: await outcome(
+        setWorkflowParams(env, ada, workflow.id, {
+          expectedRevision: 0,
+          values: { limit: 4 },
+        })
+      ),
+    }).toStrictEqual({
+      raced: "workflow.params_conflict",
+      revision: 0,
+      again: "ok",
+    });
+  });
+
+  it("puts a parameter back to its default only when told to reset it", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `reset-${unique()}`
+    );
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
+        params: {
+          // Sensitive, with no default: required.
+          token: { label: "Token", type: { kind: "string" } },
+          limit: {
+            label: "Limit",
+            type: { kind: "number", default: 3 },
+            sensitive: false,
+          },
+        },
+      })
+    );
+    const set = async (input: unknown) =>
+      await setWorkflowParams(env, ada, workflow.id, input);
+    const unset = await outcome(start(ada, workflow.id));
+    await set({ expectedRevision: 0, values: { token: "set", limit: 7 } });
+    const withToken = await outcome(start(ada, workflow.id));
+    const both = await outcome(
+      set({ expectedRevision: 1, values: { limit: 2 }, reset: ["limit"] })
+    );
+    const reset = await set({ expectedRevision: 1, reset: ["limit"] });
+    // A required parameter has no default to go back to.
+    const resetRequired = await outcome(
+      set({ expectedRevision: 2, reset: ["token"] })
+    );
+    expect({
+      unset,
+      withToken,
+      both,
+      resetRequired,
+      after: reset.params.map(({ name, set: isSet, value }) => ({
+        name,
+        set: isSet,
+        value,
+      })),
+    }).toStrictEqual({
+      unset: "workflow.params_invalid",
+      withToken: "ok",
+      both: "workflow.params_invalid",
+      resetRequired: "workflow.params_invalid",
+      after: [
+        { name: "limit", set: false, value: null },
+        { name: "token", set: true, value: null },
+      ],
+    });
+  });
+
+  it("marks money and a schedule for the page, which takes each in parts", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `kinds-${unique()}`
+    );
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
+        params: {
+          fee: {
+            label: "Fee",
+            type: {
+              kind: "money",
+              default: { minorUnits: 500, currency: "EUR" },
+            },
+            sensitive: false,
+          },
+          when: {
+            label: "When",
+            type: {
+              kind: "schedule",
+              default: { cron: "0 8 * * 1", timeZone: "Europe/Amsterdam" },
+            },
+            sensitive: false,
+          },
+        },
+      })
+    );
+    const { params } = await workflowParams(env, ada, workflow.id);
+    expect(
+      params.map(({ name, schema }) => [
+        name,
+        isRecord(schema) ? schema["x-grasp-value"] : undefined,
+      ])
+    ).toStrictEqual([
+      ["fee", { kind: "money" }],
+      ["when", { kind: "schedule" }],
+    ]);
+  });
+
+  it("refuses values too large together to fit a start's receipt, before saving anything", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(env, ada, `big-${unique()}`);
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
+        params: Object.fromEntries(
+          ["first", "second"].map((name) => [
+            name,
+            {
+              label: name,
+              type: { kind: "string", default: "" },
+              sensitive: false,
+            },
+          ])
+        ),
+      })
+    );
+    // Each fits its own schema; together they are over the bound.
+    const large = "x".repeat(300_000);
+    const together = await outcome(
+      setWorkflowParams(env, ada, workflow.id, {
+        expectedRevision: 0,
+        values: { first: large, second: large },
+      })
+    );
+    const read = await workflowParams(env, ada, workflow.id);
+    const one = await outcome(
+      setWorkflowParams(env, ada, workflow.id, {
+        expectedRevision: 0,
+        values: { first: large },
+      })
+    );
+    expect({ together, revision: read.revision, one }).toStrictEqual({
+      together: "workflow.params_invalid",
+      revision: 0,
+      one: "ok",
+    });
+  });
+
+  it("never lists or audits a sensitive value", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada, undefined, "sensitive");
+    const secret = `secret-${unique()}`;
+    await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 0,
+      values: { token: secret, limit: 4 },
+    });
+    const listed = await workflowParams(env, ada, workflow.id);
+    const started = await start(ada, workflow.id);
+    const events = await allEvents();
+    // Nor a hash of the values, which a guess at a short one is checked
+    // against.
+    const hashed = await sha256Hex(canonicalJson({ limit: 4, token: secret }));
+    expect({
+      listed: listed.params,
+      inEvents: JSON.stringify(events).includes(secret),
+      inReceipt: JSON.stringify(started).includes(secret),
+      hashInEvents: JSON.stringify(events).includes(hashed),
+      hashInReceipt: JSON.stringify(started).includes(hashed),
+    }).toStrictEqual({
+      listed: [
+        {
+          name: "limit",
+          label: "Limit",
+          sensitive: false,
+          set: true,
+          value: 4,
+          // As the version declares it, for the page to take a value as.
+          schema: { type: "number" },
+        },
+        {
+          name: "token",
+          label: "Token",
+          sensitive: true,
+          set: true,
+          value: null,
+          schema: { type: "string" },
+        },
+      ],
+      inEvents: false,
+      inReceipt: false,
+      hashInEvents: false,
+      hashInReceipt: false,
+    });
+  });
+});
+
+describe("a sensitive parameter", () => {
+  beforeAll(chooseModel);
+
+  it("stays withheld once any version marked it, whatever a later version says", async () => {
+    const ada = await person("builder");
+    const reader = await person("builder");
+    const workflow = await workflowOf(ada, undefined, "sensitive");
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    const secret = `secret-${unique()}`;
+    await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 0,
+      values: { token: secret },
+    });
+    // A builder declares it not sensitive in a new version.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({
+        status: "2.0.0",
+        token: "plain",
+      })
+    );
+    const listed = await workflowParams(env, reader, workflow.id);
+    const later = `later-${unique()}`;
+    const edited = await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 1,
+      values: { token: later },
+    });
+    expect({
+      listed: listed.params.find(({ name }) => name === "token"),
+      leaks: JSON.stringify([listed, edited]).includes(secret),
+      leaksLater: JSON.stringify(edited).includes(later),
+    }).toStrictEqual({
+      listed: {
+        name: "token",
+        label: "Token",
+        sensitive: true,
+        set: true,
+        value: null,
+        schema: { type: "string" },
+      },
+      leaks: false,
+      leaksLater: false,
+    });
+  });
+});
+
+describe("an App's binding of a workflow, written as a stand-in", () => {
+  beforeAll(chooseModel);
+
+  it("starts the live version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const app = await appOf(ada);
+    const authority: Authority = {
+      subject: { type: "app", appId: appIdSchema.parse(app) },
+      onBehalfOf: ada.userId,
+      mode: "interactive",
+      appVersion: 1,
+    };
+    const binding = await standInBinding(app, "greet", workflow.id, ada);
+    const ungranted = await outcome(
+      startAppBinding(env, authority, "greet", {
+        args: { who: "Ada" },
+        key: "k1",
+      })
+    );
+    await granted(ada, admin, {
+      subject: { type: "app", appId: appIdSchema.parse(app) },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "GREET",
+    });
+    const started = await startAppBinding(env, authority, "greet", {
+      args: { who: "Ada" },
+      key: "k2",
+    });
+    const bound = await refusal(deleteWorkflowResource(env, ada, workflow.id));
+    const events = await allEvents();
+    const refused = events.find(
+      ({ action, target }) =>
+        action === "workflow.delete_refused" && target?.id === workflow.id
+    );
+    // Ended, as the App's next version binding nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(binding)
+      .run();
+    // The run the start admitted holds the workflow too, until it ends:
+    // the delete after the binding ended waits for it, so only the
+    // binding is what held it up.
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, ada, workflow.id, started.runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    expect({
+      ungranted,
+      started: started.version,
+      bound,
+      audited: refused?.detail,
+      afterUnbind: await outcome(deleteWorkflowResource(env, ada, workflow.id)),
+    }).toMatchObject({
+      ungranted: "workflow.start_denied",
+      started: 1,
+      bound: {
+        code: "workflow.resource_bound",
+        details: { appBindings: [{ id: binding, app }] },
+      },
+      audited: { appBindings: 1, appBinding1: binding, app1: app },
+      afterUnbind: "ok",
+    });
+  });
+
+  it("pins nothing while its App may not start the workflow", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const workflow = await workflowOf(ada);
+    // Bob, a user of the workflow, binds it to an App of his own.
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const app = await appOf(bob);
+    await standInBinding(app, "greet", workflow.id, bob);
+    await expect(
+      outcome(deleteWorkflowResource(env, ada, workflow.id))
+    ).resolves.toBe("ok");
+  });
+
+  it("makes the data of an App that starts a workflow sensitive again when the workflow is granted more", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const app = await appOf(ada);
+    await granted(ada, admin, {
+      subject: { type: "app", appId: appIdSchema.parse(app) },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "GREET",
+    });
+    // An admin judged the App's data ordinary, with the access it had.
+    await env.DB.prepare(
+      `INSERT INTO screen_policies (app_id, output, generation) VALUES (?, 'ordinary', 1)
+       ON CONFLICT (app_id) DO UPDATE SET output = 'ordinary', generation = generation + 1`
+    )
+      .bind(app)
+      .run();
+    const before = await policyOf(env, appIdSchema.parse(app));
+    await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId: `connection-${unique()}` },
+      actions: ["mail.send"],
+      binding: `MAIL_${unique().toUpperCase()}`,
+    });
+    const after = await policyOf(env, appIdSchema.parse(app));
+    expect({
+      output: after.output,
+      moved: after.generation - before.generation,
+    }).toStrictEqual({ output: "sensitive", moved: 1 });
+  });
+});
+
+describe("an App's data policy through workflows", () => {
+  beforeAll(chooseModel);
+
+  it("makes the data of an App sensitive again when a workflow it starts is granted more", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // App X starts the workflow: more for the workflow is more for X.
+    const starter = await appOf(ada);
+    await granted(ada, admin, {
+      subject: { type: "app", appId: appIdSchema.parse(starter) },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "GREET",
+    });
+    await env.DB.prepare(
+      `INSERT INTO screen_policies (app_id, output, generation) VALUES (?, 'ordinary', 1)
+       ON CONFLICT (app_id) DO UPDATE SET output = 'ordinary', generation = generation + 1`
+    )
+      .bind(starter)
+      .run();
+    const before = await policyOf(env, appIdSchema.parse(starter));
+    await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId: `connection-${unique()}` },
+      actions: ["mail.send"],
+      binding: `MAIL_${unique().toUpperCase()}`,
+    });
+    const after = await policyOf(env, appIdSchema.parse(starter));
+    expect({
+      output: after.output,
+      moved: after.generation - before.generation,
+    }).toStrictEqual({ output: "sensitive", moved: 1 });
+  });
+});
+
+describe("retention", () => {
+  beforeAll(chooseModel);
+
+  it("removes a receipt's input and values and a replaced revision's values, and nothing else", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada, undefined, "sensitive");
+    const secret = `secret-${unique()}`;
+    await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 0,
+      values: { token: secret },
+    });
+    await setWorkflowParams(env, ada, workflow.id, {
+      expectedRevision: 1,
+      values: { limit: 4 },
+    });
+    const key = `key-${unique()}`;
+    const request = { expected: 1, args: { who: "Ada" }, key };
+    const first = await startWorkflow(
+      env,
+      { type: "person", person: ada },
+      workflow.id,
+      request
+    );
+    // Its run reads them until it ends: retention counts from then.
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, ada, workflow.id, first.runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    // Past the run retention (30 days).
+    await sweepRunDetails(env, new Date(Date.now() + 31 * 24 * 3_600_000));
+    const receipt = await receiptRow(first.id);
+    const revisions = await env.DB.prepare(
+      'SELECT revision, "values" AS kept FROM workflow_resource_params WHERE workflow_resource_id = ? ORDER BY revision'
+    )
+      .bind(workflow.id)
+      .all<{ revision: number; kept: string | null }>();
+    const listed = await workflowParams(env, ada, workflow.id);
+    // The same start sent again is still the same start, by its key.
+    const again = await startWorkflow(
+      env,
+      { type: "person", person: ada },
+      workflow.id,
+      request
+    );
+    expect({
+      receipt: {
+        input: receipt?.input,
+        params: receipt?.params,
+        removed: receipt?.details_removed_at !== null,
+        bindings: receipt?.bindings,
+      },
+      revisions: revisions.results.map(({ revision, kept }) => ({
+        revision,
+        kept: kept !== null,
+      })),
+      limit: listed.params.find(({ name }) => name === "limit")?.value,
+      again: again.id,
+    }).toStrictEqual({
+      receipt: { input: null, params: null, removed: true, bindings: "[]" },
+      revisions: [
+        { revision: 1, kept: false },
+        { revision: 2, kept: true },
+      ],
+      limit: 4,
+      again: first.id,
+    });
+  });
+});
+
+describe("deleting a workflow", () => {
+  beforeAll(chooseModel);
+
+  it("is refused while a run of it hasn't ended, and the refusal audited with it", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `greet-${unique()}`
+    );
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ waits: true })
+    );
+    // Its run waits an hour: it hasn't ended as the deletion is asked.
+    await start(ada, workflow.id);
+    const error = await refusal(deleteWorkflowResource(env, ada, workflow.id));
+    const events = await allEvents();
+    const refused = events.find(
+      ({ action, target }) =>
+        action === "workflow.delete_refused" && target?.id === workflow.id
+    );
+    expect({ error, audited: refused?.detail }).toMatchObject({
+      error: { code: "workflow.resource_bound", details: { liveRuns: 1 } },
+      audited: { liveRuns: 1 },
+    });
+  });
+});

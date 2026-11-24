@@ -1,0 +1,1253 @@
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
+import { maxFailedStarts, workflowErrors } from "@grasp-os/shared/workflows";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { env } from "cloudflare:workers";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+import { listNotifications } from "../src/notifications.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import {
+  grantPermission,
+  listPermissions,
+  requestPermission,
+  revokePermission,
+} from "../src/permissions.ts";
+import {
+  createTriggerResource,
+  deleteTriggerResource,
+  listWorkflowTriggers,
+  setTriggerEnabled,
+} from "../src/trigger-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
+import {
+  resourceRunFor,
+  terminateResourceRun,
+} from "../src/workflows/resource-runs.ts";
+import { startDueScheduleTriggers } from "../src/workflows/schedule-triggers.ts";
+import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
+import { brainAway, keptFromTheBrain } from "./kept-state.ts";
+import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
+
+// Independent schedule triggers (workflows/schedule-triggers.ts), from
+// their threat model: each concrete occurrence starts one run, however
+// often the clock runs or dies between starting it and moving on, and a
+// run cancelled since stays cancelled; occurrences missed in an outage
+// start one run; a local time the spring change skips starts nothing and
+// one the autumn change repeats starts once; disabled or deleted
+// triggers start nothing they missed; each occurrence starts the
+// workflow's live version, once, however a publish falls; a start refused for good is
+// audited and moves on, and one that keeps failing stops, audited; and
+// only a schedule, input and time zone that hold are taken.
+
+const person = async (role: Role): Promise<Identity> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+/**
+ * Version `version` of a workflow taking `{ [field]: string }` and handing
+ * it back: a step that never runs carries `version` as its title, so each
+ * version's document differs.
+ */
+const definitionOf = (field: string, version = "1"): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: objectSchema({ [field]: { kind: "string" } }),
+    returns: objectSchema({ [field]: { kind: "string" } }),
+    result: { [field]: { $expr: `args.${field}` } },
+    steps: [
+      {
+        id: "mark",
+        title: `Version ${version}`,
+        type: "raise",
+        if: { $expr: "false" },
+        error: { code: "test.never", message: "Failed." },
+      },
+    ],
+  });
+
+/** A workflow of `admin`'s taking a `report`. */
+const reporting = async (admin: Identity) => {
+  const workflow = await createWorkflowResource(
+    env,
+    admin,
+    `report-${unique()}`
+  );
+  await publishDefinition(env, admin, workflow.id, definitionOf("report"));
+  return workflow;
+};
+
+/** The `start` trigger `trigger` asked for as it was created: its ID. */
+const askedStart = async (
+  admin: Identity,
+  trigger: string
+): Promise<string> => {
+  const [asked] = await listPermissions(
+    env,
+    admin,
+    { type: "trigger", triggerId: trigger },
+    undefined,
+    "requested"
+  );
+  return asked?.id ?? "";
+};
+
+/** The `start` trigger `trigger` asked for, granted by `admin`: its ID. */
+const grantStart = async (
+  admin: Identity,
+  trigger: string
+): Promise<string> => {
+  const permission = await askedStart(admin, trigger);
+  await grantPermission(env, admin, permission, { version: null });
+  return permission;
+};
+
+const nightly = { report: "nightly" };
+
+const scheduleConfig = (
+  cron = "* * * * *",
+  timeZone = "UTC",
+  input: unknown = nightly
+) => ({
+  schedule: { cron, timeZone },
+  input,
+  missedOccurrences: "coalesce",
+});
+
+/**
+ * A schedule trigger of `admin`'s on workflow `id`, the `start` it asks
+ * for granted unless `granted` is false.
+ */
+const scheduleTrigger = async (
+  admin: Identity,
+  id: string,
+  {
+    cron = "* * * * *",
+    timeZone = "UTC",
+    granted = true,
+    owner = admin,
+  }: {
+    cron?: string;
+    timeZone?: string;
+    granted?: boolean;
+    owner?: Identity;
+  } = {}
+) => {
+  const trigger = await createTriggerResource(env, owner, {
+    kind: "schedule",
+    workflowId: id,
+    config: scheduleConfig(cron, timeZone),
+  });
+  const permission = granted ? await grantStart(admin, trigger.id) : undefined;
+  return { ...trigger, permission };
+};
+
+/** Trigger `id`'s schedule, as core keeps it. */
+const scheduleOf = async (id: string) =>
+  await env.DB.prepare(
+    "SELECT next_at AS nextAt, failed_starts AS failedStarts, attempts FROM trigger_schedules WHERE trigger_id = ?"
+  )
+    .bind(id)
+    .first<{
+      nextAt: number | null;
+      failedStarts: number;
+      attempts: number;
+    }>();
+
+/** Makes trigger `id`'s next occurrence `at`, as after an outage. */
+const dueAt = async (id: string, at: Date, failedStarts = 0) => {
+  await env.DB.prepare(
+    "UPDATE trigger_schedules SET next_at = ?, failed_starts = ? WHERE trigger_id = ?"
+  )
+    .bind(at.getTime(), failedStarts, id)
+    .run();
+};
+
+/** The runs trigger `trigger` started: each with its start key. */
+const runsOf = async (trigger: string) => {
+  const rows = await env.DB.prepare(
+    "SELECT run.id, receipt.idempotency_key AS key FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ? ORDER BY receipt.created_at"
+  )
+    .bind(trigger)
+    .all<{ id: string; key: string }>();
+  return rows.results;
+};
+
+/** The start key of trigger `id`'s occurrence at `at`. */
+const keyOf = (id: string, at: Date) =>
+  `grasp:schedule:${id}:${at.toISOString()}`;
+
+/** `env` whose database refuses, once, any statement `matches` finds. */
+const failingOnce = (matches: RegExp): Env => {
+  let failed = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (!failed && matches.test(query)) {
+            failed = true;
+            throw new Error("The database went away");
+          }
+          return target.prepare(query);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/**
+ * `env` whose database runs `meanwhile` once, just before the first
+ * statement `at` matches is run on its own (not in a batch): another
+ * request's change landing between what was read and that statement.
+ */
+const changedBefore = (at: RegExp, meanwhile: () => Promise<unknown>): Env => {
+  let ran = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property): unknown => {
+        if (property === "bind") {
+          return (...values: unknown[]) => racing(target.bind(...values));
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        if (
+          typeof value === "function" &&
+          (property === "first" ||
+            property === "all" ||
+            property === "raw" ||
+            property === "run")
+        ) {
+          return async (...args: unknown[]): Promise<unknown> => {
+            if (!ran) {
+              ran = true;
+              await meanwhile();
+            }
+            const answer: unknown = await Reflect.apply(value, target, args);
+            return answer;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          const statement = target.prepare(query);
+          return ran || !at.test(query) ? statement : racing(statement);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/**
+ * `env` whose database runs `meanwhile` once, just before the batch that
+ * admits a start (the one inserting its receipt) is sent: another
+ * request's change landing between a due schedule's read and its start.
+ */
+const changedBeforeAdmission = (meanwhile: () => Promise<void>): Env => {
+  let admitting = false;
+  let ran = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+            admitting = true;
+          }
+          return target.prepare(query);
+        };
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]): Promise<unknown> => {
+          if (admitting && !ran) {
+            ran = true;
+            await meanwhile();
+          }
+          const answer: unknown = await target.batch(statements);
+          return answer;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/**
+ * `env` in which one clock run's try fails in the workflow's own terms
+ * (no slot free, as at its run limit), and `meanwhile` runs just before
+ * that failure is recorded: another clock run's try of the same
+ * occurrence, admitted in between.
+ */
+const failingWhileAnotherStarts = (meanwhile: () => Promise<void>): Env => {
+  let admitting = false;
+  let recording = false;
+  let refused = false;
+  let ran = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+            admitting = true;
+          }
+          if (/^update "trigger_schedules"/iu.test(query)) {
+            recording = true;
+          }
+          return target.prepare(query);
+        };
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]): Promise<unknown> => {
+          if (admitting && !refused) {
+            refused = true;
+            throw workflowErrors.create("workflow.queued");
+          }
+          if (recording && !ran) {
+            ran = true;
+            await meanwhile();
+          }
+          const answer: unknown = await target.batch(statements);
+          return answer;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/** `env` whose run limit is full: every start's admission refused so. */
+const runLimitFull = (): Env => {
+  let admitting = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+            admitting = true;
+          }
+          return target.prepare(query);
+        };
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]): Promise<unknown> => {
+          if (admitting) {
+            admitting = false;
+            throw workflowErrors.create("workflow.queued");
+          }
+          const answer: unknown = await target.batch(statements);
+          return answer;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+const minuteMs = 60_000;
+
+/** The minute before the current one began: due now. */
+const lastMinute = () =>
+  new Date(Math.floor(Date.now() / minuteMs) * minuteMs - minuteMs);
+
+describe("schedule triggers", { timeout: 120_000 }, () => {
+  // Each test's schedules are its own: none left due in the next.
+  afterEach(async () => {
+    await env.DB.prepare(
+      "UPDATE trigger_resources SET enabled = 0 WHERE kind = 'schedule'"
+    ).run();
+  });
+
+  it("start one run per occurrence, however often the clock runs or dies before moving on", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const created = await scheduleOf(trigger.id);
+    const occurrence = lastMinute();
+    await dueAt(trigger.id, occurrence);
+
+    // Killed after the start, before its next occurrence was written.
+    const killed = await outcome(
+      startDueScheduleTriggers(
+        failingOnce(/^update "trigger_schedules" set "next_at"/iu)
+      )
+    );
+    const stillDue = await scheduleOf(trigger.id);
+    // Two clock runs at once, then one more.
+    await Promise.all([
+      startDueScheduleTriggers(env),
+      startDueScheduleTriggers(env),
+    ]);
+    await startDueScheduleTriggers(env);
+    const runs = await runsOf(trigger.id);
+    const after = await scheduleOf(trigger.id);
+    const run = await vi.waitFor(
+      async () => {
+        const found = await resourceRunFor(
+          env,
+          admin,
+          workflow.id,
+          runs[0]?.id
+        );
+        expect(found.endedAt).not.toBeNull();
+        return found;
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const logged = await allEvents();
+    const admitted = logged.filter(
+      ({ action, detail }) =>
+        action === "workflow.start.admitted" && detail.invoker === trigger.id
+    );
+
+    expect({
+      firstDue: (created?.nextAt ?? 0) > Date.now() - minuteMs,
+      killed,
+      stillDue: stillDue?.nextAt,
+      runs,
+      output: run.result,
+      movedOn: (after?.nextAt ?? 0) > occurrence.getTime(),
+      admitted: admitted.map(({ detail }) => detail.scheduledAt),
+    }).toStrictEqual({
+      firstDue: true,
+      killed: "Error: The database went away",
+      stillDue: occurrence.getTime(),
+      runs: [
+        {
+          id: runs[0]?.id,
+          key: keyOf(trigger.id, occurrence),
+        },
+      ],
+      output: { report: "nightly" },
+      movedOn: true,
+      admitted: [occurrence.toISOString()],
+    });
+  });
+
+  it("never start again an occurrence whose run was cancelled", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const occurrence = lastMinute();
+    await dueAt(trigger.id, occurrence);
+    await startDueScheduleTriggers(env);
+    const [started] = await runsOf(trigger.id);
+    await terminateResourceRun(env, admin, workflow.id, started?.id);
+    // The same occurrence due again, as a redelivery.
+    await dueAt(trigger.id, occurrence);
+    await startDueScheduleTriggers(env);
+    const runs = await runsOf(trigger.id);
+    const run = await resourceRunFor(env, admin, workflow.id, started?.id);
+
+    expect({ runs: runs.length, status: run.status }).toStrictEqual({
+      runs: 1,
+      status: "cancelled",
+    });
+  });
+
+  it("start one run for the occurrences an outage missed, then go on from the next", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const firstMissed = new Date(lastMinute().getTime() - 180 * minuteMs);
+    await dueAt(trigger.id, firstMissed);
+    const now = new Date();
+    await startDueScheduleTriggers(env, now);
+    await startDueScheduleTriggers(env, now);
+    const runs = await runsOf(trigger.id);
+    const after = await scheduleOf(trigger.id);
+
+    expect({
+      keys: runs.map(({ key }) => key),
+      next: after?.nextAt,
+    }).toStrictEqual({
+      keys: [keyOf(trigger.id, firstMissed)],
+      next: Math.floor(now.getTime() / minuteMs) * minuteMs + minuteMs,
+    });
+  });
+
+  it("skip a local time the spring change skips, and start one the autumn change repeats once", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const spring = await scheduleTrigger(admin, workflow.id, {
+      cron: "30 2 * * *",
+      timeZone: "Europe/Amsterdam",
+    });
+    const autumn = await scheduleTrigger(admin, workflow.id, {
+      cron: "30 2 * * *",
+      timeZone: "Europe/Amsterdam",
+    });
+    // 2:30 CEST on 25 October 2026, then 2:30 CET an hour on.
+    const repeated = new Date("2026-10-25T00:30:00Z");
+    await dueAt(autumn.id, repeated);
+    await startDueScheduleTriggers(env, new Date(repeated.getTime() + 1000));
+    await startDueScheduleTriggers(
+      env,
+      new Date(repeated.getTime() + 60 * minuteMs + 1000)
+    );
+    const afterRepeat = await scheduleOf(autumn.id);
+    await setTriggerEnabled(env, admin, autumn.id, false);
+    // 2:30 CET on 27 March 2027; 28 March has no 2:30.
+    const beforeGap = new Date("2027-03-27T01:30:00Z");
+    await dueAt(spring.id, beforeGap);
+    await startDueScheduleTriggers(env, new Date(beforeGap.getTime() + 1000));
+    const afterGap = await scheduleOf(spring.id);
+    const springRuns = await runsOf(spring.id);
+    const autumnRuns = await runsOf(autumn.id);
+
+    expect({
+      springNext: new Date(afterGap?.nextAt ?? 0).toISOString(),
+      springKeys: springRuns.map(({ key }) => key),
+      autumnNext: new Date(afterRepeat?.nextAt ?? 0).toISOString(),
+      autumnKeys: autumnRuns.map(({ key }) => key),
+    }).toStrictEqual({
+      springNext: "2027-03-29T00:30:00.000Z",
+      springKeys: [keyOf(spring.id, beforeGap)],
+      autumnNext: "2026-10-26T01:30:00.000Z",
+      autumnKeys: [keyOf(autumn.id, repeated)],
+    });
+  });
+
+  it("start nothing they missed while disabled or deleted", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const disabled = await scheduleTrigger(admin, workflow.id);
+    const deleted = await scheduleTrigger(admin, workflow.id);
+    const missed = new Date(lastMinute().getTime() - 60 * minuteMs);
+    await setTriggerEnabled(env, admin, disabled.id, false);
+    await deleteTriggerResource(env, admin, deleted.id);
+    for (const { id } of [disabled, deleted]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await dueAt(id, missed);
+    }
+    const whileDisabled = await runsOf(disabled.id);
+    await startDueScheduleTriggers(env);
+    await setTriggerEnabled(env, admin, disabled.id, true);
+    // Enabling one already enabled moves no occurrence on.
+    const reenabled = await scheduleOf(disabled.id);
+    await setTriggerEnabled(env, admin, disabled.id, true);
+    await startDueScheduleTriggers(env);
+    const counts = await Promise.all(
+      [disabled, deleted].map(async ({ id }) => {
+        const runs = await runsOf(id);
+        return runs.length;
+      })
+    );
+    const twiceEnabled = await scheduleOf(disabled.id);
+
+    expect({
+      whileDisabled: whileDisabled.length,
+      counts,
+      reenabledNext: (reenabled?.nextAt ?? 0) > Date.now() - minuteMs,
+      sameAfterSecondEnable: twiceEnabled?.nextAt,
+    }).toStrictEqual({
+      whileDisabled: 0,
+      counts: [0, 0],
+      reenabledNext: true,
+      sameAfterSecondEnable: reenabled?.nextAt,
+    });
+  });
+
+  it("audit a start refused for good and go on: a grant revoked, a person gone", async () => {
+    const admin = await person("admin");
+    const bob = await person("builder");
+    const workflow = await reporting(admin);
+    await shareWorkflowResource(env, admin, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const revoked = await scheduleTrigger(admin, workflow.id);
+    const departed = await scheduleTrigger(admin, workflow.id, { owner: bob });
+    await revokePermission(env, admin, revoked.permission);
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(bob.userId)
+      .run();
+    const occurrence = lastMinute();
+    await dueAt(revoked.id, occurrence);
+    await dueAt(departed.id, occurrence);
+    await startDueScheduleTriggers(env);
+    const schedules = await Promise.all(
+      [revoked, departed].map(async ({ id }) => await scheduleOf(id))
+    );
+    const runs = await Promise.all(
+      [revoked, departed].map(async ({ id }) => await runsOf(id))
+    );
+    const logged = await allEvents();
+    const refusals = [revoked, departed].map(({ id }) =>
+      logged
+        .filter(
+          ({ target, action }) =>
+            target?.id === id && action === "trigger.schedule.refused"
+        )
+        .map(({ detail }) => detail)
+    );
+
+    expect({
+      movedOn: schedules.map(
+        (schedule) => (schedule?.nextAt ?? 0) > occurrence.getTime()
+      ),
+      failedStarts: schedules.map((schedule) => schedule?.failedStarts),
+      runs: runs.map((started) => started.length),
+      refusals,
+    }).toStrictEqual({
+      movedOn: [true, true],
+      failedStarts: [1, 1],
+      runs: [0, 0],
+      refusals: Array.from({ length: 2 }, () => [
+        {
+          scheduledAt: occurrence.toISOString(),
+          code: "workflow.start_denied",
+        },
+      ]),
+    });
+  });
+
+  it("only back off on core's own failures, and stop after too many refusals, audited, its owner told, until enabled again", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const failing = await scheduleTrigger(admin, workflow.id);
+    const occurrence = lastMinute();
+    await dueAt(failing.id, occurrence);
+    // Core's database away for every try, longer than any count stops.
+    for (let attempt = 0; attempt < maxFailedStarts + 2; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await startDueScheduleTriggers(
+        failingOnce(/^insert into "workflow_start_receipts"/iu),
+        new Date(Date.now() + 2 ** attempt * minuteMs)
+      );
+    }
+    const afterOutage = await scheduleOf(failing.id);
+    const ungranted = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    // Refused: no longer waiting, its refusals count.
+    await revokePermission(env, admin, await askedStart(admin, ungranted.id));
+    // One more refusal would be too many.
+    await dueAt(ungranted.id, occurrence, maxFailedStarts - 1);
+    await startDueScheduleTriggers(env);
+    const stopped = await scheduleOf(ungranted.id);
+    const listedStopped = await listWorkflowTriggers(env, admin, workflow.id);
+    const told = await listNotifications(env, admin);
+    // Enabled again while enabled: its schedule starts again.
+    await setTriggerEnabled(env, admin, ungranted.id, true);
+    const restarted = await scheduleOf(ungranted.id);
+    const listedRestarted = await listWorkflowTriggers(env, admin, workflow.id);
+    const ungrantedRuns = await runsOf(ungranted.id);
+    const logged = await allEvents();
+    const about = logged.filter(
+      ({ target, action }) =>
+        target?.id === ungranted.id &&
+        (action.startsWith("trigger.schedule.") || action === "trigger.enabled")
+    );
+
+    expect({
+      outage: {
+        next: afterOutage?.nextAt,
+        failedStarts: afterOutage?.failedStarts,
+        backedOff: (afterOutage?.attempts ?? 0) > 0,
+      },
+      stopped: { next: stopped?.nextAt, failedStarts: stopped?.failedStarts },
+      // As its page shows it: stopped, the other not; then not, once enabled.
+      shownStopped: listedStopped.map(({ id, stopped: shown }) => [id, shown]),
+      shownRestarted: listedRestarted.map(({ id, stopped: shown }) => [
+        id,
+        shown,
+      ]),
+      told: told.notifications
+        .filter(({ type }) => type === "trigger_stopped")
+        .map((notification) =>
+          notification.type === "trigger_stopped"
+            ? {
+                trigger: notification.trigger,
+                workflow: notification.workflow,
+                workflowName: notification.workflowName,
+              }
+            : notification.type
+        ),
+      restarted: {
+        future: (restarted?.nextAt ?? 0) > Date.now() - minuteMs,
+        failedStarts: restarted?.failedStarts,
+      },
+      runs: ungrantedRuns.length,
+      audited: about.map(({ action, detail }) => ({ action, detail })),
+    }).toStrictEqual({
+      outage: { next: occurrence.getTime(), failedStarts: 0, backedOff: true },
+      stopped: { next: null, failedStarts: maxFailedStarts },
+      shownStopped: [
+        [failing.id, false],
+        [ungranted.id, true],
+      ],
+      shownRestarted: [
+        [failing.id, false],
+        [ungranted.id, false],
+      ],
+      told: [
+        {
+          trigger: ungranted.id,
+          workflow: workflow.id,
+          workflowName: workflow.name,
+        },
+      ],
+      restarted: { future: true, failedStarts: 0 },
+      runs: 0,
+      audited: [
+        {
+          action: "trigger.schedule.refused",
+          detail: {
+            scheduledAt: occurrence.toISOString(),
+            code: "workflow.start_denied",
+          },
+        },
+        {
+          action: "trigger.schedule.stopped",
+          detail: { failedStarts: maxFailedStarts },
+        },
+        { action: "trigger.schedule.restarted", detail: {} },
+      ],
+    });
+  });
+
+  it("back off, never stopping, while what the workflow keeps can't be checked, and start once it can", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    await keptFromTheBrain(env, workflow.id);
+    const occurrence = lastMinute();
+    await dueAt(trigger.id, occurrence);
+    // The Brain away for every try, longer than any count stops.
+    for (let attempt = 0; attempt < maxFailedStarts + 2; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await startDueScheduleTriggers(
+        brainAway(env),
+        new Date(Date.now() + 2 ** attempt * minuteMs)
+      );
+    }
+    const afterOutage = await scheduleOf(trigger.id);
+    // Back: its occurrence starts.
+    await startDueScheduleTriggers(
+      env,
+      new Date(Date.now() + 2 ** (maxFailedStarts + 3) * minuteMs)
+    );
+    const started = await runsOf(trigger.id);
+
+    expect({
+      outage: {
+        next: afterOutage?.nextAt,
+        failedStarts: afterOutage?.failedStarts,
+        backedOff: (afterOutage?.attempts ?? 0) > 0,
+      },
+      runs: started.map(({ key }) => key),
+    }).toStrictEqual({
+      outage: { next: occurrence.getTime(), failedStarts: 0, backedOff: true },
+      runs: [keyOf(trigger.id, occurrence)],
+    });
+  });
+
+  it("skip occurrences untried, uncounted and unlogged while their start waits for an admin, and start the next once granted", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    // More refusals while it waits than any count stops at.
+    for (let occurrence = 0; occurrence <= maxFailedStarts; occurrence += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one occurrence after another
+      await dueAt(waiting.id, lastMinute());
+      // oxlint-disable-next-line no-await-in-loop -- one occurrence after another
+      await startDueScheduleTriggers(env);
+    }
+    const whileWaiting = await scheduleOf(waiting.id);
+    const loggedWhileWaiting = await allEvents();
+    await grantStart(admin, waiting.id);
+    const occurrence = lastMinute();
+    await dueAt(waiting.id, occurrence, whileWaiting?.failedStarts ?? 0);
+    await startDueScheduleTriggers(env);
+    const granted = await scheduleOf(waiting.id);
+    const runs = await runsOf(waiting.id);
+
+    expect({
+      whileWaiting: {
+        goesOn: whileWaiting?.nextAt !== null,
+        failedStarts: whileWaiting?.failedStarts,
+        refusals: loggedWhileWaiting.filter(
+          ({ action, target }) =>
+            (action === "trigger.schedule.refused" &&
+              target?.id === waiting.id) ||
+            (action === "workflow.start.refused" && target?.id === workflow.id)
+        ).length,
+      },
+      granted: {
+        movedOn: (granted?.nextAt ?? 0) > occurrence.getTime(),
+        failedStarts: granted?.failedStarts,
+      },
+      runs: runs.map(({ key }) => key),
+    }).toStrictEqual({
+      whileWaiting: { goesOn: true, failedStarts: 0, refusals: 0 },
+      granted: { movedOn: true, failedStarts: 0 },
+      runs: [keyOf(waiting.id, occurrence)],
+    });
+  });
+
+  it("start an occurrence whose start was granted between its read and its skip", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    const occurrence = lastMinute();
+    await dueAt(waiting.id, occurrence);
+    // Granted after the clock read it as waiting, before it skipped it.
+    await startDueScheduleTriggers(
+      changedBefore(
+        /^update "trigger_schedules"/iu,
+        async () => await grantStart(admin, waiting.id)
+      )
+    );
+    const runs = await runsOf(waiting.id);
+
+    expect(runs.map(({ key }) => key)).toStrictEqual([
+      keyOf(waiting.id, occurrence),
+    ]);
+  });
+
+  it("leave an occurrence untried and unlogged when another clock run skipped it first, while its start waits", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    await dueAt(waiting.id, lastMinute());
+    // Another clock run, overlapping, skips it after this one read it.
+    await startDueScheduleTriggers(
+      changedBefore(/^update "trigger_schedules"/iu, async () => {
+        await startDueScheduleTriggers(env);
+      })
+    );
+    const logged = await allEvents();
+    const runs = await runsOf(waiting.id);
+
+    expect({
+      runs: runs.length,
+      refusals: logged.filter(
+        ({ action, target }) =>
+          (action === "workflow.start.refused" && target?.id === workflow.id) ||
+          (action === "trigger.schedule.refused" && target?.id === waiting.id)
+      ).length,
+    }).toStrictEqual({ runs: 0, refusals: 0 });
+  });
+
+  it("revoke a deleted trigger's permissions, and take no request for it, even one asked for as it is deleted", async () => {
+    const admin = await person("admin");
+    const bob = await person("builder");
+    const workflow = await reporting(admin);
+    await shareWorkflowResource(env, admin, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const granted = await scheduleTrigger(admin, workflow.id, { owner: bob });
+    const waiting = await scheduleTrigger(admin, workflow.id, {
+      owner: bob,
+      granted: false,
+    });
+    const racing = await scheduleTrigger(admin, workflow.id, {
+      granted: false,
+    });
+    // Refused, so its builder asks again.
+    await revokePermission(env, admin, await askedStart(admin, racing.id));
+    // Deleted by a builder, who could never revoke an admin's grant.
+    await deleteTriggerResource(env, bob, granted.id);
+    await deleteTriggerResource(env, bob, waiting.id);
+    const statusesOf = async (trigger: string) => {
+      const held = await listPermissions(env, admin, {
+        type: "trigger",
+        triggerId: trigger,
+      });
+      return held.map(({ status, revokedBy }) => ({ status, revokedBy }));
+    };
+    // Deleted between what the request read and its write.
+    const askedAgain = await outcome(
+      requestPermission(
+        env,
+        admin,
+        {
+          subject: { type: "trigger", triggerId: racing.id },
+          object: { type: "workflow", workflowId: workflow.id },
+          actions: ["start"],
+          binding: triggerStartBinding,
+        },
+        {
+          app: () => {
+            throw new Error("No App here");
+          },
+          resource: async (ref, needed) => {
+            await requireResourceRole(env, admin, ref, needed);
+          },
+        },
+        async () => {
+          await deleteTriggerResource(env, admin, racing.id);
+        }
+      )
+    );
+
+    const logged = await allEvents();
+    const revokedOf = (permission: string | undefined) =>
+      logged
+        .filter(
+          ({ action, target }) =>
+            action === "permission.revoked" && target?.id === permission
+        )
+        .map(({ actor }) => (actor.type === "person" ? actor.userId : actor));
+
+    expect({
+      granted: await statusesOf(granted.id),
+      grantRevokedBy: revokedOf(granted.permission),
+      waiting: await statusesOf(waiting.id),
+      askedAgain,
+      racing: await statusesOf(racing.id),
+    }).toStrictEqual({
+      // The start it asked for as it was created, granted, then revoked.
+      granted: [{ status: "revoked", revokedBy: bob.userId }],
+      // Audited as revoked, by whoever deleted the trigger.
+      grantRevokedBy: [bob.userId],
+      waiting: [{ status: "revoked", revokedBy: bob.userId }],
+      askedAgain: "workflow.trigger_unavailable",
+      racing: [{ status: "revoked", revokedBy: admin.userId }],
+    });
+  });
+
+  it("wait between failed tries from the last failure, however long overdue the occurrence is", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    // Three hours overdue, after an outage.
+    await dueAt(trigger.id, new Date(lastMinute().getTime() - 180 * minuteMs));
+    const failing = () =>
+      failingOnce(/^insert into "workflow_start_receipts"/iu);
+    const now = Date.now();
+    await startDueScheduleTriggers(failing(), new Date(now));
+    const first = await scheduleOf(trigger.id);
+    // Ten seconds on: still within the minute the first failure waits.
+    await startDueScheduleTriggers(failing(), new Date(now + 10_000));
+    const early = await scheduleOf(trigger.id);
+    // A minute on: tried again, and now it waits two.
+    await startDueScheduleTriggers(failing(), new Date(now + minuteMs));
+    const second = await scheduleOf(trigger.id);
+    await startDueScheduleTriggers(failing(), new Date(now + 2 * minuteMs));
+    const tooSoon = await scheduleOf(trigger.id);
+
+    expect({
+      first: first?.attempts,
+      early: early?.attempts,
+      second: second?.attempts,
+      tooSoon: tooSoon?.attempts,
+    }).toStrictEqual({ first: 1, early: 1, second: 2, tooSoon: 2 });
+  });
+
+  it("start nothing for an occurrence that stopped being the next between its read and its start", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const stale = lastMinute();
+    await dueAt(trigger.id, stale);
+    // Disabled and enabled again meanwhile: its schedule worked out anew.
+    const reworked = stale.getTime() + 60 * minuteMs;
+    await startDueScheduleTriggers(
+      changedBeforeAdmission(async () => {
+        await env.DB.prepare(
+          "UPDATE trigger_schedules SET next_at = ? WHERE trigger_id = ?"
+        )
+          .bind(reworked, trigger.id)
+          .run();
+      })
+    );
+    const runs = await runsOf(trigger.id);
+    const after = await scheduleOf(trigger.id);
+
+    expect({
+      runs: runs.length,
+      next: after?.nextAt,
+      failedStarts: after?.failedStarts,
+    }).toStrictEqual({ runs: 0, next: reworked, failedStarts: 0 });
+  });
+
+  it("never count an occurrence failed, or stop for it, once another clock run started it", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const occurrence = lastMinute();
+    // One more failure would stop it.
+    await dueAt(trigger.id, occurrence, maxFailedStarts - 1);
+    await startDueScheduleTriggers(
+      failingWhileAnotherStarts(async () => {
+        // The other clock run's try of the same occurrence, admitted.
+        await startWorkflow(
+          env,
+          { type: "trigger", triggerId: trigger.id },
+          workflow.id,
+          { expected: 1, args: nightly, key: keyOf(trigger.id, occurrence) },
+          undefined,
+          { scheduledAt: occurrence.toISOString() }
+        );
+      })
+    );
+    const between = await scheduleOf(trigger.id);
+    // The next clock run moves it on from the occurrence started.
+    await startDueScheduleTriggers(env);
+    const after = await scheduleOf(trigger.id);
+    const runs = await runsOf(trigger.id);
+    const logged = await allEvents();
+
+    expect({
+      between: { next: between?.nextAt, failedStarts: between?.failedStarts },
+      movedOn: (after?.nextAt ?? 0) > occurrence.getTime(),
+      failedStarts: after?.failedStarts,
+      runs: runs.map(({ key }) => key),
+      stopped: logged.filter(
+        ({ action, target }) =>
+          action === "trigger.schedule.stopped" && target?.id === trigger.id
+      ).length,
+    }).toStrictEqual({
+      between: {
+        next: occurrence.getTime(),
+        failedStarts: maxFailedStarts - 1,
+      },
+      movedOn: true,
+      failedStarts: 0,
+      runs: [keyOf(trigger.id, occurrence)],
+      stopped: 0,
+    });
+  });
+
+  // Where core may have died in an earlier turn at an occurrence, and what
+  // may have changed since: each pair, the next turn ends where it should.
+  // Dying before the start, while sending it (before its receipt) or
+  // before recording a failure leaves nothing written; dying after the
+  // receipt leaves the occurrence started, not moved on. A version
+  // published meanwhile never starts it twice: the occurrence's key is
+  // the same whichever version it starts.
+  const crashes = [
+    { crash: "before the start", started: false },
+    { crash: "after the start was sent, before its receipt", started: false },
+    { crash: "after the receipt, before moving on", started: true },
+    { crash: "before a failure was recorded", started: false },
+  ] as const;
+  const changes = [
+    "revoked",
+    "disabled",
+    "published",
+    "run limit full",
+  ] as const;
+  const pairs = crashes.flatMap(({ crash, started }) =>
+    changes.map((change) => ({ crash, started, change }))
+  );
+
+  it.each(pairs)(
+    "end where they should when core died $crash and the trigger was then $change",
+    async ({ started, change }) => {
+      const admin = await person("admin");
+      const workflow = await reporting(admin);
+      await publishDefinition(
+        env,
+        admin,
+        workflow.id,
+        definitionOf("report", "2")
+      );
+      const trigger = await scheduleTrigger(admin, workflow.id);
+      const occurrence = lastMinute();
+      await dueAt(trigger.id, occurrence);
+      if (started) {
+        await startWorkflow(
+          env,
+          { type: "trigger", triggerId: trigger.id },
+          workflow.id,
+          { expected: 2, args: nightly, key: keyOf(trigger.id, occurrence) },
+          undefined,
+          { scheduledAt: occurrence.toISOString() }
+        );
+      }
+      if (change === "revoked") {
+        await revokePermission(env, admin, trigger.permission);
+      } else if (change === "disabled") {
+        await setTriggerEnabled(env, admin, trigger.id, false);
+      } else if (change === "published") {
+        await publishDefinition(
+          env,
+          admin,
+          workflow.id,
+          definitionOf("report", "3")
+        );
+      }
+      await startDueScheduleTriggers(
+        change === "run limit full" ? runLimitFull() : env
+      );
+      const schedule = await scheduleOf(trigger.id);
+      const runs = await runsOf(trigger.id);
+      const counted = (schedule?.failedStarts ?? 0) > 0;
+      const movedOn = (schedule?.nextAt ?? 0) > occurrence.getTime();
+
+      // Started: moved on whatever changed, unless the trigger was
+      // disabled, which works its schedule out again. Not started: a
+      // publish starts it on the new version, once.
+      const expected =
+        started || change === "published"
+          ? {
+              runs: 1,
+              counted: false,
+              movedOn: change !== "disabled",
+            }
+          : {
+              runs: 0,
+              counted: change === "revoked" || change === "run limit full",
+              // Refused for good moves on; a full run limit retries it.
+              movedOn: change === "revoked",
+            };
+      expect({ runs: runs.length, counted, movedOn }).toStrictEqual(expected);
+    }
+  );
+
+  it("fire once per local time they name through the hour the autumn change repeats", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const halfHourly = await scheduleTrigger(admin, workflow.id, {
+      cron: "*/30 * * * *",
+      timeZone: "Europe/Amsterdam",
+    });
+    const hourly = await scheduleTrigger(admin, workflow.id, {
+      cron: "0 * * * *",
+      timeZone: "Europe/Amsterdam",
+    });
+    // 2:00 CEST on 25 October 2026; 2:00 to 3:00 CET repeats it.
+    const start = new Date("2026-10-25T00:00:00Z");
+    await dueAt(halfHourly.id, start);
+    await dueAt(hourly.id, start);
+    for (let step = 0; step <= 4; step += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one clock run after another
+      await startDueScheduleTriggers(
+        env,
+        new Date(start.getTime() + step * 30 * minuteMs + 1000)
+      );
+    }
+    const keysOf = async (id: string) => {
+      const runs = await runsOf(id);
+      return runs.map(({ key }) => key.split(":").slice(3).join(":"));
+    };
+
+    expect({
+      halfHourly: await keysOf(halfHourly.id),
+      hourly: await keysOf(hourly.id),
+    }).toStrictEqual({
+      // 2:00 and 2:30 CEST, then 3:00 CET: not 2:00 and 2:30 CET again.
+      halfHourly: [
+        "2026-10-25T00:00:00.000Z",
+        "2026-10-25T00:30:00.000Z",
+        "2026-10-25T02:00:00.000Z",
+      ],
+      hourly: ["2026-10-25T00:00:00.000Z", "2026-10-25T02:00:00.000Z"],
+    });
+  });
+
+  it("take only a schedule, time zone and input that hold, for the live version", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const create = async (config: unknown) =>
+      await outcome(
+        createTriggerResource(env, admin, {
+          kind: "schedule",
+          workflowId: workflow.id,
+          config,
+        })
+      );
+    expect({
+      sixFields: await create(scheduleConfig("0 * * * * *")),
+      nonsense: await create(scheduleConfig("every day")),
+      neverAgain: await create(scheduleConfig("0 0 30 2 *")),
+      zone: await create(scheduleConfig("* * * * *", "Mars/Olympus")),
+      input: await create(scheduleConfig("* * * * *", "UTC", { job: "x" })),
+      tooLarge: await create(
+        scheduleConfig("* * * * *", "UTC", {
+          report: "x".repeat(platformLimits.functionArgsBytes),
+        })
+      ),
+      backlog: await create({
+        ...scheduleConfig(),
+        missedOccurrences: "all",
+      }),
+    }).toStrictEqual({
+      sixFields: "workflow.resource_invalid",
+      nonsense: "workflow.resource_invalid",
+      neverAgain: "workflow.resource_invalid",
+      zone: "workflow.resource_invalid",
+      input: "workflow.resource_invalid",
+      tooLarge: "workflow.resource_invalid",
+      backlog: "workflow.resource_invalid",
+    });
+
+    // A wrong input says which field, by its path in the trigger's config,
+    // and never what was typed there.
+    const typed = "not-what-a-report-is";
+    const refused: unknown = await createTriggerResource(env, admin, {
+      kind: "schedule",
+      workflowId: workflow.id,
+      config: scheduleConfig("* * * * *", "UTC", { report: 7, job: typed }),
+    }).catch((error: unknown) => error);
+    // Its code and details, as they cross to whoever asked.
+    const said = JSON.stringify(refused);
+    expect({
+      refusal: said.includes('"workflow.resource_invalid"'),
+      where: said.includes('"config.input.report: '),
+      leaks: said.includes(typed),
+    }).toStrictEqual({ refusal: true, where: true, leaks: false });
+  });
+});

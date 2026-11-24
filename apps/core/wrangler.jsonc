@@ -1,0 +1,223 @@
+// Released, never deployed from here: CI builds it into every release, and
+// the admin deploys each client's core from it, creating the D1 databases
+// and R2 buckets below in the EU jurisdiction;
+// Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
+// workflow runs included: each is a Durable Object of its own.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "grasp-os-core",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "compatibility_flags": ["nodejs_compat"],
+  // The router reaches core on its workers.dev address, where every request
+  // must carry the router secret. Preview URLs stay off: each would serve an
+  // uploaded version of core, older ones included, at an address of its own.
+  "workers_dev": true,
+  "preview_urls": false,
+  // Durable Objects bundle their Drizzle migrations as text, and the Grasp
+  // skills (skills/) ship as text too.
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.sql", "**/SKILL.md"],
+      "fallthrough": true,
+    },
+  ],
+  // Minified, core is less than half its size (23 MB to 11 MB): a faster
+  // upload, a lighter deploy, and more room under Cloudflare's startup
+  // limit. Class and function names stay (esbuild's keepNames), as core
+  // reads them at run time (src/staff-audit.ts), and so do its libraries;
+  // the on-prem smoke run fails a bundle that loses one. Its source map
+  // goes up with it, so Cloudflare's logs show stack traces with real
+  // files and functions.
+  "minify": true,
+  "keep_names": true,
+  "upload_source_maps": true,
+  // No platform line per invocation: core logs the events it needs itself
+  // (@grasp-os/shared/log), never headers or bodies (threat model R17).
+  // Query strings stay out of logs and traces: the OAuth callback's carries
+  // the code and state (threat model R17, CN3).
+  // Page modules' and package artifacts' tokens ride in the query for
+  // this reason, never in a path, which traces keep whole (page-frame.ts).
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+    "traces": { "enabled": true },
+  },
+  // The frontend (apps/web) is served as static files by core. The Worker runs
+  // first for every path, so static files too pass the router-secret check
+  // before it serves them through the ASSETS binding.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  // The admin sets the deployment config vars below (SIGN_IN,
+  // PLATFORM_CHANGE) through the API; without this, every deploy
+  // would delete them, as Wrangler deletes the vars it doesn't find here.
+  "keep_vars": true,
+  // Every secret core needs: deploys fail while one is unset, and local dev
+  // loads only these from .dev.vars. ROUTER_SECRET is the one the router
+  // sends on every request, which it derives from its key for this client
+  // (@grasp-os/shared/router); while it rotates, core also accepts
+  // ROUTER_SECRET_PREVIOUS (optional, src/router-secret.ts).
+  // BETTER_AUTH_SECRET signs session cookies
+  // and encrypts sign-in state. CAPABILITY_SIGNING_KEY is shared with
+  // connect: core signs the capability every call to connect carries.
+  //
+  // Sign-in is deployment config the admin sets, not listed here: the
+  // `SIGN_IN` var (src/auth/config.ts) and the client secret of each IdP it
+  // names, ENTRA_CLIENT_SECRET and GOOGLE_CLIENT_SECRET. Without them nobody
+  // can sign in.
+  //
+  // Model calls need no secret: every provider key is connect's, the
+  // organization's own (which its admins add in Settings) and Grasp's.
+  // Until an admin connects an AI provider, model calls fail as
+  // `model.no_provider`.
+  //
+  // So is `PLATFORM_CHANGE` (src/platform-updates.ts): who made this
+  // version, and what they changed, which the clock records in the audit log
+  // once per version.
+  //
+  // And who the mail core sends is from, `MAIL_FROM` (src/mail.ts): a
+  // name and an address on the deployment's sending domain, set up for
+  // Email Sending outside core. Without it core sends no mail, and each
+  // mail it means to send fails, saying why.
+  //
+  // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
+  // `cloudflare` makes Code Mode's run record claim the CPU limit as
+  // enforced. Not a var here, which local dev and tests read too: the admin
+  // sets it on every client deploy (apps/admin/src/deploy/core-config.ts). Plain workerd
+  // and on-prem say `workerd` (scripts/workerd-smoke-config.ts).
+  //
+  // Local dev reads none of these from .dev.vars (Wrangler loads only the
+  // required secrets and declared vars from it): pass them with
+  // `wrangler dev --var NAME:<value>`, as core's dev script does for its own
+  // switches. Their types are in src/env.d.ts.
+  "secrets": {
+    "required": [
+      "ROUTER_SECRET",
+      "BETTER_AUTH_SECRET",
+      "CAPABILITY_SIGNING_KEY",
+    ],
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "WORKSPACES", "class_name": "Workspace" },
+      { "name": "APPS", "class_name": "App" },
+      // One object per App, named by its ID: the preview of its draft, run
+      // for everyone who builds it, on one store of test data
+      // (src/app-preview.ts).
+      { "name": "APP_PREVIEWS", "class_name": "AppPreview" },
+      // One object per App's or workflow's draft, named by its subject:
+      // the pages that follow it, told of each write (src/draft-watch.ts).
+      { "name": "DRAFT_WATCHES", "class_name": "DraftWatch" },
+      { "name": "AUDIT_LOG", "class_name": "AuditLog" },
+      // The one object that installs what ships with each release
+      // (src/builtins.ts).
+      { "name": "BUILTINS", "class_name": "Builtins" },
+      // The client's clock: maintenance, repair and schedule admission on
+      // its own alarm (src/clock.ts).
+      { "name": "CLOCK", "class_name": "Clock" },
+      // The onboarding's one store (src/onboarding/store.ts).
+      { "name": "ONBOARDING", "class_name": "Onboarding" },
+      // One object per business store, named by the store's ID
+      // (src/data-store.ts, src/data-stores.ts).
+      { "name": "DATA_STORES", "class_name": "DataStore" },
+      // One object per workflow run, App's and core's own alike: the
+      // engine (src/workflows/engine.ts, run-object.ts). Its definition is
+      // loaded per activation by App and pinned version, with an env
+      // rebuilt from permissions every time (src/workflows/dispatcher.ts).
+      { "name": "WORKFLOW_RUNS", "class_name": "WorkflowRuns" },
+      // One object per foreground action invocation, streaming or not, named
+      // by its person, App, contract and key (src/action-invocation.ts).
+      { "name": "ACTION_INVOCATIONS", "class_name": "ActionInvocation" },
+      // The Chat SDK's state for Stephen's door into core from chat apps
+      // (@grasp-os/chat/state): one object per key and per conversation.
+      { "name": "CHAT_STATE", "class_name": "ChatState" },
+      // One object per chat: its agent's turns on pi-durable, and its
+      // transcript as the model reads it (src/chat-session.ts).
+      { "name": "CHAT_SESSIONS", "class_name": "ChatSession" },
+      // The Brain's one store (@grasp-os/brain-next), reached only through
+      // its contract (src/brain-next.ts).
+      { "name": "BRAIN_STORE", "class_name": "BrainStore" },
+      // Our own embedding model, run from MODEL_FILES (@grasp-os/embed):
+      // questions have an object of their own (src/embedder.ts).
+      { "name": "EMBEDDER", "class_name": "Embedder" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Workspace", "App", "AuditLog"] },
+    { "tag": "v2", "new_sqlite_classes": ["Builtins"] },
+    { "tag": "v3", "new_sqlite_classes": ["Onboarding"] },
+    { "tag": "v4", "new_sqlite_classes": ["ModelLedger"] },
+    { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
+    { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
+    { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
+    { "tag": "v8", "new_sqlite_classes": ["Clock"] },
+    { "tag": "v9", "new_sqlite_classes": ["ChatState"] },
+    { "tag": "v10", "new_sqlite_classes": ["ChatSession"] },
+    // The model ledger, and its storage: spend is recorded after each
+    // response, in D1 (src/model-usage.ts).
+    { "tag": "v11", "deleted_classes": ["ModelLedger"] },
+    { "tag": "v12", "new_sqlite_classes": ["BrainStore"] },
+    { "tag": "v13", "new_sqlite_classes": ["Embedder"] },
+    { "tag": "v14", "new_sqlite_classes": ["AppPreview"] },
+    { "tag": "v15", "new_sqlite_classes": ["DraftWatch"] },
+  ],
+  // Runs App sandboxes and the App compiler.
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "grasp-os-core",
+      "migrations_dir": "src/db/core/migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "grasp-os-files",
+      "jurisdiction": "eu",
+    },
+    // Audit events past retention, moved out of the AuditLog object as they
+    // were stored (src/audit-log.ts). Only core writes it.
+    {
+      "binding": "AUDIT_ARCHIVE",
+      "bucket_name": "grasp-os-audit-archive",
+      "jurisdiction": "eu",
+    },
+    // The Brain's files: its original source files, one per content hash
+    // under `sources/` (@grasp-os/brain-next's files.ts), and what its
+    // stores keep beside them. One bucket per deployment, private, in the
+    // EU; only core reads and writes it.
+    {
+      "binding": "BRAIN_OBJECTS",
+      "bucket_name": "grasp-os-brain-objects",
+      "jurisdiction": "eu",
+    },
+    // The embedding model's files (@grasp-os/embed), each under its hash:
+    // the admin's deploy copies in the files the release names
+    // (apps/admin/src/deploy/model-files.ts), and the embedder reads and
+    // checks them. Model files only, never client data.
+    {
+      "binding": "MODEL_FILES",
+      "bucket_name": "grasp-os-models",
+      "jurisdiction": "eu",
+    },
+  ],
+  // Sends mail, through the mail outbox (src/mail-outbox.ts), from
+  // `MAIL_FROM`. On-prem binds `EMAIL` to a service of its own that takes
+  // the same message, or leaves it unbound, and core then sends nothing
+  // (src/mail.ts). Mail in comes from Email Routing: a catch-all rule for the
+  // deployment's mail domain that sends every message to this Worker's
+  // `email` handler (src/workflows/inbound-email.ts), set up with the
+  // domain, outside this file.
+  "send_email": [{ "name": "EMAIL" }],
+  // The running version's ID, which the clock records once per version to
+  // audit platform updates (src/platform-updates.ts).
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "services": [{ "binding": "CONNECT", "service": "grasp-os-connect" }],
+}

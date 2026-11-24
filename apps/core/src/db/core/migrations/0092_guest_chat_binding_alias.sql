@@ -1,0 +1,1 @@
+ALTER TABLE `guest_chats` ADD `binding_alias` text;

@@ -1,0 +1,237 @@
+/**
+ * Placed clients as the admin's tests start from them: a release a placed
+ * client runs, imported, and a client provisioned on it in the stage's
+ * destination (Grasp's account's clients' namespace on the fake Cloudflare
+ * API), live, as staff leave it once its operation is done
+ * (src/hosting/operation.ts).
+ */
+import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+
+import { act } from "../src/db/act.ts";
+import {
+  clientRuns,
+  clients,
+  clientWorkers,
+  releases,
+} from "../src/db/schema.ts";
+import { deployContext } from "../src/deploy/context.ts";
+import { placeClient } from "../src/hosting/inventory.ts";
+import {
+  runClientProvision,
+  startClientProvision,
+  startClientRelease,
+} from "../src/hosting/operation.ts";
+import {
+  ensureStageDestination,
+  stageDestinationId,
+} from "../src/hosting/placement.ts";
+import type { Channel } from "../src/rollout/channel-ids.ts";
+import { claimRun } from "../src/runners.ts";
+import type { AccountState, CoreState } from "./cloudflare-api-kit.ts";
+import type { fakeCloudflareApi } from "./cloudflare-api.ts";
+import { graspAccount, testStage } from "./grasp-account.ts";
+import { db, staff } from "./hosting.ts";
+import { buildRelease, putBlobs } from "./releases.ts";
+import type { ReleaseSpec } from "./releases.ts";
+
+/**
+ * When the last release was built: each later one is newer, and newer than
+ * any built before this module was evaluated again (as the browser
+ * journeys' admin may, test/e2e-worker.ts).
+ */
+let built = 0;
+
+/**
+ * A release a placed client runs, imported as the admin imports one: core
+ * binds its own Durable Object classes, and none of the Workflows binding
+ * a placed client has no resource for, and no Worker has cron triggers,
+ * which a Workers for Platforms namespace doesn't run. `adjust` changes
+ * core.
+ */
+export const placedRelease = async (
+  notes: string,
+  spec: Omit<ReleaseSpec, "notes"> = {},
+  adjust: (core: WorkerEntry) => WorkerEntry = (core) => core
+): Promise<string> => {
+  const release = await buildRelease({ notes, crons: [], ...spec });
+  const { core } = release.manifest.workers;
+  if (core === undefined) {
+    throw new Error("The test release has no core");
+  }
+  const manifest: ReleaseManifest = {
+    ...release.manifest,
+    workers: {
+      ...release.manifest.workers,
+      core: adjust({
+        ...core,
+        durableObjectMigrations: [
+          { tag: "v1", new_sqlite_classes: ["Workspace", "AuditLog"] },
+        ],
+        bindings: core.bindings.filter(({ type }) => type !== "workflow"),
+      }),
+    },
+  };
+  await putBlobs(release);
+  built = Math.max(built + 1000, Date.now());
+  await db.insert(releases).values({
+    id: manifest.releaseId,
+    commitSha: manifest.commit,
+    manifest: JSON.stringify(manifest),
+    manifestSha256: "0".repeat(64),
+    builtAt: new Date(built),
+    importedAt: new Date(built),
+  });
+  return manifest.releaseId;
+};
+
+/** What a placed client is recorded as. */
+export interface PlacedClientOptions {
+  /** Its id; a new one when not given. */
+  id?: string;
+  /** Its name; `Acme <id>` when not given. */
+  name?: string;
+  /** How its people sign in, as staff give it; Acme's when not given, none for null. */
+  signIn?: Record<string, unknown> | null;
+  /** The release channel it follows; Stable when not given. */
+  channel?: Channel;
+}
+
+/** A live placed client: its core on the fake, and the account its scripts run in. */
+export interface PlacedClient {
+  clientId: string;
+  /** Its core, as the fake answers for it: a test sets how. */
+  core: CoreState;
+  /** Grasp's account, whose clients' namespace its scripts run in. */
+  account: AccountState;
+  destinationId: string;
+  /** What its resources' names are made from: `grasp-<deploymentId>-…`. */
+  deploymentId: string;
+}
+
+/**
+ * A client, placed in the stage's destination on `cloudflare`,
+ * and not provisioned yet: as staff leave it once they've added and
+ * placed it.
+ */
+export const placedClientRecord = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  {
+    id = `client-${crypto.randomUUID().slice(0, 8)}`,
+    name = `Acme ${id}`,
+    signIn = {
+      domains: ["acme.test"],
+      admins: ["ada@acme.test"],
+      googleHostedDomain: "acme.test",
+    },
+    channel = "stable",
+  }: PlacedClientOptions = {}
+): Promise<PlacedClient> => {
+  const account = graspAccount(cloudflare);
+  await ensureStageDestination(env, db);
+  const destinationId = stageDestinationId(testStage);
+  const clientId = id;
+  const core = cloudflare.coreOf(clientId);
+  core.name = name;
+  const now = new Date();
+  await act(
+    db,
+    staff,
+    [
+      db.insert(clients).values({
+        id: clientId,
+        name,
+        channel,
+        signIn: signIn === null ? null : JSON.stringify(signIn),
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ],
+    { action: "client.create", clientId }
+  );
+  const { deploymentId } = await placeClient(db, staff, {
+    clientId,
+    destinationId,
+  });
+  return { clientId, core, account, destinationId, deploymentId };
+};
+
+/**
+ * Runs placed client `clientId`'s operation for `releaseId`, as a new
+ * attempt holding it, until it's done: provisioning it the first time,
+ * then releasing it, or running the release it runs again (its settings
+ * and secrets as they are now). Throws what the operation stopped with.
+ */
+export const deployPlaced = async (
+  clientId: string,
+  releaseId: string
+): Promise<void> => {
+  // Claimed first: only the holder starts the operation.
+  const before = await db
+    .select({ runId: clientRuns.runId })
+    .from(clientRuns)
+    .where(eq(clientRuns.clientId, clientId))
+    .get();
+  const runId = await claimRun(
+    db,
+    staff,
+    clientId,
+    before?.runId ?? null,
+    { action: "client.provision_placed", clientId },
+    {
+      kind: "provision_placed",
+      runId: `${clientId}-p${crypto.randomUUID().slice(0, 8)}`,
+    }
+  );
+  if (runId === undefined) {
+    throw new Error(`${clientId} wasn't claimed`);
+  }
+  const held = { clientId, runId };
+  const [client] = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  await (client?.status === "active"
+    ? startClientRelease(db, staff, held, { releaseId, again: true })
+    : startClientProvision(db, staff, held, releaseId));
+  await runClientProvision(await deployContext(env), held);
+};
+
+/**
+ * A client on `releaseId`, placed in the stage's destination on
+ * `cloudflare`, and provisioned there: live, its operation done and its
+ * runner released.
+ */
+export const livePlacedClient = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  releaseId: string,
+  options?: PlacedClientOptions
+): Promise<PlacedClient> => {
+  const client = await placedClientRecord(cloudflare, options);
+  await deployPlaced(client.clientId, releaseId);
+  const [row] = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, client.clientId));
+  if (row?.status !== "active") {
+    throw new Error(`${client.clientId} isn't live after provisioning`);
+  }
+  return client;
+};
+
+/** Client `clientId`'s scripts in its destination, by Worker, as its operation recorded them. */
+export const scriptsOf = async (
+  clientId: string
+): Promise<{ core: string; connect: string }> => {
+  const rows = await db
+    .select({ worker: clientWorkers.worker, script: clientWorkers.scriptName })
+    .from(clientWorkers)
+    .where(eq(clientWorkers.clientId, clientId));
+  const core = rows.find(({ worker }) => worker === "core")?.script;
+  const connect = rows.find(({ worker }) => worker === "connect")?.script;
+  if (core === undefined || connect === undefined) {
+    throw new Error(`${clientId} has no scripts recorded`);
+  }
+  return { core, connect };
+};

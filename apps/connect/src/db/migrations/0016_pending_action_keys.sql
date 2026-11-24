@@ -1,0 +1,1 @@
+CREATE INDEX `pending_actions_key_idx` ON `pending_actions` (`idempotency_key`);

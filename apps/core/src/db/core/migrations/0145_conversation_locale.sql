@@ -1,0 +1,1 @@
+ALTER TABLE `channel_conversations` ADD `locale` text;

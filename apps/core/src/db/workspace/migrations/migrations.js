@@ -1,0 +1,90 @@
+import journal from './meta/_journal.json';
+import m0000 from './0000_chats.sql';
+import m0001 from './0001_restricted_chats.sql';
+import m0002 from './0002_agent_sessions.sql';
+import m0003 from './0003_chat_sources.sql';
+import m0004 from './0004_personal_chats.sql';
+import m0005 from './0005_chat_drafts.sql';
+import m0006 from './0006_chat_attachments.sql';
+import m0007 from './0007_chat_owner_required.sql';
+import m0008 from './0008_chat_code_runs.sql';
+import m0009 from './0009_chat_build_jobs.sql';
+import m0010 from './0010_dashboard_layouts.sql';
+import m0011 from './0011_chat_projects.sql';
+import m0012 from './0012_preview_releases.sql';
+import m0013 from './0013_email_preferences.sql';
+import m0014 from './0014_chat_draft_call_id.sql';
+import m0015 from './0015_chat_documents.sql';
+import m0016 from './0016_chat_run_sources.sql';
+import m0017 from './0017_chat_via.sql';
+import m0018 from './0018_chat_tool_events.sql';
+import m0019 from './0019_chat_thread.sql';
+import m0020 from './0020_chat_draft_versions.sql';
+import m0021 from './0021_brain_capture_intents.sql';
+import m0022 from './0022_chat_last_at.sql';
+import m0023 from './0023_chat_thinking_ms.sql';
+import m0024 from './0024_custom_widgets.sql';
+import m0025 from './0025_chat_app.sql';
+import m0026 from './0026_chat_search_text.sql';
+import m0027 from './0027_drop_email_preferences.sql';
+import m0028 from './0028_chat_files.sql';
+import m0029 from './0029_drop_chat_projects.sql';
+import m0030 from './0030_build_job_notice_owed.sql';
+import m0031 from './0031_drop_chat_attachments.sql';
+import m0032 from './0032_chat_turn_versions.sql';
+import m0033 from './0033_draft_definitions.sql';
+import m0034 from './0034_chat_make.sql';
+import m0035 from './0035_answer_agent.sql';
+import m0036 from './0036_greedy_rafael_vega.sql';
+import m0037 from './0037_mature_tinkerer.sql';
+import m0038 from './0038_chat_answer_rating.sql';
+import m0039 from './0039_chat_request_keys.sql';
+import m0040 from './0040_chat_archived_project.sql';
+
+  export default {
+    journal,
+    migrations: {
+      m0000,
+m0001,
+m0002,
+m0003,
+m0004,
+m0005,
+m0006,
+m0007,
+m0008,
+m0009,
+m0010,
+m0011,
+m0012,
+m0013,
+m0014,
+m0015,
+m0016,
+m0017,
+m0018,
+m0019,
+m0020,
+m0021,
+m0022,
+m0023,
+m0024,
+m0025,
+m0026,
+m0027,
+m0028,
+m0029,
+m0030,
+m0031,
+m0032,
+m0033,
+m0034,
+m0035,
+m0036,
+m0037,
+m0038,
+m0039,
+m0040
+    }
+  }
+  

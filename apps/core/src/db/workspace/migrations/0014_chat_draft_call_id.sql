@@ -1,0 +1,1 @@
+ALTER TABLE `chat_drafts` ADD `call_id` text;

@@ -1,0 +1,1 @@
+CREATE INDEX `workflow_runs_root_idx` ON `workflow_runs` (`root_run_id`) WHERE root_run_id IS NOT NULL;

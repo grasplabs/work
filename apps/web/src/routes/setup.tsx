@@ -1,0 +1,724 @@
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
+import { directorySuiteSchema } from "@grasp-os/shared/directory";
+import type { OnboardingDirectory } from "@grasp-os/shared/directory";
+import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
+import type { OnboardingHr } from "@grasp-os/shared/hr";
+import type {
+  LinkToSend,
+  OnboardingReview,
+  OnboardingView,
+} from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
+import { flowScreens } from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+} from "@grasp-os/shared/onboarding-flow";
+import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import type { Organization } from "@grasp-os/shared/organization";
+import { isAdmin } from "@grasp-os/shared/roles";
+import { useLingui } from "@lingui/react/macro";
+import {
+  createFileRoute,
+  Navigate,
+  redirect,
+  useNavigate,
+} from "@tanstack/react-router";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+
+import { DotBrain } from "../brain/dot-brain.tsx";
+import type { BrainScene } from "../brain/dot-brain.tsx";
+import { loadCoreStatus } from "../core-connection.ts";
+import type { Session } from "../core.ts";
+import { PageError } from "../frame/page-states.tsx";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import { useReveal } from "../onboarding/reveal-state.ts";
+import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
+import { SetupStepBody } from "../onboarding/setup-steps.tsx";
+import {
+  brainScene,
+  isReviewItem,
+  isStep,
+  finishedAt,
+  heldAt,
+  keptAt,
+  listeningOf,
+  reachedByPlace,
+  reachedOf,
+  settledAs,
+  stepIndex,
+  steps,
+  stepShown,
+  suitesFor,
+  waysFrom,
+} from "../onboarding/setup.ts";
+import type {
+  AiReadiness,
+  Kept,
+  ReviewItemId,
+  SetupPath,
+  SetupStep,
+} from "../onboarding/setup.ts";
+import { wasHeard } from "../onboarding/visit.ts";
+import { signInErrorSearch } from "../sign-in-errors.ts";
+import { useCore } from "../use-core.ts";
+import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
+
+// The client onboarding (prototype `routes/onboarding.tsx`): what a
+// company's admin goes through until Grasp opens, full screen and outside
+// the app. The brain on top, taking a new figure for each step, and one
+// step at a time below it, each fading in; the step is in the address, so
+// the browser's back and forward work too. Stephen says each step as it
+// arrives (setup-parts.tsx). Admins only: core refuses
+// everyone else, and anyone else is taken home. Grasp's staff are sent to
+// /staff: they steer the onboarding from the admin dashboard.
+
+/** The suites whose directory the company step offers, in order. */
+const directorySuites = directorySuiteSchema.options;
+
+/** How wide the column is by step, and how large the brain: roomier where there is more to read. */
+const layout: Record<SetupStep, { width: string; brain: number }> = {
+  welcome: { width: "max-w-120", brain: 400 },
+  ai: { width: "max-w-110", brain: 260 },
+  about: { width: "max-w-140", brain: 340 },
+  company: { width: "max-w-110", brain: 420 },
+  sources: { width: "max-w-150", brain: 260 },
+  documents: { width: "max-w-150", brain: 260 },
+  pulse: { width: "max-w-140", brain: 240 },
+  leads: { width: "max-w-140", brain: 260 },
+  team: { width: "max-w-130 lg:max-w-240", brain: 270 },
+  listening: { width: "max-w-140 lg:max-w-240", brain: 300 },
+  review: { width: "max-w-110", brain: 330 },
+  open: { width: "max-w-110", brain: 450 },
+};
+
+/** The brain's sizes, by ten pixels: a class each, as a class is never built from a number. */
+const brainSizes: Record<number, string> = {
+  120: "size-30",
+  130: "size-32.5",
+  140: "size-35",
+  150: "size-37.5",
+  160: "size-40",
+  170: "size-42.5",
+  180: "size-45",
+  190: "size-47.5",
+  200: "size-50",
+  210: "size-52.5",
+  220: "size-55",
+  230: "size-57.5",
+  240: "size-60",
+  250: "size-62.5",
+  260: "size-65",
+  270: "size-67.5",
+  280: "size-70",
+  290: "size-72.5",
+  300: "size-75",
+  310: "size-77.5",
+  320: "size-80",
+  330: "size-82.5",
+  340: "size-85",
+  350: "size-87.5",
+  360: "size-90",
+  370: "size-92.5",
+  380: "size-95",
+  390: "size-97.5",
+  400: "size-100",
+  410: "size-102.5",
+  420: "size-105",
+  430: "size-107.5",
+  440: "size-110",
+  450: "size-112.5",
+};
+
+/** What stands around the brain and a step, in pixels: the frame's top and bottom, its own margins, and the room between the brain and the step. */
+const around = 190;
+/** The smallest the brain gets to make room, and the steps it gives way in, so it does not flutter as a line comes and goes. */
+const brainLeast = 120;
+const brainStep = 20;
+
+const onResize = (listener: () => void): (() => void) => {
+  window.addEventListener("resize", listener);
+  return () => {
+    window.removeEventListener("resize", listener);
+  };
+};
+
+/** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
+const keptKey = (userId: string): string => `grasp.setup.${userId}`;
+
+/**
+ * Which list of steps a kept place counts in: 2 since the AI step came
+ * second; 3 since core keeps the place by the screens' names, and this
+ * browser's own number is only how far it went on this visit.
+ */
+const keptSteps = 3;
+
+const readKept = (userId: string): Kept => {
+  try {
+    const raw: unknown = JSON.parse(
+      localStorage.getItem(keptKey(userId)) ?? "null"
+    );
+    if (typeof raw !== "object" || raw === null) {
+      return { reached: 0, message: null, settled: [] };
+    }
+    const stored =
+      "reached" in raw && typeof raw.reached === "number" ? raw.reached : 0;
+    // A place core has by now counts for nothing here. One kept before
+    // the AI step came second counts one further: every step after the
+    // welcome moved up.
+    let reached = stored;
+    if ("steps" in raw && raw.steps === keptSteps) {
+      reached = 0;
+    } else if (!("steps" in raw) && stored > 0) {
+      reached = stored + 1;
+    }
+    const message =
+      "message" in raw && typeof raw.message === "string" ? raw.message : null;
+    const settled =
+      "settled" in raw && Array.isArray(raw.settled)
+        ? raw.settled.filter(isReviewItem)
+        : [];
+    return { reached, message, settled };
+  } catch {
+    return { reached: 0, message: null, settled: [] };
+  }
+};
+
+const writeKept = (userId: string, kept: Kept): void => {
+  try {
+    localStorage.setItem(
+      keptKey(userId),
+      JSON.stringify({ ...kept, steps: keptSteps })
+    );
+  } catch {
+    // Kept only while the page is open.
+  }
+};
+
+/**
+ * Tells core the screens the admin `finished`.
+ * Not heard this once, core hears it with the next screen: nothing is
+ * lost, and nothing holds the admin up.
+ */
+const notePlace = async (
+  core: ReturnType<typeof useCore>,
+  finished: SetupStep[]
+): Promise<void> => {
+  try {
+    await core.withSession(
+      async (session) => await session.onboarding.finishSteps(finished)
+    );
+  } catch {
+    // Said again with the next screen.
+  }
+};
+
+const today = (): string => new Date().toISOString().slice(0, 10);
+
+/**
+ * How far this browser's admin went, the message they wrote and what they
+ * settled: the furthest step is remembered as they go, so the dots and the
+ * arrow keys go on as far as they went.
+ */
+const useKept = (userId: string, index: number, path: SetupPath) => {
+  // How far they went is counted on this company's path, from where core says they are.
+  const [kept, setKept] = useState(() => ({ ...readKept(userId), reached: 0 }));
+  // A place counted on another path means nothing on this one: where the
+  // flow changed while they were here, they start from where core says.
+  const [counted, setCounted] = useState(path);
+  if (counted !== path) {
+    setCounted(path);
+  }
+  // The furthest step is kept as they go, so going back never lowers it.
+  const now = keptAt(counted === path ? kept : { ...kept, reached: 0 }, index);
+  if (now !== kept) {
+    setKept(now);
+  }
+  useEffect(() => {
+    writeKept(userId, now);
+  }, [userId, now]);
+  return {
+    reached: now.reached,
+    message: now.message,
+    settled: now.settled,
+    onMessage: (next: string) => {
+      setKept({ ...now, message: next });
+    },
+    onSettle: (item: ReviewItemId, settled: boolean) => {
+      setKept(settledAs(now, item, settled));
+    },
+  };
+};
+
+/** The arrow keys go back, and forward as far as you have been, unless you are typing. */
+const useArrowKeys = (
+  index: number,
+  reached: number,
+  path: SetupPath,
+  go: (step: SetupStep) => void
+): void => {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const { target } = event;
+      const typing =
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, [contenteditable="true"], [role="radiogroup"], [role="group"]'
+        ) !== null;
+      if (typing || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      const { back, on } = waysFrom(index, reached, path);
+      if (event.key === "ArrowLeft" && back !== undefined) {
+        go(back);
+      }
+      if (event.key === "ArrowRight" && on !== undefined) {
+        go(on);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [index, reached, path, go]);
+};
+
+/**
+ * A step never needs scrolling: the brain takes what the window leaves
+ * once the step itself has its room, down to a small one, in steps, so it
+ * does not flutter as a line comes and goes; where not even the small one
+ * fits, it makes way. On a phone a step that does
+ * not fit even beside the smallest brain is cramped: its sentence makes way
+ * once read, and where that frees too little, the brain makes way with it,
+ * until the next step.
+ */
+const useBrainRoom = (step: SetupStep) => {
+  const body = useRef<HTMLDivElement>(null);
+  const [bodyHeight, setBodyHeight] = useState(0);
+  useEffect(() => {
+    const element = body.current;
+    const observer = new ResizeObserver(([entry]) => {
+      setBodyHeight(entry?.contentRect.height ?? 0);
+    });
+    if (element !== null) {
+      observer.observe(element);
+    }
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+  const windowHeight = useSyncExternalStore(
+    onResize,
+    () => window.innerHeight,
+    () => 1000
+  );
+  const phone = useSyncExternalStore(
+    onResize,
+    () => !window.matchMedia("(min-width: 40rem)").matches,
+    () => false
+  );
+  const [brainAway, setBrainAway] = useState<SetupStep | null>(null);
+  if (brainAway !== null && brainAway !== step) {
+    setBrainAway(null);
+  }
+  /** The room the brain has beside a step this high. */
+  const roomBeside = (height: number) => windowHeight - around - height;
+  const room = Math.floor(roomBeside(bodyHeight) / brainStep) * brainStep;
+  const measured = bodyHeight > 0;
+  const wanted = layout[step].brain;
+  let brain = wanted;
+  if (brainAway === step) {
+    brain = 0;
+  } else if (measured && !phone && room < brainLeast) {
+    // Where even the smallest brain leaves the step too little room, it makes way, so the page never scrolls.
+    brain = 0;
+  } else if (measured) {
+    brain = Math.max(brainLeast, Math.min(wanted, room));
+  }
+  return {
+    body,
+    cramped: phone && measured && roomBeside(bodyHeight) < brainLeast,
+    brainSize: brainSizes[Math.round(brain / 10) * 10],
+    onMadeWay: (freed: number) => {
+      if (roomBeside(bodyHeight - freed) < brainLeast) {
+        setBrainAway(step);
+      }
+    },
+  };
+};
+
+/**
+ * Leaving the onboarding, Stephen stops mid-sentence rather than talk over
+ * the app; every step that follows is a new start, so he stops what he was
+ * saying on the last one (a step he finished before says nothing to cut it), and
+ * a pause from it lets go.
+ */
+const useVoiceBetweenSteps = (step: SetupStep): void => {
+  useEffect(
+    () => () => {
+      stopSpeaking();
+      resumeVoice();
+    },
+    []
+  );
+  const last = useRef(step);
+  useEffect(() => {
+    if (last.current !== step) {
+      last.current = step;
+      stopSpeaking();
+      resumeVoice();
+    }
+  }, [step]);
+};
+
+/**
+ * On the way into the platform the brain fills up and charges, and
+ * everything around it fades: the scene the brain takes then, whether the
+ * way in is on, and whether the rest is fading.
+ */
+const useWayIn = (figure: BrainScene) => {
+  const { phase } = useReveal();
+  const revealing = phase !== "idle";
+  return {
+    scene: revealing ? { ...figure, fill: 1, charge: true } : figure,
+    revealing,
+    clearing: phase === "clearing" || phase === "building",
+  };
+};
+
+/** What the steps read of what was loaded, or nothing while it could not be. */
+const readOf = (data: Loaded | null) => ({
+  roster: data?.view.roster ?? null,
+  plan: data?.view.plan ?? null,
+  progress: data?.view.progress ?? null,
+  percent: data?.gate.known ?? 0,
+  parts: data?.gate.parts ?? [],
+  choices: data?.choices ?? noChoices,
+});
+
+const Setup = () => {
+  const { t, i18n } = useLingui();
+  const navigate = useNavigate();
+  const { identity, signIn, suites } = Route.useRouteContext();
+  const loaded = Route.useLoaderData();
+  const { step: asked } = Route.useSearch();
+  const data = loaded.state === "ready" ? loaded.data : null;
+  const { roster, plan, progress, percent, parts, choices } = readOf(data);
+  // The screens this company's flow has, in its order; all of them where core can't say.
+  // The same list while the flow is the same, so what goes by it runs once per change.
+  const screens: SetupPath = data === null ? steps : flowScreens(data.flow);
+  const [path, setPath] = useState(screens);
+  if (path.join(",") !== screens.join(",")) {
+    setPath(screens);
+  }
+  // How far they went: as core says, on whatever device, or as this browser
+  // kept it before core did, read once: it is written over as they go.
+  const legacy = useMemo(
+    () => finishedAt(readKept(identity.userId).reached),
+    [identity.userId]
+  );
+  const told = reachedByPlace(data?.place ?? null, path);
+  const placed = reachedByPlace(
+    { done: [...(data?.place.done ?? []), ...legacy] },
+    path
+  );
+  const ai = data?.ai ?? null;
+  // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
+  const step = stepShown(asked, reachedOf(placed, { plan }, path), ai, path);
+  const index = Math.max(stepIndex(step, path), 0);
+  const kept = useKept(identity.userId, Math.max(index, placed), path);
+  // Core hears of every screen they finished, so they go on from it anywhere, and Grasp sees how far they are.
+  const core = useCore();
+  useEffect(() => {
+    if (kept.reached > told) {
+      void notePlace(core, finishedAt(kept.reached, path));
+    }
+  }, [core, kept.reached, told, path]);
+  // How far they went, and how far they can go now.
+  const furthest = reachedOf(kept.reached, { plan }, path);
+  const reached = heldAt(furthest, ai, path);
+  const now = today();
+  const listening = listeningOf({ roster, plan, progress }, now);
+  // "How this works" tells its story in the brain's figures, so the figure follows the story there.
+  const [story, setStory] = useState<BrainScene | null>(null);
+  const shown = brainScene(step, {
+    roster,
+    listening,
+    known: percent,
+    choices,
+  });
+  const { scene, revealing, clearing } = useWayIn(
+    step === "about" && story !== null ? story : shown
+  );
+  const go = (next: SetupStep) => {
+    void navigate({ to: "/setup", search: { step: next } });
+  };
+  // The screen after this one; past the last, every screen is finished and the admin is in the platform.
+  const next = path[index + 1];
+  const onward = () => {
+    if (next !== undefined) {
+      go(next);
+      return;
+    }
+    void (async () => {
+      await notePlace(core, [...path]);
+      await navigate({ to: "/" });
+    })();
+  };
+  useArrowKeys(index, reached, path, go);
+  useVoiceBetweenSteps(step);
+  const { body, cramped, brainSize, onMadeWay } = useBrainRoom(step);
+
+  if (data === null) {
+    return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
+  }
+  // A company that goes through no onboarding has no screens: home.
+  if (path.length === 0) {
+    return <Navigate replace to="/" />;
+  }
+  const admin = identity.name.split(" ")[0] ?? identity.name;
+  const sendingDomain = data.view.mailDomain;
+  return (
+    <SetupFrame
+      knowledge={{ parts, percent, threshold: data.gate.threshold }}
+      onExit={() => {
+        if (!revealing) {
+          void navigate({ to: "/" });
+        }
+      }}
+      onGo={go}
+      path={path}
+      reached={reached}
+      step={step}
+    >
+      <div
+        className={cn(
+          "flex w-full flex-col items-center gap-6 text-center transition-all duration-500",
+          layout[step].width
+        )}
+      >
+        <div className="flex flex-col items-center gap-1.5">
+          {/* The brain fades with the step it belongs to, or is there at once on one finished before; making way, it folds up as it fades. */}
+          {brainSize === undefined ? null : (
+            <Arriving
+              className="block overflow-hidden"
+              motion="animate-in fade-in fill-mode-backwards delay-300 duration-500"
+              settled={wasHeard(step)}
+            >
+              <DotBrain
+                className={cn("transition-all duration-500", brainSize)}
+                label={t`The company brain: ${percent}% known. Dark dots are what I know, grey dots what I still need to learn.`}
+                scene={scene}
+                voice={voiceLevel}
+              />
+            </Arriving>
+          )}
+        </div>
+        {/* One step fades out, the next fades in, or is there at once if finished before: nothing slides. On the way in, the step fades and only the brain stays. */}
+        <div
+          className={cn(
+            "flex w-full flex-col items-center transition-all duration-450",
+            { "opacity-0 blur-sm": clearing }
+          )}
+          inert={revealing}
+          ref={body}
+        >
+          {/* Each step drawn anew, fading in unless it is one finished before (setup-steps.tsx). */}
+          <SetupStepBody
+            cramped={cramped}
+            data={{
+              ...data,
+              admin,
+              sendingDomain,
+              signIn,
+              // The sign-ins the kickoff named, where it named any.
+              suites: suitesFor(suites, data.view.context),
+              identity,
+            }}
+            furthest={furthest}
+            go={go}
+            onward={onward}
+            path={path}
+            listening={listening}
+            message={kept.message}
+            onMadeWay={onMadeWay}
+            onMessage={(message) => {
+              kept.onMessage(message);
+            }}
+            onSettle={(item, settled) => {
+              kept.onSettle(item, settled);
+            }}
+            onStory={setStory}
+            parts={parts}
+            percent={percent}
+            settled={kept.settled}
+            key={step}
+            step={step}
+            today={now}
+          />
+        </div>
+      </div>
+    </SetupFrame>
+  );
+};
+
+/**
+ * The organization's name, for the message to the team; none when it has
+ * none or core can't say, which leaves the rest of the onboarding as it is.
+ */
+const companyOf = async (
+  organization: () => Promise<Organization>
+): Promise<string | null> => {
+  try {
+    const { name } = await organization();
+    return name.trim() === "" ? null : name;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * What Grasp's AI has to call, for the AI step: the providers an admin
+ * can connect and those connected, and whether any model is ready for
+ * calls (the models a chat may name); null when core can't say, which
+ * leaves the rest of the onboarding as it is.
+ */
+const aiReadinessOf = async (session: Session): Promise<AiReadiness | null> => {
+  try {
+    const [listing, models] = await Promise.all([
+      session.aiProviders.list(),
+      session.chats.models(),
+    ]);
+    return { listing, ready: models.length > 0 };
+  } catch {
+    return null;
+  }
+};
+
+/** What the onboarding reads from core. */
+interface Loaded {
+  /** The screens the admin finished, as core keeps them. */
+  place: SetupPlace;
+  /** How much onboarding the company goes through: its screens come from it. */
+  flow: OnboardingFlow;
+  view: OnboardingView;
+  /** Everyone's own link to send, once it is out. */
+  links: LinkToSend[];
+  documents: OnboardingDocument[];
+  gate: GateView;
+  choices: SetupChoices;
+  /** The steps people told two ways and nobody could explain, and how much of the work is mapped. */
+  review: OnboardingReview;
+  /** The organization's name, as the message to the team is addressed; null when it has none. */
+  company: string | null;
+  directory: OnboardingDirectory | null;
+  places: OnboardingPlaces | null;
+  hr: OnboardingHr | null;
+  /** What Grasp's AI has to call; null when core can't say. */
+  ai: AiReadiness | null;
+}
+
+export const Route = createFileRoute("/setup")({
+  // `connection`: a connection's flow, started on a step, came back to it.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { step?: SetupStep; connection?: string } => ({
+    ...(isStep(search.step) && { step: search.step }),
+    ...(typeof search.connection === "string" && {
+      connection: search.connection,
+    }),
+  }),
+  beforeLoad: async ({ context: { core }, location }) => {
+    const { connected, identity, signInOptions } = await loadCoreStatus(core);
+    if (!connected) {
+      throw new Error("Grasp can't be reached right now.");
+    }
+    if (identity === undefined) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({
+        to: "/sign-in",
+        search: {
+          returnTo: location.pathname,
+          ...signInErrorSearch(location.search),
+        },
+      });
+    }
+    // Grasp's staff work from the admin dashboard, from a saved /setup
+    // link too (routes/staff.tsx).
+    if (identity.staff) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/staff", replace: true });
+    }
+    if (!isAdmin(identity.role)) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/", replace: true });
+    }
+    // The suites the company signs in with: their places where documents live come first.
+    const signIn = signInOptions.flatMap(({ providerId }) => {
+      const suite = oauthProviderSchema.safeParse(providerId);
+      return suite.success ? [suite.data] : [];
+    });
+    // The suites people sign in with here: their directories, and where their documents live, can be connected.
+    const suites = directorySuites.filter((suite) =>
+      signInOptions.some(({ providerId }) => providerId === suite)
+    );
+    return { identity, signIn, suites };
+  },
+  loader: async ({ context: { core } }) =>
+    await loadFromCore(core, async (session): Promise<Loaded> => {
+      const [
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+        review,
+        hr,
+        ai,
+        place,
+        flow,
+      ] = await Promise.all([
+        session.onboarding.view(),
+        session.onboarding.links(),
+        session.onboarding.documents(),
+        session.onboardingGate.view(),
+        session.onboarding.choices(),
+        companyOf(async () => await session.organization.get()),
+        session.onboarding.directory(),
+        session.onboarding.documentPlaces(),
+        session.onboarding.review(),
+        session.onboarding.hrPlatform(),
+        aiReadinessOf(session),
+        session.onboarding.place(),
+        session.onboarding.flow(),
+      ]);
+      return {
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+        review,
+        hr,
+        ai,
+        place,
+        flow,
+      };
+    }),
+  component: Setup,
+});

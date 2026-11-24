@@ -1,0 +1,40 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import type { SignInOption } from "@grasp-os/shared/rpc";
+import { Trans } from "@lingui/react/macro";
+
+import { signIn } from "./core.ts";
+import { ErrorText } from "./error-text.tsx";
+import { signInErrorMessage } from "./sign-in-errors.ts";
+
+/**
+ * A button for each way to sign in here, and why the last sign-in was
+ * refused, if it was. The IdP sends the person back to `returnTo`.
+ */
+export const SignInOptions = ({
+  options,
+  error,
+  returnTo,
+}: {
+  options: SignInOption[];
+  error: string | undefined;
+  returnTo?: string;
+}) => (
+  <div className="flex w-full flex-col items-center gap-2">
+    <ErrorText>
+      {error === undefined ? undefined : signInErrorMessage(error)}
+    </ErrorText>
+    {options.map(({ providerId, label }, index) => (
+      <Button
+        className="w-full"
+        key={providerId}
+        onClick={() => {
+          void signIn(providerId, returnTo);
+        }}
+        size="xl"
+        variant={index === 0 ? "highlight" : "outline"}
+      >
+        <Trans>Sign in with {label}</Trans>
+      </Button>
+    ))}
+  </div>
+);

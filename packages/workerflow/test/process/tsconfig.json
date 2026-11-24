@@ -1,0 +1,10 @@
+{
+  // The process-death tests run in Node: they start plain workerd, kill it
+  // and start it again. The Worker they serve (test/death-fixture.ts) is
+  // checked with the package's Workers types.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["*.ts", "../../vite.process.config.ts"]
+}

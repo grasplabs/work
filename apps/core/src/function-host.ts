@@ -1,0 +1,4031 @@
+import { AppError } from "@grasp-os/runtime/app";
+import type {
+  AnyPermission,
+  JsonValue,
+  PermissionKind,
+  ValueSchema,
+} from "@grasp-os/runtime/app";
+import {
+  actionPermission,
+  appErrorDetailsOf,
+  declaredPermission,
+  declaredPermissions,
+  defaultPermission,
+  descriptorFromText,
+  schemaFromDescriptor,
+  schemaHash,
+} from "@grasp-os/runtime/host";
+import type {
+  AppManifest,
+  FunctionManifest,
+  MutationStart,
+  FunctionChannel,
+} from "@grasp-os/runtime/host";
+import type { RunHandle } from "@grasp-os/runtime/server";
+import { fileErrors } from "@grasp-os/shared/app-files";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
+import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import {
+  appErrorDetailsMaxBytes,
+  appErrorMessageMaxLength,
+  invocationMaxReads,
+  isAppErrorCode,
+  functionArgsMaxBytes,
+  functionResultMaxBytes,
+  stagedReadMaxBytes,
+  streamMaxEmits,
+  streamProgressMaxBytes,
+} from "@grasp-os/shared/function-limits";
+import {
+  categoryOf,
+  effectErrors,
+  isPlatformCode,
+  isRetryableCode,
+  jsonOf,
+  jsonWithin,
+  functionErrors,
+} from "@grasp-os/shared/functions";
+import type {
+  AppErrorPayload,
+  FunctionResult,
+} from "@grasp-os/shared/functions";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { peopleAlias } from "@grasp-os/shared/notifications";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { mintRecordId } from "@grasp-os/shared/record-ids";
+import { runFileErrors } from "@grasp-os/shared/run-files";
+import {
+  readRequestSchema,
+  writeRequestSchema,
+} from "@grasp-os/shared/store-queries";
+import type { ReadScope } from "@grasp-os/shared/store-queries";
+import {
+  commitMaxIntents,
+  commitMaxWrites,
+  dataErrors,
+  stagedMaxBytes,
+} from "@grasp-os/shared/stores";
+import type {
+  Commit,
+  StagedWrites,
+  StoreFields,
+  WriterRoles,
+} from "@grasp-os/shared/stores";
+import {
+  idempotencyKeySchema,
+  submissionErrors,
+} from "@grasp-os/shared/submissions";
+import type { SubmissionIntent } from "@grasp-os/shared/submissions";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { executionErrors } from "@grasp-os/shared/workflows";
+import { z } from "zod";
+
+import type { PeopleNotifications } from "./app-notifications.ts";
+import { answerPeople } from "./app-people.ts";
+import type { PeopleAccess } from "./app-people.ts";
+import {
+  brainCardSchema,
+  brainEntitiesSchema,
+  brainPackSchema,
+  brainRememberedSchema,
+  brainSkillsSelectedSchema,
+  brainSkillTextSchema,
+} from "./brain-pack.ts";
+import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
+import { CallTree } from "./call-tree.ts";
+import type { RunnerCall } from "./call-tree.ts";
+import type { OpenStore } from "./data-stores.ts";
+import { openChannel } from "./function-channel.ts";
+import type { OpenChannel } from "./function-channel.ts";
+import { sandboxVerdictOf } from "./sandbox-session.ts";
+import { SandboxUnavailableError } from "./sandboxed.ts";
+import { readConsistently, StoreReader } from "./store-reader.ts";
+import { valueFiles } from "./store-references.ts";
+import type { WorkflowEventSends } from "./workflow-event-sends.ts";
+
+// Core's function host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
+// App's server functions for one caller, through the trusted host, and
+// answers what it returned or why it failed, as an `FunctionResult`.
+// App code runs where the runner puts it (`Runner`; the SDK's
+// `runFunction`) and holds nothing but its invocation's channel
+// (function-channel.ts); everything that decides what the call may do is
+// here. Threat model, and how each is closed:
+//
+// - A caller names a function it can't call: only the App's public tree
+//   is reachable from outside, by path and kind; an internal path, an
+//   unknown one and one of another kind are refused the same way
+//   (`function.not_found`, `function.kind_mismatch`), before anything
+//   runs.
+// - A caller sends too much, or what isn't JSON: the input is read as
+//   JSON and measured (128 KiB of UTF-8, `functionArgsMaxBytes`) before
+//   it is validated; then validated by the descriptor the App's
+//   inspection recorded, never by App code, and the handler gets the
+//   normalized value.
+// - A caller or App code picks whom the call is for: the read scope
+//   (principal, role flags, consumer) comes only from the invocation core
+//   resolved (`Invocation`), and the schema hash from the App's pinned
+//   manifest, hashed here; no channel method takes any of them.
+// - A query writes, a mutation reaches outside, an action holds the
+//   database: each kind's channel has only its capabilities, whatever the
+//   App code sends (function-channel.ts): an action reaches data only
+//   through the App's queries and mutations, each an invocation of its
+//   own, and a mutation runs only the App's queries.
+// - App code reaches past what the App declares: the App's permissions,
+//   sealed in its manifest, are the one list, as in Convex, where every
+//   function of an app may use what the app may. A resource request names
+//   an alias the App declares as a permission an action reaches
+//   (`actionPermission`), a start or sent event a workflow it declares,
+//   a nested call a function it registers, internal ones included
+//   (`permission.not_allowed`, `function.not_found` otherwise), each then
+//   bound and granted by an admin. No function narrows what the App holds:
+//   the App is one unit of review and of grants, its functions written
+//   together, so a list per function bounded nothing its author couldn't
+//   widen.
+// - A table is read or written past its access: every read and staged
+//   write is checked against what the function's kind may do to a table
+//   whose access isn't `none` (`mayUse`), and the store checks every read
+//   and commit against the pinned schema's own access and row rules for
+//   the caller's roles, so neither check alone decides. A nested function
+//   runs as the same caller, under the same rules.
+// - A mutation writes what its schema doesn't allow: every staged write is
+//   validated against the pinned table's fields (an insert with its
+//   defaults, a patch never with them, managed fields and unknown fields
+//   refused), and its record ID, for an insert, is minted here.
+// - A mutation commits on authority it lost while it ran: the caller is
+//   authorized again just before its commit, and the commit carries the
+//   roles found then, which the store enforces in the commit's
+//   transaction.
+// - A mutation commits on stale reads: its commit carries its read set
+//   (the generation of every table it read), and the store refuses it
+//   once any moved on, which runs the mutation again (`queryMaxReruns`
+//   times, then the retryable `mutation.concurrent_change`). Writes to a
+//   record it never read take no such fence: of two, the later commit
+//   wins, and the record's history keeps the earlier.
+// - A submission is repeated or forged: its receipt is claimed under a
+//   key core makes from the caller's idempotency key and a scope it
+//   resolved (the store derives the receipt's ID; nobody names one), and
+//   its outcome, what the mutation returned included, is answered again
+//   to the same key and input.
+// - A function answers what its contract doesn't allow: the return is
+//   read as JSON, measured, validated, and must already be in its
+//   normalized form (`contract.invalid_return`), so the caller gets
+//   exactly what the contract says.
+// - A caller who lost the right keeps reaching outside: every resource
+//   request is admitted by the same `authorize` a mutation's commit is
+//   (`admit`), whatever it checks (the release not revoked, the caller's
+//   roles, what admitted the caller), so the two gates can't drift apart.
+// - A streaming action's progress (spec 10.7.6) is a way out of its
+//   contract: a streaming action runs only through the streaming path,
+//   and any other only through the single-answer one, refused the other
+//   way round (`function.mode_mismatch`), nested calls included; each
+//   snapshot is read as JSON, measured (`streamProgressMaxBytes`),
+//   validated by the action's `stream` descriptor and must already be
+//   normalized, as a return is (`contract.invalid_progress`), and one
+//   invocation emits at most `streamMaxEmits`. Only the invocation the
+//   caller named emits: a streaming action can't be nested, and the
+//   channel of anything it calls has no `emit`.
+// - A cancelled stream goes on acting: cancellation stops the run as its
+//   deadline does (its channel ends, so nothing more it starts is
+//   admitted, and nothing it staged commits) and refuses every later
+//   emit; every mutation it runs checks for it just before its commit,
+//   and every resource request just before it is sent. What it already
+//   committed or dispatched stays, and its derived keys answer those again
+//   to a call under the same key, never twice.
+// - A cancel claims an outcome it can't know: one that lands while an
+//   effect the run started is still under way (a nested mutation
+//   committing, a request out) answers the uncertain
+//   `function.outcome_unknown`, never a definite `function.cancelled`
+//   that would invite running it again under a new key.
+// - A failure leaks what it shouldn't: a caller gets an `AppErrorPayload`
+//   and nothing more. An `AppError` App code threw keeps its code (never
+//   a platform one), message and bounded details; a platform error
+//   counts only if this invocation's channel raised it (App code can't
+//   pass a made-up `data.conflict` off as the store's); anything else is
+//   `internal.unexpected` with the request ID, its cause logged.
+// - App code starts a workflow it didn't declare, or one some other App
+//   binds: a start names an alias the App declares as a workflow
+//   (`permission.not_allowed` otherwise);
+//   core starts only what the App binds under that alias, through the
+//   App's own `start` permission, for the call's principal
+//   (`WorkflowStarts`). App code names neither the workflow, its version,
+//   the person nor the key.
+// - A mutation's start outlives a mutation that didn't commit: a mutation
+//   only stages its starts, which commit as outbox entries in the same
+//   transaction as its records, or not at all (a rerun for stale reads
+//   stages them again from nothing), and are dispatched from there once
+//   each (workflow-start-intents.ts).
+// - A start is made twice: an action's start takes a key derived from
+//   the action's call key and its place among the action's starts, and a
+//   mutation's is its outbox entry's ID, so the same start made again
+//   answers the receipt it already has.
+// - A mutation spins on starts to make core read without end: a start
+//   takes its place among the commit's starts before it is admitted, so
+//   one past the bound is refused before anything is read.
+// - A mutation sends a run an event it didn't declare, or one of
+//   another App's: a sent event names a workflow the App declares, and
+//   the event its generated reference names (its alias, type and
+//   fingerprint, the contract it was generated for), which core stages
+//   only as workflow-event-sends.ts admits it against the release it
+//   runs, as an intent of the commit, in the commit's bound with its
+//   starts.
+// - App code tells people it shouldn't, or floods them: a send to people
+//   (`peopleAlias`, an alias no App can declare) goes through
+//   `Invocation.notifyPeople` alone, after the one gate (`admit`), which decides
+//   whom it reaches and holds the App's limits (app-notifications.ts); a
+//   call with none (a run's) is refused. A mutation's is
+//   staged as an intent of its commit, in the commit's bound with its
+//   starts; an action's is keyed by its place among its sends, so a call
+//   made again under the same key tells nobody twice.
+
+/**
+ * How core starts the workflows an App binds, for one invocation: the
+ * App, its version and the person come from the invocation, never from
+ * App code, which names only the alias and the input.
+ */
+export interface WorkflowStarts {
+  /**
+   * Starts the workflow the App binds under `alias` with `input`, under
+   * `key`: its handle once the start is admitted, durably.
+   */
+  readonly start: (
+    alias: string,
+    input: Json,
+    key: string,
+    /**
+     * Throws once the call may no longer start anything (cancelled, or
+     * past its deadline): asked again just before the start is admitted.
+     */
+    requireGoing?: () => void
+  ) => Promise<RunHandle>;
+  /**
+   * What a mutation's commit stages in its outbox to start that workflow
+   * once it has committed (`workflowStartIntentSchema`).
+   */
+  readonly intent: (alias: string, input: Json) => Json;
+}
+
+/** Who an invocation is for, as core resolved it: never App code. */
+export interface Invocation {
+  /** The person the call acts for, who owns what it inserts. */
+  readonly principal: string;
+  /**
+   * Who the audit log names as making the call: the person, an agent for
+   * them, a workflow run, or the App. Each commit names them,
+   * in the store's change history of every record it writes.
+   */
+  readonly actor: AuditActor;
+  /** The App and version it comes through, which cursors are bound to. */
+  readonly consumer: {
+    readonly resourceId: string;
+    readonly resourceVersion: number;
+  };
+  /** The App's store. */
+  readonly store: OpenStore;
+  /** The ID of this request, which a failure carries for the logs. */
+  readonly requestId: string;
+  /** When the call must end, in milliseconds since the epoch. */
+  readonly deadline: number;
+  /** The workflow run the call is made in, whose life keeps its receipt. */
+  readonly runId: string | null;
+  /**
+   * The caller's roles in the App, read again on each call; throws when
+   * they may no longer use it. The one admission (`admit`): called as the
+   * call starts, just before each mutation commits and before each
+   * resource request, so whatever it checks holds before all three.
+   */
+  readonly authorize: () => Promise<WriterRoles>;
+  /** How core binds the App's resources for this call; none bound without it. */
+  readonly resources?: ResourceBindings;
+  /**
+   * Told what a query the caller named read, once its reads stand as one
+   * state of the store (`readConsistently`): the generation of each table
+   * it read, which a live query watches (query-subscriptions.ts).
+   */
+  readonly observeReads?: (readSet: Record<string, number>) => void;
+  /**
+   * How core starts the workflows the App binds, for this call; none
+   * started without it. A workflow run's call (app-functions.ts,
+   * `runInvocationFor`) has none, so App code in a run's step starts nothing, now or after its
+   * commit (`permission.unavailable`): a start there would open a lineage of
+   * its own, past its run's nesting, descendant, active-time and host-call
+   * limits (GRA-669). Letting a run start one needs its root and depth
+   * carried to the start, `admitInLineage` as it is admitted, and its attempts
+   * counted on that root (quotas.ts).
+   */
+  readonly workflows?: WorkflowStarts;
+  /**
+   * How core stages the events a mutation sends the App's workflow runs
+   * (`ctx.sendEvent`, workflow-event-sends.ts), for this call; none staged
+   * without it, as for starts (`workflows`).
+   */
+  readonly eventSends?: WorkflowEventSends;
+  /**
+   * How core tells people for this call (`ctx.notifyPeople`, of an action
+   * or a mutation, app-notifications.ts); none
+   * told without it: a workflow run's call has none.
+   */
+  readonly notifyPeople?: PeopleNotifications;
+  /**
+   * Keeps the evidence of a use refused at the host's admission
+   * (`UseRefusal`): the first of a caller's call, nested calls included,
+   * before App code hears of it. Rejects when it couldn't be kept, which
+   * the host logs: the refusal stands, whatever came of keeping it. None
+   * where nothing is kept (a draft's preview, an App's tests).
+   */
+  readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
+  /**
+   * The refused uses a live query's subscription kept already, shared by
+   * its reads (`keepEvidence`): each kept once a version of the App
+   * (`refusalKey`), however often a write reads it again, and one a read
+   * meets for the first time (a flag a write set, a role the person lost,
+   * a version published) kept then. One kept already is passed over and
+   * leaves the call's one entry to the next refusal it meets; one whose
+   * keeping rejected is given back, for a later read to keep. None for
+   * any other call: each keeps its own.
+   */
+  readonly refusalsKept?: Set<string>;
+  /**
+   * Keeps the record of what the call read of the store's sensitive
+   * tables (`SensitiveRead`), once for the whole call, nested functions
+   * included, after it answered or failed and before its caller hears
+   * either. Never throws. Required, so every way of calling a function
+   * decides: `null` only where nothing is kept, a store only a test or a
+   * draft's preview reaches, which holds no one's data.
+   */
+  readonly sensitiveReads: SensitiveReadsSink | null;
+  /**
+   * Told what the function the caller named threw that its caller hears
+   * only as `internal.unexpected`, at most once a call: its name and
+   * message, when they are strings, cut to `draftFailureMaxLength`, as
+   * data (`tellerOf`). Only a chat's preview of its
+   * own draft (draft-runs.ts) is told, for the agent's check to read
+   * as a tool's result; every other caller's App code keeps its failures
+   * to the log, and no caller's answer ever carries them.
+   */
+  readonly draftFailure?: (message: string) => void;
+  /**
+   * Who the call is for, and what of the organization's people it may
+   * read (app-people.ts): App code's `ctx.auth.getUser()` and `ctx.people`, read
+   * through the channel. Resolved by core with the rest of the
+   * invocation, never from App code. Without it, App code is told nothing
+   * of either, and a function fails as it starts.
+   */
+  readonly people?: PeopleAccess;
+  /**
+   * Set only by a test's own transaction (`t.run`, app-tests.ts), on a
+   * test's fixture store: what it reads and writes isn't held to the
+   * App's access modes or row rules. The store takes it on no other store
+   * (data-store.ts).
+   */
+  readonly unrestricted?: true;
+}
+
+/**
+ * What one function of a call read of one sensitive table
+ * (`defineTable(...).sensitive()`, as the store holds it): how many reads
+ * reached the table, and how many of its records they answered, related
+ * records and those a count, aggregate or group was computed over
+ * included. A read that answered none still counts: a filter on
+ * the table's fields that matched nothing tells something of them too.
+ */
+export interface SensitiveRead {
+  /** The function's path in the App, which read it. */
+  readonly function: string;
+  readonly table: string;
+  readonly reads: number;
+  readonly rows: number;
+}
+
+/** Keeps a call's sensitive reads (`Invocation.sensitiveReads`). */
+export type SensitiveReadsSink = (
+  reads: readonly SensitiveRead[]
+) => Promise<void>;
+
+/**
+ * A call's sensitive reads so far, by function and table: kept by the
+ * host, where App code can't reach them, and shared by every function in
+ * the call, every attempt of it included (a run made again for stale
+ * reads still handed App code what the stale one read).
+ */
+type SensitiveTally = Map<string, SensitiveRead>;
+
+/** Counts what `fn`'s read answered of sensitive tables into `tally`. */
+const tallied =
+  (tally: SensitiveTally, fn: FunctionManifest) =>
+  (sensitive: Readonly<Record<string, number>>): void => {
+    for (const [table, rows] of Object.entries(sensitive)) {
+      const key = JSON.stringify([fn.path, table]);
+      const sofar = tally.get(key);
+      tally.set(key, {
+        function: fn.path,
+        table,
+        reads: (sofar?.reads ?? 0) + 1,
+        rows: (sofar?.rows ?? 0) + rows,
+      });
+    }
+  };
+
+/** The most of a draft's failure a preview is told (`draftFailure`). */
+export const draftFailureMaxLength = 2000;
+
+/**
+ * A use App code asked the function host for that the running function's
+ * sealed manifest doesn't allow (GRA-279), as core keeps it for the audit
+ * log (`Invocation.refusedUse`): every field from the sealed manifest or
+ * the host, never App code's text. `use.name` is a function path, resource
+ * alias or workflow alias the App's manifest has, or null when what was
+ * asked isn't one.
+ */
+export interface UseRefusal {
+  /** The function whose code asked: its sealed path. */
+  readonly function: string;
+  readonly use: {
+    readonly kind: "function" | "permission" | "workflow" | "table";
+    readonly name: string | null;
+  };
+  /**
+   * Not a permission the App declares or a function it registers
+   * (`use_undeclared`), or a declared permission or workflow asked for what
+   * its declaration doesn't allow (`request_not_allowed`).
+   */
+  readonly reason: "use_undeclared" | "request_not_allowed";
+  readonly errorCode: string;
+}
+
+/**
+ * What tells one refused use from another (`Invocation.refusalsKept`):
+ * the version of the App it was refused in, as a subscription outlives a
+ * publish and the next version's refusal is evidence of its own, and
+ * every field of the refusal, all core's own, a name only one of the
+ * sealed release's: so a subscription keeps no more of them than its
+ * versions have uses.
+ */
+const refusalKey = (version: number, refusal: UseRefusal): string =>
+  JSON.stringify([
+    version,
+    refusal.function,
+    refusal.use.kind,
+    refusal.use.name,
+    refusal.reason,
+    refusal.errorCode,
+  ]);
+
+/** What a refusal of a use carries for its evidence (`refusedUseOf`). */
+type RefusedUse = Pick<UseRefusal, "use" | "reason">;
+
+/**
+ * The uses refused at the host's admission, by the error each was refused
+ * with: what `runHandler` keeps as evidence when that error reaches the
+ * channel, whatever wrapped the call.
+ */
+const refusedUses = new WeakMap<object, RefusedUse>();
+
+/** `error`, noted as the refusal of `refused` (`refusedUses`). */
+const refusingUse = <E extends Error>(error: E, refused: RefusedUse): E => {
+  refusedUses.set(error, refused);
+  return error;
+};
+
+/**
+ * `error`, noted as the refusal of a table's use when the App's store
+ * refused it by the table's access mode or row rules: a read the read
+ * mode doesn't admit (`data.access_denied`), a write the write mode
+ * doesn't, or one leaving a row its rules don't (`data.write_denied`).
+ * Kept as the host's own table denials are (`readFor`, `stage`), through
+ * `keepEvidence`, at most once a call (GRA-1652).
+ *
+ * - Only an error core's own store call threw is noted (`readFor`'s read,
+ *   `runMutation`'s commit), by its identity: an error App code makes,
+ *   wraps or rethrows with the same code is noted as nothing.
+ * - The table is named only when it is one of the sealed release's
+ *   (`tables`), as the store's own `details` name it.
+ * - A row the rules hide isn't noted: a patch, replacement or deletion of
+ *   one is answered as a missing row (`data.conflict`, store-rules.ts).
+ *   It is a blind write by an ID that is stale or unguessable, App code
+ *   learns nothing by it, and it is an everyday race when a page holds
+ *   the ID of a row someone has since moved out of its person's sight.
+ * - Rows a read's rules leave out, and related records of a table the
+ *   caller can't read (store-queries.ts `relationsOf`), are no refusal:
+ *   the read answers without them, and nothing is thrown to note.
+ */
+const refusedByStore = (
+  tables: Compiled["tables"],
+  error: unknown
+): unknown => {
+  const code = dataErrors.codeOf(error);
+  if (
+    (code !== "data.access_denied" && code !== "data.write_denied") ||
+    !(error instanceof Error)
+  ) {
+    return error;
+  }
+  const details = "details" in error ? error.details : undefined;
+  const table =
+    typeof details === "object" && details !== null && "table" in details
+      ? details.table
+      : undefined;
+  return refusingUse(error, {
+    use: {
+      kind: "table",
+      name: typeof table === "string" && tables.has(table) ? table : null,
+    },
+    reason: "request_not_allowed",
+  });
+};
+
+/** `name` when the App's manifest has it in `table`, else null. */
+const sealedName = (
+  table: Readonly<Record<string, unknown>> | undefined,
+  name: unknown
+): string | null =>
+  typeof name === "string" && table !== undefined && Object.hasOwn(table, name)
+    ? name
+    : null;
+
+/** Whether the App declares a workflow under `alias`. */
+const declaresWorkflow = (run: Run, alias: unknown): boolean =>
+  declaredPermission(run.app.manifest, alias, "workflows") !== undefined;
+
+/**
+ * The use App code asked for under `alias`, refused as one the function's
+ * kind can't make or the App doesn't declare: a workflow when the App
+ * declares one under it, otherwise a permission, named only when the App's
+ * manifest has it.
+ */
+const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] => ({
+  kind: declaresWorkflow(run, alias) ? "workflow" : "permission",
+  name: sealedName(run.app.manifest.permissions, alias),
+});
+
+/**
+ * Runs a registered function's handler over a channel: the SDK's
+ * `runFunction` with the App's registration, wherever its code runs.
+ */
+export type Runner = (
+  path: string,
+  args: Json,
+  channel: FunctionChannel,
+  /**
+   * Aborted once the host stops waiting for the run (its deadline): a
+   * runner that can end the run then does, and frees what it held (an
+   * on-prem sandbox session's process, app-functions.ts).
+   */
+  signal?: AbortSignal,
+  /**
+   * The call it runs in: one object for every function one caller's call
+   * runs, nested or not, so a runner may run them together (on-prem, in
+   * the sandbox session of the function the caller named).
+   */
+  call?: RunnerCall,
+  /**
+   * A mutation's: when it started and the seed of its randomness, from
+   * its receipt, which its time and randomness answer from inside it
+   * (the SDK's `installMutationRuntime`). None for a query or an action.
+   */
+  start?: MutationStart
+) => Promise<unknown>;
+
+/** An App as the host runs it: its inspected manifest and its runner. */
+export interface HostedApp {
+  readonly manifest: AppManifest;
+  readonly run: Runner;
+}
+
+/** A function as its caller names it: its public path and kind. */
+export interface CalledFunction {
+  readonly path: string;
+  readonly kind: string;
+}
+
+/**
+ * Where a streaming action's progress goes (spec 10.7.6): the caller's,
+ * for the one invocation it named.
+ */
+export interface ProgressSink {
+  /**
+   * Takes one snapshot, validated and normalized: the caller keeps only
+   * the latest, so a snapshot no one read yet is replaced, never queued.
+   */
+  readonly publish: (progress: Json) => void;
+}
+
+/** What a caller may pass along with a call. */
+export interface CallOptions {
+  /** A mutation's submission key: one per logical submission, reused by retries. */
+  readonly idempotencyKey?: string;
+  /**
+   * On-prem, the sandbox session (its call ID) of the call this one is
+   * made from (a Code Mode run's): its functions' session is that one's
+   * child (`CallTree.parentSession`).
+   */
+  readonly parentSession?: string;
+  /**
+   * For a streaming action, and only for one: where its progress goes.
+   * Without it a streaming action is refused, and with it any other.
+   */
+  readonly progress?: ProgressSink;
+  /**
+   * Aborted once the caller cancels the call: every run in it stops as at
+   * its deadline, and what it answers says what is known (`stoppedCode`).
+   */
+  readonly cancelled?: AbortSignal;
+  /**
+   * Told of each effect the call made, or may have made, at any depth: a
+   * mutation or an action it called, a resource request. A request a
+   * busy model budget refused before sending it isn't one. A caller that
+   * keeps the call's outcome keeps it once one was told, since running it
+   * again would act on what that effect changed.
+   */
+  readonly onEffect?: () => void;
+  /**
+   * For a mutation the caller named, an intent its commit carries with its
+   * writes, if any, made from when its receipt was made
+   * (`Claimed.startedAt`: the same for every attempt of one submission,
+   * new for a fresh one under the key): kept with the commit or not at
+   * all. Never for what it calls. `full` is carried when it fits what the
+   * mutation stages; `lean`, a small one, otherwise, so the mutation never
+   * fails on it.
+   */
+  readonly commitIntent?: (
+    startedAt: number
+  ) => Promise<
+    | { readonly full: SubmissionIntent; readonly lean: SubmissionIntent }
+    | undefined
+  >;
+  /**
+   * What the named mutation's receipt is scoped by in place of its path,
+   * for a caller that names the function by the stable ID its App's
+   * definition gives it (a workflow's run, workflows/app-calls.ts): a
+   * retry after a rename then finds the receipt the first try made.
+   */
+  readonly receiptScope?: string;
+}
+
+/** A table of the App's schema, as staged writes are checked against it. */
+interface CheckedTable {
+  /** Whether anyone at all may read it, and write it: its access isn't `none`. */
+  readonly readable: boolean;
+  readonly writable: boolean;
+  readonly fields: Readonly<Record<string, ValueDescriptorLike>>;
+  /** The whole record's fields, with their defaults: an insert, a replacement. */
+  readonly whole: ValueSchema<unknown, unknown>;
+}
+
+/** A descriptor as the manifest holds it. */
+type ValueDescriptorLike = FunctionManifest["args"];
+
+/** What the host derives from a manifest once. */
+interface Compiled {
+  readonly hash: Promise<string>;
+  readonly args: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
+  /** Each declared return; none for a function that declares none. */
+  readonly returns: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
+  /** Each streaming action's progress snapshot. */
+  readonly streams: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
+  readonly tables: ReadonlyMap<string, CheckedTable>;
+}
+
+const compiledApps = new WeakMap<AppManifest, Compiled>();
+
+const schemaOfDescriptor = (
+  descriptor: unknown
+): ValueSchema<unknown, unknown> =>
+  schemaFromDescriptor(JSON.stringify(descriptor));
+
+/** The strict object of `fields`, as a descriptor. */
+const objectOf = (fields: Readonly<Record<string, unknown>>) => ({
+  descriptorVersion: 1,
+  kind: "object",
+  presence: "required",
+  nullable: false,
+  fields,
+});
+
+/** What the host checks `manifest`'s calls and writes with, derived once. */
+const compiledOf = (manifest: AppManifest): Compiled => {
+  const known = compiledApps.get(manifest);
+  if (known !== undefined) {
+    return known;
+  }
+  const args = new Map<string, ValueSchema<unknown, unknown>>();
+  const returns = new Map<string, ValueSchema<unknown, unknown>>();
+  const streams = new Map<string, ValueSchema<unknown, unknown>>();
+  for (const [path, fn] of Object.entries(manifest.functions)) {
+    args.set(path, schemaOfDescriptor(fn.args));
+    // A function that declares no `returns` answers what its handler
+    // returns, checked as JSON within the output limit only.
+    if (fn.returns !== null) {
+      returns.set(path, schemaOfDescriptor(fn.returns));
+    }
+    if (fn.stream !== null) {
+      streams.set(path, schemaOfDescriptor(fn.stream));
+    }
+  }
+  const tables = new Map<string, CheckedTable>();
+  for (const [name, table] of Object.entries(manifest.schema.tables)) {
+    tables.set(name, {
+      readable: table.access.read !== "none",
+      writable: table.access.write !== "none",
+      fields: table.fields,
+      whole: schemaOfDescriptor(objectOf(table.fields)),
+    });
+  }
+  const compiled: Compiled = {
+    hash: schemaHash(manifest.schema),
+    args,
+    returns,
+    streams,
+    tables,
+  };
+  compiledApps.set(manifest, compiled);
+  return compiled;
+};
+
+const encoder = new TextEncoder();
+
+/** The bytes of `value`'s JSON text, as UTF-8. */
+const bytesOf = (value: Json): number =>
+  encoder.encode(JSON.stringify(value)).byteLength;
+
+/**
+ * Argument issues as a refusal's details carry them to the caller: each
+ * one's message and its path as keys and indexes, never a value, the shape
+ * the SDK's own refusals have, so a form shows each beside its field.
+ */
+const argumentIssues = (
+  issues: readonly {
+    readonly path?: readonly unknown[];
+    readonly message: string;
+  }[]
+): { message: string; path: (string | number)[] }[] =>
+  issues.map(({ path = [], message }) => ({
+    message,
+    path: path.map((segment) => {
+      const key =
+        typeof segment === "object" && segment !== null && "key" in segment
+          ? segment.key
+          : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
+
+/** Issues as an error's details say them: `path: message`, never a value. */
+const issuesOf = (
+  issues: readonly {
+    readonly path?: readonly unknown[];
+    readonly message: string;
+  }[]
+): string[] =>
+  issues.map(({ path = [], message }) =>
+    path.length === 0 ? message : `${path.map(String).join(".")}: ${message}`
+  );
+
+/**
+ * Errors the host made or got from its own subsystems (the store, the
+ * App's roles, the channel's capabilities): the only expected errors a
+ * caller gets as they are (`payloadOf`). An error with an expected code
+ * that App code made, or one its getters threw while the host read what
+ * it returned, is never among them.
+ */
+const hostErrors = new WeakSet<object>();
+
+/** `error`, branded as the host's. */
+const hostError = <Failure extends Error>(error: Failure): Failure => {
+  hostErrors.add(error);
+  return error;
+};
+
+/** Brands an expected error the host raised to App code (the channel's). */
+const trust = (error: Error): void => {
+  hostErrors.add(error);
+};
+
+/**
+ * Runs `work`, host code that touches no App value, branding the expected
+ * errors it throws as the host's.
+ */
+const trusted = async <Answer>(
+  work: () => Answer | Promise<Answer>
+): Promise<Answer> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (isExpectedError(error)) {
+      hostErrors.add(error);
+    }
+    throw error;
+  }
+};
+
+/**
+ * The admission every protected step of a call runs, and the only one:
+ * the call's start, each mutation's commit and each resource request all
+ * call this, so what must hold before one of them (the release not
+ * revoked, the caller's current roles, what admitted the caller) is the
+ * invocation's `authorize` alone and can't differ between them. Its
+ * refusal is the host's.
+ */
+const admit = async (invocation: Invocation): Promise<WriterRoles> => {
+  const roles = await trusted(invocation.authorize);
+  return invocation.unrestricted === true
+    ? { ...roles, unrestricted: true }
+    : roles;
+};
+
+/**
+ * Runs `work`, which reads a value App code made: whatever it throws (a
+ * getter's error among them) becomes an unexpected failure, logged.
+ */
+const fromApp = <Answer>(work: () => Answer): Answer => {
+  try {
+    return work();
+  } catch (error) {
+    log.error("function.app_value_threw", errorFields(error));
+    throw Object.assign(new Error("Unexpected failure"), { unexpected: true });
+  }
+};
+
+/**
+ * The function `reference` names in the App's public tree, of its kind:
+ * refused the same way whether it is internal or doesn't exist.
+ */
+const publicFunction = (
+  manifest: AppManifest,
+  reference: CalledFunction,
+  streaming: boolean
+): FunctionManifest => {
+  const { path, kind } = reference;
+  const fn =
+    typeof path === "string" && Object.hasOwn(manifest.functions, path)
+      ? manifest.functions[path]
+      : undefined;
+  if (fn === undefined || fn.visibility !== "public") {
+    throw functionErrors.create("function.not_found");
+  }
+  if (fn.kind !== kind) {
+    throw functionErrors.create("function.kind_mismatch");
+  }
+  // A streaming action runs only where its progress has somewhere to go,
+  // and any other only where it answers once (spec 10.7.6).
+  if ((fn.stream !== null) !== streaming) {
+    throw functionErrors.create("function.mode_mismatch");
+  }
+  return fn;
+};
+
+/**
+ * `args` as the function's `args` normalize them, read as JSON and bounded:
+ * measured as they are read, so input past the limit costs no more than
+ * the limit to refuse. The bytes a call carries over the wire, before any
+ * of this, are bounded where calls enter core, as text, before they are
+ * parsed (`callAppFunction`, app-functions.ts).
+ */
+const admittedArgs = (
+  compiled: Compiled,
+  fn: FunctionManifest,
+  args: unknown
+): Json => {
+  const read = jsonWithin(args, functionArgsMaxBytes);
+  if (read === "too_large") {
+    throw functionErrors.create("contract.input_too_large", {
+      maxBytes: functionArgsMaxBytes,
+    });
+  }
+  if (read === undefined) {
+    throw functionErrors.create("contract.invalid_args", {
+      issues: argumentIssues([{ message: "The arguments aren't JSON" }]),
+    });
+  }
+  const schema = compiled.args.get(fn.path);
+  const result = schema?.["~standard"].validate(read.json);
+  if (result === undefined || result.issues !== undefined) {
+    throw functionErrors.create("contract.invalid_args", {
+      issues: argumentIssues(result?.issues ?? []),
+    });
+  }
+  const normalized = jsonOf(result.value);
+  if (normalized === undefined) {
+    throw new Error("A validated value isn't JSON");
+  }
+  return normalized;
+};
+
+/**
+ * What a handler returned, if its contract allows it exactly: JSON within
+ * the public function output limit (`functionResultMaxBytes`) and, where
+ * it declares a return, valid and already as the contract normalizes it
+ * (no default left out, nothing to trim). The value is App code's: reading it can run
+ * its getters, so anything reading it throws becomes `internal.unexpected`
+ * (`fromApp`), never an error the caller would take for the host's.
+ */
+const checkedReturn = (
+  compiled: Compiled,
+  fn: FunctionManifest,
+  value: unknown
+): Json => {
+  const read = fromApp(() => jsonWithin(value, functionResultMaxBytes));
+  if (read === "too_large") {
+    throw hostError(
+      functionErrors.create("contract.result_too_large", {
+        maxBytes: functionResultMaxBytes,
+      })
+    );
+  }
+  if (read === undefined) {
+    throw hostError(
+      functionErrors.create("contract.invalid_return", {
+        issues: ["The value isn't JSON"],
+      })
+    );
+  }
+  const { json } = read;
+  const schema = compiled.returns.get(fn.path);
+  if (schema === undefined) {
+    return json;
+  }
+  const result = schema["~standard"].validate(json);
+  if (result.issues !== undefined) {
+    throw hostError(
+      functionErrors.create("contract.invalid_return", {
+        issues: issuesOf(result.issues),
+      })
+    );
+  }
+  const normalized = jsonOf(result.value);
+  if (
+    normalized === undefined ||
+    canonicalJson(normalized) !== canonicalJson(json)
+  ) {
+    throw hostError(
+      functionErrors.create("contract.invalid_return", {
+        issues: ["The value isn't in the form its contract normalizes it to"],
+      })
+    );
+  }
+  return json;
+};
+
+/**
+ * A progress snapshot a streaming action emitted, if its `stream`
+ * descriptor allows it exactly, as `checkedReturn` reads a return: JSON
+ * within `streamProgressMaxBytes`, valid, and already normalized. It
+ * arrives over the channel as the channel's own JSON copy, so reading it
+ * runs no App code. Refused as the expected error the channel raises to
+ * App code, which `ctx.emit` rejects with.
+ */
+const checkedProgress = (
+  compiled: Compiled,
+  fn: FunctionManifest,
+  value: unknown
+): Json => {
+  const read = jsonWithin(value, streamProgressMaxBytes);
+  if (read === "too_large") {
+    throw functionErrors.create("contract.progress_too_large", {
+      maxBytes: streamProgressMaxBytes,
+    });
+  }
+  const json = read?.json;
+  const result =
+    json === undefined
+      ? undefined
+      : compiled.streams.get(fn.path)?.["~standard"].validate(json);
+  if (result === undefined || result.issues !== undefined) {
+    throw functionErrors.create("contract.invalid_progress", {
+      issues: issuesOf(result?.issues ?? [{ message: "The value isn't JSON" }]),
+    });
+  }
+  const normalized = jsonOf(result.value);
+  if (
+    json === undefined ||
+    normalized === undefined ||
+    canonicalJson(normalized) !== canonicalJson(json)
+  ) {
+    throw functionErrors.create("contract.invalid_progress", {
+      issues: ["The value isn't in the form its schema normalizes it to"],
+    });
+  }
+  return json;
+};
+
+/** Domain failures App code threw, as the host rebuilt them: code and details. */
+const domainFailures = new WeakMap<
+  object,
+  { readonly code: string; readonly details: Json | undefined }
+>();
+
+/**
+ * `error` as a run of App code may end with it: a failure the host
+ * decided (its own branded errors, a rebuilt domain failure, an
+ * unexpected one), or anything else, which nothing decided and so is
+ * unexpected. What a run throws passes through this before any host code
+ * that brands errors can see it.
+ */
+const sealed = (error: unknown): unknown => {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (hostErrors.has(error) ||
+      domainFailures.has(error) ||
+      Object.hasOwn(error, "unexpected"))
+  ) {
+    return error;
+  }
+  log.error("function.unsealed_failure", errorFields(error));
+  return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+};
+
+/** The SDK's own refusals of a query or write App code built wrongly. */
+const sdkDefinitionCodes: ReadonlySet<unknown> = new Set([
+  "query.unknown_table",
+  "query.unknown_index",
+  "query.invalid_range",
+  "query.invalid_filter",
+  "query.invalid_terminal",
+]);
+
+/** A property of something App code threw, read without trusting it. */
+const field = (value: unknown, key: string): unknown =>
+  typeof value === "object" && value !== null
+    ? Reflect.get(value, key)
+    : undefined;
+
+/**
+ * The message App code sees for a function it called that failed
+ * unexpectedly (`forCaller`): what a draft's code that caught it and
+ * threw it on says, never why it failed.
+ */
+const callerSeesUnexpected = internalErrors.create(
+  "internal.unexpected"
+).message;
+
+/**
+ * What a draft's code threw, as the preview is told it: the name and
+ * message that crossed from the sandbox, an error rebuilt there whose
+ * message a non-error thrown, or one past the sandbox's size, may have
+ * lost. Undefined for a message that isn't text.
+ */
+/** Told what App code threw, and the error the host fails with for it. */
+type Teller = (
+  thrown: { name: unknown; message: unknown; details: unknown },
+  failed: object
+) => void;
+
+const saidOf = (name: unknown, message: unknown): string | undefined => {
+  if (typeof message !== "string") {
+    return undefined;
+  }
+  const named = typeof name === "string" ? name : "";
+  return named === "" || message === ""
+    ? named || message
+    : `${named}: ${message}`;
+};
+
+/**
+ * What each nested function's unexpected failure said, by the error it
+ * failed with, as the host holds it: `forCaller` gives App code a token
+ * for it (`Told.nested`), so the one App code throws on is told, never
+ * another it handled.
+ */
+const nestedSaid = new WeakMap<object, string>();
+
+/** The token a nested failure App code threw on carries (`forCaller`). */
+const tokenOf = (details: unknown): string | undefined => {
+  const token: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "failure")
+      : undefined;
+  return typeof token === "string" ? token : undefined;
+};
+
+/**
+ * Keeps what a draft's code threw for its chat's preview (`draftFailure`),
+ * told once the call has failed with it (`hostFunctionCall`): an attempt a
+ * stale read discards, or a call that answers after all, tells nothing.
+ * A nested function's failure is kept by the error it failed with, and
+ * told only when the function the caller named throws on that very error
+ * (its token, `Told.nested`): the platform's generic text alone, or a
+ * failure it handled, says nothing of why the call failed.
+ */
+const tellerOf = (run: Run): Teller | undefined => {
+  if (run.invocation.draftFailure === undefined) {
+    return undefined;
+  }
+  return ({ name, message, details }, failed) => {
+    const said = saidOf(name, message);
+    if (said === undefined) {
+      return;
+    }
+    const token = tokenOf(details);
+    // The platform's generic text alone: what the nested failure App
+    // code threw on said, if its token names one.
+    const generic = message === callerSeesUnexpected;
+    const nested = token === undefined ? undefined : run.told.nested.get(token);
+    const told = generic ? nested : said;
+    if (told === undefined) {
+      return;
+    }
+    if (run.depth > 0) {
+      nestedSaid.set(failed, told);
+      return;
+    }
+    run.told.failure = told.slice(0, draftFailureMaxLength);
+  };
+};
+
+/**
+ * What App code's failure `thrown` becomes, decided by the host (see the
+ * header): a domain failure the host rebuilt from a valid `AppError`, an
+ * expected error `open`'s channel raised, `contract.invalid_query` for
+ * the SDK's own refusals, or `internal.unexpected`.
+ */
+const failureOf = (
+  thrown: unknown,
+  open: OpenChannel,
+  requestId: string,
+  path: string,
+  tell?: Teller
+): Error => {
+  // Every read of what App code threw may run its getters: what they
+  // throw is an unexpected failure, never taken for the host's.
+  let failure: {
+    code: unknown;
+    message: unknown;
+    name: unknown;
+    details: unknown;
+  };
+  try {
+    failure = {
+      code: field(thrown, "code"),
+      message: field(thrown, "message"),
+      name: field(thrown, "name"),
+      details: field(thrown, "details"),
+    };
+  } catch (error) {
+    log.error("function.failure_threw", {
+      requestId,
+      path,
+      ...errorFields(error),
+    });
+    return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+  }
+  const { code, message, name } = failure;
+  if (name === "AppError" && isAppErrorCode(code) && !isPlatformCode(code)) {
+    const details = fromApp(() =>
+      failure.details === undefined
+        ? undefined
+        : appErrorDetailsOf(failure.details)
+    );
+    if (
+      typeof message !== "string" ||
+      message.length === 0 ||
+      message.length > appErrorMessageMaxLength ||
+      (failure.details !== undefined && details === undefined)
+    ) {
+      return hostError(
+        functionErrors.create("contract.invalid_error", {
+          maxMessageLength: appErrorMessageMaxLength,
+          maxDetailsBytes: appErrorDetailsMaxBytes,
+        })
+      );
+    }
+    const domain = new Error(message);
+    domainFailures.set(domain, { code, details });
+    return domain;
+  }
+  if (typeof code === "string" && isPlatformCode(code)) {
+    const raised = open.raised(code);
+    if (raised !== undefined) {
+      const failed = hostError(raised);
+      if (code === "internal.unexpected") {
+        // A nested call's unexpected failure, thrown on: why it failed is
+        // the nested call's (`tellerOf`).
+        tell?.(failure, failed);
+      }
+      return failed;
+    }
+  }
+  if (sdkDefinitionCodes.has(code)) {
+    return hostError(functionErrors.create("contract.invalid_query"));
+  }
+  log.error("function.failed", {
+    requestId,
+    path,
+    code: typeof code === "string" ? code : undefined,
+  });
+  const failed = Object.assign(new Error("Unexpected failure"), {
+    unexpected: true,
+  });
+  tell?.(failure, failed);
+  return failed;
+};
+
+/** The error each verdict of the sandbox's becomes for a function's caller. */
+const sandboxCodes = {
+  cpu: "function.cpu_exceeded",
+  memory: "function.memory_exceeded",
+  deadline: "function.deadline_exceeded",
+  refused: "function.sandbox_refused",
+  busy: "function.sandbox_busy",
+  call_limit: "function.call_limit",
+  ended: "function.ended",
+} as const;
+
+const isSandboxVerdict = (
+  verdict: string | undefined
+): verdict is keyof typeof sandboxCodes =>
+  verdict !== undefined && Object.hasOwn(sandboxCodes, verdict);
+
+/**
+ * What a function the on-prem sandbox ended fails with, or undefined for
+ * any other failure: the App's (CPU time, memory, deadline, what its code
+ * sent) or the platform's, to try again (its share of the sandbox in use,
+ * the sandbox down). A crash stays `internal.unexpected`. Only what core
+ * made: never a property App code may set on an error it throws.
+ */
+const sandboxFailureOf = (
+  thrown: unknown,
+  { requestId, path, depth }: { requestId: string; path: string; depth: number }
+): Error | undefined => {
+  if (thrown instanceof SandboxUnavailableError) {
+    log.error("function.sandbox_unavailable", {
+      requestId,
+      path,
+      depth,
+      ...errorFields(thrown),
+    });
+    // Only a call that surely never started ran nothing, to try again; one
+    // that may have started is an unknown outcome, never to repeat blindly.
+    return hostError(
+      functionErrors.create(
+        thrown.started
+          ? "function.sandbox_lost"
+          : "function.sandbox_unavailable"
+      )
+    );
+  }
+  const verdict = sandboxVerdictOf(thrown);
+  if (!isSandboxVerdict(verdict)) {
+    return undefined;
+  }
+  // Every function of the call running in the process logs its own: the
+  // deepest of them was running when it was ended, its callers waiting.
+  log.warn("function.sandbox_ended", { requestId, path, depth, verdict });
+  return hostError(functionErrors.create(sandboxCodes[verdict]));
+};
+
+const isJsonArray = (json: Json | undefined): json is readonly Json[] =>
+  Array.isArray(json);
+
+/** The entries of JSON object `json` whose keys `keep` keeps. */
+const entriesOf = (
+  json: Readonly<Record<string, Json | undefined>>,
+  keep: (key: string) => boolean = () => true
+): Record<string, Json> =>
+  Object.fromEntries(
+    Object.entries(json).filter(
+      (entry): entry is [string, Json] =>
+        keep(entry[0]) && entry[1] !== undefined
+    )
+  );
+
+/** The details of an expected error a caller may get: JSON, bounded, the host's only. */
+const safeDetails = (details: unknown): Json | undefined => {
+  const json = jsonOf(details);
+  if (!isRecord(json)) {
+    return undefined;
+  }
+  // The generations a read depended on are the host's own.
+  const rest = entriesOf(json, (key) => key !== "generations");
+  return bytesOf(rest) <= appErrorDetailsMaxBytes ? rest : undefined;
+};
+
+/** What a caller gets of `error`, in request `requestId`. */
+const payloadOf = (
+  error: unknown,
+  requestId: string,
+  path: string
+): AppErrorPayload => {
+  const domain = error instanceof Error ? domainFailures.get(error) : undefined;
+  if (error instanceof Error && domain !== undefined) {
+    const { code, details } = domain;
+    return {
+      code,
+      message: error.message,
+      category: "domain",
+      retryable: false,
+      requestId,
+      ...(details === undefined ? {} : { details }),
+    };
+  }
+  // Only an expected error the host made or got from its own subsystems
+  // counts: one with a platform code from anywhere else is unexpected.
+  // The opaque failure a channel raised carries its request ID in its
+  // details; the payload has it at the top, as for any other.
+  if (
+    isExpectedError(error) &&
+    hostErrors.has(error) &&
+    error.code !== "internal.unexpected"
+  ) {
+    const details = safeDetails(error.details);
+    return {
+      code: error.code,
+      message: error.message,
+      category: categoryOf(error.code),
+      retryable: isRetryableCode(error.code),
+      requestId,
+      ...(details === undefined ? {} : { details }),
+    };
+  }
+  if (error instanceof Error && !Object.hasOwn(error, "unexpected")) {
+    log.error("function.failed", { requestId, path, ...errorFields(error) });
+  }
+  return {
+    code: "internal.unexpected",
+    message: "Something went wrong.",
+    category: "operational",
+    retryable: false,
+    requestId,
+  };
+};
+
+/**
+ * Whether `fn` may `use` table `table` at all: a query and a
+ * mutation read a table whose read access isn't `none`, a mutation writes
+ * one whose write access isn't, and an action does neither. Who may, and
+ * which records, is the store's to decide by the table's access and row
+ * rules. A table the schema hasn't is unknown.
+ */
+const mayUse = (
+  run: Run,
+  fn: FunctionManifest,
+  table: string,
+  use: "read" | "write"
+): boolean => {
+  const checked = run.compiled.tables.get(table);
+  if (checked === undefined) {
+    throw dataErrors.create("data.unknown_table", { table });
+  }
+  // A test's own transaction (`t.run`) reads and writes every table.
+  if (run.invocation.unrestricted === true) {
+    return use === "read" ? fn.kind !== "action" : fn.kind === "mutation";
+  }
+  return use === "read"
+    ? fn.kind !== "action" && checked.readable
+    : fn.kind === "mutation" && checked.writable;
+};
+
+/**
+ * One read for `fn`, if it may read the table, through `reader`,
+ * what it answered of sensitive tables counted in `run`'s call.
+ */
+const readFor = async (
+  run: Run,
+  fn: FunctionManifest,
+  reader: StoreReader,
+  request: unknown
+): Promise<unknown> => {
+  const read = dataErrors.parse(
+    "data.invalid_query",
+    readRequestSchema,
+    request
+  );
+  const table = read.kind === "get" ? read.table : read.query.table;
+  if (!mayUse(run, fn, table, "read")) {
+    // Kept as evidence: with no list per function, a denied table is the
+    // only trace of code reaching past what the App's tables allow.
+    throw refusingUse(dataErrors.create("data.access_denied", { table }), {
+      use: { kind: "table", name: table },
+      reason: "request_not_allowed",
+    });
+  }
+  try {
+    return await reader.read(read, tallied(run.sensitive, fn));
+  } catch (error) {
+    // What the store refuses by the table's access and row rules is kept
+    // as evidence too (`refusedByStore`).
+    throw refusedByStore(run.compiled.tables, error);
+  }
+};
+
+/**
+ * A run's own copy of the admitted arguments: App code can change what it
+ * is handed, and a run that comes again (a stale read set, a role change)
+ * must get them as admitted, as their hash in the receipt says.
+ */
+const fresh = (args: Json): Json => structuredClone(args);
+
+/** Settles `promise`, without throwing: what it answered or threw. */
+const settle = async (
+  promise: Promise<unknown>
+): Promise<{ value: unknown } | { thrown: unknown }> => {
+  try {
+    return { value: await promise };
+  } catch (error) {
+    return { thrown: error };
+  }
+};
+
+/** The writes a mutation stages, checked one at a time as App code stages them. */
+interface Staging {
+  /** When they were staged: the time the records they change are stamped with. */
+  readonly stagedAt: number;
+  /** The bytes of the writes staged so far, as UTF-8 JSON. */
+  readonly bytes: () => number;
+  /**
+   * Counts an intent the commit carries against the bytes it stages, or
+   * refuses it (`mutation.too_large`) without counting it.
+   */
+  readonly reserve: (intent: Json) => void;
+  readonly stage: (request: unknown) => Promise<unknown>;
+  /**
+   * The first write the host refused to stage, if any: App code may not
+   * have waited for it, or may have caught it, but its change set lost a
+   * write, so the mutation can't commit as though it hadn't.
+   */
+  readonly refused: () => Error | undefined;
+  /**
+   * Remembers a refused write: told by the channel, wherever the write
+   * was refused (at its boundary, before staging, included).
+   */
+  readonly remember: (error: Error) => void;
+  readonly preview: () => StagedWrites | undefined;
+  readonly writes: () => StagedWrites["writes"];
+}
+
+/** A field's descriptor as a patch checks a value of it: present, no default. */
+const presentField = (
+  descriptor: ValueDescriptorLike
+): Record<string, unknown> => {
+  const kept = Object.entries(descriptor).filter(
+    ([key]) => key !== "defaultValue" && key !== "presence"
+  );
+  return Object.fromEntries([...kept, ["presence", "required"]]);
+};
+
+/** `fields` as `schema` normalizes them, or `data.invalid` saying why not. */
+const validFields = (
+  schema: ValueSchema<unknown, unknown>,
+  table: string,
+  fields: unknown
+): StoreFields => {
+  const result = schema["~standard"].validate(fields);
+  if (result.issues !== undefined) {
+    throw dataErrors.create("data.invalid", {
+      table,
+      issues: issuesOf(result.issues),
+    });
+  }
+  const json = jsonOf(result.value);
+  if (!isRecord(json)) {
+    throw new Error("Validated fields aren't an object");
+  }
+  return entriesOf(json);
+};
+
+/** The verb of each kind of write. */
+/**
+ * The intent of `carried` a commit takes: its full one, counted in what
+ * `staging` holds, or, past that, its lean one, which a commit's margin
+ * past what is staged always holds (a few hundred bytes of its 64 KiB).
+ */
+const carriedWithin = (
+  staging: Staging,
+  carried: { readonly full: SubmissionIntent; readonly lean: SubmissionIntent }
+): SubmissionIntent => {
+  try {
+    staging.reserve({ kind: carried.full.kind, data: carried.full.data });
+    return carried.full;
+  } catch (error) {
+    if (functionErrors.codeOf(error) !== "mutation.too_large") {
+      throw error;
+    }
+    return carried.lean;
+  }
+};
+
+/** A new staging of a mutation's writes, at `stagedAt`. */
+const stagingFor = (
+  compiled: Compiled,
+  fn: FunctionManifest,
+  stagedAt: number
+): Staging => {
+  const writes: StagedWrites["writes"] = [];
+  let staged = 2;
+  /**
+   * Counts `value`'s bytes as staged, refused (`mutation.too_large`) when
+   * they would take what the mutation stages (its writes and the intents
+   * its commit carries) past `stagedMaxBytes`, so it always fits its
+   * commit, with its result.
+   */
+  const take = (value: Json): void => {
+    const bytes = bytesOf(value) + 1;
+    if (staged + bytes > stagedMaxBytes) {
+      throw functionErrors.create("mutation.too_large", {
+        maxStagedBytes: stagedMaxBytes,
+      });
+    }
+    staged += bytes;
+  };
+  const push = (write: StagedWrites["writes"][number]): void => {
+    take(write);
+    writes.push(write);
+  };
+  let refused: Error | undefined;
+  const stage = async (request: unknown): Promise<unknown> => {
+    const write = functionErrors.parse(
+      "contract.invalid_write",
+      writeRequestSchema,
+      request
+    );
+    const table = compiled.tables.get(write.table);
+    if (table === undefined) {
+      throw dataErrors.create("data.unknown_table", { table: write.table });
+    }
+    // Only a mutation writes, and only a table someone may write: who may,
+    // and which records, the store decides as it commits.
+    if (fn.kind !== "mutation" || !table.writable) {
+      // Kept as evidence, as a denied read is (`readFor`).
+      throw refusingUse(
+        dataErrors.create("data.write_denied", { table: write.table }),
+        {
+          use: { kind: "table", name: write.table },
+          reason: "request_not_allowed",
+        }
+      );
+    }
+    if (writes.length >= commitMaxWrites) {
+      throw dataErrors.create("data.invalid", {
+        table: write.table,
+        issues: [`A mutation stages at most ${commitMaxWrites} writes`],
+      });
+    }
+    if (write.kind === "insert") {
+      const id = mintRecordId(stagedAt);
+      push({
+        op: "insert",
+        table: write.table,
+        id,
+        fields: validFields(table.whole, write.table, write.fields),
+      });
+      return await Promise.resolve(id);
+    }
+    if (write.kind === "replace") {
+      push({
+        op: "replace",
+        table: write.table,
+        id: write.id,
+        fields: validFields(table.whole, write.table, write.fields),
+      });
+      return null;
+    }
+    if (write.kind === "delete") {
+      push({ op: "delete", table: write.table, id: write.id });
+      return null;
+    }
+    const named: Record<string, unknown> = {};
+    for (const name of Object.keys(write.fields)) {
+      const descriptor = Object.hasOwn(table.fields, name)
+        ? table.fields[name]
+        : undefined;
+      // An unknown field (a managed one included) is left out of the
+      // object checked, which then refuses it as a key it doesn't have.
+      if (descriptor !== undefined) {
+        named[name] = presentField(descriptor);
+      }
+    }
+    const fields = validFields(
+      schemaOfDescriptor(objectOf(named)),
+      write.table,
+      write.fields
+    );
+    const unset = [...new Set(write.unset)];
+    for (const name of write.unset) {
+      const descriptor = Object.hasOwn(table.fields, name)
+        ? table.fields[name]
+        : undefined;
+      if (
+        descriptor?.presence !== "optional" ||
+        Object.hasOwn(fields, name) ||
+        unset.length !== write.unset.length
+      ) {
+        throw dataErrors.create("data.invalid", {
+          table: write.table,
+          issues: [
+            `unset: Optional fields only, each once, none the patch also sets`,
+          ],
+        });
+      }
+    }
+    push({
+      op: "patch",
+      table: write.table,
+      id: write.id,
+      fields,
+      unset,
+    });
+    return null;
+  };
+  return {
+    stagedAt,
+    bytes: () => staged,
+    reserve: take,
+    stage,
+    refused: () => refused,
+    remember: (error: Error) => {
+      refused ??= error;
+    },
+    preview: () =>
+      writes.length === 0 ? undefined : { stagedAt, writes: [...writes] },
+    writes: () => [...writes],
+  };
+};
+
+/** What a resource's adapter is told of the request it serves. */
+export interface ResourceContext {
+  readonly requestId: string;
+  /** When the call must end, in milliseconds since the epoch. */
+  readonly deadline: number;
+  /**
+   * The request's own key, derived from the action's call key and its
+   * place among the action's requests: the same each time the same call
+   * is made again, so an idempotent provider contract never repeats an
+   * effect, and never one App code chose.
+   */
+  readonly idempotencyKey: string;
+}
+
+/**
+ * A resource as core bound it for an invocation: an approved resource of
+ * the kind declared, the contract it serves, and its adapter, which
+ * reaches the provider (connect, the model gateway, knowledge) and never
+ * hands App code a key, token or unrestricted fetch.
+ */
+export interface BoundResource {
+  readonly kind: PermissionKind;
+  /** The contract a connection's binding serves; null otherwise. */
+  readonly contract: string | null;
+  readonly call: (
+    method: string,
+    args: readonly Json[],
+    context: ResourceContext
+  ) => Promise<unknown>;
+}
+
+/**
+ * How core binds a declared resource for an invocation, under the App's
+ * grants: the bound resource, or undefined when there is no approved
+ * binding. A declaration alone grants nothing. `byDefault`: the Brain's
+ * reads an App that declares no `brain` permission reaches with no
+ * binding (`defaultPermission`, GRA-2218), never anything it declares.
+ */
+export type ResourceBindings = (
+  declaration: AnyPermission,
+  byDefault: boolean
+) => Promise<BoundResource | undefined>;
+
+/** A model request. */
+const modelRequestSchema = z.strictObject({
+  prompt: z.string().min(1).max(100_000),
+  instructions: z.string().max(20_000).optional(),
+});
+
+/** A request a resource's declaration doesn't allow. */
+const notAllowed = () => functionErrors.create("permission.not_allowed");
+
+/** An answer a resource's contract doesn't allow. */
+const invalidResult = () =>
+  functionErrors.create("contract.invalid_permission_result");
+
+/**
+ * Whether `method` with `args` is a `call` of one name `declares`, with an
+ * object of arguments: a connection's action, a platform function.
+ */
+const isNamedCall = (
+  method: unknown,
+  args: readonly Json[],
+  declares: (name: string) => boolean
+): boolean => {
+  const [name, callArgs] = args;
+  return (
+    method === "call" &&
+    args.length === 2 &&
+    typeof name === "string" &&
+    declares(name) &&
+    isRecord(callArgs)
+  );
+};
+
+/**
+ * Whether `declaration` allows Brain operation `method` with `args`: one
+ * it declares, with one request. What the request holds is the recall's
+ * own to check (brain-recall.ts), so an App's, a workflow's and a chat's
+ * get the same answer to the same request.
+ */
+const allowsBrain = (
+  declaration: Extract<AnyPermission, { "~permission": "brain" }>,
+  method: unknown,
+  args: readonly Json[]
+): boolean =>
+  declaration.operations.some((operation) => operation === method) &&
+  args.length === 1;
+
+/**
+ * Whether `args` is an AI request: the request, and the descriptor of the
+ * value its answer must be, when it asks for one, which must read as one
+ * (`descriptorFromText`, its bounds included).
+ */
+const isAiRequest = (args: readonly Json[]): boolean => {
+  const [request, output] = args;
+  if (
+    args.length < 1 ||
+    args.length > 2 ||
+    !modelRequestSchema.safeParse(request).success
+  ) {
+    return false;
+  }
+  if (args.length === 1) {
+    return true;
+  }
+  try {
+    descriptorFromText(JSON.stringify(output));
+    return true;
+  } catch {
+    throw functionErrors.create("contract.invalid_args");
+  }
+};
+
+/**
+ * The request `method` with `args` makes of `declaration`, if the
+ * declaration allows it: a connection one of its declared actions with an
+ * object of arguments, the Brain one of its declared operations, AI a
+ * prompt, another App one of its declared functions.
+ * `permission.not_allowed` otherwise.
+ */
+const allowedRequest = (
+  declaration: AnyPermission,
+  method: unknown,
+  args: readonly Json[]
+): void => {
+  let allowed: boolean;
+  if (declaration["~permission"] === "connections") {
+    const { actions } = declaration;
+    allowed = isNamedCall(method, args, (name) => actions.includes(name));
+  } else if (declaration["~permission"] === "brain") {
+    allowed = allowsBrain(declaration, method, args);
+  } else if (declaration["~permission"] === "ai") {
+    allowed = method === "generate" && isAiRequest(args);
+  } else {
+    const { functions } = declaration;
+    allowed = isNamedCall(method, args, (path) =>
+      Object.hasOwn(functions, path)
+    );
+  }
+  if (!allowed) {
+    throw notAllowed();
+  }
+};
+
+/** Whether `result` fits `descriptor` and is already in its normalized form. */
+const isNormalized = (descriptor: unknown, result: Json): boolean => {
+  const checked = schemaOfDescriptor(descriptor)["~standard"].validate(result);
+  const normalized =
+    checked.issues === undefined ? jsonOf(checked.value) : undefined;
+  return (
+    normalized !== undefined &&
+    canonicalJson(normalized) === canonicalJson(result)
+  );
+};
+
+/**
+ * Whether `result` is the return the declared operation or function `args`
+ * names declares, already normalized, as the store's or the platform's
+ * own contract answered it (`allowedRequest` found the path).
+ */
+const returnsDeclared = (
+  shapes: Readonly<Record<string, { readonly returns: unknown }>>,
+  args: readonly Json[],
+  result: Json
+): boolean => {
+  const [path] = args;
+  const shape =
+    typeof path === "string" && Object.hasOwn(shapes, path)
+      ? shapes[path]
+      : undefined;
+  return shape !== undefined && isNormalized(shape.returns, result);
+};
+
+/** What each of the Brain's operations answers code. */
+const brainResults: Readonly<Record<string, z.ZodType>> = {
+  recall: brainPackSchema,
+  "skills.select": brainSkillsSelectedSchema,
+  "skills.read": brainSkillTextSchema,
+  "entities.get": brainCardSchema.nullable(),
+  "entities.find": brainEntitiesSchema,
+  remember: brainRememberedSchema,
+  forget: z.boolean(),
+};
+
+/**
+ * What a permission answered, if its contract allows it: AI's text, or the
+ * value the request asked for; the Brain's hits or document; the
+ * platform's function's return, as it declares it. A
+ * connection's answer is checked as JSON here; its action's own descriptor
+ * comes with generated connector contracts.
+ */
+const checkedResourceResult = (
+  declaration: AnyPermission,
+  method: string,
+  args: readonly Json[],
+  result: Json
+): Json => {
+  let valid: boolean;
+  if (declaration["~permission"] === "ai") {
+    const [, output] = args;
+    valid =
+      output === undefined
+        ? typeof result === "string"
+        : isNormalized(output, result);
+  } else if (declaration["~permission"] === "brain") {
+    valid =
+      Object.hasOwn(brainResults, method) &&
+      brainResults[method]?.safeParse(result).success === true;
+  } else if (declaration["~permission"] === "grasp") {
+    valid = returnsDeclared(declaration.functions, args, result);
+  } else {
+    valid = true;
+  }
+  if (!valid) {
+    throw invalidResult();
+  }
+  return result;
+};
+
+/**
+ * What a provider's failure becomes, from an allow-list: an outcome the
+ * provider couldn't confirm (`effect.outcome_unknown`, connect's
+ * `connect.outcome_unknown` included) as that, kept so nobody repeats the
+ * effect under a fresh key; a binding whose grant was revoked
+ * (`permission.denied`) as `permission.unavailable`; a refusal a binding's
+ * adapter made in the host's words (an unavailable resource, a budget used
+ * up, an effect held for its person, an item it doesn't have, arguments or
+ * an answer its contract doesn't allow) as that; anything else
+ * `internal.unexpected`, its cause logged. Never the provider's own code,
+ * message or details (a connection's ID, the provider's status).
+ */
+const busyDetailsSchema = z.object({
+  retryAfterSeconds: z.int().positive().max(3600),
+});
+
+/** What a busy budget's refusal tells App code: when to ask again, if known. */
+const busyDetails = (
+  details: unknown
+): { retryAfterSeconds: number } | undefined =>
+  busyDetailsSchema.safeParse(details).data;
+
+/** Which bound of a resource's a request reached, and when to ask again. */
+const limitDetailsSchema = z.strictObject({
+  limit: z.enum(["call", "minute", "day", "open"]),
+  retryAfterSeconds: z.int().positive().max(60).optional(),
+});
+
+/** What a binding's adapter may refuse a request with, in the host's words. */
+const adapterRefusals = [
+  "permission.unavailable",
+  "permission.not_allowed",
+  "permission.awaiting_confirmation",
+  "permission.item_not_found",
+  "permission.invalid_args",
+  "permission.declined",
+  "permission.idempotency_conflict",
+  "contract.invalid_permission_result",
+] as const;
+
+const isAdapterRefusal = (
+  code: string | undefined
+): code is (typeof adapterRefusals)[number] =>
+  adapterRefusals.some((refusal) => refusal === code);
+
+/**
+ * Why an App's code may not write to the Brain (brain-app-writes.ts), and
+ * the details each passes on: who called, the table, or what it reaches.
+ */
+const brainWriteRefusals = {
+  "permission.brain_write_caller": z.strictObject({
+    caller: z.enum(["agent", "code_mode", "workflow"]),
+  }),
+  "permission.brain_write_not_user": z.undefined(),
+  "permission.brain_write_table": z.strictObject({ table: z.string() }),
+  "permission.brain_write_builders_table": z.strictObject({
+    table: z.string(),
+  }),
+  "permission.brain_write_reach": z.strictObject({
+    reach: z.enum(["connection", "team_brain", "app"]),
+  }),
+  "permission.brain_write_unplaced": z.undefined(),
+} as const;
+
+/** Why the Brain refused a write's request, as it says (`issues`). */
+const brainIssuesSchema = z.strictObject({
+  issues: z.array(z.string()),
+});
+
+const isBrainWriteRefusal = (
+  code: string | undefined
+): code is keyof typeof brainWriteRefusals =>
+  code !== undefined && Object.hasOwn(brainWriteRefusals, code);
+
+const providerFailure = (error: unknown, requestId: string): Error => {
+  const code = isExpectedError(error) ? error.code : undefined;
+  if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
+    return hostError(effectErrors.create("effect.outcome_unknown"));
+  }
+  if (code === "permission.denied") {
+    return hostError(functionErrors.create("permission.unavailable"));
+  }
+  // A workflow run's attempt let go of before the request left core
+  // (`BindingCaller.requireHolds`): nothing was sent.
+  if (code === "execution.stale_attempt") {
+    return hostError(executionErrors.create("execution.stale_attempt"));
+  }
+  // What a binding's adapter, core's own code, says of a request it
+  // refused or couldn't complete, each in the function host's own words.
+  if (isAdapterRefusal(code)) {
+    return hostError(functionErrors.create(code));
+  }
+  // Why its code may not write to the Brain, with what names it.
+  if (isBrainWriteRefusal(code)) {
+    const details = brainWriteRefusals[code].safeParse(
+      isExpectedError(error) ? error.details : undefined
+    );
+    return hostError(
+      functionErrors.create(
+        code,
+        details.success && details.data !== undefined ? details.data : undefined
+      )
+    );
+  }
+  // A memory the Brain refused for what its code asked (a credential in an
+  // identifier, or in a name an entity is found by: brain-app-writes.ts),
+  // saying why: the only detail
+  // passed on, each issue naming a field, never its value. Any other
+  // request it refuses comes as `permission.invalid_args`
+  // (`inHostBrainWords`), or, saying no why, as unexpected (below).
+  const why =
+    code === "brain.request_invalid" && isExpectedError(error)
+      ? brainIssuesSchema.safeParse(error.details)
+      : undefined;
+  if (why?.success === true) {
+    return hostError(
+      brainSourceErrors.create("brain.request_invalid", why.data)
+    );
+  }
+  // Room held by runs under way, a provider's rate: worth trying again,
+  // after the wait computed, the only detail passed on.
+  if (code === "permission.budget_busy" || code === "permission.rate_limited") {
+    return hostError(
+      functionErrors.create(
+        code,
+        busyDetails(isExpectedError(error) ? error.details : undefined)
+      )
+    );
+  }
+  // A bound of the resource's reached: which one, and for a minute's, when
+  // it starts again, the only details passed on.
+  if (code === "permission.limit_reached") {
+    return hostError(
+      functionErrors.create(
+        code,
+        limitDetailsSchema.safeParse(
+          isExpectedError(error) ? error.details : undefined
+        ).data
+      )
+    );
+  }
+  log.error("function.permission_failed", {
+    requestId,
+    code,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
+/**
+ * The most bytes of a resource's answer to one request, as UTF-8 JSON:
+ * what a workflow step may carry, not a public function's output. It
+ * reaches App code, never the caller as it is: what the action returns is
+ * held to the output limit (`checkedReturn`), so a larger answer must be
+ * cut down or paginated first.
+ */
+const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
+
+/**
+ * One request of a resource the App declares, as `alias` names it, from
+ * an action: only a use its declaration allows (`allowedRequest`), its
+ * arguments JSON within the function input limit, through the binding
+ * core resolved for it, which must be of the declared kind and serve the
+ * declared contract (`permission.unavailable` otherwise, and without a
+ * binding). Its answer is checked against the contract before App code
+ * gets it. A provider's own failure reaches App code only as an expected
+ * error the adapter raised (`effect.outcome_unknown` among them), never
+ * as its message.
+ */
+/**
+ * Refuses, with `function.cancelled`, once `run`'s call is cancelled:
+ * checked just before an effect (a mutation's commit, a resource request)
+ * so a cancel that lands first stops it for certain.
+ */
+const requireNotCancelled = (run: Run): void => {
+  if (run.cancelled?.aborted === true) {
+    throw hostError(functionErrors.create("function.cancelled"));
+  }
+};
+
+const resourceCall = async (
+  run: Run,
+  fn: FunctionManifest,
+  request: { alias: unknown; method: unknown; args: unknown },
+  key: readonly string[]
+): Promise<Json> => {
+  const { alias, method } = request;
+  // Only an action reaches outside the App (its channel alone routes here,
+  // checked again), and only through a permission the App declares for
+  // it: never a workflow, a pages' permission or `people`; or, declaring
+  // none under the Brain's alias, the Brain's reads (GRA-2218).
+  const declared =
+    fn.kind === "action"
+      ? actionPermission(run.app.manifest, alias)
+      : undefined;
+  const byDefault =
+    fn.kind === "action" && declared === undefined
+      ? defaultPermission(run.app.manifest.permissions, alias)
+      : undefined;
+  const declaration = declared ?? byDefault;
+  const resourceName = sealedName(run.app.manifest.permissions, alias);
+  if (declaration === undefined) {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: undeclaredUse(run, alias),
+      reason: "use_undeclared",
+    });
+  }
+  const notAllowedRequest = () =>
+    refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: { kind: "permission", name: resourceName },
+      reason: "request_not_allowed",
+    });
+  if (typeof method !== "string") {
+    throw notAllowedRequest();
+  }
+  const args = jsonOf(request.args);
+  if (args === undefined || !isJsonArray(args)) {
+    throw notAllowedRequest();
+  }
+  if (bytesOf(args) > functionArgsMaxBytes) {
+    throw functionErrors.create("contract.input_too_large", {
+      maxBytes: functionArgsMaxBytes,
+    });
+  }
+  try {
+    allowedRequest(declaration, method, args);
+  } catch (error) {
+    // What its declaration doesn't allow; a declared operation's request
+    // outside its contract is the arguments' fault, as it was.
+    throw functionErrors.codeOf(error) === "permission.not_allowed"
+      ? notAllowedRequest()
+      : error;
+  }
+  // The one gate (`admit`): the same admission a mutation's commit runs,
+  // so a request is made only while the caller may still act.
+  await admit(run.invocation);
+  // Core's own resolution: what it refuses with is the host's.
+  const bound = await trusted(
+    async () =>
+      await run.invocation.resources?.(declaration, byDefault !== undefined)
+  );
+  const contract =
+    declaration["~permission"] === "connections" ? declaration.contract : null;
+  if (
+    bound === undefined ||
+    bound.kind !== declaration["~permission"] ||
+    bound.contract !== contract
+  ) {
+    throw functionErrors.create("permission.unavailable");
+  }
+  // Cancelled meanwhile: nothing is sent.
+  requireNotCancelled(run);
+  let answered: unknown;
+  try {
+    answered = await bound.call(method, args, {
+      requestId: run.invocation.requestId,
+      deadline: run.invocation.deadline,
+      idempotencyKey: key.join(":"),
+    });
+  } catch (error) {
+    throw providerFailure(error, run.invocation.requestId);
+  }
+  const result = jsonOf(answered);
+  if (result === undefined || bytesOf(result) > resourceResultMaxBytes) {
+    throw functionErrors.create("contract.invalid_permission_result");
+  }
+  return checkedResourceResult(declaration, method, args, result);
+};
+
+/**
+ * The start of workflow `alias` that `fn` asks for with `method`
+ * and `args`, if it is an action or a mutation and the App declares a
+ * workflow under the alias: its alias and its input, as the declaration
+ * normalizes it, within the function input limit. `permission.not_allowed`
+ * for anything else, `contract.invalid_args` for input the declaration
+ * doesn't take.
+ */
+const workflowStart = (
+  run: Run,
+  fn: FunctionManifest,
+  request: { alias: unknown; method: unknown; args: unknown }
+): { alias: string; input: Json } => {
+  const { alias, method } = request;
+  // A start is a change, never a read: a query starts nothing.
+  const declaration =
+    fn.kind === "query"
+      ? undefined
+      : declaredPermission(run.app.manifest, alias, "workflows");
+  const args = jsonOf(request.args);
+  const workflowName =
+    declaration === undefined
+      ? sealedName(run.app.manifest.permissions, alias)
+      : declaration.alias;
+  if (declaration === undefined) {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "use_undeclared",
+    });
+  }
+  if (
+    method !== "start" ||
+    args === undefined ||
+    !isJsonArray(args) ||
+    args.length > 1
+  ) {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "request_not_allowed",
+    });
+  }
+  // No argument is no input, which JSON can't carry: the declared schema
+  // decides it, its default included.
+  const given = args.length === 0 ? undefined : args[0];
+  if (given !== undefined && bytesOf(given) > functionArgsMaxBytes) {
+    throw functionErrors.create("contract.input_too_large", {
+      maxBytes: functionArgsMaxBytes,
+    });
+  }
+  const checked = schemaOfDescriptor(declaration.args)["~standard"].validate(
+    given
+  );
+  if ("then" in checked) {
+    throw new Error("A workflow's args schema validated asynchronously");
+  }
+  if (checked.issues !== undefined) {
+    throw functionErrors.create("contract.invalid_args", {
+      issues: argumentIssues(checked.issues),
+    });
+  }
+  const input = jsonOf(checked.value);
+  if (input === undefined) {
+    throw new Error("A validated value isn't JSON");
+  }
+  return { alias: declaration.alias, input };
+};
+
+/**
+ * What a start's refusal becomes for App code, from an allow-list: the
+ * workflow or its binding unavailable to the App, however (no binding,
+ * no grant, a person who can't use the App now, a version gone) as
+ * `permission.unavailable`, never saying which; input the bound version
+ * doesn't take, or a file in it the start can't hand its run, as
+ * `permission.invalid_args`; the person's live runs at
+ * their limit as the retryable `permission.budget_busy`; anything else
+ * `internal.unexpected`, its cause logged.
+ */
+const startFailure = (error: unknown, requestId: string): Error => {
+  // Stopped as it was about to be admitted (`requireGoing`): said as such.
+  const stopped = functionErrors.codeOf(error);
+  if (
+    error instanceof Error &&
+    (stopped === "function.cancelled" ||
+      stopped === "function.deadline_exceeded")
+  ) {
+    return hostError(error);
+  }
+  const code = workflowResourceErrors.codeOf(error);
+  if (code === "workflow.start_invalid") {
+    return hostError(functionErrors.create("permission.invalid_args"));
+  }
+  if (code === "workflow.run_limit") {
+    return hostError(functionErrors.create("permission.budget_busy"));
+  }
+  if (code === "workflow.start_conflict") {
+    return hostError(functionErrors.create("permission.idempotency_conflict"));
+  }
+  // A file of the input it can't hand its run (GRA-976): one the person
+  // can't read now, or past a run's limits. Never which, nor whether the
+  // file exists.
+  if (
+    fileErrors.codeOf(error) !== undefined ||
+    runFileErrors.codeOf(error) !== undefined
+  ) {
+    return hostError(functionErrors.create("permission.invalid_args"));
+  }
+  if (code !== undefined) {
+    return hostError(functionErrors.create("permission.unavailable"));
+  }
+  log.error("function.workflow_start_failed", {
+    requestId,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
+/**
+ * An action's start of one of the App's workflows (`workflowStart`), under `key`
+ * (derived from the action's call key and its place among its starts),
+ * through core's `WorkflowStarts` for the invocation, after the one gate
+ * (`admit`): its handle once admitted. `permission.unavailable` where core
+ * starts no workflow for the call.
+ */
+const startCall = async (
+  run: Run,
+  fn: FunctionManifest,
+  request: { alias: unknown; method: unknown; args: unknown },
+  key: readonly string[],
+  /** Runs the start itself as an effect under way (`runAction`). */
+  sending: <Answer>(work: () => Promise<Answer>) => Promise<Answer>
+): Promise<Json> => {
+  const { alias, input } = workflowStart(run, fn, request);
+  await admit(run.invocation);
+  const starts = run.invocation.workflows;
+  if (starts === undefined) {
+    throw functionErrors.create("permission.unavailable");
+  }
+  // Cancelled, or past its deadline, as the gate was read: nothing is
+  // started, and the start asks again just before it is admitted.
+  const requireGoing = (): void => {
+    requireNotCancelled(run);
+    if (Date.now() >= run.invocation.deadline) {
+      throw hostError(functionErrors.create("function.deadline_exceeded"));
+    }
+  };
+  requireGoing();
+  let handle: RunHandle;
+  try {
+    handle = await sending(
+      async () => await starts.start(alias, input, key.join(":"), requireGoing)
+    );
+  } catch (error) {
+    throw startFailure(error, run.invocation.requestId);
+  }
+  return {
+    startId: handle.startId,
+    runId: handle.runId,
+    version: handle.version,
+  };
+};
+
+/**
+ * The person or team and the notification a send to people asks for
+ * (`[to, notification]`, the runner's `ctx.notifyPeople`), or
+ * `permission.not_allowed` for any other request of `peopleAlias`.
+ */
+const peopleArgs = (method: unknown, args: unknown): [Json, Json] => {
+  const asked = jsonOf(args);
+  if (
+    method !== "notify" ||
+    asked === undefined ||
+    !isJsonArray(asked) ||
+    asked.length !== 2
+  ) {
+    throw functionErrors.create("permission.not_allowed");
+  }
+  const [to = null, notification = null] = asked;
+  return [to, notification];
+};
+
+/**
+ * An action's send to people, under `key` (derived from the action's call
+ * key and its place among its sends), through core's `PeopleNotifications`
+ * for the invocation, after the one gate (`admit`): how many were told.
+ * `permission.unavailable` where core tells nobody for the call.
+ */
+const notifyPeopleCall = async (
+  run: Run,
+  request: { method: unknown; args: unknown },
+  key: readonly string[],
+  /** Runs the send itself as an effect under way (`runAction`). */
+  sending: <Answer>(work: () => Promise<Answer>) => Promise<Answer>
+): Promise<Json> => {
+  const [to, notification] = peopleArgs(request.method, request.args);
+  await admit(run.invocation);
+  const { notifyPeople: people } = run.invocation;
+  if (people === undefined) {
+    throw functionErrors.create("permission.unavailable");
+  }
+  requireNotCancelled(run);
+  if (Date.now() >= run.invocation.deadline) {
+    throw hostError(functionErrors.create("function.deadline_exceeded"));
+  }
+  const receipt = await sending(
+    async () => await people.send(to, notification, key.join(":"))
+  );
+  return { delivered: receipt.delivered };
+};
+
+/**
+ * The event `fn`, a mutation, sends under workflow
+ * `alias` with `args` (`[event, runId, data]`, the runner's
+ * `ctx.sendEvent` with the alias of the event its generated reference
+ * names), if the App declares the workflow: the event's alias (which
+ * core resolves in the release it runs, and refuses unless that release
+ * declares it), the run and the data. `permission.not_allowed` for
+ * anything else.
+ */
+const workflowEventSend = (
+  run: Run,
+  fn: FunctionManifest,
+  request: { alias: unknown; args: unknown }
+): { workflow: string; event: string; runId: Json; data: Json } => {
+  const args = jsonOf(request.args);
+  const declared =
+    fn.kind === "mutation"
+      ? declaredPermission(run.app.manifest, request.alias, "workflows")
+      : undefined;
+  const workflowName = sealedName(run.app.manifest.permissions, request.alias);
+  if (declared === undefined) {
+    // Named by what the alias is in the App: a connection's is no workflow.
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: undeclaredUse(run, request.alias),
+      reason: "use_undeclared",
+    });
+  }
+  const [eventAlias, runId, data] =
+    args !== undefined && isJsonArray(args) ? args : [];
+  if (
+    args === undefined ||
+    !isJsonArray(args) ||
+    args.length !== 3 ||
+    typeof eventAlias !== "string"
+  ) {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "request_not_allowed",
+    });
+  }
+  return {
+    workflow: declared.alias,
+    event: eventAlias,
+    runId: runId ?? null,
+    data: data ?? null,
+  };
+};
+
+/**
+ * What a sent event's refusal becomes for App code: its own refusal
+ * when core raised one of the function host's codes (an event its
+ * release doesn't resolve, data its contract refuses), anything else
+ * `internal.unexpected`, its cause logged.
+ */
+const sendEventFailure = (error: unknown, requestId: string): Error => {
+  if (error instanceof Error && functionErrors.codeOf(error) !== undefined) {
+    return hostError(error);
+  }
+  log.error("function.workflow_send_event_failed", {
+    requestId,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
+/** What one run of a function may still read: its reads, and staged bytes sent. */
+interface ReadBudget {
+  reads: number;
+  shipped: number;
+}
+
+/** A new run's read budget. */
+const readBudget = (): ReadBudget => ({ reads: 0, shipped: 0 });
+
+/**
+ * Spends one read of `budget`, sending `staged` bytes of staged writes
+ * with it: `function.read_limit` past `invocationMaxReads` reads or
+ * `stagedReadMaxBytes` sent, so one call can't make the store apply its
+ * staged writes without end. The budget is the whole call's, its nested
+ * functions' reads with the one it named (`runReads`): each invocation
+ * alone is held to its host calls first (function-channel.ts).
+ */
+const spendRead = (budget: ReadBudget, staged: number): void => {
+  budget.reads += 1;
+  budget.shipped += staged;
+  if (
+    budget.reads > invocationMaxReads ||
+    budget.shipped > stagedReadMaxBytes
+  ) {
+    throw functionErrors.create("function.read_limit", {
+      maxReads: invocationMaxReads,
+      maxStagedBytes: stagedReadMaxBytes,
+    });
+  }
+};
+
+/** A role reading's teams, in one order, for comparing. */
+const teamsKey = (roles: WriterRoles): string =>
+  JSON.stringify((roles.teams ?? []).toSorted());
+
+/**
+ * Whether two role readings differ: in role, or in the teams a table's
+ * row rules read.
+ */
+const rolesDiffer = (one: WriterRoles, other: WriterRoles): boolean =>
+  one.appMember !== other.appMember ||
+  one.appBuilder !== other.appBuilder ||
+  teamsKey(one) !== teamsKey(other);
+
+/** The read scope of an invocation: core's, and the pinned schema's hash. */
+const scopeOf = async (
+  compiled: Compiled,
+  invocation: Invocation,
+  roles: WriterRoles
+): Promise<ReadScope> => ({
+  schemaHash: await compiled.hash,
+  principal: invocation.principal,
+  appMember: roles.appMember,
+  appBuilder: roles.appBuilder,
+  ...(roles.teams === undefined ? {} : { teams: [...roles.teams] }),
+  ...(roles.unrestricted === true ? { unrestricted: true } : {}),
+  consumer: { ...invocation.consumer },
+});
+
+/**
+ * How deep functions may call each other within one call: the caller's
+ * own function and three nested in it.
+ */
+export const callMaxDepth = 3;
+
+/**
+ * What a draft's code threw in the current attempt of the function the
+ * caller named (`tellerOf`): its own failure, and its nested functions'
+ * by the token App code was handed for each (`forCaller`).
+ */
+interface Told {
+  failure?: string;
+  readonly nested: Map<string, string>;
+}
+
+/** One function's run, and where it sits in the call it belongs to. */
+interface Run {
+  readonly app: HostedApp;
+  readonly compiled: Compiled;
+  readonly invocation: Invocation;
+  /** How many functions it is nested in: 0 for the one the caller named. */
+  readonly depth: number;
+  /** What the whole call may still do, shared by every function in it. */
+  readonly budget: CallBudget;
+  /**
+   * Whether the call kept its evidence of a refused use already
+   * (`Invocation.refusedUse`): shared by every function in it, so only
+   * its first refusal is kept.
+   */
+  readonly evidence: { kept: boolean };
+  /**
+   * What the call read of sensitive tables (`SensitiveTally`): shared by
+   * every function in it, kept once as the call ends (`hostFunctionCall`).
+   */
+  readonly sensitive: SensitiveTally;
+  /**
+   * The first failure a nested function of the current attempt threw that
+   * said more than the platform's generic text (`tellerOf`): shared by
+   * every function in the call, and cleared as each attempt of the one
+   * the caller named starts.
+   */
+  readonly told: Told;
+  /** The caller's call, as its runner knows it: the same at any depth. */
+  readonly call: CallTree;
+  /**
+   * Aborted once the caller cancels its call (`CallOptions.cancelled`):
+   * every run in the call stops as at its deadline.
+   */
+  readonly cancelled?: AbortSignal;
+  /** Told of each effect the call makes (`CallOptions.onEffect`). */
+  readonly onEffect?: () => void;
+  /** What the named mutation's commit carries (`CallOptions.commitIntent`). */
+  readonly commitIntent?: CallOptions["commitIntent"];
+  /** What the named mutation's receipt is scoped by (`CallOptions.receiptScope`). */
+  readonly receiptScope?: string;
+  /** Where its progress goes: only for the streaming action the caller named. */
+  readonly progress?: ProgressSink;
+  /**
+   * Checks the files the caller passed the function they named
+   * (`admitFiles`): a mutation calls it once its receipt says it hasn't
+   * run yet, never for a nested call (whose arguments are App code's).
+   */
+  readonly filesAdmitted?: () => Promise<void>;
+}
+
+/** The most resource requests one call may make, at any depth. */
+export const callMaxResourceRequests = 32;
+
+/**
+ * What one call, with everything nested in it, may still do: its nested
+ * calls, its resource requests, and one read budget (reads and staged
+ * bytes sent) shared by every function it runs.
+ */
+interface CallBudget {
+  nested: number;
+  requests: number;
+  /**
+   * The current run's reads: each run of the call's own function (a
+   * query run again for stale reads, a mutation's next attempt) starts a
+   * fresh one, which everything nested in that run shares. The limits are
+   * per run, as their names say; the bounded number of reruns bounds the
+   * whole call.
+   */
+  reads: ReadBudget;
+}
+
+/**
+ * The read budget of a run of `run`'s function: a fresh one, shared by
+ * what it calls, when it is the call's own function; the run it is nested
+ * in's otherwise, so nested calls never multiply what one run reads.
+ */
+const runReads = (run: Run): ReadBudget => {
+  if (run.depth === 0) {
+    run.budget.reads = readBudget();
+  }
+  return run.budget.reads;
+};
+
+/** A new call's budget. */
+const callBudget = (): CallBudget => ({
+  nested: 0,
+  requests: 0,
+  reads: readBudget(),
+});
+
+/** Spends one nested call, or one resource request, of `budget`. */
+const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
+  budget[what] += 1;
+  if (
+    budget.nested > callMaxNested ||
+    budget.requests > callMaxResourceRequests
+  ) {
+    throw functionErrors.create("function.call_limit", {
+      maxNested: callMaxNested,
+      maxResourceRequests: callMaxResourceRequests,
+    });
+  }
+};
+
+/**
+ * `capabilities`, each use tracked while it runs: once the handler has
+ * settled (`settle`), a new use is refused (`function.ended`), and
+ * `settle` waits for those still running, at most until `deadline`
+ * (past which the store refuses whatever they would commit). It answers
+ * the failure of the first that was still running when the handler
+ * settled and then failed: one the handler never waited for, so it could
+ * neither handle it nor report it. One the handler waited for is its own
+ * to have handled, and doesn't fail the run again. One stopped at the
+ * deadline (`function.deadline_exceeded`, nested calls sharing it) is
+ * answered as unfinished, the handler's own failure.
+ */
+const trackedCalls = (
+  capabilities: Capabilities,
+  deadline: number
+): {
+  capabilities: Capabilities;
+  settle: () => Promise<unknown>;
+  /**
+   * Settles once every call still under way has, however each ended: what
+   * a run stopped at its deadline or cancelled left running in the host
+   * (a mutation it called committing, a request's refusal recorded), which
+   * `letGo` keeps alive a little longer.
+   */
+  inFlight: () => Promise<unknown>;
+} => {
+  let handlerSettled = false;
+  const running = new Set<Promise<unknown>>();
+  let unfinished: { error: unknown } | undefined;
+  let pastDeadline = false;
+  const track = <Args extends unknown[]>(
+    use: ((...args: Args) => Promise<unknown>) | undefined
+  ) =>
+    use === undefined
+      ? undefined
+      : async (...args: Args): Promise<unknown> => {
+          if (handlerSettled) {
+            throw functionErrors.create("function.ended");
+          }
+          const call = use(...args);
+          const watched = (async () => {
+            try {
+              await call;
+            } catch (error) {
+              if (!handlerSettled) {
+                return;
+              }
+              // Left running and stopped at the deadline: the handler's
+              // own failure is that it left the call unfinished, as when
+              // the wait for it runs out (the host's error, never one to
+              // read as App code's).
+              if (
+                functionErrors.codeOf(error) === "function.deadline_exceeded"
+              ) {
+                pastDeadline = true;
+              } else {
+                unfinished ??= { error };
+              }
+            }
+          })();
+          running.add(watched);
+          try {
+            return await call;
+          } finally {
+            running.delete(watched);
+          }
+        };
+  return {
+    capabilities: {
+      read: track(capabilities.read),
+      write: track(capabilities.write),
+      call: track(capabilities.call),
+      permission: track(capabilities.permission),
+      emit: track(capabilities.emit),
+      people: track(capabilities.people),
+    },
+    inFlight: async () => await Promise.allSettled(running),
+    settle: async () => {
+      handlerSettled = true;
+      while (running.size > 0) {
+        const left = deadline - Date.now();
+        if (left <= 0) {
+          throw hostError(functionErrors.create("function.unfinished_call"));
+        }
+        // The timer is cleared once the calls settle first, so no wait is
+        // left pending past the run.
+        const timer = new AbortController();
+        // oxlint-disable-next-line no-await-in-loop -- until none is left
+        await Promise.race([
+          Promise.allSettled(running),
+          scheduler.wait(left, { signal: timer.signal }).catch(() => null),
+        ]);
+        timer.abort();
+      }
+      if (pastDeadline) {
+        throw hostError(functionErrors.create("function.unfinished_call"));
+      }
+      return unfinished?.error;
+    },
+  };
+};
+
+/**
+ * `work`, or "expired" once `deadline` (ms since the epoch) passes first:
+ * the sandbox limits CPU, not time, so a handler awaiting a long timer
+ * would otherwise hold its call and channel open. Nested calls share their
+ * caller's invocation, so they run to the same deadline. It stops waiting,
+ * not the isolate: a busy loop runs on until the runtime's CPU limit ends
+ * it, which plain workerd (on-prem) doesn't enforce (sandbox.ts, GRA-449).
+ */
+const untilDeadline = async <Answer>(
+  work: Promise<Answer>,
+  at: number,
+  cancelled?: AbortSignal
+): Promise<Answer | "expired" | "cancelled"> => {
+  const limit = timeLimit(Math.max(0, at - Date.now()));
+  try {
+    return await Promise.race([
+      work,
+      whenAborted(limit.signal).catch(() => "expired" as const),
+      ...(cancelled === undefined
+        ? []
+        : [whenAborted(cancelled).catch(() => "cancelled" as const)]),
+    ]);
+  } finally {
+    limit.clear();
+  }
+};
+
+/** `work`'s value, or "cancelled" once `cancelled` aborts first. */
+const untilCancelled = async <Answer>(
+  work: Promise<Answer>,
+  cancelled: AbortSignal | undefined
+): Promise<{ readonly value: Answer } | "cancelled"> => {
+  // Never rejecting: a failure that comes after the cancel won is dropped,
+  // not left unhandled.
+  const settled = (async () => {
+    try {
+      return { value: await work };
+    } catch (error) {
+      return { error };
+    }
+  })();
+  const first = await Promise.race([
+    settled,
+    ...(cancelled === undefined
+      ? []
+      : [whenAborted(cancelled).catch(() => "cancelled" as const)]),
+  ]);
+  if (first === "cancelled") {
+    return first;
+  }
+  if ("error" in first) {
+    throw first.error;
+  }
+  return first;
+};
+
+/** Thrown by a run whose failure came from stale reads: run it again. */
+const staleRun = new Error("A run's reads went stale");
+
+/** The capabilities one handler's channel gets, besides its refusals. */
+interface Capabilities {
+  /** Told of every refused or failed use, as the channel's `refused`. */
+  readonly onRefused?: (
+    name: "read" | "write" | "call" | "permission" | "emit" | "people",
+    error: Error
+  ) => void;
+  readonly read?: (request: unknown) => Promise<unknown>;
+  readonly write?: (request: unknown) => Promise<unknown>;
+  readonly call?: (
+    kind: unknown,
+    path: unknown,
+    args: unknown
+  ) => Promise<unknown>;
+  readonly permission?: (
+    alias: unknown,
+    method: unknown,
+    args: unknown
+  ) => Promise<unknown>;
+  readonly emit?: (progress: unknown) => Promise<unknown>;
+  /** Who calls, and the organization's people (`Invocation.people`). */
+  readonly people?: (name: unknown, args: unknown) => Promise<unknown>;
+  /**
+   * Whether an effect it started (a mutation or action it called, a
+   * resource request) is still under way: a cancel that lands then can't
+   * say what happened (`function.outcome_unknown`).
+   */
+  readonly effectsInFlight?: () => boolean;
+}
+
+/** Why each kind's channel refuses what it hasn't. */
+const refusalsOf = {
+  query: {
+    write: "function.read_only",
+    call: "function.read_only",
+    permission: "function.no_permissions",
+    emit: "function.no_stream",
+  },
+  mutation: {
+    permission: "function.no_permissions",
+    emit: "function.no_stream",
+  },
+  action: {
+    read: "function.no_database",
+    write: "function.no_database",
+    emit: "function.no_stream",
+  },
+} as const;
+
+/**
+ * Why a run stopped early: its deadline, or a cancel. A cancel that lands
+ * while an effect it started is still under way (a mutation committing, a
+ * request out) can't say whether that effect happened: uncertain, never
+ * a definite `function.cancelled` that would invite running it again.
+ */
+const stoppedCode = (
+  outcome: "expired" | "cancelled",
+  capabilities: Capabilities
+):
+  | "function.deadline_exceeded"
+  | "function.cancelled"
+  | "function.outcome_unknown" => {
+  if (outcome === "expired") {
+    return "function.deadline_exceeded";
+  }
+  return capabilities.effectsInFlight?.() === true
+    ? "function.outcome_unknown"
+    : "function.cancelled";
+};
+
+/** How long a run stopped at its deadline gets to let go of what it held. */
+const letGoMs = 1000;
+
+/**
+ * Waits, a little, for a run stopped at its deadline or cancelled to let go
+ * of what it holds (an on-prem sandbox process, which its runner frees when
+ * the run's signal aborts), and for what it left under way in the host to
+ * settle (`inFlight`: a mutation's commit, a request's refusal recorded;
+ * a call its handler started and didn't wait for). Past the answer, the
+ * request that frees or finishes them may itself be cancelled, its object
+ * evicted: kept alive this long, they finish rather than being cut off
+ * (GRA-701). Never longer, so a call that hangs can't hold the answer.
+ */
+const letGo = async (
+  ran: Promise<unknown>,
+  inFlight: () => Promise<unknown>
+): Promise<void> => {
+  const timer = new AbortController();
+  await Promise.race([
+    Promise.allSettled([ran, inFlight()]),
+    scheduler.wait(letGoMs, { signal: timer.signal }).catch(() => null),
+  ]);
+  timer.abort();
+};
+
+/**
+ * The longest App code waits to hear of a refused use while its evidence
+ * is kept (`keepEvidence`): long enough for an outboxed write, short of
+ * holding the call.
+ */
+export const useEvidenceWaitMs = 2000;
+
+/**
+ * Keeps the evidence of a use refused at the host's admission
+ * (`refusedUses`) as `fn`'s code asked it: the call's first, through
+ * `Invocation.refusedUse`, before the refusal reaches App code. For a
+ * live query, a refusal its subscription kept already in this version is
+ * passed over without taking the call's entry, and one whose keeping
+ * rejects is given back to it (`Invocation.refusalsKept`). A failure to
+ * keep it is logged; the refusal stands either way.
+ */
+const keepEvidence = async (
+  run: Run,
+  fn: FunctionManifest,
+  error: unknown
+): Promise<void> => {
+  const refused =
+    typeof error === "object" && error !== null
+      ? refusedUses.get(error)
+      : undefined;
+  const keep = run.invocation.refusedUse;
+  if (refused === undefined || keep === undefined || run.evidence.kept) {
+    return;
+  }
+  const errorCode =
+    functionErrors.codeOf(error) ??
+    dataErrors.codeOf(error) ??
+    "permission.not_allowed";
+  const refusal: UseRefusal = { function: fn.path, ...refused, errorCode };
+  const { refusalsKept, consumer } = run.invocation;
+  const key = refusalKey(consumer.resourceVersion, refusal);
+  if (refusalsKept?.has(key) === true) {
+    return;
+  }
+  // Taken before the write, so a read again meanwhile doesn't write it
+  // twice; given back if the write rejects, so a later read keeps it. A
+  // write that hangs keeps it: it goes on past the wait (`waitUntil`,
+  // app-functions.ts), and a read again would only write it twice.
+  refusalsKept?.add(key);
+  run.evidence.kept = true;
+  const keeping = (async () => {
+    try {
+      await keep(refusal);
+    } catch (keepError) {
+      refusalsKept?.delete(key);
+      log.error("app.use.audit_failed", {
+        requestId: run.invocation.requestId,
+        errorCode,
+        ...errorFields(keepError),
+      });
+    }
+  })();
+  // Waited for no longer than `useEvidenceWaitMs`, nor past the call's
+  // deadline: a write still under way then goes on, and App code hears of
+  // the refusal, so a hung write never holds the App's call. The deadline
+  // alone wouldn't do: the run is stopped there anyway (`runHandler`).
+  const waited = Promise.withResolvers<null>();
+  const giveUp = setTimeout(
+    () => {
+      waited.resolve(null);
+    },
+    Math.max(
+      0,
+      Math.min(useEvidenceWaitMs, run.invocation.deadline - Date.now())
+    )
+  );
+  try {
+    await Promise.race([keeping, waited.promise]);
+  } finally {
+    clearTimeout(giveUp);
+  }
+};
+
+/**
+ * `capabilities`, its reads, writes, calls and resource requests keeping
+ * the evidence of a use refused at the host's admission (`keepEvidence`).
+ */
+const keepingEvidence = (
+  run: Run,
+  fn: FunctionManifest,
+  capabilities: Capabilities
+): Capabilities => {
+  const keeping =
+    <Args extends unknown[]>(capability: (...args: Args) => Promise<unknown>) =>
+    async (...args: Args): Promise<unknown> => {
+      try {
+        return await capability(...args);
+      } catch (error) {
+        await keepEvidence(run, fn, error);
+        throw error;
+      }
+    };
+  return {
+    ...capabilities,
+    ...(capabilities.read === undefined
+      ? {}
+      : { read: keeping(capabilities.read) }),
+    ...(capabilities.write === undefined
+      ? {}
+      : { write: keeping(capabilities.write) }),
+    ...(capabilities.call === undefined
+      ? {}
+      : { call: keeping(capabilities.call) }),
+    ...(capabilities.permission === undefined
+      ? {}
+      : { permission: keeping(capabilities.permission) }),
+  };
+};
+
+/**
+ * Runs `fn`'s handler with `args` over a channel of `capabilities`,
+ * ended once it settles, and answers its checked return; a failure as the
+ * host decides it (`failureOf`). `stale` says, for a failure, whether the
+ * run's reads went stale, which makes it a run to repeat rather than a
+ * failure: thrown as `Stale`.
+ */
+const runHandler = async (
+  run: Run,
+  fn: FunctionManifest,
+  args: Json,
+  capabilities: Capabilities,
+  stale?: () => Promise<boolean>,
+  start?: MutationStart
+): Promise<Json> => {
+  if (run.depth === 0) {
+    // A new attempt: what an earlier one's nested calls threw isn't why
+    // this one fails.
+    run.told.failure = undefined;
+    run.told.nested.clear();
+  }
+  const { people } = run.invocation;
+  const calls = trackedCalls(
+    {
+      ...keepingEvidence(run, fn, capabilities),
+      // Every kind's: who calls, and the directory, as core resolved them
+      // for the invocation, nested calls' included. Each directory read is
+      // admitted first, as a resource request is (`admit`): a person
+      // removed, a release revoked or an agent's permission withdrawn
+      // while the call runs reads nothing more. Only who calls is kept
+      // from the call's start.
+      ...(people === undefined
+        ? {}
+        : {
+            people: async (read: unknown, readArgs: unknown) => {
+              if (read !== "user") {
+                await admit(run.invocation);
+              }
+              return await answerPeople(people, read, readArgs);
+            },
+          }),
+    },
+    run.invocation.deadline
+  );
+  const open = openChannel({
+    requestId: run.invocation.requestId,
+    path: fn.path,
+    ...calls.capabilities,
+    trust,
+    ...(capabilities.onRefused === undefined
+      ? {}
+      : { refused: capabilities.onRefused }),
+    refusals: refusalsOf[fn.kind],
+  });
+  const stopped = new AbortController();
+  const ran = settle(
+    run.app.run(
+      fn.path,
+      fresh(args),
+      open.channel,
+      stopped.signal,
+      { tree: run.call, nested: run.depth > 0 },
+      start
+    )
+  );
+  try {
+    const outcome = await untilDeadline(
+      ran,
+      run.invocation.deadline,
+      run.cancelled
+    );
+    if (outcome === "expired" || outcome === "cancelled") {
+      // Stopped at its deadline, or cancelled: its channel ends as this
+      // returns (the `finally` below), so nothing it still does reaches
+      // the store, and what it staged never commits.
+      throw hostError(
+        functionErrors.create(stoppedCode(outcome, capabilities))
+      );
+    }
+    // What it started and didn't wait for still runs: the run ends once
+    // that has settled, and fails with what failed of it. A cancel stops
+    // that wait too, saying what is known of what still ran.
+    const left = await untilCancelled(calls.settle(), run.cancelled);
+    if (left === "cancelled") {
+      throw hostError(
+        functionErrors.create(stoppedCode("cancelled", capabilities))
+      );
+    }
+    const unfinished = left.value;
+    if ("thrown" in outcome) {
+      if (stale !== undefined && (await stale())) {
+        throw staleRun;
+      }
+      const sandboxed = sandboxFailureOf(outcome.thrown, {
+        requestId: run.invocation.requestId,
+        path: fn.path,
+        depth: run.depth,
+      });
+      if (sandboxed !== undefined) {
+        throw sandboxed;
+      }
+      throw failureOf(
+        outcome.thrown,
+        open,
+        run.invocation.requestId,
+        fn.path,
+        tellerOf(run)
+      );
+    }
+    if (unfinished !== undefined) {
+      // A call it left running may have failed on reads a commit made
+      // stale, as its handler may: then it is a run to repeat too.
+      if (stale !== undefined && (await stale())) {
+        throw staleRun;
+      }
+      throw failureOf(
+        unfinished,
+        open,
+        run.invocation.requestId,
+        fn.path,
+        tellerOf(run)
+      );
+    }
+    return checkedReturn(run.compiled, fn, outcome.value);
+  } catch (error) {
+    if (error === staleRun) {
+      throw error;
+    }
+    throw sealed(error);
+  } finally {
+    // Past its deadline or done, the run is over: what still runs of it
+    // ends with its channel.
+    stopped.abort();
+    open.end();
+    // Stopped at its deadline or cancelled, or ended with calls it left
+    // still out (`function.unfinished_call`): kept alive a little longer.
+    // A run that settled with nothing left out waits for nothing here.
+    await letGo(ran, calls.inFlight);
+    // Its session, on-prem, which the function its caller named opened and
+    // which went on after it answered: it ends now, as the run is over, and
+    // is waited for a little, so it asks the supervisor to free its process
+    // while this request still can.
+    if (run.depth === 0) {
+      await run.call.sessionEnded(letGoMs);
+    }
+  }
+};
+
+/**
+ * A query a mutation runs: its handler over the mutation's own reader, so
+ * it sees the staged writes and its reads count in the mutation's read
+ * set, as the same caller under the same access and row rules.
+ */
+const stagedQuery = async (
+  run: Run,
+  /** The mutation that runs it, whose staged writes it sees. */
+  mutation: FunctionManifest,
+  callee: FunctionManifest,
+  args: Json,
+  reader: StoreReader,
+  spend: () => void,
+  start: Promise<MutationStart>
+): Promise<Json> => {
+  // A mutation runs queries only (inspection and `nestedCall` see to it):
+  // checked again here, where anything else would see its staged state.
+  if (callee.kind !== "query") {
+    throw functionErrors.create("function.kind_mismatch");
+  }
+  return await runHandler(
+    run,
+    callee,
+    args,
+    {
+      read: async (request) => {
+        spend();
+        try {
+          return await readFor(run, callee, reader, request);
+        } catch (error) {
+          // A write the store refuses as it shows the query the staged
+          // writes is the mutation's, which staged it: kept as its own.
+          if (dataErrors.codeOf(error) === "data.write_denied") {
+            await keepEvidence(run, mutation, error);
+          }
+          throw error;
+        }
+      },
+    },
+    undefined,
+    await start
+  );
+};
+
+/**
+ * What a failure becomes for App code that called the failing function:
+ * a domain failure the `AppError` it was (App code may handle it or throw
+ * it on), an expected platform error as it is, anything else
+ * `internal.unexpected`, its cause logged already.
+ */
+const forCaller = (error: unknown, run: Run): Error => {
+  const { requestId } = run.invocation;
+  const domain = error instanceof Error ? domainFailures.get(error) : undefined;
+  if (error instanceof Error && domain !== undefined) {
+    // A fresh `AppError` each time, of the SDK's own class (what App code
+    // catches with `instanceof` when it runs in this isolate; across one,
+    // the SDK's runner rebuilds it): nothing the host keeps, so nothing
+    // App code does to it reaches a caller.
+    // SAFETY: details a domain failure carries are JSON, as
+    // `appErrorDetailsOf` copied them.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const details = structuredClone(domain.details) as JsonValue | undefined;
+    return new AppError(domain.code, error.message, details);
+  }
+  // What a draft's nested function threw, kept by a token App code is
+  // handed with it: told only if it throws on this very failure. Read
+  // before a host error passes on as it is: a nested function that threw
+  // on one failure it caught fails with its channel's copy of the last
+  // one it was raised, whose token names that other failure.
+  const said =
+    typeof error === "object" && error !== null
+      ? nestedSaid.get(error)
+      : undefined;
+  if (said === undefined && isExpectedError(error) && hostErrors.has(error)) {
+    return error;
+  }
+  const token = said === undefined ? undefined : crypto.randomUUID();
+  if (said !== undefined && token !== undefined) {
+    run.told.nested.set(token, said);
+  }
+  const opaque = internalErrors.create(
+    "internal.unexpected",
+    token === undefined ? { requestId } : { requestId, failure: token }
+  );
+  opaque.stack = undefined;
+  return opaque;
+};
+
+/**
+ * Runs the function at `path` that `fn` calls with `args`, as
+ * `kind` (`runQuery`, `runMutation`, `runAction`): one the App registers,
+ * public or internal, of that kind, within the call's depth, under the
+ * call's principal and the tables' access and row rules. A mutation's
+ * query runs in the mutation's staged state, its reads through `reader`;
+ * an action's calls are invocations of their own, each
+ * authorized again and each mutation committed on its own under a
+ * receipt derived from the action's key (`derived`).
+ */
+const startNested = async (
+  run: Run,
+  fn: FunctionManifest,
+  request: { kind: unknown; path: unknown; args: unknown },
+  within:
+    | {
+        readonly type: "mutation";
+        readonly reader: StoreReader;
+        /** Spends one of the mutation's reads (`spendRead`). */
+        readonly spend: () => void;
+        /** The nested query's time and seed, from the mutation's. */
+        readonly start: Promise<MutationStart>;
+      }
+    | {
+        readonly type: "action";
+        readonly derived: () => Promise<readonly string[]>;
+      }
+): Promise<Json> => {
+  const { kind, path, args } = request;
+  const callee =
+    typeof path === "string" && Object.hasOwn(run.app.manifest.functions, path)
+      ? run.app.manifest.functions[path]
+      : undefined;
+  if (callee === undefined) {
+    throw refusingUse(functionErrors.create("function.not_found"), {
+      use: {
+        kind: "function",
+        name: sealedName(run.app.manifest.functions, path),
+      },
+      reason: "use_undeclared",
+    });
+  }
+  if (callee.kind !== kind) {
+    throw functionErrors.create("function.kind_mismatch");
+  }
+  if (run.depth + 1 > callMaxDepth) {
+    throw functionErrors.create("function.depth_exceeded", {
+      maxDepth: callMaxDepth,
+    });
+  }
+  // A streaming action runs only for a page following it (spec 10.7.6):
+  // nested, its progress would have no one to go to.
+  if (callee.stream !== null) {
+    throw functionErrors.create("function.mode_mismatch");
+  }
+  spendCall(run.budget, "nested");
+  const admitted = admittedArgs(run.compiled, callee, args);
+  // Cancelled with the call, but never emitting: its progress would be
+  // another function's to send.
+  const { progress: _progress, ...inherited } = run;
+  const nested: Run = { ...inherited, depth: run.depth + 1 };
+  try {
+    if (within.type === "mutation") {
+      return await stagedQuery(
+        nested,
+        fn,
+        callee,
+        admitted,
+        within.reader,
+        within.spend,
+        within.start
+      );
+    }
+    // oxlint-disable-next-line no-use-before-define -- an action's calls run functions of every kind, actions among them
+    return await execute(
+      nested,
+      callee,
+      admitted,
+      // A query needs no key: only what changes something holds a place.
+      callee.kind === "query" ? [] : await within.derived(),
+      args
+    );
+  } catch (error) {
+    throw forCaller(error, run);
+  }
+};
+
+/**
+ * A function nested in `run`'s, started: counted by the call it runs in
+ * from now (`CallTree`), so a session that call's functions share stays
+ * open for it while it's still authorized or claimed.
+ */
+const nestedCall = async (
+  ...args: Parameters<typeof startNested>
+): Promise<Json> => {
+  const work = startNested(...args);
+  args[0].call.track(work);
+  return await work;
+};
+
+/** Runs a query: its reads one state of the store (`readConsistently`). */
+const runQuery = async (
+  run: Run,
+  fn: FunctionManifest,
+  args: Json
+): Promise<Json> => {
+  const { invocation, compiled } = run;
+  const scope = await trusted(
+    async () => await scopeOf(compiled, invocation, await admit(invocation))
+  );
+  return await trusted(
+    async () =>
+      await readConsistently(
+        invocation.store,
+        scope,
+        async (reader) => {
+          const budget = runReads(run);
+          return await runHandler(run, fn, args, {
+            read: async (request) => {
+              spendRead(budget, 0);
+              return await readFor(run, fn, reader, request);
+            },
+          });
+        },
+        run.depth === 0 ? invocation.observeReads : undefined
+      )
+  );
+};
+
+/** The aliases of the App's files resources that declare `use`. */
+const resourcesDeclaring = (
+  manifest: AppManifest,
+  use: "attach" | "read"
+): string[] =>
+  declaredPermissions(manifest, "files").flatMap((resource) =>
+    resource.operations.includes(use) ? [resource.alias] : []
+  );
+
+/**
+ * Runs a mutation under its receipt (`key`): claimed first (a submission
+ * that committed already answers its outcome), run, its return checked,
+ * the caller authorized again, then committed with its read set; run
+ * again when a commit finds its reads stale.
+ */
+const runMutation = async (
+  run: Run,
+  fn: FunctionManifest,
+  args: Json,
+  key: readonly string[],
+  inputHash: string
+): Promise<Json> => {
+  const { invocation, compiled } = run;
+  const { store } = invocation;
+  let roles = await admit(invocation);
+  const claimed = await trusted(
+    async () =>
+      await store.claim({
+        scope: {
+          principal: invocation.principal,
+          resource: invocation.consumer.resourceId,
+          binding: null,
+          // The function's path alone, not its contract or the App's
+          // version: a page's call runs in whatever release is current,
+          // so a retry after a publish, even one that changed the
+          // function's arguments, finds the receipt and runs nothing
+          // again. Other input under the key is refused by its hash. A
+          // caller naming the function by its stable ID scopes it by
+          // that, so a retry after a rename finds it too.
+          contractId:
+            run.depth === 0 && run.receiptScope !== undefined
+              ? run.receiptScope
+              : fn.path,
+          contractVersion: 1,
+          functionKind: "mutation",
+        },
+        key: [...key],
+        inputHash,
+        runId: invocation.runId,
+        deadline: invocation.deadline,
+      })
+  );
+  if ("outcome" in claimed) {
+    return claimed.outcome.result;
+  }
+  if (run.depth === 0) {
+    await run.filesAdmitted?.();
+  }
+  // What its commit carries for its caller, once, whatever reruns it takes.
+  const carried =
+    run.depth === 0 ? await run.commitIntent?.(claimed.startedAt) : undefined;
+  for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after the other
+    const scope = await scopeOf(compiled, invocation, roles);
+    const staging = stagingFor(compiled, fn, Date.now());
+    // Each query it runs answers as it does from the mutation's start and
+    // a seed of its own, by the order this run calls them: the same in
+    // every run of the mutation, never the mutation's own seed again.
+    let nestedCalls = 0;
+    const nestedStart = async (): Promise<MutationStart> => {
+      nestedCalls += 1;
+      return {
+        startedAt: claimed.startedAt,
+        seed: await sha256Hex(`${claimed.seed}:${nestedCalls}`),
+      };
+    };
+    // The workflows it starts once it commits, staged by this run alone: a
+    // run again for stale reads stages its own from nothing. A start holds
+    // its place from before it is admitted (`placed`).
+    const intents: NonNullable<Commit["intents"]> = [];
+    let placed = 0;
+    const reader = new StoreReader(store, scope, staging.preview);
+    const budget = runReads(run);
+    const spend = () => {
+      spendRead(budget, staging.bytes());
+    };
+    let value: Json;
+    try {
+      // One run after the other: a rerun exists only because the last
+      // one's reads went stale.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      value = await runHandler(
+        run,
+        fn,
+        args,
+        {
+          read: async (request) => {
+            spend();
+            return await readFor(run, fn, reader, request);
+          },
+          write: staging.stage,
+          // Any write refused, at the channel's boundary or in staging,
+          // fails the mutation (`refused`); calls and resources stay
+          // catchable.
+          onRefused: (name, error) => {
+            if (name === "write") {
+              staging.remember(error);
+            }
+          },
+          call: async (kind, path, callArgs) =>
+            await nestedCall(
+              run,
+              fn,
+              { kind, path, args: callArgs },
+              { type: "mutation", reader, spend, start: nestedStart() }
+            ),
+          // Its only reach past the store: starts of the workflows it
+          // lists, staged for its commit and made from its outbox after.
+          // Any other resource is refused as a mutation's always is.
+          permission: async (alias, method, callArgs) => {
+            if (alias === peopleAlias) {
+              const { notifyPeople: people } = invocation;
+              if (people === undefined) {
+                throw functionErrors.create("permission.unavailable");
+              }
+              const [to, notification] = peopleArgs(method, callArgs);
+              // Its place first, as a start's: the commit's bound counts
+              // it with them, refused before core reads anything.
+              if (placed >= commitMaxIntents) {
+                throw functionErrors.create("function.call_limit", {
+                  maxStarts: commitMaxIntents,
+                });
+              }
+              placed += 1;
+              await admit(invocation);
+              const intent: NonNullable<Commit["intents"]>[number] = {
+                kind: "app.notify",
+                data: people.intent(to, notification),
+              };
+              staging.reserve(intent);
+              intents.push(intent);
+              return null;
+            }
+            if (method === "sendEvent") {
+              const asked = workflowEventSend(run, fn, {
+                alias,
+                args: callArgs,
+              });
+              const { eventSends } = invocation;
+              if (eventSends === undefined) {
+                throw functionErrors.create("permission.unavailable");
+              }
+              // Its place first, as a start's: the commit's bound counts
+              // both, refused before core reads anything.
+              if (placed >= commitMaxIntents) {
+                throw functionErrors.create("function.call_limit", {
+                  maxStarts: commitMaxIntents,
+                });
+              }
+              placed += 1;
+              await admit(invocation);
+              let data: Json;
+              try {
+                data = await eventSends.intent(
+                  asked.workflow,
+                  asked.event,
+                  asked.runId,
+                  asked.data
+                );
+              } catch (error) {
+                const failure = sendEventFailure(error, invocation.requestId);
+                // An event the release doesn't resolve for the workflow
+                // (another, or a stale reference's) is kept as evidence.
+                throw functionErrors.codeOf(failure) ===
+                  "permission.not_allowed"
+                  ? refusingUse(failure, {
+                      use: { kind: "workflow", name: asked.workflow },
+                      reason: "request_not_allowed",
+                    })
+                  : failure;
+              }
+              const intent: NonNullable<Commit["intents"]>[number] = {
+                kind: "workflow.send_event",
+                data,
+              };
+              staging.reserve(intent);
+              intents.push(intent);
+              return null;
+            }
+            if (!declaresWorkflow(run, alias)) {
+              // Any resource but one of the App's workflows: a mutation
+              // reaches nothing else.
+              throw refusingUse(
+                functionErrors.create("function.no_permissions"),
+                { use: undeclaredUse(run, alias), reason: "use_undeclared" }
+              );
+            }
+            const start = workflowStart(run, fn, {
+              alias,
+              method,
+              args: callArgs,
+            });
+            const starts = invocation.workflows;
+            if (starts === undefined) {
+              throw functionErrors.create("permission.unavailable");
+            }
+            // Its place first, synchronously, so a start past the bound is
+            // refused before the gate reads anything. Taken for good, the
+            // start refused or not: what bounds the gate's reads is how
+            // often App code asks, whatever it catches.
+            if (placed >= commitMaxIntents) {
+              throw functionErrors.create("function.call_limit", {
+                maxStarts: commitMaxIntents,
+              });
+            }
+            placed += 1;
+            // The one gate, as for a resource request: staged only while
+            // the caller may still act. Its commit is admitted again, and
+            // the start itself once more as it is dispatched.
+            await admit(invocation);
+            // Its key is its outbox entry's ID, given as it commits.
+            const intent: NonNullable<Commit["intents"]>[number] = {
+              kind: "workflow.start",
+              data: starts.intent(start.alias, start.input),
+            };
+            // In the commit's bound with its writes, or refused here,
+            // where the handler may catch it, never by the commit.
+            staging.reserve(intent);
+            intents.push(intent);
+            return null;
+          },
+        },
+        // A failure torn reads may have caused is a stale run too.
+        async () => !(await trusted(async () => await reader.isCurrent())),
+        // The same for every run of it, and every attempt of its
+        // submission: it computes what it did the first time.
+        { startedAt: claimed.startedAt, seed: claimed.seed }
+      );
+    } catch (error) {
+      if (error === staleRun) {
+        continue;
+      }
+      throw error;
+    }
+    const refusedWrite = staging.refused();
+    if (refusedWrite !== undefined) {
+      throw sealed(hostError(refusedWrite));
+    }
+    // The gate, then the commit: a revocation or a membership ended
+    // between the two doesn't stop this commit; the next protected step
+    // is refused. It can't be
+    // atomic with it: what the gate reads lives in core's D1 and the write
+    // in the store's own Durable Object, with no transaction across the
+    // two. The window is bounded to a call already admitted (accepted on
+    // GRA-500).
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const current = await admit(invocation);
+    // Its reads were scoped for roles the caller no longer has: run again
+    // under the roles they have, so nothing read under the old ones is
+    // committed or kept with the receipt.
+    if (rolesDiffer(current, roles)) {
+      roles = current;
+      continue;
+    }
+    // Cancelled meanwhile: nothing it staged commits.
+    requireNotCancelled(run);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const committed = await trusted(
+        async () =>
+          await store.commit({
+            principal: { userId: invocation.principal },
+            actor: invocation.actor,
+            roles: current,
+            schemaHash: scope.schemaHash,
+            receipt: claimed.held,
+            stagedAt: staging.stagedAt,
+            readSet: reader.readSet(),
+            writes: staging.writes(),
+            intents:
+              carried === undefined
+                ? intents
+                : [...intents, carriedWithin(staging, carried)],
+            result: value,
+            attachable: resourcesDeclaring(run.app.manifest, "attach"),
+          })
+      );
+      return committed.result;
+    } catch (error) {
+      if (dataErrors.codeOf(error) !== "data.reads_changed") {
+        // A write the store refuses by the table's access and row rules
+        // surfaces here, past the mutation's code: kept now, before an
+        // action that called it hears of it (`refusedByStore`).
+        // oxlint-disable-next-line no-await-in-loop -- it ends the loop
+        await keepEvidence(run, fn, refusedByStore(run.compiled.tables, error));
+        throw error;
+      }
+    }
+  }
+  throw hostError(
+    functionErrors.create("mutation.concurrent_change", { retryable: true })
+  );
+};
+
+/**
+ * A streaming action's `emit` (`ctx.emit`): the snapshot checked
+ * (`checkedProgress`) and handed to `sink`, unless the call is cancelled
+ * or has emitted `streamMaxEmits` already. It waits for nothing: the sink
+ * keeps the latest snapshot only, so an action emitting faster than its
+ * page reads costs it nothing more than that one snapshot.
+ */
+const emitProgress = async (
+  compiled: Compiled,
+  fn: FunctionManifest,
+  sink: ProgressSink,
+  {
+    emitted,
+    progress,
+    cancelled,
+  }: { emitted: number; progress: unknown; cancelled?: AbortSignal }
+): Promise<null> => {
+  await Promise.resolve();
+  if (cancelled?.aborted === true) {
+    throw functionErrors.create("function.cancelled");
+  }
+  if (emitted > streamMaxEmits) {
+    throw functionErrors.create("function.emit_limit", {
+      maxEmits: streamMaxEmits,
+    });
+  }
+  sink.publish(checkedProgress(compiled, fn, progress));
+  return null;
+};
+
+/**
+ * Runs an action: authorized as the call starts, with no database, its
+ * calls of the App's functions each an invocation of its own and its
+ * resources each one call of the binding core resolved (`resourceCall`).
+ * Not one transaction, and never retried whole: a mutation it ran stays
+ * committed whatever it does next. `key` is the call's own key, which
+ * each mutation it runs, and each resource request it makes, derives its
+ * own from by order, so the same call made again under the same key
+ * answers what those already did rather than doing it twice.
+ */
+const runAction = async (
+  run: Run,
+  fn: FunctionManifest,
+  args: Json,
+  key: readonly string[],
+  inputHash: string
+): Promise<Json> => {
+  const { invocation, compiled, progress: sink } = run;
+  await admit(invocation);
+  // What every key this action derives is bound to: who calls it, through
+  // which App, which action's contract with which input, under the call's
+  // key. Two callers, Apps, actions or inputs with one key never share a
+  // derived key, and the same call made again derives the same ones.
+  const scope = await sha256Hex(
+    canonicalJson({
+      principal: invocation.principal,
+      resource: invocation.consumer.resourceId,
+      // Its path, as a mutation's receipt is scoped: the same call
+      // retried after a publish derives the same keys.
+      contract: fn.path,
+      inputHash,
+      key: [...key],
+    })
+  );
+  // Places count only what changes something (mutations and actions it
+  // calls, resource requests), so a query that runs or not, as the data
+  // has it, moves no later place.
+  let changes = 0;
+  let requests = 0;
+  let emitted = 0;
+  // Effects under way: mutations and actions it called, resource requests.
+  let inFlight = 0;
+  const effect = async <Answer>(
+    work: () => Promise<Answer>
+  ): Promise<Answer> => {
+    inFlight += 1;
+    try {
+      const answer = await work();
+      run.onEffect?.();
+      return answer;
+    } catch (error) {
+      // Refused before it was sent, for a budget busy with requests under
+      // way or a call cancelled meanwhile: nothing went out. Anything else
+      // may have.
+      const code = functionErrors.codeOf(error);
+      if (code !== "permission.budget_busy" && code !== "function.cancelled") {
+        run.onEffect?.();
+      }
+      throw error;
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  let starts = 0;
+  let sends = 0;
+  const derived = async (
+    what: "call" | "resource" | "start" | "notify",
+    count: number
+  ): Promise<readonly string[]> => [
+    "derived",
+    await sha256Hex(canonicalJson([scope, what, count])),
+  ];
+  const callNested = async (
+    kind: unknown,
+    path: unknown,
+    callArgs: unknown
+  ): Promise<Json> =>
+    await nestedCall(
+      run,
+      fn,
+      { kind, path, args: callArgs },
+      {
+        type: "action",
+        derived: async () => {
+          changes += 1;
+          return await derived("call", changes);
+        },
+      }
+    );
+  return await runHandler(run, fn, args, {
+    // A query changes nothing: only what may is an effect under way.
+    call: async (kind, path, callArgs) =>
+      kind === "query"
+        ? await callNested(kind, path, callArgs)
+        : await effect(async () => await callNested(kind, path, callArgs)),
+    permission: async (alias, method, callArgs) => {
+      spendCall(run.budget, "requests");
+      // People it tells: its own place among its sends.
+      if (alias === peopleAlias) {
+        sends += 1;
+        const sendKey = await derived("notify", sends);
+        return await notifyPeopleCall(
+          run,
+          { method, args: callArgs },
+          sendKey,
+          effect
+        );
+      }
+      // A workflow it starts: its own place among its starts.
+      if (declaresWorkflow(run, alias)) {
+        starts += 1;
+        const startKey = await derived("start", starts);
+        // A start is an effect under way like any other, from when it is
+        // sent: its gate, before, starts nothing.
+        return await startCall(
+          run,
+          fn,
+          { alias, method, args: callArgs },
+          startKey,
+          effect
+        );
+      }
+      requests += 1;
+      const resourceKey = await derived("resource", requests);
+      return await effect(
+        async () =>
+          await resourceCall(
+            run,
+            fn,
+            { alias, method, args: callArgs },
+            resourceKey
+          )
+      );
+    },
+    effectsInFlight: () => inFlight > 0,
+    ...(sink === undefined
+      ? {}
+      : {
+          emit: async (progress) => {
+            emitted += 1;
+            return await emitProgress(compiled, fn, sink, {
+              emitted,
+              progress,
+              ...(run.cancelled === undefined
+                ? {}
+                : { cancelled: run.cancelled }),
+            });
+          },
+        }),
+  });
+};
+
+/**
+ * The hash a receipt binds a call's key to: of the input as the caller
+ * sent it, not as the release normalized it, so the same input sent again
+ * under the key after a publish that adds or changes a default still
+ * finds its receipt. `admitted` stands in only for input JSON can't hold,
+ * which the release's validator took.
+ */
+const submittedHash = async (input: unknown, admitted: Json): Promise<string> =>
+  await sha256Hex(canonicalJson(jsonOf(input) ?? admitted));
+
+/**
+ * Runs `fn` with `args` (`submitted` as the caller sent them), by
+ * its kind, under the call key `key`.
+ */
+const execute = async (
+  run: Run,
+  fn: FunctionManifest,
+  args: Json,
+  key: readonly string[],
+  submitted: unknown
+): Promise<Json> => {
+  if (fn.kind === "query") {
+    return await runQuery(run, fn, args);
+  }
+  const inputHash = await submittedHash(submitted, args);
+  if (fn.kind === "mutation") {
+    return await runMutation(run, fn, args, key, inputHash);
+  }
+  return await runAction(run, fn, args, key, inputHash);
+};
+
+/**
+ * The latest deadline a call may have: a server invocation's wall time
+ * (spec 18.1) from now. A caller may give less (a page's call, an
+ * agent's, a step's attempt), never more: a later deadline is held to it.
+ */
+const invocationDeadline = (asked: number): number => {
+  const latest = Date.now() + platformLimits.serverInvocationWallMs;
+  // Not a time at all (NaN, or no end): the latest a call may have.
+  return Number.isFinite(asked) ? Math.min(asked, latest) : latest;
+};
+
+/**
+ * Checks the files a caller passes a public function (spec 32.5): each
+ * one the caller may use now, through its own resource, which must
+ * declare the use (`attach` for a mutation, `read` otherwise): published,
+ * and theirs while nothing holds it or held by a record they may read.
+ * `file.operation_denied` when no resource declares the use at all,
+ * `file.not_found` otherwise, the same however it isn't usable. Before
+ * the function runs, so a handler that returns early (an attachment that
+ * is there already) can't acknowledge a file its caller can't use. What
+ * a commit then writes is checked again in its transaction (file-host.ts).
+ */
+const admitFiles = async (
+  app: HostedApp,
+  compiled: Compiled,
+  invocation: Invocation,
+  fn: FunctionManifest,
+  args: Json
+): Promise<void> => {
+  const held = valueFiles(fn.args, args);
+  if (held.size === 0) {
+    return;
+  }
+  const resources = resourcesDeclaring(
+    app.manifest,
+    fn.kind === "mutation" ? "attach" : "read"
+  );
+  if (resources.length === 0) {
+    throw fileErrors.create("file.operation_denied");
+  }
+  const roles = await admit(invocation);
+  await invocation.store.filesUsable(
+    {
+      principal: invocation.principal,
+      roles,
+      schemaHash: await compiled.hash,
+    },
+    [...held],
+    resources
+  );
+};
+
+/**
+ * Tells a chat's preview what its draft's code threw (`draftFailure`),
+ * once the call failed with it: the last attempt's (`tellerOf`).
+ */
+const tellDraft = (invocation: Invocation, told: Told): void => {
+  if (invocation.draftFailure === undefined || told.failure === undefined) {
+    return;
+  }
+  try {
+    invocation.draftFailure(told.failure);
+  } catch (error) {
+    log.error("function.draft_failure_unkept", errorFields(error));
+  }
+};
+
+/**
+ * `hostFunctionCall`'s answer, what the call read of sensitive tables counted
+ * into `sensitive`. Never throws.
+ */
+const answer = async (
+  app: HostedApp,
+  asked: Invocation,
+  reference: CalledFunction,
+  args: unknown,
+  options: CallOptions,
+  sensitive: SensitiveTally
+): Promise<FunctionResult> => {
+  const path = typeof reference.path === "string" ? reference.path : "";
+  const invocation: Invocation = {
+    ...asked,
+    deadline: invocationDeadline(asked.deadline),
+  };
+  const told: Told = { nested: new Map() };
+  try {
+    const { compiled, fn, admitted, key } = await trusted(() => {
+      const known = compiledOf(app.manifest);
+      const found = publicFunction(
+        app.manifest,
+        reference,
+        options.progress !== undefined
+      );
+      return {
+        compiled: known,
+        fn: found,
+        admitted: admittedArgs(known, found, args),
+        key:
+          options.idempotencyKey === undefined
+            ? crypto.randomUUID()
+            : submissionErrors.parse(
+                "submission.key_invalid",
+                idempotencyKeySchema,
+                options.idempotencyKey
+              ),
+      };
+    });
+    const { progress, cancelled } = options;
+    if (cancelled?.aborted === true) {
+      throw hostError(functionErrors.create("function.cancelled"));
+    }
+    const filesAdmitted = async (): Promise<void> => {
+      await trusted(async () => {
+        await admitFiles(app, compiled, invocation, fn, admitted);
+      });
+    };
+    // A mutation's files are checked once its receipt says it hasn't run
+    // yet (`runMutation`): a submission that committed answers its outcome
+    // whatever the caller may use now. Anything else, before it runs.
+    if (fn.kind !== "mutation") {
+      await filesAdmitted();
+    }
+    const value = await execute(
+      {
+        app,
+        compiled,
+        invocation,
+        depth: 0,
+        budget: callBudget(),
+        evidence: { kept: false },
+        sensitive,
+        told,
+        call: new CallTree(options.parentSession),
+        ...(progress === undefined ? {} : { progress }),
+        ...(cancelled === undefined ? {} : { cancelled }),
+        ...(options.onEffect === undefined
+          ? {}
+          : { onEffect: options.onEffect }),
+        ...(options.commitIntent === undefined
+          ? {}
+          : { commitIntent: options.commitIntent }),
+        ...(options.receiptScope === undefined
+          ? {}
+          : { receiptScope: options.receiptScope }),
+        filesAdmitted,
+      },
+      fn,
+      admitted,
+      ["call", key],
+      args
+    );
+    return { ok: true, value };
+  } catch (error) {
+    const payload = payloadOf(error, invocation.requestId, path);
+    if (payload.code === "internal.unexpected") {
+      tellDraft(invocation, told);
+    }
+    return { ok: false, error: payload };
+  }
+};
+
+/**
+ * Calls the public function `reference` names of `app` for `invocation`,
+ * with `args`: what it returned, or why it failed, as its caller may see
+ * it (see the header), once what it read of sensitive tables is kept
+ * (`Invocation.sensitiveReads`): one record a function and table for the
+ * whole call, however many reads and records, so a read stays one store
+ * call and a function reading a thousand records writes one record, not
+ * a thousand. Kept here, past everything App code runs, so no answer or
+ * failure of its own (a throw, a timeout, a cancel) leaves it out. Never
+ * throws.
+ */
+export const hostFunctionCall = async (
+  app: HostedApp,
+  asked: Invocation,
+  reference: CalledFunction,
+  args: unknown,
+  options: CallOptions = {}
+): Promise<FunctionResult> => {
+  const sensitive: SensitiveTally = new Map();
+  const result = await answer(app, asked, reference, args, options, sensitive);
+  if (sensitive.size > 0) {
+    try {
+      await asked.sensitiveReads?.([...sensitive.values()]);
+    } catch (error) {
+      log.error("function.sensitive_reads_unkept", errorFields(error));
+    }
+  }
+  return result;
+};

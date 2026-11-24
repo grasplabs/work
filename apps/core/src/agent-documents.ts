@@ -1,0 +1,326 @@
+import { agentErrors } from "@grasp-os/shared/agent";
+import { agentDocumentsTextMaxBytes } from "@grasp-os/shared/agents";
+import type { AgentDocument } from "@grasp-os/shared/agents";
+import { actorOf } from "@grasp-os/shared/audit";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { changeableAgent, firstAgentId, readableAgent } from "./agents.ts";
+import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { readChatFile } from "./chat-files.ts";
+import { agentDocuments, agents } from "./db/core/schema.ts";
+import type { LocalExtractorEnv } from "./files/extract.ts";
+
+// An agent's documents: files the company's admins give an agent to
+// answer from, such as a checklist or a policy too long for its
+// instructions. A document is checked and read as a file attached to a
+// chat is (chat-files.ts): by what arrived, in the deployment's own
+// sandbox, and only its text is kept, here in core's database.
+//
+// The agent is told its documents by name each turn (agent.ts) and reads
+// one through `env.chat.readDocument`, which hands over only a document
+// of the agent the chat's turn runs as. So a document reaches exactly the
+// people the agent reaches: what an admin puts here, whoever may ask the
+// agent may learn. The pages say so where a document is added.
+//
+// A document is the company's word on the agent's job, written by an
+// admin as its instructions are, and like them it adds to Grasp's rules
+// and lifts none (agent.ts says so to the model).
+//
+// The company's own admins add and remove a company agent's documents,
+// never Grasp staff, who read their names only. A person's own agent's
+// documents are that person's alone, to read, add and remove
+// (agents.ts). Each change is audited with the document's
+// ID, type and size, never its name or text.
+//
+// The ways it can fail, which the tests start from: someone who isn't
+// the company's own admin adding or removing one; a document read in a
+// chat another agent answers; a document added to an agent that was
+// deleted meanwhile; a deleted agent's documents left behind; a change
+// left unaudited.
+//
+// An agent keeps as many documents as it is given. What bounds them is
+// each file's size, as a chat's file (chat-files.ts), the text they hold
+// together (`agentDocumentsTextMaxBytes`: core's database keeps it, and
+// anyone with an agent of their own adds to it), and how many a turn
+// names (agent.ts): the agent's code lists the rest.
+
+/** A document's ID, as core makes them. */
+const documentIdSchema = z.uuid();
+
+const card = {
+  id: agentDocuments.id,
+  name: agentDocuments.name,
+  type: agentDocuments.type,
+  bytes: agentDocuments.bytes,
+  addedAt: agentDocuments.addedAt,
+};
+
+/** A document's card with how long its text is, as its code slices it. */
+const sized = { ...card, chars: agentDocuments.chars };
+
+const documentOf = (row: {
+  id: string;
+  name: string;
+  type: AgentDocument["type"];
+  bytes: number;
+  addedAt: Date;
+}): AgentDocument => ({
+  id: row.id,
+  name: row.name,
+  type: row.type,
+  bytes: row.bytes,
+  addedAt: row.addedAt.toISOString(),
+});
+
+/**
+ * The documents core keeps for the agent with this ID, the oldest first,
+ * without their text but with its length in characters: what a turn
+ * tells the agent it has.
+ */
+export const documentsOf = async (
+  env: Pick<Env, "DB">,
+  agentId: string
+): Promise<(AgentDocument & { chars: number })[]> => {
+  const rows = await drizzle(env.DB)
+    .select(sized)
+    .from(agentDocuments)
+    .where(eq(agentDocuments.agentId, agentId))
+    .orderBy(asc(agentDocuments.addedAt), asc(agentDocuments.id));
+  return rows.map((row) => ({ ...documentOf(row), chars: row.chars }));
+};
+
+/**
+ * The documents of the agent `agentId`, the oldest first, without their
+ * text: for the company's admins, and Grasp staff, who read only. Throws
+ * `agent.unknown`.
+ */
+export const listAgentDocuments = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<AgentDocument[]> => {
+  const { id } = await readableAgent(env, identity, agentId);
+  const documents = await documentsOf(env, id);
+  return documents.map(({ chars: _chars, ...document }) => document);
+};
+
+/**
+ * One of the agent's documents with its text, or undefined when the agent
+ * with this ID has none by `documentId`: another agent's document is
+ * never handed over, whatever ID is asked for.
+ */
+export const readAgentDocument = async (
+  env: Pick<Env, "DB">,
+  agentId: string,
+  documentId: unknown
+): Promise<(AgentDocument & { text: string }) | undefined> => {
+  const id = documentIdSchema.safeParse(documentId);
+  if (!id.success) {
+    return undefined;
+  }
+  const row = await drizzle(env.DB)
+    .select({ ...card, text: agentDocuments.text })
+    .from(agentDocuments)
+    .where(
+      and(eq(agentDocuments.agentId, agentId), eq(agentDocuments.id, id.data))
+    )
+    .get();
+  return row === undefined ? undefined : { ...documentOf(row), text: row.text };
+};
+
+/** The agent's document called `name`, without its text, if it has one. */
+const documentNamed = async (
+  env: Pick<Env, "DB">,
+  agentId: string,
+  name: string
+): Promise<AgentDocument | undefined> => {
+  const row = await drizzle(env.DB)
+    .select(card)
+    .from(agentDocuments)
+    .where(
+      and(eq(agentDocuments.agentId, agentId), eq(agentDocuments.name, name))
+    )
+    .get();
+  return row === undefined ? undefined : documentOf(row);
+};
+
+/** A chat file's refusals, as they are said of a document. */
+const asDocument = {
+  "agent.file_unsupported": "agent.document_unsupported",
+  "agent.file_too_large": "agent.document_too_large",
+  "agent.file_busy": "agent.document_busy",
+} as const;
+
+/** `file` read as a chat's file is, refused in a document's words. */
+const readAsDocument = async (env: LocalExtractorEnv, file: unknown) => {
+  try {
+    return await readChatFile(env, file);
+  } catch (error) {
+    const code = agentErrors.codeOf(error);
+    if (
+      code === "agent.file_unsupported" ||
+      code === "agent.file_too_large" ||
+      code === "agent.file_busy"
+    ) {
+      throw agentErrors.create(asDocument[code]);
+    }
+    throw error;
+  }
+};
+
+/**
+ * The document `named`, which the agent has under the name of a file
+ * being added, when its text is the file's: the same file added again,
+ * such as by a caller whose first answer was lost, which is told what it
+ * was told then. Throws `agent.document_named` for any other file.
+ */
+const sameOrNamed = async (
+  env: Pick<Env, "DB">,
+  agentId: string,
+  named: AgentDocument,
+  text: string
+): Promise<AgentDocument> => {
+  const kept = await readAgentDocument(env, agentId, named.id);
+  if (kept?.text !== text) {
+    throw agentErrors.create("agent.document_named");
+  }
+  return named;
+};
+
+/**
+ * Gives the agent `agentId` the file `file` as a document, read as a
+ * chat's file is. Throws `agent.unknown`, why a file can't be read in a
+ * document's words (`agent.document_unsupported`, `_too_large`, `_busy`),
+ * `agent.document_named` when the agent has another file by that name,
+ * and `agent.documents_full` when its documents would together hold more
+ * text than {@link agentDocumentsTextMaxBytes}. The same file added again
+ * is answered with the document it already is.
+ *
+ * The insert itself holds what was checked before the file was read: the
+ * agent wasn't deleted, is still whose it was (never one erased with its
+ * owner meanwhile, whose row is gone), and has room for the text, so
+ * files added at once never pass together. Reading a file takes a while,
+ * and any of these may have changed since.
+ */
+export const addAgentDocument = async (
+  env: Env & LocalExtractorEnv,
+  identity: Identity,
+  agentId: unknown,
+  file: unknown
+): Promise<AgentDocument> => {
+  const { id, ownerId } = await changeableAgent(env, identity, agentId);
+  const read = await readAsDocument(env, file);
+  const named = await documentNamed(env, id, read.name);
+  if (named !== undefined) {
+    return await sameOrNamed(env, id, named, read.text);
+  }
+  const textBytes = new TextEncoder().encode(read.text).byteLength;
+  const db = drizzle(env.DB);
+  // The text the agent's documents hold together, with this one's.
+  const together = sql`(SELECT coalesce(sum(length(CAST(${agentDocuments.text} AS BLOB))), 0) FROM ${agentDocuments} WHERE ${agentDocuments.agentId} = ${id}) + ${textBytes}`;
+  const full = async (): Promise<boolean> => {
+    const row = await db.get<{ bytes: number }>(
+      sql`SELECT ${together} AS bytes`
+    );
+    return row.bytes > agentDocumentsTextMaxBytes;
+  };
+  if (await full()) {
+    throw agentErrors.create("agent.documents_full");
+  }
+  const document = {
+    id: crypto.randomUUID(),
+    name: read.name,
+    type: read.type,
+    bytes: read.bytes,
+    addedAt: new Date(),
+  };
+  const holds = sql`${together} <= ${agentDocumentsTextMaxBytes}
+    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
+    AND (${id} = ${firstAgentId} OR EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId}))`;
+  try {
+    await auditedBatch(env, db, [
+      db.insert(agentDocuments).select(
+        sql`SELECT ${document.id}, ${id}, ${document.name}, ${document.type},
+            ${document.bytes}, ${read.text.length}, ${read.text}, ${identity.userId},
+            ${document.addedAt.getTime()} WHERE ${holds}`
+      ),
+      outboxedIfChanged(db, {
+        actor: actorOf(identity),
+        action: "agent.document.added",
+        target: { type: "agent", id },
+        detail: {
+          documentId: document.id,
+          type: document.type,
+          bytes: document.bytes,
+        },
+      }),
+    ]);
+  } catch (error) {
+    // One name added twice at once: the index refuses the second.
+    if (!String(error).includes("UNIQUE constraint failed")) {
+      throw error;
+    }
+    const now = await documentNamed(env, id, read.name);
+    if (now === undefined) {
+      throw agentErrors.create("agent.document_named");
+    }
+    return await sameOrNamed(env, id, now, read.text);
+  }
+  const kept = await readAgentDocument(env, id, document.id);
+  if (kept === undefined) {
+    // The insert's condition failed. This very file, added at once by
+    // another call: the same answer as that call got.
+    const now = await documentNamed(env, id, read.name);
+    if (now !== undefined) {
+      return await sameOrNamed(env, id, now, read.text);
+    }
+    // Full, or deleted or no longer whose it was, since the checks.
+    throw agentErrors.create(
+      (await full()) ? "agent.documents_full" : "agent.unknown"
+    );
+  }
+  return documentOf({ ...document });
+};
+
+/**
+ * Takes the document `documentId` from the agent `agentId`, for good.
+ * Throws `agent.unknown`, and `agent.document_unknown` when the agent has
+ * none by that ID.
+ */
+export const removeAgentDocument = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown,
+  documentId: unknown
+): Promise<void> => {
+  const { id, ownerId } = await changeableAgent(env, identity, agentId);
+  const document = await readAgentDocument(env, id, documentId);
+  if (document === undefined) {
+    throw agentErrors.create("agent.document_unknown");
+  }
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db.delete(agentDocuments).where(
+      and(
+        eq(agentDocuments.agentId, id),
+        eq(agentDocuments.id, document.id),
+        // Still whose it was when checked: not once the company adopted it.
+        sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId})`
+      )
+    ),
+    // Recorded only if this removed it: removed twice at once, once.
+    outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "agent.document.removed",
+      target: { type: "agent", id },
+      detail: {
+        documentId: document.id,
+        type: document.type,
+        bytes: document.bytes,
+      },
+    }),
+  ]);
+};

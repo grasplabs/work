@@ -1,0 +1,45 @@
+/**
+ * The test runtime keeps constructing Durable Objects for as long as a
+ * shard runs, files sharing it (`isolate: false`): thousands of one class
+ * must not break it. The Workers test pool once wrapped a class's
+ * prototype in one more Proxy on every construction, until a property
+ * lookup overflowed the stack and every object of the class, in every
+ * file after, failed to construct (GRA-972); @cloudflare/vitest-plugin
+ * wraps it once.
+ */
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { appHost } from "../src/durable-objects.ts";
+
+/**
+ * More objects of one class than the runtime held before that fix:
+ * without it, the 1,676th to 1,700th App host overflowed the stack
+ * (measured November 2026, in a file of its own). A fifth more leaves room
+ * for a machine with a deeper stack, and stays as few as still fail.
+ */
+const constructed = 2000;
+
+/** How many App hosts are woken at once. */
+const atOnce = 50;
+
+describe("the test runtime", { timeout: 120_000 }, () => {
+  it("constructs thousands of objects of one class and still answers", async () => {
+    const ids = Array.from({ length: constructed }, () =>
+      appIdSchema.parse(crypto.randomUUID())
+    );
+    for (let at = 0; at < ids.length; at += atOnce) {
+      // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
+      await Promise.all(
+        ids
+          .slice(at, at + atOnce)
+          .map(async (id) => await appHost(env, id).accessRevoked(null))
+      );
+    }
+
+    await expect(
+      appHost(env, appIdSchema.parse(crypto.randomUUID())).accessRevoked(null)
+    ).resolves.toBe(0);
+  });
+});

@@ -1,0 +1,1006 @@
+import { randomBytes } from "node:crypto";
+import { once } from "node:events";
+import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { text } from "node:stream/consumers";
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { mapConcurrently } from "@grasp-os/shared/release";
+import type { Role } from "@grasp-os/shared/roles";
+import type { CoreApi } from "@grasp-os/shared/rpc";
+import { test } from "@playwright/test";
+import type { BrowserContext } from "@playwright/test";
+import { RpcSession, WebSocketTransport } from "capnweb";
+import type { RpcTransport } from "capnweb";
+import { z } from "zod";
+
+import {
+  appOf,
+  changesOf,
+  publishApp,
+  sourceParts,
+  writeApp,
+} from "../apps/core/test/app-definitions.ts";
+import type { TestSource } from "../apps/core/test/app-definitions.ts";
+/**
+ * Signed-in people for end-to-end tests. They sign in through the product,
+ * as anyone does: core sends them to the client's Entra tenant, which on
+ * the local stack is the fake IdP (apps/core/test/idp-worker.ts), and the
+ * IdP sends them back signed in. The configured admin then gives each the
+ * role the tests need, through the members API. Everyone is signed in up
+ * front, before any test runs, and again for a retry, before it runs;
+ * tests only look theirs up.
+ */
+import { localAdmin, localStaff } from "../apps/core/test/sign-in-config.ts";
+import { expectModelRequestsHere } from "./model-fake.ts";
+import {
+  e2eModel,
+  e2eModelKey,
+  e2eThinkingModel,
+  origin,
+  workersPerStack,
+} from "./stack.ts";
+
+/** Signs session cookies on the test stack only; never a real secret. */
+export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
+
+/**
+ * Signs the capabilities core gives connect for each connector call, on
+ * the test stack only (core and connect alike); never a real secret.
+ */
+export const testCapabilityKey =
+  "e2e-only-capability-signing-key-of-32-chars-or-more";
+
+/**
+ * Seals what connect keeps, the AI provider keys the stack's organization
+ * adds among them, on the test stack only: 32 bytes, base64. Never a real
+ * secret.
+ */
+export const testTokenKey = btoa("e2e-only-token-key-of-32-bytes!!");
+
+/** The name of core's session cookie. */
+export const sessionCookie = "__Host-grasp.session_token";
+
+/** The `name=value` pairs a response sets, as a `Cookie` header. */
+const cookiesOf = (response: Response): string =>
+  response.headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(";")[0] ?? "")
+    .join("; ");
+
+/** Where a redirect goes; fails when the response isn't one. */
+const locationOf = (response: Response, step: string): string => {
+  const location = response.headers.get("location");
+  if (location === null) {
+    throw new Error(`${step} did not redirect (${response.status})`);
+  }
+  return location;
+};
+
+/**
+ * What wrangler's dev server says when it drops a request between its
+ * proxy and a Worker (core, or the fake IdP behind core's callback). The
+ * request never reached the code under test, so it's tried again. Core
+ * passes it on in its error redirect's query, where spaces are `+`.
+ */
+const droppedByDevServer = /Network[ +]connection[ +]lost/u;
+
+/**
+ * How many times a sign-in, or a connection to `/rpc`, that got no answer
+ * is tried in all. Each try after the first waits until core answers
+ * again (`coreAnswering`).
+ */
+const attemptsWhenDropped = 3;
+
+/**
+ * How long a retry waits for core to answer again: miniflare restarts a
+ * crashed runtime on the same ports in a few seconds. Tried again at once,
+ * every try fell in the same outage, and so did the test's next attempt
+ * (merge queue, November 2026).
+ */
+const coreBackWithinMs = 30_000;
+
+/** How often core's health check is asked while it doesn't answer. */
+const coreAskedEveryMs = 250;
+
+/**
+ * Resolves once core answers its health check (`/health`, which the stack
+ * serves without the router's secret) through the dev server again; throws,
+ * with what it last met and `why` the retry was needed, when it hasn't
+ * within `coreBackWithinMs`. A dropped request is tried again only after
+ * this, so the retry doesn't fall in the same outage.
+ */
+const coreAnswering = async (
+  why: unknown,
+  deadline: AbortSignal = AbortSignal.timeout(coreBackWithinMs),
+  lastMet = "no answer yet"
+): Promise<void> => {
+  let met = lastMet;
+  try {
+    const response = await fetch(new URL("/health", origin), {
+      signal: deadline,
+    });
+    if (response.ok) {
+      return;
+    }
+    const said = await response.text();
+    met = `${response.status}: ${said.trim()}`;
+  } catch (error) {
+    // The deadline's own abort says nothing of core: what came before does.
+    if (!deadline.aborted) {
+      met = String(error);
+    }
+  }
+  if (deadline.aborted) {
+    throw new Error(
+      `Core did not answer /health within ${coreBackWithinMs / 1000} s (last: ${met})`,
+      { cause: why }
+    );
+  }
+  try {
+    await sleep(coreAskedEveryMs, undefined, { signal: deadline });
+  } catch {
+    // The deadline passed while waiting: asked once more, which fails.
+  }
+  await coreAnswering(why, deadline, met);
+};
+
+/**
+ * `response`, unless the dev server dropped the request it answers: then
+ * it throws, saying so (`droppedByDevServer`), wherever the drop shows,
+ * in its body or in the redirect core makes of it.
+ */
+const unlessDropped = async (
+  response: Response,
+  step: string
+): Promise<Response> => {
+  const said = `${response.headers.get("location") ?? ""} ${await response.clone().text()}`;
+  if (droppedByDevServer.test(said)) {
+    throw new Error(`${step} was dropped by the dev server: ${said.trim()}`);
+  }
+  return response;
+};
+
+/** One attempt at `signInAs`. */
+const signInOnce = async (
+  email: string,
+  providerId: "microsoft" | "grasp-staff"
+): Promise<string> => {
+  const startedAt = await fetch(new URL("/api/auth/sign-in/sso", origin), {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: JSON.stringify({
+      providerId,
+      callbackURL: "/",
+      errorCallbackURL: "/",
+      loginHint: email,
+    }),
+  });
+  const started = await unlessDropped(startedAt, `Sign-in as ${email}`);
+  const body: unknown = started.ok ? await started.json() : null;
+  if (
+    !started.ok ||
+    typeof body !== "object" ||
+    body === null ||
+    !("url" in body) ||
+    typeof body.url !== "string"
+  ) {
+    throw new Error(`Sign-in as ${email} did not start (${started.status})`);
+  }
+  const atIdp = await unlessDropped(
+    await fetch(body.url, { redirect: "manual" }),
+    "The IdP"
+  );
+  const finished = await unlessDropped(
+    await fetch(locationOf(atIdp, "The IdP"), {
+      redirect: "manual",
+      headers: { cookie: cookiesOf(started) },
+    }),
+    "Core's callback"
+  );
+  const session = cookiesOf(finished)
+    .split("; ")
+    .find((pair) => pair.startsWith(`${sessionCookie}=`));
+  if (session === undefined) {
+    throw new Error(
+      `Sign-in as ${email} refused: ${locationOf(finished, "Core")}`
+    );
+  }
+  return decodeURIComponent(session.slice(sessionCookie.length + 1));
+};
+
+/**
+ * What Node's fetch (undici) throws when a request got no answer: no
+ * response at all (a connection refused or reset), or a response whose
+ * body was cut off. Other `TypeError`s it throws, such as a URL it can't
+ * parse, are not.
+ */
+const fetchNetworkErrors = new Set(["fetch failed", "terminated"]);
+
+/**
+ * Whether a sign-in failed for want of an answer: the dev server dropped a
+ * request (`droppedByDevServer`), or fetch met a network error
+ * (`fetchNetworkErrors`). Whatever core answers, a refusal among them, is
+ * not.
+ */
+const unanswered = (error: unknown): boolean =>
+  (error instanceof Error && droppedByDevServer.test(error.message)) ||
+  (error instanceof TypeError && fetchNetworkErrors.has(error.message));
+
+/**
+ * `signInOnce`, tried again while it gets no answer (`unanswered`),
+ * `attemptsLeft` times in all, each time once core answers again. A
+ * sign-in core refuses fails at once.
+ */
+const signInTrying = async (
+  email: string,
+  providerId: "microsoft" | "grasp-staff",
+  attemptsLeft: number
+): Promise<string> => {
+  try {
+    return await signInOnce(email, providerId);
+  } catch (error) {
+    if (!unanswered(error) || attemptsLeft <= 1) {
+      throw error;
+    }
+    await coreAnswering(error);
+    return await signInTrying(email, providerId, attemptsLeft - 1);
+  }
+};
+
+/**
+ * Signs in as `email` the way a browser does: core starts the sign-in, the
+ * IdP (told who by `loginHint`) sends the browser back, and core's callback
+ * sets the session cookie. Returns that cookie's value; throws, with where
+ * core sent the browser, when core refuses the sign-in. A sign-in that got
+ * no answer (`unanswered`) is tried again once core answers: the serial
+ * journeys start on a fresh stack with no retries of their own, and there a
+ * single dropped request failed the whole part.
+ */
+export const signInAs = async (
+  email: string,
+  providerId: "microsoft" | "grasp-staff" = "microsoft"
+): Promise<string> =>
+  await signInTrying(email, providerId, attemptsWhenDropped);
+
+export interface Person {
+  userId: string;
+  email: string;
+  role: Role;
+  /** The session cookie's value. */
+  cookie: string;
+}
+
+/** A connection to `/rpc` from Node, with the person's session cookie. */
+const rpcSocket = (person: Pick<Person, "cookie">): WebSocket => {
+  const url = new URL("/rpc", origin);
+  url.protocol = "ws:";
+  const headers = {
+    origin,
+    cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+  };
+  // SAFETY: Node's WebSocket (undici) takes `{ headers }` as its second
+  // argument, which the DOM's types, loaded for page code, don't know.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return new WebSocket(url, { headers } as never);
+};
+
+/**
+ * A team of the organization, named `name`, made by `admin` as Better
+ * Auth's organization plugin makes one; its ID.
+ */
+export const teamMadeBy = async (
+  admin: Pick<Person, "cookie">,
+  name: string
+): Promise<string> => {
+  const response = await fetch(
+    new URL("/api/auth/organization/create-team", origin),
+    {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: `${sessionCookie}=${encodeURIComponent(admin.cookie)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Making team ${name} failed (${response.status}): ${await response.text()}`
+    );
+  }
+  const { id } = z.object({ id: z.string() }).parse(await response.json());
+  return id;
+};
+
+/** Puts `userId` in the team `teamId`, as an admin does through Better Auth. */
+export const teamMemberAddedBy = async (
+  admin: Pick<Person, "cookie">,
+  teamId: string,
+  userId: string
+): Promise<void> => {
+  const response = await fetch(
+    new URL("/api/auth/organization/add-team-member", origin),
+    {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: `${sessionCookie}=${encodeURIComponent(admin.cookie)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ teamId, userId }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Adding ${userId} to team ${teamId} failed (${response.status}): ${await response.text()}`
+    );
+  }
+};
+
+/**
+ * What `/rpc` answers an upgrade with, asked again by hand after a socket
+ * failed before it opened: Node's WebSocket (undici) tells nothing of why,
+ * the same empty error and close 1006 for a refused upgrade (403), an
+ * error page, a dropped connection or nobody listening. A 101 means the
+ * failure has passed; the upgrade it made is closed at once.
+ */
+const upgradeAnswer = async (
+  person: Pick<Person, "cookie">
+): Promise<{ status: number; said: string }> => {
+  const asked = httpRequest(new URL("/rpc", origin), {
+    headers: {
+      origin,
+      cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+      connection: "Upgrade",
+      upgrade: "websocket",
+      "sec-websocket-version": "13",
+      "sec-websocket-key": randomBytes(16).toString("base64"),
+    },
+  });
+  const answer = Promise.withResolvers<{ status: number; said: string }>();
+  asked.on("upgrade", (_response, socket) => {
+    socket.destroy();
+    answer.resolve({ status: 101, said: "" });
+  });
+  asked.on("response", (response) => {
+    const status = response.statusCode ?? 0;
+    answer.resolve(
+      (async () => {
+        const said = await text(response);
+        return { status, said };
+      })()
+    );
+  });
+  asked.on("error", answer.reject);
+  asked.end();
+  return await answer.promise;
+};
+
+/**
+ * A connection to `/rpc` that has opened. One that fails before it opens is
+ * tried again, `attemptsLeft` times in all, once core answers again, while
+ * that's the dev server dropping it or nobody answering for a moment:
+ * nothing has been sent on it yet. An upgrade core refuses (403) fails at once, with core's answer;
+ * the last attempt fails with what it met.
+ */
+const openRpcSocket = async (
+  person: Pick<Person, "cookie">,
+  attemptsLeft: number = attemptsWhenDropped
+): Promise<WebSocket> => {
+  const socket = rpcSocket(person);
+  const settled = async (event: string, opened: boolean) => {
+    await once(socket, event);
+    return opened;
+  };
+  const opened = await Promise.race([
+    settled("open", true),
+    settled("error", false),
+    settled("close", false),
+  ]);
+  if (opened) {
+    return socket;
+  }
+  const failed = "The connection to /rpc failed before it opened";
+  let answer: { status: number; said: string };
+  try {
+    answer = await upgradeAnswer(person);
+  } catch (error) {
+    // Nobody listening, or the connection reset: core down, or the
+    // moment it restarts. Tried again; the last attempt says which.
+    if (attemptsLeft <= 1) {
+      // Node tries each of localhost's addresses: one error for each.
+      const why =
+        error instanceof AggregateError
+          ? error.errors.map(String).join("; ")
+          : String(error);
+      throw new Error(`${failed}: ${why}`, { cause: error });
+    }
+    await coreAnswering(error);
+    return await openRpcSocket(person, attemptsLeft - 1);
+  }
+  const passed = answer.status === 101;
+  const dropped = droppedByDevServer.test(answer.said);
+  const said = `${failed}; asked again, it answers ${answer.status}: ${answer.said.trim()}`;
+  if ((!passed && !dropped) || attemptsLeft <= 1) {
+    throw new Error(said);
+  }
+  await coreAnswering(said);
+  return await openRpcSocket(person, attemptsLeft - 1);
+};
+
+/**
+ * Cap'n Web's WebSocket transport over a socket still opening
+ * (`openRpcSocket`): calls wait for it, and fail with why it never opened.
+ */
+const openingTransport = (opening: Promise<WebSocket>): RpcTransport => {
+  const transport = (async () => new WebSocketTransport(await opening))();
+  /** Aborts the session's socket, once there is one. */
+  const aborted = async (reason: unknown): Promise<void> => {
+    let opened: WebSocketTransport;
+    try {
+      opened = await transport;
+    } catch {
+      return;
+    }
+    opened.abort(reason);
+  };
+  return {
+    send: async (message) => {
+      const opened = await transport;
+      opened.send(message);
+    },
+    receive: async () => {
+      const opened = await transport;
+      return await opened.receive();
+    },
+    abort: (reason: unknown) => {
+      void aborted(reason);
+    },
+  };
+};
+
+/** The person's API over `/rpc`, from Node, as their browser would open it. */
+export const apiOf = (person: Pick<Person, "cookie">) => {
+  const core = new RpcSession<CoreApi>(
+    openingTransport(openRpcSocket(person))
+  ).getRemoteMain();
+  return { core, api: core.authenticate() };
+};
+
+/**
+ * Grasp's staff member of the stack, signed in now through Grasp's own
+ * tenant (the stack's staff window, apps/core/test/sign-in-config.ts):
+ * not a member of the company, and never signed out by the gate.
+ */
+export const signInStaff = async (): Promise<Person> => {
+  const cookie = await signInAs(localStaff, "grasp-staff");
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { userId, email, role } = await api.whoami();
+    return { userId, email, role, cookie };
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * The admin the deployment names, signed in now: let in while the
+ * platform waits for Grasp's go, and never signed out by the gate.
+ * Grasp's staff have nothing to do in the workspace (apps/web's
+ * routes/staff.tsx).
+ */
+export const signInConfiguredAdmin = async (): Promise<Person> => {
+  const cookie = await signInAs(localAdmin);
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { userId, role } = await api.whoami();
+    return { userId, email: localAdmin, role, cookie };
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Ends the person's session as signing out elsewhere does: their cookie
+ * stays in the browser, and no longer says who they are.
+ */
+export const endSession = async (
+  person: Pick<Person, "cookie">
+): Promise<void> => {
+  const ended = await fetch(new URL("/api/auth/sign-out", origin), {
+    method: "POST",
+    headers: {
+      origin,
+      "content-type": "application/json",
+      cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+    },
+    body: "{}",
+  });
+  if (!ended.ok) {
+    throw new Error(`The session did not end (${ended.status})`);
+  }
+};
+
+/**
+ * Everyone the tests sign in as, by scene: a test, or a file whose tests
+ * share them. Scenes don't share people, so what a test changes about
+ * someone, their role say, no other test sees.
+ */
+const cast = {
+  platformWarmUp: { builder: "builder" },
+  apps: { builder: "builder", user: "user", admin: "admin" },
+  appPage: { builder: "builder", user: "user", colleague: "builder" },
+  pages: { one: "builder", two: "builder" },
+  pageAttacks: { builder: "builder" },
+  pageBoundWorkflow: { builder: "builder", admin: "admin" },
+  pageDecisionForm: {
+    builder: "builder",
+    admin: "admin",
+    colleague: "user",
+  },
+  notesApp: { builder: "builder" },
+  pageNavigation: { builder: "builder" },
+  appSurfaces: { builder: "builder", user: "user" },
+  notesAppSwitch: { first: "builder", next: "user" },
+  notesAppTwoTabs: { first: "builder", next: "user" },
+  notesAppSignedOut: { first: "builder" },
+  notesLive: { builder: "builder" },
+  writerApp: { builder: "builder" },
+  notesPages: { builder: "builder" },
+  notesLanguage: { builder: "builder" },
+  signOutFailure: { member: "user" },
+  workflowEditor: { builder: "builder" },
+  workflowDrawn: { builder: "builder" },
+  workflowDiagram: { builder: "builder", admin: "admin" },
+  resourceBindings: { builder: "builder", admin: "admin" },
+  productPageScripts: { builder: "builder" },
+  decisionUnreachable: { decider: "user" },
+  memberActions: { admin: "admin", one: "user", two: "user" },
+  memberRemoval: { admin: "admin", leaving: "user" },
+  revokesByHand: { admin: "admin", owner: "user" },
+  memberErasure: { admin: "admin", leaving: "user" },
+  workspaceSettings: { admin: "admin", member: "user" },
+  memberInvites: { admin: "admin" },
+  teams: { admin: "admin", member: "user" },
+  roleChange: { admin: "admin", one: "user" },
+  membersUnreachable: { admin: "admin" },
+  membersRecover: { admin: "admin" },
+  sessionEnded: { member: "user" },
+  readsGivenUp: { member: "user" },
+  notFound: { member: "user" },
+  errorReports: { member: "user" },
+  connections: { admin: "admin", user: "user" },
+  models: { admin: "admin", builder: "builder" },
+  settings: { admin: "admin", member: "user" },
+  ownSessions: { member: "user" },
+  activity: { admin: "admin", builder: "builder" },
+  activityAgain: { admin: "admin", builder: "builder" },
+  chat: { user: "user" },
+  globalChat: { user: "user" },
+  exports: { admin: "admin" },
+  chatBuilds: { builder: "builder", user: "user" },
+  chatPackages: { builder: "builder" },
+  chartPackages: { builder: "builder" },
+  inbox: { admin: "admin" },
+  inboxEmpty: { user: "user" },
+  chatPreview: { builder: "builder" },
+  previewParity: { admin: "admin" },
+  appPrint: { builder: "builder" },
+  blueprints: { owner: "builder", maker: "builder" },
+  appBuilt: { builder: "builder", user: "user" },
+  dataModel: { builder: "builder" },
+  workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
+  languages: { member: "user" },
+  iconMoves: { member: "user" },
+  pageRecovery: { member: "user" },
+  brain: { member: "user" },
+  brainMeaning: { member: "user" },
+  brainQuestions: { admin: "admin", member: "user" },
+  boardGoals: { admin: "admin", member: "user" },
+  setupVoice: { admin: "admin" },
+  setupConnect: { admin: "admin" },
+  setupDocuments: { admin: "admin" },
+  setupStory: { admin: "admin" },
+  pagePanel: { member: "user" },
+} as const satisfies Record<string, Record<string, Role>>;
+
+type Scene = keyof typeof cast;
+
+/** Each attempt's people, by scene and name. */
+export type Cast = Record<string, Record<string, Person>>[];
+
+/**
+ * Sign-ins `signInScenes` runs at once. All of them at once (over a
+ * hundred) keep the one local core isolate so busy that, on a slow CI
+ * runner, a callback's fetch of the IdP's keys can wait past the 5 s the
+ * SSO plugin gives it (jose's `createRemoteJWKSet` default, which the
+ * plugin doesn't let us change). The plugin then refuses the sign-in as
+ * `token_not_verified`. Eight at a time keep that fetch well inside its
+ * 5 s on a starved core, and cost the setup about half a second when it
+ * isn't. At sixteen it came within a few milliseconds of the limit.
+ */
+const signInsAtOnce = 8;
+
+/**
+ * Sign-ins a test file's people run at once: tests run beside them, and so
+ * may another file's on the stack's other worker, so each keeps to a share
+ * of `signInsAtOnce` (playwright.config.ts's `workers`, e2e/stack.ts).
+ */
+const fileSignInsAtOnce = signInsAtOnce / workersPerStack;
+
+/** How the casts signed in so far reach the tests, by attempt. */
+const castVariable = "E2E_CAST";
+
+/** How `signInCast` hands the configured admin's session to the test workers. */
+const adminVariable = "E2E_ADMIN";
+
+/** The casts signed in so far, by attempt: the global setup's first. */
+const castsSoFar = (): Cast => {
+  const json = process.env[castVariable];
+  if (json === undefined) {
+    throw new Error(
+      `${castVariable} is unset: the global setup in playwright.config.ts signs people in`
+    );
+  }
+  // SAFETY: signInCast and signInFile wrote it, as a Cast.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return JSON.parse(json) as Cast;
+};
+
+/**
+ * Signs in the people of `names`, scenes of the cast: everyone is called
+ * Person (person.<id>@acme.test, as the IdP names people by their email's
+ * first word) and joins as a user; the configured admin, signed in as
+ * `adminCookie`, then gives the others their roles.
+ */
+const signInScenes = async (
+  adminCookie: string,
+  names: readonly string[],
+  atOnce: number
+): Promise<Cast[number]> => {
+  const people = await mapConcurrently(
+    Object.entries(cast)
+      .filter(([scene]) => names.includes(scene))
+      .flatMap(([scene, roles]) =>
+        Object.entries<Role>(roles).map(([name, role]) => ({
+          scene,
+          name,
+          role,
+          email: `person.${crypto.randomUUID()}@acme.test`,
+        }))
+      ),
+    atOnce,
+    async (person) => ({ ...person, cookie: await signInAs(person.email) })
+  );
+  const { core, api } = apiOf({ cookie: adminCookie });
+  try {
+    const members = await api.members.list();
+    const userIds = new Map(
+      members.map(({ email, userId }) => [email, userId])
+    );
+    const scenes: Cast[number] = {};
+    const roles: Promise<void>[] = [];
+    for (const { scene, name, role, email, cookie } of people) {
+      const userId = userIds.get(email);
+      if (userId === undefined) {
+        throw new Error(`${email} signed in but isn't a member`);
+      }
+      scenes[scene] ??= {};
+      scenes[scene][name] = { userId, email, role, cookie };
+      if (role !== "user") {
+        roles.push(api.members.setRole(userId, role));
+      }
+    }
+    await Promise.all(roles);
+    return scenes;
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Signs in the configured admin, the platform warm-up's builder and the
+ * connections scene, and
+ * connects the stack's AI providers. Each test file's people are signed in
+ * as the file starts (`signInFile`): signing in every scene's people up
+ * front, for every attempt a test may get, took 30 to 40 s of every CI
+ * part's start, most of them for tests other parts run (November 2026).
+ * The global setup (e2e/setup.ts) runs it before any test, and returns
+ * them.
+ */
+export const signInCast = async (): Promise<Cast> => {
+  const adminCookie = await signInAs(localAdmin);
+  // Playwright hands the global setup's environment to the test workers.
+  process.env[adminVariable] = adminCookie;
+  // The connections scene too: its connections, written by the global setup
+  // (e2e/setup.ts), are what every test finds connected, as Microsoft 365
+  // for everyone (setup-voice.e2e.ts reads it as connected).
+  const first = await signInScenes(
+    adminCookie,
+    ["platformWarmUp", "connections"],
+    signInsAtOnce
+  );
+  const { core, api } = apiOf({ cookie: adminCookie });
+  try {
+    // The stack's AI providers and models (e2e/stack.ts), as an admin
+    // connects them in Settings: every page that offers a model reads them.
+    await api.aiProviders.add({ provider: "mistral", key: e2eModelKey });
+    await api.aiProviders.add({ provider: "anthropic", key: e2eModelKey });
+    await api.aiProviders.setModels({
+      defaultModel: e2eModel,
+      fallbacks: [e2eThinkingModel],
+    });
+    // Each provider asked once, as an admin tests it: its request must
+    // reach the stack's fake providers, never the provider itself.
+    await api.aiProviders.test("mistral", e2eModel);
+    await api.aiProviders.test("anthropic", e2eThinkingModel);
+    await expectModelRequestsHere(["api.mistral.ai", "api.anthropic.com"]);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const casts: Cast = [first];
+  // Playwright hands the global setup's environment to the test workers.
+  process.env[castVariable] = JSON.stringify(casts);
+  return casts;
+};
+
+/** A scene a test file looks up: `peopleIn("<scene>")`. */
+const sceneLookedUp = /\bpeopleIn\(\s*"(?<scene>\w+)"/gu;
+
+/** The scenes of the cast that `source`, a test file, looks up. */
+export const scenesOf = (source: string): string[] =>
+  [
+    ...new Set(
+      Array.from(
+        source.matchAll(sceneLookedUp),
+        (found) => found.groups?.scene ?? ""
+      )
+    ),
+  ].filter((scene) => Object.hasOwn(cast, scene));
+
+/**
+ * Signs in the scenes the running test's file looks up (`scenesOf`) for
+ * its attempt, those this worker has none for yet, and calls `seed` with
+ * them (the connections the connections scene expects,
+ * e2e/connections-seed.ts). A file's tests run in one worker, so a scene's
+ * people are signed in once for the file, and a retry, which runs in a
+ * worker of its own, gets people of its own: it starts from people as
+ * they were, not as the failed attempt left them. It runs before each test
+ * (e2e/contexts.ts), and in the `beforeAll` of a file that looks people up
+ * there, as that runs before any fixture.
+ */
+export const signInFile = async (
+  seed: (scenes: Cast[number], attempt: number) => Promise<void>
+): Promise<void> => {
+  const { retry, file } = test.info();
+  const casts = castsSoFar();
+  const signedIn = casts[retry] ?? {};
+  const missing = scenesOf(readFileSync(file, "utf-8")).filter(
+    (scene) => signedIn[scene] === undefined
+  );
+  if (missing.length === 0) {
+    return;
+  }
+  const adminCookie = process.env[adminVariable];
+  if (adminCookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const scenes = await signInScenes(adminCookie, missing, fileSignInsAtOnce);
+  await seed(scenes, retry);
+  while (casts.length < retry) {
+    casts.push({});
+  }
+  casts[retry] = { ...signedIn, ...scenes };
+  process.env[castVariable] = JSON.stringify(casts);
+};
+
+/** The scene's people, signed in for this attempt at the running test. */
+export const peopleIn = <S extends Scene>(
+  scene: S
+): Record<keyof (typeof cast)[S], Person> => {
+  const { retry } = test.info();
+  const people = castsSoFar()[retry]?.[scene];
+  if (people === undefined) {
+    throw new Error(
+      `Nobody is signed in for ${scene}, attempt ${retry + 1}: a test's file signs in the scenes it names as peopleIn("<scene>"), from its test (\`test\` of e2e/contexts.ts or e2e/csp.ts) or a beforeAll that calls fileCast()`
+    );
+  }
+  // SAFETY: signInCast signed in every name in the scene's cast.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return people as Record<keyof (typeof cast)[S], Person>;
+};
+
+/**
+ * Carries a page's `/rpc` connection, and its pages' function calls
+ * (`/api/app-functions/`, plain requests, not the socket), through Node,
+ * which adds the person's session cookie. Only for WebKit, which keeps a
+ * Secure cookie from `http://localhost` where Chromium and Firefox send
+ * it: the stack runs without TLS, so its pages would be signed out there.
+ * Everything the page and core say to each other passes as it is.
+ */
+const carrySession = async (
+  context: BrowserContext,
+  person: Person
+): Promise<void> => {
+  await context.route("**/api/app-functions/**", async (route) => {
+    const response = await route.fetch({
+      headers: {
+        ...route.request().headers(),
+        cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+      },
+    });
+    await route.fulfill({ response });
+  });
+  await context.routeWebSocket("**/rpc", (page) => {
+    const core = rpcSocket(person);
+    const waiting: string[] = [];
+    core.addEventListener("open", () => {
+      for (const message of waiting) {
+        core.send(message);
+      }
+      waiting.length = 0;
+    });
+    core.addEventListener("message", (event: MessageEvent<string>) => {
+      page.send(event.data);
+    });
+    core.addEventListener("close", (event) => {
+      void page.close({ code: event.code, reason: event.reason });
+    });
+    page.onMessage((message) => {
+      if (core.readyState === WebSocket.OPEN) {
+        core.send(String(message));
+      } else {
+        waiting.push(String(message));
+      }
+    });
+    page.onClose(() => {
+      core.close();
+    });
+  });
+};
+
+/** Gives a browser context the person's session. */
+export const signInTo = async (
+  context: BrowserContext,
+  person: Person
+): Promise<void> => {
+  if (context.browser()?.browserType().name() === "webkit") {
+    await carrySession(context, person);
+  }
+  await context.addCookies([
+    {
+      name: sessionCookie,
+      value: encodeURIComponent(person.cookie),
+      // Chrome sends Secure cookies to http://localhost too; the cookie
+      // store takes one only for a secure URL.
+      url: "https://localhost",
+      secure: true,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+};
+
+/**
+ * Revokes the App's newest release, as the configured admin: its pages
+ * get none of the App's data from then on, the pages already running
+ * included.
+ */
+export const revokeNewestRelease = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const [newest] = await api.apps.releases.list(app);
+    if (newest === undefined) {
+      throw new Error(`The App ${app} has no release to revoke`);
+    }
+    await api.apps.releases.revoke(app, newest.version, {
+      reason: "An end-to-end test revokes it",
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Classifies the App's data as `ordinary`, as the configured admin: its
+ * pages' links then open on a click, without the person confirming each.
+ */
+export const ordinaryData = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { generation } = await api.dataPolicy.read(app);
+    await api.dataPolicy.classify(app, "ordinary", generation);
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * The App lint's rules test Apps break, for brevity or on purpose (an
+ * attack's page), which a publish checks: named in a disable comment, as
+ * the lint takes one only with its rules, and a builder's own code may.
+ */
+const fixtureRules = [
+  "arrow-body-style",
+  "func-names",
+  "jsx-a11y/prefer-tag-over-role",
+  "no-await-in-loop",
+  "no-eval",
+  "no-extend-native",
+  "no-nested-ternary",
+  "no-new-func",
+  "no-plusplus",
+  "no-promise-executor-return",
+  "no-useless-concat",
+  "no-void",
+  "prefer-template",
+  "promise/avoid-new",
+  "promise/prefer-await-to-callbacks",
+  "promise/prefer-await-to-then",
+  "promise/prefer-catch",
+  "react-hooks/exhaustive-deps",
+  "react/exhaustive-effect-dependencies",
+  "react/set-state-in-effect",
+  "unicorn/consistent-function-scoping",
+  "unicorn/no-await-expression-member",
+  "unicorn/no-useless-undefined",
+  "unicorn/prefer-dom-node-append",
+];
+
+const typeScript = /\.tsx?$/u;
+
+/** `source` with each of its TypeScript files past `fixtureRules`. */
+const pastFixtureRules = (source: TestSource): TestSource => {
+  const { files, definition } = sourceParts(source);
+  const marked = Object.fromEntries(
+    Object.entries(files).map(([path, content]) => [
+      path,
+      content !== null && typeScript.test(path)
+        ? `/* oxlint-disable ${fixtureRules.join(", ")} -- a test's App */\n${content}`
+        : content,
+    ])
+  );
+  return definition === undefined
+    ? marked
+    : changesOf(appOf(definition), marked);
+};
+
+/**
+ * Writes `files` into the App's draft (null deletes one) and publishes it:
+ * live, for the people it is shared with (until then, its builders'
+ * alone).
+ */
+export const release = async (
+  api: ReturnType<typeof apiOf>["api"],
+  app: string,
+  files: TestSource
+): Promise<{ version: number }> =>
+  await publishApp(api, app, pastFixtureRules(files));
+
+/**
+ * Writes `files` into the App's draft and leaves it unpublished: only its
+ * builders see it.
+ */
+export const drafted = async (
+  api: ReturnType<typeof apiOf>["api"],
+  app: string,
+  files: TestSource
+): Promise<void> => {
+  await writeApp(api, app, files);
+};

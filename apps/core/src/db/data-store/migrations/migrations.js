@@ -1,0 +1,60 @@
+import journal from './meta/_journal.json';
+import m0000 from './0000_data_store.sql';
+import m0001 from './0001_receipts.sql';
+import m0002 from './0002_store_deletion.sql';
+import m0003 from './0003_schemas_and_default_order.sql';
+import m0004 from './0004_cursor_key.sql';
+import m0005 from './0005_table_generations.sql';
+import m0006 from './0006_schema_contract.sql';
+import m0007 from './0007_record_refs.sql';
+import m0008 from './0008_record_ref_cascade.sql';
+import m0009 from './0009_schema_backfills.sql';
+import m0010 from './0010_backfill_pending_and_cascade_indexes.sql';
+import m0011 from './0011_abandoned_targets.sql';
+import m0012 from './0012_custom_migrations.sql';
+import m0013 from './0013_commit_writers.sql';
+import m0014 from './0014_app_files.sql';
+import m0015 from './0015_file_write_removals.sql';
+import m0016 from './0016_app_preferences.sql';
+import m0017 from './0017_preferences_contract.sql';
+import m0018 from './0018_cascade_jobs.sql';
+import m0019 from './0019_search_docs.sql';
+import m0020 from './0020_record_changes.sql';
+import m0021 from './0021_schema_answers.sql';
+import m0022 from './0022_rules_owed.sql';
+import m0023 from './0023_work_audience.sql';
+import m0024 from './0024_receipt_seeds.sql';
+import m0025 from './0025_schema_at_publish.sql';
+
+  export default {
+    journal,
+    migrations: {
+      m0000,
+m0001,
+m0002,
+m0003,
+m0004,
+m0005,
+m0006,
+m0007,
+m0008,
+m0009,
+m0010,
+m0011,
+m0012,
+m0013,
+m0014,
+m0015,
+m0016,
+m0017,
+m0018,
+m0019,
+m0020,
+m0021,
+m0022,
+m0023,
+m0024,
+m0025
+    }
+  }
+  

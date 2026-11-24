@@ -1,0 +1,501 @@
+import ultracite from "ultracite/oxfmt";
+import antiSlop from "ultracite/oxlint/anti-slop";
+import core from "ultracite/oxlint/core";
+import react from "ultracite/oxlint/react";
+import shadcn from "ultracite/oxlint/shadcn";
+import tanstack from "ultracite/oxlint/tanstack";
+import vitest from "ultracite/oxlint/vitest";
+import { defineConfig } from "vite-plus";
+
+import { brainModules } from "./apps/core/test/brain-next-modules.ts";
+import DurationSequencer from "./scripts/test-sequencer.ts";
+
+const generated = [
+  "**/routeTree.gen.ts",
+  "**/worker-configuration.d.ts",
+  "**/src/db/**/migrations/**",
+  // Release fixtures and the golden manifest the release test writes.
+  "scripts/release/testdata/**",
+  // What the host generates for an App, byte for byte (spec 8), and the
+  // config and schema an App's definition generates (the SDK's
+  // definition-source.ts), which its commits must equal.
+  "**/.grasp/**",
+  "apps/core/blueprints/*/files/grasp.config.ts",
+  "apps/core/blueprints/*/files/server/schema.ts",
+  "apps/core/blueprints/*/files/server/_generated/**",
+  "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/_generated/**",
+  // The SDK's connector catalog, from the release's connectors
+  // (apps/core/build-connector-catalog.ts).
+  "packages/runtime/src/connector-catalog.gen.ts",
+  // Each native tool's class, from the same connectors.
+  "apps/core/src/native-tool-classes.gen.ts",
+  // The names core's RPC targets give their parameters, from their source.
+  "apps/core/src/rpc-param-names.gen.ts",
+  // The Snowball project's own stemmers, as its release ships them
+  // (scripts/brain-snowball.ts).
+  "packages/brain-next/src/snowball/**",
+];
+
+/** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
+const unboundedTarget =
+  "Extend CoreRpcTarget (core) or a boundedRpcTarget (@grasp-os/shared/rpc-target), so every call's arguments are bounded.";
+
+/** Cap'n Web's and workerd's RpcTarget, which core and the frontend never extend. */
+const unboundedTargetPaths = [
+  { name: "capnweb", importNames: ["RpcTarget"], message: unboundedTarget },
+  {
+    name: "cloudflare:workers",
+    importNames: ["RpcTarget"],
+    allowTypeImports: true,
+    message: unboundedTarget,
+  },
+];
+
+/**
+ * The Brain's store and its files: reached only through its contract
+ * (`@grasp-os/brain-next/contract`). Core's src/brain-store.ts alone
+ * imports the store, to subclass it for its alarm. Its work queue (`/work`) is the store's
+ * own too: its handlers run inside the store.
+ */
+const brainStoreImports = {
+  group: [
+    "@grasp-os/brain-next/store",
+    "@grasp-os/brain-next/work",
+    "**/brain-next/src/**",
+  ],
+  message:
+    "Reach the Brain through @grasp-os/brain-next/contract (core's src/brain-next.ts), never its store.",
+};
+
+/**
+ * The Brain's contract, inside core: only src/brain-next.ts holds it, so
+ * the Brain's reader is made there alone, from core's own records.
+ */
+const brainContractImports = {
+  group: ["@grasp-os/brain-next", "@grasp-os/brain-next/contract"],
+  message:
+    "In core, only src/brain-next.ts reaches the Brain: add and recall through its addSource and recallAs.",
+};
+
+/**
+ * Core's module for the Brain (src/brain-next.ts): only the modules the
+ * Brain's permission harness lists (apps/core/test/brain-next-modules.ts)
+ * import it, each with the surface that probes it
+ * (test/brain-next-surfaces.ts), so no module reaches the Brain without
+ * them.
+ */
+const brainModuleImports = {
+  // Every spelling that resolves to it: bare, .ts and .js.
+  group: ["**/brain-next", "**/brain-next.ts", "**/brain-next.js"],
+  message:
+    "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to apps/core/test/brain-next-modules.ts, with its surface in brainSurfaces (test/brain-next-surfaces.ts).",
+};
+
+// Test through real interfaces; mock only outside systems, at their
+// boundary. (anti-slop/no-module-mocking only knows `vitest` imports.)
+const noModuleMocks = ["mock", "doMock", "hoisted"].map((property) => ({
+  object: "vi",
+  property,
+  message:
+    "Don't mock modules. Pass the dependency through a real interface instead.",
+}));
+
+export default defineConfig({
+  lint: {
+    extends: [core, react, tanstack, vitest, shadcn],
+    ignorePatterns: [
+      ...(core.ignorePatterns ?? []),
+      ...generated,
+      // The tests' own built-in, an App of spec 8's layout: its functions
+      // import what its seal generates (`@server/_generated/server`), which nothing
+      // here maps, so its files are untyped, like any inline test App's
+      // (the seal strips types without checking them), and
+      // builtin-blueprints.test.ts covers what they do at runtime.
+      "apps/core/test/fixtures/blueprints/*/files/**",
+      // A built-in's pages, which need the route tree and the kit a page
+      // build gives them: the build type-checks them as it does
+      // any App's (builtin-blueprints.test.ts). Its config and server code
+      // are checked here (each built-in's own tsconfig.json).
+      "apps/core/blueprints/*/files/src/**",
+    ],
+    jsPlugins: [
+      ...(shadcn.jsPlugins ?? []),
+      ...(antiSlop.jsPlugins ?? []),
+      "./scripts/lint/grasp-plugin.ts",
+    ],
+    options: {
+      typeAware: true,
+      typeCheck: true,
+      // No warning tier: a rule is either an error or off.
+      denyWarnings: true,
+      // A disable comment that no longer suppresses anything must go.
+      reportUnusedDisableDirectives: "error",
+    },
+    rules: {
+      // Controls are closed: a page places them (layout) and nothing else.
+      // A painted field is a container, open for composition: it lays out
+      // what stands on it, with its own room and corners (AGENTS.md, Design).
+      "shadcn/no-restyle": [
+        "error",
+        {
+          allow: ["layout"],
+          contracts: [
+            {
+              pattern: "^PaintedField$",
+              allow: ["layout", "spacing", "shape", "typography"],
+            },
+          ],
+        },
+      ],
+      // Picked from Ultracite's anti-slop preset: the rules that stop agents
+      // from silencing the type checker. The rest of that preset forces
+      // workarounds (no options objects, no `unknown`).
+      "anti-slop/no-chained-type-assertions": "error",
+      "anti-slop/no-widen-then-assert": "error",
+      "anti-slop/require-safety-comment-for-type-assertion": "error",
+      // TanStack Router's `throw notFound()` is control flow, not an error.
+      "typescript/only-throw-error": [
+        "error",
+        {
+          allow: [
+            {
+              from: "package",
+              package: "@tanstack/router-core",
+              name: "NotFoundError",
+            },
+          ],
+        },
+      ],
+      "no-restricted-properties": ["error", ...noModuleMocks],
+    },
+    settings: {
+      shadcn: {
+        ui: "@grasp-os/app-kit/components",
+      },
+    },
+    overrides: [
+      {
+        // The frontend hides every scrollbar (apps/web/src/styles.css).
+        files: ["apps/web/src/**"],
+        rules: { "grasp/no-scrollbars": "error" },
+      },
+      {
+        // Every icon of a control moves in its own parts when pointed at
+        // (icon-moves.css): the app's icons, not its tests'.
+        files: ["apps/web/src/**"],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: {
+          "grasp/icon-has-move": [
+            "error",
+            { table: "apps/web/src/icon-moves.css" },
+          ],
+        },
+      },
+      {
+        // Every answer of the interface is over within 300 ms (AGENTS.md,
+        // Design), in the frontend, the admin and the kit alike.
+        files: [
+          "apps/web/src/**",
+          "apps/admin/src/**",
+          "packages/app-kit/src/**",
+        ],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: { "grasp/no-slow-motion": "error" },
+      },
+      {
+        // Seen once per person, so they may take longer to delight: the
+        // onboarding, the interview and setup. And rare: an
+        // app connected, a few times per company, whose drawn mark is the
+        // delight of it (success-mark.tsx).
+        files: [
+          "apps/web/src/onboarding/**",
+          "apps/web/src/interview/**",
+          "apps/web/src/voice/**",
+          "apps/web/src/routes/interview*",
+          "apps/web/src/routes/setup*",
+          "apps/web/src/frame/onboarding-frame.tsx",
+          "packages/app-kit/src/components/success-mark.tsx",
+          // Base UI's drawer leaves as fast as it was swiped: up to 400 ms
+          // for a gentle swipe, which follows the finger, not a wait.
+          "packages/app-kit/src/components/drawer.tsx",
+        ],
+        rules: { "grasp/no-slow-motion": "off" },
+      },
+      {
+        // What clients and buyers read names the product Grasp Work
+        // (GRA-143): the apps' and packages' source, not their tests.
+        files: ["apps/*/src/**", "packages/*/src/**"],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: { "grasp/no-old-product-name": "error" },
+      },
+      {
+        // Nothing outside the Brain reaches its store (GRA-1720); the
+        // overrides below that set their own restricted imports repeat it.
+        files: ["apps/**", "packages/**", "scripts/**", "e2e/**"],
+        excludeFiles: ["packages/brain-next/**"],
+        rules: {
+          "no-restricted-imports": ["error", { patterns: [brainStoreImports] }],
+        },
+      },
+      {
+        // The work queue's tests (its own, the leak harness's probes, and
+        // erasure's, which erases queued work) define kinds of work whose
+        // handlers they control, and add items.
+        files: [
+          "apps/core/test/brain-next-work.test.ts",
+          "apps/core/test/brain-next-surfaces.ts",
+          "apps/core/test/brain-next-vectors.test.ts",
+          "apps/core/test/brain-next-erasure.test.ts",
+          "apps/core/test/brain-report.test.ts",
+          "apps/core/test/brain-next-own-work.test.ts",
+        ],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  ...brainStoreImports,
+                  group: ["@grasp-os/brain-next/store", "**/brain-next/src/**"],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // Workerflow is a generic engine: nothing of Grasp's domain (users,
+        // Apps, connect, permissions) may reach it. Grasp imports it, never
+        // the other way round.
+        files: ["packages/workerflow/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  // Other workspace packages, by name or by path.
+                  group: ["@grasp-os/**", "**/apps/**", "../../*/**"],
+                  message:
+                    "Workerflow imports nothing of Grasp: core maps Grasp onto it.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // A target a browser or a page calls must hold what its methods
+        // get to the session's limits: Cap'n Web bounds each message, not
+        // a value built from several (@grasp-os/shared/rpc-target). In
+        // workerd, Cap'n Web's RpcTarget is workerd's own.
+        files: ["apps/core/src/**", "apps/web/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: unboundedTargetPaths,
+              patterns: [
+                brainStoreImports,
+                brainContractImports,
+                brainModuleImports,
+              ],
+            },
+          ],
+          "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // The modules that reach the Brain through core's module, each
+        // probed by the permission harness (its list,
+        // apps/core/test/brain-next-modules.ts).
+        files: Object.keys(brainModules),
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: unboundedTargetPaths,
+              patterns: [brainStoreImports, brainContractImports],
+            },
+          ],
+        },
+      },
+      {
+        // Core reaches the Brain's store binding only through
+        // src/brain-next.ts (and the provisioning probe, which lists every
+        // binding), so no module skips the reader brain-next.ts makes.
+        files: ["apps/core/src/**"],
+        excludeFiles: [
+          "apps/core/src/brain-next.ts",
+          "apps/core/src/provision-probe.ts",
+        ],
+        rules: {
+          "no-restricted-properties": [
+            "error",
+            ...noModuleMocks,
+            {
+              property: "BRAIN_STORE",
+              message:
+                "Reach the Brain through src/brain-next.ts, never its store binding.",
+            },
+            {
+              // The same namespace, as the Worker's own exports give it.
+              property: "BrainStore",
+              message:
+                "Reach the Brain through src/brain-next.ts, never its store.",
+            },
+          ],
+        },
+      },
+      {
+        // Core's subclass of the Brain's store (its alarm's host): the one
+        // import of the store, and a module the harness probes.
+        files: ["apps/core/src/brain-store.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: unboundedTargetPaths,
+              patterns: [brainContractImports],
+            },
+          ],
+        },
+      },
+      {
+        // Core's one way to the Brain: its contract, never its store.
+        files: ["apps/core/src/brain-next.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            { paths: unboundedTargetPaths, patterns: [brainStoreImports] },
+          ],
+        },
+      },
+      {
+        // No package passes RpcTarget on for core or the frontend to
+        // extend unbounded; the bounded base extends it in place.
+        files: ["packages/**"],
+        rules: {
+          "grasp/no-unbounded-rpc-target": ["error", { reexportsOnly: true }],
+        },
+      },
+      {
+        // A run's host, and the host of each of its steps' attempts, are
+        // served over workerd's own RPC to the run's isolate, never over
+        // Cap'n Web, and extend workerd's RpcTarget.
+        files: [
+          "apps/core/src/workflows/host.ts",
+          "apps/core/src/workflows/attempt-host.ts",
+          // What holds a run's host to its time between steps, forwarding
+          // each call to it unchanged (between-steps.ts).
+          "apps/core/src/workflows/between-steps.ts",
+        ],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "capnweb",
+                  importNames: ["RpcTarget"],
+                  message: unboundedTarget,
+                },
+              ],
+              patterns: [
+                brainStoreImports,
+                brainContractImports,
+                brainModuleImports,
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // A test's stand-ins are called by the test alone.
+        files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+        rules: {
+          "no-restricted-imports": "off",
+          "grasp/no-unbounded-rpc-target": "off",
+        },
+      },
+      {
+        // Core's JSX is Chat SDK's cards (apps/core/tsconfig.json), not
+        // React's DOM: a card's `style` is a word ("primary", "muted").
+        files: ["apps/core/src/**/*.tsx"],
+        rules: { "react/style-prop-object": "off" },
+      },
+      {
+        // RecordGrid draws through TanStack Virtual, which the React
+        // Compiler lists as incompatible: the one component is opted out
+        // with "use no memo" (AGENTS.md, Architecture rules).
+        files: ["packages/app-kit/src/components/record-grid.tsx"],
+        rules: { "react/incompatible-library": "off" },
+      },
+      {
+        // Schema files start as comment-only placeholders until their first table.
+        files: ["apps/*/src/db/**/schema.ts"],
+        rules: { "unicorn/no-empty-file": "off" },
+      },
+      {
+        files: ["packages/app-kit/src/components/**"],
+        rules: {
+          "shadcn/no-arbitrary-values": "off",
+          "shadcn/no-restyle": "off",
+          "shadcn/require-static-classes": "off",
+          // Components are added with the shadcn CLI; keep its code style.
+          "func-style": "off",
+          "react/function-component-definition": "off",
+          // shadcn gives divs ARIA roles (group, list, link, status) for
+          // their layout; a semantic tag would bring its own styles.
+          "jsx-a11y/prefer-tag-over-role": "off",
+        },
+      },
+    ],
+  },
+  fmt: {
+    ...ultracite,
+    ignorePatterns: [...(ultracite.ignorePatterns ?? []), ...generated],
+  },
+  test: {
+    // The admin's Cloudflare Vite plugin cannot load as a Vitest project;
+    // its tests have a config of their own.
+    projects: [
+      "apps/*",
+      "!apps/admin",
+      "apps/admin/vite.test.config.ts",
+      "apps/admin/vite.components.config.ts",
+      "apps/core/vite.pages.config.ts",
+      "apps/core/vite.on-prem.config.ts",
+      "apps/core/vite.brain-meaning.config.ts",
+      "apps/core/vite.stephen.config.ts",
+      "packages/*",
+      "packages/app-kit/vite.browser.config.ts",
+      "packages/workerflow/vite.process.config.ts",
+      "packages/workerflow/vite.conformance.config.ts",
+      "packages/connectors/*",
+      // Repo tooling's pure logic, and core's build step, in Node.
+      {
+        test: {
+          name: "scripts",
+          include: [
+            "scripts/**/*.test.ts",
+            "apps/core/build-blueprints.test.ts",
+            "apps/core/host-json.bundle.test.ts",
+            "apps/admin/vite.config.test.ts",
+          ],
+          environment: "node",
+        },
+      },
+    ],
+    passWithNoTests: true,
+    // CI's shards split by how long each file takes, and each shard's
+    // longest files first (scripts/test-sequencer.ts).
+    sequence: { sequencer: DurationSequencer },
+  },
+  staged: {
+    "*": ["secretlint", "vp check --fix"],
+    "*.{md,mdx}": "node scripts/check-docs.ts",
+  },
+});

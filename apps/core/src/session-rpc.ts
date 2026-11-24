@@ -1,0 +1,348 @@
+import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
+
+import { AiProvidersRpc } from "./ai-providers.ts";
+import { AppsRpc } from "./apps-rpc.ts";
+import { AuditRpc } from "./audit-rpc.ts";
+import { BoardReportRpc } from "./board-report.ts";
+import { BrainMemoriesRpc } from "./brain-memories-rpc.ts";
+import { BrainRpc } from "./brain-rpc.ts";
+import { BrainSourcesRpc } from "./brain-sources-rpc.ts";
+import { ChannelAccountsRpc } from "./channels/accounts.ts";
+import { ChatsRpc } from "./chats-rpc.ts";
+import { ConnectionsRpc } from "./connections.ts";
+import { DataPolicyRpc } from "./data-policy-rpc.ts";
+import { DecisionsRpc } from "./decisions/rpc.ts";
+import { DirectoryGroupsRpc } from "./directory-groups.ts";
+import { DraftsRpc } from "./drafts-rpc.ts";
+import { membersOnly, openToGuests } from "./guest-access.ts";
+import { HeldStartsRpc } from "./held-starts-rpc.ts";
+import { InstructionsRpc } from "./instructions-rpc.ts";
+import { MembersRpc } from "./members.ts";
+import { ModelsRpc } from "./models-rpc.ts";
+import { NotificationsRpc } from "./notifications.ts";
+import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
+import { OnboardingRpc } from "./onboarding/rpc.ts";
+import { OpportunitiesRpc } from "./opportunities-rpc.ts";
+import { OrgSettingsRpc } from "./org-settings.ts";
+import { OrganizationRpc } from "./organization.ts";
+import { setOwnName } from "./own-name.ts";
+import { SessionsRpc } from "./own-sessions.ts";
+import { DependenciesRpc } from "./packages/rpc.ts";
+import { PagesRpc } from "./pages-rpc.ts";
+import { PendingActionsRpc } from "./pending-actions.ts";
+import { PermissionsRpc } from "./permissions-rpc.ts";
+import { ProjectsRpc } from "./projects.ts";
+import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { fullAccess, withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+import { SignalsRpc } from "./signals-rpc.ts";
+import { SkillsRpc } from "./skills-rpc.ts";
+import { staffAudited } from "./staff-audit.ts";
+import { StephenRequestsRpc } from "./stephen-requests.ts";
+import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
+import { VersionsRpc } from "./versions-rpc.ts";
+import { WaitingRpc } from "./waiting-rpc.ts";
+import { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
+import { WorkflowsRpc } from "./workflows/rpc.ts";
+
+/**
+ * What a signed-in person reaches over `/rpc`. Every API here has the same
+ * form: an RpcTarget built once per session with core's env and a session
+ * check, holding no identity. Each method runs through `withPerson`, which
+ * checks the session first and hands over the identity that check returned,
+ * so a method can't reach the person without the check, or use one kept
+ * from an earlier call. Each namespace is created once and handed out as
+ * the same object every time. There's no base
+ * class: an RpcTarget's methods, protected ones too, can be called over
+ * RPC, so each keeps its env and check in private fields.
+ */
+export class SessionRpc extends CoreRpcTarget implements SessionApi {
+  readonly #env: Env;
+  readonly #whoami: SessionCheck;
+  /** The check for what only the client's own members do. */
+  readonly #full: SessionCheck;
+  readonly #apps: AppsRpc;
+  readonly #drafts: DraftsRpc;
+  readonly #versions: VersionsRpc;
+  readonly #brain: BrainRpc;
+  readonly #brainSources: BrainSourcesRpc;
+  readonly #skills: SkillsRpc;
+  readonly #brainMemories: BrainMemoriesRpc;
+  readonly #opportunities: OpportunitiesRpc;
+  readonly #instructions: InstructionsRpc;
+  readonly #permissions: PermissionsRpc;
+  readonly #resourceBindings: ResourceBindingsRpc;
+  readonly #connections: ConnectionsRpc;
+  readonly #workflows: WorkflowsRpc;
+  readonly #workflowResources: WorkflowResourcesRpc;
+  readonly #projects: ProjectsRpc;
+  readonly #decisions: DecisionsRpc;
+  readonly #heldStarts: HeldStartsRpc;
+  readonly #dependencies: DependenciesRpc;
+  readonly #pages: PagesRpc;
+  readonly #dataPolicy: DataPolicyRpc;
+  readonly #members: MembersRpc;
+  readonly #directoryGroups: DirectoryGroupsRpc;
+  readonly #organization: OrganizationRpc;
+  readonly #orgSettings: OrgSettingsRpc;
+  readonly #stephenRequests: StephenRequestsRpc;
+  readonly #audit: AuditRpc;
+  readonly #models: ModelsRpc;
+  readonly #aiProviders: AiProvidersRpc;
+  readonly #pendingActions: PendingActionsRpc;
+  readonly #unknownOutcomes: UnknownOutcomesRpc;
+  readonly #signals: SignalsRpc;
+  readonly #chats: ChatsRpc;
+  readonly #boardReport: BoardReportRpc;
+  readonly #sessions: SessionsRpc;
+  readonly #channelAccounts: ChannelAccountsRpc;
+  readonly #notifications: NotificationsRpc;
+  readonly #waiting: WaitingRpc;
+  readonly #onboarding: OnboardingRpc;
+  readonly #onboardingGate: OnboardingGateRpc;
+
+  /** `sessionId`: the session the connection is signed in with. */
+  constructor(env: Env, connectionCheck: SessionCheck, sessionId: string) {
+    super();
+    // Every view and action of Grasp's staff, on every namespace, is in
+    // the client's audit log (staff-audit.ts): the one check they all ask.
+    const audited = staffAudited(env, connectionCheck);
+    // A guest's connection is answered as nobody's everywhere but where
+    // guest-access.ts opens it to them (`openToGuests`).
+    const check = membersOnly(audited);
+    this.#whoami = openToGuests(audited, "whoami");
+    this.#env = env;
+    // Everything but the onboarding refuses Grasp staff (session-check.ts).
+    const full = fullAccess(check);
+    this.#full = full;
+    this.#apps = new AppsRpc(env, full);
+    this.#drafts = new DraftsRpc(env, full);
+    this.#versions = new VersionsRpc(env, full);
+    this.#brain = new BrainRpc(env, full);
+    this.#brainSources = new BrainSourcesRpc(env, full);
+    this.#skills = new SkillsRpc(env, full);
+    this.#brainMemories = new BrainMemoriesRpc(env, full);
+    this.#opportunities = new OpportunitiesRpc(env, full);
+    this.#instructions = new InstructionsRpc(env, full);
+    this.#permissions = new PermissionsRpc(env, full);
+    this.#resourceBindings = new ResourceBindingsRpc(env, full);
+    this.#connections = new ConnectionsRpc(env, full);
+    this.#workflows = new WorkflowsRpc(env, full);
+    this.#workflowResources = new WorkflowResourcesRpc(env, full);
+    this.#projects = new ProjectsRpc(env, full);
+    this.#decisions = new DecisionsRpc(env, full);
+    this.#heldStarts = new HeldStartsRpc(env, full);
+    this.#dependencies = new DependenciesRpc(env, full);
+    this.#pages = new PagesRpc(env, full, (method) =>
+      fullAccess(openToGuests(audited, method))
+    );
+    this.#dataPolicy = new DataPolicyRpc(env, full);
+    this.#members = new MembersRpc(env, full);
+    this.#directoryGroups = new DirectoryGroupsRpc(env, full);
+    this.#organization = new OrganizationRpc(env, full);
+    this.#orgSettings = new OrgSettingsRpc(env, full);
+    this.#stephenRequests = new StephenRequestsRpc(env, full);
+    this.#audit = new AuditRpc(env, full);
+    this.#models = new ModelsRpc(env, full);
+    this.#aiProviders = new AiProvidersRpc(env, full);
+    this.#pendingActions = new PendingActionsRpc(env, full);
+    this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
+    this.#signals = new SignalsRpc(env, full);
+    this.#chats = new ChatsRpc(env, full);
+    this.#sessions = new SessionsRpc(env, full, sessionId);
+    this.#channelAccounts = new ChannelAccountsRpc(env, full);
+    this.#notifications = new NotificationsRpc(env, full);
+    // Read from and acting through the namespaces above, with their checks.
+    this.#waiting = new WaitingRpc(full, {
+      pendingActions: this.#pendingActions,
+      unknownOutcomes: this.#unknownOutcomes,
+      permissions: this.#permissions,
+      apps: this.#apps,
+      notifications: this.#notifications,
+      connections: this.#connections,
+      decisions: this.#decisions,
+      heldStarts: this.#heldStarts,
+      bindings: this.#workflowResources,
+      skills: this.#skills,
+    });
+    this.#onboarding = new OnboardingRpc(env, check);
+    this.#onboardingGate = new OnboardingGateRpc(env, check);
+    // The weekly report, read through the namespaces above, with their checks.
+    this.#boardReport = new BoardReportRpc(full, {
+      onboarding: this.#onboarding,
+      workflows: this.#workflows,
+      signals: this.#signals,
+      apps: this.#apps,
+    });
+  }
+
+  get sessions(): SessionsRpc {
+    return this.#sessions;
+  }
+
+  get channelAccounts(): ChannelAccountsRpc {
+    return this.#channelAccounts;
+  }
+
+  get notifications(): NotificationsRpc {
+    return this.#notifications;
+  }
+
+  get waiting(): WaitingRpc {
+    return this.#waiting;
+  }
+
+  get heldStarts(): HeldStartsRpc {
+    return this.#heldStarts;
+  }
+
+  get onboarding(): OnboardingRpc {
+    return this.#onboarding;
+  }
+
+  get onboardingGate(): OnboardingGateRpc {
+    return this.#onboardingGate;
+  }
+
+  get chats(): ChatsRpc {
+    return this.#chats;
+  }
+
+  get boardReport(): BoardReportRpc {
+    return this.#boardReport;
+  }
+
+  get apps(): AppsRpc {
+    return this.#apps;
+  }
+
+  get brain(): BrainRpc {
+    return this.#brain;
+  }
+
+  get brainSources(): BrainSourcesRpc {
+    return this.#brainSources;
+  }
+
+  get skills(): SkillsRpc {
+    return this.#skills;
+  }
+
+  get brainMemories(): BrainMemoriesRpc {
+    return this.#brainMemories;
+  }
+
+  get opportunities(): OpportunitiesRpc {
+    return this.#opportunities;
+  }
+
+  get instructions(): InstructionsRpc {
+    return this.#instructions;
+  }
+
+  get permissions(): PermissionsRpc {
+    return this.#permissions;
+  }
+
+  get resourceBindings(): ResourceBindingsRpc {
+    return this.#resourceBindings;
+  }
+
+  get connections(): ConnectionsRpc {
+    return this.#connections;
+  }
+
+  get drafts(): DraftsRpc {
+    return this.#drafts;
+  }
+
+  get versions(): VersionsRpc {
+    return this.#versions;
+  }
+
+  get workflows(): WorkflowsRpc {
+    return this.#workflows;
+  }
+
+  get workflowResources(): WorkflowResourcesRpc {
+    return this.#workflowResources;
+  }
+
+  get projects(): ProjectsRpc {
+    return this.#projects;
+  }
+
+  get decisions(): DecisionsRpc {
+    return this.#decisions;
+  }
+
+  get dependencies(): DependenciesRpc {
+    return this.#dependencies;
+  }
+
+  get pages(): PagesRpc {
+    return this.#pages;
+  }
+
+  get dataPolicy(): DataPolicyRpc {
+    return this.#dataPolicy;
+  }
+
+  get members(): MembersRpc {
+    return this.#members;
+  }
+
+  get directoryGroups(): DirectoryGroupsRpc {
+    return this.#directoryGroups;
+  }
+
+  get organization(): OrganizationRpc {
+    return this.#organization;
+  }
+
+  get orgSettings(): OrgSettingsRpc {
+    return this.#orgSettings;
+  }
+
+  get stephenRequests(): StephenRequestsRpc {
+    return this.#stephenRequests;
+  }
+
+  get audit(): AuditRpc {
+    return this.#audit;
+  }
+
+  get models(): ModelsRpc {
+    return this.#models;
+  }
+
+  get aiProviders(): AiProvidersRpc {
+    return this.#aiProviders;
+  }
+
+  get pendingActions(): PendingActionsRpc {
+    return this.#pendingActions;
+  }
+
+  get unknownOutcomes(): UnknownOutcomesRpc {
+    return this.#unknownOutcomes;
+  }
+
+  get signals(): SignalsRpc {
+    return this.#signals;
+  }
+
+  async whoami(): Promise<Identity> {
+    return await withPerson(this.#whoami, (identity) => identity);
+  }
+
+  async setName(name: string): Promise<void> {
+    await withPerson(this.#full, async (person) => {
+      await setOwnName(this.#env, person, name);
+    });
+    // The connection's reading of who they are holds their old name: the
+    // next `whoami` reads them again.
+    this.#full.forget?.();
+  }
+}

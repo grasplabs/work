@@ -1,0 +1,304 @@
+/**
+ * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
+ * account's state, the API's envelope, and how a route answers.
+ */
+import type { AdminCommandEnvelope } from "@grasp-os/shared/admin-command";
+import type {
+  AdminKickoffRequest,
+  AdminKickoffView,
+} from "@grasp-os/shared/admin-kickoff";
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type {
+  BrainActionOutcome,
+  BrainActionRequest,
+  BrainErasureAnswer,
+  BrainErasureRequest,
+  BrainReport,
+  BrainReportRequest,
+} from "@grasp-os/shared/brain-report";
+import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
+
+export const base = "https://api.cloudflare.com/client/v4";
+
+export type Json = Record<string, unknown>;
+
+/** A Worker script's modules and metadata, as one upload sent them. */
+export interface UploadState {
+  metadata: Json;
+  modules: { name: string; type: string; content: string }[];
+}
+
+/** A version: its upload, and the secrets it runs with. */
+export interface VersionState extends UploadState {
+  id: string;
+  number: number;
+  /** Values by name: a test can check a secret arrived; the API never shows one. */
+  secrets: Map<string, string>;
+}
+
+export interface DeploymentState {
+  id: string;
+  created_on: string;
+  versions: { version_id: string; percentage: number }[];
+  annotations: Json;
+}
+
+export interface ScriptState {
+  /** Oldest first. */
+  versions: VersionState[];
+  /** The current deployment first. */
+  deployments: DeploymentState[];
+  schedules: string[];
+  subdomain?: { enabled: boolean; previews_enabled: boolean };
+  /** The last Durable Object migration a script upload ran. */
+  migrationTag?: string;
+}
+
+export interface AccountState {
+  id: string;
+  name: string;
+  /** Its members, by email: `accepted`, or `pending` for an invitation. */
+  members: Map<string, string>;
+  d1: { uuid: string; name: string; jurisdiction?: string }[];
+  /** Buckets by jurisdiction: a name is unique only within one. */
+  buckets: { name: string; jurisdiction: string }[];
+  /**
+   * The buckets with objects in them, by name, which R2 refuses to delete
+   * (409) until a lifecycle rule has expired them.
+   */
+  fullBuckets: Set<string>;
+  /** Each bucket's lifecycle rules, by name, as the last PUT set them. */
+  lifecycles: Map<string, Json>;
+  /** Each bucket's objects put through the API, by bucket name, then key. */
+  objects: Map<string, Map<string, Uint8Array<ArrayBuffer>>>;
+  /**
+   * The jurisdiction R2 reports for every bucket, whatever it's in: a test
+   * of an API that answers other than asked.
+   */
+  r2Reports?: string;
+  /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
+  d1Reports?: string;
+  scripts: Map<string, ScriptState>;
+  /**
+   * Its Workers for Platforms dispatch namespaces, each with its user
+   * Workers by script name. A test adds a namespace; uploads fill it.
+   */
+  namespaces: Map<string, Map<string, ScriptState>>;
+  /**
+   * The static files the account holds: each one's hash, and the type it
+   * was uploaded with, which it is served with.
+   */
+  assets: Map<string, string>;
+  /** Assets upload sessions: each token, and the hashes still to upload. */
+  sessions: Map<string, Set<string>>;
+  /** Assets completion tokens it issued. */
+  completions: Set<string>;
+  /**
+   * Each script upload as it landed: the script, and the version each of
+   * the account's scripts was live on at that moment.
+   */
+  scriptUploads: { script: string; live: Record<string, string | undefined> }[];
+}
+
+/**
+ * One client's core, as the fake answers for it wherever its scripts run:
+ * what it answers the admin, and what it took. Kept by client, as the
+ * `CLIENT_ID` its live version runs with names it (`fakeCloudflareApi`,
+ * `coreOf`), so clients sharing one namespace each answer as their own.
+ */
+export interface CoreState {
+  /** The client's company name, as its admin snapshot names it. */
+  name: string;
+  /** How many more health checks its core fail, as a Worker still starting. */
+  unhealthy?: number;
+  /** The version its core' health checks name, as an old version still answering would. */
+  answeringVersion?: string;
+  /**
+   * What its core' health checks name first, one answer per check,
+   * before their live version (or `answeringVersion`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  healthAnswersFirst?: string[];
+  /**
+   * The version its cores name for their connect instead of its live one
+   * (@grasp-os/shared/provision-probe), as an isolate of an old version
+   * still answering would; null as a connect that doesn't answer, or has
+   * no version metadata.
+   */
+  connectAnswering?: string | null;
+  /**
+   * What its cores name for their connect first, one answer per ask, before
+   * they name its live one (or `connectAnswering`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  connectAnswersFirst?: (string | null)[];
+  /**
+   * Where its core redirect every request (307, to the same path), as a
+   * core or a hop in front of it gone wrong or hostile would. The fake
+   * follows the redirect as fetch does, unless the request says
+   * `redirect: "manual"`, and records what it sent there (`redirected`).
+   */
+  redirectsTo?: string;
+  /**
+   * How its core answers the admin's provisioning probe
+   * (@grasp-os/shared/provision-probe) unlike a healthy one: `absent` for
+   * a core from before the probe, which answers it as any path it has no
+   * route for; otherwise the client it answers as, as a core deployed
+   * with another client's config would, and the bindings and clocks that
+   * don't answer.
+   */
+  coreProbe?:
+    | "absent"
+    | {
+        asClient?: string;
+        down?: readonly string[];
+        clocksDown?: readonly ("core" | "connect")[];
+        /** As a core from before connect's version: neither in its probe nor asked for. */
+        noConnectVersion?: boolean;
+        /** As a core from before a company could start closed: it says nothing of it. */
+        beforeStartingClosed?: boolean;
+      };
+  /**
+   * What its core answers the admin's signed onboarding summary request
+   * with (@grasp-os/shared/onboarding-summary): none begun unless set, or
+   * `absent` for a core from before the summary, which answers 404.
+   */
+  onboarding?: OnboardingSummary | "absent";
+  /**
+   * What its core answers the admin's signed admin snapshot request
+   * with (@grasp-os/shared/admin-snapshot): a company with nothing begun
+   * unless set; `absent` for a core from before the snapshot, which
+   * answers 404; `ended` for one whose company ended Grasp's staff
+   * access, which refuses it (403); `garbled` for one that answers
+   * something that isn't a snapshot.
+   */
+  admin?: AdminSnapshot | "absent" | "ended" | "garbled";
+  /** True for a core that answers the AI status request with a redirect elsewhere. */
+  aiRedirect?: boolean;
+  /**
+   * What its core answers the admin's signed AI status request with
+   * (@grasp-os/shared/ai-status-report): no provider connected unless set.
+   * As JSON, so a core on an earlier release, which answers an older shape
+   * (`AiStatusReport` as it was then), can be played too.
+   */
+  ai?: unknown;
+  /**
+   * What its core does once a snapshot request arrives, before answering
+   * it: waits, as a slow or hanging one does, or throws, as a dropped
+   * connection does.
+   */
+  adminHeld?: () => Promise<void>;
+  /**
+   * What its core does once any request arrives, before answering it:
+   * waits, as a slow core does. A request whose caller gives up first
+   * ends then, as fetch's does.
+   */
+  held?: () => Promise<void>;
+  /** The staff members its core answered a snapshot to, as each signed request named them. */
+  adminReaders: string[];
+  /** Every path its core was asked for, in order, whatever it answered. */
+  coreAsked: string[];
+  /**
+   * What its core answers the admin's signed kickoff request with
+   * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,
+   * or `shut_out` for a company that keeps Grasp's staff out (403). Unset,
+   * a kickoff with nothing brought in.
+   */
+  kickoff?: AdminKickoffView | "shut_out";
+  /** The kickoff requests its core took, as each signed request sent them. */
+  kickoffAsks: AdminKickoffRequest[];
+  /**
+   * What its core answers a signed command with, when it doesn't apply it
+   * (@grasp-os/shared/admin-command): core's status and code. Unset, it
+   * applies every command.
+   */
+  commandRefusal?: { status: number; code: string };
+  /** The commands its core took, as each signed envelope sent them. */
+  commands: AdminCommandEnvelope[];
+  /**
+   * What its core answers the admin's signed Brain report request with
+   * (@grasp-os/shared/brain-report): unset, it doesn't answer (404, a
+   * release from before the report).
+   */
+  brain?: BrainReport;
+  /** What its core does once a Brain report request arrives, before answering it: waits, as a slow one does. */
+  brainHeld?: () => Promise<void>;
+  /** What its core answers a signed Brain action with: `done` unless set. */
+  brainOutcome?: BrainActionOutcome;
+  /**
+   * What its core answers a signed erasure lookup with: `not_erased` unless
+   * set; any state, as a core of a newer release could answer.
+   */
+  brainErasure?: BrainErasureAnswer | { state: string };
+  /** The Brain's reads, actions and lookups its core took, as each signed request sent them. */
+  brainAsks: (BrainReportRequest | BrainActionRequest | BrainErasureRequest)[];
+}
+
+/** A call the fake got. */
+export interface ApiCall {
+  method: string;
+  /** Below the API base, without the query. */
+  path: string;
+  query: URLSearchParams;
+  headers: Headers;
+  body: unknown;
+}
+
+export const envelope = (result: unknown, resultInfo?: Json): Response =>
+  Response.json({
+    success: true,
+    errors: [],
+    messages: [],
+    result,
+    ...(resultInfo === undefined ? {} : { result_info: resultInfo }),
+  });
+
+export const refusal = (
+  status: number,
+  code: number,
+  message: string
+): Response =>
+  Response.json(
+    { success: false, errors: [{ code, message }], messages: [], result: null },
+    { status }
+  );
+
+export const notFound = (): Response => refusal(404, 10_007, "Not found");
+
+/** One page of `items`, as the API pages its lists. */
+export const paged = (
+  items: readonly unknown[],
+  query: URLSearchParams
+): Response => {
+  const page = Number(query.get("page") ?? "1");
+  const perPage = Number(query.get("per_page") ?? "20");
+  const slice = items.slice((page - 1) * perPage, page * perPage);
+  return envelope(slice, {
+    page,
+    per_page: perPage,
+    count: slice.length,
+    total_count: items.length,
+  });
+};
+
+export const text = (body: Json, key: string): string => {
+  const value = body[key];
+  return typeof value === "string" ? value : "";
+};
+
+/** What a route gets: the account, the call, its path's named parts and its JSON body. */
+export interface RouteInput {
+  account: AccountState;
+  call: ApiCall;
+  params: Record<string, string>;
+  json: Json;
+}
+
+export interface Route {
+  method: string;
+  /** Matched against the path below `/accounts/<id>`. */
+  path: RegExp;
+  /** Authorized by an assets upload session's token, not the account's. */
+  session?: boolean;
+  answer: (input: RouteInput) => Response | Promise<Response>;
+}

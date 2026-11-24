@@ -1,0 +1,293 @@
+import { actorOf } from "@grasp-os/shared/audit";
+import {
+  organizationErrors,
+  organizationLogoPath,
+  organizationNameSchema,
+  organizationTimeZoneSchema,
+} from "@grasp-os/shared/organization";
+import type {
+  Organization,
+  OrganizationApi,
+  OrganizationChanges,
+} from "@grasp-os/shared/organization";
+import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { defaultTimeZone, nextScheduledRun } from "@grasp-os/shared/workflows";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { activeMember, organizationId } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
+import { organizations, teams } from "./db/core/schema.ts";
+import { requireOwnAdmin, stillAdmin } from "./organization-admin.ts";
+import {
+  removeOrganizationLogo,
+  setOrganizationLogo,
+} from "./organization-logo.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+
+// The organization's own settings, as the prototype's Workspace section
+// has them (`routes/settings/workspace.tsx`): its name and the time zone
+// it works in, which its admins change, and where its data lives, which
+// the deployment decides. Grasp staff are admins, but what the client is
+// called and when its day starts are the client's to say.
+
+/** The organization's name, time zone and logo, as stored. */
+const storedOrganization = async (
+  db: D1Database
+): Promise<{ name: string; timeZone: string; logo: string | null }> => {
+  const [row] = await drizzle(db)
+    .select({
+      name: organizations.name,
+      timeZone: organizations.timeZone,
+      logo: organizations.logo,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, organizationId));
+  return {
+    name: row?.name ?? "",
+    timeZone: row?.timeZone ?? defaultTimeZone,
+    logo: row?.logo ?? null,
+  };
+};
+
+/** The time zone the organization works in, as stored. */
+export const organizationTimeZone = async (db: D1Database): Promise<string> => {
+  const { timeZone } = await storedOrganization(db);
+  return timeZone;
+};
+
+/** The organization as stored, with what the deployment says about it. */
+export const readOrganization = async (env: Env): Promise<Organization> => {
+  const { name, timeZone, logo } = await storedOrganization(env.DB);
+  return {
+    name,
+    timeZone,
+    dataRegion: "eu",
+    signInDomains: signInConfig(env)?.domains ?? [],
+    logo: logo === null ? null : organizationLogoPath(logo),
+  };
+};
+
+/**
+ * When the company's day that `now` falls on began: the last midnight in
+ * its time zone at or before `now`, in milliseconds since the epoch, and
+ * the zone it was read in. Read in UTC should the stored zone no longer
+ * be one the runtime knows.
+ */
+export const startOfCompanyDay = async (
+  env: Env,
+  now: number = Date.now()
+): Promise<{ start: number; timeZone: string }> => {
+  const { timeZone: stored } = await readOrganization(env);
+  const midnight = { cron: "0 0 * * *" };
+  // A day is at most 25 hours long, across a change of the clocks.
+  const earliest = new Date(now - 26 * 60 * 60 * 1000);
+  const known =
+    nextScheduledRun({ ...midnight, timeZone: stored }, earliest) !== undefined;
+  const timeZone = known ? stored : defaultTimeZone;
+  let start = nextScheduledRun({ ...midnight, timeZone }, earliest);
+  if (start === undefined) {
+    throw new Error("Midnight always comes");
+  }
+  for (
+    let next = nextScheduledRun({ ...midnight, timeZone }, start);
+    next !== undefined && next.getTime() <= now;
+    next = nextScheduledRun({ ...midnight, timeZone }, next)
+  ) {
+    start = next;
+  }
+  return { start: start.getTime(), timeZone };
+};
+
+/**
+ * When the company's day that `now` falls on ends: the next midnight in
+ * its time zone, in milliseconds since the epoch. Read in UTC should the
+ * stored zone no longer be one the runtime knows.
+ */
+export const endOfCompanyDay = async (
+  env: Env,
+  now: number = Date.now()
+): Promise<number> => {
+  const { timeZone } = await readOrganization(env);
+  const midnight = { cron: "0 0 * * *" };
+  const next =
+    nextScheduledRun({ ...midnight, timeZone }, new Date(now)) ??
+    nextScheduledRun({ ...midnight, timeZone: defaultTimeZone }, new Date(now));
+  if (next === undefined) {
+    throw new Error("Midnight always comes");
+  }
+  return next.getTime();
+};
+
+const changesSchema = z
+  .object({ name: z.unknown(), timeZone: z.unknown() })
+  .partial();
+
+/** `changes`, checked: each field given must be valid. */
+const parseChanges = (
+  changes: unknown
+): { name?: string; timeZone?: string } => {
+  const shape = changesSchema.safeParse(changes);
+  if (!shape.success) {
+    throw organizationErrors.create("organization.changes_invalid");
+  }
+  const { name, timeZone } = shape.data;
+  const parsedName =
+    name === undefined ? undefined : organizationNameSchema.safeParse(name);
+  if (parsedName?.success === false) {
+    throw organizationErrors.create("organization.name_invalid");
+  }
+  const parsedZone =
+    timeZone === undefined
+      ? undefined
+      : organizationTimeZoneSchema.safeParse(timeZone);
+  if (parsedZone?.success === false) {
+    throw organizationErrors.create("organization.time_zone_invalid");
+  }
+  return {
+    ...(parsedName === undefined ? {} : { name: parsedName.data }),
+    ...(parsedZone === undefined ? {} : { timeZone: parsedZone.data }),
+  };
+};
+
+/**
+ * Changes the organization's name, time zone or both, in one batch: each
+ * one statement that changes it only while it differs and the admin still
+ * is one, followed by its audit event, recorded only when it changed. So
+ * two admins saving the same value at once record one change. The events
+ * record the time zone, never the name.
+ */
+const updateOrganization = async (
+  env: Env,
+  by: Identity,
+  changes: unknown
+): Promise<Organization> => {
+  requireOwnAdmin(by);
+  const { name, timeZone } = parseChanges(changes);
+  const db = drizzle(env.DB);
+  const admin = activeMember(by.userId, ["admin"]);
+  const ofOrganization = eq(organizations.id, organizationId);
+  const target = { type: "organization", id: organizationId };
+  const renames =
+    name === undefined
+      ? []
+      : ([
+          db
+            .update(organizations)
+            .set({ name })
+            .where(and(ofOrganization, ne(organizations.name, name), admin))
+            .returning({ id: organizations.id }),
+          outboxedIfChanged(db, {
+            actor: actorOf(by),
+            action: "organization.renamed",
+            target,
+          }),
+        ] as const);
+  const rezones =
+    timeZone === undefined
+      ? []
+      : ([
+          db
+            .update(organizations)
+            .set({ timeZone })
+            .where(
+              and(
+                ofOrganization,
+                sql`coalesce(${organizations.timeZone}, ${defaultTimeZone}) <> ${timeZone}`,
+                admin
+              )
+            )
+            .returning({ id: organizations.id }),
+          outboxedIfChanged(db, {
+            actor: actorOf(by),
+            action: "organization.time_zone.updated",
+            target,
+            detail: { timeZone },
+          }),
+        ] as const);
+  const [first, ...rest] = [...renames, ...rezones];
+  if (first === undefined) {
+    return await readOrganization(env);
+  }
+  const results = await auditedBatch(env, db, [first, ...rest]);
+  const changed = results.some(
+    (result) => Array.isArray(result) && result.length > 0
+  );
+  // Nothing changed: it already was so, or the admin stopped being one
+  // since their session was checked.
+  if (!(changed || (await stillAdmin(env, by.userId)))) {
+    throw roleErrors.create("role.forbidden");
+  }
+  return await readOrganization(env);
+};
+
+/**
+ * The organization's teams, by name, to choose one from (a collection's, a
+ * person's): for admins and builders; not Grasp staff, who never choose.
+ */
+export const teamChoices = async (
+  env: Env,
+  by: Identity
+): Promise<{ id: string; name: string }[]> => {
+  if (by.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+  requireBuilder(by);
+  return await drizzle(env.DB)
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.organizationId, organizationId))
+    .orderBy(asc(teams.name), asc(teams.id));
+};
+
+/** A signed-in person's `organization`. */
+export class OrganizationRpc extends CoreRpcTarget implements OrganizationApi {
+  readonly #env: Env;
+  readonly #check: SessionCheck;
+
+  constructor(env: Env, check: SessionCheck) {
+    super();
+    this.#env = env;
+    this.#check = check;
+  }
+
+  async get(): Promise<Organization> {
+    return await withPerson(
+      this.#check,
+      async () => await readOrganization(this.#env)
+    );
+  }
+
+  async update(changes: OrganizationChanges): Promise<Organization> {
+    return await withPerson(
+      this.#check,
+      async (person) => await updateOrganization(this.#env, person, changes)
+    );
+  }
+
+  async setLogo(image: Uint8Array): Promise<Organization> {
+    return await withPerson(this.#check, async (person) => {
+      await setOrganizationLogo(this.#env, person, image);
+      return await readOrganization(this.#env);
+    });
+  }
+
+  async removeLogo(): Promise<Organization> {
+    return await withPerson(this.#check, async (person) => {
+      await removeOrganizationLogo(this.#env, person);
+      return await readOrganization(this.#env);
+    });
+  }
+
+  async teams(): Promise<{ id: string; name: string }[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await teamChoices(this.#env, by)
+    );
+  }
+}

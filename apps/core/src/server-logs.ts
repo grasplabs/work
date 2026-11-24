@@ -1,0 +1,109 @@
+import type { AppId } from "@grasp-os/shared/ids";
+import type { ServerLog } from "@grasp-os/shared/pages";
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+import { appHost, appPreview } from "./durable-objects.ts";
+
+// What an App's server code writes with `console`, which would otherwise
+// be lost: its isolate runs with no network (sandbox.ts), and the
+// platform's own logs never carry App-written text (app.ts). Each loader
+// that starts App server code names this entrypoint as the isolate's tail
+// (WorkerLoader `tails`, which workerd runs as Cloudflare does), so the
+// runtime hands it what each call logged once the call ends:
+//
+// - a live App's lines go to its error log (app-error-log.ts), in the
+//   App's own Durable Object, with its pages' problems;
+// - a draft's preview's lines go to the App's preview (app-preview.ts),
+//   for the next check of the draft by any builder's agent
+//   (preview-reports.ts): each isolate a draft's sealed preview runs a
+//   function in (draft-runs.ts), named by that function. Its props are
+//   core's, fixed as the isolate is made, never App code's: its lines
+//   reach only that App's preview, at that revision.
+//
+// Bounded twice: the first lines of each call, each held to size, and the
+// newest entries of each log. Only what the App's code wrote is kept, with
+// the method and the time: never who called.
+
+/** Most lines kept of one call. */
+const maxLinesPerCall = 20;
+
+/** Most characters of one line kept. */
+const maxMessage = 2000;
+
+/** Whose server code a tail listens to. */
+export interface TailOf {
+  app: AppId;
+  /** The live version that runs; null for a draft's preview. */
+  version: number | null;
+  /** The App's draft at `revision`, for its preview. */
+  preview?: { revision: number };
+  /**
+   * The function the isolate runs, for an App of spec 8's layout, whose
+   * every isolate runs one (release-runner.ts): named as the lines'
+   * `method`.
+   */
+  method?: string;
+}
+
+const levels = new Set<unknown>(["debug", "info", "log", "warn", "error"]);
+
+const isLevel = (level: string): level is ServerLog["level"] =>
+  levels.has(level);
+
+const levelOf = (level: string): ServerLog["level"] =>
+  isLevel(level) ? level : "log";
+
+/** One argument of a `console` call as text. */
+const partOf = (part: unknown): string => {
+  if (typeof part === "string") {
+    return part;
+  }
+  try {
+    return JSON.stringify(part) ?? String(part);
+  } catch {
+    return String(part);
+  }
+};
+
+/** A line's arguments as text, held to size. */
+const textOf = (message: unknown): string =>
+  (Array.isArray(message) ? message : [message])
+    .map(partOf)
+    .join(" ")
+    .slice(0, maxMessage);
+
+/**
+ * What the calls in `events` wrote: the first lines of each call, so one
+ * call that logs a lot crowds out none of the others in the same batch.
+ */
+export const serverLogsOf = (
+  events: readonly Pick<TraceItem, "event" | "logs">[],
+  named?: string
+): ServerLog[] =>
+  events.flatMap(({ event, logs }) => {
+    const method =
+      named ??
+      (event !== null && "rpcMethod" in event ? event.rpcMethod : null);
+    return logs.slice(0, maxLinesPerCall).map((line) => ({
+      at: new Date(line.timestamp).toISOString(),
+      level: levelOf(line.level),
+      message: textOf(line.message),
+      method,
+    }));
+  });
+
+/** The tail of an isolate running App server code. */
+export class AppTail extends WorkerEntrypoint<Env, TailOf> {
+  override async tail(events: TraceItem[]): Promise<void> {
+    const logs = serverLogsOf(events, this.ctx.props.method);
+    if (logs.length === 0) {
+      return;
+    }
+    const { app, version, preview } = this.ctx.props;
+    if (preview !== undefined) {
+      await appPreview(this.env, app).logs(preview.revision, logs);
+    } else if (version !== null) {
+      await appHost(this.env, app).logServer(version, logs);
+    }
+  }
+}

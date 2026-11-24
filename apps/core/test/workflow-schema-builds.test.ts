@@ -1,0 +1,343 @@
+import { generatedWorkflowEntry } from "@grasp-os/compiler";
+import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import { checkWorkflow } from "@grasp-os/workflow-schema/check";
+import { expressionTypeRequest } from "@grasp-os/workflow-schema/expression-scope";
+import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
+import { sealedTableSchema } from "@grasp-os/workflow-schema/sealed";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  checked,
+  decision,
+  emojiType,
+  everyCall,
+  eventWait,
+  everyOperator,
+  everyStep,
+  fileSteps,
+  followedBy,
+  keeping,
+  withDecisions,
+  withEventWaits,
+  withFiles,
+  withLoops,
+} from "../../../packages/workflow-schema/test/fixtures.ts";
+import {
+  buildGeneratedWorkflow,
+  checkWorkflowExpressions,
+} from "../src/pages.ts";
+
+// grasp-workflow/2's generated code, held to the compiler's own type
+// check against the SDK's real declarations, as the host's generated
+// workflow module is built (`buildGeneratedWorkflow`): the generator's
+// output is the host's own, so a type error in it is the generator's, and
+// nothing it generates may fail the check a build holds it to. Its sealed table, likewise, is one the
+// host reads back (`sealedTableSchema`).
+
+/** Every fixture the generator is tested on, by name. */
+const fixtures = {
+  everyStep,
+  everyCall,
+  everyOperator,
+  // Every action on the run's files and the Brain, and a connection's
+  // calls keeping and attaching run files.
+  files: () => withFiles(...fileSteps()),
+  decisions: () =>
+    withDecisions(
+      decision(),
+      decision({
+        id: "later",
+        if: { $expr: "approve.timedOut" },
+        recipients: { $expr: "[args.who]" },
+        timeout: "2 days",
+      })
+    ),
+  // A decision in items, its loop stopped by a `while`, beside nested loops.
+  loops: () => ({
+    ...withLoops({
+      id: "approvals",
+      type: "forEach",
+      items: { $expr: "args.pages" },
+      while: { $expr: "item.open" },
+      do: [
+        decision({ recipients: [{ $expr: "item.owner" }] }),
+        {
+          id: "refused",
+          type: "raise",
+          if: { $expr: "approve.timedOut || !approve.approved" },
+          error: { code: "test.refused", message: "Failed." },
+        },
+      ],
+    }),
+    permissions: withDecisions().permissions,
+  }),
+  // A loop's item read bare, as arithmetic takes it, in nested loops.
+  bareItems: () =>
+    withLoops({
+      id: "scores",
+      type: "forEach",
+      items: { $expr: "args.pages" },
+      do: [
+        {
+          id: "marks",
+          type: "forEach",
+          items: { $expr: "item.marks" },
+          while: { $expr: "100 * item < 5000" },
+          do: [{ id: "tick", type: "wait", for: "1 second" }],
+        },
+      ],
+    }),
+  // Event waits, one in a loop's items, and steps reading how they ended.
+  // A mail whose replies go to the run's inbox, a string or `undefined`,
+  // and the wait that takes the reply.
+  inbox: () =>
+    withEventWaits(
+      {
+        id: "ask",
+        type: "call",
+        connection: "mail",
+        action: "mail.send",
+        if: { $expr: 'typeof inbox.replies === "string"' },
+        args: {
+          to: { $expr: "args.who" },
+          subject: { $expr: '"Reply to " + (inbox.replies ?? "")' },
+          replyTo: { $expr: "inbox.replies" },
+        },
+      },
+      eventWait()
+    ),
+  eventWaits: () =>
+    withEventWaits(
+      eventWait({ if: { $expr: 'args.who !== "Ada"' } }),
+      {
+        id: "answer",
+        type: "call",
+        connection: "mail",
+        action: "mail.send",
+        if: { $expr: "reply?.timedOut === false" },
+        args: {
+          to: { $expr: "reply.event.data.from" },
+          subject: { $expr: "reply.event.type" },
+        },
+      },
+      {
+        id: "rounds",
+        type: "forEach",
+        items: { $expr: "args.rounds" },
+        do: [
+          eventWait({
+            id: "each",
+            eventType: ["grasp.a", "grasp.b"],
+          }),
+        ],
+      }
+    ),
+  // State kept by a call (a count of runs among it), an `if`-guarded one
+  // and one in a loop's items, read by an agent's instructions.
+  state: () =>
+    followedBy(
+      keeping(),
+      keeping({ id: "maybe", if: { $expr: "args.who === state.last" } }),
+      {
+        id: "rows",
+        type: "forEach",
+        items: { $expr: "state.kept" },
+        do: [keeping({ id: "row", state: { last: { $expr: "item" } } })],
+      },
+      {
+        id: "ask",
+        type: "generate",
+        instructions: { $expr: '"Runs so far: " + (state.runs ?? 0)' },
+        input: { last: { $expr: "state.last" } },
+        returns: { kind: "string" },
+        state: { last: { $expr: "output" } },
+      }
+    ),
+};
+
+/** A workflow waiting for an event of `type` through `replies`. */
+const waitingFor = (type: string) =>
+  withEventWaits(eventWait({ eventType: type }));
+
+describe("grasp-workflow/2's generated code", () => {
+  it("type-checks against the SDK, for every fixture", async () => {
+    const diagnostics = Object.fromEntries(
+      await Promise.all(
+        Object.entries(fixtures).map(
+          async ([name, fixture]): Promise<[string, string[]]> => {
+            const { source } = generateWorkflow(checked(fixture()));
+            const build = await buildGeneratedWorkflow(
+              env,
+              { [generatedWorkflowEntry]: source },
+              "workflow-schema-builds"
+            );
+            return [
+              name,
+              build.ok
+                ? []
+                : build.diagnostics.map(
+                    ({ rule, line, message }) => `${rule} ${line}: ${message}`
+                  ),
+            ];
+          }
+        )
+      )
+    );
+    expect(diagnostics).toStrictEqual(
+      Object.fromEntries(Object.keys(fixtures).map((name) => [name, []]))
+    );
+  });
+
+  it("seals a table the host reads back, for every fixture", () => {
+    const refused = Object.entries(fixtures).flatMap(([name, fixture]) => {
+      const generation = generateWorkflow(checked(fixture()));
+      const read = sealedTableSchema.safeParse(
+        structuredClone({
+          tasks: generation.tasks,
+          expressions: generation.expressions,
+          workflow: generation.workflow,
+          params: generation.params,
+        })
+      );
+      return read.success ? [] : [[name, read.error.issues]];
+    });
+    expect(refused).toStrictEqual([]);
+  });
+
+  it("holds an event type to one length, in code points, from the check to the sealed table", () => {
+    const longest = emojiType(sealedBuildLimits.eventTypeLength);
+    const tooLong = emojiType(sealedBuildLimits.eventTypeLength + 1);
+    const generation = generateWorkflow(checked(waitingFor(longest)));
+    const sealed = JSON.stringify({
+      tasks: generation.tasks,
+      expressions: generation.expressions,
+      workflow: generation.workflow,
+      params: generation.params,
+    });
+    expect({
+      longest: sealedTableSchema.safeParse(JSON.parse(sealed)).success,
+      tooLongChecked: checkWorkflow(waitingFor(tooLong)).ok,
+      // That table with one more emoji in its type: what a checker counting
+      // length otherwise than the host would have let through.
+      tooLongSealed: sealedTableSchema.safeParse(
+        JSON.parse(sealed.replaceAll(longest, tooLong))
+      ).success,
+    }).toStrictEqual({
+      longest: true,
+      tooLongChecked: false,
+      tooLongSealed: false,
+    });
+  });
+});
+
+/**
+ * A document waiting for a reply only when `args.who` isn't Ada, then
+ * answering it, its answer guarded by `guard` and sent to `to`.
+ */
+const answering = (guard: string | undefined, to: string) =>
+  withEventWaits(eventWait({ if: { $expr: 'args.who !== "Ada"' } }), {
+    id: "answer",
+    type: "call",
+    connection: "mail",
+    action: "mail.send",
+    ...(guard === undefined ? {} : { if: { $expr: guard } }),
+    args: { to: { $expr: to }, subject: "Re" },
+  });
+
+/**
+ * What the publication's typed check finds in `document`, by pointer and
+ * code, and whether its generated module builds: the two never disagree.
+ */
+const checkedAndBuilt = async (document: unknown) => {
+  const workflow = checked(document);
+  const { scope, expressions } = expressionTypeRequest(workflow, () => {});
+  const typed = await checkWorkflowExpressions(
+    env,
+    scope,
+    expressions,
+    "workflow-schema-builds"
+  );
+  const build = await buildGeneratedWorkflow(
+    env,
+    { [generatedWorkflowEntry]: generateWorkflow(workflow).source },
+    "workflow-schema-builds"
+  );
+  return {
+    problems: Object.entries(typed.expressions).flatMap(([pointer, errors]) =>
+      errors.map(({ code }) => `${pointer} ${code}`)
+    ),
+    builds: build.ok,
+  };
+};
+
+/**
+ * A decision, then a mail retried when `retryWhen` holds, its catch taking
+ * the failure when `when` does.
+ */
+const retryingAfterDecision = (when: string | undefined, retryWhen: string) =>
+  withDecisions(decision(), {
+    id: "followUp",
+    type: "try",
+    try: [keeping({ id: "mailed" })],
+    catch: {
+      ...(when === undefined ? {} : { when: { $expr: when } }),
+      retry: {
+        attempts: 2,
+        delay: "1 minute",
+        backoff: "constant",
+        when: { $expr: retryWhen },
+      },
+    },
+  });
+
+describe("a retry's `when`", () => {
+  it("reads under its catch's `when`, as its guard joins them, and builds", async () => {
+    await expect(
+      checkedAndBuilt(
+        retryingAfterDecision("!approve.timedOut", "approve.approved")
+      )
+    ).resolves.toStrictEqual({ problems: [], builds: true });
+  });
+
+  it("fails the typed check where nothing narrows its read, as its build would", async () => {
+    await expect(
+      checkedAndBuilt(retryingAfterDecision(undefined, "approve.approved"))
+    ).resolves.toStrictEqual({
+      problems: ["/steps/6/catch/retry/when TS2339"],
+      builds: false,
+    });
+  });
+});
+
+describe("a skipped step's result", () => {
+  it("passes the typed check where its read is narrowed, and then builds", async () => {
+    expect([
+      await checkedAndBuilt(
+        answering("reply?.timedOut === false", "reply.event.data.from")
+      ),
+      await checkedAndBuilt(
+        answering(
+          undefined,
+          'reply?.timedOut === false ? reply.event.data.from : "nobody"'
+        )
+      ),
+    ]).toStrictEqual([
+      { problems: [], builds: true },
+      { problems: [], builds: true },
+    ]);
+  });
+
+  it("fails the typed check at its step where its read isn't, as its build would", async () => {
+    await expect(
+      checkedAndBuilt(answering("!reply.timedOut", "reply.event.data.from"))
+    ).resolves.toStrictEqual({
+      problems: [
+        "/steps/6/if TS18047",
+        "/steps/6/args/to TS18047",
+        "/steps/6/args/to TS2339",
+      ],
+      builds: false,
+    });
+  });
+});

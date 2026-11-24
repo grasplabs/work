@@ -1,0 +1,1 @@
+ALTER TABLE `chat_build_jobs` ADD `notice_owed` integer DEFAULT false NOT NULL;

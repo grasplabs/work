@@ -1,0 +1,3 @@
+DROP INDEX `workflow_start_receipts_due`;--> statement-breakpoint
+CREATE INDEX `workflow_start_receipts_due_idx` ON `workflow_start_receipts` (`created_at`,`id`) WHERE "workflow_start_receipts"."details_removed_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `workflow_resource_params_values_kept_idx` ON `workflow_resource_params` (`set_at`) WHERE "workflow_resource_params"."values_removed_at" IS NULL;

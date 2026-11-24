@@ -1,0 +1,455 @@
+import type { AuditActor } from "@grasp-os/shared/audit";
+import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { WorkflowResourceId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import { Workflow } from "@grasp-os/workerflow/binding";
+import type { WorkflowOptions } from "@grasp-os/workerflow/binding";
+import { encode } from "@grasp-os/workerflow/codec";
+import type {
+  DefinitionIdentity,
+  InstanceStatus,
+} from "@grasp-os/workerflow/contracts";
+import { runObjectName } from "@grasp-os/workerflow/identity";
+import type { RunStub } from "@grasp-os/workerflow/instance";
+import type { EventOutcome } from "@grasp-os/workerflow/run";
+import { z } from "zod";
+
+import { inJurisdiction } from "../durable-objects.ts";
+
+// The engine that runs workflow runs, behind the little core asks of
+// it: create a run, see where it is, terminate it, send it an event, remove
+// it. This is the only module that reaches the engine's runs, so the rest
+// of core never depends on how it keeps them.
+//
+// The engine is Workerflow (@grasp-os/workerflow): one SQLite Durable
+// Object per run (`WORKFLOW_RUNS`, run-object.ts), the only authority on
+// the run's steps, waits and lifecycle. It runs on Cloudflare and on plain
+// workerd alike, its objects in the EU where the platform has
+// jurisdictions (durable-objects.ts). Every run is a run of one
+// definition, `grasp`, so its object is named
+// by the run's ID alone; what it runs is the opaque version it was created
+// with (`pinOf`), which the dispatcher checks against the run's row on
+// every activation (dispatcher.ts).
+//
+// Starts are admissions under the run's own ID as their key: the same
+// start sent again, after an answer that never came, finds the run it
+// created, and finds a run deleted since as deleted rather than create it
+// again. So a start is retried safely, and nothing creates a run twice.
+//
+// The engine keeps a run's record only for the run retention
+// (`runRetentionDays`) once the run has ended: every run is created with
+// that as its retention, so the engine purges the record itself, on the
+// same clock as core removes the rest of the run's details (retention.ts).
+
+/** An event as core admits it to a run (`RunEngine.admitEvent`). */
+export interface AdmittedEngineEvent {
+  readonly type: string;
+  readonly payload: Json;
+  readonly key: string;
+  readonly attributes: Readonly<Record<string, string>>;
+  /**
+   * Whether it may take the inbox's reserve (@grasp-os/workerflow's
+   * `reservedInboxEvents`): only for what core owes the run itself, a
+   * child's end, so no sender can crowd it out.
+   */
+  readonly reserved?: boolean;
+  /**
+   * Who sent it, as core names senders apart: held to that sender's share
+   * of the inbox (@grasp-os/workerflow's `maxSenderEvents`), so no one
+   * sender fills it for the others.
+   */
+  readonly sender?: string;
+}
+
+/**
+ * What a run of an independent workflow is pinned to (resource-runs.ts):
+ * the workflow, its exact version, and the manifest that version sealed,
+ * which names the build it runs. The dispatcher loads nothing else.
+ */
+export interface PinnedResourceRun {
+  workflow: WorkflowResourceId;
+  version: number;
+  manifest: string;
+}
+
+/**
+ * What a test run of a workflow's draft checkpoint is pinned to
+ * (candidate-runs.ts): the workflow, and the manifest of the build its
+ * start compiled, which its row keeps. The dispatcher loads nothing else.
+ */
+export interface PinnedCandidateRun {
+  workflow: WorkflowResourceId;
+  manifest: string;
+}
+
+/**
+ * What a run executes: an independent workflow's sealed version, a test
+ * run of its draft at one revision, or a run an App's test started.
+ */
+export type RunPin =
+  | ({ type: "resource" } & PinnedResourceRun)
+  | ({ type: "candidate" } & PinnedCandidateRun)
+  /**
+   * A run an App's test started of a workflow its release binds
+   * (fixture-runs.ts): the same sealed version, run on the same engine,
+   * with nothing of the organization's around it.
+   */
+  | ({ type: "fixture" } & PinnedResourceRun);
+
+/** The one definition every run is a run of. */
+export const runDefinition = "grasp";
+
+const pinSchema = z.union([
+  z
+    .tuple([
+      z.literal("resource"),
+      workflowResourceIdSchema,
+      z.int().positive(),
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, version, manifest]): RunPin => ({
+      type: "resource",
+      workflow,
+      version,
+      manifest,
+    })),
+  z
+    .tuple([
+      z.literal("candidate"),
+      workflowResourceIdSchema,
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, manifest]): RunPin => ({
+      type: "candidate",
+      workflow,
+      manifest,
+    })),
+  z
+    .tuple([
+      z.literal("fixture"),
+      workflowResourceIdSchema,
+      z.int().positive(),
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, version, manifest]): RunPin => ({
+      type: "fixture",
+      workflow,
+      version,
+      manifest,
+    })),
+]);
+
+/** A pin as the engine keeps it: the run's opaque definition version. */
+const versionOf = (pin: RunPin): string => {
+  switch (pin.type) {
+    case "resource": {
+      return JSON.stringify([
+        "resource",
+        pin.workflow,
+        pin.version,
+        pin.manifest,
+      ]);
+    }
+    case "candidate": {
+      return JSON.stringify(["candidate", pin.workflow, pin.manifest]);
+    }
+    case "fixture": {
+      return JSON.stringify([
+        "fixture",
+        pin.workflow,
+        pin.version,
+        pin.manifest,
+      ]);
+    }
+    default: {
+      return pin satisfies never;
+    }
+  }
+};
+
+/**
+ * What a run the engine activates is pinned to, from the definition and
+ * version it was created with; nothing for anything core never created.
+ */
+export const pinOf = (identity: DefinitionIdentity): RunPin | undefined => {
+  if (identity.definition !== runDefinition || identity.version === undefined) {
+    return undefined;
+  }
+  try {
+    return pinSchema.safeParse(JSON.parse(identity.version)).data;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The engine core runs workflow runs on. */
+export interface RunEngine {
+  /**
+   * Creates the run `id` of an independent workflow, pinned to its
+   * version's sealed manifest, with its input. Sent again, it finds the
+   * run the first one created, ended or deleted since included: it never
+   * creates a second one.
+   */
+  createResource: (run: {
+    id: string;
+    pinned: PinnedResourceRun;
+    input: Json;
+  }) => Promise<void>;
+  /**
+   * As `createResource`, for a test run of a workflow's draft checkpoint, pinned
+   * to the manifest of the build its start compiled.
+   */
+  createCandidate: (run: {
+    id: string;
+    pinned: PinnedCandidateRun;
+    input: Json;
+  }) => Promise<void>;
+  /**
+   * As `createResource`, for a run an App's test started
+   * (fixture-runs.ts): kept a day at most once it ended, as nothing
+   * reads it after its test.
+   */
+  createFixture: (run: {
+    id: string;
+    pinned: PinnedResourceRun;
+    input: Json;
+    /** How far its test moved its clock on before it started, in ms. */
+    clockMs: number;
+  }) => Promise<void>;
+  /**
+   * Moves test run `id`'s clock `ms` on (an App's test's `t.clock`): what
+   * it waits for that comes due by then runs now. Refused for any run an
+   * App's test didn't start; nothing for a run the engine doesn't have.
+   */
+  advanceFixtureClock: (id: string, ms: number) => Promise<void>;
+  /**
+   * Whether test run `id` waits for something now, its wake not due:
+   * what an App's test waits for before moving its clock.
+   */
+  fixtureWaits: (id: string) => Promise<boolean>;
+  /**
+   * How many steps named `name` run `id` completed, each once however it
+   * was replayed; nothing when the engine has no such run.
+   */
+  succeededSteps: (id: string, name: string) => Promise<number | undefined>;
+  /** Where the engine has the run; nothing when it has no such run. */
+  status: (id: string) => Promise<InstanceStatus | undefined>;
+  /**
+   * Where the engine has the run, with the newest control generation it
+   * took (`fence`, null before any), read together; nothing when it has
+   * no such run. A control of a generation at most `fence` reached it.
+   */
+  controlState: (
+    id: string
+  ) => Promise<{ status: InstanceStatus; fence: number | null } | undefined>;
+  /**
+   * Terminates the run; one that has ended already, that is rolling back,
+   * or that the engine has no record of, stays as it is. Answers whether
+   * the engine took it: `rolling_back` for a run whose compensation it
+   * doesn't cut short.
+   */
+  terminate: (
+    id: string,
+    generation?: number
+  ) => Promise<"taken" | "rolling_back">;
+  /**
+   * Pauses the run at its next safe boundary: a run asleep or waiting at
+   * once, a running one once the steps it has out end. One that is queued,
+   * paused or ended, or that the engine has no record of, stays as it is.
+   */
+  pause: (id: string, generation: number) => Promise<void>;
+  /**
+   * Resumes a paused run, its deadlines where they were: paused time
+   * counts, so a sleep or a wait that came due meanwhile is taken at once.
+   * Any other run stays as it is.
+   */
+  resume: (id: string, generation: number) => Promise<void>;
+  /**
+   * Delivers the run an event of `type`, which ends a wait on that type: it
+   * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
+   * the same key again is the same event, taken once. A run that has
+   * ended, or that the engine has no record of, takes none, and that is
+   * no error: there is nothing left to wake (workflows/wakes.ts). Answers
+   * `delivered` for those, and `refused` for an event the run will never
+   * take, sent again or not: its inbox is full, the event too large, or
+   * the key already names another event. Throws when the run can't be
+   * reached.
+   */
+  sendEvent: (
+    id: string,
+    type: string,
+    key: string
+  ) => Promise<"delivered" | "refused">;
+  /**
+   * Accepts `event` into the run's inbox, for a wait that matches it by
+   * its type and attributes (`waitForMatch`): the engine's own answer, so
+   * the caller tells a duplicate delivery (`duplicate`, the same key, type,
+   * payload and attributes) from a key reused for another event
+   * (`conflict`), a full inbox or too large a payload, an ended run, and a
+   * run the engine has no record of yet (`missing`). Throws when the run
+   * can't be reached.
+   */
+  admitEvent: (id: string, event: AdmittedEngineEvent) => Promise<EventOutcome>;
+  /**
+   * The event the run's inbox took under delivery key `key` (its engine
+   * type and encoded payload), taken or not, the run ended or not; null
+   * for none, or a run the engine has no record of. Accepts nothing.
+   */
+  eventOf: (
+    id: string,
+    key: string
+  ) => Promise<{ type: string; payload: string } | null>;
+  /**
+   * Removes the run, with all the engine kept of it, whether or not it has
+   * ended; one it has no record of stays as it is. For a run core ended
+   * that the engine's own retention may not reach (retention.ts).
+   */
+  remove: (id: string) => Promise<void>;
+}
+
+/**
+ * How many days an ended workflow run keeps its details (its input, what
+ * its steps returned, its output, why it failed): 30. Most of those
+ * details are the engine's record of the run, and core has Cloudflare
+ * Workflows keep it for this long (each instance's `retention`), which can
+ * be no longer than the 30 days it keeps an ended instance on the Workers
+ * Paid plan.
+ */
+export const runRetentionDays = 30;
+
+/**
+ * How long the engine keeps a run once it has ended, after it completed
+ * or was terminated and after it errored: the run retention.
+ */
+const runRetention: Pick<WorkflowOptions, "retention"> = {
+  retention: {
+    successRetention: `${runRetentionDays} days`,
+    errorRetention: `${runRetentionDays} days`,
+  },
+};
+
+/**
+ * How long the engine keeps a test's run once it ended: a day, the least a
+ * deployment keeps any; its test removes it sooner (fixture-runs.ts).
+ */
+const fixtureRetention: Pick<WorkflowOptions, "retention"> = {
+  retention: { successRetention: "1 day", errorRetention: "1 day" },
+};
+
+const runs = (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">
+) => inJurisdiction(env, env.WORKFLOW_RUNS);
+
+/** The run `id`'s object, whether or not it has a run. */
+/** The object run `id` lives in, as core's own class (run-object.ts). */
+export const runObjectOf = (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string
+) => {
+  const namespace = runs(env);
+  return namespace.get(namespace.idFromName(runObjectName(runDefinition, id)));
+};
+
+const runStub = (env: Env, id: string): RunStub => runObjectOf(env, id);
+
+/**
+ * Marks an independent workflow's run `id` stopped in its object by
+ * `actor` (run-object.ts, `markStopped`), the first step of its stop: no
+ * attempt of it holds
+ * from then on, and the object terminates it itself should the stop's
+ * request not. Answers whether it was marked, or why not. Throws when the
+ * object can't be told, so a stop fails before anything else of it.
+ */
+export const markResourceRunStopped = async (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string,
+  actor: AuditActor
+): Promise<"marked" | "rolling_back" | "ended" | "missing"> =>
+  await runObjectOf(env, id).markStopped(id, actor, Date.now());
+
+/** Admits the run `id` of `pin`: created once, however often sent. */
+const admit = async (
+  env: Env,
+  id: string,
+  pin: RunPin,
+  input: Json | undefined
+): Promise<void> => {
+  const binding = new Workflow<{ input?: Json }>(runs(env), runDefinition, {
+    version: versionOf(pin),
+    ...(pin.type === "fixture" ? fixtureRetention : runRetention),
+  });
+  await binding.admit({
+    id,
+    key: id,
+    params: input === undefined ? {} : { input },
+  });
+};
+
+/** Workerflow, through the deployment's one run object class. */
+export const runEngine = (env: Env): RunEngine => ({
+  createResource: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "resource", ...pinned }, input);
+  },
+  createCandidate: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "candidate", ...pinned }, input);
+  },
+  createFixture: async ({ id, pinned, input, clockMs }) => {
+    // Its clock moved on before it runs anything: the time it starts at.
+    if (clockMs > 0) {
+      await runObjectOf(env, id).advanceFixtureClock(clockMs);
+    }
+    await admit(env, id, { type: "fixture", ...pinned }, input);
+  },
+  advanceFixtureClock: async (id, ms) => {
+    await runObjectOf(env, id).advanceFixtureClock(ms);
+  },
+  fixtureWaits: async (id) => await runObjectOf(env, id).fixtureWaits(),
+  succeededSteps: async (id, name) =>
+    await runStub(env, id).succeededSteps(name),
+  status: async (id) => await runStub(env, id).status(),
+  controlState: async (id) => await runStub(env, id).controlState(),
+  terminate: async (id, generation) => {
+    // Ended, rolling back or missing: nothing to terminate, and nothing
+    // to fail over (a cancel racing a run's own end finds it ended).
+    const outcome = await runStub(env, id).terminate({
+      rollback: false,
+      ...(generation === undefined ? {} : { fence: generation }),
+    });
+    return outcome === "rolling_back" ? "rolling_back" : "taken";
+  },
+  // Each with the run's control generation it was admitted under: the run
+  // ignores one older than the newest it took, in the same write as the
+  // pause or resume (resource-runs.ts), so a late one can't undo a newer
+  // one.
+  pause: async (id, generation) => {
+    await runStub(env, id).pause({ fence: generation });
+  },
+  resume: async (id, generation) => {
+    await runStub(env, id).resume({ keepDeadlines: true, fence: generation });
+  },
+  admitEvent: async (id, event) =>
+    await runStub(env, id).sendEvent({
+      type: event.type,
+      payload: encode(event.payload),
+      key: event.key,
+      attributes: event.attributes,
+      reserved: event.reserved === true,
+      sender: event.sender ?? null,
+    }),
+  eventOf: async (id, key) => await runStub(env, id).eventOf(key),
+  sendEvent: async (id, type, key) => {
+    const outcome = await runStub(env, id).sendEvent({
+      type,
+      payload: encode(null),
+      key,
+    });
+    return outcome === "full" ||
+      outcome === "too_large" ||
+      outcome === "conflict"
+      ? "refused"
+      : "delivered";
+  },
+  remove: async (id) => {
+    await runStub(env, id).deleteRun();
+  },
+});

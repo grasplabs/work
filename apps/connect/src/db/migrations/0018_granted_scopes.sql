@@ -1,0 +1,1 @@
+ALTER TABLE `connection_tokens` ADD `granted_scopes` text;

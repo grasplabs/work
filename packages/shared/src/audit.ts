@@ -1,0 +1,322 @@
+import { z } from "zod";
+
+import { chatPlatformSchema } from "./chat.ts";
+import type { ChatChannel } from "./chat.ts";
+import {
+  appIdSchema,
+  identifierMaxLength,
+  identifierSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "./ids.ts";
+import type { Authority } from "./permissions.ts";
+import type { Identity } from "./rpc.ts";
+
+// The audit log is append-only and can't be purged, so every field is bounded
+// to identifier size: an event can name things, never carry their content
+// (prompts, message bodies, documents, tokens).
+
+/** Longest string any field may hold: an identifier's. */
+export { identifierMaxLength as auditIdentifierMaxLength } from "./ids.ts";
+
+/** Most resources one event names as provenance: a large retrieval, no more. */
+export const auditProvenanceMaxItems = 100;
+
+/** Most `detail` members one event holds. */
+export const auditDetailMaxKeys = 32;
+
+/**
+ * Largest event the AuditLog object appends, in bytes of canonical JSON. Room
+ * for a full provenance of identifier-sized IDs (about 26 KB) next to the
+ * other fields, so an event that names a large retrieval is always kept; the
+ * per-field bounds together allow a little more, and this caps it well below
+ * a pasted document.
+ */
+export const auditEventMaxBytes = 32 * 1024;
+
+/** A `detail` key: a short camelCase or dotted name, never free text. */
+const detailKeyPattern = /^[a-z][a-zA-Z0-9_.]{0,63}$/u;
+
+/** A dotted verb such as `model.call`: at least two lowercase segments. */
+const actionPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
+
+/**
+ * The Grasp staff member whose work an event was, on events kept before
+ * Grasp staff stopped starting work in a client's workspace. Nothing writes
+ * it any more; it stays so those events, and an outbox retry of one, read
+ * and compare exactly as they were kept (the chain refuses a retry whose
+ * JSON differs from the stored event).
+ */
+const legacyStaff = identifierSchema.optional();
+
+/**
+ * Who did something: a person, an agent acting for one, part of an App (its
+ * pages or server code), a workflow run, the platform itself, or Grasp
+ * staff (whose access is always logged).
+ */
+export const auditActorSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("person"),
+    userId: identifierSchema,
+    /**
+     * The chat platform they acted through (a press on a card in Teams,
+     * say), by its adapter's name; none in Grasp's own app.
+     */
+    via: chatPlatformSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("agent"),
+    agentId: identifierSchema,
+    onBehalfOf: identifierSchema,
+    /**
+     * The chat platform of the chat it answered in (a Teams chat's turn),
+     * by its adapter's name; none in Grasp's own app.
+     */
+    via: chatPlatformSchema.optional(),
+    staff: legacyStaff,
+  }),
+  z.object({
+    type: z.literal("app"),
+    appId: appIdSchema,
+    // Events written before an App's pages were file routes name the part
+    // `screen`: the log is history and keeps them readable, as the page
+    // they are now. New events write `page`.
+    part: z
+      .enum(["page", "server", "screen"])
+      .transform((part) => (part === "screen" ? "page" : part)),
+    staff: legacyStaff,
+  }),
+  z.object({
+    type: z.literal("workflow"),
+    appId: appIdSchema,
+    workflowId: workflowIdSchema,
+    runId: runIdSchema,
+    /**
+     * The run its lineage started from, for a run started by another run:
+     * read from the engine's record of the run, never from what the run
+     * was given. A run that is its own root has none.
+     */
+    rootRunId: runIdSchema.optional(),
+    /**
+     * The run whose allowances an App's own workflow run's work was
+     * charged to. Nothing makes this actor any more (Apps run no workflows
+     * of their own): kept so past audit events still read.
+     */
+    accountRunId: runIdSchema.optional(),
+    staff: legacyStaff,
+  }),
+  z.object({
+    type: z.literal("staff"),
+    userId: identifierSchema,
+    /**
+     * Read through Grasp's admin rather than signed in here: `userId`
+     * is then the email Cloudflare Access verified, as the admin signs
+     * it (core's admin-snapshot.ts), for they have no user here.
+     */
+    via: z.literal("console").optional(),
+  }),
+  z.object({ type: z.literal("system"), staff: legacyStaff }),
+]);
+export type AuditActor = z.infer<typeof auditActorSchema>;
+
+/** The `via` an actor carries for `channel`: none for Grasp's own app. */
+const viaOf = (channel: ChatChannel | undefined) =>
+  channel === undefined || channel === "web" ? {} : { via: channel };
+
+/**
+ * A signed-in person as the audit log names them: staff apart. A person
+ * acting through a chat platform (`channel`) names it.
+ */
+export const actorOf = (
+  { userId, staff }: Pick<Identity, "userId" | "staff">,
+  channel?: ChatChannel
+): AuditActor =>
+  staff
+    ? { type: "staff", userId }
+    : { type: "person", userId, ...viaOf(channel) };
+
+/**
+ * An App, agent or independent workflow, acting for a person, as the audit
+ * log names it. A run of an independent workflow is the system, as every
+ * event of such runs names it, its run being the event's target
+ * (core's workflows/resource-runs.ts). An agent answering in a chat names
+ * the chat's `channel` when it is a chat platform's.
+ */
+export const delegateActorOf = (
+  { subject, onBehalfOf }: Authority,
+  channel?: ChatChannel
+): AuditActor => {
+  switch (subject.type) {
+    case "agent": {
+      return {
+        type: "agent",
+        agentId: subject.agentId,
+        onBehalfOf,
+        ...viaOf(channel),
+      };
+    }
+    case "app": {
+      return { type: "app", appId: subject.appId, part: "server" };
+    }
+    case "workflow": {
+      return { type: "system" };
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
+
+/** The Workers that send audit events. */
+export const auditSourceSchema = z.enum(["core", "connect"]);
+export type AuditSource = z.infer<typeof auditSourceSchema>;
+
+/**
+ * A model call, as metadata only: never the prompt or the response. The
+ * resources that fed the prompt go in the event's `provenance`.
+ */
+export const auditModelSchema = z.object({
+  provider: identifierSchema,
+  model: identifierSchema,
+  inputTokens: z.int().nonnegative(),
+  outputTokens: z.int().nonnegative(),
+});
+export type AuditModel = z.infer<typeof auditModelSchema>;
+
+/** What an action cost, in an ISO 4217 currency such as `USD`. */
+export const auditCostSchema = z.object({
+  amount: z.number().nonnegative(),
+  currency: z.string().regex(/^[A-Z]{3}$/u),
+});
+export type AuditCost = z.infer<typeof auditCostSchema>;
+
+/** One `detail` value: a flat, identifier-sized scalar. */
+export const auditDetailValueSchema = z.union([
+  z.string().max(identifierMaxLength),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
+export type AuditDetailValue = z.infer<typeof auditDetailValueSchema>;
+
+/**
+ * Whom the recall before a chat's question read as, in its `agent.call`
+ * event's `reads` (method `brain.recall`, core's turn-recall.ts): the
+ * person, or the company alone. Never who.
+ */
+export type TurnRecallReads = "person" | "company";
+
+/**
+ * One audit event, stored by core and connect in an outbox and appended to
+ * the hash chain by the AuditLog object. Stored events outlive a release
+ * while they wait in an outbox, so this schema only ever expands: add
+ * optional fields, never rename or remove, never tighten a bound.
+ *
+ * Events carry identifiers, never secrets or content: the log is
+ * append-only, so nothing in it can be purged.
+ */
+export const auditEventSchema = z.object({
+  /**
+   * Unique per event; an outbox delivers at least once, the log dedupes.
+   * Lowercased, so a redelivery can't dodge the dedupe by changing case.
+   */
+  id: z.uuid().toLowerCase(),
+  at: z.iso.datetime(),
+  source: auditSourceSchema,
+  actor: auditActorSchema,
+  /** Dotted verb, e.g. `connection.action.approved` or `model.call`. */
+  action: z.string().max(identifierMaxLength).regex(actionPattern),
+  /** What was acted on, e.g. `{ type: "connection", id }`. */
+  target: z.object({ type: identifierSchema, id: identifierSchema }).optional(),
+  /** Ties the events of one request together. */
+  requestId: identifierSchema.optional(),
+  /** IDs of the resources the action read from or was built from. */
+  provenance: z
+    .array(identifierSchema)
+    .max(auditProvenanceMaxItems)
+    .default([]),
+  /** Set on model calls. */
+  model: auditModelSchema.optional(),
+  /** Set where the action has a cost, such as a model call. */
+  cost: auditCostSchema.optional(),
+  /** Anything else worth recording, as identifiers and small values. */
+  detail: z
+    .record(z.string().regex(detailKeyPattern), auditDetailValueSchema)
+    .refine((detail) => Object.keys(detail).length <= auditDetailMaxKeys, {
+      message: `At most ${auditDetailMaxKeys} detail members`,
+    })
+    .default({}),
+});
+export type AuditEvent = z.infer<typeof auditEventSchema>;
+
+/** An entry, as `createAuditEvent` takes it: an event before its ID, time and source. */
+export const auditEntrySchema = auditEventSchema.omit({
+  id: true,
+  at: true,
+  source: true,
+});
+
+/** What a caller records; the logger sets the ID, the time and the source. */
+export type AuditEntry = Omit<
+  z.input<typeof auditEventSchema>,
+  "id" | "at" | "source"
+>;
+
+/**
+ * Most events one take from an outbox returns: core and Knowledge's own,
+ * and connect's, which core takes over RPC (`ConnectApi.takeAuditEvents`).
+ */
+export const auditOutboxTakeMax = 100;
+
+/**
+ * An event waiting in an outbox: its row's ID, the event as stored JSON,
+ * and when it was stored (milliseconds since the epoch).
+ */
+export interface OutboxedAuditEvent {
+  id: string;
+  event: string;
+  createdAt: number;
+}
+
+/**
+ * Why a drain moved a row out of an outbox, to `audit_outbox_rejected`:
+ * the log can never take it (`refused`: not an event to that release, or
+ * over the size cap), or holds its ID with other content (`conflict`).
+ */
+export const auditRejectReasons = ["refused", "conflict"] as const;
+
+/** A row a drain moves out of an outbox, and why. */
+export interface OutboxRejected {
+  id: string;
+  reason: (typeof auditRejectReasons)[number];
+}
+
+/** Whether an event's JSON is over {@link auditEventMaxBytes}. */
+export const isAuditEventTooLarge = (json: string): boolean =>
+  new TextEncoder().encode(json).byteLength > auditEventMaxBytes;
+
+/**
+ * An audit event ready to send: a new ID, the time and the Worker it comes
+ * from, validated and within {@link auditEventMaxBytes}. For a sender that
+ * stores the event first and sends it later, maybe more than once: the log
+ * dedupes by ID.
+ */
+export const createAuditEvent = (
+  entry: AuditEntry,
+  source: AuditSource
+): AuditEvent => {
+  const event = auditEventSchema.parse({
+    ...entry,
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    source,
+  });
+  // The log refuses it too; failing here keeps it out of the outbox.
+  // (Canonical JSON only reorders keys, so its size is the same.)
+  if (isAuditEventTooLarge(JSON.stringify(event))) {
+    throw new RangeError(
+      `Audit event ${event.id} is over ${auditEventMaxBytes} bytes`
+    );
+  }
+  return event;
+};

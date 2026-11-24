@@ -1,0 +1,413 @@
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import type { SetupTab } from "../src/admin/setup.tsx";
+import { setSignIn } from "../src/clients/settings.ts";
+import { act, adminDatabase } from "../src/db/act.ts";
+import { clientDeploys, clientProvisions, clients } from "../src/db/schema.ts";
+import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
+import { importReleases } from "../src/releases/import.ts";
+import { mockAccess } from "./access.ts";
+import { publishRelease } from "./releases.ts";
+import { adminOf } from "./secrets-store-admin.ts";
+import { setupPage } from "./setup-page.ts";
+
+mockAccess();
+
+const db = adminDatabase(env.DB);
+const staff = { email: "staff@grasp.test", sub: "sub-staff" };
+
+/**
+ * A client recorded as `status`, without a run: one being provisioned as
+ * adding it records it, with no account of its own; an active one on an
+ * account of its own, as the account-per-client path left it.
+ */
+const recordClient = async (
+  status: "provisioning" | "active" = "provisioning",
+  pinnedReleaseId: string | null = null
+) => {
+  const id = `client-${crypto.randomUUID().slice(0, 8)}`;
+  const now = new Date();
+  await act(
+    db,
+    staff,
+    [
+      db.insert(clients).values({
+        id,
+        name: `Acme ${id}`,
+        channel: "beta",
+        status,
+        pinnedReleaseId,
+        createdBy: staff.email,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ],
+    { action: "client.create", clientId: id }
+  );
+  return { id };
+};
+
+/** A release, published and imported. */
+const importedRelease = async (notes: string): Promise<string> => {
+  const release = await publishRelease({ notes });
+  await importReleases(env.RELEASES, db);
+  return release.id;
+};
+
+/** Client `clientId`'s Setup, on `tab` (how it stands when none). */
+const setupOf = async (clientId: string, tab: SetupTab = "status") => ({
+  html: (await setupPage(clientId, tab)) ?? "",
+});
+
+/** The part of a page titled `title`: from its label to its end. */
+const sectionOf = (html: string, title: string): string => {
+  const at = html.indexOf(`aria-label="${title}"`);
+  return at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
+};
+
+describe("the company pages, in the admin", () => {
+  it("shows a company just added its setting up step by step, and its Hosting under its settings with nothing to choose", async () => {
+    await importedRelease("feat(core): newest of all");
+    const client = await recordClient();
+
+    const { html } = await setupOf(client.id);
+    const settings = await setupOf(client.id, "settings");
+    const hosting = sectionOf(settings.html, "Hosting");
+
+    expect({
+      steps: [
+        `Reserving ${client.id}.grasp.test`,
+        "Installing Grasp",
+        "Inviting admins",
+      ].every((line) => html.includes(line)),
+      onStatus: html.includes('aria-label="Hosting"'),
+      place: hosting.includes("Place and start provisioning"),
+      release: hosting.includes('id="hosting-release"'),
+      where: hosting.includes("Grasp Cloud, data kept in the EU"),
+      account: settings.html.includes("Account id"),
+    }).toStrictEqual({
+      steps: true,
+      onStatus: false,
+      place: false,
+      release: false,
+      where: true,
+      account: false,
+    });
+  });
+
+  it("says a stopped provisioning failed where it stopped, not that it's tried again, with why and Retry now, and still once Grasp gives up", async () => {
+    const releaseId = await importedRelease("feat(core): stops");
+    const client = await recordClient();
+    const now = new Date();
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId,
+      status: "failed",
+      step: "resources",
+      error: "probe_unanswered",
+      startedBy: staff.email,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const stoppedPage = await setupOf(client.id);
+    // Grasp's automatic retries give up: a person is asked to look.
+    await markNeedsAttention(db, client.id, await episodeOf(db, client.id), {
+      reason: "needs_person",
+      code: "probe_unanswered",
+    });
+    const { html } = await setupOf(client.id);
+
+    expect({
+      stopped: [
+        stoppedPage.html.includes("Trying again"),
+        stoppedPage.html.includes("Stopped: it needs a look"),
+        stoppedPage.html.includes(">Failed<"),
+      ],
+      givenUp: html.includes("Stopped: it needs a look"),
+      code: html.includes("probe_unanswered"),
+      // Beside why it stopped, above its steps.
+      resume: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes("Retry now"),
+    }).toStrictEqual({
+      stopped: [false, true, true],
+      givenUp: true,
+      code: true,
+      resume: true,
+    });
+  });
+
+  it("names a stopped operation's last step as recorded when this release has no such step, and still shows its Setup", async () => {
+    const release = await importedRelease("feat(core): dropped a step");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    // Recorded by a release that had a step this one doesn't: records are
+    // never rewritten.
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      status: "running",
+      step: "ignition",
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+
+    expect({
+      named: html.includes(
+        "A try stopped in its ignition step without recording why"
+      ),
+    }).toStrictEqual({ named: true });
+  });
+
+  it("says why a later run stopped by its own losses, not by an earlier deploy's failure", async () => {
+    const release = await importedRelease("feat(core): failed, then applied");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    // An earlier deploy failed with its own code; then an apply ran the
+    // operation, and its every attempt was lost after the migrations.
+    await db.insert(clientDeploys).values({
+      clientId: client.id,
+      releaseId: release,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed",
+      error: "cloudflare_400_10000",
+      startedAt: now,
+      endedAt: now,
+    });
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      status: "running",
+      step: "migrations",
+      runId: `${client.id}-apply`,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+
+    expect({
+      own: html.includes(
+        "A try stopped in its connect step without recording why"
+      ),
+      earlier: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes("cloudflare_400_10000"),
+    }).toStrictEqual({ own: true, earlier: false });
+  });
+
+  it("says a live organization's deploy that stopped failed at the step it reached, with why and Retry beside it, never that it's still installing", async () => {
+    const before = await importedRelease("feat(core): runs");
+    const release = await importedRelease("feat(core): stopped deploying");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    const runId = `deploy-${crypto.randomUUID().slice(0, 8)}`;
+    // Its deploy's every attempt was lost after its migrations: the
+    // operation is left running, its run ended and the client released.
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      previousReleaseId: before,
+      status: "running",
+      step: "migrations",
+      runId,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(clientDeploys).values({
+      clientId: client.id,
+      releaseId: release,
+      runId,
+      status: "failed",
+      error: "attempt_lost: connect",
+      startedAt: now,
+      endedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+    const steps = html.slice(html.indexOf('aria-label="Steps"'));
+    const install = steps.slice(
+      steps.indexOf("Installing Grasp") - 400,
+      steps.indexOf("Installing Grasp")
+    );
+
+    expect({
+      trying: html.includes("Trying again"),
+      ready: html.includes("Ready: open"),
+      headline: html.includes("Stopped: it needs a look"),
+      installFailed: install.includes(">Failed<"),
+      why: html.includes(
+        "A try stopped in its connect step without recording why"
+      ),
+      retry: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes(">Retry<"),
+    }).toStrictEqual({
+      trying: false,
+      ready: false,
+      headline: true,
+      installFailed: true,
+      why: true,
+      retry: true,
+    });
+  });
+
+  it("shows an active company nothing left to set up, and nothing of its account's numbers before they are read", async () => {
+    const client = await recordClient("active");
+
+    const { html } = await setupOf(client.id);
+
+    expect({
+      settingUp: html.includes('aria-label="Setting it up"'),
+      resume: html.includes("Resume"),
+      numbers: html.includes("Its platform in numbers"),
+    }).toStrictEqual({
+      settingUp: false,
+      resume: false,
+      numbers: false,
+    });
+  });
+
+  it("shows a company's channel and sign-in to change, what waits for its next deploy, rotating its secrets, and its history", async () => {
+    const client = await recordClient("active");
+    // The key a sign-in change fingerprints its admins with, for its audit.
+    const store = await adminOf(env.CLIENT_KEY);
+    const key = await store.create("test-client-key");
+    try {
+      await setSignIn(env, staff, {
+        clientId: client.id,
+        signIn: {
+          domains: ["acme.test"],
+          admins: ["ada@acme.test"],
+          googleHostedDomain: "acme.test",
+        },
+      });
+    } finally {
+      await store.delete(key);
+    }
+
+    const releases = await setupOf(client.id, "releases");
+    const settings = await setupOf(client.id, "settings");
+    const historyTab = await setupOf(client.id, "history");
+    const history = sectionOf(historyTab.html, "Its history");
+
+    expect({
+      channel:
+        releases.html.includes('name="channel"') &&
+        releases.html.includes('value="beta"'),
+      signIn:
+        settings.html.includes('value="acme.test"') &&
+        settings.html.includes('value="ada@acme.test"'),
+      pending: settings.html.includes(
+        "changed since its last deploy: apply it now"
+      ),
+      apply: settings.html.includes("Apply settings now"),
+      rotate: sectionOf(settings.html, "Its secrets").includes(
+        "Rotate secrets"
+      ),
+      history: ["Changed how its people sign in.", "Added it."].map((words) =>
+        history.includes(words)
+      ),
+    }).toStrictEqual({
+      channel: true,
+      signIn: true,
+      pending: true,
+      apply: true,
+      rotate: true,
+      history: [true, true],
+    });
+  });
+
+  it("shows a live company's pin, to change or let go, and none of it for one being set up", async () => {
+    const release = await importedRelease("feat(core): pinned to");
+    const pinned = await recordClient("active", release);
+    const unpinned = await recordClient("active");
+    const settingUp = await recordClient("provisioning");
+
+    const pinnedPage = await setupOf(pinned.id, "releases");
+    const unpinnedPage = await setupOf(unpinned.id, "releases");
+    const settingUpPage = await setupOf(settingUp.id, "releases");
+
+    expect({
+      pinned: {
+        says: pinnedPage.html.includes(`Pinned to ${release}`),
+        unpin: pinnedPage.html.includes("Unpin"),
+      },
+      unpinned: {
+        says: unpinnedPage.html.includes(
+          "Not pinned: it gets each release promoted to its channel."
+        ),
+        unpin: unpinnedPage.html.includes("Unpin"),
+      },
+      settingUp: settingUpPage.html.includes("Pin it to"),
+    }).toStrictEqual({
+      pinned: { says: true, unpin: true },
+      unpinned: { says: true, unpin: false },
+      settingUp: false,
+    });
+  });
+
+  it("says when its deploy of the release it should run failed, and why, with Retry beside it; never for a release it no longer should run", async () => {
+    const release = await importedRelease("feat(core): fails to deploy");
+    const other = await importedRelease("feat(core): no longer its target");
+    const failed = await recordClient("active", release);
+    const moved = await recordClient("active", release);
+    const now = new Date();
+    await db.insert(clientDeploys).values([
+      {
+        clientId: failed.id,
+        releaseId: release,
+        runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+        status: "failed",
+        error: "cloudflare_400_10000",
+        startedAt: now,
+        endedAt: now,
+      },
+      {
+        clientId: moved.id,
+        releaseId: other,
+        runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+        status: "failed",
+        error: "cloudflare_400_10000",
+        startedAt: now,
+        endedAt: now,
+      },
+    ]);
+
+    const failedPage = await setupOf(failed.id);
+    const movedPage = await setupOf(moved.id);
+
+    expect({
+      failed: failedPage.html.includes(`Its deploy of ${release} failed`),
+      why: failedPage.html.includes("cloudflare_400_10000"),
+      retry: sectionOf(failedPage.html, "What needs a look").includes("Retry"),
+      moved: movedPage.html.includes(`Its deploy of ${other} failed`),
+    }).toStrictEqual({
+      failed: true,
+      why: true,
+      retry: true,
+      moved: false,
+    });
+  });
+
+  // The browser says such a page isn't there (src/admin/frame.test.tsx).
+  it("has no Setup for a company that doesn't exist, or can't be one", async () => {
+    const setups = await Promise.all(
+      ["nobody-here", "Not_A_Client"].map(async (id) => await setupPage(id))
+    );
+
+    expect(setups).toStrictEqual([null, null]);
+  });
+});

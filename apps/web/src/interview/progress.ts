@@ -1,0 +1,441 @@
+import {
+  erasedFact,
+  interviewLimits,
+  nextFactId,
+  removedLine,
+  shareByDefault,
+} from "@grasp-os/shared/interview-links";
+import type {
+  InterviewFact,
+  InterviewLine,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
+import { readBackParts } from "@grasp-os/shared/interview-story";
+import { spanOf } from "@grasp-os/shared/interview-turn";
+import type {
+  FactTag,
+  InterviewEvent,
+  InterviewPhase,
+  InterviewWants,
+  StephenTurn,
+} from "@grasp-os/shared/interview-turn";
+import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
+
+// Where someone's interview stands, as their page keeps it and sends it to
+// core to be kept (`InterviewProgress`), and how each thing that happens
+// moves it on. Pure, so the page and its tests go through the same steps.
+// Ported from the prototype (grasplabs/prototype, packages/grasp:
+// src/data/interviews.ts).
+
+/** The link as it was sent: nothing said, nothing written down. */
+export const freshProgress: InterviewProgress = {
+  person: "opened",
+  told: false,
+  mode: null,
+  lines: [],
+  facts: [],
+  phase: "open",
+  wants: "answer",
+  startedAt: null,
+  confirmed: 0,
+  adding: false,
+  addedAt: 0,
+};
+
+/** Whether they are in the conversation: started, and not agreed to it all. */
+export const isTalking = ({ person }: InterviewProgress): boolean =>
+  person === "progress" || person === "incomplete";
+
+/** Whether what is on screen is the read-back. */
+export const isReading = ({ wants }: InterviewProgress): boolean =>
+  wants === "readback" || wants === "end";
+
+/** They chose who they talk with: that one's text and voice every turn uses. */
+export const chose = (
+  progress: InterviewProgress,
+  interviewer: Interviewer
+): InterviewProgress =>
+  progress.interviewer === interviewer
+    ? progress
+    : { ...progress, interviewer };
+
+/** They read what this is: back on the link, they go straight to the sound check. */
+export const toldWhat = (progress: InterviewProgress): InterviewProgress =>
+  progress.told ? progress : { ...progress, told: true };
+
+/**
+ * They pressed start, to talk or by typing: they have read what this is.
+ * An interview they agreed to stays agreed to: they read what it says now,
+ * and are back where they were.
+ */
+export const begun = (
+  progress: InterviewProgress,
+  now: number,
+  by: "talk" | "type"
+): InterviewProgress => ({
+  ...progress,
+  person: progress.person === "completed" ? "completed" : "progress",
+  told: true,
+  mode: by,
+  startedAt: progress.startedAt ?? now,
+  seenAt: progress.seenAt ?? now,
+});
+
+/**
+ * Longer than this between two turns, they were away: called off, the page
+ * closed, back the next day. A long pause to think fits inside it; what is
+ * beyond it is not interview time.
+ */
+export const awayAfterMs = 5 * 60_000;
+
+/**
+ * The clock moved on to a turn at `at`: what of the gap since their last
+ * turn was beyond `awayAfterMs` is added to the time away. A page reopened
+ * and a tab left open come to the same, so it needs no visibility events.
+ * Before they start it stands still; an interview kept before this clock
+ * has no `seenAt`, and starts counting gaps from this turn.
+ */
+export const ticked = (
+  progress: InterviewProgress,
+  at: number
+): InterviewProgress => {
+  if (progress.startedAt === null) {
+    return progress;
+  }
+  const gap =
+    progress.seenAt === undefined ? 0 : Math.max(0, at - progress.seenAt);
+  return {
+    ...progress,
+    seenAt: at,
+    awayMs: (progress.awayMs ?? 0) + Math.max(0, gap - awayAfterMs),
+  };
+};
+
+/** The most minutes a turn may say, as core reads them (`interviewTurnRequestSchema`). */
+const mostMinutes = 240;
+
+/**
+ * The minutes the interview has taken at `at`, as Stephen is told them:
+ * from the start, less the time away. Someone back the next day is where
+ * they left off, not at the end of the clock (GRA-1468).
+ */
+export const minutesAt = (progress: InterviewProgress, at: number): number =>
+  progress.startedAt === null
+    ? 0
+    : Math.min(
+        mostMinutes,
+        Math.max(0, (at - progress.startedAt - (progress.awayMs ?? 0)) / 60_000)
+      );
+
+/** They stopped for now: their place is kept, and the link carries on later. */
+export const leftFor = (progress: InterviewProgress): InterviewProgress =>
+  progress.person === "progress"
+    ? { ...progress, person: "incomplete" }
+    : progress;
+
+/** Back on the link after stopping. */
+export const resumed = (progress: InterviewProgress): InterviewProgress =>
+  progress.person === "incomplete"
+    ? { ...progress, person: "progress" }
+    : progress;
+
+/** One more line in the conversation, as long as the interview holds more. */
+export const withLine = (
+  progress: InterviewProgress,
+  line: InterviewLine
+): InterviewProgress =>
+  progress.lines.length >= interviewLimits.lines
+    ? progress
+    : { ...progress, lines: [...progress.lines, line] };
+
+/** Where the interview goes, known with his line, before what he wrote down. */
+export const steered = (
+  progress: InterviewProgress,
+  { phase, wants }: { phase: InterviewPhase | null; wants: InterviewWants }
+): InterviewProgress => ({
+  ...progress,
+  wants,
+  phase: phase ?? progress.phase,
+});
+
+/** Words as they are compared: small letters, one space, no full stop. */
+const sameWords = (text: string): string =>
+  text
+    .toLowerCase()
+    .replaceAll(/\s+/gu, " ")
+    .replace(/[.!\s]+$/u, "")
+    .trim();
+
+/** A fact without the fields it doesn't have, as the store keeps it. */
+const withoutEmpty = (fact: InterviewFact): InterviewFact => {
+  const { out, pin, agreed, share, ...rest } = fact;
+  return {
+    ...rest,
+    ...(out === true ? { out } : {}),
+    ...(pin === undefined ? {} : { pin }),
+    ...(agreed === true ? { agreed } : {}),
+    ...(share === undefined ? {} : { share }),
+  };
+};
+
+/**
+ * What a turn of Stephen's brought: what he marked in what was just said,
+ * what he wrote down, what he put right, and where the interview is now.
+ * `answered` is the line his marks go on: the last thing the person said,
+ * as it stands in the conversation. In the read-back, what is new is
+ * pinned to the part on screen (`pin`).
+ */
+export const afterTurn = (
+  progress: InterviewProgress,
+  turn: StephenTurn,
+  {
+    answered,
+    pin,
+    kind,
+  }: { answered: number; pin?: number; kind: InterviewKind }
+): InterviewProgress => {
+  const marks = turn.facts
+    .filter(({ quote }) => quote !== "")
+    .map(({ quote, tag }) => ({ quote, tag }));
+  const lines = progress.lines.map((line, at) =>
+    // A line they removed meanwhile takes no marks: it holds nothing.
+    at === answered && marks.length > 0 && line.removed !== true
+      ? {
+          ...line,
+          marks: [...(line.marks ?? []), ...marks].slice(
+            0,
+            interviewLimits.marks
+          ),
+        }
+      : line
+  );
+  const changed = progress.facts.map((fact): InterviewFact => {
+    const change = turn.changes.find(({ id }) => id === fact.id);
+    if (change === undefined) {
+      return fact;
+    }
+    // What is put right is read back again, also when it was agreed to before.
+    const { agreed: _agreed, ...rest } = fact;
+    return change.text === null
+      ? { ...rest, out: true }
+      : {
+          ...rest,
+          text: change.text,
+          record: change.record ?? change.text,
+          out: undefined,
+        };
+  });
+  // The same thing is written down once.
+  const have = new Set(
+    changed.filter(({ out }) => out !== true).map(({ text }) => sameWords(text))
+  );
+  const added: InterviewFact[] = [];
+  for (const fact of turn.facts) {
+    const words = sameWords(fact.text);
+    if (
+      words !== "" &&
+      !have.has(words) &&
+      changed.length + added.length < interviewLimits.facts
+    ) {
+      have.add(words);
+      // Where it goes starts from what kind of thing it is: theirs to move before they agree.
+      const share = shareByDefault(fact.tag, kind);
+      added.push({
+        id: nextFactId([...changed, ...added]),
+        tag: fact.tag,
+        text: fact.text,
+        record: fact.record,
+        ...(pin === undefined ? {} : { pin }),
+        ...(share === undefined ? {} : { share }),
+      });
+    }
+  }
+  return {
+    ...progress,
+    lines,
+    facts: [...changed, ...added].map(withoutEmpty),
+    phase: turn.phase,
+    wants: turn.wants,
+  };
+};
+
+/**
+ * `progress` with the line `at` removed by them (GRA-1897): its words, its
+ * marks and its file's name gone, its place kept, so a turn under way
+ * still finds the line it answers.
+ */
+export const withoutLine = (
+  progress: InterviewProgress,
+  at: number
+): InterviewProgress => ({
+  ...progress,
+  lines: progress.lines.map((line, each) =>
+    each === at ? removedLine(line) : line
+  ),
+});
+
+/** A line of the read-back, put right by them: their words, at once, also for the record until Stephen has heard of it. */
+export const withFactText = (
+  progress: InterviewProgress,
+  id: string,
+  text: string
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) => {
+    if (fact.id !== id) {
+      return fact;
+    }
+    const { agreed: _agreed, ...rest } = fact;
+    return { ...rest, text, record: text };
+  }),
+});
+
+/**
+ * Where the lines in `shares` go, as they chose: shared in their company
+ * as how their team works (`team`), or only counted anonymously (none). Approving
+ * binds where a line goes (`factRevision`), so a line moved after they
+ * agreed counts again only once it is approved where it goes now.
+ */
+export const withShares = (
+  progress: InterviewProgress,
+  shares: ReadonlyMap<string, InterviewFact["share"]>
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) => {
+    if (!shares.has(fact.id)) {
+      return fact;
+    }
+    const { share: _was, ...rest } = fact;
+    const share = shares.get(fact.id);
+    return share === undefined ? rest : { ...rest, share };
+  }),
+});
+
+/** A line of the read-back taken out, or put back. */
+export const withFactToggled = (
+  progress: InterviewProgress,
+  id: string
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) => {
+    if (fact.id !== id) {
+      return fact;
+    }
+    const { out, ...rest } = fact;
+    return out === true ? rest : { ...rest, out: true };
+  }),
+});
+
+/** Lines of the read-back that were taken out, put back. */
+export const withFactsBack = (
+  progress: InterviewProgress,
+  ids: string[]
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) => {
+    if (!ids.includes(fact.id)) {
+      return fact;
+    }
+    const { out: _out, ...rest } = fact;
+    return rest;
+  }),
+});
+
+/** They said yes to a part of the read-back. */
+export const partConfirmed = (
+  progress: InterviewProgress
+): InterviewProgress => ({ ...progress, confirmed: progress.confirmed + 1 });
+
+/** They said yes to the last part: what is left in counts from now, and is not read back again. */
+export const approved = (progress: InterviewProgress): InterviewProgress => ({
+  ...progress,
+  confirmed: progress.confirmed + 1,
+  person: "completed",
+  wants: "end",
+  adding: false,
+  // What they took out is erased for good now, in its place, as core keeps
+  // it (GRA-1897): no copy of this page holds its words any more.
+  facts: progress.facts.map((fact) =>
+    fact.out === true ? erasedFact(fact) : { ...fact, agreed: true as const }
+  ),
+});
+
+/** Back after agreeing, to add something: only what is new will be read back. */
+export const reopened = (progress: InterviewProgress): InterviewProgress =>
+  progress.person === "completed"
+    ? {
+        ...progress,
+        person: "progress",
+        wants: "answer",
+        confirmed: 0,
+        adding: true,
+        addedAt: progress.lines.length,
+      }
+    : progress;
+
+/** How they found it, from 1 to 5. */
+export const rated = (
+  progress: InterviewProgress,
+  rating: number
+): InterviewProgress =>
+  progress.person === "completed"
+    ? { ...progress, rating: Math.min(Math.max(Math.round(rating), 1), 5) }
+    : progress;
+
+/** The event a conversation starts with, by where it stands: the first line, back to add something, an answer never answered, or coming back. */
+export const openingEvent = (progress: InterviewProgress): InterviewEvent => {
+  if (progress.lines.length === 0) {
+    return "start";
+  }
+  if (progress.adding && progress.lines.length === progress.addedAt) {
+    return "add";
+  }
+  return progress.lines.at(-1)?.from === "person" ? "answer" : "resume";
+};
+
+/** The part of the read-back they are at, and how many there are. */
+export const partAt = (progress: InterviewProgress) => {
+  const parts = readBackParts(progress.facts);
+  const at = Math.min(progress.confirmed, Math.max(parts.length - 1, 0));
+  return { parts, at, part: parts[at] };
+};
+
+/** A piece of what someone said: plain words, or words Stephen marked, with what they are. */
+export interface Piece {
+  /** Where it starts in the line. */
+  at: number;
+  text: string;
+  tag: FactTag | null;
+}
+
+/** A line with what is marked in it, in pieces; a mark inside or across another is left out. */
+export const markedPieces = (
+  said: string,
+  marks: { quote: string; tag: FactTag }[] = []
+): Piece[] => {
+  const spans = marks
+    .flatMap(({ quote, tag }) => {
+      const span = spanOf(said, quote);
+      return span === null ? [] : [{ from: span[0], to: span[1], tag }];
+    })
+    .toSorted((a, b) => a.from - b.from || b.to - a.to);
+  const pieces: Piece[] = [];
+  let at = 0;
+  for (const span of spans) {
+    if (span.from >= at) {
+      if (span.from > at) {
+        pieces.push({ at, text: said.slice(at, span.from), tag: null });
+      }
+      pieces.push({
+        at: span.from,
+        text: said.slice(span.from, span.to),
+        tag: span.tag,
+      });
+      at = span.to;
+    }
+  }
+  if (at < said.length) {
+    pieces.push({ at, text: said.slice(at), tag: null });
+  }
+  return pieces;
+};

@@ -1,0 +1,357 @@
+/**
+ * Calls connect the way core does: with a capability core signed for
+ * exactly that call. Connections are set up in connect's registry directly,
+ * as the flows that create them (OAuth, Composio) would leave them.
+ */
+import { auditEventSchema } from "@grasp-os/shared/audit";
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import { capabilityErrors, signCapability } from "@grasp-os/shared/capability";
+import type { CapabilityScope } from "@grasp-os/shared/capability";
+import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
+import type {
+  ConnectionPerson,
+  ConnectResult,
+  StartConnection,
+  connectCallSchema,
+} from "@grasp-os/shared/connect";
+import { authoritySchema } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
+import { roleErrors } from "@grasp-os/shared/roles";
+import { runClockTasks } from "@grasp-os/workerflow/clock";
+import { createExecutionContext } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
+import { beforeEach } from "vite-plus/test";
+import type { z } from "zod";
+
+import { clockTasks, report } from "../src/clock.ts";
+import { connections } from "../src/db/schema.ts";
+import Connect from "../src/index.ts";
+import type { Account, fakeProviders } from "./oauth-provider.ts";
+import { acmeDomain, acmeTenant } from "./provider-config.ts";
+
+type ConnectionRow = typeof connections.$inferInsert;
+
+/** The URL of the MCP server behind the test connections. */
+export const serverUrl =
+  "https://backend.composio.dev/v3/mcp/server-mail?user_id=grasp";
+
+/**
+ * The tools an admin allowed on the test connections: every tool the
+ * tests' servers have, and nothing more.
+ */
+export const allowedTools = [
+  "mail.archive",
+  "mail.bounce",
+  "mail.draft",
+  "mail.export",
+  "mail.relay",
+  "mail.list",
+  "mail.mixed",
+  "mail.open",
+  "mail.photo",
+  "mail.read",
+  "mail.search",
+  "mail.send",
+  "mail.unsure",
+];
+
+/**
+ * A shared connection to `serverUrl` allowing `allowedTools`, unless
+ * `fields` say otherwise.
+ */
+export const addConnection = async (
+  fields: Partial<ConnectionRow> = {}
+): Promise<string> => {
+  const id = fields.id ?? `connection-${crypto.randomUUID()}`;
+  const now = new Date();
+  await drizzle(env.DB)
+    .insert(connections)
+    .values({
+      provider: "mail",
+      scope: "shared",
+      status: "active",
+      serverKind: "composio",
+      server: serverUrl,
+      tools: JSON.stringify(allowedTools),
+      createdAt: now,
+      updatedAt: now,
+      ...fields,
+      id,
+    });
+  return id;
+};
+
+/**
+ * An agent acting for `person`: in a workflow run unless `mode` says chat
+ * (`interactive`), where connect holds writes for the person.
+ */
+export const agentFor = (
+  person: string,
+  agentId = "agent-chat",
+  mode: Authority["mode"] = "workflow"
+): Authority =>
+  authoritySchema.parse({
+    subject: { type: "agent", agentId },
+    onBehalfOf: person,
+    mode,
+  });
+
+/** An App's workflow acting for `person`. */
+export const appFor = (person: string, appId = "app-crm"): Authority =>
+  authoritySchema.parse({
+    subject: { type: "app", appId },
+    onBehalfOf: person,
+    mode: "workflow",
+    appVersion: 1,
+  });
+
+/** A call as core states it, with plain string IDs. */
+export type Call = Omit<z.input<typeof connectCallSchema>, "capability">;
+
+/** Where a chat's call comes from, as core signs it for connect to hold. */
+export const chatOrigin: CapabilityScope["origin"] = {
+  permissionId: "permission-mail",
+  context: { type: "chat", workspaceId: "workspace-1", chatId: "chat-1" },
+};
+
+/**
+ * Where a call by `authority` comes from, as core signs it: an agent's
+ * from its chat, an App's from the App.
+ */
+export const originOf = (authority: Authority): CapabilityScope["origin"] =>
+  authority.subject.type === "app"
+    ? {
+        permissionId: "permission-mail",
+        context: { type: "app", appId: authority.subject.appId },
+      }
+    : chatOrigin;
+
+/** The capability core would sign for `call` by `authority`. */
+export const capabilityFor = async (
+  authority: Authority,
+  call: Call,
+  key: string = env.CAPABILITY_SIGNING_KEY,
+  now?: number
+): Promise<string> =>
+  await signCapability(
+    key,
+    authority,
+    { origin: originOf(authority), ...call },
+    now
+  );
+
+/**
+ * What core signs into a capability besides the call itself; the origin
+ * is `originOf` the authority unless it says another.
+ */
+export type Signed = Partial<
+  Pick<
+    CapabilityScope,
+    | "restricted"
+    | "readOnly"
+    | "unattended"
+    | "origin"
+    | "decision"
+    | "heldUntil"
+    | "chatApp"
+    | "mailboxes"
+    | "resources"
+  >
+>;
+
+/**
+ * Makes `call` for `authority`, as core does: with a capability that also
+ * says what `signed` says (whether the caller's context is restricted,
+ * where it comes from), none of which the call itself names.
+ */
+export const callAs = async (
+  authority: Authority,
+  call: Call,
+  signed: Signed = {},
+  connect: Pick<Connect, "call"> = exports.default
+): Promise<ConnectResult> =>
+  await connect.call({
+    ...call,
+    capability: await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
+      origin: originOf(authority),
+      ...call,
+      ...signed,
+    }),
+  });
+
+/**
+ * Connect as a deployment with `vars` in its env instead would run it,
+ * such as without its Composio key: the same Worker, through its RPC
+ * methods.
+ */
+export const connectWith = (vars: Partial<Env>): Connect =>
+  new Connect(createExecutionContext(), { ...env, ...vars });
+
+/**
+ * Runs connect's clock tasks once, as its alarm does every minute, on an
+ * env with `vars`, for now.
+ */
+export const runMaintenance = async (
+  vars: Partial<Env> = {}
+): Promise<void> => {
+  await runClockTasks(
+    { ...env, ...vars },
+    clockTasks,
+    "minute",
+    Date.now(),
+    report
+  );
+};
+
+/** The code connect refused or failed with, or "ok" if it didn't. */
+export const outcome = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "ok";
+  } catch (error) {
+    return (
+      capabilityErrors.codeOf(error) ??
+      connectErrors.codeOf(error) ??
+      connectionErrors.codeOf(error) ??
+      roleErrors.codeOf(error) ??
+      String(error)
+    );
+  }
+};
+
+/**
+ * A new person, as core names them to connect, signed in with Entra: tests
+ * share the database, so each one has people, and accounts, of its own.
+ */
+export const someone = (
+  role: ConnectionPerson["role"] = "user"
+): ConnectionPerson => {
+  const id = crypto.randomUUID();
+  return {
+    userId: `user-${id}`,
+    role,
+    staff: false,
+    email: `person-${id}@acme.test`,
+    accounts: [{ provider: "microsoft", subject: `oid-${id}` }],
+  };
+};
+
+/**
+ * The person's own account at `provider`: the one they sign in with, or,
+ * where they sign in elsewhere, the one with their email.
+ */
+export const ownAccount = (
+  person: ConnectionPerson,
+  provider: Account["provider"] = "microsoft"
+): Account => {
+  const signIn = person.accounts.find((each) => each.provider === provider);
+  return provider === "microsoft"
+    ? {
+        provider,
+        tenant: acmeTenant,
+        subject: signIn?.subject ?? `oid-${person.userId}`,
+        email: person.email,
+      }
+    : {
+        provider,
+        tenant: acmeDomain,
+        subject: signIn?.subject ?? `g-${person.userId}`,
+        email: person.email,
+      };
+};
+
+/** An account nobody signs in with, such as a shared mailbox. */
+export const mailboxAccount = (
+  provider: Account["provider"] = "microsoft"
+): Account => {
+  const id = crypto.randomUUID();
+  return {
+    provider,
+    tenant: provider === "microsoft" ? acmeTenant : acmeDomain,
+    subject: `mailbox-${id}`,
+    email: `mailbox-${id}@acme.test`,
+  };
+};
+
+/** The client's origin, where the provider sends the browser back. */
+export const clientOrigin = "https://acme.grasp.test";
+
+type StartOptions = Partial<Omit<StartConnection, "person">>;
+
+/** Starts connecting, as core does for `person`: the provider URL. */
+export const startAs = async (
+  person: ConnectionPerson,
+  options: StartOptions = {}
+): Promise<URL> => {
+  const provider = options.provider ?? "microsoft";
+  const { url } = await exports.default.startConnection({
+    person,
+    provider,
+    scope: "personal",
+    origin: clientOrigin,
+    tenant: provider === "microsoft" ? acmeTenant : acmeDomain,
+    returnTo: "/integrations",
+    ...options,
+  });
+  return new URL(url);
+};
+
+/** The state a started flow carries through the browser. */
+export const stateOf = (url: URL): string =>
+  url.searchParams.get("state") ?? "";
+
+/**
+ * Connects an account end to end, as `person`'s browser and core would:
+ * start, consent at the provider as `account`, come back with the code.
+ */
+export const connectAccount = async (
+  providers: ReturnType<typeof fakeProviders>,
+  person: ConnectionPerson,
+  account: Account,
+  options: StartOptions = {}
+): Promise<string> => {
+  const url = await startAs(person, { provider: account.provider, ...options });
+  const { connectionId } = await exports.default.finishConnection({
+    person,
+    state: stateOf(url),
+    code: providers.authorize(url.href, account),
+  });
+  return connectionId;
+};
+
+/**
+ * Connect's audit outbox, emptied before each test of the file: `events()`
+ * gives every event the test recorded so far, in the order core takes them.
+ */
+export const auditEvents = () => {
+  beforeEach(async () => {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM audit_outbox"),
+      env.DB.prepare("DELETE FROM audit_outbox_rejected"),
+    ]);
+  });
+  return {
+    events: async (): Promise<AuditEvent[]> => {
+      const { results } = await env.DB.prepare(
+        "SELECT event FROM audit_outbox ORDER BY rowid"
+      ).all<{ event: string }>();
+      return results.map(({ event }) =>
+        auditEventSchema.parse(JSON.parse(event))
+      );
+    },
+  };
+};
+
+/** The places picked on `connectionId` for its sync `feed`, as connect holds them. */
+export const heldPicks = async (
+  connectionId: string,
+  feed: string
+): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT place FROM sync_picks WHERE connection_id = ? AND feed = ?"
+  )
+    .bind(connectionId, feed)
+    .all<{ place: string }>();
+  return results.map(({ place }) => place);
+};

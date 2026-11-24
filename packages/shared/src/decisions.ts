@@ -1,0 +1,211 @@
+import { z } from "zod";
+
+import { defineErrorFamily } from "./errors.ts";
+import type { RunId, WorkflowId, WorkflowResourceId } from "./ids.ts";
+import type { Json } from "./json.ts";
+
+// A decision is a person's answer a workflow run waits for
+// (`step.decision`). Only the people the decision is `from` answer it,
+// signed in, each time checked against who they are then, and never the
+// run's starter, unless `from` is exactly `person:<them>`; a decision link
+// (`/decisions/<id>`) only leads them to it (threat model R8, decision Q5).
+
+/** Who answers a decision, as `decidersSchema` holds it: its pattern. */
+export const decidersPattern =
+  /^(?:person:[\w-]{1,128}|role:(?:admin|builder|user)|team:[\w-]{1,128})$/u;
+
+/**
+ * Who answers a decision: one person (`person:<user ID>`), everyone with
+ * a role (`role:admin`, exactly that role), or everyone in a team
+ * (`team:<team ID>`), as they are when someone answers.
+ */
+export const decidersSchema = z
+  .string()
+  .regex(
+    decidersPattern,
+    'a person ("person:<user ID>"), a role ("role:admin") or a team ("team:<team ID>")'
+  );
+
+/**
+ * What one workflow's decision may ask, as every generator bounds what it
+ * seals and the run host takes it.
+ */
+export const decisionLimits = {
+  /** The people, teams and roles one decision asks. */
+  recipients: 16,
+  /** Its prompt, which people are shown uncut, in characters. */
+  promptLength: 500,
+} as const;
+
+/**
+ * A decision's prompt: text, not blank, at most
+ * `decisionLimits.promptLength` characters. A character is a code point,
+ * as JSON Schema's `maxLength` counts one (and zod's `max`), so a prompt a
+ * workflow's checker takes is one the host asks: an emoji is one, not the
+ * two UTF-16 units JavaScript's `length` counts.
+ */
+export const decisionPromptSchema = z
+  .string()
+  .regex(/\S/u)
+  .max(decisionLimits.promptLength);
+
+/** Why a decision call was refused. */
+export const decisionErrors = defineErrorFamily({
+  "decision.invalid": "That isn't a valid answer to a decision.",
+  "decision.not_found": "There's no such decision.",
+  "decision.forbidden":
+    "You aren't one of the people who answer this decision.",
+  "decision.closed":
+    "This decision has been answered, has timed out, or its run has ended.",
+  "decision.unconfirmed":
+    "This answer wasn't confirmed in Grasp, so it wasn't recorded. Answer again and confirm it.",
+  "decision.conflict":
+    "This decision changed since you opened it. Review it again before you answer.",
+  "decision.withheld":
+    "What this decision asks is withheld, so it can only be rejected.",
+  "decision.unavailable":
+    "What this decision asks can't be shown right now, so it takes no answer yet. Try again in a moment.",
+  "decision.cancelled":
+    "You didn't confirm the answer, so nothing was recorded.",
+  "decision.asking_paused":
+    "This page can't ask you to confirm an answer right now: another is open, you cancelled one moments ago, or you cancelled twice. Reload the page to answer again.",
+});
+
+/**
+ * The most people one decision asks, so asking stays one email each. It
+ * counts only the people who may answer: the run's starter counts only
+ * when `from` is exactly `person:<them>`, never as part of a role or team.
+ */
+export const maxDeciders = 50;
+
+/** Where a decision stands; `closed` once its run ended while it was open. */
+export type DecisionStatus =
+  | "open"
+  | "approved"
+  | "rejected"
+  | "timed_out"
+  | "closed";
+
+/** Why what a decision asks isn't shown (`DecisionView.withheld`). */
+export type DecisionWithheld = "revoked" | "unchecked";
+
+/** A decision as the people who answer it see it. */
+export interface DecisionView {
+  id: string;
+  /** The workflow whose run asks (its `grasp.decision` call). */
+  workflowResource: {
+    id: WorkflowResourceId;
+    name: string;
+  };
+  /**
+   * Present when core confirmed, as the decision was read for its page,
+   * that the reader may open the workflow's own page.
+   */
+  opens?: true;
+  /** The workflow's name. */
+  workflow: WorkflowId;
+  run: RunId;
+  /** What is decided, as the workflow's code describes the step. */
+  description: string;
+  /**
+   * What the decision is about, as the run passed it (the workflow's call
+   * `input`, checked against its decision contract): part of the review
+   * context. None once removed with its run's details.
+   */
+  input?: Json;
+  /**
+   * Present when what it asks isn't shown, its description saying why and
+   * no input with it: `revoked` once its run may no longer read what it
+   * read, when it takes a rejection alone; `unchecked` while that can't be
+   * checked (Grasp can't reach what it needs right now), when it takes no
+   * answer, until a later read shows it.
+   */
+  withheld?: DecisionWithheld;
+  status: DecisionStatus;
+  /** ISO 8601: no answer is taken from then on. */
+  expiresAt: string;
+  /**
+   * The fingerprint of the review context shown here (what is asked, by
+   * which run, until when, of whom): an answer confirmed against another
+   * one is a `decision.conflict`, never an approval of what wasn't seen.
+   */
+  revision: string;
+  /** Who answered, and when; only once answered. */
+  decided?: {
+    by: { userId: string; name: string };
+    at: string;
+  };
+}
+
+/** What a person answers. */
+export interface DecisionAnswerInput {
+  approved: boolean;
+  /**
+   * Anything more the workflow asks for, e.g. `{ comment }`: JSON, at most
+   * 4 KiB. The workflow gets it as it is, as untrusted input.
+   */
+  payload?: Json;
+}
+
+/**
+ * What the trusted host decision UI shows before a person confirms an
+ * answer: the decision as it stands, with its review context, and the
+ * answer as core will record it (`response`). `recorded` when the person
+ * already gave exactly that answer: it is the decision, and isn't asked
+ * for again.
+ */
+export type DecisionReview =
+  | { state: "review"; decision: DecisionView; response: DecisionAnswerInput }
+  | { state: "recorded"; decision: DecisionView };
+
+/**
+ * A one-use confirmation of one answer: minted by the trusted host
+ * decision UI once the person confirmed it, for them, that decision, its
+ * review context and that answer, and taken by the answer that uses it.
+ * Never handed to an App's page.
+ */
+export interface DecisionConfirmation {
+  confirmation: string;
+  /** ISO 8601: no answer takes it from then on. */
+  expiresAt: string;
+}
+
+/**
+ * A signed-in person's decisions. Every call checks the session, and that
+ * the person is one the decision is from, as they are now: never the run's
+ * starter, unless `from` is exactly `person:<them>`.
+ */
+export interface DecisionsApi {
+  /**
+   * The open decisions the person may answer now, latest first: what waits
+   * for their answer (their inbox), an App's workflow's or an independent
+   * one's.
+   */
+  waiting: () => Promise<DecisionView[]>;
+  /** A decision the person may answer. */
+  get: (decision: string) => Promise<DecisionView>;
+  /** What the person confirms before `answer` takes it. */
+  review: (
+    decision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionReview>;
+  /**
+   * Mints the one-use confirmation of `answer`, as reviewed at `revision`,
+   * once the person confirmed it in the trusted host decision UI.
+   */
+  confirm: (
+    decision: string,
+    revision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionConfirmation>;
+  /**
+   * Answers a decision, once, with the confirmation of exactly that
+   * answer: the first answer is the decision. The same answer again, by
+   * the same person, is the recorded decision, needing no confirmation.
+   */
+  answer: (
+    decision: string,
+    answer: DecisionAnswerInput,
+    confirmation?: string
+  ) => Promise<DecisionView>;
+}

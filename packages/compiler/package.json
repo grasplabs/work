@@ -1,0 +1,65 @@
+{
+  "name": "@grasp-os/compiler",
+  "private": true,
+  "description": "App compiler: builds an App's pages into ES modules and CSS, in its own isolate",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "imports": {
+    "#kit": {
+      "types": "./src/kit-module.d.ts"
+    },
+    "#types": {
+      "types": "./src/types-module.d.ts"
+    },
+    "#ultracite-config": {
+      "types": "./src/ultracite-config.d.ts"
+    },
+    "#version": {
+      "types": "./src/version.d.ts",
+      "default": "./dist/version.js"
+    }
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./inputs": "./src/inputs.ts",
+    "./page-imports": "./src/page-imports.ts",
+    "./oxc": "./src/oxc.ts",
+    "./oxc-wasm": "./oxc-wasm/wasm.ts",
+    "./route-tree": "./src/route-tree.ts"
+  },
+  "scripts": {
+    "build": "node build.ts"
+  },
+  "dependencies": {
+    "@grasp-os/app-kit": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
+    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/shared": "workspace:*",
+    "@tanstack/react-router": "catalog:",
+    "@tanstack/router-generator": "catalog:",
+    "@tsrs/wasm": "catalog:",
+    "@tybys/wasm-util": "catalog:",
+    "es-module-lexer": "catalog:",
+    "esbuild-wasm": "catalog:",
+    "lucide-react": "catalog:",
+    "modern-tar": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "resolve.exports": "catalog:",
+    "tailwindcss": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "oxc-parser": "catalog:oxc",
+    "oxfmt": "catalog:oxc",
+    "oxlint": "catalog:oxc",
+    "rolldown": "catalog:",
+    "rolldown-plugin-dts": "catalog:",
+    "ultracite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  }
+}

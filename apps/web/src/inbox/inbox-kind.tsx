@@ -1,0 +1,145 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import {
+  BellIcon,
+  CalendarOffIcon,
+  CircleCheckIcon,
+  CircleHelpIcon,
+  GitCompareArrowsIcon,
+  GlobeIcon,
+  KeyRoundIcon,
+  LockKeyholeIcon,
+  MailWarningIcon,
+  PencilLineIcon,
+  PlayIcon,
+  ScaleIcon,
+  BookOpenIcon,
+  ShieldAlertIcon,
+  SparklesIcon,
+  SplitIcon,
+  WorkflowIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+
+import { AppLogo } from "../connections/app-logo.tsx";
+import type { InboxItem, InboxKind } from "./items.ts";
+
+// The marks of the inbox's items, as the prototype draws them
+// (`components/inbox-kind.tsx`): what each kind is called, its icon, a
+// square for what an item is about, and its kind as a small label.
+
+/** What each kind of item that waits on a person is called, in the inbox. */
+export const kindLabel: Record<InboxKind, MessageDescriptor> = {
+  checkDrawing: msg({
+    message: "Check a workflow",
+    context: "inbox item kind",
+  }),
+  checkProposal: msg({
+    message: "Check a proposal",
+    context: "inbox item kind",
+  }),
+  approveChange: msg({ message: "Change", context: "inbox item kind" }),
+  confirmResult: msg({ message: "Result", context: "inbox item kind" }),
+  conflict: msg({
+    message: "Two answers",
+    context: "inbox item kind: two sources disagree",
+  }),
+  openQuestion: msg({ message: "Open question", context: "inbox item kind" }),
+  unknownAiTool: msg({ message: "AI tool", context: "inbox item kind" }),
+  signInAgain: msg({ message: "Connection", context: "inbox item kind" }),
+  externalDomain: msg({ message: "Domain", context: "inbox item kind" }),
+  heldWrite: msg({ message: "Change", context: "inbox item kind" }),
+  heldStart: msg({ message: "Workflow start", context: "inbox item kind" }),
+  unknownOutcome: msg({
+    message: "Did it happen?",
+    context: "inbox item kind: a change whose answer was lost",
+  }),
+  permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
+  stoppedSchedule: msg({
+    message: "Stopped schedule",
+    context: "inbox item kind",
+  }),
+  workflowChanged: msg({
+    message: "Workflow changed",
+    context:
+      "inbox item kind: another version of a workflow the person's triggers start went live",
+  }),
+  packageNotice: msg({
+    message: "Packages",
+    context: "inbox item kind: what a scan found of approved packages",
+  }),
+  stoppedEvents: msg({
+    message: "Not hearing",
+    context: "inbox item kind: a mailbox or drive connect stopped hearing",
+  }),
+  appMessage: msg({
+    message: "From an App",
+    context: "inbox item kind: something an App told the person",
+  }),
+  bindingApproval: msg({
+    message: "Bindings",
+    context:
+      "inbox item kind: what a workflow reaches, for an admin to approve",
+  }),
+  skillShare: msg({
+    message: "Skill",
+    context: "inbox item kind: a skill someone asked to share with the company",
+  }),
+  decision: msg({ message: "Decision", context: "inbox item kind" }),
+};
+
+export const kindIcon: Record<InboxKind, LucideIcon> = {
+  checkDrawing: WorkflowIcon,
+  checkProposal: GitCompareArrowsIcon,
+  approveChange: PencilLineIcon,
+  confirmResult: CircleCheckIcon,
+  conflict: SplitIcon,
+  openQuestion: CircleHelpIcon,
+  unknownAiTool: SparklesIcon,
+  signInAgain: KeyRoundIcon,
+  externalDomain: GlobeIcon,
+  heldWrite: PencilLineIcon,
+  heldStart: PlayIcon,
+  unknownOutcome: CircleHelpIcon,
+  permissionRequest: LockKeyholeIcon,
+  stoppedSchedule: CalendarOffIcon,
+  workflowChanged: GitCompareArrowsIcon,
+  packageNotice: ShieldAlertIcon,
+  stoppedEvents: MailWarningIcon,
+  appMessage: BellIcon,
+  bindingApproval: LockKeyholeIcon,
+  skillShare: BookOpenIcon,
+  decision: ScaleIcon,
+};
+
+/** The icon of an item's kind, as a square. */
+const KindMark = ({ icon: Icon }: { icon: LucideIcon }) => (
+  <span
+    aria-hidden="true"
+    className="bg-card text-muted-foreground flex size-8 flex-none items-center justify-center rounded-md border"
+  >
+    <Icon className="size-4" />
+  </span>
+);
+
+/** What an item is about, as a square: the app's tile, or the icon of its kind. */
+export const ItemMark = ({ item }: { item: InboxItem }) =>
+  item.logo === undefined ? (
+    <KindMark icon={kindIcon[item.kind]} />
+  ) : (
+    <AppLogo name={item.logo.name} size="sm" />
+  );
+
+/** The kind of an item, as a small label with its icon. */
+export const KindPill = ({ kind }: { kind: InboxKind }) => {
+  const { i18n } = useLingui();
+  const Icon = kindIcon[kind];
+  return (
+    <Badge className="flex-none" variant="outline">
+      <Icon data-icon="inline-start" />
+      {i18n._(kindLabel[kind])}
+    </Badge>
+  );
+};

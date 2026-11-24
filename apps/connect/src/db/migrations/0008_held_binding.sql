@@ -1,0 +1,1 @@
+ALTER TABLE `pending_actions` ADD `binding` text;

@@ -1,0 +1,2103 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
+import { applyPartial } from "@grasp-os/shared/chat";
+import type {
+  ChatMessage,
+  ChatPartial,
+  ChatProvenance,
+  ChatReplyUsage,
+  ChatUpdate,
+} from "@grasp-os/shared/chat";
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import { authoritySchema } from "@grasp-os/shared/permissions";
+import { routerSecretHeader } from "@grasp-os/shared/router";
+import type { CoreApi } from "@grasp-os/shared/rpc";
+import { newWebSocketRpcSession } from "capnweb";
+import { runInDurableObject } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { bindingsFor } from "../src/bindings.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { personOf } from "../src/connections.ts";
+import { workspace } from "../src/durable-objects.ts";
+import { confirmPendingAction } from "../src/pending-actions.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
+import { maxChatsPerPerson } from "../src/workspace.ts";
+import { newTeam } from "./admin-teams.ts";
+import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { connectionIn } from "./contexts.ts";
+import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
+import { mailConnection } from "./mail-connection.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
+import { closeWhenTestEnds } from "./open-sockets.ts";
+import { fullScan } from "./query-plans.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+import { callAuth, openRpc, outcome, signedInApi } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
+
+/** An ISO 8601 time, as a reply keeps when it was said. */
+const isoTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u;
+
+// People's chats, through `/rpc` as the frontend reaches them: each is its
+// person's alone, is kept in the workspace's object over a restart, and
+// streams to whoever follows it, who picks the stream up again after a
+// lost connection or a reload. The ways it can fail come first: someone
+// else reads, renames, deletes, asks in, stops or follows a chat; a
+// follower misses or repeats a message on reconnecting; a reply is lost
+// when nobody watches or the object restarts; a turn that stopped short
+// looks like one still running; a deleted chat leaves writes nobody can
+// decide, or goes unrecorded.
+
+const idp = mockIdp();
+
+/** A member signed in on a connection of their own, and their chats. */
+const person = async () => {
+  const signedIn = await signedInApi(idp, "user");
+  return { ...signedIn, chats: signedIn.api.chats };
+};
+type Person = Awaited<ReturnType<typeof person>>;
+
+/** The object that holds `someone`'s chats. */
+const objectOf = ({ userId }: { userId: string }) =>
+  workspace(env, personalWorkspaceId(userId));
+
+/** Has the provider answer `someone`'s chats with `replies`. */
+const answering = async (
+  someone: { userId: string },
+  ...replies: ProviderReply[]
+) => {
+  const provider = await fakeProvider(...replies);
+  return provider;
+};
+
+/** Keeps every chat's agent as an admin would have changed it. */
+const keepAgent = async ({
+  name,
+  state,
+}: {
+  name: string;
+  state: "on" | "paused";
+}): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO agents
+       (id, name, face, job, model_role, state, made_by, made_at, changed_by, changed_at)
+     VALUES (?, ?, 'stephen', 'Helps.', NULL, ?, 'admin', ?, 'admin', ?)`
+  )
+    .bind(chatAgentId, name, state, Date.now(), Date.now())
+    .run();
+};
+
+/** A Workspace object's env, to point it elsewhere. */
+const envOf = (instance: object): object => {
+  const objectEnv: unknown = Reflect.get(instance, "env");
+  if (typeof objectEnv !== "object" || objectEnv === null) {
+    throw new TypeError("The Workspace object has no env");
+  }
+  return objectEnv;
+};
+
+/**
+ * A page of the person signed in as `cookie`, connected as a browser's
+ * is: a request of its own, which ends once the page closes (a reload,
+ * a tab shut), not with the test's.
+ */
+const pageOf = async (cookie: string) => {
+  const response = await exports.default.fetch("https://core/rpc", {
+    headers: {
+      Upgrade: "websocket",
+      Origin: clientOrigin,
+      cookie,
+      [routerSecretHeader]: env.ROUTER_SECRET,
+    },
+  });
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error(`Expected a WebSocket, got ${response.status}`);
+  }
+  socket.accept();
+  closeWhenTestEnds(socket);
+  const core = newWebSocketRpcSession<CoreApi>(socket);
+  return {
+    chats: core.authenticate().chats,
+    close: () => {
+      socket.close();
+    },
+  };
+};
+
+/** Follows a chat, keeping every update. */
+/**
+ * Whether `message` is the recall before a question (turn-recall.ts names
+ * its calls `recall_…`): a step of its own every turn shows, which these
+ * tests of how a chat streams leave aside (turn-recall.test.ts holds it).
+ */
+const ofRecall = (message: ChatMessage): boolean =>
+  (message.role === "result" && message.callId.startsWith("recall_")) ||
+  (message.role === "assistant" &&
+    message.text === "" &&
+    message.code.length === 0 &&
+    message.tools.length > 0 &&
+    message.tools.every(({ callId }) => callId.startsWith("recall_")));
+
+const follow = async (
+  chats: Person["chats"],
+  chatId: string,
+  after: number | null = null
+) => {
+  const updates: ChatUpdate[] = [];
+  // Put together as the page does.
+  let partial: ChatPartial | null = null;
+  let provenance: ChatProvenance | undefined;
+  const subscription = await chats.watch(chatId, after, (update) => {
+    updates.push(update);
+    partial = applyPartial(partial, update.partial);
+    provenance = update.provenance ?? provenance;
+  });
+  return {
+    updates,
+    subscription,
+    /** Every message it was sent, in the order they came, but the recall's. */
+    messages: () =>
+      updates.flatMap(({ messages }) =>
+        messages.filter((message) => !ofRecall(message))
+      ),
+    /** The chat as the updates so far show it. */
+    now: () => {
+      const last = updates.at(-1);
+      return last === undefined
+        ? undefined
+        : {
+            running: last.running,
+            stopped: last.stopped,
+            held: last.held,
+            partial,
+            provenance,
+          };
+    },
+  };
+};
+type Follower = Awaited<ReturnType<typeof follow>>;
+
+/** Waits until the follower's chat has ended its turn. */
+const settled = async (follower: Follower) => {
+  await vi.waitFor(
+    () => {
+      expect(follower.now()?.running).toBeFalsy();
+      expect(follower.messages().at(-1)?.role).toBe("assistant");
+    },
+    { timeout: 10_000 }
+  );
+};
+
+/** What the person reads of the messages: their role and text. */
+const shown = (follower: Follower) =>
+  follower.messages().map((message) => ({
+    role: message.role,
+    text: message.text,
+  }));
+
+/** What the last message the person read thought, when it is an answer. */
+const thought = (messages: readonly ChatMessage[]) => {
+  const answer = messages.at(-1);
+  return answer?.role === "assistant" ? answer.reasoning : undefined;
+};
+
+/** Anthropic's models, as pi's catalog gives them. */
+const anthropicModels: Readonly<Record<string, Model<Api>>> = ANTHROPIC_MODELS;
+
+/** The chats' model's context window, as its provider's catalog gives it. */
+const modelWindow =
+  anthropicModels[model.slice(model.indexOf("/") + 1)]?.contextWindow;
+
+/**
+ * A reply's usage as the gateway's record of its request puts it: the
+ * prompt with the cache's tokens, the model's window, and whether the
+ * whole prompt fits in it.
+ */
+const usedOf = (usage: ChatReplyUsage | undefined) => {
+  if (usage === undefined) {
+    return null;
+  }
+  const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+  return {
+    prompt,
+    output: usage.output,
+    cost: usage.cost,
+    window: usage.contextWindow,
+    fits: prompt < (usage.contextWindow ?? 0),
+  };
+};
+
+describe("chats", () => {
+  it("are kept per person: made, listed newest first, renamed and deleted", async () => {
+    const ann = await person();
+    const first = await ann.chats.create("Invoices");
+    const second = await ann.chats.create("  Travel  ");
+    await ann.chats.rename(first.id, "Invoices of May");
+
+    await expect(ann.chats.list()).resolves.toMatchObject([
+      { id: second.id, title: "Travel", running: false },
+      { id: first.id, title: "Invoices of May", running: false },
+    ]);
+    await expect(
+      Promise.all([
+        outcome(ann.chats.create(" ")),
+        outcome(ann.chats.rename(first.id, "x".repeat(201))),
+      ])
+    ).resolves.toStrictEqual(["agent.invalid_title", "agent.invalid_title"]);
+
+    await ann.chats.remove(first.id);
+    await expect(ann.chats.list()).resolves.toMatchObject([{ id: second.id }]);
+    await expect(outcome(follow(ann.chats, first.id))).resolves.toBe(
+      "agent.chat_not_found"
+    );
+  });
+
+  it("are archived by their person alone: out of the list, listed when asked, opened as ever, and back once unarchived, each recorded once", async () => {
+    const ann = await person();
+    const ben = await person();
+    const kept = await ann.chats.create("Kept");
+    const old = await ann.chats.create("Old trip");
+
+    await ann.chats.archive(old.id);
+    // Archiving it again changes nothing, and records nothing more.
+    await ann.chats.archive(old.id);
+    await expect(
+      Promise.all([
+        outcome(ben.chats.archive(old.id)),
+        outcome(ben.chats.unarchive(old.id)),
+      ])
+    ).resolves.toStrictEqual(["agent.chat_not_found", "agent.chat_not_found"]);
+    const listed = {
+      list: await ann.chats.list(),
+      archived: await ann.chats.list({ archived: true }),
+      opened: await ann.chats.summary(old.id),
+    };
+    await ann.chats.unarchive(old.id);
+
+    expect({
+      list: listed.list.map(({ id }) => id),
+      archived: listed.archived.map(({ id, archived }) => ({ id, archived })),
+      opened: listed.opened.archived,
+    }).toStrictEqual({
+      list: [kept.id],
+      archived: [{ id: old.id, archived: true }],
+      opened: true,
+    });
+    await expect(ann.chats.list()).resolves.toMatchObject([
+      { id: old.id, archived: false },
+      { id: kept.id, archived: false },
+    ]);
+    await expect(ann.chats.list({ archived: true })).resolves.toStrictEqual([]);
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(({ target }) => target?.id === old.id)
+            .map(({ action, actor, detail }) => ({
+              action,
+              actor,
+              project: detail?.project,
+            }))
+        ).toStrictEqual([
+          {
+            action: "chat.created",
+            actor: { type: "person", userId: ann.userId },
+            project: undefined,
+          },
+          // In no project: recorded as in none.
+          {
+            action: "chat.archived",
+            actor: { type: "person", userId: ann.userId },
+            project: null,
+          },
+          {
+            action: "chat.unarchived",
+            actor: { type: "person", userId: ann.userId },
+            project: null,
+          },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("are filed in a project by their person alone, listed there for them only while they are in it, and taken out again, each recorded once", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const ann = await person();
+    const ben = await person();
+    const cy = await person();
+    const { id: project } = await owner.api.projects.create({
+      name: "Year-end close",
+      description: "",
+      icon: "folder",
+    });
+    for (const { userId } of [ann, ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await owner.api.projects.addMember(project, {
+        type: "person",
+        id: userId,
+        role: "user",
+      });
+    }
+    const filed = await ann.chats.create("Accruals");
+    const kept = await ann.chats.create("Lunch");
+    const cys = await cy.chats.create("Elsewhere");
+
+    await ann.chats.setProject(filed.id, project);
+    // Filing it again changes nothing, and records nothing more.
+    await ann.chats.setProject(filed.id, project);
+    const refused = await Promise.all([
+      // Someone else in the project can't file, or take out, her chat.
+      outcome(ben.chats.setProject(filed.id, null)),
+      outcome(ben.chats.setProject(kept.id, project)),
+      // Someone outside it can neither file in it nor list it.
+      outcome(cy.chats.setProject(cys.id, project)),
+      outcome(cy.chats.list({ project })),
+      // A malformed ID is a project nobody is in, wherever it is given.
+      outcome(ann.chats.setProject(kept.id, "not-a-project")),
+      outcome(ann.chats.list({ project: "not-a-project" })),
+    ]);
+    const listed = {
+      ann: await ann.chats.list({ project }),
+      ben: await ben.chats.list({ project }),
+      annAll: await ann.chats.list(),
+    };
+    await ann.chats.setProject(filed.id, null);
+    const after = await ann.chats.list({ project });
+    // Once out of the project, she no longer lists it, though her chat
+    // filed there stays hers, and she can still take it out.
+    await ann.chats.setProject(filed.id, project);
+    await owner.api.projects.removeMember(project, {
+      type: "person",
+      id: ann.userId,
+    });
+    const stillOwn = await ann.chats.list();
+    const left = {
+      listed: await outcome(ann.chats.list({ project })),
+      own: stillOwn.map(({ id }) => id),
+      unfiled: await outcome(ann.chats.setProject(filed.id, null)),
+    };
+
+    expect({
+      refused,
+      ann: listed.ann.map(({ id }) => id),
+      ben: listed.ben.map(({ id }) => id),
+      annAll: listed.annAll.map(({ id }) => id),
+      after: after.map(({ id }) => id),
+      left,
+    }).toStrictEqual({
+      refused: [
+        "agent.chat_not_found",
+        "agent.chat_not_found",
+        "project.not_found",
+        "project.not_found",
+        "project.not_found",
+        "project.not_found",
+      ],
+      ann: [filed.id],
+      ben: [],
+      annAll: [kept.id, filed.id],
+      after: [],
+      left: {
+        listed: "project.not_found",
+        own: [kept.id, filed.id],
+        unfiled: "ok",
+      },
+    });
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                target?.id === filed.id && action !== "chat.created"
+            )
+            .map(({ action, actor, detail }) => ({
+              action,
+              actor,
+              project: detail?.project,
+            }))
+        ).toStrictEqual([
+          {
+            action: "chat.filed",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+          {
+            action: "chat.unfiled",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+          {
+            action: "chat.filed",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+          {
+            action: "chat.unfiled",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("are filed by someone in a project through a team, listed there archived only when asked, and moved straight to another, which records where from", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "builder");
+    const dee = await person();
+    const team = await newTeam(admin, [dee]);
+    const [first, second] = await Promise.all(
+      ["Year-end close", "Audit"].map(
+        async (name) =>
+          await owner.api.projects.create({
+            name,
+            description: "",
+            icon: "folder",
+          })
+      )
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Expected both projects");
+    }
+    for (const { id } of [first, second]) {
+      // oxlint-disable-next-line no-await-in-loop -- one project at a time
+      await owner.api.projects.addMember(id, {
+        type: "team",
+        id: team,
+        role: "user",
+      });
+    }
+    const open = await dee.chats.create("Accruals");
+    const done = await dee.chats.create("Last year's close");
+    await dee.chats.setProject(open.id, first.id);
+    await dee.chats.setProject(done.id, first.id);
+    await dee.chats.archive(done.id);
+    // Archived too, but in no project: never in a project's archived list.
+    const loose = await dee.chats.create("Old notes");
+    await dee.chats.archive(loose.id);
+    const inFirst = {
+      listed: await dee.chats.list({ project: first.id }),
+      archived: await dee.chats.list({ project: first.id, archived: true }),
+    };
+    await dee.chats.setProject(open.id, second.id);
+    const moved = {
+      first: await dee.chats.list({ project: first.id }),
+      second: await dee.chats.list({ project: second.id }),
+    };
+
+    expect({
+      listed: inFirst.listed.map(({ id }) => id),
+      archived: inFirst.archived.map(({ id }) => id),
+      first: moved.first.map(({ id }) => id),
+      second: moved.second.map(({ id }) => id),
+    }).toStrictEqual({
+      listed: [open.id],
+      archived: [done.id],
+      first: [],
+      second: [open.id],
+    });
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                target?.id === open.id && action === "chat.filed"
+            )
+            .map(({ detail }) => ({
+              project: detail?.project,
+              from: detail?.from,
+            }))
+        ).toStrictEqual([
+          { project: first.id, from: undefined },
+          { project: second.id, from: first.id },
+        ]);
+        // Archived where they were filed: in the project, or in none.
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                (target?.id === done.id || target?.id === loose.id) &&
+                action === "chat.archived"
+            )
+            .map(({ target, detail }) => ({
+              chat: target?.id,
+              project: detail?.project,
+            }))
+        ).toStrictEqual([
+          { chat: done.id, project: first.id },
+          { chat: loose.id, project: null },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("are listed by their latest message: a chat just continued comes first", async () => {
+    const ann = await person();
+    const older = await ann.chats.create("Invoices");
+    const newer = await ann.chats.create("Travel");
+    // Before any message, each is as active as it is old.
+    const made = await ann.chats.list();
+    expect(new Map(made.map(({ id, lastAt }) => [id, lastAt]))).toStrictEqual(
+      new Map([
+        [newer.id, newer.createdAt],
+        [older.id, older.createdAt],
+      ])
+    );
+
+    await answering(ann, says("Noted."));
+    const follower = await follow(ann.chats, older.id);
+    await ann.chats.send(older.id, { text: "Any news?", model });
+    await settled(follower);
+    const answered = follower.messages().at(-1)?.at;
+
+    const listed = await ann.chats.list();
+    expect(listed).toMatchObject([
+      { id: older.id, createdAt: older.createdAt, lastAt: answered },
+      { id: newer.id, lastAt: newer.createdAt },
+    ]);
+  });
+
+  it("are recorded as their person makes, renames and deletes them, and a deleted one's held writes are rejected", async () => {
+    const ann = await person();
+    const ben = await person();
+    const admin = await signedInApi(idp, "admin");
+    const mail = await mailConnection();
+    // The workspace's agent may send mail, held for its person each time:
+    // one grant, for everyone's chats, each in its person's own object.
+    const agent = { type: "agent" as const, agentId: chatAgentId };
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+    /** The chat's agent asks to send a mail: connect holds it for its person. */
+    const holdMail = async (
+      { userId }: Person,
+      chatId: string
+    ): Promise<string> => {
+      const bindings = await bindingsFor(
+        env,
+        authoritySchema.parse({
+          subject: agent,
+          onBehalfOf: userId,
+          mode: "interactive",
+        }),
+        {
+          type: "chat",
+          workspaceId: personalWorkspaceId(userId),
+          chatId: chatIdSchema.parse(chatId),
+        }
+      );
+      const result = await connectionIn(bindings, "MAIL")?.call(
+        "mail.send",
+        { to: "ben@acme.test", subject: `Invoice ${chatId}` },
+        { idempotencyKey: `chat:${crypto.randomUUID()}` }
+      );
+      return result?.pending?.id ?? "not held";
+    };
+
+    let chat = "";
+    let other = "";
+    let held: string[] = [];
+    const { id: benChat } = await ben.chats.create("Ben's");
+    const bens = await holdMail(ben, benChat);
+    ({ id: chat } = await ann.chats.create("Invoices for Ben"));
+    ({ id: other } = await ann.chats.create("Other"));
+    await ann.chats.rename(chat, "Invoices of May");
+    held = [
+      await holdMail(ann, chat),
+      await holdMail(ann, chat),
+      await holdMail(ann, other),
+    ];
+    await ann.chats.remove(chat);
+    // Each object delivers its chats' events to the log a moment after.
+    const recorded = await vi.waitFor(
+      async () => {
+        const all = await allEvents();
+        const events = all.filter(
+          ({ action, target }) =>
+            action.startsWith("chat.") &&
+            (target?.id === chat || target?.id === other)
+        );
+        expect(events).toHaveLength(4);
+        return events;
+      },
+      { timeout: 10_000 }
+    );
+
+    // The chat's two writes were rejected; Ann's other chat's and Ben's
+    // still wait, and nothing was sent.
+    const waiting = await ann.api.pendingActions.list();
+    const bensWaiting = await ben.api.pendingActions.list();
+    expect({
+      waiting: waiting.map(({ id }) => id),
+      bensWaiting: bensWaiting.map(({ id }) => id),
+      sent: await mail.did(),
+    }).toStrictEqual({
+      waiting: [held[2]],
+      bensWaiting: [bens],
+      sent: { calls: 0, sent: [] },
+    });
+    // Each recorded as the person's own, on the chat, never with its title.
+    expect(
+      recorded
+        .filter(({ action }) => action.startsWith("chat."))
+        .map(({ actor, action, target, detail }) => ({
+          actor,
+          action,
+          target,
+          detail,
+        }))
+    ).toStrictEqual([
+      {
+        actor: { type: "person", userId: ann.userId },
+        action: "chat.created",
+        target: { type: "chat", id: chat },
+        detail: { workspace: personalWorkspaceId(ann.userId) },
+      },
+      {
+        actor: { type: "person", userId: ann.userId },
+        action: "chat.created",
+        target: { type: "chat", id: other },
+        detail: { workspace: personalWorkspaceId(ann.userId) },
+      },
+      {
+        actor: { type: "person", userId: ann.userId },
+        action: "chat.renamed",
+        target: { type: "chat", id: chat },
+        detail: { workspace: personalWorkspaceId(ann.userId) },
+      },
+      {
+        actor: { type: "person", userId: ann.userId },
+        action: "chat.deleted",
+        target: { type: "chat", id: chat },
+        detail: { workspace: personalWorkspaceId(ann.userId), declined: 2 },
+      },
+    ]);
+    // Connect recorded each rejection, as the person's.
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        const declined = events.filter(
+          ({ action, detail }) =>
+            action === "connection.action.declined" &&
+            held.includes(String(detail.pendingActionId))
+        );
+        expect(
+          new Set(declined.map(({ detail }) => detail.pendingActionId))
+        ).toStrictEqual(new Set([held[0], held[1]]));
+        expect(declined).toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("reject every write a deleted chat's agent holds, however many newer ones wait elsewhere", async () => {
+    const ann = await person();
+    const workspaceId = personalWorkspaceId(ann.userId);
+    const chat = await ann.chats.create("Old writes");
+    const elsewhere = crypto.randomUUID();
+    /** A held write of Ann's from chat `chatId`, held `at`, as connect keeps one. */
+    const held = (chatId: string, at: number) => {
+      const id = crypto.randomUUID();
+      return {
+        id,
+        insert: connectDb()
+          .prepare(
+            "INSERT INTO pending_actions (id, subject_type, subject_id, on_behalf_of, mode, connection_id, action, idempotency_key, input, input_hash, permission_id, context, restricted, created_at) VALUES (?, 'agent', ?, ?, 'interactive', ?, 'mail.send', ?, '{}', ?, ?, ?, 0, ?)"
+          )
+          .bind(
+            id,
+            chatAgentId,
+            ann.userId,
+            `connection-${crypto.randomUUID()}`,
+            `chat:${id}`,
+            "0".repeat(64),
+            crypto.randomUUID(),
+            JSON.stringify({ type: "chat", workspaceId, chatId }),
+            at
+          ),
+      };
+    };
+    // More from the chat than connect declines in one round, then more
+    // than a list of held writes holds, all newer, from another chat.
+    const now = Date.now();
+    const old = Array.from({ length: 150 }, (_, index) =>
+      held(chat.id, now + index)
+    );
+    const newer = Array.from({ length: 205 }, (_, index) =>
+      held(elsewhere, now + 1000 + index)
+    );
+    await connectDb().batch([...old, ...newer].map(({ insert }) => insert));
+
+    await ann.chats.remove(chat.id);
+
+    const left = await connectDb()
+      .prepare("SELECT id FROM pending_actions WHERE on_behalf_of = ?")
+      .bind(ann.userId)
+      .all<{ id: string }>();
+    const ids = new Set(left.results.map(({ id }) => id));
+    expect({
+      oldLeft: old.filter(({ id }) => ids.has(id)).length,
+      newerLeft: newer.filter(({ id }) => ids.has(id)).length,
+    }).toStrictEqual({ oldLeft: 0, newerLeft: newer.length });
+  });
+
+  it("tell a follower the moment its agent has a write held, mid-turn", async () => {
+    const ann = await person();
+    const admin = await signedInApi(idp, "admin");
+    const mail = await mailConnection();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "HELD_MAIL",
+    });
+    const { reply, release } = pausedReply(says("It waits for you."), 2);
+    await answering(
+      ann,
+      codeStep(
+        'export default async (self, env) => await env.connections.call("HELD_MAIL", "mail.send", { to: "ben@acme.test", subject: "Invoice" });'
+      ),
+      reply
+    );
+    const chat = await ann.chats.create("Held");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Send Ben the invoice.", model });
+
+    // Still answering: the follower already knows a write waits.
+    await vi.waitFor(
+      () => {
+        expect(follower.now()).toMatchObject({ running: true, held: 1 });
+      },
+      { timeout: 10_000 }
+    );
+    await expect(ann.api.pendingActions.list()).resolves.toHaveLength(1);
+    release();
+    await settled(follower);
+  });
+
+  it("tell their agent, on its next turn, how each write it had held ended: confirmed, declined, unknown or failed", async () => {
+    const ann = await person();
+    const admin = await signedInApi(idp, "admin");
+    // Five writes, each on a mail connection of its own; the third one's
+    // server refuses the mail once it is confirmed (on Composio, connect
+    // can't tell that from a refusal after acting, so it is unknown too),
+    // connect fails unexpectedly on the fourth once it took it, and the
+    // fifth's server sends the mail and loses its answer.
+    const mails = {
+      OUTCOME_SENT: await mailConnection(),
+      OUTCOME_DECLINED: await mailConnection(),
+      OUTCOME_FAILED: await mailConnection(["invalid"]),
+      OUTCOME_BROKEN: await mailConnection(),
+      OUTCOME_UNKNOWN: await mailConnection(["lost"]),
+    };
+    for (const [binding, { id }] of Object.entries(mails)) {
+      // oxlint-disable-next-line no-await-in-loop -- one grant after the other
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId: chatAgentId },
+        object: { type: "connection", connectionId: id },
+        actions: ["mail.send"],
+        binding,
+      });
+    }
+    await answering(
+      ann,
+      codeStep(
+        `export default async (self, env) => { for (const name of ${JSON.stringify(Object.keys(mails))}) { await env.connections.call(name, "mail.send", { to: "ben@acme.test", subject: name }); } };`
+      ),
+      says("They wait for you.")
+    );
+    const chat = await ann.chats.create("Outcomes");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Send Ben the invoices.", model });
+    await settled(follower);
+    const waiting = await ann.api.pendingActions.list();
+    const heldOn = (connection: { id: string }) => {
+      const held = waiting.find(
+        ({ connectionId }) => connectionId === connection.id
+      );
+      if (held === undefined) {
+        throw new Error("Expected a held write on the connection");
+      }
+      return held;
+    };
+    const sent = heldOn(mails.OUTCOME_SENT);
+    const declined = heldOn(mails.OUTCOME_DECLINED);
+    const failed = heldOn(mails.OUTCOME_FAILED);
+    const broken = heldOn(mails.OUTCOME_BROKEN);
+    const unknown = heldOn(mails.OUTCOME_UNKNOWN);
+    // Connect finds a stored answer to the fourth write's call it can't
+    // read, once it has taken the write: a plain error, not one of its own.
+    await connectDb()
+      .prepare(
+        "INSERT OR REPLACE INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, output, provenance, created_at, resource) SELECT subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, 'done', 'null', 'not JSON', ?, NULL FROM pending_actions WHERE id = ?"
+      )
+      .bind(Date.now(), broken.id)
+      .run();
+
+    const decided = {
+      // Refused, for another input than the one shown: it waits on, and
+      // the agent hears nothing of it.
+      refused: await outcome(
+        ann.api.pendingActions.confirm(sent.id, "0".repeat(64))
+      ),
+      sent: await outcome(
+        ann.api.pendingActions.confirm(sent.id, sent.inputHash)
+      ),
+      declined: await outcome(ann.api.pendingActions.decline(declined.id)),
+      failed: await outcome(
+        ann.api.pendingActions.confirm(failed.id, failed.inputHash)
+      ),
+      broken: await outcome(
+        ann.api.pendingActions.confirm(broken.id, broken.inputHash)
+      ),
+      unknown: await outcome(
+        ann.api.pendingActions.confirm(unknown.id, unknown.inputHash)
+      ),
+    };
+    // No turn started by itself; the next question's request holds each
+    // outcome, which the person isn't shown.
+    const gateway = await answering(ann, says("Noted."));
+    await ann.chats.send(chat.id, { text: "What happened?", model });
+    await vi.waitFor(
+      () => {
+        expect(follower.messages().at(-1)).toMatchObject({ text: "Noted." });
+      },
+      { timeout: 10_000 }
+    );
+    const asked = JSON.stringify(gateway.requests[0]?.body);
+
+    expect({
+      decided,
+      requests: gateway.requests.length,
+      told: [
+        `(pending ID ${sent.id}), was decided. The person confirmed it and it was carried out. Don't ask for it again.`,
+        `(pending ID ${declined.id}), was decided. The person declined it: it was not carried out and won't be.`,
+        `(pending ID ${failed.id}), was decided. The person confirmed it and it was sent, but whether it took effect is unknown`,
+        `(pending ID ${broken.id}), was decided. The person confirmed it, but carrying it out failed`,
+        // Never told it failed: it may have been sent.
+        `(pending ID ${unknown.id}), was decided. The person confirmed it and it was sent, but whether it took effect is unknown`,
+      ].map((text) => asked.includes(text)),
+      // Each names the call that reads how it ended (quoted, in JSON).
+      readWith: [sent, declined, failed, broken, unknown].map(({ id }) =>
+        asked.includes(`env.connections.outcome(\\"${id}\\")`)
+      ),
+      outcomes: asked.split("was decided.").length - 1,
+      shown: shown(follower).filter(({ text }) => text.includes("was decided"))
+        .length,
+      mail: [
+        await mails.OUTCOME_SENT.did(),
+        await mails.OUTCOME_DECLINED.did(),
+        await mails.OUTCOME_BROKEN.did(),
+        await mails.OUTCOME_UNKNOWN.did(),
+      ],
+    }).toStrictEqual({
+      decided: {
+        refused: "connect.pending_changed",
+        sent: "ok",
+        declined: "ok",
+        failed: "connect.outcome_unknown",
+        broken: "connect.action_failed",
+        unknown: "connect.outcome_unknown",
+      },
+      requests: 1,
+      told: [true, true, true, true, true],
+      readWith: [true, true, true, true, true],
+      outcomes: 5,
+      shown: 0,
+      mail: [
+        { calls: 1, sent: [{ to: "ben@acme.test", subject: "OUTCOME_SENT" }] },
+        { calls: 0, sent: [] },
+        { calls: 0, sent: [] },
+        {
+          calls: 1,
+          sent: [{ to: "ben@acme.test", subject: "OUTCOME_UNKNOWN" }],
+        },
+      ],
+    });
+  });
+
+  it("tell their agent one outcome of a write when a refused confirmation races the one that runs it", async () => {
+    const ann = await person();
+    const admin = await signedInApi(idp, "admin");
+    const mail = await mailConnection();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "RACED_MAIL",
+    });
+    await answering(
+      ann,
+      codeStep(
+        'export default async (self, env) => await env.connections.call("RACED_MAIL", "mail.send", { to: "ben@acme.test", subject: "Raced" });'
+      ),
+      says("It waits for you.")
+    );
+    const chat = await ann.chats.create("Raced");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Send Ben the mail.", model });
+    await settled(follower);
+    const [held] = await ann.api.pendingActions.list();
+    if (held === undefined) {
+      throw new Error("Expected a held write");
+    }
+    // Connect refuses the first confirmation (another input than shown)
+    // while the action still waits; before core hears of it, the second
+    // confirmation runs the action.
+    let confirmed: string | undefined;
+    const connect = env.CONNECT;
+    const racing: Env = {
+      ...env,
+      CONNECT: new Proxy(connect, {
+        get: (target, property) => {
+          if (property === "confirmAction") {
+            return async (
+              request: Parameters<typeof connect.confirmAction>[0]
+            ) => {
+              try {
+                return await target.confirmAction(request);
+              } finally {
+                confirmed = await outcome(
+                  ann.api.pendingActions.confirm(held.id, held.inputHash)
+                );
+              }
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const refused = await outcome(
+      confirmPendingAction(
+        racing,
+        await ann.api.whoami(),
+        held.id,
+        "0".repeat(64)
+      )
+    );
+
+    const gateway = await answering(ann, says("Noted."));
+    await ann.chats.send(chat.id, { text: "Was it sent?", model });
+    await vi.waitFor(
+      () => {
+        expect(follower.messages().at(-1)).toMatchObject({ text: "Noted." });
+      },
+      { timeout: 10_000 }
+    );
+    const asked = JSON.stringify(gateway.requests[0]?.body);
+    expect({
+      refused,
+      confirmed,
+      outcomes: asked.split("was decided.").length - 1,
+      told: asked.includes(
+        `(pending ID ${held.id}), was decided. The person confirmed it and it was carried out.`
+      ),
+      sent: await mail.did(),
+    }).toStrictEqual({
+      refused: "connect.pending_changed",
+      confirmed: "ok",
+      outcomes: 1,
+      told: true,
+      sent: { calls: 1, sent: [{ to: "ben@acme.test", subject: "Raced" }] },
+    });
+  });
+
+  it("are refused to anyone but their person, as if there were none", async () => {
+    const ann = await person();
+    const ben = await person();
+    const gateway = await answering(ann, says("Hi, Ann."));
+    const chat = await ann.chats.create("Mine");
+
+    await expect(ben.chats.list()).resolves.toStrictEqual([]);
+    await expect(
+      Promise.all([
+        outcome(ben.chats.rename(chat.id, "Ben's now")),
+        outcome(ben.chats.remove(chat.id)),
+        outcome(ben.chats.send(chat.id, { text: "Hi.", model })),
+        outcome(ben.chats.cancel(chat.id)),
+        outcome(follow(ben.chats, chat.id)),
+      ])
+    ).resolves.toStrictEqual(
+      Array.from({ length: 5 }, () => "agent.chat_not_found")
+    );
+    // Nothing reached the model, and the chat is as Ann left it.
+    expect(gateway.requests).toHaveLength(0);
+    await expect(ann.chats.list()).resolves.toMatchObject([
+      { id: chat.id, title: "Mine" },
+    ]);
+
+    // Ann's own question is answered.
+    const annSees = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Hi.", model });
+    await settled(annSees);
+    expect(shown(annSees)).toStrictEqual([
+      { role: "user", text: "Hi." },
+      { role: "assistant", text: "Hi, Ann." },
+    ]);
+  });
+
+  it.each([
+    ["answered", says("Hi, Ann.")],
+    // Breaks off with its prompt counted and not its answer: the gateway
+    // estimates the answer's tokens, and so does the reply.
+    ["broken off", { ...says("Hi, Ann, here is a longer answer."), cut: 12 }],
+    // Its prompt partly written to the provider's cache: counted apart.
+    ["cached", { ...says("Hi, Ann."), cacheWrite1h: 150 }],
+  ])(
+    "show what each reply used as the model gateway counted it, %s: its tokens, its cost and the model's window",
+    async (_case, answer) => {
+      const ann = await person();
+      await answering(ann, answer);
+      const chat = await ann.chats.create("Usage");
+      const follower = await follow(ann.chats, chat.id);
+
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      const reply = follower.messages().at(-1);
+      // The gateway's own record of the request.
+      const events = await allEvents();
+      const counted = events.find(
+        ({ action, actor }) =>
+          action === "model.call" &&
+          actor.type === "agent" &&
+          actor.onBehalfOf === ann.userId
+      );
+
+      expect(
+        reply?.role === "assistant" ? usedOf(reply.usage) : null
+      ).toStrictEqual({
+        prompt: counted?.model?.inputTokens,
+        output: counted?.model?.outputTokens,
+        cost: counted?.cost?.amount,
+        window: modelWindow,
+        fits: true,
+      });
+      expect(counted?.cost?.amount).toBeGreaterThan(0);
+      // The cache's tokens apart from the prompt's own, as the provider
+      // counted them.
+      const usage = reply?.role === "assistant" ? reply.usage : undefined;
+      expect((usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0)).toBe(
+        answer.cacheWrite1h ?? 0
+      );
+    }
+  );
+
+  it("show no usage for a reply that used nothing: the provider refused it", async () => {
+    const ann = await person();
+    await answering(ann, { status: 400, errorType: "invalid_request_error" });
+    const chat = await ann.chats.create("Refused");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, { text: "Hi.", model });
+    await settled(follower);
+
+    const reply = follower.messages().at(-1);
+    expect({
+      end: reply?.role === "assistant" ? reply.end : null,
+      usage: reply !== undefined && "usage" in reply,
+    }).toStrictEqual({ end: "failed", usage: false });
+  });
+
+  it("say why a reply failed by the model gateway's code, never its words or the provider's", async () => {
+    const ann = await person();
+    await answering(
+      ann,
+      { status: 400, errorType: "invalid_request_error" },
+      // Refused for its rate, the provider's SDK retries and all.
+      ...Array.from({ length: 3 }, () => ({
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after": "1" },
+      }))
+    );
+    const failedReply = async (question: string) => {
+      const chat = await ann.chats.create(question);
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: question, model });
+      await settled(follower);
+      return follower.messages().at(-1);
+    };
+
+    const refused = await failedReply("Hi.");
+    const limited = await failedReply("Hi again.");
+
+    expect([refused, limited]).toMatchObject([
+      { end: "failed", failure: "model.failed" },
+      { end: "failed", failure: "model.rate_limited" },
+    ]);
+    // Its own times left out: one ending in .400Z or .429Z says nothing
+    // of the provider.
+    const said = JSON.stringify([refused, limited], (_key, value: unknown) =>
+      typeof value === "string" && isoTime.test(value) ? undefined : value
+    );
+    expect({
+      said: /invalid_request_error|rate_limit_error|400|429/u.test(said),
+      error: [refused, limited].some(
+        (reply) => reply !== undefined && "error" in reply
+      ),
+    }).toStrictEqual({ said: false, error: false });
+  });
+
+  it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
+    const ann = await person();
+    const { reply, release } = pausedReply(says("Two plus two is four."), 9);
+    await answering(ann, codeStep("export default async () => 2 + 2;"), reply);
+    const chat = await ann.chats.create("Sums");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, { text: "What is 2 + 2?", model });
+    // Caught mid-answer: the code step and its result are stored, and the
+    // answer so far shows as it is written.
+    await vi.waitFor(
+      () => {
+        expect(follower.now()).toMatchObject({
+          running: true,
+          partial: { text: "Two plus ", code: [] },
+        });
+      },
+      { timeout: 10_000 }
+    );
+    await expect(ann.chats.list()).resolves.toMatchObject([
+      { id: chat.id, running: true },
+    ]);
+    release();
+    await settled(follower);
+
+    const messages = follower.messages();
+    const [, step] = messages;
+    const callId = step?.role === "assistant" ? step.code[0]?.callId : "none";
+    expect({ messages, now: follower.now() }).toMatchObject({
+      messages: [
+        { role: "user", text: "What is 2 + 2?" },
+        {
+          role: "assistant",
+          code: [{ code: "export default async () => 2 + 2;" }],
+          end: "done",
+        },
+        // The step's result, paired with its code.
+        { role: "result", callId, text: "Returned:\n4", failed: false },
+        { role: "assistant", text: "Two plus two is four.", end: "done" },
+      ],
+      // Once stored, the answer is no longer shown as being written.
+      now: { partial: null, running: false },
+    });
+    // Each message came once, in order; the answer came as what it gained
+    // each time, never all of it again; and the provenance only in the
+    // first update, as nothing was read since.
+    const ids = messages.map(({ id }) => id);
+    const answerText = follower.updates.flatMap(({ partial }) =>
+      partial === null || partial.text === ""
+        ? []
+        : [[partial.from, partial.text]]
+    );
+    expect({
+      ids,
+      first: answerText[0],
+      resent: answerText.slice(1).filter(([from]) => from !== 9),
+      provenance: follower.updates.map(
+        ({ provenance }) => provenance !== undefined
+      ),
+    }).toStrictEqual({
+      ids: [...new Set(ids)].toSorted((a, b) => a - b),
+      first: [0, "Two plus "],
+      resent: [],
+      provenance: follower.updates.map((_, index) => index === 0),
+    });
+  });
+
+  it("resume a reply mid-stream after a lost connection or a reload, and it goes on with nobody watching", async () => {
+    const ann = await person();
+    const { reply, release } = pausedReply(
+      says("Half an answer, then the rest."),
+      14
+    );
+    await answering(ann, reply);
+    const chat = await ann.chats.create("Resume");
+    const before = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Tell me.", model });
+    await vi.waitFor(
+      () => {
+        expect(before.now()?.partial?.text).toBe("Half an answer");
+      },
+      { timeout: 10_000 }
+    );
+    // The connection goes, mid-reply.
+    const [seen] = before.messages();
+    ann.core[Symbol.dispose]();
+
+    // A new connection picks up after the last message it saw; a reloaded
+    // page, which saw none, from the start. Both see the answer so far.
+    const { core } = await openRpc(ann.session);
+    const { chats } = core.authenticate();
+    const reconnected = await follow(chats, chat.id, seen?.id ?? null);
+    const reloaded = await follow(chats, chat.id);
+    await vi.waitFor(
+      () => {
+        for (const follower of [reconnected, reloaded]) {
+          expect(follower.now()).toMatchObject({
+            running: true,
+            partial: { text: "Half an answer" },
+          });
+        }
+      },
+      { timeout: 10_000 }
+    );
+    expect(reconnected.messages()).toStrictEqual([]);
+    expect(shown(reloaded)).toStrictEqual([{ role: "user", text: "Tell me." }]);
+
+    release();
+    await settled(reconnected);
+    await settled(reloaded);
+    expect(shown(reconnected)).toStrictEqual([
+      { role: "assistant", text: "Half an answer, then the rest." },
+    ]);
+    expect(shown(reloaded)).toStrictEqual([
+      { role: "user", text: "Tell me." },
+      { role: "assistant", text: "Half an answer, then the rest." },
+    ]);
+    core[Symbol.dispose]();
+  });
+
+  it("survive the object restarting, a turn under way going on in the chat's own object and shown running", async () => {
+    const ann = await person();
+    const { reply, release } = pausedReply(says("Still here."), 2);
+    await answering(ann, says("Kept."), reply);
+    const chat = await ann.chats.create("Durable");
+    const first = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Keep this.", model });
+    await settled(first);
+    // The next question is under way, its answer streaming, when the
+    // object restarts.
+    const again = { key: crypto.randomUUID(), text: "And this?", model };
+    await ann.chats.send(chat.id, again);
+    await vi.waitFor(
+      () => {
+        expect(first.now()?.partial).not.toBeNull();
+      },
+      { timeout: 10_000 }
+    );
+
+    // Restarted, as a deploy restarts it: twice, as nothing of the turn is
+    // the Workspace's to lose.
+    const restart = async () => {
+      await runInDurableObject(objectOf(ann), (_instance, state) => {
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+    };
+    await restart();
+    await restart();
+    // Sent again with its key, as a page that never heard it was taken:
+    // the same question, still being answered, not a second one.
+    await ann.chats.send(chat.id, again);
+    const after = await follow(ann.chats, chat.id);
+    await vi.waitFor(
+      () => {
+        expect(after.updates).not.toHaveLength(0);
+      },
+      { timeout: 10_000 }
+    );
+    const during = {
+      shown: shown(after),
+      running: after.now()?.running,
+      listed: await ann.chats.list(),
+    };
+    release();
+    await vi.waitFor(
+      () => {
+        expect(after.messages().at(-1)).toMatchObject({ text: "Still here." });
+        expect(after.now()?.running).toBeFalsy();
+      },
+      { timeout: 15_000 }
+    );
+    expect(during).toMatchObject({
+      shown: [
+        { role: "user", text: "Keep this." },
+        { role: "assistant", text: "Kept." },
+        { role: "user", text: "And this?" },
+      ],
+      running: true,
+      listed: [{ id: chat.id, title: "Durable", running: true }],
+    });
+  });
+
+  it("take a question sent again with its key once, and one refused before it started again", async () => {
+    const ann = await person();
+    await answering(ann, says("Noted."), says("Again."), says("Here."));
+    const chat = await ann.chats.create("Repeated");
+    const follower = await follow(ann.chats, chat.id);
+    const key = crypto.randomUUID();
+    const refusedKey = crypto.randomUUID();
+
+    // A model the company doesn't offer refuses it before it starts, and
+    // its key stays free for the same question sent right.
+    await expect(
+      outcome(
+        ann.chats.send(chat.id, {
+          key: refusedKey,
+          text: "Any news?",
+          model: "openai/not-a-model",
+        })
+      )
+    ).resolves.not.toBe("resolved");
+
+    // Twice at once, as a page that retries early, and once more after
+    // the answer: one question, one answer.
+    const question = { key, text: "Any news?", model };
+    await Promise.all([
+      ann.chats.send(chat.id, question),
+      ann.chats.send(chat.id, question),
+    ]);
+    await settled(follower);
+    // What a repeat names is not looked up again: it may be gone since.
+    await ann.chats.send(chat.id, {
+      ...question,
+      mentions: [{ kind: "agent", id: crypto.randomUUID() }],
+    });
+    expect(
+      follower.messages().map(({ role, text }) => ({ role, text }))
+    ).toStrictEqual([
+      { role: "user", text: "Any news?" },
+      { role: "assistant", text: "Noted." },
+    ]);
+
+    await ann.chats.send(chat.id, { ...question, key: refusedKey });
+    await vi.waitFor(() => {
+      expect(follower.messages().at(-1)?.text).toBe("Again.");
+    });
+    // Another chat's key says nothing of a question here.
+    const other = await ann.chats.create("Elsewhere");
+    await expect(outcome(ann.chats.send(other.id, question))).resolves.toBe(
+      "agent.invalid_question"
+    );
+    // A key kept for a question a restart then lost, before anything of
+    // it was kept: sent again, it is asked, not answered for.
+    const lost = crypto.randomUUID();
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_request_keys (kind, key, chat_id, at) VALUES ('send', ?, ?, ?)",
+        lost,
+        other.id,
+        Date.now()
+      );
+    });
+    const elsewhere = await follow(ann.chats, other.id);
+    await ann.chats.send(other.id, { key: lost, text: "Still there?", model });
+    await settled(elsewhere);
+    expect(elsewhere.messages().at(-1)?.text).toBe("Here.");
+    // A malformed key is no key.
+    await expect(
+      outcome(ann.chats.send(chat.id, { ...question, key: "again" }))
+    ).resolves.toBe("agent.invalid_question");
+  });
+
+  it("are made once for a key, however often the page asks", async () => {
+    const ann = await person();
+    const ben = await person();
+    const key = crypto.randomUUID();
+    const made = await ann.chats.create("Travel", undefined, undefined, key);
+    // Nor is the agent a repeat names looked up again: gone since, it
+    // would refuse only a new chat.
+    await expect(
+      ann.chats.create("Travel", crypto.randomUUID(), undefined, key)
+    ).resolves.toStrictEqual(made);
+    const listed = await ann.chats.list();
+    // Archived since, a repeat answers it as archived, as its summary does.
+    await ann.chats.archive(made.id);
+    const repeated = await ann.chats.create(
+      "Travel",
+      undefined,
+      undefined,
+      key
+    );
+    const summary = await ann.chats.summary(made.id);
+    expect({
+      listed: listed.length,
+      repeated,
+      archived: summary.archived,
+    }).toStrictEqual({
+      listed: 1,
+      repeated: { ...made, archived: true },
+      archived: true,
+    });
+    // Someone else's same key is their own chat.
+    const other = await ben.chats.create("Travel", undefined, undefined, key);
+    expect(other.id).not.toBe(made.id);
+    // Deleted, its key is free again.
+    await ann.chats.remove(made.id);
+    const next = await ann.chats.create("Travel", undefined, undefined, key);
+    expect(next.id).not.toBe(made.id);
+    await expect(
+      outcome(ann.chats.create("Travel", undefined, undefined, "again"))
+    ).resolves.toBe("agent.invalid_request");
+  });
+
+  it("keep what their person thought of an answer, for that person alone", async () => {
+    const ann = await person();
+    const ben = await person();
+    await answering(ann, says("Noted."));
+    const chat = await ann.chats.create("Rated");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Any news?", model });
+    await settled(follower);
+    const [question, answer] = follower.messages();
+    if (question === undefined || answer === undefined) {
+      throw new Error("No question and answer");
+    }
+    const ratingOf = async () => {
+      const read = await follow(ann.chats, chat.id);
+      const kept = await vi.waitFor(() => {
+        const found = read.messages().find(({ id }) => id === answer.id);
+        if (found?.role !== "assistant") {
+          throw new Error("The answer isn't read yet");
+        }
+        return found;
+      });
+      return kept.rating ?? null;
+    };
+
+    await ann.chats.rate(chat.id, answer.id, {
+      value: "down",
+      reason: "It left out the invoice.",
+    });
+    await expect(ratingOf()).resolves.toStrictEqual({
+      value: "down",
+      reason: "It left out the invoice.",
+    });
+    // Rated again, the new one stands; taken back, none does.
+    await ann.chats.rate(chat.id, answer.id, { value: "up" });
+    await expect(ratingOf()).resolves.toStrictEqual({ value: "up" });
+    await ann.chats.rate(chat.id, answer.id, null);
+
+    // Only an answer, only of that chat, only by its person.
+    const elsewhere = await ann.chats.create("Elsewhere");
+    await expect(
+      Promise.all([
+        outcome(ann.chats.rate(chat.id, question.id, { value: "up" })),
+        outcome(ann.chats.rate(elsewhere.id, answer.id, { value: "up" })),
+        outcome(ben.chats.rate(chat.id, answer.id, { value: "up" })),
+        outcome(
+          ann.chats.rate(chat.id, answer.id, {
+            value: "up",
+            reason: "x".repeat(2001),
+          })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      "agent.invalid_request",
+      "agent.invalid_request",
+      "agent.chat_not_found",
+      "agent.invalid_request",
+    ]);
+    // Taken back, and nothing refused left one.
+    await expect(ratingOf()).resolves.toBeNull();
+    // Each rating is recorded, never which way or why.
+    const events = await allEvents();
+    expect(
+      events
+        .filter(({ action }) => action === "chat.answer_rated")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+    ).toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        actor: { type: "person", userId: ann.userId },
+        target: { type: "chat", id: chat.id },
+        detail: { workspace: personalWorkspaceId(ann.userId) },
+      }))
+    );
+  });
+
+  it("take one question at a time, and aren't deleted under their agent", async () => {
+    const ann = await person();
+    await answering(ann, { hang: true });
+    const chat = await ann.chats.create("Busy");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "First.", model });
+
+    await expect(
+      Promise.all([
+        outcome(ann.chats.send(chat.id, { text: "Second.", model })),
+        outcome(ann.chats.remove(chat.id)),
+      ])
+    ).resolves.toStrictEqual(["agent.busy", "agent.busy"]);
+
+    await expect(ann.chats.cancel(chat.id)).resolves.toBeTruthy();
+    await settled(follower);
+    expect(follower.messages().at(-1)).toMatchObject({ end: "cancelled" });
+    await ann.chats.remove(chat.id);
+    await expect(ann.chats.list()).resolves.toStrictEqual([]);
+  });
+
+  it("refuse a question that can't start before taking it", async () => {
+    const ann = await person();
+    const gateway = await answering(ann, says("Never."));
+    const chat = await ann.chats.create("Refused");
+
+    await expect(
+      Promise.all([
+        outcome(
+          ann.chats.send(chat.id, { text: "Hi.", model: "openai/gpt-5.4" })
+        ),
+        outcome(ann.chats.send(chat.id, { text: " ", model })),
+        outcome(
+          ann.chats.send(chat.id, {
+            text: "Hi.",
+            model,
+            // @ts-expect-error -- not an effort, as a page could send it
+            effort: "extreme",
+          })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      "model.not_allowed",
+      "agent.invalid_question",
+      "agent.invalid_question",
+    ]);
+    expect(gateway.requests).toHaveLength(0);
+    const follower = await follow(ann.chats, chat.id);
+    await vi.waitFor(
+      () => {
+        expect(follower.now()).toMatchObject({ running: false });
+      },
+      { timeout: 10_000 }
+    );
+    expect(follower.messages()).toStrictEqual([]);
+  });
+
+  it("take no turn for an agent an admin paused, and take turns again once it is back on", async () => {
+    const ann = await person();
+    const gateway = await answering(ann, says("Back."));
+    const chat = await ann.chats.create("Paused");
+    await keepAgent({ name: "Stephen", state: "paused" });
+    try {
+      await expect(
+        outcome(ann.chats.send(chat.id, { text: "Hi.", model }))
+      ).resolves.toBe("agent.paused");
+      // Nothing was read for it, and the model never asked.
+      expect(gateway.requests).toHaveLength(0);
+      await env.DB.prepare("DELETE FROM agents").run();
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      expect(gateway.requests).toHaveLength(1);
+    } finally {
+      await env.DB.prepare("DELETE FROM agents").run();
+    }
+  });
+
+  it("tell an agent its name and what its instruction file says, between Grasp's own rules, an edit on its page from its next turn, and the first agent as shipped nothing more", async () => {
+    const ann = await person();
+    const admin = await signedInApi(idp, "admin");
+    const gateway = await answering(
+      ann,
+      says("Hello."),
+      says("Hello."),
+      says("Hello.")
+    );
+    const shipped = await ann.chats.create("As shipped");
+    const first = await follow(ann.chats, shipped.id);
+    await ann.chats.send(shipped.id, { text: "Hi.", model });
+    await settled(first);
+    expect(JSON.stringify(gateway.requests[0]?.body)).not.toContain("<agent>");
+
+    await keepAgent({ name: "Claire", state: "on" });
+    const told = { scope: "agent", agentId: chatAgentId } as const;
+    /** What the model was asked in a new chat's first turn. */
+    const askedInNewChat = async (index: number): Promise<string> => {
+      const chat = await ann.chats.create("As changed");
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      return JSON.stringify(gateway.requests[index]?.body);
+    };
+    try {
+      // What an admin saves on its page, its instruction file.
+      await saveInstructions(
+        admin.api,
+        told,
+        "Answer only about unpaid invoices."
+      );
+      const asked = await askedInNewChat(1);
+      expect(asked).toContain("You answer here as Claire");
+      expect(asked).toContain("Answer only about unpaid invoices.");
+      // Told that Grasp's rules hold over it.
+      expect(asked).toContain("lifts none of them");
+      await saveInstructions(admin.api, told, "Answer only about payroll.");
+      const edited = await askedInNewChat(2);
+      expect({
+        now: edited.includes("Answer only about payroll."),
+        before: edited.includes("unpaid invoices"),
+      }).toStrictEqual({ now: true, before: false });
+    } finally {
+      // Emptied, it loads nowhere: the other tests' first agent says nothing.
+      await saveInstructions(admin.api, told, "");
+      await env.DB.prepare("DELETE FROM agents").run();
+    }
+  });
+
+  it("ask the model to think as hard as the question says, stream its thinking, and keep it with the answer and how long it took", async () => {
+    const ann = await person();
+    const opus = "anthropic/claude-opus-4-8";
+    // The model thinks, then holds its thought open until the test lets it
+    // go on: the time it thought covers the hold.
+    const thinking = Promise.withResolvers<boolean>();
+    const gateway = await fakeProviderFor([opus], {
+      ...says("Two plus two is four."),
+      outputTokens: 80,
+      thinking: {
+        text: "Add two to two.",
+        tokens: 60,
+        pause: { until: thinking.promise },
+      },
+    });
+    const chat = await ann.chats.create("Sums");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, {
+      text: "What is 2 + 2?",
+      model: opus,
+      effort: "max",
+    });
+    // Streamed while the model still thinks, before it says a word.
+    await vi.waitFor(
+      () => {
+        expect(follower.now()).toMatchObject({
+          running: true,
+          partial: { text: "", code: [], reasoning: "Add two to two." },
+        });
+      },
+      { timeout: 10_000 }
+    );
+    const heldMs = 200;
+    await scheduler.wait(heldMs);
+    thinking.resolve(true);
+    await settled(follower);
+
+    expect(gateway.requests[0]?.body).toMatchObject({
+      output_config: { effort: "max" },
+    });
+    expect(shown(follower)).toStrictEqual([
+      { role: "user", text: "What is 2 + 2?" },
+      { role: "assistant", text: "Two plus two is four." },
+    ]);
+    const kept = thought(follower.messages());
+    expect(kept?.text).toBe("Add two to two.");
+    expect(kept?.ms).toBeGreaterThanOrEqual(heldMs);
+    // The time it took is the thinking's, not the whole answer's.
+    expect(kept?.ms).toBeLessThan(10_000);
+
+    // Kept as it was, for whoever follows the chat again: after a reload.
+    const again = await follow(ann.chats, chat.id);
+    await vi.waitFor(
+      () => {
+        expect(thought(again.messages())).toStrictEqual(kept);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("show no thinking for an answer the model wrote without it", async () => {
+    const ann = await person();
+    await answering(ann, says("Four."));
+    const chat = await ann.chats.create("Quick");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "What is 2 + 2?", model });
+    await settled(follower);
+    const answer = follower.messages().at(-1);
+    expect(answer?.role === "assistant" && "reasoning" in answer).toBeFalsy();
+  });
+
+  it("show a failed answer with the gateway's code for it, and nothing as stopped", async () => {
+    const ann = await person();
+    await answering(ann, { status: 500 });
+    const chat = await ann.chats.create("Failed");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Look it up.", model });
+    await settled(follower);
+    const last = follower.messages().at(-1);
+    expect(
+      last?.role === "assistant" ? [last.end, last.failure] : last
+    ).toStrictEqual(["failed", "model.provider_unavailable"]);
+    expect(follower.now()?.stopped).toBeNull();
+  });
+
+  it("keep their object up while a turn nobody waits on runs", async () => {
+    const ann = await person();
+    const { reply, release } = pausedReply(says("Done in a while."), 4);
+    await answering(ann, reply);
+    const chat = await ann.chats.create("Kept up");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Take your time.", model });
+    await vi.waitFor(
+      () => {
+        expect(follower.now()?.running).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+
+    // The alarm runs until the turn has ended, however long that takes:
+    // started while it runs, it ends only once the chat is done.
+    let alarmEnded: Promise<unknown> = Promise.resolve();
+    await runInDurableObject(objectOf(ann), (instance) => {
+      alarmEnded = (async () => {
+        await instance.alarm();
+        return instance.chats(ann.userId);
+      })();
+    });
+    release();
+    await expect(alarmEnded).resolves.toMatchObject([
+      { id: chat.id, running: false },
+    ]);
+  });
+
+  it("are listed, and followed, by index: never a whole table or a sort", async () => {
+    const ann = await person();
+    const plans = await runInDurableObject(objectOf(ann), (_instance, state) =>
+      [
+        "SELECT id, title, last_at FROM chats WHERE person_id = 'p' ORDER BY last_at DESC LIMIT 200",
+        "SELECT * FROM chat_messages WHERE chat_id = 'c' AND id > 7 ORDER BY id",
+      ].map((query) =>
+        state.storage.sql
+          .exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`)
+          .toArray()
+          .map(({ detail }) => detail)
+      )
+    );
+    for (const plan of plans) {
+      expect(plan.some((step) => fullScan.test(step))).toBeFalsy();
+      expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBeFalsy();
+    }
+  });
+
+  it("are each person's own object's: one person's watches and restarts leave another's chats be", async () => {
+    const ann = await person();
+    const ben = await person();
+    const annChat = await ann.chats.create("Ann's");
+    const { reply, release } = pausedReply(says("Still answering Ben."), 5);
+    await answering(ben, reply);
+    const benChat = await ben.chats.create("Ben's");
+    const benSees = await follow(ben.chats, benChat.id);
+    await ben.chats.send(benChat.id, { text: "Go on.", model });
+    await vi.waitFor(
+      () => {
+        expect(benSees.now()?.partial?.text).toBe("Still");
+      },
+      { timeout: 10_000 }
+    );
+
+    // Ann fills her object with watches, 10 a connection, then restarts it.
+    const connections = await Promise.all(
+      Array.from({ length: 6 }, async () => {
+        const { core } = await openRpc(ann.session);
+        const { chats } = core.authenticate();
+        return { core, chats };
+      })
+    );
+    await Promise.all(
+      connections
+        .slice(0, 5)
+        .flatMap(({ chats }) =>
+          Array.from(
+            { length: 10 },
+            async () => await follow(chats, annChat.id)
+          )
+        )
+    );
+    await expect(
+      outcome(follow(connections[5]?.chats ?? ann.chats, annChat.id))
+    ).resolves.toBe("agent.too_many_watches");
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+
+    // Ben's chat is in an object of his own: he follows it, and his answer
+    // goes on to its end.
+    await expect(outcome(follow(ben.chats, benChat.id))).resolves.toBe("ok");
+    release();
+    await settled(benSees);
+    expect(benSees.messages().at(-1)).toMatchObject({
+      text: "Still answering Ben.",
+    });
+    for (const { core } of connections) {
+      core[Symbol.dispose]();
+    }
+  });
+
+  it("are kept to 500 a person", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    for (let batch = 0; batch < maxChatsPerPerson / 50; batch += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a batch at a time
+      await Promise.all(
+        Array.from(
+          { length: 50 },
+          async () => await kept.createChat("Old", ann.userId, chatAgentId)
+        )
+      );
+    }
+    await expect(outcome(ann.chats.create("One more"))).resolves.toBe(
+      "agent.too_many_chats"
+    );
+    // Another person makes theirs as ever.
+    const ben = await person();
+    await expect(outcome(ben.chats.create("Mine"))).resolves.toBe("ok");
+  });
+
+  it("aren't deleted while a question is being taken, and take none while being deleted", async () => {
+    const ann = await person();
+    await answering(ann, says("Hi."));
+    const chat = await ann.chats.create("Racing");
+    const by = { type: "person" as const, userId: ann.userId };
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    // Deleted the moment a question is taken, before it awaits anything.
+    const taken = await runInDurableObject(objectOf(ann), async (instance) => {
+      const asked = instance.ask(chat.id, { text: "Hi.", model });
+      const deleting = outcome(
+        instance.deleteChat(chat.id, ann.userId, annAsConnect, by)
+      );
+      const answered = await asked;
+      return { deleting: await deleting, answer: answered.answer };
+    });
+    expect(taken).toStrictEqual({ deleting: "agent.busy", answer: "Hi." });
+
+    // A question racing a delete, asked while its writes are being
+    // rejected, is refused: nothing is left held once it is gone.
+    const heldId = crypto.randomUUID();
+    await connectDb()
+      .prepare(
+        "INSERT INTO pending_actions (id, subject_type, subject_id, on_behalf_of, mode, connection_id, action, idempotency_key, input, input_hash, permission_id, context, restricted, created_at) VALUES (?, 'agent', ?, ?, 'interactive', ?, 'mail.send', ?, '{}', ?, ?, ?, 0, ?)"
+      )
+      .bind(
+        heldId,
+        chatAgentId,
+        ann.userId,
+        `connection-${crypto.randomUUID()}`,
+        `chat:${heldId}`,
+        "0".repeat(64),
+        crypto.randomUUID(),
+        JSON.stringify({
+          type: "chat",
+          workspaceId: personalWorkspaceId(ann.userId),
+          chatId: chat.id,
+        }),
+        Date.now()
+      )
+      .run();
+    const racing = await runInDurableObject(objectOf(ann), async (instance) => {
+      const deleting = instance.deleteChat(
+        chat.id,
+        ann.userId,
+        annAsConnect,
+        by
+      );
+      const asking = outcome(
+        instance.send(chat.id, ann.userId, { text: "Quick!", model })
+      );
+      return { asked: await asking, declined: await deleting };
+    });
+    expect(racing).toStrictEqual({
+      asked: "agent.chat_not_found",
+      declined: 1,
+    });
+    await expect(ann.api.pendingActions.list()).resolves.toStrictEqual([]);
+    await expect(ann.chats.list()).resolves.toStrictEqual([]);
+  });
+
+  it("record chats made, renamed and deleted while the audit log is out, once it's back, exactly once", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    // Objects may share the tests' env: this is the log to put back.
+    const realLog = env.AUDIT_LOG;
+    // The log refuses everything the object delivers, for now.
+    const failing = {
+      getByName: () => ({
+        append: async () => {
+          await Promise.resolve();
+          throw new Error("The audit log is out");
+        },
+      }),
+      jurisdiction: () => failing,
+    };
+    await runInDurableObject(kept, (instance) => {
+      Object.assign(envOf(instance), { AUDIT_LOG: failing });
+    });
+    const waiting = async () =>
+      await runInDurableObject(kept, (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>("SELECT count(*) AS count FROM audit_outbox")
+          .one()
+      );
+    let chat = { id: "" };
+    try {
+      chat = await ann.chats.create("While it's out");
+      await ann.chats.rename(chat.id, "Still out");
+      await ann.chats.remove(chat.id);
+      // The changes are made; their events wait in the object.
+      await expect(ann.chats.list()).resolves.toStrictEqual([]);
+      await vi.waitFor(
+        async () => {
+          await expect(waiting()).resolves.toStrictEqual({ count: 3 });
+        },
+        { timeout: 10_000 }
+      );
+    } finally {
+      await runInDurableObject(kept, (instance) => {
+        Object.assign(envOf(instance), { AUDIT_LOG: realLog });
+      });
+    }
+
+    // The log is back: the alarm delivers them, and again finds none left.
+    await runInDurableObject(kept, async (instance) => {
+      await instance.alarm();
+      await instance.alarm();
+    });
+    await expect(waiting()).resolves.toStrictEqual({ count: 0 });
+    const events = await allEvents();
+    expect(
+      events
+        .filter(({ target }) => target?.id === chat.id)
+        .map(({ action }) => action)
+    ).toStrictEqual(["chat.created", "chat.renamed", "chat.deleted"]);
+  });
+
+  it("free a watch's slot when the page's callback fails", async () => {
+    const ann = await person();
+    const chat = await ann.chats.create("Failing page");
+    let failed = 0;
+    /** Ten watches whose page fails every push, then a watch that works. */
+    const failingRound = async (): Promise<void> => {
+      const before = failed;
+      await Promise.all(
+        Array.from({ length: 10 }, async () => {
+          await ann.chats.watch(chat.id, null, () => {
+            failed += 1;
+            throw new Error("The page failed");
+          });
+        })
+      );
+      await vi.waitFor(
+        () => {
+          expect(failed).toBe(before + 10);
+        },
+        { timeout: 10_000 }
+      );
+      // Their slots are free: another watch is taken.
+      await vi.waitFor(
+        async () => {
+          const watch = await follow(ann.chats, chat.id);
+          await watch.subscription.release();
+        },
+        { timeout: 10_000 }
+      );
+    };
+    // More failing watches than a connection may keep at once.
+    await failingRound();
+    await failingRound();
+    await failingRound();
+  });
+
+  it("stop streaming to a page whose session has ended", async () => {
+    const ann = await person();
+    const { reply, release } = pausedReply(says("Too late for you."), 3);
+    await answering(ann, reply);
+    const chat = await ann.chats.create("Signed out");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Tell me.", model });
+    await vi.waitFor(
+      () => {
+        expect(follower.now()?.partial?.text).toBe("Too");
+      },
+      { timeout: 10_000 }
+    );
+
+    await callAuth("/sign-out", ann.session, {});
+    // Past the few seconds one reading of the session holds.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + sessionRecheckMs);
+      release();
+      await vi.waitFor(
+        async () => {
+          await expect(
+            runInDurableObject(objectOf(ann), (instance) =>
+              instance.chats(ann.userId)
+            )
+          ).resolves.toMatchObject([{ id: chat.id, running: false }]);
+        },
+        { timeout: 10_000 }
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    // The answer was kept, and never pushed to the signed-out page.
+    expect(follower.now()).toMatchObject({
+      running: true,
+      partial: { text: "Too" },
+    });
+    expect(follower.messages().at(-1)).toMatchObject({ role: "user" });
+  });
+
+  it("are followed by at most 10 watches per connection", async () => {
+    const ann = await person();
+    const chat = await ann.chats.create("Watched");
+    const watches = await Promise.all(
+      Array.from({ length: 10 }, async () => await follow(ann.chats, chat.id))
+    );
+    await expect(outcome(follow(ann.chats, chat.id))).resolves.toBe(
+      "agent.too_many_watches"
+    );
+    // Releasing one frees its slot.
+    await watches[0]?.subscription.release();
+    await expect(outcome(follow(ann.chats, chat.id))).resolves.toBe("ok");
+  });
+
+  it("free their slots in their person's object once the page that followed them closes", async () => {
+    const ann = await person();
+    const chat = await ann.chats.create("Reloaded");
+    // Pages that each followed the chat and closed without letting go, as
+    // many watches as the object keeps at once: a person who reloaded
+    // over and over, or opened and shut tabs.
+    for (const _page of Array.from({ length: 5 })) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another, as a person reloads
+      const page = await pageOf(ann.session);
+      // oxlint-disable-next-line no-await-in-loop -- one page after another, as a person reloads
+      await Promise.all(
+        Array.from(
+          { length: 10 },
+          async () => await follow(page.chats, chat.id)
+        )
+      );
+      page.close();
+    }
+    // The next page follows the chat: the closed pages' watches are gone.
+    await vi.waitFor(
+      async () => {
+        await expect(outcome(follow(ann.chats, chat.id))).resolves.toBe("ok");
+      },
+      { timeout: 10_000 }
+    );
+  });
+});

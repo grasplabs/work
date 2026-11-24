@@ -1,0 +1,1656 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent } from "@grasp-os/app-kit/components/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/app-kit/components/collapsible";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/app-kit/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+} from "@grasp-os/app-kit/components/item";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import {
+  PageHeader,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/app-kit/components/page-header";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import type { Connection } from "@grasp-os/shared/brain";
+import type {
+  BrainFoundBy,
+  BrainMemoryFoundBy,
+  BrainConnectedSource,
+  BrainSearchMemory,
+  BrainSearchPack,
+  BrainSourceListed,
+  BrainSourcePage,
+  BrainSourceProducer,
+  BrainSourceRef,
+  BrainSourceText,
+  BrainSourceVersionPage,
+  BrainSharedUploadPage,
+  BrainUpload,
+  BrainUploadReaders,
+} from "@grasp-os/shared/brain-sources";
+import {
+  brainQuestionMaxLength,
+  brainUploadErrors,
+  firstLineOf,
+} from "@grasp-os/shared/brain-sources";
+import { failureText } from "@grasp-os/shared/errors";
+import {
+  uploadErrors,
+  uploadMaxBytes,
+  uploadTypes,
+} from "@grasp-os/shared/uploads";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useEffect, useId, useState } from "react";
+
+import { Confirmed } from "../confirmed.tsx";
+import type { CoreConnection } from "../core-connection.ts";
+import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatBytes, formatDateTime, formatList } from "../format.ts";
+import { useCore } from "../use-core.ts";
+import { LearnedSection } from "./learned-section.tsx";
+import { OwnExportSection } from "./own-export.tsx";
+
+// The Brain's sources, from the new Brain (GRA-1734): what the person may
+// read, a page at a time, newest first; one source's versions and text;
+// search, which is recall as that person, shown as recall packs it (no
+// ranking of the page's own), its memories each with where it came from,
+// and everything the pack holds shown, as its budget was spent on it; and
+// how each of their connections feeds the Brain today. Core answers each
+// from what they may read alone. Texts are shown as text, never markup.
+// A file uploaded here goes straight into the Brain, for who the person
+// chooses: only them, a team of theirs, or everyone (GRA-1824); its
+// uploader adds its next version. Its uploader deletes one for only them,
+// erasing it; one shared with a team or everyone its uploader removes,
+// out of use for everyone with its history kept (GRA-1877), and an admin
+// erases, from the shared uploads listed for admins, removed ones among
+// them. What each may do to an upload, and what their Delete does, is
+// core's to say (`uploadOf`). At its foot, the person's own export of
+// what only they may read (own-export.tsx).
+
+/** A team the person is in. */
+interface Team {
+  id: string;
+  name: string;
+}
+
+type Sources = Session["brainSources"];
+
+/** What a read from core came to. */
+type Read<T> =
+  | { state: "loading" }
+  | { state: "refused"; message: string; code?: string }
+  | { state: "ready"; data: T };
+
+/**
+ * What `read` answers on the person's session, or why not. Outside the
+ * components, as the React Compiler can't compile `try`.
+ */
+const readFrom = async <T,>(
+  core: CoreConnection,
+  read: (sources: Sources) => Promise<T>
+): Promise<Read<T>> => {
+  try {
+    const data = await core.withSession(
+      async (session) => await read(session.brainSources)
+    );
+    return { state: "ready", data };
+  } catch (error) {
+    const code = brainUploadErrors.codeOf(error);
+    return {
+      state: "refused",
+      message: failureText(error),
+      ...(code === undefined ? {} : { code }),
+    };
+  }
+};
+
+/**
+ * Why an upload was refused, as the person reads it.
+ */
+const UploadRefusal = ({
+  refused,
+}: {
+  refused: { message: string; code?: string };
+}) => {
+  const { t } = useLingui();
+  // Core's refusals the page says in the person's own language; every
+  // other is core's own words.
+  const said: Record<string, string> = {
+    "brain.upload_text_too_long": t`This file's text is too long for the Brain to keep. Split it into smaller files and upload those.`,
+    "brain.upload_other_file": t`This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version.`,
+  };
+  return (
+    <ErrorText>
+      {(refused.code === undefined ? undefined : said[refused.code]) ??
+        refused.message}
+    </ErrorText>
+  );
+};
+
+/**
+ * A file as core takes it: its name and its bytes. Refused here, as core
+ * would, before reading and sending it all: the size the browser reports
+ * only saves the trip. Core checks the bytes that arrive.
+ */
+const fileOf = async (file: File) => {
+  if (file.size > uploadMaxBytes) {
+    throw uploadErrors.create("upload.too_large");
+  }
+  return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+};
+
+/**
+ * Whether `answer` is a delete refused as not found: one done before, its
+ * answer lost, or one they may no longer make (an admin no longer one).
+ * The page reads again what is there, rather than say which.
+ */
+const notFound = (answer: Read<unknown>): boolean =>
+  answer.state === "refused" && answer.code === "brain.upload_not_found";
+
+/** The file types an upload may be, for the file picker: core's own list. */
+const uploadAccept = Object.keys(uploadTypes)
+  .map((extension) => `.${extension}`)
+  .join(",");
+
+/** Who may read an upload, as the form's choice names it: `me`, `everyone` or a team's id. */
+const readersOf = (choice: string): BrainUploadReaders => {
+  if (choice === "me" || choice === "everyone") {
+    return { kind: choice };
+  }
+  return { kind: "team", teamId: choice };
+};
+
+/** The same source, by its producer and id. */
+const sameSource = (one: BrainSourceRef, other: BrainSourceRef): boolean =>
+  one.producer === other.producer && one.id === other.id;
+
+/** A source's key, for React. */
+const keyOf = ({ producer, id }: BrainSourceRef): string => `${producer}:${id}`;
+
+const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
+  const { t } = useLingui();
+  const label = {
+    upload: t({ message: "Upload", context: "a source of the Brain" }),
+    chat: t({ message: "Chat", context: "a source of the Brain" }),
+    run: t({ message: "Workflow run", context: "a source of the Brain" }),
+    capture: t({
+      message: "Fetched from a connection",
+      context: "a source of the Brain",
+    }),
+    interview: t({ message: "Interview", context: "a source of the Brain" }),
+    claim: t({
+      message: "What your team said",
+      context: "a source of the Brain",
+    }),
+    drawing: t({
+      message: "How a team works",
+      context: "a source of the Brain",
+    }),
+    opinion: t({
+      message: "What people across the company say",
+      context: "a source of the Brain",
+    }),
+    kickoff: t({
+      message: "The company's vision",
+      context: "a source of the Brain",
+    }),
+    roster: t({
+      message: "The company's teams",
+      context: "a source of the Brain",
+    }),
+    connected: t({
+      message: "Read from a shared connection",
+      context: "a source of the Brain",
+    }),
+    sync: t({
+      message: "Copied from a connected system",
+      context: "a source of the Brain",
+    }),
+  }[producer];
+  return <Badge variant="outline">{label}</Badge>;
+};
+
+const FoundBadge = ({ found }: { found: BrainFoundBy }) => {
+  const { t } = useLingui();
+  const label = {
+    exact: t({ message: "Exact match", context: "how search found a passage" }),
+    words: t({
+      message: "By its words",
+      context: "how search found a passage",
+    }),
+    "stop words": t({
+      message: "By common words only",
+      context: "how search found a passage",
+    }),
+    meaning: t({
+      message: "By meaning",
+      context: "how search found a passage",
+    }),
+  }[found];
+  return <Badge variant="secondary">{label}</Badge>;
+};
+
+const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
+  const { t } = useLingui();
+  const label = {
+    words: t({
+      message: "By its words",
+      context: "how search found a memory",
+    }),
+    entities: t({
+      message: "Through what you asked about",
+      context: "how search found a memory",
+    }),
+    contested: t({
+      message: "Another side of a disputed fact",
+      context: "how search found a memory",
+    }),
+  }[found];
+  return <Badge variant="secondary">{label}</Badge>;
+};
+
+/** Whose word a memory is, as its producer said it. */
+const SaidBadge = ({ said }: { said: BrainSearchMemory["said"] }) => {
+  const { t } = useLingui();
+  const label = {
+    you: t`Your own word`,
+    person: t`Someone's word`,
+    outside: t`An outside party's word`,
+    agent: t`An agent's word`,
+    system: t`A system's word`,
+  }[said];
+  return <Badge variant="outline">{label}</Badge>;
+};
+
+/**
+ * A memory of the pack: what it says, the words of its source it rests on
+ * and the passage around them when the pack holds them, and where it came
+ * from: a source's version, which opens it, or someone's word.
+ */
+const MemoryResult = ({
+  memory,
+  onOpen,
+}: {
+  memory: BrainSearchMemory;
+  onOpen: (source: BrainSourceRef, version: number) => void;
+}) => {
+  const { source, context } = memory;
+  const version = source?.version;
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm">{memory.statement}</span>
+        {memory.quote === null ? null : (
+          <blockquote className="text-muted-foreground border-l-2 pl-3 text-sm whitespace-pre-wrap">
+            {memory.quote}
+          </blockquote>
+        )}
+        {context === null ? null : (
+          <Collapsible>
+            <CollapsibleTrigger render={<Button size="xs" variant="ghost" />}>
+              <Trans>The passage around it</Trans>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <p className="text-muted-foreground text-sm whitespace-pre-wrap">
+                {context.text}
+              </p>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+          <SaidBadge said={memory.said} />
+          {source === null ? null : (
+            <>
+              <ProducerBadge producer={source.source.producer} />
+              <Button
+                onClick={() => {
+                  onOpen(source.source, source.version);
+                }}
+                size="xs"
+                type="button"
+                variant="link"
+              >
+                <Trans>Open version {version}</Trans>
+              </Button>
+            </>
+          )}
+          {memory.store === "own" ? (
+            <Badge variant="outline">
+              <Trans context="a memory nobody else may read">Only you</Trans>
+            </Badge>
+          ) : null}
+          {/* A saved memory is taken as correct: a confirmation is shown
+              only where it settled a disagreement. */}
+          {memory.confirmed && memory.contested ? (
+            <Badge variant="passed">
+              <Trans context="a memory a person confirmed">Confirmed</Trans>
+            </Badge>
+          ) : null}
+          {memory.contested ? (
+            <Badge variant="attention">
+              <Trans>Sources disagree</Trans>
+            </Badge>
+          ) : null}
+          <MemoryFoundBadge found={memory.found} />
+        </span>
+      </ItemContent>
+    </Item>
+  );
+};
+
+/** The pack, as recall gave it: its memories and passages in its order, what it didn't find, and whether it was cut short. */
+const SearchResults = ({
+  pack,
+  onOpen,
+}: {
+  pack: BrainSearchPack;
+  onOpen: (source: BrainSourceRef, version: number) => void;
+}) => {
+  const missing = formatList(pack.notFound);
+  const heading = useId();
+  const nothing = pack.items.length === 0 && pack.memories.length === 0;
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Results</Trans>
+      </h2>
+      {nothing ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>Nothing you may read matched.</Trans>
+        </p>
+      ) : null}
+      {pack.memories.length === 0 ? null : (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground text-xs font-medium">
+            <Trans>What the Brain remembers</Trans>
+          </h3>
+          <ItemGroup render={<ol />} spacing="tight">
+            {pack.memories.map((memory) => (
+              <li key={`${memory.store}:${memory.id}`}>
+                <MemoryResult memory={memory} onOpen={onOpen} />
+              </li>
+            ))}
+          </ItemGroup>
+        </div>
+      )}
+      {pack.items.length === 0 ? null : (
+        <div className="flex flex-col gap-2">
+          {pack.memories.length === 0 ? null : (
+            <h3 className="text-muted-foreground text-xs font-medium">
+              <Trans>Passages</Trans>
+            </h3>
+          )}
+          <ItemGroup render={<ol />} spacing="tight">
+            {pack.items.map((item) => {
+              const { version } = item;
+              return (
+                <li key={`${keyOf(item.source)}@${version}#${item.position}`}>
+                  <Item
+                    onClick={() => {
+                      onOpen(item.source, version);
+                    }}
+                    render={
+                      // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the passage and its labels are its words, as the Item's children
+                      <button type="button" />
+                    }
+                    size="sm"
+                  >
+                    <ItemContent>
+                      <span className="text-sm whitespace-pre-wrap">
+                        {item.text}
+                      </span>
+                      <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                        <ProducerBadge producer={item.source.producer} />
+                        <FoundBadge found={item.found} />
+                        <span>
+                          <Trans>Version {version}</Trans>
+                        </span>
+                        {item.whole ? null : (
+                          <span>
+                            <Trans>The best part of its passage</Trans>
+                          </span>
+                        )}
+                      </span>
+                    </ItemContent>
+                  </Item>
+                </li>
+              );
+            })}
+          </ItemGroup>
+        </div>
+      )}
+      {/* What wasn't found only beside what was: a search that found
+          nothing says so once, above. */}
+      {nothing || pack.notFound.length === 0 ? null : (
+        <p className="text-muted-foreground text-sm">
+          <Trans>Nothing you may read holds {missing}.</Trans>
+        </p>
+      )}
+      {pack.truncated ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>More was found than fits: these are the best of it.</Trans>
+        </p>
+      ) : null}
+    </section>
+  );
+};
+
+/** Uploading a file into the Brain: the file, and who may read it. */
+const UploadForm = ({
+  teams,
+  onUploaded,
+}: {
+  teams: Team[];
+  onUploaded: (source: BrainSourceRef) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const fileId = useId();
+  const readersId = useId();
+  // The upload's id, minted for the file chosen and sent again when it is
+  // retried, so a retry after a lost answer is the same upload.
+  const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
+  const [choice, setChoice] = useState("me");
+  const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
+  const busy = sent?.state === "loading";
+  // What an upload takes, from core's own limits.
+  const types = formatList(Object.keys(uploadTypes).map((type) => `.${type}`));
+  const size = formatBytes(uploadMaxBytes);
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (file === undefined || busy) {
+          return;
+        }
+        const form = event.currentTarget;
+        setSent({ state: "loading" });
+        void (async () => {
+          const answer = await readFrom(
+            core,
+            async (sources) =>
+              await sources.upload(
+                await fileOf(file.chosen),
+                readersOf(choice),
+                file.uploadId
+              )
+          );
+          setSent(answer);
+          if (answer.state === "ready") {
+            form.reset();
+            setFile(undefined);
+            onUploaded(answer.data.source);
+          }
+        })();
+      }}
+    >
+      <FieldGroup className="sm:flex-row sm:items-end">
+        <Field>
+          <FieldLabel htmlFor={fileId}>
+            <Trans>File</Trans>
+          </FieldLabel>
+          <Input
+            accept={uploadAccept}
+            // Out of reach while a file uploads: the form is reset when it
+            // is done, which would drop a file chosen meanwhile.
+            disabled={busy}
+            id={fileId}
+            onChange={(event) => {
+              const chosen = event.target.files?.[0];
+              setFile(
+                chosen === undefined
+                  ? undefined
+                  : { chosen, uploadId: crypto.randomUUID() }
+              );
+            }}
+            type="file"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={readersId}>
+            <Trans context="a file uploaded into the Brain">
+              Who may read it
+            </Trans>
+          </FieldLabel>
+          <NativeSelect
+            id={readersId}
+            onChange={(event) => {
+              setChoice(event.target.value);
+            }}
+            value={choice}
+          >
+            <NativeSelectOption value="me">{t`Only me`}</NativeSelectOption>
+            {teams.map(({ id, name }) => (
+              <NativeSelectOption key={id} value={id}>
+                {t`Team ${name}`}
+              </NativeSelectOption>
+            ))}
+            <NativeSelectOption value="everyone">
+              {t`Everyone`}
+            </NativeSelectOption>
+          </NativeSelect>
+        </Field>
+        <Button disabled={file === undefined || busy} type="submit">
+          {busy ? (
+            <>
+              <Spinner aria-hidden="true" />
+              <Trans>Uploading…</Trans>
+            </>
+          ) : (
+            <Trans>Upload</Trans>
+          )}
+        </Button>
+      </FieldGroup>
+      <FieldDescription>
+        <Trans>
+          It takes {types} files of up to {size}. Who may read it stays as you
+          choose: to share it with others, upload it again for them.
+        </Trans>
+      </FieldDescription>
+      {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
+    </form>
+  );
+};
+
+/** Who may read an upload, in words. */
+const ReadersLine = ({
+  readers,
+  teams,
+}: {
+  readers: BrainUploadReaders;
+  teams: Team[];
+}) => {
+  if (readers.kind === "me") {
+    return <Trans>Only you can read this upload.</Trans>;
+  }
+  if (readers.kind === "everyone") {
+    return <Trans>Everyone can read this upload.</Trans>;
+  }
+  const team = teams.find(({ id }) => id === readers.teamId)?.name;
+  return team === undefined ? (
+    <Trans>A team can read this upload.</Trans>
+  ) : (
+    <Trans>Team {team} can read this upload.</Trans>
+  );
+};
+
+/**
+ * What the person may do to an upload, as core says: upload its next
+ * version, and delete it: erase it for good, or remove it.
+ */
+const UploadActions = ({
+  source,
+  teams,
+  onChanged,
+  onDeleted,
+}: {
+  source: BrainSourceRef;
+  teams: Team[];
+  onChanged: (source: BrainSourceRef) => void;
+  onDeleted: (source: BrainSourceRef) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const fileId = useId();
+  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
+    state: "loading",
+  });
+  // The new version's id, minted for the file chosen and sent again when
+  // it is retried, so a retry after a lost answer is the same version.
+  const [file, setFile] = useState<{ chosen: File; versionId: string }>();
+  const [acting, setActing] = useState<Read<unknown>>();
+  // Which action is under way: a new version shows it uploads.
+  const [uploading, setUploading] = useState(false);
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.uploadOf(source.id)
+      );
+      if (!left) {
+        setUpload(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core, source]);
+  if (upload.state === "refused") {
+    return <ErrorText>{upload.message}</ErrorText>;
+  }
+  if (upload.state !== "ready" || upload.data === null) {
+    return null;
+  }
+  const { readers, mayAddVersion, deletes } = upload.data;
+  const busy = acting?.state === "loading";
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-muted-foreground text-sm">
+        <ReadersLine readers={readers} teams={teams} />
+      </p>
+      {mayAddVersion ? (
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (file === undefined || busy) {
+              return;
+            }
+            setActing({ state: "loading" });
+            setUploading(true);
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) =>
+                  await sources.uploadVersion(
+                    source.id,
+                    await fileOf(file.chosen),
+                    file.versionId
+                  )
+              );
+              setUploading(false);
+              setActing(answer);
+              if (answer.state === "ready") {
+                onChanged(source);
+              }
+            })();
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor={fileId}>
+              <Trans>New version</Trans>
+            </FieldLabel>
+            <Input
+              accept={uploadAccept}
+              id={fileId}
+              onChange={(event) => {
+                const chosen = event.target.files?.[0];
+                setFile(
+                  chosen === undefined
+                    ? undefined
+                    : { chosen, versionId: crypto.randomUUID() }
+                );
+              }}
+              type="file"
+            />
+          </Field>
+          <Button
+            disabled={file === undefined || busy}
+            type="submit"
+            variant="outline"
+          >
+            {uploading ? (
+              <>
+                <Spinner aria-hidden="true" />
+                <Trans>Uploading…</Trans>
+              </>
+            ) : (
+              <Trans>Upload new version</Trans>
+            )}
+          </Button>
+        </form>
+      ) : null}
+      {deletes === null ? null : (
+        <Confirmed
+          busy={busy}
+          button={t`Delete`}
+          confirm={deletes === "erase" ? t`Delete for good` : t`Delete`}
+          description={
+            deletes === "erase"
+              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`
+              : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`
+          }
+          label={t`Delete this upload`}
+          onConfirm={() => {
+            setActing({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(core, async (sources) => {
+                await sources.deleteUpload(source.id);
+              });
+              if (answer.state === "ready") {
+                setActing(undefined);
+                onDeleted(source);
+                return;
+              }
+              if (notFound(answer)) {
+                // Read again: gone, or still there without Delete.
+                setActing(undefined);
+                onChanged(source);
+                return;
+              }
+              setActing(answer);
+            })();
+          }}
+          title={t`Delete this upload?`}
+        />
+      )}
+      {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
+    </div>
+  );
+};
+
+/** Search: the question, and recall's pack for it. */
+const Search = ({
+  onOpen,
+}: {
+  onOpen: (source: BrainSourceRef, version: number) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const id = useId();
+  const [question, setQuestion] = useState("");
+  const [result, setResult] = useState<Read<BrainSearchPack>>();
+  return (
+    <div className="flex flex-col gap-4">
+      <form
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const asked = question.trim();
+          // One search at a time, so answers can't arrive out of order.
+          if (asked === "" || result?.state === "loading") {
+            return;
+          }
+          setResult({ state: "loading" });
+          void (async () => {
+            setResult(
+              await readFrom(
+                core,
+                async (sources) => await sources.search(asked)
+              )
+            );
+          })();
+        }}
+      >
+        <label className="sr-only" htmlFor={id}>
+          <Trans>Search the Brain</Trans>
+        </label>
+        <Input
+          id={id}
+          onChange={(event) => {
+            setQuestion(event.target.value);
+          }}
+          maxLength={brainQuestionMaxLength}
+          placeholder={t`Ask what you're looking for`}
+          type="search"
+          value={question}
+        />
+        <Button
+          disabled={result?.state === "loading" || question.trim() === ""}
+          type="submit"
+        >
+          <Trans>Search</Trans>
+        </Button>
+      </form>
+      {result?.state === "refused" ? (
+        <ErrorText>{result.message}</ErrorText>
+      ) : null}
+      {result?.state === "ready" ? (
+        <SearchResults onOpen={onOpen} pack={result.data} />
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * How the person's connections feed the Brain. What an agent reads as one
+ * item (a message, a page) through a connection of their own is kept in
+ * their own Brain, for them alone (core's connection-capture.ts,
+ * GRA-1730); everything else agents search live, and the Brain keeps
+ * nothing of it. A full copy comes with native sync. These connections
+ * don't say which are the person's own, so the rule is said once.
+ */
+const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
+  const heading = useId();
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>How your connections feed the Brain</Trans>
+      </h2>
+      {connections.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>You have no connections yet.</Trans>
+        </p>
+      ) : (
+        <>
+          <p className="text-muted-foreground text-sm">
+            <Trans>
+              When an agent reads for you through an account you connected
+              yourself, the Brain keeps what it read for you alone, while that
+              account stays connected: one Gmail message or attachment, one
+              OneNote page, or the answer of a read in another app, the
+              company’s records included. Everything else agents search live
+              when you ask, and the Brain keeps nothing of it.
+            </Trans>
+          </p>
+          <ul className="flex flex-col gap-2 text-sm">
+            {connections.map(({ name, keepsReads, activityGap }) => (
+              <li className="flex flex-col" key={name}>
+                <span>{name}</span>
+                <span className="text-muted-foreground">
+                  {keepsReads === true ? (
+                    <Trans>
+                      The Brain may keep, for you alone, some of what an agent
+                      reads for you through this connection, while it stays
+                      connected.
+                    </Trans>
+                  ) : (
+                    <Trans>Searched live, nothing kept.</Trans>
+                  )}
+                </span>
+                {activityGap === true ? (
+                  <span className="text-muted-foreground">
+                    <Trans>
+                      A gap: this connection can’t tell Grasp what changed in
+                      it, so Grasp sees only what is done there through Grasp.
+                    </Trans>
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+};
+
+/**
+ * The shared connections whose kept reads the person may read
+ * (GRA-1831): what agents read through a connection an admin shared,
+ * kept for the people the admin chose. One row a connection, not one a
+ * record.
+ */
+const SharedConnectionReads = ({
+  connected,
+}: {
+  connected: BrainConnectedSource[];
+}) => {
+  const heading = useId();
+  if (connected.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>What agents read through shared connections</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          The Brain keeps what agents read through these connections an admin
+          shared, for the people the admin chose. It is what each system said
+          when it was read, not kept up to date.
+        </Trans>
+      </p>
+      <ul className="flex flex-col gap-2 text-sm">
+        {connected.map(
+          ({ connectionId, name, account, records, lastReadAt }) => {
+            const lastRead = formatDateTime(lastReadAt);
+            return (
+              <li className="flex flex-col" key={connectionId}>
+                <span>{account === null ? name : `${name} (${account})`}</span>
+                <span className="text-muted-foreground">
+                  <Plural
+                    one="# record kept"
+                    other="# records kept"
+                    value={records}
+                  />
+                </span>
+                <span className="text-muted-foreground">
+                  <Trans>Last read {lastRead}</Trans>
+                </span>
+              </li>
+            );
+          }
+        )}
+      </ul>
+    </section>
+  );
+};
+
+/** The shared connection a kept read's source is under: the first part of its ID. */
+const connectionOfSource = (source: BrainSourceRef): string | undefined =>
+  source.producer === "connected" ? source.id.split("/")[0] : undefined;
+
+/**
+ * Where and when a kept read was read (a `connected` source): its
+ * system's name, when known, and its version's time. Nothing for any
+ * other source.
+ */
+const ReadFrom = ({
+  source,
+  read,
+  names,
+}: {
+  source: BrainSourceRef;
+  read: BrainSourceText;
+  names: ReadonlyMap<string, string>;
+}) => {
+  const connectionId = connectionOfSource(source);
+  if (connectionId === undefined) {
+    return null;
+  }
+  const name = names.get(connectionId);
+  const readOn = formatDateTime(read.addedAt);
+  return (
+    <p className="text-muted-foreground text-sm">
+      {name === undefined ? (
+        <Trans>Read from a shared connection on {readOn}</Trans>
+      ) : (
+        <Trans>
+          Read from {name} on {readOn}
+        </Trans>
+      )}
+    </p>
+  );
+};
+
+const SourceLine = ({
+  listed,
+  picked,
+  onPick,
+}: {
+  listed: BrainSourceListed;
+  picked: boolean;
+  onPick: () => void;
+}) => {
+  const { versions } = listed;
+  const lastRead =
+    listed.readAt === undefined ? undefined : formatDateTime(listed.readAt);
+  return (
+    <Item
+      onClick={onPick}
+      render={
+        // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the source's first line and labels are its words, as the Item's children
+        <button aria-pressed={picked} type="button" />
+      }
+      size="sm"
+    >
+      <ItemContent>
+        <span className="min-w-0 text-sm">
+          {listed.firstLine === "" ? (
+            <span className="text-muted-foreground">
+              <Trans>No first line</Trans>
+            </span>
+          ) : (
+            listed.firstLine
+          )}
+        </span>
+        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+          <ProducerBadge producer={listed.source.producer} />
+          {listed.personal ? (
+            <Badge variant="outline">
+              <Trans context="a source nobody else may read">Only you</Trans>
+            </Badge>
+          ) : null}
+          <span>{formatDateTime(listed.addedAt)}</span>
+          {lastRead === undefined ? null : (
+            <span>
+              <Trans>Last read {lastRead}</Trans>
+            </span>
+          )}
+          <span>
+            <Plural one="# version" other="# versions" value={versions} />
+          </span>
+        </span>
+      </ItemContent>
+    </Item>
+  );
+};
+
+/** The sources the person may read, newest first, a page at a time. */
+const SourceList = ({
+  picked,
+  onPick,
+}: {
+  picked: BrainSourceRef | undefined;
+  onPick: (source: BrainSourceRef) => void;
+}) => {
+  const core = useCore();
+  const [listed, setListed] = useState<Read<BrainSourcePage>>({
+    state: "loading",
+  });
+  const [more, setMore] = useState<Read<BrainSourcePage>>();
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.list()
+      );
+      if (!left) {
+        setListed(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  if (listed.state === "refused") {
+    return <ErrorText>{listed.message}</ErrorText>;
+  }
+  if (listed.state === "loading") {
+    return null;
+  }
+  const { sources, next } = listed.data;
+  if (sources.length === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>
+            <Trans>Nothing in the Brain you may read yet</Trans>
+          </EmptyTitle>
+          <EmptyDescription>
+            <Trans>
+              Documents and workflow runs show here once they reach the Brain.
+            </Trans>
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Those marked Only you are yours alone: nobody else sees them, admins
+          included.
+        </Trans>
+      </p>
+      <ItemGroup render={<ul />} spacing="tight">
+        {sources.map((each) => (
+          <li key={keyOf(each.source)}>
+            <SourceLine
+              listed={each}
+              onPick={() => {
+                onPick(each.source);
+              }}
+              picked={picked !== undefined && sameSource(picked, each.source)}
+            />
+          </li>
+        ))}
+      </ItemGroup>
+      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
+      {next === null ? null : (
+        <Button
+          className="self-start"
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (read) => await read.list(next)
+              );
+              setMore(answer.state === "refused" ? answer : undefined);
+              if (answer.state === "ready") {
+                setListed({
+                  state: "ready",
+                  data: {
+                    sources: [...sources, ...answer.data.sources],
+                    next: answer.data.next,
+                  },
+                });
+              }
+            })();
+          }}
+          type="button"
+          variant="outline"
+        >
+          <Trans>Show more</Trans>
+        </Button>
+      )}
+    </div>
+  );
+};
+
+/** A source's versions, newest first, the one shown marked. */
+const VersionList = ({
+  page,
+  shown,
+  source,
+  onChoose,
+  onMore,
+}: {
+  page: BrainSourceVersionPage;
+  shown: number | undefined;
+  source: BrainSourceRef;
+  onChoose: (version: number) => void;
+  onMore: (page: BrainSourceVersionPage) => void;
+}) => {
+  const core = useCore();
+  const [more, setMore] = useState<Read<BrainSourceVersionPage>>();
+  const { before } = page;
+  return (
+    <div className="flex flex-col gap-1">
+      <h4 className="text-muted-foreground text-xs font-medium">
+        <Trans>Versions</Trans>
+      </h4>
+      <ItemGroup render={<ul />} spacing="tight">
+        {page.versions.map(({ version, addedAt }) => {
+          const added = formatDateTime(addedAt);
+          return (
+            <li key={version}>
+              <Item
+                onClick={() => {
+                  onChoose(version);
+                }}
+                render={
+                  // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the version and its date are its words, as the Item's children
+                  <button aria-pressed={version === shown} type="button" />
+                }
+                size="xs"
+              >
+                <Trans>
+                  Version {version}, added {added}
+                </Trans>
+              </Item>
+            </li>
+          );
+        })}
+      </ItemGroup>
+      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
+      {before === null ? null : (
+        <Button
+          className="self-start"
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) => await sources.versions(source, before)
+              );
+              setMore(answer.state === "refused" ? answer : undefined);
+              if (answer.state === "ready") {
+                onMore(answer.data);
+              }
+            })();
+          }}
+          type="button"
+          variant="outline"
+        >
+          <Trans>Older versions</Trans>
+        </Button>
+      )}
+    </div>
+  );
+};
+
+/** One source: its versions the person may read, and the text of the one in hand. */
+const SourcePanel = ({
+  source,
+  version: asked,
+  teams,
+  connectedNames,
+  onChanged,
+  onDeleted,
+}: {
+  source: BrainSourceRef;
+  /** The version to show first: the newest they may read when left out. */
+  version: number | undefined;
+  teams: Team[];
+  /** The names of the shared connections whose kept reads they may read, by ID. */
+  connectedNames: ReadonlyMap<string, string>;
+  /** A new version of it was added. */
+  onChanged: (source: BrainSourceRef) => void;
+  /** It was deleted. */
+  onDeleted: (source: BrainSourceRef) => void;
+}) => {
+  const core = useCore();
+  const [versions, setVersions] = useState<Read<BrainSourceVersionPage>>({
+    state: "loading",
+  });
+  const [chosen, setChosen] = useState(asked);
+  // Each read is kept with the version it is of, so a version picked
+  // after it shows as loading, never under the text of the one before.
+  const [readOf, setReadOf] = useState<{
+    version: number;
+    answer: Read<BrainSourceText | null>;
+  }>();
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.versions(source)
+      );
+      if (!left) {
+        setVersions(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core, source]);
+  const newest =
+    versions.state === "ready" ? versions.data.versions[0]?.version : undefined;
+  const shown = chosen ?? newest;
+  useEffect(() => {
+    let left = false;
+    const read = async (version: number): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.read(source, version)
+      );
+      if (!left) {
+        setReadOf({ version, answer });
+      }
+    };
+    if (shown !== undefined) {
+      void read(shown);
+    }
+    return () => {
+      left = true;
+    };
+  }, [core, source, shown]);
+
+  if (versions.state === "refused") {
+    return <ErrorText>{versions.message}</ErrorText>;
+  }
+  const text: Read<BrainSourceText | null> =
+    readOf !== undefined && readOf.version === shown
+      ? readOf.answer
+      : { state: "loading" };
+  const read = text.state === "ready" ? text.data : undefined;
+  return (
+    <Card render={<section />} size="sm">
+      <CardContent>
+        {versions.state === "ready" && versions.data.versions.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            <Trans>You can&apos;t read this source.</Trans>
+          </p>
+        ) : null}
+        {read === undefined || read === null ? null : (
+          <>
+            <h3 className="text-sm font-medium">
+              {firstLineOf(read.text) || <Trans>No first line</Trans>}
+            </h3>
+            <ReadFrom names={connectedNames} read={read} source={source} />
+            <p className="text-sm whitespace-pre-wrap">{read.text}</p>
+            <LearnedSection
+              key={`${keyOf(source)}#${read.version}`}
+              source={source}
+              version={read.version}
+            />
+          </>
+        )}
+        {text.state === "ready" && text.data === null ? (
+          <p className="text-muted-foreground text-sm">
+            <Trans>You can&apos;t read this version.</Trans>
+          </p>
+        ) : null}
+        {text.state === "refused" ? (
+          <ErrorText>{text.message}</ErrorText>
+        ) : null}
+        {versions.state === "ready" && versions.data.versions.length > 0 ? (
+          <VersionList
+            onChoose={setChosen}
+            page={versions.data}
+            shown={shown}
+            source={source}
+            onMore={(page) => {
+              setVersions({
+                state: "ready",
+                data: {
+                  versions: [...versions.data.versions, ...page.versions],
+                  before: page.before,
+                },
+              });
+            }}
+          />
+        ) : null}
+        {source.producer === "upload" ? (
+          <UploadActions
+            onChanged={onChanged}
+            onDeleted={onDeleted}
+            source={source}
+            teams={teams}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+};
+
+/**
+ * For an admin: the uploads shared with a team or everyone, newest first,
+ * each by its file's name, who may read it, who uploaded it and when, and
+ * when its uploader removed it, never its text, with Erase for good: a
+ * shared upload only an admin erases, also one of a team they aren't in,
+ * or one removed.
+ */
+const SharedUploads = ({ onErased }: { onErased: () => void }) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const heading = useId();
+  const [listed, setListed] = useState<Read<BrainSharedUploadPage>>({
+    state: "loading",
+  });
+  const [acting, setActing] = useState<Read<unknown>>();
+  const [more, setMore] = useState<Read<BrainSharedUploadPage>>();
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.sharedUploads()
+      );
+      if (!left) {
+        setListed(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  const busy = acting?.state === "loading";
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Shared uploads</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Uploads shared with a team or everyone, those their uploader removed
+          among them. Only an admin can erase one, for everyone and for good.
+          Its text isn&apos;t shown here.
+        </Trans>
+      </p>
+      {listed.state === "refused" ? (
+        <ErrorText>{listed.message}</ErrorText>
+      ) : null}
+      {listed.state === "ready" && listed.data.uploads.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>No uploads are shared with a team or everyone.</Trans>
+        </p>
+      ) : null}
+      {listed.state === "ready" && listed.data.uploads.length > 0 ? (
+        <ItemGroup render={<ul />} spacing="tight">
+          {listed.data.uploads.map((upload) => {
+            const { uploaderName, teamName, readers } = upload;
+            // Named only for an admin who may read it; else told apart by
+            // its team, uploader and the minute it was uploaded.
+            const { name } = upload;
+            const uploaded = formatDateTime(upload.uploadedAt);
+            const removed =
+              upload.removedAt === null
+                ? null
+                : formatDateTime(upload.removedAt);
+            let readBy = t`Everyone`;
+            if (readers.kind === "team") {
+              readBy =
+                teamName === null ? t`A deleted team` : t`Team ${teamName}`;
+            }
+            return (
+              <li key={upload.source.id}>
+                <Item size="sm">
+                  <ItemContent>
+                    <span className="min-w-0 text-sm">
+                      {name ?? t`An upload`}
+                    </span>
+                    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                      <Badge variant="outline">{readBy}</Badge>
+                      <span>
+                        <Trans>
+                          Uploaded by {uploaderName}, {uploaded}
+                        </Trans>
+                      </span>
+                      {removed === null ? null : (
+                        <Badge variant="secondary">
+                          <Trans>Removed by its uploader, {removed}</Trans>
+                        </Badge>
+                      )}
+                    </span>
+                  </ItemContent>
+                  <Confirmed
+                    busy={busy}
+                    button={t`Erase for good`}
+                    confirm={t`Erase for good`}
+                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
+                    label={
+                      name === null
+                        ? t`Erase this upload for good`
+                        : t`Erase ${name} for good`
+                    }
+                    onConfirm={() => {
+                      setActing({ state: "loading" });
+                      void (async () => {
+                        const answer = await readFrom(core, async (sources) => {
+                          await sources.deleteUpload(upload.source.id);
+                        });
+                        // Not found: read the lists again, which show what
+                        // is there (or that they may no longer list it).
+                        if (answer.state !== "ready" && !notFound(answer)) {
+                          setActing(answer);
+                          return;
+                        }
+                        onErased();
+                      })();
+                    }}
+                    title={t`Erase this upload for good?`}
+                  />
+                </Item>
+              </li>
+            );
+          })}
+        </ItemGroup>
+      ) : null}
+      {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
+      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
+      {listed.state === "ready" && listed.data.next !== null ? (
+        <Button
+          className="self-start"
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            const { next, uploads } = listed.data;
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) => await sources.sharedUploads(next)
+              );
+              setMore(answer.state === "refused" ? answer : undefined);
+              if (answer.state === "ready") {
+                setListed({
+                  state: "ready",
+                  data: {
+                    uploads: [...uploads, ...answer.data.uploads],
+                    next: answer.data.next,
+                  },
+                });
+              }
+            })();
+          }}
+          type="button"
+          variant="outline"
+        >
+          <Trans>Show more</Trans>
+        </Button>
+      ) : null}
+    </section>
+  );
+};
+
+/** The Brain's sources page: search, how connections feed it, and the sources. */
+export const SourcesPage = ({
+  connections,
+  teams,
+  admin,
+}: {
+  /** The person's connections, each one they have connected. */
+  connections: Connection[];
+  /** The teams the person is in, whom they may upload for. */
+  teams: Team[];
+  /** Whether they are an admin, who erases shared uploads. */
+  admin: boolean;
+}) => {
+  // Each opening counts, so opening a source again (a search result
+  // citing a version, after another was picked in its panel) starts its
+  // panel afresh at what was asked.
+  const [opened, setOpened] = useState<{
+    source: BrainSourceRef;
+    version?: number;
+    opening: number;
+  }>();
+  const heading = useId();
+  const uploadHeading = useId();
+  const core = useCore();
+  // Each change to the sources counts, so the list reads them again.
+  const [listing, setListing] = useState(0);
+  const [connected, setConnected] = useState<Read<BrainConnectedSource[]>>({
+    state: "loading",
+  });
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.connections()
+      );
+      if (!left) {
+        setConnected(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  const connectedList = connected.state === "ready" ? connected.data : [];
+  const connectedNames = new Map(
+    connectedList.map(({ connectionId, name }) => [connectionId, name])
+  );
+  const open = (source: BrainSourceRef, version?: number) => {
+    const opening = (opened?.opening ?? 0) + 1;
+    setOpened(
+      version === undefined ? { source, opening } : { source, version, opening }
+    );
+  };
+  // What an action on `source` changed, once it finished: read from the
+  // state as it is then, as the person may have opened another source
+  // meanwhile, which stays open.
+  const changed = (source: BrainSourceRef) => {
+    setListing((before) => before + 1);
+    setOpened((current) =>
+      current !== undefined && sameSource(current.source, source)
+        ? { source, opening: current.opening + 1 }
+        : current
+    );
+  };
+  const deleted = (source: BrainSourceRef) => {
+    setListing((before) => before + 1);
+    setOpened((current) =>
+      current !== undefined && sameSource(current.source, source)
+        ? undefined
+        : current
+    );
+  };
+  return (
+    // A page of the brain: the title in the serif, in the brain's column,
+    // with room at the foot for the chat.
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
+        <PageHeader>
+          <PageHeaderTitle>
+            <Trans context="the Brain's sources page">Sources</Trans>
+          </PageHeaderTitle>
+          <PageHeaderDescription>
+            <Trans>
+              What the Brain keeps that you may read, and search through it as
+              your agents recall it.
+            </Trans>
+          </PageHeaderDescription>
+        </PageHeader>
+        <Search onOpen={open} />
+        <section
+          aria-labelledby={uploadHeading}
+          className="flex flex-col gap-3"
+        >
+          <h2 className="text-sm font-medium" id={uploadHeading}>
+            <Trans>Upload a file</Trans>
+          </h2>
+          <UploadForm
+            onUploaded={(source) => {
+              setListing((before) => before + 1);
+              open(source);
+            }}
+            teams={teams}
+          />
+        </section>
+        {admin ? (
+          <SharedUploads
+            // Read again from the start whenever the sources are (an
+            // upload, a new version, a delete), as the list below is.
+            key={`shared-${listing}`}
+            onErased={() => {
+              setListing((before) => before + 1);
+            }}
+          />
+        ) : null}
+        <ConnectionFeeds connections={connections} />
+        {connected.state === "refused" ? (
+          <ErrorText>{connected.message}</ErrorText>
+        ) : (
+          <SharedConnectionReads connected={connectedList} />
+        )}
+        <section aria-labelledby={heading} className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium" id={heading}>
+            <Trans>Sources you may read</Trans>
+          </h2>
+          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+            <SourceList
+              key={`list-${listing}`}
+              onPick={(source) => {
+                open(source);
+              }}
+              picked={opened?.source}
+            />
+            {opened === undefined ? null : (
+              <SourcePanel
+                key={`panel-${opened.opening}`}
+                onChanged={changed}
+                onDeleted={deleted}
+                connectedNames={connectedNames}
+                source={opened.source}
+                teams={teams}
+                version={opened.version}
+              />
+            )}
+          </div>
+        </section>
+        <OwnExportSection />
+      </div>
+    </div>
+  );
+};

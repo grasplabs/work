@@ -1,0 +1,717 @@
+import { z } from "zod";
+
+import type { AgentProposer } from "./apps.ts";
+import { defineErrorFamily } from "./errors.ts";
+import {
+  agentIdSchema,
+  appIdSchema,
+  chatIdSchema,
+  connectionIdSchema,
+  identifierMaxLength,
+  identifierSchema,
+  runIdSchema,
+  teamIdSchema,
+  triggerIdSchema,
+  workflowResourceIdSchema,
+  workspaceIdSchema,
+} from "./ids.ts";
+import type { PermissionId } from "./ids.ts";
+import { stableIdPattern } from "./store-limits.ts";
+import type { TriggerSummary } from "./workflow-triggers.ts";
+
+// Apps and agents start with nothing. Each thing they may use is one
+// permission: a person asks for it, an admin grants it (their own request
+// included), and every call checks it again on the server.
+// Everything here names things by ID and stays identifier-sized, because
+// each grant and revoke goes into the audit log with these values.
+
+const appSubjectSchema = z.strictObject({
+  type: z.literal("app"),
+  appId: appIdSchema,
+});
+const agentSubjectSchema = z.strictObject({
+  type: z.literal("agent"),
+  agentId: agentIdSchema,
+});
+const workflowSubjectSchema = z.strictObject({
+  type: z.literal("workflow"),
+  workflowId: workflowResourceIdSchema,
+});
+
+/**
+ * Whose code makes a call: an App's, an agent's, or an independent
+ * workflow's (a run of its sealed build, on the grants the workflow holds
+ * itself: core's workflows/resource-calls.ts). What a call's authority
+ * names (`authoritySchema`).
+ */
+export const codeSubjectSchema = z.discriminatedUnion("type", [
+  appSubjectSchema,
+  agentSubjectSchema,
+  workflowSubjectSchema,
+]);
+export type CodeSubject = z.infer<typeof codeSubjectSchema>;
+
+/** The ID of the App, agent or workflow `subject` names. */
+export const codeSubjectId = (subject: CodeSubject): string => {
+  switch (subject.type) {
+    case "app": {
+      return subject.appId;
+    }
+    case "agent": {
+      return subject.agentId;
+    }
+    case "workflow": {
+      return subject.workflowId;
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
+
+/**
+ * The subject of type `type` and ID `id`, as a store keeps the two
+ * apart: refused, as any parse is, when `id` can't be one of that type.
+ */
+export const codeSubjectOf = (
+  type: CodeSubject["type"],
+  id: string
+): CodeSubject => {
+  switch (type) {
+    case "app": {
+      return codeSubjectSchema.parse({ type, appId: id });
+    }
+    case "agent": {
+      return codeSubjectSchema.parse({ type, agentId: id });
+    }
+    case "workflow": {
+      return codeSubjectSchema.parse({ type, workflowId: id });
+    }
+    default: {
+      return type satisfies never;
+    }
+  }
+};
+
+/**
+ * Who a permission is for: an App, an agent, or an independent resource
+ * (platform specification 24): a workflow or a trigger,
+ * each holding its own grants, never its owner's nor those of an App that
+ * uses it. Never a person.
+ */
+export const permissionSubjectSchema = z.discriminatedUnion("type", [
+  appSubjectSchema,
+  agentSubjectSchema,
+  workflowSubjectSchema,
+  z.strictObject({
+    type: z.literal("trigger"),
+    triggerId: triggerIdSchema,
+  }),
+]);
+export type PermissionSubject = z.infer<typeof permissionSubjectSchema>;
+export type PermissionSubjectType = PermissionSubject["type"];
+/** A subject as a client sends it, with a plain string ID. */
+export type PermissionSubjectInput = z.input<typeof permissionSubjectSchema>;
+
+/**
+ * Most teams one `brain` permission names: the Brain reads as at most
+ * 1,000 groups (`readerGroupsMax` in `@grasp-os/brain-next/contract`), and
+ * the company is always one of them.
+ */
+export const brainTeamsMax = 999;
+
+/**
+ * The teams an App's `brain` permission names: what a request may name,
+ * and the only shape core reads back from storage (core's
+ * brain-grant-teams.ts). Team IDs, at least one, at most `brainTeamsMax`,
+ * each once.
+ */
+export const brainTeamsSchema = z
+  .array(teamIdSchema)
+  .min(1)
+  .max(brainTeamsMax)
+  .refine((teams) => new Set(teams).size === teams.length, {
+    message: "Each team once",
+  });
+
+/**
+ * What the platform itself offers an App, as a permission's object, one
+ * action per permission (its stub does that one thing):
+ *
+ * - `statistics`: the measures the platform publishes of Apps' runs
+ *   (`platformMeasures` in `@grasp-os/shared/platform-measures`), which an App
+ *   reads only once an admin grants it this, and then only of Apps whose
+ *   runs the person it acts for may see. An App's own statistics need no
+ *   permission.
+ * - `brain`: reading the company Brain, and only reading: recall, reads of
+ *   its evidence and of its open questions (gaps). Apps, runs and agents
+ *   share this one permission, and start without it. A grant never
+ *   reaches past the person it acts for: every read is that person's
+ *   access intersected with the grant's, and is audited. Writing
+ *   (remember, proposals) will be an action of its own, with its own
+ *   consent, so an approved read grant never gains writes.
+ */
+const platformObjectSchema = z.strictObject({
+  type: z.literal("platform"),
+  /**
+   * The teams an App's `brain` permission reaches beyond what everyone in
+   * the company may read, by ID (a rename changes nothing): its recall
+   * reads, of these, the teams the person it acts for is in, and the App
+   * is shared only with people in all of them (core's brain-recall.ts and
+   * app-provenance.ts). Absent, it reaches the company alone. At most
+   * `brainTeamsMax`, each once; only on an App's `brain` permission.
+   */
+  teams: brainTeamsSchema.optional(),
+});
+
+/**
+ * What a permission gives access to: a connection (all of it, or one
+ * resource in it, such as one mailbox), an independent workflow (to follow its runs, `read`, start it, `start`,
+ * or send events to its runs, `send`, which neither of the others
+ * implies), an App's sealed functions, for an agent (reading with
+ * `read`, writing with `write`: core's agent-apps.ts), one of an App's
+ * functions, for an independent workflow (`function`, the stable ID the
+ * App's definition gives it, with the one action `call`: core's
+ * workflows/app-calls.ts), or the platform's own statistics.
+ */
+export const permissionObjectSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("connection"),
+    connectionId: connectionIdSchema,
+    /** One resource in the connection; absent means the whole connection. */
+    resource: identifierSchema.optional(),
+  }),
+  z.strictObject({
+    type: z.literal("workflow"),
+    workflowId: workflowResourceIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("app"),
+    appId: appIdSchema,
+    /**
+     * One of the App's functions, by the stable ID its definition gives
+     * it (never its name, which a rename changes): a workflow's grant.
+     * Absent for an agent's, which reaches every public function.
+     */
+    function: z.string().regex(stableIdPattern).optional(),
+  }),
+  platformObjectSchema,
+]);
+export type PermissionObject = z.infer<typeof permissionObjectSchema>;
+export type PermissionObjectType = PermissionObject["type"];
+
+/**
+ * A connection's actions are its connector's tool names (native ones such
+ * as `mail.send`, or a catalog's such as `GMAIL_SEND_EMAIL`); which of them
+ * write is the connector's to say, in connect.
+ */
+const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
+
+/** The actions of workflows and the platform, fixed by the platform. */
+const platformActions = {
+  workflow: ["read", "start", "send"],
+  platform: ["statistics", "brain"],
+} as const;
+
+/**
+ * What a platform permission's one action is: each is a binding of its
+ * own kind in an App's env (statistics, the Brain).
+ */
+export const platformActionSchema = z.enum(platformActions.platform);
+export type PlatformAction = z.infer<typeof platformActionSchema>;
+
+/** One action a permission allows. */
+export const permissionActionSchema = z.string().regex(connectionActionPattern);
+
+/** Whether `action` is one an object of `type` has. */
+const isActionOf = (type: PermissionObjectType, action: string): boolean => {
+  if (type === "connection") {
+    return connectionActionPattern.test(action);
+  }
+  // An App's functions, for an agent: those that read, or all of them;
+  // one of them, for a workflow: calling it.
+  if (type === "app") {
+    return action === "read" || action === "write" || action === "call";
+  }
+  const actions: readonly string[] = platformActions[type];
+  return actions.includes(action);
+};
+
+/** Most actions one permission lists. */
+export const permissionMaxActions = 16;
+
+/**
+ * The names of core's and connect's own bindings, secrets and vars. A
+ * permission can't use one, so a stub is never mistaken for, or passed off
+ * as, a platform binding. Tests check this list against both Workers' env.
+ */
+const platformBindingNames: ReadonlySet<string> = new Set([
+  // One foreground action's invocation (core's src/action-invocation.ts).
+  "ACTION_INVOCATIONS",
+  // A workflow run's own App (its server methods), next to its permissions.
+  "APP",
+  "APP_CALL_TIMEOUT_MS",
+  // Grasp's OAuth apps at the apps that aren't suites (connect's providers.ts).
+  "APP_OAUTH_CLIENTS",
+  // One App's preview of its draft (core's src/app-preview.ts).
+  "APP_PREVIEWS",
+  "APPS",
+  "ASSETS",
+  "AUDIT_ARCHIVE",
+  "AUDIT_LOG",
+  "BETTER_AUTH_SECRET",
+  // The Chat SDK's state for Stephen's door (core's @grasp-os/chat/state).
+  "CHAT_STATE",
+  // One chat's agent (core's src/chat-session.ts).
+  "CHAT_SESSIONS",
+  "BRAIN_OBJECTS",
+  // The Brain's store (core's src/brain-next.ts).
+  "BRAIN_STORE",
+  "BUILD_WAIT_MS",
+  "BUILTINS",
+  "CAPABILITY_SIGNING_KEY",
+  "CAPABILITY_SIGNING_KEY_PREVIOUS",
+  "CF_VERSION_METADATA",
+  // The client this deployment is (core's src/provision-probe.ts).
+  "CLIENT_ID",
+  // The client's clock (core's src/clock.ts).
+  "CLOCK",
+  "COMPOSIO_API_KEY",
+  "CONNECT",
+  "DATA_STORES",
+  "DB",
+  "DEV_SKIP_ROUTER_SECRET",
+  // Who follows an App's or workflow's draft (core's src/draft-watch.ts).
+  "DRAFT_WATCHES",
+  "DURABLE_OBJECT_JURISDICTION",
+  "EMAIL",
+  // Our own embedding model's objects (core's src/embedder.ts).
+  "EMBEDDER",
+  "ENTRA_CLIENT_SECRET",
+  "FILES",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+  // The directory's Google client (connect's providers.ts).
+  "GOOGLE_DIRECTORY_CLIENT_ID",
+  "GOOGLE_DIRECTORY_CLIENT_SECRET",
+  // The documents' Google client (connect's providers.ts).
+  "GOOGLE_DOCUMENTS_CLIENT_ID",
+  "GOOGLE_DOCUMENTS_CLIENT_SECRET",
+  // A lower live-read budget, which tests set (core's src/app.ts).
+  "LIVE_READ_LIMITS",
+  "LOADER",
+  // Who core's mail is from (core's src/mail.ts).
+  "MAIL_FROM",
+  "MICROSOFT_CLIENT_ID",
+  "MICROSOFT_CLIENT_SECRET",
+  // The directory's Entra app (connect's providers.ts).
+  "MICROSOFT_DIRECTORY_CLIENT_ID",
+  "MICROSOFT_DIRECTORY_CLIENT_SECRET",
+  // The documents' Entra app (connect's providers.ts).
+  "MICROSOFT_DOCUMENTS_CLIENT_ID",
+  "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
+  // The embedding model's files, and on-prem where they come from (core's
+  // src/embedder.ts).
+  "MODEL_FILES",
+  "MODEL_SOURCE",
+  "ONBOARDING",
+  "PACKAGE_LIMITS",
+  "PLATFORM_CHANGE",
+  "RELEASE_READ_MS",
+  "ROUTER_SECRET",
+  "ROUTER_SECRET_PREVIOUS",
+  // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
+  "RUNTIME_PROFILE",
+  // The on-prem sandbox for untrusted isolates (core's src/sandboxed.ts).
+  "SANDBOX_DEADLINE_MS",
+  "SANDBOX_HOST",
+  "SANDBOX_IN_PROCESS",
+  "SIGN_IN",
+  // The client's own Slack app (core's src/channels/slack.ts, connect's
+  // src/channels.ts).
+  "SLACK_BOT_TOKEN",
+  "SLACK_SIGNING_SECRET",
+  // The month model spend counts in, which tests set (core's
+  // src/model-spend.ts).
+  "SPEND_MONTH",
+  // The platform's statistics (core's src/statistics.ts), next to its permissions.
+  "STATISTICS",
+  "STATISTICS_READ_LIMITS",
+  // The client's own Teams bot (connect's src/channels.ts).
+  "TEAMS_BOT_ID",
+  "TEAMS_BOT_SECRET",
+  "TEAMS_BOT_TENANT_ID",
+  // Tests' lowered quota limits (core's src/workflows/quotas.ts).
+  "TEST_QUOTA_LIMITS",
+  "TOKEN_ENCRYPTION_KEY",
+  "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+  "WORKFLOW_BETWEEN_STEPS_MS",
+  "WORKFLOW_BUILD_READ_MS",
+  "WORKFLOW_OFF_WAIT_MS",
+  "WORKFLOW_RETRY_DELAY_MS",
+  "WORKFLOW_RUNS",
+  "WORKSPACES",
+]);
+
+/**
+ * The name a permission's stub has in the env of the App or agent, such as
+ * `OUTLOOK`. Upper case only, like every other binding: that also keeps out
+ * `__proto__`, `constructor` and every other name an object already has.
+ */
+export const bindingNameSchema = z
+  .string()
+  .regex(/^[A-Z][A-Z0-9_]{0,63}$/u, "Upper case letters, digits and _")
+  .refine((name) => !platformBindingNames.has(name), {
+    message: "A name the platform uses itself",
+  });
+
+/** What a permission gives: the object, its actions and the stub's name. */
+const grantShape = {
+  object: permissionObjectSchema,
+  actions: z
+    .array(permissionActionSchema)
+    .min(1)
+    .max(permissionMaxActions)
+    .refine((actions) => new Set(actions).size === actions.length, {
+      message: "Each action once",
+    }),
+  binding: bindingNameSchema,
+};
+
+/**
+ * Refuses an action the object doesn't have, and actions too long for the
+ * audit log.
+ */
+const checkGrant = (
+  { object, actions }: { object: PermissionObject; actions: readonly string[] },
+  context: z.RefinementCtx
+): void => {
+  for (const action of actions) {
+    if (!isActionOf(object.type, action)) {
+      context.addIssue({
+        code: "custom",
+        path: ["actions"],
+        message: `A ${object.type} has no action ${action}`,
+      });
+    }
+  }
+  // One App function is only called; the whole App only read or written.
+  if (
+    object.type === "app" &&
+    (object.function === undefined) === actions.includes("call")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["actions"],
+      message:
+        "One of an App's functions is called (call); a whole App is read or written",
+    });
+  }
+  if (
+    object.type === "app" &&
+    object.function !== undefined &&
+    actions.length !== 1
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["actions"],
+      message: "A permission on one of an App's functions has one action",
+    });
+  }
+  // A platform permission's stub does one thing: the action names it.
+  if (object.type === "platform" && actions.length !== 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["actions"],
+      message: "A platform permission has one action",
+    });
+  }
+  // Only the Brain is read as far as teams go.
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    !actions.includes("brain")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["object", "teams"],
+      message: "Only a permission to read the Brain names teams",
+    });
+  }
+  // The audit log records the actions as one identifier-sized value.
+  if (actions.join(" ").length > identifierMaxLength) {
+    context.addIssue({
+      code: "custom",
+      path: ["actions"],
+      message: "Too many actions for one permission",
+    });
+  }
+};
+
+/** What a person asks for: the subject, the object, its actions, the name. */
+export const permissionRequestSchema = z
+  .strictObject({ subject: permissionSubjectSchema, ...grantShape })
+  .superRefine(checkGrant);
+/** A permission request as a client sends it, with plain string IDs. */
+export type PermissionRequest = z.input<typeof permissionRequestSchema>;
+
+/**
+ * A permission a blueprint declares (a built-in's `blueprint.json`, or
+ * what its App asked for as it was marked): a request without its
+ * subject, which is every App created from it. Only what the platform
+ * offers (its statistics, the Brain): the thing that names
+ * the same for whoever creates from it, where a connection is someone's
+ * or set up for one App, and a workflow or exports name an App its
+ * creator may not see.
+ */
+export const declaredPermissionSchema = z
+  .strictObject({
+    ...grantShape,
+    object: platformObjectSchema,
+  })
+  .superRefine(checkGrant)
+  .superRefine(({ object }, context) => {
+    // Teams are its requester's, as a connection is someone's: whoever
+    // creates from it names their own.
+    if (object.type === "platform" && object.teams !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object", "teams"],
+        message: "A blueprint names no teams",
+      });
+    }
+  });
+export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
+
+/** Longest workflow definition a blueprint ships, as JSON text. */
+export const blueprintWorkflowMaxLength = 256 * 1024;
+
+/**
+ * An independent workflow a built-in blueprint ships (core's
+ * app-blueprints.ts): each App created from it gets a workflow of its
+ * creator's own, published from `definition` (grasp-workflow/2 JSON)
+ * and bound to the App under `alias`, and asks, under `binding`, for the
+ * permission to start it. Never a grant: the request waits for an admin,
+ * and each of the version's catalog bindings for an admin's approval.
+ * The alias is lowercase, as it also names the workflow.
+ */
+export const blueprintWorkflowSchema = z.strictObject({
+  alias: z.string().regex(/^[a-z][a-z0-9]{0,31}$/u),
+  binding: bindingNameSchema,
+  definition: z.string().min(1).max(blueprintWorkflowMaxLength),
+});
+export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
+
+/**
+ * Requested: asked for, allows nothing yet. Active: granted, allows its
+ * actions. Revoked: allows nothing, for good (ask again for a new one).
+ * An App's active permission on a connection or to start a workflow goes
+ * back to requested when someone who couldn't grant
+ * it (Grasp staff included) makes another version of the App current
+ * (`drafts.publish`, `versions.rollback`), until an admin
+ * grants it again.
+ */
+export const permissionStatusSchema = z.enum([
+  "requested",
+  "active",
+  "revoked",
+]);
+export type PermissionStatus = z.infer<typeof permissionStatusSchema>;
+
+/**
+ * What an admin reviewed as they grant a permission: the version of its
+ * App current then; for a workflow's permission on one of an App's
+ * functions, the version of that App current then, whose definition
+ * named the function they saw; null for any other, or an App with none
+ * current.
+ */
+export const grantReviewSchema = z.strictObject({
+  version: z.int().positive().nullable(),
+});
+export type GrantReview = z.infer<typeof grantReviewSchema>;
+
+/** One permission, as the API returns it. */
+export interface Permission {
+  id: PermissionId;
+  subject: PermissionSubject;
+  object: PermissionObject;
+  actions: string[];
+  binding: string;
+  status: PermissionStatus;
+  /** User IDs, and when (ISO 8601). */
+  requestedBy: string;
+  requestedAt: string;
+  /** Who granted it, and when: only `status` says what it allows. */
+  grantedBy: string | null;
+  grantedAt: string | null;
+  revokedBy: string | null;
+  revokedAt: string | null;
+  /**
+   * The chat's agent that asked for it, acting for `requestedBy`; null
+   * when that person asked themselves.
+   */
+  requestedVia: AgentProposer | null;
+  /**
+   * The ID of the one chat it holds in, for `requestedBy` alone: a shared
+   * connection the chat's agent asked for there, which an admin grants.
+   * It goes with the chat. (A chat's request for its person's own
+   * personal connection is theirs alone to see and decide: it is never
+   * listed here.) Null for a permission that holds wherever its App or
+   * agent works.
+   */
+  chat: string | null;
+  /**
+   * For a live trigger holding it, what the trigger is (its kind and what
+   * starts it), so whoever decides it knows which trigger asks. Absent for
+   * any other permission.
+   */
+  trigger?: TriggerSummary;
+  /**
+   * The names of the independent workflows it names, as its subject or
+   * its object, by ID: so whoever decides it knows which workflow asks or
+   * is reached. Absent where it names none.
+   */
+  workflowNames?: Record<string, string>;
+  /**
+   * For an independent workflow's permission on one of an App's functions
+   * (an `app` object with its `function`), that function's path in the
+   * App's current version, such as `tasks.create`: so whoever decides it
+   * knows what is called. Only a hint: the grant names the ID. Absent
+   * once no current version gives that ID.
+   */
+  functionName?: string;
+}
+
+/**
+ * A signed-in person's permissions, over `/rpc`: every call checks the
+ * session and the person's role again.
+ */
+export interface PermissionsApi {
+  /**
+   * Asks for a permission for an App, an agent, or an independent
+   * workflow or trigger; it allows nothing until an admin grants
+   * it. Admins and builders; for any but an agent, only its builders.
+   */
+  request: (request: PermissionRequest) => Promise<Permission>;
+  /**
+   * Grants a requested permission, the admin's own request included.
+   * Admins only, never Grasp staff; audited. `reviewed.version` is the
+   * version of the App
+   * the admin reviewed, the one current as they decided (null for an
+   * agent's permission, or an App with none current): the grant approves
+   * it, and is refused with `app.conflict`, changing nothing, once another
+   * version is current.
+   */
+  grant: (id: string, reviewed: GrantReview) => Promise<Permission>;
+  /**
+   * Revokes a permission; the next call that needs it is refused. Admins
+   * only, never Grasp staff; audited.
+   */
+  revoke: (id: string) => Promise<Permission>;
+  /**
+   * Every permission, or one App's or agent's, oldest first; only those in
+   * `status` when given. Admins and builders.
+   */
+  list: (
+    subject?: PermissionSubjectInput,
+    status?: PermissionStatus
+  ) => Promise<Permission[]>;
+}
+
+/**
+ * How a call reaches for access: which App or agent makes it, the person it
+ * acts for, and whether a person is there (interactive) or a workflow runs
+ * on its own. The host sets it, from the session or the run; never the code
+ * that makes the call.
+ *
+ * A workflow run acts for the person who started it, or for the workflow's
+ * owner when a trigger or schedule started it, and stops when that person
+ * leaves. The permission check only requires that the person is still a
+ * member; it doesn't intersect the grant with the person's own access. That
+ * part of "never more than the person" (R5) is enforced where the access
+ * lives: connect limits personal connections to their owner, and the
+ * Brain recalls only what the person may read.
+ */
+export const authoritySchema = z
+  .strictObject({
+    subject: codeSubjectSchema,
+    onBehalfOf: identifierSchema,
+    mode: z.enum(["interactive", "workflow"]),
+    /**
+     * For a call from an App's code: the App version whose code made it,
+     * set by the host. Required for an App, and it decides access: a
+     * version no admin approved changes nothing (core's `authorize`). The
+     * audit log traces each call to the code that made it (threat model
+     * SB9). An agent has none.
+     */
+    appVersion: z.int().positive().optional(),
+  })
+  .refine(
+    ({ subject, appVersion }) =>
+      (subject.type === "app") === (appVersion !== undefined),
+    {
+      path: ["appVersion"],
+      message: "An App's call names its version; an agent's none",
+    }
+  )
+  .refine(
+    ({ subject, mode }) => subject.type !== "workflow" || mode === "workflow",
+    {
+      path: ["mode"],
+      message: "An independent workflow's call is a run's, never interactive",
+    }
+  );
+export type Authority = z.infer<typeof authoritySchema>;
+
+/**
+ * Where an App, agent or independent workflow works, and keeps its
+ * restricted mode: a chat, an App, or a run of an independent workflow
+ * (`workflowRun`, core's workflows/resource-calls.ts). The host sets it,
+ * like the authority.
+ */
+export const workContextSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("chat"),
+    workspaceId: workspaceIdSchema,
+    chatId: chatIdSchema,
+  }),
+  z.strictObject({ type: z.literal("app"), appId: appIdSchema }),
+  z.strictObject({
+    type: z.literal("workflowRun"),
+    workflowId: workflowResourceIdSchema,
+    runId: runIdSchema,
+    /**
+     * The files use a write's attachments are read through (GRA-887),
+     * set by core for that call only: kept with a held write, so its
+     * release decides that use's authority again.
+     */
+    filesFrom: z.string().min(1).max(128).optional(),
+  }),
+]);
+export type WorkContext = z.infer<typeof workContextSchema>;
+
+/** Why a permission call was refused. */
+export const permissionErrors = defineErrorFamily({
+  "permission.denied": "This App or agent has no permission to do that.",
+  "permission.context_invalid":
+    "This App or agent can't work in that chat or App, or it doesn't exist.",
+  "permission.restricted":
+    "This chat, App or run has read restricted data, so it can no longer act on or fetch from outside systems.",
+  "permission.person_inactive":
+    "The person this acts for no longer has access to this deployment.",
+  "permission.invalid": "That isn't a valid permission request.",
+  "permission.not_found": "There's no such permission.",
+  "permission.not_requested": "Only a requested permission can be granted.",
+  "permission.conflict":
+    "This App or agent already has a permission with that binding name.",
+  "permission.admin_decides":
+    "A shared connection is granted by an admin. You can withdraw the request.",
+  "permission.denied_before":
+    "The person already turned this down in this chat. Don't ask again unless they say so.",
+  "permission.team_brain_workflow":
+    "An App whose permission to read the Brain names teams can't be called from a workflow, and an App a workflow may call can't name teams.",
+  "permission.too_many_requests":
+    "This chat already has too many connection requests waiting. Wait until the person decides them.",
+  "permission.own_in_chat_app":
+    "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app, and a grant there holds in that chat alone. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), grant it there, and have the work done in that chat.",
+});

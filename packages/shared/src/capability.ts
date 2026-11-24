@@ -1,0 +1,543 @@
+import { z } from "zod";
+
+import { fromBase64Url, toBase64Url } from "./encoding.ts";
+import { defineErrorFamily } from "./errors.ts";
+import {
+  connectionIdSchema,
+  identifierSchema,
+  permissionIdSchema,
+} from "./ids.ts";
+import {
+  authoritySchema,
+  permissionActionSchema,
+  workContextSchema,
+} from "./permissions.ts";
+import type { Authority } from "./permissions.ts";
+
+// A capability is what lets connect act on a call from core without
+// trusting core's caller: core checks the permission, then signs exactly
+// what it allows (who, for whom, which connection, resource and action,
+// which idempotency key) for a few seconds; connect verifies every field
+// against the call before it does anything.
+//
+// The scheme is HMAC-SHA256 with a secret only core and connect hold
+// (`CAPABILITY_SIGNING_KEY`), over the token's own payload text:
+// `base64url(JSON claims) "." base64url(MAC)`. Both ends are ours and share
+// the secret, so a MAC does what a signature would, with less to go wrong.
+//
+// Replays: connect keeps no record of used capabilities. A capability names
+// one exact call and expires quickly, and a side effect is bound to the
+// idempotency key it names, so replaying one repeats at most that same call
+// within its lifetime, and a write returns its stored result instead of
+// running again.
+
+/** How long core makes a capability valid for: one call, not a session. */
+export const capabilityTtlMs = 30_000;
+
+/** The longest lifetime connect accepts, however a capability was made. */
+export const capabilityMaxTtlMs = 60_000;
+
+/** How far ahead of connect's clock a capability may have been issued. */
+export const capabilityClockSkewMs = 5000;
+
+/** The shortest signing key accepted, in characters. */
+export const capabilityKeyMinLength = 32;
+
+/** Keeps a MAC made here from ever passing as one made for anything else. */
+const macContext = "grasp-os capability v1\n";
+
+/** An approved resource binding, as a held call pins it. */
+export const heldBindingSchema = z.strictObject({
+  id: identifierSchema,
+  declarationHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+export type HeldBinding = z.infer<typeof heldBindingSchema>;
+
+/** Where a call a person is there for comes from (`origin`). */
+const originSchema = z.strictObject({
+  /**
+   * The grant the call was allowed under; null for a read in its
+   * person's own chat that needs none (core's ungranted-reads.ts), which
+   * is always `readOnly`.
+   */
+  permissionId: permissionIdSchema.nullable(),
+  context: workContextSchema,
+  /**
+   * For an App action's connector resource: the approved binding the call
+   * came through, with the declaration and contract it served then. Core
+   * resolves the binding again, as a live request would, before it signs
+   * a decision of a call held or of unknown outcome, and refuses on any
+   * difference; connect compares the decision's with the call's.
+   */
+  binding: heldBindingSchema.optional(),
+});
+
+/**
+ * What a person decided of a call waiting for them, as core signs it:
+ * confirming the held action `pendingActionId`, or resolving a call of
+ * unknown outcome by `choice`, at the claim of its key they were shown
+ * (`claimedAt`; one sent again since, and lost again, is another call to
+ * decide on). One kind never stands for the other: connect compares the
+ * whole decision with the one it expects.
+ */
+export const capabilityDecisionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("confirm"), pendingActionId: z.uuid() }),
+  z.strictObject({
+    kind: z.literal("resolve"),
+    choice: z.enum(["happened", "not_happened"]),
+    claimedAt: z.int().nonnegative(),
+  }),
+]);
+export type CapabilityDecision = z.infer<typeof capabilityDecisionSchema>;
+
+/** What a capability says. Unknown fields make it invalid. */
+export const capabilityClaimsSchema = z.strictObject({
+  v: z.literal(1),
+  /** Only connect accepts it. */
+  aud: z.literal("connect"),
+  /** Unique per capability, so calls can be told apart in the audit log. */
+  jti: z.uuid(),
+  /** Issued and expires, in milliseconds since the epoch. */
+  iat: z.int().nonnegative(),
+  exp: z.int().nonnegative(),
+  authority: authoritySchema,
+  connectionId: connectionIdSchema,
+  /** The one resource in the connection it covers, or the whole connection. */
+  resource: identifierSchema.nullable(),
+  action: permissionActionSchema,
+  /** A side effect's key; connect stores its result under it. */
+  idempotencyKey: identifierSchema.nullable(),
+  /**
+   * The chat, App or run making the call has read restricted data (threat
+   * model R12, Q12), or the chat handed over something only its person
+   * may read (core's private-reads.ts, GRA-1928): connect lets it read, as
+   * a tool declares, and holds every side effect for the person, a read
+   * whose input leaves for a third party too. Only the capability says it.
+   */
+  restricted: z.boolean().default(false),
+  /**
+   * The call comes from work that may only read (an App call through an
+   * export marked `read`): connect refuses every side effect of it, before
+   * holding or running one. Only the capability says it.
+   */
+  readOnly: z.boolean().default(false),
+  /**
+   * The call comes from a turn nobody asked for there and then: an agent
+   * woken by a schedule or an event, with no person in the chat. Connect
+   * holds every side effect of it for its person, whatever else the
+   * capability says, and only with an end (`heldUntil`), so what nobody
+   * answers ends with the company's day. Only the capability says it.
+   */
+  unattended: z.boolean().default(false),
+  /**
+   * The call's input holds a value core keeps from people: a workflow's
+   * sensitive parameter, put in as a binding argument. Connect keeps none
+   * of its input under its key, so no listing of a call of unknown
+   * outcome shows it, and saying such a call didn't happen is refused, as
+   * for one whose input is no longer kept. Only the capability says it.
+   */
+  sensitive: z.boolean().default(false),
+  /**
+   * What core checks again if connect holds the call, or loses its
+   * answer, and the person decides it: the permission that allowed it and
+   * the context it came from.
+   */
+  origin: originSchema,
+  /**
+   * Where the call is made: the chat, App or run, for the audit log. A
+   * chat's agent is its workspace's, in every chat, so only this says
+   * which chat called.
+   */
+  context: workContextSchema.optional(),
+  /**
+   * When a side effect connect holds from this call ends unconfirmed, in
+   * milliseconds since the epoch: after it, connect declines it as
+   * expired, and a confirmation runs nothing. Core sets it for a chat on a
+   * chat platform, where a card scrolls away and its values may have moved
+   * on (midnight of the company's day); without it, a held side effect
+   * waits until it is decided. Only the capability says it.
+   */
+  heldUntil: z.int().nonnegative().optional(),
+  /**
+   * The call comes from a conversation in a chat app (Teams, Slack), which
+   * Grasp never shows as a chat: a side effect held from it is decided on
+   * its card there, and Grasp's own list of what waits leaves it out
+   * (`listPendingActions`). Only the capability says it.
+   */
+  chatApp: z.boolean().default(false),
+  /**
+   * Only on the capability core signs once a person decided a call that
+   * waits for them, from their own session, after checking its permission
+   * and context again (`CapabilityDecision`). Connect decides that call
+   * only with it, only as it says, and takes it nowhere else: a call or a
+   * held call's read with one is refused.
+   */
+  decision: capabilityDecisionSchema.optional(),
+  /**
+   * Only for a chat's agent: the shared mailboxes its company pointed it
+   * at for the person it acts for, in lower case (core's
+   * shared-mailboxes.ts). Its Microsoft 365 mail calls reach those and its
+   * person's own mailbox, no other; absent is none.
+   */
+  mailboxes: z.array(z.string().min(1).max(254)).max(50).optional(),
+  /**
+   * Only for a chat's agent, on a company app its company pointed it at
+   * within some of its resources (core's app-pointers.ts): its reads there
+   * may name only these. Absent is the whole app.
+   */
+  resources: z.array(identifierSchema).max(50).optional(),
+});
+export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
+
+/** The one call a capability is for, as the call itself states it. */
+export interface CapabilityCall {
+  connectionId: string;
+  resource?: string | undefined;
+  /**
+   * When the work the call comes from must end, in milliseconds since the
+   * epoch: the capability expires by then, if that is sooner than its own
+   * lifetime.
+   */
+  notAfter?: number | undefined;
+  action: string;
+  idempotencyKey?: string | undefined;
+}
+
+/** The call a capability is for, and what core signs with it. */
+export interface CapabilityScope extends CapabilityCall {
+  /** The caller's context is in restricted mode: signed, not compared. */
+  restricted?: boolean | undefined;
+  /** The caller may only read: signed, not compared. */
+  readOnly?: boolean | undefined;
+  unattended?: boolean | undefined;
+  /** The call's input holds a sensitive value: signed, not compared. */
+  sensitive?: boolean | undefined;
+  /** What core checks again when a held call is confirmed: signed. */
+  origin: z.input<typeof originSchema>;
+  /** Where the call is made, for the audit log: signed, not compared. */
+  context?: z.input<typeof workContextSchema> | undefined;
+  /** When a side effect held from it ends unconfirmed: signed, not compared. */
+  heldUntil?: number | undefined;
+  /** It comes from a chat app's conversation: signed, not compared. */
+  chatApp?: boolean | undefined;
+  /** What a person decided of the call: signed, not compared. */
+  decision?: CapabilityDecision | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.mailboxes`. */
+  mailboxes?: readonly string[] | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.resources`. */
+  resources?: readonly string[] | undefined;
+}
+
+/** Why connect refuses a call before looking at it any further. */
+export const capabilityErrors = defineErrorFamily({
+  "capability.invalid":
+    "This call doesn't carry a valid capability for this action.",
+});
+
+type MacUsage = "sign" | "verify";
+
+const tokenPattern = /^(?<payload>[A-Za-z0-9_-]+)\.(?<mac>[A-Za-z0-9_-]+)$/u;
+
+const macKey = async (secret: string, usage: MacUsage): Promise<CryptoKey> => {
+  if (secret.length < capabilityKeyMinLength) {
+    throw new Error(
+      `The capability signing key must be at least ${capabilityKeyMinLength} characters`
+    );
+  }
+  return await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    [usage]
+  );
+};
+
+const macInput = (
+  payload: string,
+  context: string = macContext
+): Uint8Array<ArrayBuffer> => new TextEncoder().encode(`${context}${payload}`);
+
+/**
+ * Makes the capability for one call, valid for {@link capabilityTtlMs}.
+ * Core calls it in exactly one place, after the permission check.
+ */
+export const signCapability = async (
+  secret: string,
+  authority: Authority,
+  scope: CapabilityScope,
+  now: number = Date.now()
+): Promise<string> => {
+  const claims = {
+    v: 1,
+    aud: "connect",
+    jti: crypto.randomUUID(),
+    iat: now,
+    exp: Math.min(
+      now + capabilityTtlMs,
+      scope.notAfter ?? Number.POSITIVE_INFINITY
+    ),
+    authority,
+    connectionId: scope.connectionId,
+    resource: scope.resource ?? null,
+    action: scope.action,
+    idempotencyKey: scope.idempotencyKey ?? null,
+    restricted: scope.restricted === true,
+    readOnly: scope.readOnly === true,
+    ...(scope.unattended === true ? { unattended: true } : {}),
+    sensitive: scope.sensitive === true,
+    origin: scope.origin,
+    ...(scope.context === undefined ? {} : { context: scope.context }),
+    ...(scope.heldUntil === undefined ? {} : { heldUntil: scope.heldUntil }),
+    ...(scope.chatApp === true ? { chatApp: true } : {}),
+    ...(scope.decision === undefined ? {} : { decision: scope.decision }),
+    ...(scope.mailboxes === undefined
+      ? {}
+      : { mailboxes: [...scope.mailboxes] }),
+    ...(scope.resources === undefined
+      ? {}
+      : { resources: [...scope.resources] }),
+  };
+  capabilityClaimsSchema.parse(claims);
+  const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    await macKey(secret, "sign"),
+    macInput(payload)
+  );
+  return `${payload}.${toBase64Url(new Uint8Array(mac))}`;
+};
+
+const invalid = (reason: "malformed" | "mac" | "expired" | "scope") =>
+  capabilityErrors.create("capability.invalid", { reason });
+
+/** Whether one of `keys` made `mac` over `payload`, in constant time each. */
+const madeWithOneOf = async (
+  keys: readonly CryptoKey[],
+  mac: Uint8Array<ArrayBuffer>,
+  payload: string,
+  context: string
+): Promise<boolean> => {
+  const checks = await Promise.all(
+    keys.map(
+      async (key) =>
+        await crypto.subtle.verify("HMAC", key, mac, macInput(payload, context))
+    )
+  );
+  return checks.includes(true);
+};
+
+/**
+ * The JSON a token made under `context` carries, if the MAC over its
+ * payload holds for one of `secrets`; throws otherwise.
+ */
+const readPayload = async (
+  secrets: readonly string[],
+  token: unknown,
+  context: string
+): Promise<unknown> => {
+  const parts = typeof token === "string" ? tokenPattern.exec(token) : null;
+  const payload = parts?.groups?.payload;
+  const mac = parts?.groups?.mac;
+  if (payload === undefined || mac === undefined) {
+    throw invalid("malformed");
+  }
+  // The keys are checked before anything else. The current key must be
+  // sound; a previous one that isn't is left out, so a slip while rotating
+  // can't stop calls made with the current key.
+  const [current, ...previous] = secrets;
+  if (current === undefined) {
+    throw new Error("No capability signing key to verify with");
+  }
+  const keys = await Promise.all(
+    [
+      current,
+      ...previous.filter((secret) => secret.length >= capabilityKeyMinLength),
+    ].map(async (secret) => await macKey(secret, "verify"))
+  );
+  let macBytes: Uint8Array<ArrayBuffer>;
+  try {
+    macBytes = fromBase64Url(mac);
+  } catch {
+    throw invalid("malformed");
+  }
+  if (!(await madeWithOneOf(keys, macBytes, payload, context))) {
+    throw invalid("mac");
+  }
+  try {
+    const json = new TextDecoder("utf-8", { fatal: true }).decode(
+      fromBase64Url(payload)
+    );
+    return JSON.parse(json);
+  } catch {
+    throw invalid("malformed");
+  }
+};
+
+/** The claims, if the MAC over the payload holds; throws otherwise. */
+const readClaims = async (
+  secrets: readonly string[],
+  token: unknown
+): Promise<CapabilityClaims> => {
+  const payload = await readPayload(secrets, token, macContext);
+  const parsed = capabilityClaimsSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw invalid("malformed");
+  }
+  return parsed.data;
+};
+
+/**
+ * Checks a capability against the call it came with: made with one of
+ * `secrets` (the current key, and the previous one while a rotation is
+ * under way), for connect, still valid, and for exactly this connection,
+ * resource, action and idempotency key. Returns what it says (who, for
+ * whom, how); throws `capability.invalid` otherwise.
+ */
+export const verifyCapability = async (
+  secrets: readonly string[],
+  token: unknown,
+  scope: CapabilityCall,
+  now: number = Date.now()
+): Promise<CapabilityClaims> => {
+  const claims = await readClaims(secrets, token);
+  const live =
+    claims.iat <= now + capabilityClockSkewMs &&
+    now < claims.exp &&
+    claims.exp - claims.iat <= capabilityMaxTtlMs;
+  if (!live) {
+    throw invalid("expired");
+  }
+  const matches =
+    claims.connectionId === scope.connectionId &&
+    claims.resource === (scope.resource ?? null) &&
+    claims.action === scope.action &&
+    claims.idempotencyKey === (scope.idempotencyKey ?? null);
+  // A call no grant allows may only read: whatever signed it, connect
+  // takes nothing else from it.
+  const grantless = claims.origin.permissionId === null;
+  if (!matches || (grantless && !claims.readOnly)) {
+    throw invalid("scope");
+  }
+  return claims;
+};
+
+// The model grant: core's capability for one provider request of a model
+// call, which connect makes with a credential it holds (connect's
+// ai-providers.ts). Core signs it only once the model gateway decided the
+// call (core's models.ts), for exactly that request: the credential (the
+// organization's or Grasp's), the provider, the host it goes to, the
+// request's ID and the hash of its body. Made with the same key and scheme as a capability, under a
+// context of its own, so one never passes for the other. A grant isn't
+// kept as used: within its few seconds it could be sent again, but only
+// with the very body core signed for, to the same host on the same
+// credential, and only by someone who read it out of core or connect,
+// which hold the signing key anyway.
+
+/** Keeps a model grant's MAC from ever passing for a capability's. */
+const modelGrantContext = "grasp-os model grant v1\n";
+
+/**
+ * The longest a model request may stream, as its grant bounds it: a
+ * listening's realtime socket (core's models.ts, `listen`), open for up to
+ * an hour, is the longest. A text call's grant ends at its own deadline,
+ * 15 minutes at most, well before.
+ */
+export const modelGrantMaxStreamMs = 61 * 60_000;
+
+/** What a model grant says. Unknown fields make it invalid. */
+export const modelGrantClaimsSchema = z.strictObject({
+  v: z.literal(1),
+  aud: z.literal("connect.model"),
+  jti: z.uuid(),
+  /** Issued and expires (the start of the request), in ms since the epoch. */
+  iat: z.int().nonnegative(),
+  exp: z.int().nonnegative(),
+  /** When connect cuts the request off, its stream too: the call's deadline. */
+  notAfter: z.int().nonnegative(),
+  /** Whose key: the organization's own, or Grasp's for platform features. */
+  credential: z.enum(["organization", "platform"]),
+  provider: z.enum([
+    "anthropic",
+    "openai",
+    "mistral",
+    "openrouter",
+    "openai-compatible",
+    "kugelaudio",
+  ]),
+  /** The host the request goes to, lowercase. */
+  host: z.string().min(1).max(253),
+  /** The gateway's ID for the request, for connect's log. */
+  request: z.uuid(),
+  /**
+   * The SHA-256 of the request's body, hex: connect sends only the body
+   * core signed for, so a grant taken elsewhere can't carry another
+   * request to the provider within its few seconds.
+   */
+  body: z.string().regex(/^[\da-f]{64}$/u),
+});
+export type ModelGrantClaims = z.infer<typeof modelGrantClaimsSchema>;
+
+/** What core signs a model grant for. */
+export type ModelGrantScope = Pick<
+  ModelGrantClaims,
+  "credential" | "provider" | "host" | "request" | "notAfter" | "body"
+>;
+
+/** Makes the grant for one provider request, valid to start for {@link capabilityTtlMs}. */
+export const signModelGrant = async (
+  secret: string,
+  scope: ModelGrantScope,
+  now: number = Date.now()
+): Promise<string> => {
+  const claims = modelGrantClaimsSchema.parse({
+    v: 1,
+    aud: "connect.model",
+    jti: crypto.randomUUID(),
+    iat: now,
+    exp: now + capabilityTtlMs,
+    notAfter: Math.min(scope.notAfter, now + modelGrantMaxStreamMs),
+    credential: scope.credential,
+    provider: scope.provider,
+    host: scope.host.toLowerCase(),
+    request: scope.request,
+    body: scope.body,
+  });
+  const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    await macKey(secret, "sign"),
+    macInput(payload, modelGrantContext)
+  );
+  return `${payload}.${toBase64Url(new Uint8Array(mac))}`;
+};
+
+/**
+ * Checks a model grant: made with one of `secrets`, for connect's model
+ * requests, and still valid to start. Returns what it says, which connect
+ * then holds the request to (its credential, provider and host); throws
+ * `capability.invalid` otherwise.
+ */
+export const verifyModelGrant = async (
+  secrets: readonly string[],
+  token: unknown,
+  now: number = Date.now()
+): Promise<ModelGrantClaims> => {
+  const parsed = modelGrantClaimsSchema.safeParse(
+    await readPayload(secrets, token, modelGrantContext)
+  );
+  if (!parsed.success) {
+    throw invalid("malformed");
+  }
+  const claims = parsed.data;
+  const live =
+    claims.iat <= now + capabilityClockSkewMs &&
+    now < claims.exp &&
+    claims.exp - claims.iat <= capabilityMaxTtlMs &&
+    claims.notAfter - claims.iat <= modelGrantMaxStreamMs;
+  if (!live) {
+    throw invalid("expired");
+  }
+  return claims;
+};

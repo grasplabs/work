@@ -1,0 +1,280 @@
+/**
+ * An App's functions on the on-prem sandbox, on plain workerd: a stand-in
+ * core (apps/core/test/workerd/functions-worker.ts) runs a release's
+ * functions with the same runner core does, with `SANDBOX_HOST` bound to
+ * the supervisor (workerd-sandbox.ts), so each call runs in a session.
+ * Functions that spin until their CPU time is spent are
+ * workerd-sandbox-functions-cpu.test.ts, apart so their waits run on a
+ * worker and shard of their own.
+ */
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
+import type { SandboxSupervisor } from "./workerd-sandbox.ts";
+import { serveStandIn } from "./workerd-stand-in.ts";
+import { cleanUp } from "./workerd-test-server.ts";
+
+/**
+ * A call's wall-clock cap: its deadline unless a test gives it another, a
+ * server invocation's minute, as core gives it.
+ */
+const WALL_CAP_MS = platformLimits.serverInvocationWallMs;
+
+const outcomeSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    value: z.unknown(),
+    ms: z.number(),
+    logged: z.array(z.unknown()),
+  }),
+  z.object({
+    ok: z.literal(false),
+    error: z.object({
+      code: z.string(),
+      message: z.string(),
+      retryable: z.boolean(),
+    }),
+    ms: z.number(),
+    logged: z.array(z.unknown()),
+  }),
+]);
+
+/** What a failed call's caller gets, or `ok` for one that succeeded. */
+const failure = (outcome: z.infer<typeof outcomeSchema>) =>
+  outcome.ok ? { code: "ok", retryable: false } : outcome.error;
+
+describe("an App's function on the on-prem sandbox", () => {
+  let supervisor: SandboxSupervisor;
+  let coreUrl: string;
+  /** Processes the supervisor started: one more for each session it ran. */
+  let processesStarted = 0;
+
+  beforeAll(async () => {
+    supervisor = await startSandboxSupervisor({
+      workerd: nativeWorkerd,
+      processes: 2,
+      log: (event) => {
+        if (event.event === "sandbox.process_started") {
+          processesStarted += 1;
+        }
+      },
+    });
+    coreUrl = await serveStandIn("functions-worker.ts", supervisor.socket);
+  }, 120_000);
+
+  afterAll(async () => {
+    await supervisor.stop();
+    cleanUp();
+  });
+
+  const call = async (
+    path: string,
+    {
+      within = WALL_CAP_MS,
+      owner = "app-stand-in",
+      endLost = false,
+      slowNested = false,
+      settle = 0,
+    } = {}
+  ) => {
+    const response = await fetch(
+      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}&endLost=${endLost ? 1 : 0}&slowNested=${slowNested ? 1 : 0}&settle=${settle}`
+    );
+    return outcomeSchema.parse(await response.json());
+  };
+
+  it("runs a function through the function host, its session ending as done", async () => {
+    const { abandoned } = supervisor.stats();
+    const outcome = await call("echo");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 1 } });
+    await expect
+      .poll(() => supervisor.stats(), { timeout: 3000 })
+      .toMatchObject({ inFlight: 0 });
+    // Over, not given up on: the host stops waiting only once it answered.
+    expect(supervisor.stats().abandoned).toBe(abandoned);
+  });
+
+  it.each([false, true])(
+    "frees a finished function's process at once, even when core's word that it's over is lost (lost: %s)",
+    async (endLost) => {
+      const outcome = await call("echo", { endLost });
+      expect(outcome.ok).toBeTruthy();
+      // Well before its minute of wall-clock time.
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(0);
+    }
+  );
+
+  it("runs functions nested three deep in the session of the one called, whatever the owner's share", async () => {
+    // One process an owner here: each nested call taking one of its own
+    // would wait for the place its callers hold.
+    const { abandoned } = supervisor.stats();
+    const outcome = await call("chain");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 4 } });
+    expect(outcome.ms).toBeLessThan(3000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 1500, interval: 50 })
+      .toBe(0);
+    // Over once all three answered, not given up on.
+    expect(supervisor.stats().abandoned).toBe(abandoned);
+  });
+
+  it("runs two such calls of one owner, one after the other within its share", async () => {
+    const outcomes = await Promise.all([call("chain"), call("chain")]);
+    for (const outcome of outcomes) {
+      expect(outcome).toMatchObject({ ok: true, value: { n: 4 } });
+    }
+  });
+
+  it("runs a nested function in an isolate of its own, apart from its caller's globals and channel", async () => {
+    const outcome = await call("isolationParent");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 1 } });
+  });
+
+  it("ends the session, not holding it to its wall-clock cap, after a call that didn't wait for a nested one", async () => {
+    // The runtime ends what the isolate still does once its call returned,
+    // a nested call it didn't wait for among it: the session is done then.
+    const outcome = await call("forgets", { within: 1500 });
+    expect(outcome.ms).toBeLessThan(4000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 2000, interval: 50 })
+      .toBe(0);
+  });
+
+  it("leaves a caller running when a function it nests fails", async () => {
+    const outcome = await call("catches");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 11 } });
+  });
+
+  it("runs a nested call still being authorized as its caller returns in the caller's session, never a process of its own", async () => {
+    const before = processesStarted;
+    const outcome = await call("forgetsLeaf", { slowNested: true });
+    expect(outcome.ok).toBeTruthy();
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
+      .toBe(0);
+    // Each session's process is replaced as it goes: one session, one more.
+    await expect
+      .poll(() => processesStarted - before, {
+        timeout: 3000,
+        interval: 50,
+      })
+      .toBe(1);
+    await sleep(500);
+    expect(processesStarted - before).toBe(1);
+  });
+
+  it("ends a nested call still being authorized as its caller's deadline passes as function.ended", async () => {
+    const outcome = await call("awaitsLeaf", {
+      within: 300,
+      slowNested: true,
+      settle: 1500,
+    });
+    expect(failure(outcome).code).toBe("function.deadline_exceeded");
+    // The nested one reached its runner once its caller's session was over:
+    // refused as ended, never given a process of its own.
+    expect(outcome.logged).toContainEqual(
+      expect.objectContaining({
+        event: "function.sandbox_ended",
+        path: "jobs.leaf",
+        verdict: "ended",
+      })
+    );
+  });
+
+  it("ends a function past its memory as the App's fault", async () => {
+    const outcome = await call("hogs");
+    expect(failure(outcome)).toMatchObject({
+      code: "function.memory_exceeded",
+      retryable: false,
+    });
+  }, 30_000);
+
+  it("refuses a function that sends core more than a call takes, as the App's fault", async () => {
+    const outcome = await call("sendsTooMuch");
+    expect(failure(outcome)).toMatchObject({
+      code: "function.sandbox_refused",
+      retryable: false,
+    });
+  }, 30_000);
+
+  it("keeps an error the App's code threw its own, whatever it says of itself", async () => {
+    const outcome = await call("forgesVerdict");
+    expect(failure(outcome).code).toBe("internal.unexpected");
+  });
+
+  it("frees a function's process once the host stops waiting for it", async () => {
+    const outcome = await call("waits", { within: 300 });
+    expect(failure(outcome).code).toBe("function.deadline_exceeded");
+    expect(outcome.ms).toBeLessThan(3000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(0);
+  });
+
+  it("fails a call past its App's share of the sandbox as busy, to try again", async () => {
+    const holding = call("waits", { within: 8000, owner: "app-busy" });
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(1);
+    const outcome = await call("echo", { owner: "app-busy" });
+    expect(failure(outcome)).toMatchObject({
+      code: "function.sandbox_busy",
+      retryable: true,
+    });
+    await holding;
+  }, 30_000);
+
+  /** Nested calls core has authorized so far, across every call. */
+  const nestedCalls = async (): Promise<number> => {
+    const response = await fetch(`${coreUrl}nested`);
+    return z.object({ nested: z.number() }).parse(await response.json()).nested;
+  };
+
+  it("fails a call cut off mid-call as an unknown outcome, and one that can't start as the sandbox unavailable, to try again", async () => {
+    // Two calls running inside the sandbox, one each of its two processes:
+    // each has reached core from there, so its code surely runs.
+    const before = await nestedCalls();
+    const cutOff = [
+      call("waitsInside", { within: 8000, owner: "app-cut-a" }),
+      call("waitsInside", { within: 8000, owner: "app-cut-b" }),
+    ];
+    await expect
+      .poll(nestedCalls, { timeout: 5000, interval: 20 })
+      .toBe(before + 2);
+    // A third waits for a process: counted in flight, its session not yet
+    // open, so no call of it went to the sandbox.
+    const opening = call("echo", { owner: "app-cut-c" });
+    await expect
+      .poll(() => supervisor.stats(), { timeout: 3000, interval: 10 })
+      .toMatchObject({ inFlight: 3, waiting: 1 });
+    await supervisor.stop();
+    // Started, then its sandbox went away: it may have changed something,
+    // so it is never one that ran nothing.
+    for (const outcome of await Promise.all(cutOff)) {
+      expect(failure(outcome)).toMatchObject({
+        code: "function.sandbox_lost",
+        retryable: false,
+      });
+    }
+    // Stopped while its session opened: nothing of it ran, to try again.
+    expect(failure(await opening)).toMatchObject({
+      code: "function.sandbox_unavailable",
+      retryable: true,
+    });
+    // With no supervisor to take it, the next call never starts.
+    const outcome = await call("echo");
+    expect(failure(outcome)).toMatchObject({
+      code: "function.sandbox_unavailable",
+      retryable: true,
+    });
+  }, 30_000);
+});

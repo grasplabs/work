@@ -1,0 +1,217 @@
+import { z } from "zod";
+
+import { relayedClientOf } from "./oauth-relay.ts";
+import { roleSchema } from "./roles.ts";
+import { loopbackHosts } from "./router.ts";
+
+// The deployment config vars the admin sets on core, as core parses them
+// (with `deploymentConfig`, @grasp-os/shared/config) and the admin
+// validates them before it deploys: one schema for both, so the admin
+// never sets a value core would refuse. Each var is deployment config,
+// never an in-product setting, so no admin session can change it.
+// `PLATFORM_CHANGE`'s schema is in @grasp-os/shared/platform-change.
+
+// SIGN_IN (core's src/auth/config.ts)
+
+export const domainSchema = z
+  .string()
+  .regex(/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/u, "a lowercase domain, e.g. acme.com");
+
+/** An HTTPS origin, or plain HTTP on this machine for local development. */
+const isOrigin = (value: string): boolean => {
+  if (!URL.canParse(value)) {
+    return false;
+  }
+  const url = new URL(value);
+  const secure =
+    url.protocol === "https:" ||
+    (url.protocol === "http:" && loopbackHosts.has(url.hostname));
+  return secure && url.origin === value;
+};
+
+/**
+ * How people sign in to a deployment: the `SIGN_IN` var. A compromised
+ * admin session can't add a tenant, widen the domains or open staff
+ * access. Without it nobody can sign in.
+ *
+ * It names at least one IdP for the client's people: its Entra tenant, its
+ * Google Workspace, or both. One that names neither isn't a sign-in config
+ * (its people could never sign in), so it's refused here, where core and
+ * the admin both read it.
+ */
+export const signInConfigSchema = z
+  .object({
+    /**
+     * The deployment's own address, e.g. `https://acme.<domain>`: where the
+     * IdPs send people back, and the only page that may open `/rpc`.
+     */
+    origin: z.url().refine(isOrigin, "an https origin, without a path"),
+    /**
+     * Relay mode, for Grasp-hosted clients only: the OAuth relay's origin
+     * of the stage the deployment is hosted in (`https://auth.ongrasp.app`
+     * or `https://auth.staging.ongrasp.app`, @grasp-os/shared/names), where
+     * the IdPs send people back to instead of `origin`, for sign-in and
+     * connections alike (@grasp-os/shared/oauth-relay). Only with an
+     * `origin` under that stage's hosted domain. Absent, the default, the
+     * IdPs come back to `origin` itself, as on-prem, with its own OAuth
+     * apps, has it.
+     */
+    callbackOrigin: z.url().optional(),
+    /** Email domains people may sign in with, exactly (no subdomains). */
+    domains: z.array(domainSchema).min(1),
+    /** Emails that get the admin role when they join. */
+    admins: z.array(z.email().toLowerCase()).default([]),
+    /*
+     * A deployment may offer both IdPs, but a person is one account at one of
+     * them: an email already signed in through one is refused through the
+     * other, as accounts are never linked by email (threat model R15).
+     */
+    /** The client's Microsoft Entra tenant, pinned. */
+    entra: z
+      .object({ tenantId: z.guid(), clientId: z.string().min(1) })
+      .optional(),
+    /** The client's Google Workspace, pinned by its primary domain (`hd`). */
+    google: z
+      .object({ hostedDomain: domainSchema, clientId: z.string().min(1) })
+      .optional(),
+    /**
+     * Grasp staff access, off unless the admin opens a window. While it is
+     * open, Grasp's admin may act here; and when it names Grasp's tenant,
+     * only the listed people (Entra object ids in that tenant) sign in, get
+     * `role` without joining the organization, and lose access when `until`
+     * passes. A window longer than {@link staffWindowMaxMs} is closed
+     * (`staffWindowOpen`).
+     */
+    staff: z
+      .object({
+        /*
+         * Who may sign in as Grasp's staff, through Grasp's own Entra
+         * tenant: all four, or none. Without them the window still lets
+         * Grasp's admin act here (its kickoff and commands, signed with
+         * this company's key), but nobody signs in as staff.
+         */
+        tenantId: z.guid().optional(),
+        clientId: z.string().min(1).optional(),
+        domains: z.array(domainSchema).min(1).optional(),
+        oids: z.array(z.guid()).min(1).optional(),
+        role: roleSchema,
+        /**
+         * What they reach: everything their role allows (`full`), or the
+         * onboarding alone (`onboarding`: only its own `/rpc` namespaces,
+         * until 7 days after Grasp's go).
+         */
+        scope: z.enum(["full", "onboarding"]).default("full"),
+        /** When the admin opened the window. */
+        opened: z.iso.datetime({ offset: true }),
+        until: z.iso.datetime({ offset: true }),
+      })
+      .refine(
+        ({ tenantId, clientId, domains, oids }) =>
+          [tenantId, clientId, domains, oids].every(
+            (each) => each === undefined
+          ) ||
+          [tenantId, clientId, domains, oids].every(
+            (each) => each !== undefined
+          ),
+        {
+          message:
+            "Staff sign-in names Grasp's tenant, app, domains and staff, or none of them",
+        }
+      )
+      .optional(),
+  })
+  .refine(({ entra, google }) => entra !== undefined || google !== undefined, {
+    message: "An Entra tenant or a Google Workspace",
+    path: ["entra"],
+  })
+  .refine(
+    ({ origin, callbackOrigin }) =>
+      callbackOrigin === undefined ||
+      relayedClientOf(origin, callbackOrigin) !== null,
+    {
+      message:
+        "A stage's OAuth relay origin, for an origin under that stage's hosted domain",
+      path: ["callbackOrigin"],
+    }
+  );
+export type SignInConfig = z.infer<typeof signInConfigSchema>;
+
+/**
+ * The domain of `email`, as core's sign-in reads it (core's
+ * src/auth/claims.ts): after the last `@`, lowercase.
+ */
+const emailDomainOf = (email: string): string | undefined => {
+  const at = email.lastIndexOf("@");
+  return at > 0 ? email.slice(at + 1).toLowerCase() : undefined;
+};
+
+/**
+ * The admins of `config` who can never sign in: core signs in only people
+ * whose email is in one of its `domains`, whichever IdP they come from.
+ */
+export const unreachableAdmins = ({
+  domains,
+  admins,
+}: {
+  domains: readonly string[];
+  admins: readonly string[];
+}): string[] =>
+  admins.filter((email) => {
+    const domain = emailDomainOf(email);
+    return domain === undefined || !domains.includes(domain);
+  });
+
+/** The longest a staff window may be. */
+export const staffWindowMaxMs = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the staff window is open at `now`: between `opened` and `until`,
+ * and seven days long at most. A longer window counts as closed for its
+ * whole length, never only once its end draws near: the admin opens short
+ * windows, and a longer one is a mistake rather than a reason to let staff
+ * in.
+ */
+export const staffWindowOpen = (
+  config: SignInConfig | undefined,
+  now: number
+): boolean => {
+  if (config?.staff === undefined) {
+    return false;
+  }
+  const opened = Date.parse(config.staff.opened);
+  const until = Date.parse(config.staff.until);
+  return opened <= now && now < until && until - opened <= staffWindowMaxMs;
+};
+
+// Model roles (core's src/models.ts)
+
+/**
+ * What core's own features ask the gateway for, rather than a model:
+ * `quick` for a line someone is waiting to hear, `careful` for reading and
+ * writing that must be right. Each resolves against the organization's
+ * chosen models, its default first, then its fallbacks (core's
+ * `modelForRole`).
+ */
+export const modelRoles = ["quick", "careful"] as const;
+export type ModelRole = (typeof modelRoles)[number];
+
+// MAIL_FROM (core's src/mail.ts)
+
+/**
+ * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
+ * an address on the deployment's sending domain, set up for Email Sending
+ * outside core (the admin's src/hosting/operation.ts, which also locks
+ * the `EMAIL` binding to that address), and the name shown with it. The name is one line with no
+ * quotes or angle brackets, so it can't change the header it goes in.
+ * Unset, core sends no mail: each one fails, and says why.
+ */
+export const mailFromSchema = z.strictObject({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[^"<>\r\n]+$/u, "One line, without quotes or angle brackets"),
+  address: z.email().max(254),
+});
+export type MailFrom = z.infer<typeof mailFromSchema>;

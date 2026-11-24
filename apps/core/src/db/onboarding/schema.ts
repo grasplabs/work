@@ -1,0 +1,960 @@
+/**
+ * The onboarding's Durable Object SQLite (onboarding/store.ts): one per
+ * deployment. Migrates itself on first wake-up after a release.
+ */
+import type { StatementKind } from "@grasp-os/shared/brain";
+import { sql } from "drizzle-orm";
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
+
+/**
+ * The onboarding as a whole, one row: the plan, the agreements, and
+ * whether Grasp paused the interviews. A plan, once saved, is what links
+ * go out by.
+ */
+export const onboarding = sqliteTable(
+  "onboarding",
+  {
+    id: integer().primaryKey(),
+    /** The plan as JSON (`planSchema`), or `null` before there is one. */
+    plan: text(),
+    /** The agreements as JSON (`agreementsSchema`), or `null` before any. */
+    agreements: text(),
+    /** When Grasp paused the interviews (ISO 8601); `null` while they run. */
+    pausedAt: text("paused_at"),
+    /**
+     * How Stephen is set up, as JSON (`stephenSetupSchema`), or `null`
+     * while he is as the kickoff suggests.
+     */
+    stephen: text(),
+    /**
+     * When the first link went out (ISO 8601): the team is told, and the
+     * agreements stay as they were. Never cleared, whoever leaves the
+     * roster with their link; `null` before any link went out.
+     */
+    toldAt: text("told_at"),
+    /**
+     * When a piece of work counts as known here, as JSON
+     * (`orgRulesSchema`), or `null` while the starting values hold.
+     */
+    rules: text(),
+    /**
+     * What the admin chose about what Grasp may connect, as JSON
+     * (`setupChoicesSchema`), or `null` before anything.
+     */
+    choices: text(),
+    /**
+     * The teams and people new on a list the admin saved while a plan was
+     * set, as JSON (`unconfirmedSchema`): their links wait until the admin
+     * confirms the organization. `null` while nothing waits.
+     */
+    unconfirmed: text(),
+    /**
+     * How much onboarding the company goes through, as JSON
+     * (`onboardingFlowSchema`), or `null` while it goes through all of it.
+     */
+    flow: text(),
+    /**
+     * Where the company's admin is in their onboarding, as JSON
+     * (`setupPlaceSchema`), or `null` before they finished a screen.
+     */
+    place: text(),
+  },
+  (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
+);
+
+/** The teams, in the order the admin gave them. */
+export const teams = sqliteTable("teams", {
+  id: text().primaryKey(),
+  position: integer().notNull(),
+  name: text().notNull(),
+  /** Its lead, by person. */
+  lead: text(),
+  /**
+   * What it does, as the admin described it on the roster they saved: only
+   * ever the admin's own words, which every member reads once confirmed
+   * (GRA-1748). Never the lead's map (`mappedDoes`).
+   */
+  does: text().notNull(),
+  /**
+   * What it does, as its lead's map drew it (team-map.ts): a model's answer
+   * from the lead's own interview. Read by Grasp's staff alone, as before;
+   * never handed to the Brain nor shown to members (GRA-1748). None before
+   * a map said it.
+   */
+  mappedDoes: text("mapped_does"),
+  off: integer({ mode: "boolean" }).notNull(),
+  /**
+   * Whether core made its id for the list (GRA-2055, staff-list-teams.ts
+   * `intoMembersTeams`): only under such an id does a confirm make a
+   * members' team, so a team deleted in Settings never comes back under
+   * its old id, with what was shared with it. Every row this code writes
+   * sets it (true only for an id core made, false for a members' team's).
+   * The default, minted, is for rows written before this column (or by an
+   * older release after a rollback): they keep their ids and what hangs on
+   * them, and an id the list has made a team of before is still refused, in
+   * the statement that makes one (`retired_team_ids`). Such a release
+   * stored whatever team id the admin's request sent: its web only ever
+   * sent the list's own (`t-<name>`), never a members' team's, but a
+   * request made by hand could have (GRA-2055).
+   */
+  minted: integer({ mode: "boolean" }).notNull().default(true),
+  /**
+   * When its lead's map of the team's work was drawn (ISO 8601): its links
+   * wait for that, or for `leadWaitWorkingDays`.
+   */
+  mappedAt: text("mapped_at"),
+  /**
+   * The lead's agreement its map, as it stands, was last drawn from
+   * (GRA-329): their admission's generation then, when that interview
+   * began and how often something they approved stopped counting, as
+   * `startedAt|revocations` (GRA-1089). Its pieces of work reach the brain only
+   * while that lead's facts still count, as they were when it was drawn:
+   * an edit or a withdrawal since keeps them out until it is drawn again.
+   */
+  mappedFrom: text("mapped_from"),
+});
+
+/** The people, in the order the admin gave them. */
+export const people = sqliteTable("people", {
+  id: text().primaryKey(),
+  position: integer().notNull(),
+  name: text().notNull(),
+  email: text().notNull(),
+  team: text().notNull(),
+  title: text().notNull(),
+  away: integer({ mode: "boolean" }).notNull(),
+});
+
+/**
+ * Each person's link, once it went out: when, and when it was opened and
+ * reminded about. A person without a row has no link out yet.
+ */
+export const links = sqliteTable("links", {
+  person: text().primaryKey(),
+  sentAt: text("sent_at").notNull(),
+  openedAt: text("opened_at"),
+  remindedAt: text("reminded_at"),
+  /**
+   * No longer read or written: a link belongs to an account now
+   * (`account`), not to a device. Dropped in a later release, as a
+   * schema contracts only after the code that read it is gone.
+   */
+  keyMark: text("key_mark"),
+  /** When they deleted their interview: a copy left open can't save it back. */
+  deletedAt: text("deleted_at"),
+  /**
+   * When core erased them (person-erasure.ts): their link is closed for
+   * good. No code is made for it again, so nothing is saved under the
+   * entry that stays on the list, until an admin takes them off it.
+   */
+  erasedAt: text("erased_at"),
+  /**
+   * The team they led when their link went out; none when they led none.
+   * Only this makes theirs a lead's interview (rules.ts, `leadsTalked`):
+   * making someone a lead afterwards tells nobody about their interview.
+   */
+  ledTeam: text("led_team"),
+  /**
+   * When the company's admin took the link to send it themselves (ISO
+   * 8601): it is new to them no more. None while they haven't.
+   */
+  takenAt: text("taken_at"),
+  /**
+   * The version of what their interview holds: a save goes up by one, and
+   * so does a delete or a new start, so no copy from before either ever
+   * matches again. A save from a copy of another version is refused.
+   */
+  version: integer().notNull().default(0),
+  /**
+   * The page that last saved the interview, its count of saves then, and
+   * the version that save made: a later save of the same page goes on
+   * from it, though it never heard of that version, while nothing else
+   * has moved the version since. None before a save that names its page.
+   */
+  savedByPage: text("saved_by_page"),
+  savedPageSave: integer("saved_page_save"),
+  savedVersion: integer("saved_version"),
+  /**
+   * The account the interview belongs to (GRA-1790): the one whose
+   * address, verified by the company's sign-in, it was sent to, when it
+   * first opened the link; from then on it alone opens it. The only reader
+   * of their interview in the Brain, and how core finds their team's
+   * claims for them. None before it was opened, and again after a new
+   * start or their erasure.
+   */
+  account: text("user_id").unique(),
+  /**
+   * The address, folded to lower case, the link (or a reminder carrying
+   * it) was last sent to while it belonged to no account, or the one it
+   * was opened under: only that address opens it the first time. None for
+   * a link no mail carried (the list's address counts then), and after
+   * their erasure.
+   */
+  sentTo: text("sent_to_email"),
+  /**
+   * When what the Brain holds of their interview was last decided
+   * (`interviewDueSql`, store.ts): it is decided again while this differs.
+   * None before it ever was.
+   */
+  brainMark: text("brain_mark"),
+});
+
+/**
+ * What each person's link is made from: a random id of its own, which
+ * core's key turns into the link's secret (onboarding/links.ts), and the
+ * SHA-256 (hex) of that secret, which a request's is looked up by. The
+ * secret itself is kept nowhere. Made when someone is added to the
+ * roster, gone when they leave it, so someone added back gets a new link.
+ */
+export const linkCodes = sqliteTable("link_codes", {
+  person: text().primaryKey(),
+  linkId: text("link_id").notNull(),
+  mark: text().notNull().unique(),
+});
+
+/**
+ * What was said in each interview, as the person's page last saved it
+ * (its version is the link's). Only the account the link belongs to
+ * reads it back, and Grasp's staff.
+ */
+export const interviews = sqliteTable("interviews", {
+  person: text().primaryKey(),
+  progress: text().notNull(),
+  updatedAt: text("updated_at").notNull(),
+  /**
+   * Each fact's revision as saved (`factRevision`), by its id, as JSON:
+   * what an approval must name to count (`approvals`).
+   */
+  revisions: text().notNull().default("{}"),
+});
+
+/**
+ * Whether each person agreed to take part (GRA-329), before anything they
+ * say is recorded or read by a model: the notice they read
+ * (`participationNotice`), its purpose and audience, when, and when they
+ * withdrew. Goes with the interview, unless they withdrew: then it stays
+ * through a delete and a new start, so withdrawing is final, until they
+ * leave the roster, which takes it.
+ */
+export const participations = sqliteTable("participations", {
+  person: text().primaryKey(),
+  notice: integer().notNull(),
+  purpose: text().notNull(),
+  audience: text().notNull(),
+  at: text().notNull(),
+  /** When they withdrew (ISO 8601): nothing of theirs is used from then on. */
+  withdrawnAt: text("withdrawn_at"),
+});
+
+/**
+ * Each read-back someone approved: its receipt, made from exactly which
+ * revisions (`approvals`), so approving the same again finds it.
+ * Goes with the interview.
+ */
+export const readbacks = sqliteTable(
+  "readbacks",
+  {
+    person: text().notNull(),
+    receipt: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.person, table.receipt] })]
+);
+
+/**
+ * Each fact revision someone approved, under the read-back it was first
+ * approved in. Only a fact whose revision as saved is here counts: an
+ * edit makes a new revision, which waits for its own approval. Goes with
+ * the interview.
+ */
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    person: text().notNull(),
+    fact: text().notNull(),
+    revision: text().notNull(),
+    receipt: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.person, table.fact, table.revision] }),
+  ]
+);
+
+/**
+ * Where each interview stands, without anything that was said in it: all
+ * the plan, the links and the numbers need, so a change never reads every
+ * interview.
+ */
+export const interviewStates = sqliteTable("interview_states", {
+  person: text().primaryKey(),
+  kind: text({ enum: ["own", "lead"] }).notNull(),
+  /**
+   * The team they gave a lead's interview for, as the roster said before
+   * they agreed; none for an employee's interview. Settled, with `kind`,
+   * once they agree.
+   */
+  leadOf: text("lead_of"),
+  /**
+   * The team they were in on the list as they agreed to their interview
+   * (GRA-1984); null before they did, and for an interview agreed to before
+   * this was kept. Settled, as `leadOf`, once they agree: what they told
+   * counts only for this team, and only while they are in it, so after a
+   * move it counts for neither until they have a new interview.
+   */
+  toldIn: text("told_in"),
+  startedAt: text("started_at"),
+  /** When they first agreed to what was read back (ISO 8601). */
+  completedAt: text("completed_at"),
+  /**
+   * When they last agreed to something new (ISO 8601): their first
+   * agreement, or what they added and agreed to after. What they agreed to
+   * is drawn from then on.
+   */
+  agreedAt: text("agreed_at"),
+  /**
+   * The generation of what they agreed to that was last drawn,
+   * `agreedAt|revocations` (GRA-1089); null before it ever was. Due again
+   * while it isn't theirs now.
+   */
+  drawnAt: text("drawn_at"),
+  /**
+   * When something they had approved last stopped counting (ISO 8601): an
+   * edit, a fact taken out, or withdrawing. Drawing and giving the brain
+   * what was read before then is thrown away.
+   */
+  revokedAt: text("revoked_at"),
+  /**
+   * How often something they had approved stopped counting: one more each
+   * time `revokedAt` is set. Part of their admission's generation, which
+   * two revocations in one millisecond would leave the same as a time
+   * (GRA-1089).
+   */
+  revocations: integer().notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
+ * Everyone ever counted in the admin's numbers (`teamCounts`), once: the
+ * team they were asked in, and whether their talking was counted. Kept when
+ * they leave the roster, so taking someone off and on again can't count
+ * them twice. Leads aren't here: they are counted apart.
+ */
+export const countedPeople = sqliteTable("counted", {
+  person: text().primaryKey(),
+  team: text().notNull(),
+  talked: integer({ mode: "boolean" }).notNull(),
+});
+
+/**
+ * How many were asked and how many talked, by team and by the day it
+ * happened: what the company's admin reads, as numbers that only ever grow.
+ * A person is counted once (`countedPeople`), in the team they were in when
+ * their link first went out, and stays counted whatever the roster says
+ * later, so editing it (someone marked away, moved, removed or added
+ * again) can't tell the admin whether they talked.
+ */
+export const teamCounts = sqliteTable(
+  "team_counts",
+  {
+    team: text().notNull(),
+    day: text().notNull(),
+    asked: integer().notNull(),
+    talked: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.team, table.day] })]
+);
+
+/**
+ * What happened in the onboarding, and who did it: Grasp's staff, the
+ * company's admin, or Grasp itself. Ids and counts only, never anyone's
+ * words.
+ */
+export const events = sqliteTable("events", {
+  seq: integer().primaryKey({ autoIncrement: true }),
+  at: text().notNull(),
+  by: text().notNull(),
+  what: text().notNull(),
+  about: text(),
+  /** Whom it names besides: the colleague someone named for work that isn't theirs. */
+  named: text(),
+});
+
+/**
+ * The kickoff, one row: Grasp's first conversation with the sponsor, as
+ * staff brought it in, Stephen's reading of it (JSON, `KickoffReading`),
+ * and the sponsor's answers to what it left open (JSON, by field). Only
+ * staff read it; Stephen's context is made from it.
+ */
+export const kickoff = sqliteTable(
+  "kickoff",
+  {
+    id: integer().primaryKey(),
+    at: text().notNull(),
+    by: text().notNull(),
+    fileName: text("file_name"),
+    transcript: text().notNull(),
+    reading: text().notNull(),
+    answers: text().notNull().default("{}"),
+  },
+  (table) => [check("kickoff_one_row", sql`${table.id} = 1`)]
+);
+
+/**
+ * Documents the company's admin shared (onboarding/documents.ts), by their
+ * file's upload in the Brain (brain-uploads.ts): Stephen's reading of each
+ * (JSON, `DocumentReading`), and the admin's answer to its question. The
+ * file itself is the Brain's.
+ */
+export const documents = sqliteTable("documents", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  at: text().notNull(),
+  by: text().notNull(),
+  reading: text().notNull(),
+  answer: text(),
+  /**
+   * No longer written or read since GRA-1889 (a reading waited here to be
+   * checked against Knowledge's erasures while the file was Knowledge's).
+   * Dropped in a later release: expand, then contract.
+   */
+  checkMark: integer("check_mark"),
+});
+
+/**
+ * The teams' pieces of work, from their leads' maps (team-map.ts): a whole
+ * job that comes back, named in English and in the team's language. Drawn
+ * again, a piece keeps its id while its name stays.
+ */
+export const works = sqliteTable("works", {
+  id: text().primaryKey(),
+  team: text().notNull(),
+  position: integer().notNull(),
+  name: text().notNull(),
+  local: text().notNull(),
+  /** What one of them is called, and several. */
+  one: text().notNull(),
+  many: text().notNull(),
+  /** Who does it, by person, as JSON. */
+  doers: text().notNull(),
+  /** Roughly how much of the team's time it takes, 0 to 1. */
+  share: real().notNull(),
+});
+
+/**
+ * Which piece of work each person is asked about. Apart from the roster,
+ * so saving who works where keeps it; it goes with the person.
+ */
+export const askedAbout = sqliteTable("asked_about", {
+  person: text().primaryKey(),
+  work: text().notNull(),
+});
+
+/**
+ * Each piece of work as drawn from what its people agreed to
+ * (work-drawing.ts), apart from `works`, which a map draws again. `agreed`
+ * is whose agreements it was drawn from, and when each last agreed, as
+ * JSON: someone agreeing to more since makes it due again.
+ */
+export const drawnWorks = sqliteTable("drawn_works", {
+  work: text().primaryKey(),
+  /** The drawing as JSON (`DrawnWork`); null when it was given up before any. */
+  drawn: text(),
+  agreed: text().notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * The pieces of work the company asked to hear more people about
+ * (GRA-1253, `brain.askMorePeople`): whoever is asked about a piece of
+ * work next is asked about these first. Who asked is the audit log's,
+ * never kept here.
+ */
+export const moreVoices = sqliteTable("more_voices", {
+  work: text().primaryKey(),
+  at: text().notNull(),
+});
+
+/**
+ * How the company's admin settled a piece of work told two ways that
+ * nobody could explain: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other. Apart from the drawing, so drawing it
+ * again keeps it; it goes with the piece of work.
+ */
+export const settledWorks = sqliteTable("settled_works", {
+  work: text().primaryKey(),
+  holds: text({ enum: ["both", "first", "other"] }).notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * The pieces of work whose step told two ways the brain's intake checked
+ * five or more people behind, each way (GRA-1084, drawing-support.ts),
+ * and the drawing it checked: the review shows that difference only while
+ * that drawing stands, and only as it was checked, the two ways with every
+ * name the roster had then taken out (`way`, `other`), so a name changed
+ * on the roster since never brings one back. Goes with the piece of work.
+ */
+export const checkedDifferences = sqliteTable("checked_differences", {
+  work: text().primaryKey(),
+  drawnAt: text("drawn_at").notNull(),
+  /** The step as one way tells it, names taken out. */
+  way: text().notNull(),
+  /** The other way, names taken out. */
+  other: text().notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * The pieces of work Grasp counts as known by hand, before the rules say
+ * so: when, and by which staff member. Goes with the piece of work.
+ */
+export const countedWorks = sqliteTable("counted_works", {
+  work: text().primaryKey(),
+  at: text().notNull(),
+  by: text().notNull(),
+});
+
+/**
+ * Each team whose intake may be due (onboarding/brain-intake.ts): when
+ * something new of it waits to be taken in (`dueAt`), ISO 8601.
+ */
+export const brainTeams = sqliteTable("brain_teams", {
+  team: text().primaryKey(),
+  dueAt: text("due_at"),
+  /**
+   * When the old brain's records first had any of the team (GRA-1748):
+   * written and read by nothing since the onboarding keeps what it learned
+   * itself. Dropped in a later release (expand, then contract).
+   */
+  sentAt: text("sent_at"),
+});
+
+/**
+ * Who each of a team's claims and drawings rests on: a claim
+ * (`statement`) on whoever agreed to its fact, a drawing
+ * (`workflowVersion`) on whom it was drawn from. The Brain never names a
+ * person; this is how deleting an interview finds what it is in
+ * (GRA-368). Goes with nothing else.
+ */
+export const brainSent = sqliteTable(
+  "brain_sent",
+  {
+    record: text().notNull(),
+    type: text().notNull(),
+    team: text().notNull(),
+    person: text().notNull(),
+    /**
+     * The old brain's workflow a drawing belonged to (GRA-1748): written
+     * and read by nothing since the onboarding keeps its drawings itself.
+     * Dropped in a later release (expand, then contract).
+     */
+    parent: text(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.record, table.person] }),
+    index("brain_sent_person").on(table.person),
+  ]
+);
+
+/**
+ * Drawings that failed and wait to be tried again: what (`team:<id>` or
+ * `work:<id>`), how often it failed, and when it may be tried again (ISO 8601).
+ */
+/**
+ * Someone who said the work they were asked about isn't theirs and agreed
+ * to it at the read-back (GRA-1285): who does what is put right from what
+ * they agreed to (referral.ts), before work is drawn, then the row goes.
+ */
+export const referrals = sqliteTable("referrals", {
+  person: text().primaryKey(),
+  at: text().notNull(),
+});
+
+/**
+ * The addresses of someone core erased (person-erasure.ts) that the store
+ * still had when the erasure ran (GRA-2194 for one it no longer had), as the keyed
+ * hash core keeps of one (erased-people.ts `emailHashOf`), never the
+ * address (GRA-2189): what the store's own transactions decide by, which
+ * can't wait on core's database. A save writes such an address blank
+ * while it isn't released. Who it was kept out for (`userId`) and whether
+ * an admin released it since order a release and an erasure of one
+ * address: an attempt of that erasure finding it released writes nothing
+ * by it.
+ */
+export const erasedAddresses = sqliteTable("erased_addresses", {
+  hash: text().primaryKey(),
+  userId: text("user_id").notNull(),
+  released: integer({ mode: "boolean" }).notNull().default(false),
+});
+
+/**
+ * The addresses of an entry that left the list, whose link an account had
+ * opened (GRA-2194): as the keyed hash core keeps of one (erased-people.ts
+ * `emailHashOf`), never the address, under that account. Leaving the list
+ * deletes the entry's link, the one tie between the account and the
+ * addresses it went to; this keeps that tie for an erasure of the account
+ * later, which moves them into `erasedAddresses` and deletes these rows.
+ * A removal keeps them, as removals keep history; nothing else deletes
+ * them.
+ */
+export const leftAddresses = sqliteTable(
+  "left_addresses",
+  {
+    userId: text("user_id").notNull(),
+    hash: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.hash] })]
+);
+
+export const drawFailures = sqliteTable("draw_failures", {
+  item: text().primaryKey(),
+  tries: integer().notNull(),
+  after: text().notNull(),
+});
+
+/**
+ * The AI the onboarding used, by day, purpose and model: calls, tokens
+ * read new and from a cache, tokens written, and seconds of voice.
+ */
+export const usage = sqliteTable(
+  "usage",
+  {
+    day: text().notNull(),
+    purpose: text().notNull(),
+    model: text().notNull(),
+    calls: integer().notNull(),
+    tokensIn: integer("tokens_in").notNull(),
+    tokensCached: integer("tokens_cached").notNull(),
+    tokensOut: integer("tokens_out").notNull(),
+    seconds: real().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.day, table.purpose, table.model] })]
+);
+
+/**
+ * Seconds of voice said today (`/api/speech`, onboarding/speech.ts), by
+ * whom they were said for: `link:<person>` for someone's interview link,
+ * `admin:<user>` for an admin; and of what was heard
+ * (onboarding/transcription.ts), `link:<person>:heard` and, for anyone
+ * signed in, `user:<user>:heard`. Only today's are kept: each count
+ * deletes the days before it.
+ */
+export const voiceUse = sqliteTable(
+  "voice_use",
+  {
+    who: text().notNull(),
+    day: text().notNull(),
+    seconds: real().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.day] })]
+);
+
+/**
+ * The text each interview ran on (onboarding/interviewer-text.ts), as its
+ * last turn had it: the text's mark, who held it, and in which language.
+ * Nothing that was said. Goes with the interview.
+ */
+export const interviewSettings = sqliteTable("interview_settings", {
+  person: text().primaryKey(),
+  mark: text().notNull(),
+  interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
+  locale: text().notNull(),
+  /**
+   * Which Stephen that was, as one name for every text of a release
+   * (`stephenVersion` in onboarding/lab-marks.ts), so Grasp's admin can set
+   * the interviews of one version side by side; none for turns from before
+   * it was kept.
+   */
+  version: text(),
+});
+
+/**
+ * Audit events of changes here, each stored in the same transaction as its
+ * change, until the object has delivered it to the audit log
+ * (`drainObjectOutbox` in audit-outbox.ts).
+ */
+export const auditOutbox = sqliteTable("audit_outbox", {
+  id: text().primaryKey(),
+  event: text().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * The voice's lines still to be taken out of the cache (speech-cache.ts),
+ * by their stored keys (`storedKeyOf`): hashes, never what was said. Each
+ * goes once the cache confirms it; the alarm tries what is left again
+ * until none is (GRA-329). `queued` counts each time a key is queued
+ * again: a row goes only as it was read before the cache was asked, so a
+ * key queued again meanwhile is asked once more (GRA-1897).
+ */
+export const linesToForget = sqliteTable("forget_lines", {
+  key: text().primaryKey(),
+  queued: integer(),
+});
+
+/**
+ * The voice cache's key (speech-cache.ts `storedKeyOf`: a hash, never the
+ * words) of every text the voice was asked to say for someone, as it was
+ * asked (GRA-1897): `who` as the voice counts them (`link:<person>` for an
+ * interview, `admin:<user>` for an admin's onboarding). What erasing
+ * anything of theirs takes out of the cache, whole: what was said, as
+ * said, a sentence or a story at a time.
+ */
+export const spokenKeys = sqliteTable(
+  "spoken_keys",
+  {
+    who: text().notNull(),
+    key: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.key] })]
+);
+
+/**
+ * Mail the onboarding sends (mail-outbox.ts), each once, by its key: a mail
+ * queued again under a key it holds already is not sent again. A mail with
+ * someone's link names whose (`fill`) and holds a slot for it, filled in
+ * only as it is sent, so the link's secret is kept here no more than
+ * anywhere else (link-secret.ts).
+ */
+export const mailOutbox = sqliteTable(
+  "mail_outbox",
+  {
+    key: text().primaryKey(),
+    /** Whom it is about, by person, for the log; null for nobody in particular. */
+    about: text(),
+    to: text("to_address").notNull(),
+    /** Subject, bodies and headers as JSON (`queuedMailSchema`), slots unfilled. */
+    mail: text().notNull(),
+    /** What fills its slots as it is sent: for a link's mail, whose link. */
+    fill: text(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    /** When it is tried next (ms since the epoch), while queued. */
+    nextAt: integer("next_at").notNull(),
+    queuedAt: text("queued_at").notNull(),
+    /** When it was sent, or ended failed (ISO 8601). */
+    settledAt: text("settled_at"),
+    /** Why its last try didn't send it: Email Sending's code, or core's. */
+    reason: text(),
+    messageId: text("message_id"),
+  },
+  (table) => [index("mail_outbox_due").on(table.state, table.nextAt)]
+);
+
+/**
+ * Each interview the Brain is to take as a source (GRA-1790), under an id
+ * minted here for one decision of it: the facts the person approved,
+ * readable by the account the interview belongs to alone, added by core
+ * (onboarding/new-brain.ts) as they are then. A decision that
+ * moves is a new source, and the old one is owed an erasure; a row stays
+ * until the Brain's erasure of it returned (`erase`), so no source is ever
+ * there without a row naming it.
+ */
+export const brainInterviews = sqliteTable(
+  "brain_interviews",
+  {
+    /** The source's id in the Brain (`interview:<source>`), minted here. */
+    source: text().primaryKey(),
+    person: text().notNull(),
+    /** The account that reads it. */
+    account: text("user_id").notNull(),
+    /**
+     * What it stands for (`#interviewWanted`, store.ts): the account and
+     * each approved fact at its revision, so a mark that moved makes a new
+     * one.
+     */
+    mark: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Whether core added it to the new Brain (onboarding/new-brain.ts):
+     * until then core adds it, right after the person's request and on its
+     * clock. Core adds it itself, not through the hand-over, whose audit
+     * events the company reads.
+     */
+    added: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_interviews_person").on(table.person)]
+);
+
+/**
+ * Each team claim given to the Brain (GRA-1741): a claim five or more of
+ * the team's people back, as the intake counts them here (`brain_sent`,
+ * record `record`), given to the Brain as a source of its own
+ * (`claim:<source>`) under an id minted here each time it stands. Who
+ * backs it is counted here alone, never in the Brain. Once a change drops
+ * it (below five, its team below seven, or no longer made), it is marked
+ * to be erased (`erase`), then taken out of use and erased in the Brain,
+ * all before that change commits; the row goes once the Brain's erasure
+ * returned. A claim backed again later is a new source.
+ */
+export const brainClaims = sqliteTable(
+  "brain_claims",
+  {
+    /** The source's id in the Brain (`claim:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The intake's statement record it stands for. */
+    record: text().notNull(),
+    team: text().notNull(),
+    /**
+     * What kind of thing was said (a goal, a blocker, ...), as the Brain
+     * page groups the team's claims (GRA-1748). None on a row from before
+     * it was kept: onboarding migration 0040 owes those an erasure. None
+     * also on a claim noted while the admin rolled back past 0040 and
+     * rolled forward again: such a claim stays off the page for good
+     * (hidden, never shown wrongly) until its team's claims are put
+     * together anew.
+     */
+    kind: text().$type<StatementKind>(),
+    text: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_claims_record").on(table.record)]
+);
+
+/**
+ * Each drawing of a team's piece of work given to the Brain and to the
+ * Brain page (GRA-1748): only the parts five or more told, checked, as
+ * the intake drew it, given to the Brain as a source of its own
+ * (`drawing:<source>`) under an id minted here each time it stands. Whom
+ * it rests on is noted here alone (`brain_sent`, record `record`), never
+ * in the Brain. Once a change drops it (someone it rests on no longer
+ * counts, its team under five, its map no longer its lead's, a newer
+ * drawing of the work, or a document's reading it may have had), it is
+ * marked to be erased (`erase`), then taken out of use and erased in the
+ * Brain, all before that change commits; the row goes once the Brain's
+ * erasure returned. One drawn again later is a new source.
+ */
+export const brainDrawings = sqliteTable(
+  "brain_drawings",
+  {
+    /** The source's id in the Brain (`drawing:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The drawing's own id, from what it holds: whom it rests on is noted under it. */
+    record: text().notNull(),
+    /** The piece of work's id on the Brain page, from its team and its work. */
+    workflow: text().notNull(),
+    team: text().notNull(),
+    /** The piece of work's name, in English. */
+    name: text().notNull(),
+    /** Its name in the language its people speak; none when the same. */
+    local: text(),
+    /** The drawing, as a brain record (`workflowVersion`), as JSON. */
+    drawing: text().notNull(),
+    /** When it was noted (ISO 8601): a document's removal takes what came since. */
+    at: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    index("brain_drawings_record").on(table.record),
+    index("brain_drawings_team").on(table.team),
+    // A turn reads the drawing of the work it is about, alone.
+    index("brain_drawings_workflow").on(table.workflow),
+  ]
+);
+
+/**
+ * What one team's lines only counted anonymously say, put together
+ * (GRA-1987, onboarding/company-opinions.ts): a candidate for the
+ * company's opinions, one row for each person whose line was checked to
+ * say it. Read by nothing but the company's merge of them: never the
+ * Brain, a page, staff or a log, as one may rest on a single person. Goes
+ * with the person (`#erase`), and with what they said once it no longer
+ * counts.
+ */
+export const opinionCandidates = sqliteTable(
+  "opinion_candidates",
+  {
+    /** The candidate's id, from its team and its words. */
+    id: text().notNull(),
+    /** The team whose lines it was put together from: only so they are put together anew as one. */
+    team: text().notNull(),
+    text: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.person] }),
+    index("opinion_candidates_team").on(table.team),
+    index("opinion_candidates_person").on(table.person),
+  ]
+);
+
+/**
+ * What the company's opinions were last put together from (GRA-1987): a
+ * hash of exactly what a model was given, by what it was given for
+ * (`team:<id>`, a team's candidates; `merge`, the company's merge), so an
+ * input that didn't change asks no model again. A hash over people's
+ * lines and ids: it goes whenever what it was taken over loses one of
+ * them (the store's `#forgetOpinionsOf`), and all of it once the company
+ * can have no opinions.
+ */
+export const opinionInputs = sqliteTable("opinion_inputs", {
+  key: text().primaryKey(),
+  input: text().notNull(),
+});
+
+/**
+ * What each person's lines only counted anonymously were (a hash) when
+ * the company's opinions were last put together from them (`mergedFrom`),
+ * and when the run under way began (`runFrom`, null while none runs): a
+ * run starts once five people's differ from what was last merged, and
+ * takes in only what was agreed before it began (GRA-1987). Goes with the
+ * person, and with what they said once it no longer counts.
+ */
+export const opinionPeople = sqliteTable("opinion_people", {
+  person: text().primaryKey(),
+  mergedFrom: text("merged_from"),
+  runFrom: text("run_from"),
+});
+
+/**
+ * Each opinion of the company given to the Brain (GRA-1987): what five or
+ * more people across the company say, in a company where seven or more
+ * have a line only counted anonymously, given to the Brain as a source of
+ * its own (`opinion:<source>`) under an id minted here each time it
+ * stands. It has no team. Who backs it is noted here alone
+ * (`opinion_backers`). Once a change drops it, it is marked to be erased
+ * (`erase`), then taken out of use and erased in the Brain, all before
+ * that change commits; the row goes once the Brain's erasure returned.
+ */
+export const brainOpinions = sqliteTable(
+  "brain_opinions",
+  {
+    /** The source's id in the Brain (`opinion:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The opinion's own id, from its words: whom it rests on is noted under it. */
+    record: text().notNull(),
+    /** What kind of thing it says, as the Brain page groups it. */
+    kind: text().$type<StatementKind>().notNull(),
+    text: text().notNull(),
+    /** The day it was put together (ISO 8601): a run of five people's changes, never one person's moment. */
+    at: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_opinions_record").on(table.record)]
+);
+
+/** Who each of the company's opinions rests on (`brain_opinions.record`): never in the Brain. */
+export const opinionBackers = sqliteTable(
+  "opinion_backers",
+  {
+    record: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.record, table.person] }),
+    index("opinion_backers_person").on(table.person),
+  ]
+);

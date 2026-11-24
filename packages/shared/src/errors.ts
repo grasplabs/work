@@ -1,0 +1,225 @@
+import { z } from "zod";
+
+/**
+ * An error as data, for when it crosses a boundary (an RPC call or an HTTP
+ * response body). Plain JSON, so it survives serialisation and reads the same
+ * on both sides.
+ */
+export const errorPayloadSchema = z.object({
+  /** Stable and machine-readable, e.g. `permission.denied`; branch on this. */
+  code: z.string().min(1),
+  /** For people; may change between releases, so never branch on it. */
+  message: z.string(),
+  /** Structured context, e.g. which input failed validation. */
+  details: z.record(z.string(), z.json()).optional(),
+});
+export type ErrorPayload = z.infer<typeof errorPayloadSchema>;
+
+/**
+ * An `Error` with a stable code. `code` and `details` are own properties, so
+ * Cap'n Web carries them across the wire along with the message.
+ */
+export type CodedError<Code extends string = string> = Error & {
+  code: Code;
+  details?: ErrorPayload["details"];
+};
+
+/**
+ * What's wrong with some input, for an error's `details.issues`: each issue
+ * as `path: message`, which names the field and never repeats its value.
+ * `prefix` goes before every path, e.g. `frontmatter`; an issue with no path
+ * at all is its message alone.
+ */
+export const issuesOf = (
+  error: {
+    issues: readonly { path: readonly PropertyKey[]; message: string }[];
+  },
+  prefix = ""
+): string[] =>
+  error.issues.map(({ path, message }) => {
+    const where = [prefix, ...path.map(String)].filter(Boolean).join(".");
+    return where === "" ? message : `${where}: ${message}`;
+  });
+
+/**
+ * Every code of every family defined: the expected errors, which whoever
+ * made the call may see, a person or App code. A family's module is loaded
+ * before any of its errors can be created, so its codes are here by then.
+ */
+const expectedCodes = new Set<string>();
+
+/** Each expected code's message, as its family defines it. */
+const expectedMessages = new Map<string, string>();
+
+/**
+ * The message the platform defines for expected code `code`, if it is
+ * one: what may be shown of a failure whose own message can't be.
+ */
+export const expectedMessageOf = (code: string): string | undefined =>
+  expectedMessages.get(code);
+
+/** Adds a family's codes and messages to the expected errors. */
+const expect = (messages: Readonly<Record<string, string>>): void => {
+  for (const [code, message] of Object.entries(messages)) {
+    expectedCodes.add(code);
+    expectedMessages.set(code, message);
+  }
+};
+
+/**
+ * A family of expected errors (`defineErrorFamily`). Named, so a package
+ * that defines one names its type by this module, which it imports, never
+ * by zod's, which it may not depend on: a declaration of it is portable.
+ */
+export interface ErrorFamily<Code extends string> {
+  create: (code: Code, details?: ErrorPayload["details"]) => CodedError<Code>;
+  /** `input` as `schema` has it, or error `code` saying why not. */
+  parse: <Schema extends z.ZodType>(
+    code: Code,
+    schema: Schema,
+    input: unknown
+  ) => z.output<Schema>;
+  /** The error's code if it belongs to this family, otherwise `undefined`. */
+  codeOf: (error: unknown) => Code | undefined;
+}
+
+/**
+ * Defines one family of expected errors: a fixed set of codes, each with the
+ * message people see. Create errors from it, and read the code back from
+ * anything caught, including errors that crossed an RPC boundary.
+ */
+export const defineErrorFamily = <Code extends string>(
+  messages: Readonly<Record<Code, string>>
+): ErrorFamily<Code> => {
+  const codes = new Set<unknown>(Object.keys(messages));
+  expect(messages);
+  const isCode = (value: unknown): value is Code => codes.has(value);
+  const create = (
+    code: Code,
+    details?: ErrorPayload["details"]
+  ): CodedError<Code> =>
+    Object.assign(
+      new Error(messages[code]),
+      details === undefined ? { code } : { code, details }
+    );
+
+  return {
+    create,
+    parse: <Schema extends z.ZodType>(
+      code: Code,
+      schema: Schema,
+      input: unknown
+    ): z.output<Schema> => {
+      const parsed = schema.safeParse(input);
+      if (!parsed.success) {
+        throw create(code, { issues: issuesOf(parsed.error) });
+      }
+      return parsed.data;
+    },
+    codeOf: (error: unknown): Code | undefined => {
+      if (typeof error !== "object" || error === null || !("code" in error)) {
+        return undefined;
+      }
+      return isCode(error.code) ? error.code : undefined;
+    },
+  };
+};
+
+/** An error's message, or what was thrown, as text. */
+export const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * The request ID core put in an error's details (an HTTP error body, an
+ * error over RPC): what a person quotes so the logs of it can be found.
+ */
+export const requestIdOf = (error: unknown): string | undefined => {
+  if (typeof error !== "object" || error === null || !("details" in error)) {
+    return undefined;
+  }
+  const { details } = error;
+  return typeof details === "object" &&
+    details !== null &&
+    "requestId" in details &&
+    typeof details.requestId === "string"
+    ? details.requestId
+    : undefined;
+};
+
+/** `message`, and the reference to quote for it when there is one. */
+export const withReference = (message: string, requestId?: string): string =>
+  requestId === undefined ? message : `${message} Reference: ${requestId}`;
+
+/**
+ * What a person reads of a failure: its message, and the request ID core
+ * gave it, if any, to quote.
+ */
+export const failureText = (error: unknown): string =>
+  withReference(messageOf(error), requestIdOf(error));
+
+/** Why core refused a request before it reached any feature. */
+export const requestErrors = defineErrorFamily({
+  "request.forbidden": "Forbidden.",
+  "request.not_found": "Not found.",
+  "request.upgrade_required":
+    "This endpoint only accepts WebSocket connections.",
+  "request.rate_limited": "Too many requests. Try again in a minute.",
+  "request.too_deep": "A value in the request nests deeper than values may.",
+  "request.too_large": "A value in the request holds more than a request may.",
+  "request.timeout": "The request took too long to arrive. Try again.",
+  "request.unsupported_value":
+    "A value in the request is of a kind calls don't take.",
+  "request.too_expensive":
+    "A message would expand to more than this connection may hold.",
+});
+
+/** Why a call needs a person to sign in (again). */
+export const authErrors = defineErrorFamily({
+  "auth.principal_changed":
+    "Someone else signed in on this browser since this page was opened.",
+  "auth.unauthenticated": "Sign in to continue.",
+});
+
+/**
+ * Anything nobody planned for. Its details carry the request ID, never the
+ * cause: that stays in the logs.
+ */
+export const internalErrors = defineErrorFamily({
+  "internal.unexpected": "Something went wrong.",
+});
+
+/**
+ * The namespaces (first segments) of every expected code defined so far:
+ * those of every family whose module is loaded.
+ */
+export const expectedNamespaces = (): ReadonlySet<string> =>
+  new Set([...expectedCodes].map((code) => code.slice(0, code.indexOf("."))));
+
+/** Whether `code` is the code of an expected error, of any family. */
+export const isExpectedCode = (code: unknown): code is string =>
+  typeof code === "string" && expectedCodes.has(code);
+
+/** Whether `error` is an expected error, of any family. */
+export const isExpectedError = (error: unknown): error is CodedError =>
+  error instanceof Error &&
+  "code" in error &&
+  typeof error.code === "string" &&
+  expectedCodes.has(error.code);
+
+/**
+ * What a caller outside core may see of `error`: an expected error as it is,
+ * anything else replaced by `internal.unexpected` with `details` (such as the
+ * request ID) and no stack, so internals never leave.
+ */
+export const toOpaqueError = (
+  error: unknown,
+  details?: ErrorPayload["details"]
+): Error => {
+  if (isExpectedError(error)) {
+    return error;
+  }
+  const replacement = internalErrors.create("internal.unexpected", details);
+  // Cap'n Web sends a replacement's stack; this one has none to send.
+  replacement.stack = undefined;
+  return replacement;
+};

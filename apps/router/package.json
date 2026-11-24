@@ -1,0 +1,21 @@
+{
+  "name": "@grasp-os/router",
+  "private": true,
+  "description": "Stateless router in Grasp's account: forwards *.<domain> to each client's core Worker",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "node ../../scripts/wrangler-deploy.ts",
+    "typegen": "wrangler types --include-runtime=false"
+  },
+  "dependencies": {
+    "@better-auth/core": "catalog:",
+    "@grasp-os/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

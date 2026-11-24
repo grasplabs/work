@@ -1,0 +1,1 @@
+ALTER TABLE `brain_records` ADD `forgotten_at` integer;

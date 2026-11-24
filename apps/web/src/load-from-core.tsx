@@ -1,0 +1,126 @@
+import {
+  failureText,
+  requestIdOf,
+  withReference,
+} from "@grasp-os/shared/errors";
+import type { I18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+
+import { readWithin } from "./core-connection.ts";
+import type { CoreConnection } from "./core-connection.ts";
+import { CoreTimeoutError, deadline, isConnectionFailure } from "./core.ts";
+import type { Session } from "./core.ts";
+import { ErrorText } from "./error-text.tsx";
+
+/** What a page read from core: its data, or why there is none. */
+export type Loaded<T> =
+  | { state: "offline" }
+  /** Core doesn't have it; `requestId` is the reference to quote, if any. */
+  | { state: "missing"; requestId?: string }
+  | { state: "refused"; message: string }
+  | { state: "ready"; data: T };
+
+/**
+ * What a page can name that core may not have (any more): an App, a
+ * workflow, a decision, a page. Not
+ * `request.not_found`, an endpoint this core doesn't know (an older one),
+ * nor what a page reads along the way, such as a member: those stay
+ * refusals, with their reference.
+ */
+const notFoundCodes = new Set([
+  "app.not_found",
+  "workflow.not_found",
+  "workflow.run_not_found",
+  "workflow.resource_unavailable",
+  "brain.work_not_found",
+  "decision.not_found",
+  "page.not_found",
+  "project.not_found",
+]);
+
+// Read off the error itself: a family's codes are only known to
+// `isExpectedError` once its module has loaded, and the page loads few.
+const isNotFound = (error: unknown): boolean =>
+  error instanceof Error &&
+  "code" in error &&
+  typeof error.code === "string" &&
+  notFoundCodes.has(error.code);
+
+/**
+ * Reads a page's data with `read`, on the signed-in person's session over
+ * the tab's connection, within a few seconds (`readWithin`): a read that
+ * hangs, waits that long for a connection, or loses its connection on the
+ * way, counts as core being out of reach, a read of something core doesn't have (renamed or removed) as
+ * missing, and any other refusal carries core's reason. Given `left`, the
+ * page's signal that it was left, a read still waiting for a connection
+ * then is never sent. `read` gets the read's signal too, which ends with
+ * its deadline or `left`, to end a request of its own (a `fetch`).
+ */
+export const loadFromCore = async <T,>(
+  core: Pick<CoreConnection, "withSession">,
+  read: (session: Session, signal: AbortSignal) => Promise<T>,
+  left?: AbortSignal
+): Promise<Loaded<T>> => {
+  const signal =
+    left === undefined ? deadline() : AbortSignal.any([deadline(), left]);
+  try {
+    const data = await readWithin(
+      core,
+      async (session) => await read(session, signal),
+      signal
+    );
+    return { state: "ready", data };
+  } catch (error) {
+    // The connection dropped under the read, as much as one that never
+    // came: core is out of reach, and the socket's own words are no reason
+    // to show.
+    if (error instanceof CoreTimeoutError || isConnectionFailure(error)) {
+      return { state: "offline" };
+    }
+    if (isNotFound(error)) {
+      const requestId = requestIdOf(error);
+      return requestId === undefined
+        ? { state: "missing" }
+        : { state: "missing", requestId };
+    }
+    return { state: "refused", message: failureText(error) };
+  }
+};
+
+/**
+ * What `read` reads, or null when core refuses it or can't be reached: a
+ * read that may fail on its own without failing the page it is part of.
+ */
+export const orNull = async <T,>(read: () => Promise<T>): Promise<T | null> => {
+  try {
+    return await read();
+  } catch {
+    return null;
+  }
+};
+
+const unreachable = msg`Grasp can't be reached right now. Try again in a moment.`;
+const missing = msg`Not found. It may have been renamed or removed.`;
+
+/** Why a read from core has no data, in words; nothing once it has. */
+export const notLoadedText = (
+  page: Loaded<unknown>,
+  i18n: I18n
+): string | undefined => {
+  if (page.state === "offline") {
+    return i18n._(unreachable);
+  }
+  if (page.state === "missing") {
+    // In a section of a page, with its reference: what the page named was
+    // found, but not something it read along the way.
+    return withReference(i18n._(missing), page.requestId);
+  }
+  return page.state === "refused" ? page.message : undefined;
+};
+
+/** Why a page has no data to show; nothing once it has. */
+export const NotLoaded = ({ page }: { page: Loaded<unknown> }) => {
+  const { i18n } = useLingui();
+  return <ErrorText>{notLoadedText(page, i18n)}</ErrorText>;
+};

@@ -1,0 +1,633 @@
+import { channelsApiPath } from "@grasp-os/shared/channels";
+import { requestErrors } from "@grasp-os/shared/errors";
+import type { ErrorPayload } from "@grasp-os/shared/errors";
+import { eventSourcePath } from "@grasp-os/shared/event-source-path";
+import {
+  readAtMost,
+  requestIdHeader,
+  strictTransportSecurity,
+} from "@grasp-os/shared/http";
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import { interviewStoryPath } from "@grasp-os/shared/interview-story";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
+import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  mailIngressHeaders,
+  mailIngressMaxBytes,
+  mailIngressPath,
+  mailIngressRequest,
+  mailRejectedStatus,
+} from "@grasp-os/shared/mail-ingress";
+import { authRelayHost, stageNamed, stageOfHost } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import {
+  readRelayRequest,
+  relayKindOf,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
+import {
+  deriveRouterSecret,
+  routerHostKey,
+  routerClientIpHeader,
+  routerHostSchema,
+  routerSecretHeader,
+  routerTargetOf,
+} from "@grasp-os/shared/router";
+import type { RouterTarget } from "@grasp-os/shared/router";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
+
+import { clientAddress } from "./client-address.ts";
+import { routeCache } from "./route-cache.ts";
+
+/** Where one hostname goes, and the secret its core expects. */
+interface Route {
+  target: RouterTarget;
+  secret: string;
+}
+
+/**
+ * How long this isolate trusts what it read from the hostname map (and
+ * Secrets Store), found or not. A new or changed host, or a raised
+ * generation, takes effect within this cache plus KV's propagation (about
+ * 60 s), so while rotating, core must accept the previous secret for at
+ * least 2 minutes.
+ */
+const routeCacheMs = 30_000;
+
+/** Hostnames remembered per isolate. */
+const maxCachedHosts = 1000;
+
+const routes = routeCache<Route | null>(maxCachedHosts, routeCacheMs);
+
+/**
+ * Reads a host's entry from the map and derives its secret. An entry that
+ * doesn't parse (a script that isn't a script's name, an origin that isn't
+ * https `*.workers.dev`, both or neither) routes nowhere. Throws when the
+ * router key can't be read, so nothing is forwarded (and nothing cached)
+ * without the right secret.
+ */
+const loadRoute = async (host: string, env: Env): Promise<Route | null> => {
+  const stored = await env.HOSTS.get(host, "json");
+  if (stored === null) {
+    return null;
+  }
+  const parsed = routerHostSchema.safeParse(stored);
+  if (!parsed.success) {
+    log.error("router.host_refused", { host });
+    return null;
+  }
+  const { clientId, generation } = parsed.data;
+  const routerKey = await env.ROUTER_KEY.get();
+  return {
+    target: routerTargetOf(parsed.data),
+    secret: await deriveRouterSecret(routerKey, clientId, generation),
+  };
+};
+
+/**
+ * The route of `host`, or null for none. A host of the other stage is
+ * never this router's, whatever its map holds: staging's clients are
+ * below production's domain (@grasp-os/shared/names, `stageOfHost`). A
+ * router whose STAGE names neither stage routes nothing: it never takes
+ * itself for production's.
+ */
+const routeFor = async (host: string, env: Env): Promise<Route | null> => {
+  const stage = stageNamed(env.STAGE);
+  if (stage === undefined || stageOfHost(host) !== stage) {
+    return null;
+  }
+  const cached = routes.get(host, Date.now());
+  if (cached !== undefined) {
+    return cached.value;
+  }
+  const route = await loadRoute(host, env);
+  routes.set(host, route, Date.now());
+  return route;
+};
+
+/**
+ * Sends `request` to `route`'s core and answers what core answers: into its
+ * user Worker through the dispatch namespace (`DISPATCHER`) for a script,
+ * never over the internet; over the internet only to an https
+ * `*.workers.dev` origin. Either way to that one core alone: a script the
+ * namespace doesn't have throws, as a failed fetch does, and nothing is
+ * tried in its place (GRA-283).
+ */
+const toCore = async (
+  route: Route,
+  request: Request,
+  env: Env
+): Promise<Response> =>
+  route.target.kind === "dispatch"
+    ? await env.DISPATCHER.get(route.target.script).fetch(request)
+    : await fetch(request);
+
+/**
+ * The URL a request for `host` goes to: on its hostname for a script, so
+ * its core sees the address it was asked at; on its core's own origin for
+ * an origin.
+ */
+const coreUrlFor = (route: Route, host: string, path: string): string =>
+  `${route.target.kind === "dispatch" ? `https://${host}` : route.target.origin}${path}`;
+
+/** The most of core's reason for a bounce the sender is told. */
+const maxBounceReason = 500;
+
+/**
+ * The reason the sender reads for a message core bounced: core's own, as
+ * its answer gives it, or a plain one when that isn't a short string.
+ */
+const bounceReason = (answer: unknown): string => {
+  const reason: unknown =
+    typeof answer === "object" && answer !== null
+      ? Reflect.get(answer, "reason")
+      : undefined;
+  return typeof reason === "string" &&
+    reason !== "" &&
+    reason.length <= maxBounceReason
+    ? reason
+    : "The message can't be delivered.";
+};
+
+/** Core's sign-in routes (Better Auth, core's `authBasePath`). */
+const authBasePath = "/api/auth";
+
+/**
+ * The limits' window, as `AUTH_RATE_LIMIT`, `INTERVIEW_RATE_LIMIT`,
+ * `CHANNELS_RATE_LIMIT` and `WEBHOOK_RATE_LIMIT` all have it in
+ * wrangler.jsonc.
+ */
+const limitPeriodS = 60;
+
+/** Whether `key` is within `limiter`'s limit; through when the limiter fails. */
+const withinLimitOf = async (
+  limiter: RateLimit,
+  key: string,
+  host: string
+): Promise<boolean> => {
+  try {
+    const { success } = await limiter.limit({ key });
+    return success;
+  } catch (error) {
+    log.error("router.rate_limit_failed", { host, ...errorFields(error) });
+    return true;
+  }
+};
+
+/**
+ * Whether a request is within `limiter`'s limit for its hostname and
+ * client address: core's sign-in routes (Better Auth's own limiter is off
+ * in core, as behind the router every request comes from the router's
+ * address), and the endpoints of an interview link, which have no
+ * session to limit by. Keyed by the client's IPv4 address or IPv6 /64 (`clientAddress`),
+ * so rotating through a /64 buys no fresh budget, and by hostname too, so
+ * one office behind one address counts separately for each client. When
+ * the limiter itself fails, the request goes through (and is logged):
+ * sign-in and interviews stay up.
+ */
+const withinLimit = async (
+  limiter: RateLimit,
+  request: Request,
+  host: string
+): Promise<boolean> => {
+  const ip = clientAddress(
+    request.headers.get("cf-connecting-ip") ?? "unknown"
+  );
+  return await withinLimitOf(limiter, `${host}|${ip}`, host);
+};
+
+/**
+ * The budget a request counts against besides its client address's, if
+ * any: an event source's own (its URL's token), so a URL someone learned
+ * can't be flooded from many addresses either, each delivery costing core
+ * a body read and a signature check before it is refused unsigned. One
+ * source takes every event of its sender (a payment provider's, a
+ * shop's), so its budget is its own limiter's, larger than an address's
+ * (`WEBHOOK_SOURCE_RATE_LIMIT`, wrangler.jsonc).
+ */
+const ownBudgetOf = (
+  pathname: string
+): { limit: LimitBinding; key: string } | undefined =>
+  pathname.startsWith(`${eventSourcePath}/`)
+    ? {
+        limit: "WEBHOOK_SOURCE_RATE_LIMIT",
+        key: `webhook:${pathname.slice(eventSourcePath.length + 1)}`,
+      }
+    : undefined;
+
+/** Core's sign-out route, which the limit leaves alone. */
+const signOutPath = `${authBasePath}/sign-out`;
+
+/**
+ * The router's own 429, with the headers core puts on every response it
+ * makes (a request ID, `nosniff`, HSTS on https), since it answers in
+ * core's place. The request ID is logged with the refusal.
+ */
+const rateLimited = (url: URL, host: string): Response => {
+  const requestId = crypto.randomUUID();
+  const { code, message } = requestErrors.create("request.rate_limited");
+  const headers = new Headers({
+    "retry-after": String(limitPeriodS),
+    [requestIdHeader]: requestId,
+    "x-content-type-options": "nosniff",
+  });
+  if (url.protocol === "https:") {
+    headers.set("strict-transport-security", strictTransportSecurity);
+  }
+  log.warn("router.rate_limited", { host, requestId });
+  return Response.json(
+    { code, message, details: { requestId } } satisfies ErrorPayload,
+    { status: 429, headers }
+  );
+};
+
+/**
+ * An interview link's endpoints: core's src/onboarding/links.ts, its
+ * turns (src/onboarding/interview.ts), its read-back
+ * (src/onboarding/story.ts), where its lines are said
+ * (src/onboarding/speech.ts), and where what is said is written down
+ * (src/onboarding/transcription.ts, once per socket opened, or from a
+ * recording, src/onboarding/hear.ts).
+ */
+const interviewLinkPaths: ReadonlySet<string> = new Set([
+  interviewApiPath,
+  interviewTurnPath,
+  interviewStoryPath,
+  speechPath,
+  transcriptionPath,
+  interviewHearPath,
+]);
+
+/** The rate limiter bindings, in wrangler.jsonc. */
+type LimitBinding =
+  | "AUTH_RATE_LIMIT"
+  | "CHANNELS_RATE_LIMIT"
+  | "INTERVIEW_RATE_LIMIT"
+  | "WEBHOOK_RATE_LIMIT"
+  | "WEBHOOK_SOURCE_RATE_LIMIT";
+
+/**
+ * The limit a request to `pathname` counts against, if any: the public
+ * endpoints core reaches without a session.
+ */
+const limitFor = (pathname: string): LimitBinding | undefined => {
+  // Signing out needs no protection from guessing, and refusing it would
+  // leave the person signed in.
+  const isAuth =
+    pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
+  if (isAuth && pathname !== signOutPath) {
+    return "AUTH_RATE_LIMIT";
+  }
+  // A chat platform's webhook (core's src/channels/door.ts), which anyone
+  // can post to; core checks each request is the platform's own.
+  if (pathname.startsWith(`${channelsApiPath}/`)) {
+    return "CHANNELS_RATE_LIMIT";
+  }
+  // An interview link's endpoints (`interviewLinkPaths`), the same, from
+  // one budget; core counts per link too.
+  if (interviewLinkPaths.has(pathname)) {
+    return "INTERVIEW_RATE_LIMIT";
+  }
+  // An event source's URL (core's workflows/source-events.ts), which
+  // anyone can post to; core checks each delivery is signed with its
+  // secret. Counted per client address and per URL (`ownBudgetOf`), before
+  // core looks the URL up or reads a byte of the body.
+  if (pathname.startsWith(`${eventSourcePath}/`)) {
+    return "WEBHOOK_RATE_LIMIT";
+  }
+  return undefined;
+};
+
+/**
+ * The answer refusing a request to a public endpoint core reaches without
+ * a session, past its limit (`limitFor`) or its own budget's
+ * (`ownBudgetOf`); none when it is within both, or limits nothing.
+ */
+const limitRefusal = async (
+  env: Env,
+  request: Request,
+  url: URL,
+  host: string
+): Promise<Response | undefined> => {
+  const { pathname } = url;
+  const limit = limitFor(pathname);
+  if (limit === undefined) {
+    return undefined;
+  }
+  // Read as the stage may have it: an env's `ratelimits` replace the
+  // top level's, so one left out there is missing at run time. Such
+  // an endpoint is refused, never let through unlimited.
+  const limiter: RateLimit | undefined = env[limit];
+  if (limiter === undefined) {
+    log.error("router.rate_limit_unbound", { host, limit });
+    return new Response("Service unavailable", { status: 503 });
+  }
+  const own = ownBudgetOf(pathname);
+  const ownLimiter: RateLimit | undefined =
+    own === undefined ? undefined : env[own.limit];
+  if (own !== undefined && ownLimiter === undefined) {
+    log.error("router.rate_limit_unbound", { host, limit: own.limit });
+    return new Response("Service unavailable", { status: 503 });
+  }
+  if (
+    !(await withinLimit(limiter, request, host)) ||
+    (own !== undefined &&
+      ownLimiter !== undefined &&
+      !(await withinLimitOf(ownLimiter, `${host}|${own.key}`, host)))
+  ) {
+    return rateLimited(url, host);
+  }
+  return undefined;
+};
+
+/** The OAuth relay's pages: a fixed title and line each, never anything a request carried. */
+const relayPages = {
+  invalid: {
+    status: 400,
+    title: "This sign-in can't go on",
+    line: "The link it came back with isn't valid, or is too old. Go back to your Grasp workspace and start again.",
+  },
+  unknownClient: {
+    status: 404,
+    title: "This workspace isn't available",
+    line: "The workspace this sign-in started at isn't served here. Go back to it and start again.",
+  },
+  notFound: {
+    status: 404,
+    title: "Not found",
+    line: "There is nothing at this address.",
+  },
+  methodNotAllowed: {
+    status: 405,
+    title: "Not allowed",
+    line: "This address only takes your browser coming back from signing in.",
+  },
+  rateLimited: {
+    status: 429,
+    title: "Too many attempts",
+    line: "Wait a minute, then go back to your Grasp workspace and start again.",
+  },
+  unavailable: {
+    status: 503,
+    title: "Try again in a moment",
+    line: "Grasp couldn't finish this just now. Go back to your Grasp workspace and start again.",
+  },
+} as const;
+type RelayPage = keyof typeof relayPages;
+
+/**
+ * The headers of every answer the relay makes: never stored, never
+ * framed, never leaking its URL (an OAuth code, a state) to where it
+ * leads, with HSTS on https.
+ */
+const relayHeaders = (url: URL): Headers => {
+  const headers = new Headers({
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+  });
+  if (url.protocol === "https:") {
+    headers.set("strict-transport-security", strictTransportSecurity);
+  }
+  return headers;
+};
+
+/** One of the relay's plain pages (`relayPages`). */
+const relayPage = (url: URL, page: RelayPage): Response => {
+  const { status, title, line } = relayPages[page];
+  const headers = relayHeaders(url);
+  headers.set("content-type", "text/html; charset=utf-8");
+  if (page === "methodNotAllowed") {
+    headers.set("allow", "GET");
+  }
+  if (page === "rateLimited") {
+    headers.set("retry-after", String(limitPeriodS));
+  }
+  return new Response(
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><h1>${title}</h1><p>${line}</p></html>`,
+    { status, headers }
+  );
+};
+
+/**
+ * The OAuth relay (@grasp-os/shared/oauth-relay), on this stage's relay
+ * host: sends a browser an IdP brought back on to the client whose
+ * signed state it carries, at that client's own callback, with the
+ * client's own state. Only a GET to one of its two paths, within the
+ * sign-in limit for the caller's address, with a state that names a
+ * client in the map and that client's MAC, no older than the relay
+ * allows; anything else gets a plain page and goes nowhere. It reads
+ * nothing of the code, forwards nothing to a core, and logs the client's
+ * hostname alone.
+ */
+const oauthRelay = async (
+  request: Request,
+  url: URL,
+  env: Env,
+  stage: Stage
+): Promise<Response> => {
+  const relayHost = authRelayHost(stage);
+  if (relayKindOf(url.pathname) === undefined) {
+    return relayPage(url, "notFound");
+  }
+  if (request.method !== "GET") {
+    return relayPage(url, "methodNotAllowed");
+  }
+  // Per address across clients, before anything is looked up: a flood of
+  // guessed states costs no map reads.
+  if (!(await withinLimit(env.AUTH_RATE_LIMIT, request, relayHost))) {
+    log.warn("router.rate_limited", { host: relayHost });
+    return relayPage(url, "rateLimited");
+  }
+  const relayed = readRelayRequest(url, stage);
+  if (relayed === null) {
+    log.info("router.relay_refused", { reason: "malformed" });
+    return relayPage(url, "invalid");
+  }
+  let route: Route | null;
+  try {
+    route = await routeFor(relayed.host, env);
+  } catch (error) {
+    log.error("router.route_failed", {
+      host: relayed.host,
+      ...errorFields(error),
+    });
+    return relayPage(url, "unavailable");
+  }
+  // Unknown, or offboarded: offboarding takes the hostname out of the map.
+  if (route === null) {
+    log.info("router.relay_refused", {
+      host: relayed.host,
+      reason: "unknown_client",
+    });
+    return relayPage(url, "unknownClient");
+  }
+  if (!(await relayStateValid(route.secret, relayed))) {
+    log.warn("router.relay_refused", {
+      host: relayed.host,
+      reason: "bad_state",
+    });
+    return relayPage(url, "invalid");
+  }
+  const headers = relayHeaders(url);
+  headers.set("location", relayTarget(url, relayed));
+  log.info("router.relay_forwarded", { host: relayed.host });
+  return new Response(null, { status: 302, headers });
+};
+
+/**
+ * Forwards each request on a client's hostname to that client's core (its
+ * user Worker through the dispatch namespace, or its workers.dev origin:
+ * `toCore`), with the router secret so a core is reached through the
+ * router alone.
+ * Pass-through only: the method, path, query, headers and body go as they
+ * came (but for Host, the router secret and the client-IP header),
+ * WebSocket upgrades included, and core's response comes back as it
+ * is, redirects included. Logs no headers, URLs or bodies.
+ */
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const host = routerHostKey(url.hostname);
+    // The relay only on this router's own stage's host, and only when
+    // STAGE names one exactly: never production's by default.
+    const stage = stageNamed(env.STAGE);
+    if (stage !== undefined && host === authRelayHost(stage)) {
+      return await oauthRelay(request, url, env, stage);
+    }
+    // No client is `auth` (reservedClientIds): a map entry for such a
+    // host, at any domain, is never forwarded to.
+    if (host.startsWith("auth.")) {
+      if (stage === undefined) {
+        log.error("router.relay_stage_unset", { host });
+      }
+      return relayPage(url, "notFound");
+    }
+
+    let route: Route | null;
+    try {
+      route = await routeFor(host, env);
+    } catch (error) {
+      log.error("router.route_failed", { host, ...errorFields(error) });
+      return new Response("Service unavailable", { status: 503 });
+    }
+    if (route === null) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const { pathname } = url;
+    // Mail reaches core only through `email` below, signed: never from
+    // the public, whatever it sends.
+    if (pathname === mailIngressPath) {
+      return new Response("Not found", { status: 404 });
+    }
+    const limited = await limitRefusal(env, request, url, host);
+    if (limited !== undefined) {
+      return limited;
+    }
+
+    // Any copy the caller sent is replaced (threat model RT3): the secret
+    // comes only from the map entry for the hostname the request came to.
+    // The client's IP comes only from Cloudflare's `cf-connecting-ip`, which
+    // the edge sets itself. The client's Host goes too: the target's host
+    // comes from the URL alone.
+    const headers = new Headers(request.headers);
+    headers.delete("host");
+    headers.set(routerSecretHeader, route.secret);
+    headers.delete(routerClientIpHeader);
+    for (const name of mailIngressHeaders) {
+      headers.delete(name);
+    }
+    const clientIp = request.headers.get("cf-connecting-ip");
+    if (clientIp !== null) {
+      headers.set(routerClientIpHeader, clientIp);
+    }
+    try {
+      return await toCore(
+        route,
+        new Request(coreUrlFor(route, host, `${url.pathname}${url.search}`), {
+          method: request.method,
+          headers,
+          body: request.body,
+          redirect: "manual",
+        }),
+        env
+      );
+    } catch (error) {
+      // The error's kind only: a failed fetch's message or stack can carry
+      // the target URL, and with it an OAuth callback's code and state; a
+      // dispatch's names the client's script.
+      log.error("router.forward_failed", {
+        host,
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+      return new Response("Bad gateway", { status: 502 });
+    }
+  },
+
+  /**
+   * Sorts the mail Email Routing hands the router (one catch-all for every
+   * client's domain) to the client whose hostname is the recipient's
+   * domain, and to no other: unknown, the message bounces. Passes the
+   * raw message on to that client's core, signed for exactly its
+   * recipient, sender and bytes (@grasp-os/shared/mail-ingress), and
+   * keeps nothing of it. Core's answer is the message's: taken, bounced
+   * with core's reason, or anything else failed for now (thrown), so
+   * Email Routing tells the sender to try again. Logs the domain, the
+   * message's hash and size, never an address or what it says.
+   */
+  async email(message, env) {
+    const at = message.to.lastIndexOf("@");
+    const host = routerHostKey(message.to.slice(at + 1));
+    // Thrown when the map or the key can't be read: failed for now, never
+    // sent anywhere else.
+    const route = at > 0 ? await routeFor(host, env) : null;
+    if (route === null) {
+      log.info("router.mail_unrouted", { host });
+      message.setReject("No such address.");
+      return;
+    }
+    const raw =
+      message.rawSize > mailIngressMaxBytes
+        ? undefined
+        : await readAtMost(message.raw, mailIngressMaxBytes);
+    if (raw === undefined) {
+      log.info("router.mail_too_large", { host, size: message.rawSize });
+      message.setReject("The message is too large.");
+      return;
+    }
+    const { mail, request } = await mailIngressRequest(
+      coreUrlFor(route, host, ""),
+      route.secret,
+      {
+        to: message.to,
+        from: message.from,
+        raw,
+        sentAt: new Date().toISOString(),
+      }
+    );
+    const response = await toCore(route, request, env);
+    const fields = {
+      host,
+      message: mail.sha256,
+      size: mail.size,
+      status: response.status,
+    };
+    if (response.status === mailRejectedStatus) {
+      log.info("router.mail_bounced", fields);
+      message.setReject(bounceReason(await response.json().catch(() => null)));
+      return;
+    }
+    await response.body?.cancel();
+    if (response.status !== 202) {
+      log.error("router.mail_failed", fields);
+      throw new Error(
+        `Core didn't take message ${mail.sha256} (${response.status})`
+      );
+    }
+    log.info("router.mail_delivered", fields);
+  },
+} satisfies ExportedHandler<Env>;

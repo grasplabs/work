@@ -1,0 +1,268 @@
+import type { AiProvidersApi } from "./ai-providers.ts";
+import type { AppsApi } from "./apps.ts";
+import type { AuditApi } from "./audit-log.ts";
+import type { BoardReportApi } from "./board-report.ts";
+import type { BrainMemoriesApi } from "./brain-memories.ts";
+import type { BrainSourcesApi } from "./brain-sources.ts";
+import type { BrainApi } from "./brain.ts";
+import type { ChannelAccountsApi } from "./channel-accounts.ts";
+import type { ChatsApi } from "./chat.ts";
+import type {
+  ConnectionsApi,
+  PendingActionsApi,
+  UnknownOutcomesApi,
+} from "./connect.ts";
+import type { DataPolicyApi } from "./data-policy.ts";
+import type { DecisionsApi } from "./decisions.ts";
+import type { DependenciesApi } from "./dependencies.ts";
+import type { DirectoryGroupsApi } from "./directory.ts";
+import type { DraftsApi, VersionsApi } from "./drafts.ts";
+import type { HeldStartsApi } from "./held-starts.ts";
+import type { InstructionsApi } from "./instruction-files.ts";
+import type { MembersApi } from "./members.ts";
+import type { ModelsApi } from "./models.ts";
+import type { NotificationsApi } from "./notifications.ts";
+import type { OnboardingGateApi } from "./onboarding-gate.ts";
+import type { OnboardingApi } from "./onboarding.ts";
+import type { OpportunitiesApi } from "./opportunities.ts";
+import type { OrgSettingsApi } from "./org-settings.ts";
+import type { OrganizationApi } from "./organization.ts";
+import type { PagesApi } from "./pages.ts";
+import type { PermissionsApi } from "./permissions.ts";
+import type { ProjectsApi } from "./projects.ts";
+import type { ResourceBindingsApi } from "./resource-bindings.ts";
+import type { Role } from "./roles.ts";
+import type { SessionsApi } from "./sign-in.ts";
+import type { SignalsApi } from "./signals.ts";
+import type { SkillsApi } from "./skills.ts";
+import type { StephenRequestsApi } from "./stephen-requests.ts";
+import type { WaitingApi } from "./waiting.ts";
+import type { WorkflowResourcesApi } from "./workflow-resources.ts";
+import type { WorkflowsApi } from "./workflows.ts";
+
+/** A way to sign in to this deployment, for the sign-in screen. */
+export interface SignInOption {
+  /** Passed to Better Auth's `POST /api/auth/sign-in/sso` as `providerId`. */
+  providerId: string;
+  label: string;
+  /** Grasp's staff's own sign-in: never for anyone's interview (GRA-1790). */
+  staff: boolean;
+}
+
+/** The signed-in person, as the server sees them right now. */
+export interface Identity {
+  userId: string;
+  email: string;
+  name: string;
+  role: Role;
+  /** The teams they belong to. */
+  teams: { id: string; name: string }[];
+  /** Grasp staff, signed in for a limited time; not a member of the organization. */
+  staff: boolean;
+  /**
+   * Grasp staff, who reach the onboarding alone, whatever `SIGN_IN`'s
+   * staff scope: every other namespace and route refuses them. Set on
+   * every staff session.
+   */
+  onboardingOnly?: true;
+  /**
+   * A guest (roles.ts `guestRole`): someone outside the company, who
+   * reaches only the Apps shared with them, as their user, and nothing
+   * else of the platform (core's guest-access.ts). Their `role` is
+   * `user` and they are in no team.
+   */
+  guest?: true;
+  /** When the session ends (ISO 8601). */
+  expiresAt: string;
+}
+
+/**
+ * What a signed-in person reaches. Every call checks the session again, so
+ * one that was revoked or expired stops working at once, and the connection
+ * closes. Each feature is a namespace of its own (`session.apps.list()`),
+ * the same object on every access.
+ */
+export interface SessionApi {
+  /** The person behind the session, with their current role and teams. */
+  whoami: () => Promise<Identity>;
+  /**
+   * Changes the person's own name (`personNameSchema`), as Grasp shows it
+   * everywhere; `member.name_invalid` for one it doesn't take. Only a
+   * member does, for themselves: never Grasp staff or a guest, and their
+   * email, role and teams are not theirs to change.
+   */
+  setName: (name: string) => Promise<void>;
+  /**
+   * The person's chats with the organization's agent: their list, questions,
+   * and each chat's messages as they stream in.
+   */
+  readonly chats: ChatsApi;
+  /** The weekly report on the programme with Grasp, as the person may read it. */
+  readonly boardReport: BoardReportApi;
+  /** The person's own sessions: the browsers they are signed in on, and ending one. */
+  readonly sessions: SessionsApi;
+  /** The person's own accounts on chat platforms, linked so the agent knows them there. */
+  readonly channelAccounts: ChannelAccountsApi;
+  /** Permissions of Apps and agents. */
+  readonly permissions: PermissionsApi;
+  /**
+   * Which provider serves each resource an App's actions declare: approved
+   * and revoked by admins only, listed for admins and the App's builders.
+   */
+  readonly resourceBindings: ResourceBindingsApi;
+  /**
+   * The App registry and each App's code: the Apps the person owns or that
+   * are shared with them, and every App for admins.
+   */
+  readonly apps: AppsApi;
+  /**
+   * The drafts of Apps and workflows: one per App or workflow, shared by
+   * its builders and their chats' agents, published by a person.
+   */
+  readonly drafts: DraftsApi;
+  /** The versions of Apps and workflows: compared, and rolled back to. */
+  readonly versions: VersionsApi;
+  /**
+   * What the company brain is built from, assembled from the onboarding,
+   * the brain's records and the connections, each as the person may
+   * read it.
+   */
+  readonly brain: BrainApi;
+  /**
+   * The Brain's sources the person may read, their versions and text, and
+   * search, which is recall as that person.
+   */
+  readonly brainSources: BrainSourcesApi;
+  /**
+   * Skills: the person's own, which they write; asking to share one with
+   * the company; and, for admins, deciding those asks and retiring the
+   * company's skills.
+   */
+  readonly skills: SkillsApi;
+  /**
+   * The memories the agent saved for the person in their own chats:
+   * undoing one there.
+   */
+  readonly brainMemories: BrainMemoriesApi;
+  /** What the company could automate or improve, from its routines: for admins. */
+  readonly opportunities: OpportunitiesApi;
+  /** Instruction files, for those who may edit each. */
+  readonly instructions: InstructionsApi;
+  /**
+   * Accounts connected through OAuth: the person's own, and shared ones
+   * (which only admins connect and disconnect).
+   */
+  readonly connections: ConnectionsApi;
+  /** Runs of Apps' workflows, for those with a role in the App. */
+  readonly workflows: WorkflowsApi;
+  /**
+   * Independent workflows: their versions and whom they are shared with,
+   * for those with a role in them.
+   */
+  readonly workflowResources: WorkflowResourcesApi;
+  /**
+   * Projects: groupings of Apps and workflows the person is in, and what
+   * is filed in them that they may open. Filing never shares.
+   */
+  readonly projects: ProjectsApi;
+  /**
+   * What core tells the person: the workflows that failed while acting for
+   * them.
+   */
+  readonly notifications: NotificationsApi;
+  /**
+   * Everything that waits on the person, in one feed, each item with the
+   * verdicts it takes: what the inbox shows.
+   */
+  readonly waiting: WaitingApi;
+  /**
+   * Decisions workflow runs wait for, answered by the people they are
+   * from, whatever their role.
+   */
+  readonly decisions: DecisionsApi;
+  /**
+   * Starts of independent workflows the person's chats' agents asked for,
+   * held until they confirm them.
+   */
+  readonly heldStarts: HeldStartsApi;
+  /**
+   * npm packages proposed for Apps, and the people who approve them: a
+   * permission of its own, which no role gives.
+   */
+  readonly dependencies: DependenciesApi;
+  /** Apps' pages: their builds, their servers and their error logs. */
+  readonly pages: PagesApi;
+  /** What an App's data is to code Grasp didn't serve. */
+  readonly dataPolicy: DataPolicyApi;
+  /** The organization's members: offboarding. Admins only. */
+  readonly members: MembersApi;
+  /** The directory's groups, mapped to teams. Admins only. */
+  readonly directoryGroups: DirectoryGroupsApi;
+  /**
+   * The organization's name, time zone and where its data lives: everyone
+   * reads them, its own admins change them.
+   */
+  readonly organization: OrganizationApi;
+  /**
+   * The organization's billing settings: its admins read them,
+   * its own admins (never Grasp staff) change them.
+   */
+  readonly orgSettings: OrgSettingsApi;
+  /**
+   * Stephen's requests outside Grasp: his week and this month's billed
+   * requests. Owners and admins only.
+   */
+  readonly stephenRequests: StephenRequestsApi;
+  /** The audit log: search, export and chain verification. Admins only. */
+  readonly audit: AuditApi;
+  /**
+   * The model gateway's settings, which Grasp sets for the client, and this
+   * month's spend against its budgets. Admins only.
+   */
+  readonly models: ModelsApi;
+  /**
+   * The organization's own AI provider keys, sealed in connect, and the
+   * models its calls use. Admins read them; its own admins change them.
+   */
+  readonly aiProviders: AiProvidersApi;
+  /**
+   * Side effects the person's agents, Apps and runs asked for, held until
+   * the person confirms or declines them: from chat, from a person using
+   * an App, and from any of them once it read restricted data.
+   */
+  readonly pendingActions: PendingActionsApi;
+  /**
+   * Side effects sent for the signed-in person whose answer was lost, and
+   * that connect couldn't recover: the person says what became of each.
+   */
+  readonly unknownOutcomes: UnknownOutcomesApi;
+  /**
+   * Improvement signals from runs and the audit log, computed daily: every
+   * one for admins, an App's for its builders.
+   */
+  readonly signals: SignalsApi;
+  /**
+   * The onboarding: who works where, the plan, and numbers per team, never
+   * anyone's words. Admins only, Grasp staff included; its programme (the
+   * dates and the stage) for everyone signed in.
+   */
+  readonly onboarding: OnboardingApi;
+  /** Whether the company may come in yet: Grasp's go. */
+  readonly onboardingGate: OnboardingGateApi;
+}
+
+/**
+ * The root object core exposes to the frontend over Cap'n Web, at `/rpc`.
+ * Core implements it; the frontend holds a typed stub of it.
+ */
+export interface CoreApi {
+  /** Answers `"pong"`: proves the connection works end to end. */
+  ping: () => "pong";
+  /** The ways to sign in here; empty while sign-in isn't set up. */
+  signInOptions: () => SignInOption[];
+  /**
+   * The signed-in person's API, for the session the connection was opened
+   * with. Throws `auth.unauthenticated` when there is none.
+   */
+  authenticate: () => SessionApi;
+}

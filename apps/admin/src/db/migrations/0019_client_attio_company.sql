@@ -1,0 +1,1 @@
+ALTER TABLE `clients` ADD `attio_company_id` text;

@@ -1,0 +1,384 @@
+/**
+ * The deployment config every deploy derives for a client's core:
+ * `SIGN_IN`, from the client's record, `MAIL_FROM`, Grasp's onboarding
+ * sender at the client's sending domain (`onboardingSender`), and
+ * `RUNTIME_PROFILE`, `cloudflare`: every client runs on Cloudflare, which
+ * enforces Code Mode's CPU limit, so its run records say so (core's
+ * src/code-mode.ts). Derived on every deploy, so each one keeps them. And
+ * the check every deploy makes of the config it is about to set before it
+ * changes anything (`checkDeployedConfig`).
+ */
+import "@tanstack/react-start/server-only";
+import {
+  signInConfigSchema,
+  staffWindowMaxMs,
+  unreachableAdmins,
+} from "@grasp-os/shared/deployment-config";
+import type {
+  MailFrom,
+  SignInConfig,
+} from "@grasp-os/shared/deployment-config";
+import { clientDomain } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
+import { z } from "zod";
+
+import {
+  adminUnreachable,
+  clientSignInSchema,
+} from "../clients/sign-in-schema.ts";
+import type { ClientSignInRecord } from "../clients/sign-in-schema.ts";
+import { DeployError } from "./errors.ts";
+
+/**
+ * The runtime every client's core runs on: Cloudflare, where the isolates
+ * Code Mode loads have their CPU limit enforced. Not a setting: a client
+ * can't make its run records claim otherwise.
+ */
+export const clientRuntimeProfile = "cloudflare";
+
+/**
+ * The client's sending domain: `mail.<id>.<domain>`, a zone of its own in
+ * the client's account, below the client's hostname (`<id>.<domain>`)
+ * rather than at it, so delegating it never takes the hostname the router
+ * serves away from the router (src/hosting/operation.ts ensures it).
+ */
+export const clientMailDomain = (clientId: string, domain: string): string =>
+  `mail.${clientId}.${domain}`;
+
+/**
+ * Who a client's onboarding mail is from: Grasp's onboarding sender at
+ * the client's sending domain, by the product's name. Core's `MAIL_FROM`,
+ * which is also where replies go unless a mail names another address, and
+ * the only address the `EMAIL` binding may send from
+ * (`allowed_sender_addresses`, src/deploy/upload.ts).
+ */
+export const onboardingSender = (
+  clientId: string,
+  domain: string
+): MailFrom => ({
+  name: "Grasp Work",
+  address: `onboarding@${clientMailDomain(clientId, domain)}`,
+});
+
+/**
+ * Grasp's multi-tenant OAuth apps' client ids (not secret: their secrets
+ * are shared secrets, src/deploy/context.ts). Unset while the admin has
+ * none for that IdP.
+ */
+export interface SignInApps {
+  entraClientId?: string;
+  googleClientId?: string;
+  /**
+   * Grasp's own staff as core's `SIGN_IN.staff` names them: Grasp's Entra
+   * tenant, the email domains its staff sign in with and the Entra object
+   * ids of the staff who may sign in to a client's site. Unset while the
+   * admin has none: a staff window then lets the admin act, and nobody
+   * sign in as staff.
+   */
+  staff?: GraspStaff;
+}
+
+/** Grasp's own staff, as a client's staff window lets them in. */
+export interface GraspStaff {
+  tenantId: string;
+  domains: string[];
+  oids: string[];
+}
+
+/** The longest window staff may open, in days: core closes a longer one. */
+export const staffWindowMaxDays = Math.floor(
+  staffWindowMaxMs / (24 * 60 * 60 * 1000)
+);
+
+/**
+ * A client's staff window as its record keeps it (`clients.staffWindow`,
+ * JSON): when staff opened it, until when, and what Grasp's staff reach
+ * in it (`onboarding`: the onboarding alone). Every deploy makes core's
+ * `SIGN_IN.staff` from it and the admin's `GraspStaff`.
+ */
+export const staffWindowSchema = z
+  .object({
+    opened: z.iso.datetime({ offset: true }),
+    until: z.iso.datetime({ offset: true }),
+    scope: z.enum(["full", "onboarding"]),
+  })
+  .refine(
+    ({ opened, until }) => {
+      const span = Date.parse(until) - Date.parse(opened);
+      return span > 0 && span <= staffWindowMaxMs;
+    },
+    { message: "A window of at most seven days", path: ["until"] }
+  );
+export type StaffWindow = z.output<typeof staffWindowSchema>;
+
+/** The staff window `value` (a record's JSON) keeps, or null for none or one that doesn't parse. */
+export const staffWindowOf = (value: string | null): StaffWindow | null => {
+  if (value === null) {
+    return null;
+  }
+  try {
+    const parsed = staffWindowSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Core's `SIGN_IN.staff` for a client whose record keeps `staffWindow`:
+ * while it is open, Grasp's admin may act in its core (its kickoff and
+ * commands, signed with the client's key), as admins of what the scope
+ * reaches. When the admin knows Grasp's staff (`apps.staff`) and Entra
+ * app, it also names them, so the listed staff can sign in to the
+ * client's site through Grasp's own tenant; without them nobody does.
+ * Undefined while no window is kept.
+ */
+const staffSignInOf = (
+  staffWindow: string | null,
+  apps: SignInApps
+): SignInConfig["staff"] => {
+  const opened = staffWindowOf(staffWindow);
+  if (opened === null) {
+    return undefined;
+  }
+  const window = {
+    role: "admin" as const,
+    scope: opened.scope,
+    opened: opened.opened,
+    until: opened.until,
+  };
+  if (apps.staff === undefined || apps.entraClientId === undefined) {
+    return window;
+  }
+  return {
+    tenantId: apps.staff.tenantId,
+    clientId: apps.entraClientId,
+    domains: apps.staff.domains,
+    oids: apps.staff.oids,
+    ...window,
+  };
+};
+
+/**
+ * Client `clientId`'s `SIGN_IN`, from its record's `signIn` (JSON), at
+ * `https://<clientId>.<domain>`; undefined for a client without one.
+ * Refused (`sign_in_incomplete`) when the record doesn't parse (its
+ * message says `admin_unreachable` when no first admin could sign in), or
+ * it names an IdP the admin has no app id for, so no deploy leaves its
+ * people unable to sign in unnoticed.
+ */
+const signInOf = (
+  clientId: string,
+  signIn: string | null,
+  domain: string,
+  apps: SignInApps,
+  oauthRelay: Stage | undefined,
+  staffWindow: string | null
+): SignInConfig | undefined => {
+  if (signIn === null) {
+    return undefined;
+  }
+  const incomplete = (why: string): DeployError =>
+    new DeployError("sign_in_incomplete", `${clientId}'s sign-in: ${why}`);
+  let parsed: unknown = undefined;
+  try {
+    parsed = JSON.parse(signIn);
+  } catch {
+    // Not JSON: refused below, as a record that doesn't parse.
+  }
+  const record = clientSignInSchema.safeParse(parsed);
+  if (!record.success) {
+    // Named by its code, never its emails: a deploy's error is audited.
+    const unreachable = record.error.issues.some(
+      (issue) =>
+        issue.code === "custom" && issue.params?.code === adminUnreachable
+    );
+    throw incomplete(
+      unreachable
+        ? `${adminUnreachable}: no first admin can sign in`
+        : "its record doesn't parse"
+    );
+  }
+  const { entraTenantId, googleHostedDomain } = record.data;
+  if (entraTenantId !== undefined && apps.entraClientId === undefined) {
+    throw incomplete("ENTRA_CLIENT_ID isn't set on the admin");
+  }
+  if (googleHostedDomain !== undefined && apps.googleClientId === undefined) {
+    throw incomplete("GOOGLE_CLIENT_ID isn't set on the admin");
+  }
+  // The relay sends browsers back only to its stage's hosted domain.
+  if (oauthRelay !== undefined && domain !== clientDomain(oauthRelay)) {
+    throw incomplete(
+      `the OAuth relay serves clients under ${clientDomain(oauthRelay)}, not ${domain}`
+    );
+  }
+  const staff = staffSignInOf(staffWindow, apps);
+  const config = signInConfigSchema.safeParse({
+    origin: `https://${clientId}.${domain}`,
+    // Relay mode: the client's IdPs send people back through the stage's
+    // OAuth relay (@grasp-os/shared/oauth-relay), so Grasp's shared OAuth
+    // apps name one redirect URI, not one per client.
+    ...(oauthRelay === undefined
+      ? {}
+      : { callbackOrigin: oauthRelayOrigin(oauthRelay) }),
+    domains: record.data.domains,
+    admins: record.data.admins,
+    ...(entraTenantId === undefined
+      ? {}
+      : { entra: { tenantId: entraTenantId, clientId: apps.entraClientId } }),
+    ...(googleHostedDomain === undefined
+      ? {}
+      : {
+          google: {
+            hostedDomain: googleHostedDomain,
+            clientId: apps.googleClientId,
+          },
+        }),
+    ...(staff === undefined ? {} : { staff }),
+  });
+  if (!config.success) {
+    throw incomplete("core wouldn't take it");
+  }
+  return config.data;
+};
+
+/**
+ * Why `value` can't be core's `SIGN_IN`, as a code, or null when it can:
+ * `sign_in_invalid` when core wouldn't parse it (one that names neither an
+ * Entra tenant nor a Google Workspace included: nobody could sign in),
+ * `admin_unreachable` when it names no admin, or one whose email isn't in
+ * its domains (the rule `clientSignInSchema` applies to a client's
+ * record). Checked on the `SIGN_IN` a deploy is about to set. A code,
+ * never the emails: a deploy's error is audited.
+ */
+export const signInSettingProblem = (
+  value: unknown
+): "sign_in_invalid" | typeof adminUnreachable | null => {
+  const config = signInConfigSchema.safeParse(value);
+  if (!config.success) {
+    return "sign_in_invalid";
+  }
+  return config.data.admins.length === 0 ||
+    unreachableAdmins(config.data).length > 0
+    ? adminUnreachable
+    : null;
+};
+
+/**
+ * Throws `sign_in_incomplete` unless `vars`, the config vars a deploy
+ * of client `clientId` is about to set on core, has no `SIGN_IN` or one
+ * with an admin who can sign in (`signInSettingProblem`).
+ */
+const checkDeployedSignIn = (
+  clientId: string,
+  vars: Readonly<Record<string, unknown>>
+): void => {
+  if (vars.SIGN_IN === undefined) {
+    return;
+  }
+  const problem = signInSettingProblem(vars.SIGN_IN);
+  if (problem !== null) {
+    throw new DeployError(
+      "sign_in_incomplete",
+      `${clientId}'s SIGN_IN to deploy: ${problem}`
+    );
+  }
+};
+
+/**
+ * Throws unless core would take the config a deploy of client `clientId`
+ * is about to set on core (`vars`): `sign_in_incomplete` for a `SIGN_IN`
+ * nobody, or no admin, could sign in with (`checkDeployedSignIn`). The
+ * error never names an email.
+ */
+export const checkDeployedConfig = checkDeployedSignIn;
+
+/**
+ * The IdP `signIn` names that the admin has no OAuth app id for
+ * (`apps`), or null when it has one for each: a deploy would refuse such
+ * a sign-in (`sign_in_incomplete`), so it's refused when saved.
+ */
+export const missingSignInApp = (
+  signIn: Pick<ClientSignInRecord, "entraTenantId" | "googleHostedDomain">,
+  apps: SignInApps
+): "entra" | "google" | null => {
+  if (signIn.entraTenantId !== undefined && apps.entraClientId === undefined) {
+    return "entra";
+  }
+  if (
+    signIn.googleHostedDomain !== undefined &&
+    apps.googleClientId === undefined
+  ) {
+    return "google";
+  }
+  return null;
+};
+
+/** What a client's derived core config is made from. */
+export interface CoreConfigInputs {
+  clientId: string;
+  /** Its record's sign-in, JSON; null when it has none. */
+  signIn: string | null;
+  /** Its record's staff window, JSON (`staffWindowSchema`); null or absent when none was opened. */
+  staffWindow?: string | null;
+  /** The domain clients are served under. */
+  domain: string;
+  apps: SignInApps;
+  /**
+   * Relay mode (`oauthRelayOf`, src/deploy/context.ts): the stage whose
+   * OAuth relay the client's sign-in and connections come back through,
+   * as Grasp-hosted clients' do. Absent, they come back to the client's
+   * own origin, which needs its own OAuth apps.
+   */
+  oauthRelay?: Stage;
+  /**
+   * The onboarding its company starts with, as its record keeps it
+   * (`clients.startingFlow`); null or absent for all of it.
+   */
+  startingFlow?: string | null;
+  /**
+   * When it was added, where its deployment starts closed
+   * (`clients.closedFrom`); null or absent where it starts open.
+   */
+  closedFrom?: Date | null;
+}
+
+/**
+ * The deployment config vars a deploy derives for a client's core:
+ * `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM` (`onboardingSender`)
+ * always, `SIGN_IN` when its record has sign-in, `ONBOARDING_START` when
+ * its record names the onboarding it starts with (core reads it once, as
+ * its onboarding is first kept), `ONBOARDING_CLOSED_FROM` when it was
+ * added with an onboarding (core reads it while its gate was never moved). Every model key is its connect's. `CLIENT_ID` is what core answers the provisioning probe with
+ * (src/hosting/probe.ts).
+ */
+export const derivedCoreConfig = ({
+  clientId,
+  signIn,
+  domain,
+  apps,
+  oauthRelay,
+  staffWindow = null,
+  startingFlow = null,
+  closedFrom = null,
+}: CoreConfigInputs): Record<string, unknown> => {
+  const config = signInOf(
+    clientId,
+    signIn,
+    domain,
+    apps,
+    oauthRelay,
+    staffWindow
+  );
+  return {
+    RUNTIME_PROFILE: clientRuntimeProfile,
+    CLIENT_ID: clientId,
+    MAIL_FROM: onboardingSender(clientId, domain),
+    ...(config === undefined ? {} : { SIGN_IN: config }),
+    ...(startingFlow === null ? {} : { ONBOARDING_START: startingFlow }),
+    ...(closedFrom === null
+      ? {}
+      : { ONBOARDING_CLOSED_FROM: closedFrom.toISOString() }),
+  };
+};

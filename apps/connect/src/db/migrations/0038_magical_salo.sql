@@ -1,0 +1,2 @@
+ALTER TABLE `connections` ADD `composio_auth` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `connections_key_toolkit_idx` ON `connections` (`provider`) WHERE "connections"."composio_auth" = 'key' AND "connections"."status" <> 'disconnected';

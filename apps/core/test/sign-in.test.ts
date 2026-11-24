@@ -1,0 +1,864 @@
+import { authErrors } from "@grasp-os/shared/errors";
+import {
+  readRelayRequest,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
+import { routerClientIpHeader } from "@grasp-os/shared/router";
+import { createExecutionContext } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import worker from "../src/index.ts";
+import { createIdp } from "./fake-idp.ts";
+import { mockIdp } from "./idp.ts";
+import type { Claims } from "./idp.ts";
+import {
+  acmeTenant,
+  clientOrigin,
+  otherTenant,
+  signInConfig,
+} from "./sign-in-config.ts";
+import {
+  auditedDuring,
+  coreOrigin,
+  entraPerson,
+  finishSignIn,
+  googlePerson,
+  openRpc,
+  routed,
+  sessionCookieName,
+  signIn,
+  signedIn,
+  staffPerson,
+  startSignIn,
+  whoami,
+  withSignIn,
+} from "./sign-in.ts";
+
+const idp = mockIdp();
+
+/** Whether anything about the person with this email was stored. */
+const stored = async (email: unknown) => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS count FROM users WHERE email = ?"
+  )
+    .bind(String(email).toLowerCase())
+    .first<{ count: number }>();
+  return (row?.count ?? 0) > 0;
+};
+
+/** The error code a refused sign-in sends the browser back to the frontend with. */
+const errorOf = (location: string | null) => {
+  const url = new URL(location ?? "", clientOrigin);
+  return url.pathname === "/" ? url.searchParams.get("error") : null;
+};
+
+/** What became of a sign-in: the error it was sent back with, and what was kept. */
+const outcome = async (providerId: string, claims: Claims) => {
+  const result = await signIn(idp, providerId, claims);
+  return {
+    error: errorOf(result.location),
+    signedIn: result.session !== undefined,
+    stored: await stored(claims.email),
+  };
+};
+
+/** A refusal with `error`, with nobody signed in and nothing stored. */
+const refused = (error: string) => ({ error, signedIn: false, stored: false });
+
+/** The attributes of the session cookie a response sets, except its lifetime. */
+const sessionCookieAttributes = (response: Response) =>
+  response.headers
+    .getSetCookie()
+    .find((cookie) => cookie.startsWith(`${sessionCookieName}=`))
+    ?.toLowerCase()
+    .split("; ")
+    .slice(1)
+    .filter((attribute) => !/^(?:max-age|expires)=/u.test(attribute))
+    .toSorted();
+
+describe("signing in", () => {
+  it("signs in someone from the client's Entra tenant, as a user", async () => {
+    const person = entraPerson(acmeTenant);
+    const started = await startSignIn("microsoft");
+    // The IdP sends them back to the client's hostname, not core's own.
+    expect(started.authorizationUrl.searchParams.get("redirect_uri")).toBe(
+      `${clientOrigin}/api/auth/sso/callback/microsoft`
+    );
+
+    const { response, location, session } = await signIn(
+      idp,
+      "microsoft",
+      person
+    );
+    expect(location).toBe("/");
+    // Host-only (no Domain), HTTPS-only, out of reach of scripts.
+    expect(sessionCookieAttributes(response)).toStrictEqual([
+      "httponly",
+      "path=/",
+      "samesite=lax",
+      "secure",
+    ]);
+    await expect(whoami(session)).resolves.toMatchObject({
+      email: person.email,
+      name: person.name,
+      role: "user",
+      teams: [],
+      staff: false,
+    });
+  });
+
+  it("signs in someone from the client's Google Workspace", async () => {
+    const person = googlePerson();
+    const session = await signedIn(idp, "google", person);
+    await expect(whoami(session)).resolves.toMatchObject({
+      email: person.email,
+      role: "user",
+    });
+  });
+
+  it("makes the configured admins admins on their first sign-in", async () => {
+    const person = entraPerson(acmeTenant);
+    // Configured in another case than the IdP sends it.
+    const session = await signedIn(idp, "microsoft", person, {
+      coreEnv: withSignIn({ admins: [String(person.email).toUpperCase()] }),
+    });
+    await expect(whoami(session)).resolves.toMatchObject({ role: "admin" });
+  });
+
+  it("never links an account at the other IdP by its email", async () => {
+    const person = entraPerson(acmeTenant);
+    await signedIn(idp, "microsoft", person);
+    const other = await outcome(
+      "google",
+      googlePerson({ email: person.email })
+    );
+    expect(other).toMatchObject({ signedIn: false, stored: true });
+    expect(other.error).not.toBeNull();
+  });
+
+  it("keeps none of the IdP's tokens", async () => {
+    const person = entraPerson(acmeTenant);
+    await signedIn(idp, "microsoft", person);
+    await signedIn(idp, "microsoft", person);
+    const account = await env.DB.prepare(
+      "SELECT access_token, refresh_token, id_token FROM accounts WHERE account_id = ?"
+    )
+      .bind(person.sub)
+      .first();
+    expect(account).toStrictEqual({
+      access_token: null,
+      refresh_token: null,
+      id_token: null,
+    });
+  });
+
+  it("offers the configured IdPs, and none while sign-in isn't set up", async () => {
+    const { core } = await openRpc();
+    await expect(core.signInOptions()).resolves.toStrictEqual([
+      { providerId: "microsoft", label: "Microsoft", staff: false },
+      { providerId: "google", label: "Google", staff: false },
+      { providerId: "grasp-staff", label: "Grasp staff", staff: true },
+    ]);
+    core[Symbol.dispose]();
+
+    const unconfigured = { ...env, SIGN_IN: undefined };
+    // Without config, the page's own origin (core's address here) is accepted.
+    const off = await openRpc(undefined, {
+      coreEnv: unconfigured,
+      origin: coreOrigin,
+    });
+    await expect(off.core.signInOptions()).resolves.toStrictEqual([]);
+    off.core[Symbol.dispose]();
+    const start = await routed(
+      "/api/auth/sign-in/sso",
+      {
+        method: "POST",
+        headers: { origin: clientOrigin, "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "microsoft", callbackURL: "/" }),
+      },
+      unconfigured
+    );
+    expect(start.status).toBe(404);
+  });
+
+  it("offers nothing when its config doesn't parse, and says which var and where", async () => {
+    const logged = vi.spyOn(console, "error");
+    try {
+      const configs = [
+        `{"origin": "https://acme.test"`,
+        { ...signInConfig, domains: "acme.test" },
+        // No IdP of the client's own: not even staff sign in.
+        { ...signInConfig, entra: undefined, google: undefined },
+      ];
+      const offered = await Promise.all(
+        configs.map(async (config) => {
+          const { core } = await openRpc(undefined, {
+            coreEnv: { ...env, SIGN_IN: config },
+            origin: coreOrigin,
+          });
+          try {
+            return await core.signInOptions();
+          } finally {
+            core[Symbol.dispose]();
+          }
+        })
+      );
+      expect(offered).toStrictEqual([[], [], []]);
+      // Once per config, however often it's read: it's parsed once.
+      const invalid = logged.mock.calls
+        .map(([line]: unknown[]) => line)
+        .filter(
+          (line) =>
+            z.object({ event: z.literal("config.invalid") }).safeParse(line)
+              .success
+        );
+      // In any order: the connections run at once.
+      expect(new Set(invalid)).toStrictEqual(
+        new Set([
+          { event: "config.invalid", var: "SIGN_IN", paths: "<root>" },
+          { event: "config.invalid", var: "SIGN_IN", paths: "domains" },
+          { event: "config.invalid", var: "SIGN_IN", paths: "entra" },
+        ])
+      );
+      expect(invalid).toHaveLength(3);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("gives a connection without a session nothing but the public calls", async () => {
+    const { core } = await openRpc();
+    await expect(core.ping()).resolves.toBe("pong");
+    const refusal = await core
+      .authenticate()
+      .whoami()
+      .catch((error: unknown) => error);
+    expect(authErrors.codeOf(refusal)).toBe("auth.unauthenticated");
+    core[Symbol.dispose]();
+  });
+});
+
+describe("tenant and domain spoofing", () => {
+  it("refuses a token another Entra tenant issued", async () => {
+    const outsider = entraPerson(otherTenant, "acme.test", {
+      iss: `https://login.microsoftonline.com/${otherTenant}/v2.0`,
+    });
+    await expect(outcome("microsoft", outsider)).resolves.toStrictEqual(
+      refused("invalid_provider")
+    );
+  });
+
+  it("refuses a token for another app", async () => {
+    const person = entraPerson(acmeTenant, "acme.test", { aud: "other-app" });
+    await expect(outcome("microsoft", person)).resolves.toStrictEqual(
+      refused("invalid_provider")
+    );
+  });
+
+  it("refuses an Entra account outside the pinned tenant, whatever its email", async () => {
+    const outcomes = await Promise.all([
+      outcome("microsoft", entraPerson(otherTenant)),
+      outcome(
+        "microsoft",
+        entraPerson(acmeTenant, "acme.test", { oid: undefined })
+      ),
+    ]);
+    expect(outcomes).toStrictEqual([
+      refused("tenant_mismatch"),
+      refused("tenant_mismatch"),
+    ]);
+  });
+
+  it("refuses B2B guests in the tenant, and anyone it can't tell apart from one", async () => {
+    const outcomes = await Promise.all([
+      outcome("microsoft", entraPerson(acmeTenant, "acme.test", { acct: 1 })),
+      outcome(
+        "microsoft",
+        entraPerson(acmeTenant, "acme.test", { acct: undefined })
+      ),
+    ]);
+    expect(outcomes).toStrictEqual([
+      refused("guest_not_allowed"),
+      refused("guest_not_allowed"),
+    ]);
+  });
+
+  it("refuses emails outside the client's domains, lookalikes included", async () => {
+    const domains = [
+      "gmail.com",
+      "evil.acme.test",
+      "acme.test.evil.example",
+      "acme.testx",
+    ];
+    const outcomes = await Promise.all(
+      domains.map(
+        async (domain) =>
+          await outcome("microsoft", entraPerson(acmeTenant, domain))
+      )
+    );
+    expect(outcomes).toStrictEqual(
+      domains.map(() => refused("domain_not_allowed"))
+    );
+  });
+
+  it("refuses a Google account with a client email that isn't in the client's Workspace", async () => {
+    const outcomes = await Promise.all([
+      // A consumer Google account can carry any address, but has no `hd`.
+      outcome("google", googlePerson({ hd: undefined })),
+      outcome("google", googlePerson({ hd: "evil.example" })),
+      outcome("google", googlePerson({ email_verified: false })),
+    ]);
+    expect(outcomes).toStrictEqual([
+      refused("tenant_mismatch"),
+      refused("tenant_mismatch"),
+      refused("email_unverified"),
+    ]);
+  });
+
+  it("checks again on every sign-in, not only the first", async () => {
+    const person = entraPerson(acmeTenant);
+    await signedIn(idp, "microsoft", person);
+    await expect(
+      outcome("microsoft", { ...person, tid: otherTenant })
+    ).resolves.toStrictEqual({
+      error: "tenant_mismatch",
+      signedIn: false,
+      stored: true,
+    });
+  });
+});
+
+describe("login CSRF, session fixation and replay", () => {
+  it("won't finish a sign-in in a browser that didn't start it", async () => {
+    // An attacker signs in as themselves and sends the victim the callback.
+    const started = await startSignIn("microsoft");
+    const callback = idp.authorize(
+      started.authorizationUrl,
+      entraPerson(acmeTenant)
+    );
+    const noState = await finishSignIn(callback);
+    expect(noState.headers.get("location")).toMatch(/error=state/u);
+    expect(noState.headers.getSetCookie().join(",")).not.toContain(
+      `${sessionCookieName}=`
+    );
+
+    // The victim's browser has a sign-in of its own in progress.
+    const victims = await startSignIn("microsoft");
+    const crossed = await finishSignIn(callback, { cookie: victims.cookie });
+    expect(crossed.headers.getSetCookie().join(",")).not.toContain(
+      `${sessionCookieName}=`
+    );
+  });
+
+  it("won't finish the same sign-in twice", async () => {
+    const first = await signIn(idp, "microsoft", entraPerson(acmeTenant));
+    expect(first.session).toBeDefined();
+    const replayed = await finishSignIn(first.callback, {
+      cookie: first.cookie,
+    });
+    expect(replayed.headers.getSetCookie().join(",")).not.toContain(
+      `${sessionCookieName}=`
+    );
+  });
+
+  it("gives a new session on sign-in, whatever session the browser had", async () => {
+    const attacker = entraPerson(acmeTenant);
+    const planted = await signedIn(idp, "microsoft", attacker);
+    const victim = entraPerson(acmeTenant);
+    const session = await signedIn(idp, "microsoft", victim, {
+      cookie: planted,
+    });
+
+    expect(session).not.toBe(planted);
+    await expect(whoami(session)).resolves.toMatchObject({
+      email: victim.email,
+    });
+    await expect(whoami(planted)).resolves.toMatchObject({
+      email: attacker.email,
+    });
+  });
+
+  it("treats a forged or altered session cookie as nobody", async () => {
+    const session = await signedIn(idp, "microsoft", entraPerson(acmeTenant));
+    const [name, value = ""] = session.split("=");
+    const [token = "", signature = ""] = decodeURIComponent(value).split(".");
+    const forged = [
+      `${name}=${encodeURIComponent(`${token}x.${signature}`)}`,
+      `${name}=${encodeURIComponent(token)}`,
+      `${name}=${encodeURIComponent(`${crypto.randomUUID()}.${signature}`)}`,
+      // The same token under the name Better Auth uses without the prefix.
+      `better-auth.session_token=${value}`,
+    ];
+    for (const cookie of forged) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential for readable failures
+      const refusal = await whoami(cookie).catch((error: unknown) => error);
+      expect(authErrors.codeOf(refusal)).toBe("auth.unauthenticated");
+    }
+  });
+});
+
+/** The client IP kept on the session behind a session cookie, if any. */
+const sessionIp = async (cookie: string) => {
+  const [token = ""] = decodeURIComponent(cookie.split("=")[1] ?? "").split(
+    "."
+  );
+  const row = await env.DB.prepare(
+    "SELECT ip_address AS ip FROM sessions WHERE token = ?"
+  )
+    .bind(token)
+    .first<{ ip: string | null }>();
+  return row?.ip;
+};
+
+describe("the client's IP", () => {
+  it("is taken from the router's header, not from x-forwarded-for", async () => {
+    const started = await startSignIn("microsoft");
+    const callback = idp.authorize(
+      started.authorizationUrl,
+      entraPerson(acmeTenant)
+    );
+    const response = await routed(`${callback.pathname}${callback.search}`, {
+      headers: {
+        cookie: started.cookie,
+        [routerClientIpHeader]: "203.0.113.7",
+        // The router's own hop, as a proxy in front of core would add it.
+        "x-forwarded-for": "198.51.100.9",
+      },
+    });
+    const session = response.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith(`${sessionCookieName}=`))
+      ?.split(";")[0];
+
+    expect(session).toBeDefined();
+    await expect(sessionIp(session ?? "")).resolves.toBe("203.0.113.7");
+  });
+
+  it("can't be claimed by a request that skips the router", async () => {
+    const started = await startSignIn("microsoft");
+    const callback = idp.authorize(
+      started.authorizationUrl,
+      entraPerson(acmeTenant)
+    );
+    // Straight to core's own address: the client's header, no router secret.
+    const direct = new Request(
+      `${coreOrigin}${callback.pathname}${callback.search}`,
+      {
+        redirect: "manual",
+        headers: { cookie: started.cookie, [routerClientIpHeader]: "10.0.0.1" },
+      }
+    );
+    const response = await worker.fetch(direct, env, createExecutionContext());
+
+    expect(response.status).toBe(403);
+    expect(response.headers.getSetCookie().join(",")).not.toContain(
+      `${sessionCookieName}=`
+    );
+  });
+});
+
+const day = 24 * 60 * 60 * 1000;
+
+const staffWindow = (opened: number, until: number) =>
+  withSignIn({
+    staff: {
+      ...signInConfig.staff,
+      opened: new Date(opened).toISOString(),
+      until: new Date(until).toISOString(),
+    },
+  });
+const closedWindow = staffWindow(
+  Date.parse("2000-01-01T00:00:00Z"),
+  Date.parse("2000-01-02T00:00:00Z")
+);
+
+describe("Grasp staff access", () => {
+  it("lets listed staff in through Grasp's tenant, for an hour at most, and logs it", async () => {
+    const startedAt = Date.now();
+    let session = "";
+    const audited = await auditedDuring(async () => {
+      session = await signedIn(idp, "grasp-staff", staffPerson());
+    });
+    const identity = await whoami(session);
+
+    expect(identity).toMatchObject({ staff: true, role: "admin", teams: [] });
+    expect(Date.parse(identity.expiresAt)).toBeLessThanOrEqual(
+      startedAt + 60 * 60 * 1000 + 1000
+    );
+    expect(audited).toContainEqual(
+      expect.objectContaining({
+        action: "staff.session.started",
+        actor: { type: "staff", userId: identity.userId },
+      })
+    );
+  });
+
+  it("lets in only the staff the window names", async () => {
+    await expect(
+      outcome("grasp-staff", staffPerson({ oid: crypto.randomUUID() }))
+    ).resolves.toStrictEqual(refused("staff_not_listed"));
+  });
+
+  it("ends a staff session when its person is taken off the list", async () => {
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const delisted = withSignIn({
+      staff: { ...signInConfig.staff, oids: [crypto.randomUUID()] },
+    });
+    const refusal = await whoami(session, delisted).catch(
+      (error: unknown) => error
+    );
+    expect(authErrors.codeOf(refusal)).toBe("auth.unauthenticated");
+  });
+
+  it("never lets a staff session outlive the window", async () => {
+    const until = Date.now() + 10 * 60 * 1000;
+    const shortWindow = staffWindow(Date.now() - 60 * 1000, until);
+    const session = await signedIn(idp, "grasp-staff", staffPerson(), {
+      coreEnv: shortWindow,
+    });
+    const identity = await whoami(session, shortWindow);
+    expect(Date.parse(identity.expiresAt)).toBeLessThanOrEqual(until);
+  });
+
+  it("ends staff sessions when the window closes", async () => {
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const refusal = await whoami(session, closedWindow).catch(
+      (error: unknown) => error
+    );
+    expect(authErrors.codeOf(refusal)).toBe("auth.unauthenticated");
+  });
+
+  it("offers and allows no staff sign-in while no window is open", async () => {
+    const noStaff = {
+      providerId: "grasp-staff",
+      label: "Grasp staff",
+      staff: true,
+    };
+    const now = Date.now();
+    const shut = [
+      closedWindow,
+      withSignIn({ staff: undefined }),
+      // Not open yet.
+      staffWindow(now + day, now + 2 * day),
+      // Longer than the seven days allowed, even this close to its end.
+      staffWindow(now - 6 * day, now + 2 * day),
+    ];
+    const offered = await Promise.all(
+      shut.map(async (coreEnv) => {
+        const { core } = await openRpc(undefined, { coreEnv });
+        try {
+          return await core.signInOptions();
+        } finally {
+          core[Symbol.dispose]();
+        }
+      })
+    );
+    for (const options of offered) {
+      expect(options).not.toContainEqual(noStaff);
+    }
+    const started = await Promise.all(
+      shut.map(
+        async (coreEnv) =>
+          await startSignIn("grasp-staff", { coreEnv }).catch(
+            (error: unknown) => error
+          )
+      )
+    );
+    for (const attempt of started) {
+      expect(attempt).toBeInstanceOf(Error);
+    }
+  });
+
+  it("offers and allows no staff sign-in through an open window that names no staff", async () => {
+    const now = Date.now();
+    const adminOnly = withSignIn({
+      staff: {
+        role: "admin",
+        scope: "onboarding",
+        opened: new Date(now - day).toISOString(),
+        until: new Date(now + day).toISOString(),
+      },
+    });
+    const { core } = await openRpc(undefined, { coreEnv: adminOnly });
+    try {
+      await expect(core.signInOptions()).resolves.not.toContainEqual({
+        providerId: "grasp-staff",
+        label: "Grasp staff",
+        staff: true,
+      });
+    } finally {
+      core[Symbol.dispose]();
+    }
+    const started = await startSignIn("grasp-staff", {
+      coreEnv: adminOnly,
+    }).catch((error: unknown) => error);
+    expect(started).toBeInstanceOf(Error);
+  });
+
+  it("won't finish a staff sign-in once the window has closed", async () => {
+    const started = await startSignIn("grasp-staff");
+    const callback = idp.authorize(started.authorizationUrl, staffPerson());
+    const finished = await finishSignIn(callback, {
+      cookie: started.cookie,
+      coreEnv: closedWindow,
+    });
+    expect(finished.headers.getSetCookie().join(",")).not.toContain(
+      `${sessionCookieName}=`
+    );
+  });
+
+  it("keeps staff and client sign-ins apart", async () => {
+    const outcomes = await Promise.all([
+      outcome("grasp-staff", entraPerson(acmeTenant, "grasp.test")),
+      outcome("microsoft", staffPerson()),
+    ]);
+    expect(outcomes).toStrictEqual([
+      refused("tenant_mismatch"),
+      refused("tenant_mismatch"),
+    ]);
+  });
+});
+
+describe("local development's stand-in for Entra", () => {
+  const localOrigin = "http://localhost:8787";
+  const standInOrigin = "http://localhost:8788";
+  /** Core's env on a local stack pointed at a stand-in at `standIn`. */
+  const localEnv = (standIn = standInOrigin): Env => ({
+    ...withSignIn({ origin: localOrigin }),
+    DEV_IDP_ORIGIN: standIn,
+  });
+
+  it("signs someone in on a local stack through the stand-in it's pointed at", async () => {
+    const standIn = createIdp(standInOrigin);
+    vi.spyOn(globalThis, "fetch").mockImplementation(standIn.fetch);
+    const coreEnv = localEnv();
+    const person = entraPerson(acmeTenant);
+    const session = await signedIn(standIn, "microsoft", person, {
+      coreEnv,
+      origin: localOrigin,
+    });
+    const { core } = await openRpc(session, { coreEnv, origin: localOrigin });
+    try {
+      using signedInAs = core.authenticate();
+      await expect(signedInAs.whoami()).resolves.toMatchObject({
+        email: person.email,
+        role: "user",
+      });
+    } finally {
+      core[Symbol.dispose]();
+    }
+  });
+
+  it("never sends a deployment's sign-in there, whatever the var says", async () => {
+    const deployed: Env = { ...env, DEV_IDP_ORIGIN: standInOrigin };
+    const started = await startSignIn("microsoft", { coreEnv: deployed });
+    expect(started.authorizationUrl.origin).toBe(
+      "https://login.microsoftonline.com"
+    );
+    // Its token and keys come from Microsoft too: the IdP here answers
+    // Microsoft's URLs only.
+    const session = await signedIn(idp, "microsoft", entraPerson(acmeTenant), {
+      coreEnv: deployed,
+    });
+    await expect(whoami(session, deployed)).resolves.toMatchObject({
+      staff: false,
+    });
+  });
+
+  it("never trusts the stand-in's origin on a deployment, whatever the var says", async () => {
+    const deployed: Env = { ...env, DEV_IDP_ORIGIN: standInOrigin };
+    /**
+     * Better Auth's answer to a browser starting a sign-in from `origin`,
+     * back to `callbackURL`. The browser has a cookie for the site, as any
+     * visitor does: Better Auth checks the origin of requests with one.
+     */
+    const started = async (origin: string, callbackURL: string) => {
+      const response = await routed(
+        "/api/auth/sign-in/sso",
+        {
+          method: "POST",
+          headers: {
+            origin,
+            cookie: "visited=1",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ providerId: "microsoft", callbackURL }),
+        },
+        deployed
+      );
+      return response.status;
+    };
+    // A page on the stand-in's origin can't start one...
+    await expect(started(standInOrigin, "/")).resolves.toBe(403);
+    // ...nor can a sign-in be sent back there.
+    await expect(
+      started(clientOrigin, `${standInOrigin}/landing`)
+    ).resolves.toBe(403);
+    // The same sign-in from the client's own page, back to it, starts.
+    await expect(started(clientOrigin, "/")).resolves.toBe(200);
+  });
+
+  it("never sends a local stack's sign-in to a stand-in off this machine", async () => {
+    const started = await startSignIn("microsoft", {
+      coreEnv: localEnv("https://idp.attacker.test"),
+      origin: localOrigin,
+    });
+    expect(started.authorizationUrl.origin).toBe(
+      "https://login.microsoftonline.com"
+    );
+  });
+});
+
+/**
+ * The OAuth relay's step, as the router takes it with the secret it
+ * derives for this client (the same as core's `ROUTER_SECRET`): where it
+ * sends a browser the IdP brought back. Fails the test when it would
+ * refuse.
+ */
+const relayed = async (returned: URL): Promise<URL> => {
+  const request = readRelayRequest(returned, "production");
+  if (
+    request === null ||
+    !(await relayStateValid(env.ROUTER_SECRET, request))
+  ) {
+    throw new Error("The relay would refuse this callback");
+  }
+  return new URL(relayTarget(returned, request));
+};
+
+/** A session cookie a response sets, as a `Cookie` pair, if any. */
+const sessionOf = (response: Response): string | undefined =>
+  response.headers
+    .getSetCookie()
+    .find((cookie) => cookie.startsWith(`${sessionCookieName}=`))
+    ?.split(";")[0];
+
+describe("in relay mode", () => {
+  const hostedOrigin = "https://acme.ongrasp.app";
+  const relayOrigin = "https://auth.ongrasp.app";
+  const relayEnv = withSignIn({
+    origin: hostedOrigin,
+    callbackOrigin: relayOrigin,
+  });
+  const options = { coreEnv: relayEnv, origin: hostedOrigin };
+
+  it("sends the IdP to the relay with a state only this client could sign, and signs in once the relay sends the browser on", async () => {
+    const person = entraPerson(acmeTenant);
+    const started = await startSignIn("microsoft", options);
+    expect(started.authorizationUrl.searchParams.get("redirect_uri")).toBe(
+      `${relayOrigin}/callback/sign-in`
+    );
+
+    // The IdP sends the browser to the relay, which sends it on here; the
+    // fake IdP checks the code is exchanged with the redirect URI it was
+    // given for.
+    const callback = idp.authorize(started.authorizationUrl, person);
+    expect(callback.origin).toBe(relayOrigin);
+    const onward = await relayed(callback);
+    expect(onward.origin).toBe(hostedOrigin);
+    const response = await finishSignIn(onward, {
+      cookie: started.cookie,
+      coreEnv: relayEnv,
+    });
+
+    expect(response.headers.get("location")).toBe("/");
+    await expect(whoami(sessionOf(response))).resolves.toMatchObject({
+      email: person.email,
+    });
+  });
+
+  it("signs in through Google the same way", async () => {
+    const person = googlePerson();
+    const started = await startSignIn("google", options);
+    const callback = idp.authorize(started.authorizationUrl, person);
+    const response = await finishSignIn(await relayed(callback), {
+      cookie: started.cookie,
+      coreEnv: relayEnv,
+    });
+
+    expect(sessionOf(response)).toBeDefined();
+  });
+
+  it("lets listed staff in through the relay too, on Grasp's tenant", async () => {
+    const started = await startSignIn("grasp-staff", options);
+    const callback = idp.authorize(started.authorizationUrl, staffPerson());
+    const response = await finishSignIn(await relayed(callback), {
+      cookie: started.cookie,
+      coreEnv: relayEnv,
+    });
+
+    await expect(whoami(sessionOf(response))).resolves.toMatchObject({
+      staff: true,
+    });
+  });
+
+  it("signs nobody in with a code the relay brings back to another browser's sign-in, or with a callback replayed", async () => {
+    const person = entraPerson(acmeTenant);
+    const victim = await startSignIn("microsoft", options);
+    const attacker = await startSignIn("microsoft", options);
+    const onward = await relayed(
+      idp.authorize(attacker.authorizationUrl, person)
+    );
+    const crossed = await finishSignIn(onward, {
+      cookie: victim.cookie,
+      coreEnv: relayEnv,
+    });
+    const own = await finishSignIn(onward, {
+      cookie: attacker.cookie,
+      coreEnv: relayEnv,
+    });
+    const replayed = await finishSignIn(onward, {
+      cookie: attacker.cookie,
+      coreEnv: relayEnv,
+    });
+
+    expect({
+      crossed: sessionOf(crossed),
+      own: sessionOf(own) === undefined,
+      replayed: sessionOf(replayed),
+    }).toStrictEqual({ crossed: undefined, own: false, replayed: undefined });
+  });
+
+  it.each([
+    ["another stage's relay", hostedOrigin, "https://auth.staging.ongrasp.app"],
+    ["a relay with a path", hostedOrigin, `${relayOrigin}/x`],
+    ["a host that isn't a relay", hostedOrigin, "https://auth.grasp.test"],
+    ["an origin the relay doesn't serve", clientOrigin, relayOrigin],
+    [
+      "an origin on a port the relay doesn't return to",
+      `${hostedOrigin}:8443`,
+      relayOrigin,
+    ],
+  ])("starts no sign-in with %s", async (_case, origin, callbackOrigin) => {
+    const response = await routed(
+      "/api/auth/sign-in/sso",
+      {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "microsoft", callbackURL: "/" }),
+      },
+      withSignIn({ origin, callbackOrigin })
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("leaves a deployment without it as it was: the IdP comes back to its own origin with Better Auth's own state", async () => {
+    const started = await startSignIn("microsoft");
+    const callback = idp.authorize(
+      started.authorizationUrl,
+      entraPerson(acmeTenant)
+    );
+
+    expect({
+      redirect: started.authorizationUrl.searchParams.get("redirect_uri"),
+      relayable: readRelayRequest(callback, "production"),
+    }).toStrictEqual({
+      redirect: `${clientOrigin}/api/auth/sso/callback/microsoft`,
+      relayable: null,
+    });
+  });
+});

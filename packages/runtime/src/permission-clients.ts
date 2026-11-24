@@ -1,0 +1,195 @@
+import type { HttpContract } from "@grasp-os/shared/http-contract";
+
+import type {
+  BrainCard,
+  BrainEntitiesFind,
+  BrainEntity,
+  BrainMembersOf,
+  BrainPack,
+  BrainRecall,
+  BrainRemember,
+  BrainSkill,
+  BrainSkillText,
+} from "./brain-recall.ts";
+import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
+import type { GraspFunctions } from "./grasp-functions.ts";
+import type { MemberName } from "./member-names.ts";
+import type {
+  BrainOperation,
+  BrainPermission,
+  ConnectionPermission,
+} from "./permission-types.ts";
+import type { ValueSchema } from "./value-descriptor.ts";
+import type { AnySchema } from "./value-schema.ts";
+import type { Infer, ObjectInput } from "./value-types.ts";
+
+/** What `ctx.ai` is. */
+export interface AiClient {
+  /**
+   * One answer to `prompt`, within the permission's token bound and the
+   * App's budget: text, or a value of `output` when given, which the
+   * model is told the shape of and the host checks the answer against.
+   */
+  readonly generate: <
+    Output extends AnySchema | undefined = undefined,
+  >(request: {
+    readonly prompt: string;
+    readonly instructions?: string;
+    readonly output?: Output;
+  }) => Promise<
+    Output extends ValueSchema<unknown, unknown> ? Infer<Output> : string
+  >;
+}
+
+/**
+ * What `ctx.connections.<alias>` is: each declared action as a member of
+ * its own (`MemberName`), taking that action's arguments and answering
+ * its answer, as the contract's catalog entry types them
+ * (`ConnectorCatalog`; any JSON for a Composio tool). Connect checks both
+ * against the contract the binding serves. An action the permission
+ * doesn't declare isn't a member.
+ */
+export type ConnectionClient<
+  Contract extends string,
+  Actions extends readonly string[],
+> = {
+  readonly [Action in Actions[number] as MemberName<Action>]: (
+    args: ContractAction<Contract, Action>["input"]
+  ) => Promise<ContractAction<Contract, Action>["output"]>;
+};
+
+/** The methods an HTTP connection's declared `Actions` allow. */
+type HttpMethodOf<Actions extends readonly string[]> =
+  | ("get" extends Actions[number] ? "GET" | "HEAD" : never)
+  | ("send" extends Actions[number]
+      ? "POST" | "PUT" | "PATCH" | "DELETE"
+      : never);
+
+/**
+ * What `ctx.connections.<alias>` is for an HTTP connection: `fetch`, a
+ * request as the web's `fetch` makes one, to a path of the connection's
+ * own origin, answered as a `Response`. A GET or HEAD (the default) is
+ * the declaration's `get`; any other method its `send`, which the host
+ * may hold for the person to confirm (`permission.awaiting_confirmation`).
+ * Only the methods its declared actions allow type-check: without `get`,
+ * the method is required.
+ */
+export interface HttpClient<Actions extends readonly string[]> {
+  readonly fetch: "get" extends Actions[number]
+    ? (
+        path: string,
+        init?: HttpRequestInit<HttpMethodOf<Actions>>
+      ) => Promise<Response>
+    : (
+        path: string,
+        init: HttpRequestInit<HttpMethodOf<Actions>> & {
+          readonly method: HttpMethodOf<Actions>;
+        }
+      ) => Promise<Response>;
+}
+
+/** Each of the Brain's operations, as a member of `ctx.brain` calls it. */
+interface BrainCalls {
+  /**
+   * What the person the call acts for may read that answers
+   * `request.question`, within its budget: the same pack a workflow's
+   * step and a chat's code get.
+   */
+  readonly recall: (request: BrainRecall) => Promise<BrainPack>;
+  /**
+   * The skills that apply to `request.task`, best first, a few at most,
+   * each at its version: the same a chat's code selects.
+   */
+  readonly "skills.select": (request: {
+    /** The task, in your words: at most 2,000 characters. */
+    readonly task: string;
+  }) => Promise<{ readonly skills: readonly BrainSkill[] }>;
+  /** A skill at exactly the version a selection gave, whole. */
+  readonly "skills.read": (request: {
+    /** As a selection gave it: its scope, name and version. */
+    readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+  }) => Promise<BrainSkillText>;
+  /**
+   * Remembers a fact in the App's own name, read only through the App's
+   * own code (`entities.get`, `entities.find`) by whoever uses the App
+   * when it reads: its new word on the same entity and attribute
+   * replaces its earlier one. Only from a call a person makes on the
+   * App's own page (never an agent's, Code Mode's or a workflow's), and
+   * only while every table of the version that runs is read by everyone
+   * who uses the App and everything it can reach is everyone's in the
+   * company: otherwise refused, saying why. The memory and the entity it
+   * is about.
+   */
+  readonly remember: (
+    memory: BrainRemember
+  ) => Promise<{ readonly memory: string; readonly entity: string }>;
+  /**
+   * Forgets one of the App's own memories, under the same rules as
+   * `remember`: true once it is forgotten (again for one forgotten
+   * before), false for none of the App's.
+   */
+  readonly forget: (request: { readonly memory: string }) => Promise<boolean>;
+  /**
+   * A page of an entity's card, as everyone in the company may read it,
+   * with what the App's own code remembered for someone who uses it, now
+   * or as of `asOf` (ISO 8601, with its offset): null for no entity they
+   * may see.
+   */
+  readonly "entities.get": (request: {
+    readonly entity: string;
+    readonly asOf?: string;
+    /** A page's `next`, for the page after it. */
+    readonly after?: string;
+  }) => Promise<BrainCard | null>;
+  /**
+   * A page of the entities that match, as everyone in the company may see
+   * them, with what the App's own code remembered for someone who uses it.
+   */
+  readonly "entities.find": (request: BrainEntitiesFind) => Promise<{
+    readonly entities: readonly BrainEntity[];
+    readonly next: string | null;
+  }>;
+}
+
+/** What `ctx.brain` is, by its operations: `entities.get` as `ctx.brain.entities.get`. */
+export type BrainClient<Operations extends readonly BrainOperation[]> =
+  BrainMembersOf<BrainCalls, Operations[number]>;
+
+/** The paths of the platform's functions: `<namespace>.<function>`. */
+type GraspPath = Extract<keyof GraspFunctions, string>;
+
+/** The namespace of path `Path`: what comes before its first `.`. */
+type GraspNamespace<Path> = Path extends `${infer Namespace}.${string}`
+  ? Namespace
+  : never;
+
+/**
+ * What `ctx.grasp` is: each of the platform's functions as a member of
+ * its namespace, `statistics.read` as `ctx.grasp.statistics.read(args)`,
+ * taking its arguments and answering its return.
+ */
+export type GraspClient = {
+  readonly [Namespace in GraspNamespace<GraspPath>]: {
+    readonly [
+      Path in GraspPath as Path extends `${Namespace}.${infer Name}`
+        ? Name
+        : never
+    ]: (
+      args: ObjectInput<GraspFunctions[Path]["args"]>
+    ) => Promise<Infer<GraspFunctions[Path]["returns"]>>;
+  };
+};
+
+/** What `ctx.connections.<alias>` is for `Permission`. */
+export type ConnectionClientOf<Permission> =
+  Permission extends ConnectionPermission<string, infer Contract, infer Actions>
+    ? Contract extends HttpContract
+      ? HttpClient<Actions>
+      : ConnectionClient<Contract, Actions>
+    : never;
+
+/** What `ctx.brain` is for `Permission`. */
+export type BrainClientOf<Permission> =
+  Permission extends BrainPermission<infer Operations>
+    ? BrainClient<Operations>
+    : never;

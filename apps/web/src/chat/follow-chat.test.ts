@@ -1,0 +1,103 @@
+import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
+import { describe, expect, it } from "vite-plus/test";
+
+import { applyUpdate, emptyView } from "./follow-chat.ts";
+
+// How the chat page puts a chat together from the updates core streams:
+// pure logic, so tested on its own.
+
+const at = "2026-09-29T00:00:00.000Z";
+
+const question = (id: number, text: string): ChatMessage => ({
+  id,
+  role: "user",
+  text,
+  at,
+});
+
+const update = (changes: Partial<ChatUpdate> = {}): ChatUpdate => ({
+  messages: [],
+  partial: null,
+  running: false,
+  stopped: null,
+  held: 0,
+  worked: 0,
+  ...changes,
+});
+
+describe("a chat as the page shows it", () => {
+  it("drops why the last question stopped once the next one runs", () => {
+    const stopped = applyUpdate(
+      emptyView,
+      update({ stopped: "You're no longer a member of this organization." })
+    );
+    const next = applyUpdate(stopped, update({ running: true }));
+
+    expect([stopped.stopped, next.stopped]).toStrictEqual([
+      "You're no longer a member of this organization.",
+      null,
+    ]);
+  });
+
+  it("follows core's count of held writes, which the page reads again on", () => {
+    const once = applyUpdate(emptyView, update({ held: 1 }));
+    const twice = applyUpdate(once, update({ held: 2 }));
+
+    expect([emptyView.held, once.held, twice.held]).toStrictEqual([0, 1, 2]);
+  });
+
+  it("adds each message once, in order, and keeps provenance until it changes", () => {
+    const first = applyUpdate(
+      emptyView,
+      update({
+        messages: [question(1, "One")],
+        provenance: { sources: ["handbook"], restricted: false },
+      })
+    );
+    // A reconnect may send a message the page has already.
+    const again = applyUpdate(
+      first,
+      update({ messages: [question(1, "One"), question(2, "Two")] })
+    );
+
+    expect({
+      texts: again.messages.map(({ text }) => text),
+      provenance: again.provenance,
+    }).toStrictEqual({
+      texts: ["One", "Two"],
+      provenance: { sources: ["handbook"], restricted: false },
+    });
+  });
+
+  it("shows a running step's output as it grows, starts afresh for another step, and drops it once none runs", () => {
+    const first = applyUpdate(
+      emptyView,
+      update({ output: { callId: "a", from: 0, text: "one" } })
+    );
+    const grown = applyUpdate(
+      first,
+      update({ output: { callId: "a", from: 3, text: "\ntwo" } })
+    );
+    const other = applyUpdate(
+      grown,
+      update({ output: { callId: "b", from: 0, text: "three" } })
+    );
+    const kept = applyUpdate(other, update({ output: undefined }));
+    const done = applyUpdate(kept, update({ output: null }));
+
+    expect([
+      first.output,
+      grown.output,
+      other.output,
+      kept.output,
+      done.output,
+    ]).toStrictEqual([
+      { callId: "a", text: "one" },
+      { callId: "a", text: "one\ntwo" },
+      { callId: "b", text: "three" },
+      // An update that leaves it out leaves it as it was.
+      { callId: "b", text: "three" },
+      null,
+    ]);
+  });
+});

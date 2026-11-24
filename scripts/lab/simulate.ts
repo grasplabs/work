@@ -1,0 +1,164 @@
+/**
+ * `simulate`: a model plays everyone of a practice company who hasn't
+ * talked yet, as people really answer (people.ts), each on their own link,
+ * every turn a real turn of the local core. Who has which temper follows
+ * from their place in the company and the seed, so a second company of
+ * the same key meets the same people. Ported from the prototype
+ * (grasplabs/prototype, packages/grasp: playRest in lab/cli.ts).
+ */
+import type { Interviewer } from "@grasp-os/shared/onboarding";
+
+import { inTurns, linkOn, linksOf } from "./core.ts";
+import type { Core, Link } from "./core.ts";
+import { mixesFor, mixLine, tempersOf } from "./drift.ts";
+import { timetableFor } from "./events.ts";
+import type { AnswerKey } from "./keys/types.ts";
+import { realPlayerV2 } from "./people-v2.ts";
+import type { PeopleVersion } from "./people-v2.ts";
+import { realPlayer, realSystem, tempersFor } from "./people.ts";
+import { employeeSystem, modelPlayer } from "./person.ts";
+import { playInterview } from "./play.ts";
+import { askerOf, keepPractice, practiceEmail } from "./practice.ts";
+import type { Practice } from "./practice.ts";
+import { protectedOf, surfaceFor } from "./surface.ts";
+
+export interface SimulateOptions {
+  /** Only these people, by roster id or key id. */
+  only: readonly string[] | null;
+  /** Which mix of tempers. */
+  seed: number;
+  /** The first practice people, who tell all they know. */
+  ideal: boolean;
+  /** People v2 (a mix and a state that drifts), or v1 (one temper each), when not ideal. */
+  people: PeopleVersion;
+  interviewer: Interviewer;
+  /** How many interviews at once. */
+  parallel: number;
+  log: (line: string) => void;
+}
+
+/** Whether `link`'s person talked already: the lab plays nobody twice. */
+const talkedAlready = async (link: Link): Promise<boolean> => {
+  const session = await link.open();
+  return session.progress?.person === "completed";
+};
+
+/** Who played them, as the lab keeps it. */
+const peopleOf = (ideal: boolean, v2: boolean): "ideal" | "real" | "v2" => {
+  if (ideal) {
+    return "ideal";
+  }
+  return v2 ? "v2" : "real";
+};
+
+/** Lets a model play everyone asked for who hasn't talked yet; says how many it played. */
+export const simulate = async (
+  core: Core,
+  practice: Practice,
+  key: AnswerKey,
+  { only, seed, ideal, people, interviewer, parallel, log }: SimulateOptions
+): Promise<number> => {
+  const tempers = tempersFor(practice.people.length, seed);
+  const mixes = mixesFor(practice.people.length, seed);
+  const v2 = !ideal && people === "v2";
+  const links = await linksOf(core);
+  const asker = askerOf(core);
+  const open = practice.people.filter(
+    (person) =>
+      person.played === undefined &&
+      (only === null ||
+        only.includes(person.id) ||
+        only.includes(person.employee))
+  );
+  log(
+    `A model plays ${open.length} people${ideal ? ", who tell all they know" : `, as people really answer (people ${people}, seed ${seed})`}`
+  );
+  const guarded = protectedOf(key);
+  const played = await inTurns(open, parallel, async (person) => {
+    const employee = key.employees.find((each) => each.id === person.employee);
+    const link = links.get(person.id);
+    if (employee === undefined || link === undefined) {
+      return false;
+    }
+    const onLink = linkOn(link, practiceEmail(person.id));
+    if (await talkedAlready(onLink)) {
+      return false;
+    }
+    const place = practice.people.indexOf(person);
+    const mix = mixes[place] ?? { plain: 1 };
+    const [leading = "plain", ...also] = tempersOf(mix);
+    const temper = v2 ? leading : (tempers[place] ?? "plain");
+    const mark = `${key.id}:${employee.id}:${seed}`;
+    const surface = surfaceFor(mark);
+    const playerV2 = v2
+      ? realPlayerV2({
+          asker,
+          name: employee.name,
+          system: realSystem({
+            key,
+            employee,
+            lead: practice.lead.name,
+            locale: practice.locale,
+            temper,
+            seed: mark,
+            also,
+          }),
+          known: employee.knows,
+          mix,
+          seed: mark,
+          locale: practice.locale,
+          surface,
+          guarded,
+        })
+      : null;
+    if (playerV2 !== null) {
+      log(`  ${person.id}: ${mixLine(mix)}`);
+    }
+    const player = ideal
+      ? modelPlayer(
+          asker,
+          employee.name,
+          employeeSystem(key, employee, practice.lead.name, practice.locale),
+          employee.knows
+        )
+      : (playerV2 ??
+        realPlayer({
+          asker,
+          name: employee.name,
+          system: realSystem({
+            key,
+            employee,
+            lead: practice.lead.name,
+            locale: practice.locale,
+            temper,
+            seed: mark,
+          }),
+          known: employee.knows,
+          temper,
+          seed: mark,
+          locale: practice.locale,
+        }));
+    log(`> ${person.id}`);
+    const interview = await playInterview(onLink, player, {
+      locale: practice.locale,
+      interviewer,
+      ...(ideal ? {} : { clock: "talk" as const }),
+      ...(v2 ? { events: timetableFor(place, mark) } : {}),
+    });
+    const { answers: _answers, ...kept } = interview;
+    person.played = {
+      ...kept,
+      interviewer,
+      people: peopleOf(ideal, v2),
+      ...(ideal ? {} : { temper, seed }),
+      ...(playerV2 === null ? {} : { mix, states: playerV2.states, surface }),
+    };
+    // Kept at once, so an interview that fails later loses none before it.
+    keepPractice(practice);
+    log(
+      `< ${person.id}: ${interview.answers} answers${interview.left ? ", went away before the read-back" : ""}`
+    );
+    return true;
+  });
+  return played.filter(Boolean).length;
+};

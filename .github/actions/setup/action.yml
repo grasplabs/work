@@ -1,0 +1,140 @@
+# Node.js, Vite+ and the workspace's installed dependencies: every job's
+# setup, the journeys' too. The installed node_modules are cached whole, by
+# the lockfile and what else the install reads (the `keys` step):
+# restoring them skips the install, which with pnpm's store restored (still
+# restored, for the tests that install offline from it) linked 1,200
+# packages, checked the lockfile against the supply-chain
+# policies over the network and ran the build scripts, about 25 s of each
+# job's 39 s setup (October 2026). A lockfile the cache hasn't seen installs
+# from the pnpm store's cache as before, and checks its policies.
+#
+# The store is cached here, not by setup-vp's `cache`, so it is saved with
+# node_modules, by the same install. setup-vp saved it after the job, and
+# only when the job passed, from whatever store the job had: a job that
+# failed after saving node_modules left them without their store, and the
+# next run, restoring those, saved an older lockfile's store (its fallback)
+# under this lockfile's key, so tests installing offline from it failed
+# (November 2026). Now node_modules are restored only beside the store their
+# lockfile installed, and a store is saved only by the install that filled it.
+#
+# Only the tests that install offline read the store
+# (scripts/package-definition*.test.ts, all in the first test shard): a
+# job restores node_modules alone, about 9 s sooner than with the store,
+# and the store only to install when node_modules missed, unless it
+# passes `store: true`.
+#
+# Only a job that says so saves a cache it missed: `static`'s `main` part for a pull
+# request, so the pull request's next run hits it, and `release` on a
+# push to main, whose caches every pull request can read. Every job saving
+# would have them all pack the same 2 GB at once, for one to win.
+#
+# Then oxc.wasm, which the compiler builds in (.github/actions/oxc-wasm),
+# with no token: every workflow that sets up can build.
+name: Set up
+description: Install Vite+ and Node.js, restore or install node_modules, and download oxc.wasm
+
+inputs:
+  save:
+    description: "Save node_modules and pnpm's store when their cache missed: true or false"
+    default: "false"
+  store:
+    description: "Restore pnpm's store even when node_modules hit, for tests that install offline from it: true or false"
+    default: "false"
+  oxc-wasm:
+    description: "Download oxc.wasm, for a job that builds or tests the compiler: true or false"
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # Node.js from GitHub's own copies (actions/node-versions, or the
+    # runner's tool cache), not from nodejs.org through Vite+'s Node
+    # manager: that download takes about a second, but on 16 November 2026
+    # it took 63 and 103 s in two runs a minute apart, holding up every job
+    # of each. Vite+ then runs on it (node-manager: false). Its own cache is
+    # off: node_modules and pnpm's store are cached below.
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .node-version
+        package-manager-cache: false
+    - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        node-manager: false
+        cache: false
+        run-install: false
+    # node_modules are keyed by what the install reads, not by whole
+    # package.json files: hashing those, a pull request that only edited a
+    # script missed the cache and installed again, 6 of 10 merge-queue runs
+    # on 11 November 2026, about 27 s a job (twice in the e2e chain).
+    # From each package.json only what pnpm links or installs by: its name,
+    # version and dependency fields (the lockfile records each importer's
+    # specifiers, but a workspace package's `bin` is linked into its
+    # dependents' node_modules/.bin from its package.json alone), the root's
+    # packageManager and devEngines, and the lifecycle scripts pnpm runs on
+    # install. Of those only the root's `prepare` exists, and it installs
+    # the git hooks (.vite-hooks/_, git config), outside node_modules; the
+    # dependencies' own build scripts are pnpm-workspace.yaml's allowBuilds.
+    # `exports` and `imports` are left out: workspace packages are linked as
+    # whole directories and resolved through them at runtime.
+    - id: keys
+      shell: bash
+      run: |
+        echo "store-path=$(vp pm cache dir)" >> "$GITHUB_OUTPUT"
+        echo "store=pnpm-store-$RUNNER_OS-$RUNNER_ARCH-$LOCKFILE_HASH" >> "$GITHUB_OUTPUT"
+        manifests=$(jq -S -c '{file: input_filename} + ({name, version, bin, directories, dependencies, devDependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, bundleDependencies, bundledDependencies, dependenciesMeta, engines, packageManager, devEngines, pnpm, overrides, resolutions, workspaces} | with_entries(select(.value != null))) + {scripts: ((.scripts // {}) | with_entries(select(.key | test("^(pre|post)?(install|prepare)$"))))}' package.json apps/*/package.json packages/*/package.json packages/connectors/*/package.json)
+        modules_hash=$( (echo "$manifests"; cat .node-version pnpm-lock.yaml pnpm-workspace.yaml) | sha256sum | cut -d ' ' -f 1)
+        echo "modules=node-modules-$RUNNER_OS-$RUNNER_ARCH-$modules_hash" >> "$GITHUB_OUTPUT"
+      env:
+        LOCKFILE_HASH: ${{ hashFiles('pnpm-lock.yaml') }}
+    # An older lockfile's store when this one's is missing: most of what the
+    # install needs, and it fetches the rest. Before node_modules for a job
+    # that reads the store: they are restored only beside this lockfile's
+    # own store, as with an older one an install that found node_modules
+    # up to date wouldn't fetch what the store lacks.
+    - id: store-first
+      if: inputs.store == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.keys.outputs.store-path }}
+        key: ${{ steps.keys.outputs.store }}
+        restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+    # Every node_modules of the workspace's packages (pnpm-workspace.yaml):
+    # each holds links into the root's virtual store.
+    - id: modules
+      if: inputs.store != 'true' || steps.store-first.outputs.cache-hit == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+          packages/connectors/*/node_modules
+        key: ${{ steps.keys.outputs.modules }}
+    # A job that doesn't read the store needs it only to install.
+    - id: store-late
+      if: inputs.store != 'true' && steps.modules.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.keys.outputs.store-path }}
+        key: ${{ steps.keys.outputs.store }}
+        restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+    - if: steps.modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: vp install --frozen-lockfile
+    # The store first: node_modules saved without it are what broke before.
+    - if: steps.modules.outputs.cache-hit != 'true' && steps.store-first.outputs.cache-hit != 'true' && steps.store-late.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.keys.outputs.store-path }}
+        key: ${{ steps.keys.outputs.store }}
+    - if: steps.modules.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+          packages/connectors/*/node_modules
+        key: ${{ steps.keys.outputs.modules }}
+    - if: inputs.oxc-wasm == 'true'
+      uses: ./.github/actions/oxc-wasm

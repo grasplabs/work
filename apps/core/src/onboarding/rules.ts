@@ -1,0 +1,264 @@
+import {
+  addDays,
+  addWorkingDays,
+  dayOf,
+} from "@grasp-os/shared/admin/org-record";
+import {
+  leadWaitWorkingDays,
+  minTalkedShown,
+  minTeamShown,
+} from "@grasp-os/shared/onboarding";
+import type {
+  Agreements,
+  OnboardingProgress,
+  Plan,
+  Roster,
+  RosterPerson,
+  TeamProgress,
+} from "@grasp-os/shared/onboarding";
+import { flowAgreements } from "@grasp-os/shared/onboarding-flow";
+import type { FlowAgreement } from "@grasp-os/shared/onboarding-flow";
+
+// The onboarding's rules, as pure functions of what the store holds: whose
+// links are due, and what the company's admin may see of where the
+// interviews stand. Ported from the prototype (grasplabs/prototype,
+// packages/grasp: src/lib/org-record.ts) and adapted to Grasp OS's own
+// roster and plan; the days it counts in are the admin model's own
+// (@grasp-os/shared/admin/org-record).
+
+/** Where one interview stands, without what was said in it. */
+export interface InterviewState {
+  person: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  /**
+   * The team they led when their link went out, when they also talked as
+   * its lead; left out otherwise.
+   */
+  ledTeam?: string;
+}
+
+/** How long after its last save an interview still counts as going on. */
+export const talkingMs = 15 * 60 * 1000;
+
+/** The Monday (UTC) of the week `day` falls in, as an ISO day. */
+export const mondayOf = (day: string): string => {
+  const weekday = new Date(`${dayOf(day)}T12:00:00Z`).getUTCDay();
+  // Sunday is the last day of its week, not the first.
+  return addDays(day, -((weekday + 6) % 7));
+};
+
+/** The last day of the interviews. */
+export const closesOn = (plan: Plan): string =>
+  addDays(plan.start, plan.days - 1);
+
+/** When a team's links start to go out (ISO time): `null` while its turn isn't planned. */
+export const sendsFrom = (plan: Plan, team: string): string | null => {
+  const own = plan.later?.[team];
+  if (own !== undefined) {
+    return own;
+  }
+  return plan.at ?? `${plan.start}T00:00:00.000Z`;
+};
+
+/** Whether someone takes part: their team does, and they aren't away. */
+export const takingPart = (roster: Roster, person: RosterPerson): boolean => {
+  const team = roster.teams.find((each) => each.id === person.team);
+  return team !== undefined && !team.off && !person.away;
+};
+
+/** Whether someone leads a team. */
+export const leads = (roster: Roster, person: string): boolean =>
+  roster.teams.some((team) => team.lead === person);
+
+/**
+ * Whether interviews may happen: of the agreements `asked` of this
+ * company (all of them unless its flow says otherwise), the data
+ * processing agreement and the risk assessment in place, and the works
+ * council agreed or not there. Where none is asked, nothing is waited
+ * for.
+ */
+export const agreementsIn = (
+  agreements: Agreements | null,
+  asked: readonly FlowAgreement[] = flowAgreements
+): boolean => {
+  const inPlace: Record<FlowAgreement, boolean> = {
+    processing: agreements?.processing === true,
+    assessment: agreements?.assessment === true,
+    council: agreements !== null && agreements.council !== "waiting",
+  };
+  return asked.every((agreement) => inPlace[agreement]);
+};
+
+/** What links depend on beside the roster and the plan. */
+export interface LinkFacts {
+  /** People whose link went out already. */
+  sent: ReadonlySet<string>;
+  interviews: ReadonlyMap<string, InterviewState>;
+  /** Teams whose lead's map of the work is drawn. */
+  mapped: ReadonlySet<string>;
+  /**
+   * The teams and people new on a list the admin saved while the plan was
+   * set, until they confirm the organization again: no link of theirs goes
+   * out before that.
+   */
+  unconfirmed: { teams: ReadonlySet<string>; people: ReadonlySet<string> };
+}
+
+/** Whether a team's lead is someone who will talk: there, and not away. */
+const leadOf = (roster: Roster, team: string): RosterPerson | undefined => {
+  const lead = roster.teams.find((each) => each.id === team)?.lead;
+  return roster.people.find((each) => each.id === lead && !each.away);
+};
+
+/**
+ * Whether one person's link is due by `now`. A lead's at their team's
+ * moment, and so is everyone's in a team without a lead. Everyone else's
+ * once their lead has agreed to their interview and the team's work is
+ * mapped; or, when the lead hasn't, `leadWaitWorkingDays` after the team's
+ * moment, and Stephen asks them what work they do.
+ */
+const isDue = (
+  roster: Roster,
+  plan: Plan,
+  facts: LinkFacts,
+  person: RosterPerson,
+  now: string
+): boolean => {
+  if (!takingPart(roster, person) || facts.sent.has(person.id)) {
+    return false;
+  }
+  const { unconfirmed } = facts;
+  if (unconfirmed.people.has(person.id) || unconfirmed.teams.has(person.team)) {
+    return false;
+  }
+  // Nothing of a team goes out before its own moment, and nothing at all while that isn't planned.
+  const from = sendsFrom(plan, person.team);
+  if (from === null || now < from) {
+    return false;
+  }
+  const lead = leadOf(roster, person.team);
+  if (lead === undefined || lead.id === person.id) {
+    return true;
+  }
+  const leadDone = facts.interviews.get(lead.id)?.completedAt ?? null;
+  if (leadDone !== null && facts.mapped.has(person.team)) {
+    return true;
+  }
+  const first = dayOf(from) > plan.start ? dayOf(from) : plan.start;
+  return dayOf(now) >= addWorkingDays(first, leadWaitWorkingDays);
+};
+
+/** Whose links are due by `now` and not out yet, in the roster's order. */
+export const dueLinks = (
+  roster: Roster,
+  plan: Plan | null,
+  facts: LinkFacts,
+  now: string
+): string[] =>
+  plan === null
+    ? []
+    : roster.people
+        .filter((person) => isDue(roster, plan, facts, person, now))
+        .map((person) => person.id);
+
+/** How many were asked and talked in a team on one day. */
+export interface TeamCount {
+  team: string;
+  day: string;
+  asked: number;
+  talked: number;
+}
+
+/**
+ * Who of each team talked as its lead, and the day they finished, by team
+ * id: someone who led the team when their link went out (`ledTeam`), never
+ * whoever leads it now, so making someone a lead afterwards tells the admin
+ * nothing about their interview. Only interviews finished before today, as
+ * `progressOf` tells the admin (`leadTalked`), which moves once a day; the
+ * first to finish when a team had two. The brain shows each as that team's
+ * stakeholder interview (brain-rpc.ts), never what was said in it.
+ */
+export const leadsTalked = (
+  roster: Roster,
+  interviews: ReadonlyMap<string, InterviewState>,
+  now: string
+): Map<string, { person: string; day: string }> => {
+  const asOf = dayOf(now);
+  const teams = new Set(roster.teams.map(({ id }) => id));
+  const talked = new Map<string, { person: string; completedAt: string }>();
+  for (const { person, completedAt, ledTeam } of interviews.values()) {
+    if (
+      ledTeam === undefined ||
+      !teams.has(ledTeam) ||
+      completedAt === null ||
+      dayOf(completedAt) >= asOf
+    ) {
+      continue;
+    }
+    const first = talked.get(ledTeam);
+    if (first === undefined || completedAt < first.completedAt) {
+      talked.set(ledTeam, { person, completedAt });
+    }
+  }
+  return new Map(
+    [...talked].map(([team, { person, completedAt }]) => [
+      team,
+      { person, day: dayOf(completedAt) },
+    ])
+  );
+};
+
+/**
+ * Where the interviews stand, as the company's admin may see it: how many
+ * were asked and how many talked, never who. The counts are tallies that
+ * only grow, kept by the team someone was in when their link went out, so
+ * editing the roster afterwards (someone marked away, moved, removed)
+ * moves no number. They count only what happened before today, so they
+ * move once a day and two looks can't tell who just talked. A team shows
+ * its numbers only once `minTeamShown` people in it were asked, and how
+ * many talked only once `minTalkedShown` did: the admin controls the list,
+ * so made-up people could fill a team up to five asked.
+ */
+export const progressOf = (
+  roster: Roster,
+  interviews: ReadonlyMap<string, InterviewState>,
+  counts: readonly TeamCount[],
+  now: string
+): OnboardingProgress => {
+  const asOf = dayOf(now);
+  const before = counts.filter(({ day }) => day < asOf);
+  const tally = (team: string) => {
+    const sum = { asked: 0, talked: 0 };
+    for (const count of before) {
+      if (count.team === team) {
+        sum.asked += count.asked;
+        sum.talked += count.talked;
+      }
+    }
+    return sum;
+  };
+  const leadDone = leadsTalked(roster, interviews, now);
+  const teams = roster.teams.map((team): TeamProgress => {
+    const { asked, talked } = tally(team.id);
+    const shown = !team.off && asked >= minTeamShown;
+    return {
+      id: team.id,
+      name: team.name,
+      people: roster.people.filter((person) => person.team === team.id).length,
+      off: team.off,
+      leadTalked: leadDone.has(team.id),
+      talked: shown && talked >= minTalkedShown ? talked : null,
+      asked: shown ? asked : null,
+    };
+  });
+  const taking = roster.teams.filter((team) => !team.off && team.lead !== null);
+  return {
+    teams,
+    talked: teams.reduce((sum, team) => sum + (team.talked ?? 0), 0),
+    asked: teams.reduce((sum, team) => sum + (team.asked ?? 0), 0),
+    leadsTalked: taking.filter((team) => leadDone.has(team.id)).length,
+    leads: taking.length,
+    asOf,
+  };
+};

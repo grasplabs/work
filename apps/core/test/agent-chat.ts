@@ -1,0 +1,324 @@
+import type { Message } from "@earendil-works/pi-ai";
+import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { workspace } from "../src/durable-objects.ts";
+import { fakeProvider, testModel } from "./model-provider.ts";
+import type { Answer, FakeProvider, ProviderReply } from "./model-provider.ts";
+
+// A chat's agent, as the tests drive it: the Workspace object's loop, the
+// code it runs in isolates of their own, the model gateway and connect, all
+// real. The outside system is the model provider behind connect: a fake
+// answers with scripted replies, in the provider's own wire format
+// (test/model-provider.ts).
+
+export const model = testModel;
+
+/** The model calls `executeCode` with `code`, `times` times at once. */
+export const codeStep = (code: string, times = 1): Answer => ({
+  text: "",
+  toolCalls: Array.from({ length: times }, () => ({
+    id: `call_${crypto.randomUUID()}`,
+    name: "executeCode",
+    arguments: { code },
+  })),
+  inputTokens: 200,
+  outputTokens: 40,
+});
+
+/** The model calls its tool `name` (`writeFile`, say) with `input`. */
+export const toolStep = (
+  name: string,
+  input: Record<string, unknown>
+): Answer => ({
+  text: "",
+  toolCalls: [{ id: `call_${crypto.randomUUID()}`, name, arguments: input }],
+  inputTokens: 200,
+  outputTokens: 40,
+});
+
+/** The model reads the full declaration of the APIs `names` (`readApi`). */
+export const readApiStep = (...names: string[]): Answer => ({
+  text: "",
+  toolCalls: [
+    {
+      id: `call_${crypto.randomUUID()}`,
+      name: "readApi",
+      arguments: { names },
+    },
+  ],
+  inputTokens: 200,
+  outputTokens: 10,
+});
+
+/** The model answers. */
+export const says = (text: string): Answer => ({
+  text,
+  inputTokens: 200,
+  outputTokens: 20,
+});
+
+/**
+ * `answer`, its stream stopped after its text's first `at` characters until
+ * released: the model still answering, for as long as a test needs.
+ */
+export const pausedReply = (answer: Answer, at: number) => {
+  const release = Promise.withResolvers<boolean>();
+  const reply: Answer = { ...answer, pause: { at, until: release.promise } };
+  return {
+    reply,
+    release: () => {
+      release.resolve(true);
+    },
+  };
+};
+
+export type WorkspaceStub = ReturnType<typeof workspace>;
+
+/**
+ * A new chat of `personId`'s in a new workspace, answered by `replies`,
+ * and the agent subject its permissions are granted to.
+ */
+export const chatOf = async (personId: string, ...replies: ProviderReply[]) => {
+  const id = workspaceIdSchema.parse(crypto.randomUUID());
+  const stub = workspace(env, id);
+  const chat = await stub.createChat("Questions", personId, id);
+  const provider = await fakeProvider(...replies);
+  const ask = async (text: string) => await stub.ask(chat.id, { text, model });
+  // The workspace's agent: its grants hold in all the workspace's chats.
+  const agent = { type: "agent" as const, agentId: id };
+  return { id, stub, chat, personId, provider, ask, agent };
+};
+
+/**
+ * Asks `text` in a new chat of `chat`'s workspace, whose agent's grants
+ * hold there too. A read of the person's own connection marks the chat it
+ * answers in, which then holds every later toolkit read for them
+ * (GRA-1928): a test of something else gives each such read a chat of its
+ * own.
+ */
+export const askAfresh = async (
+  chat: Awaited<ReturnType<typeof chatOf>>,
+  text: string
+): Promise<void> => {
+  const fresh = await chat.stub.createChat("Questions", chat.personId, chat.id);
+  await chat.stub.ask(fresh.id, { text, model });
+};
+
+/**
+ * `personId`'s own Workspace object, the one their session's chats are in
+ * (`personalWorkspaceId`), answered by `replies` in all its chats, with an
+ * agent of its own: `newChat` makes each chat.
+ */
+export const personalChatsOf = async (
+  personId: string,
+  ...replies: ProviderReply[]
+) => {
+  const id = personalWorkspaceId(personId);
+  const stub = workspace(env, id);
+  const provider = await fakeProvider(...replies);
+  const agent = { type: "agent" as const, agentId: crypto.randomUUID() };
+  const newChat = async () => {
+    const chat = await stub.createChat("Questions", personId, agent.agentId);
+    const ask = async (text: string) =>
+      await stub.ask(chat.id, { text, model });
+    return { chat, ask };
+  };
+  return { id, stub, provider, agent, newChat };
+};
+
+/** The chat's transcript, as the object keeps it. */
+export const transcript = async (
+  stub: WorkspaceStub,
+  chatId: string
+): Promise<Message[]> =>
+  await runInDurableObject(stub, (instance) => instance.messages(chatId));
+
+/**
+ * The agent's words each of `personId`'s chats in their own Workspace
+ * keeps, chat by chat, oldest first.
+ */
+export const keptAnswersOf = async (personId: string): Promise<string[][]> => {
+  const stub = workspace(env, personalWorkspaceId(personId));
+  const chatIds = await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ id: string }>(
+        "SELECT id FROM chats WHERE person_id = ? ORDER BY created_at",
+        personId
+      )
+      .toArray()
+      .map(({ id }) => id)
+  );
+  const kept: string[][] = [];
+  for (const chatId of chatIds) {
+    // oxlint-disable-next-line no-await-in-loop -- chat by chat
+    const messages = await transcript(stub, chatId);
+    kept.push(
+      messages.flatMap((message) =>
+        message.role === "assistant"
+          ? message.content.flatMap((block) =>
+              block.type === "text" ? [block.text] : []
+            )
+          : []
+      )
+    );
+  }
+  return kept;
+};
+
+/** How the notice of a turn's check begins (agent-builds.ts, `turnCheck`). */
+const turnCheckStart = "Grasp checked the drafts you wrote this turn";
+
+/** Every string in `value`, however deep. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap((each: unknown) => stringsIn(each));
+  }
+  return [];
+};
+
+/**
+ * What each turn's check of the chat's drafts found, as the model read it
+ * (agent-builds.ts, `turnCheck`): the drafts that failed, one entry for
+ * each check that found something, as the last request to the model
+ * carried them. A notice is the turn's own, never one of the chat's
+ * messages, so the request is where it shows.
+ */
+export const turnChecks = (provider: FakeProvider): unknown[] =>
+  stringsIn(provider.requests.at(-1)?.body)
+    .filter((text) => text.startsWith(turnCheckStart))
+    .map((text): unknown => JSON.parse(text.slice(text.indexOf("\n") + 1)));
+
+/** What the code steps of the chat returned, or threw, as the model read it. */
+export const codeResults = async (stub: WorkspaceStub, chatId: string) => {
+  const messages = await transcript(stub, chatId);
+  return messages.flatMap((message) =>
+    message.role === "toolResult" && message.toolName === "executeCode"
+      ? [
+          {
+            isError: message.isError,
+            text: message.content
+              .flatMap((part) => (part.type === "text" ? [part.text] : []))
+              .join(""),
+          },
+        ]
+      : []
+  );
+};
+
+/**
+ * Whether a tool call is the recall before a question, which every turn
+ * runs as a step of its own (turn-recall.ts names its calls `recall_…`).
+ */
+const isRecall = (toolCallId: string): boolean =>
+  toolCallId.startsWith("recall_");
+
+/**
+ * What each call of the chat's tools came to, by tool, as the model read
+ * it: the model's own calls (`recalls: false`, the default), or the
+ * recalls before its questions alone (`recalls: true`).
+ */
+export const toolResults = async (
+  stub: WorkspaceStub,
+  chatId: string,
+  { recalls = false }: { recalls?: boolean } = {}
+) => {
+  const messages = await transcript(stub, chatId);
+  return messages.flatMap((message) =>
+    message.role === "toolResult" && isRecall(message.toolCallId) === recalls
+      ? [
+          {
+            tool: message.toolName,
+            isError: message.isError,
+            text: message.content
+              .flatMap((part) => (part.type === "text" ? [part.text] : []))
+              .join(""),
+          },
+        ]
+      : []
+  );
+};
+
+/**
+ * How each code step of the chat ended, as the host recorded it: its
+ * `executeCode` runs, never the recall before a question every turn runs.
+ */
+export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
+  const messages = await transcript(stub, chatId);
+  return messages.flatMap((message) => {
+    if (message.role !== "toolResult" || message.toolName !== "executeCode") {
+      return [];
+    }
+    const details: unknown = message.details;
+    return [
+      typeof details === "object" && details !== null && "status" in details
+        ? details.status
+        : undefined,
+    ];
+  });
+};
+
+/**
+ * Sets `vars` in the object's env: a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say. The env is the
+ * test Worker's own, shared by every object of the file, so the test puts
+ * back what was there with the restore this returns (in a `finally`), or
+ * the tests after it run under its values.
+ */
+export const setObjectEnv = async <O extends Rpc.DurableObjectBranded>(
+  stub: DurableObjectStub<O>,
+  vars: Record<string, unknown>
+): Promise<() => Promise<void>> => {
+  const before = await runInDurableObject(stub, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The object has no env");
+    }
+    const kept: Record<string, { value: unknown } | undefined> = {};
+    for (const key of Object.keys(vars)) {
+      const value: unknown = Reflect.get(objectEnv, key);
+      kept[key] = Object.hasOwn(objectEnv, key) ? { value } : undefined;
+    }
+    Object.assign(objectEnv, vars);
+    return kept;
+  });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      const objectEnv: unknown = Reflect.get(instance, "env");
+      if (typeof objectEnv !== "object" || objectEnv === null) {
+        throw new TypeError("The object has no env");
+      }
+      for (const [key, was] of Object.entries(before)) {
+        if (was === undefined) {
+          Reflect.deleteProperty(objectEnv, key);
+        } else {
+          Reflect.set(objectEnv, key, was.value);
+        }
+      }
+    });
+  };
+};
+
+/** What a test's own code run records of its module. */
+export const testRunOpening = {
+  toolCallId: "call_test",
+  sourceHash: "0".repeat(64),
+  sourceChars: 0,
+};
+
+/**
+ * Opens a code run of the chat for a test that writes a draft as the
+ * chat's code would: the run every draft write is admitted against. In
+ * turn `turnId`, a turn of its own by default, so each such write keeps
+ * a version of its own.
+ */
+export const openTestRun = async (
+  stub: WorkspaceStub,
+  chatId: ChatId,
+  turnId: string = crypto.randomUUID()
+): Promise<string> => await stub.openCodeRun(chatId, turnId, testRunOpening);

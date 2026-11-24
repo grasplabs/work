@@ -1,0 +1,536 @@
+import { graspAi } from "@grasp-os/shared/ai-providers";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import type { BrainModelSpend } from "@grasp-os/shared/brain-report";
+import type { ModelMonthSpend } from "@grasp-os/shared/models";
+import { modelSpendListed } from "@grasp-os/shared/models";
+import type { Authority } from "@grasp-os/shared/permissions";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+
+import {
+  apps,
+  modelUsage,
+  workflowResourceRuns,
+  workflowResources,
+} from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
+
+// What the deployment's model calls spent, in US dollars at the providers'
+// list prices, for admins to read: in a UTC month, all together, per
+// workflow, per person and per App's model binding. Nothing limits it:
+// clients pay their providers on their own keys, and the overview is
+// read-only. Each response is recorded after it, as one `model_usage` row
+// (model-usage.ts), and the overview is a query over those rows, as the
+// usual gateways keep spend: metered after the response, never reserved
+// before it, so the accounting can never fail a call. A row whose write
+// failed is logged and missing from the overview; the provider's invoice
+// is the bill.
+
+/** What a call's spend is counted by. */
+export interface SpendInput {
+  trigger: AuditActor;
+  /**
+   * For a workflow's run: its lineage's root, and its workflow (models.ts,
+   * `lineage`).
+   */
+  lineage?: { rootRunId: string; workflowId: string };
+  work?:
+    | { authority: Authority }
+    | { onboarding: true }
+    | {
+        platform:
+          | "brain_upkeep"
+          | "stephen_requests"
+          | "provider_test"
+          | "agent_builder"
+          | "opportunities"
+          | "dictation";
+      };
+  /** The App's model binding the call is made through. */
+  binding?: { app: string; alias: string };
+}
+
+/**
+ * The person a call is made by or for, if any: who makes it, or whom an
+ * agent or a run acts for.
+ */
+export const spendPersonOf = ({
+  trigger,
+  work,
+}: SpendInput): string | undefined => {
+  if (trigger.type === "person" || trigger.type === "staff") {
+    return trigger.userId;
+  }
+  if (trigger.type === "agent") {
+    return trigger.onBehalfOf;
+  }
+  return work !== undefined && "authority" in work
+    ? work.authority.onBehalfOf
+    : undefined;
+};
+
+const monthPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
+
+/**
+ * The UTC month spend counts in now, such as `2026-09`; tests set it
+ * with `SPEND_MONTH`.
+ */
+export const spendMonth = (
+  env: Pick<Env, "SPEND_MONTH">,
+  now = new Date()
+): string =>
+  env.SPEND_MONTH !== undefined && monthPattern.test(env.SPEND_MONTH)
+    ? env.SPEND_MONTH
+    : now.toISOString().slice(0, "yyyy-mm".length);
+
+/** What a usage row is counted by: whom, which workflow, run and binding. */
+export interface SpendKeys {
+  personId: string | null;
+  triggerType: string;
+  /** The agent that asked; null when no agent did. */
+  agentId: string | null;
+  workflowAppId: string | null;
+  workflowId: string | null;
+  runId: string | null;
+  bindingAppId: string | null;
+  bindingAlias: string | null;
+}
+
+/**
+ * What a call's usage counts by, from its trigger, work and lineage, which
+ * core's host sets, never App code: a workflow's run by its `lineage`.
+ */
+export const spendKeysOf = (input: SpendInput): SpendKeys => {
+  const { trigger, lineage, binding } = input;
+  return {
+    personId: spendPersonOf(input) ?? null,
+    triggerType: trigger.type,
+    agentId: trigger.type === "agent" ? trigger.agentId : null,
+    workflowAppId: null,
+    workflowId: lineage?.workflowId ?? null,
+    runId: lineage?.rootRunId ?? null,
+    bindingAppId: binding?.app ?? null,
+    bindingAlias: binding?.alias ?? null,
+  };
+};
+
+/** Micros in a US dollar: what the platform's spend is reported in. */
+const microsPerDollar = 1_000_000;
+
+/**
+ * The organization's own spend: its calls on its own key, and on Grasp's
+ * AI, which it pays Grasp for. Never Grasp's features on Grasp's key.
+ */
+const organizationIn = (month: string) =>
+  and(
+    eq(modelUsage.period, month),
+    or(
+      eq(modelUsage.credential, "organization"),
+      eq(modelUsage.feature, "organization")
+    )
+  );
+
+/** A workflow whose spend is counted: an App's, in its App; or an independent one (`appId` null). */
+interface SpendWorkflow {
+  appId: string | null;
+  workflowId: string;
+}
+
+/** The key `workflow` is told apart by. */
+const workflowKey = ({ appId, workflowId }: SpendWorkflow): string =>
+  JSON.stringify(appId === null ? [workflowId] : [appId, workflowId]);
+
+/** Names of Apps and independent workflows, by ID, as core still has them. */
+interface Names {
+  apps: ReadonlyMap<string, string>;
+  workflows: ReadonlyMap<string, string>;
+}
+
+/** The name of `workflow`: an App's workflow's is its ID; an independent one's, null once it is gone. */
+const workflowNameOf = (
+  { appId, workflowId }: SpendWorkflow,
+  names: Pick<Names, "workflows">
+): string | null =>
+  appId === null ? (names.workflows.get(workflowId) ?? null) : workflowId;
+
+/** The name of `appId`'s App; null for none, or once it is gone. */
+const appNameOf = (
+  appId: string | null,
+  names: Pick<Names, "apps">
+): string | null => (appId === null ? null : (names.apps.get(appId) ?? null));
+
+/** The App IDs of `workflows`, and the IDs of the independent ones. */
+const idsOf = (workflows: readonly SpendWorkflow[]) => ({
+  appIds: [
+    ...new Set(
+      workflows.flatMap(({ appId }) => (appId === null ? [] : [appId]))
+    ),
+  ],
+  workflowIds: [
+    ...new Set(
+      workflows.flatMap(({ appId, workflowId }) =>
+        appId === null ? [workflowId] : []
+      )
+    ),
+  ],
+});
+
+/** The names of the Apps and independent workflows `workflows` are in or are. */
+const workflowNamesOf = async (
+  db: DrizzleD1Database,
+  workflows: readonly SpendWorkflow[]
+): Promise<Names> => {
+  const { appIds, workflowIds } = idsOf(workflows);
+  const [appRows, workflowRows] = await Promise.all([
+    appIds.length === 0
+      ? []
+      : db
+          .select({ id: apps.id, name: apps.name })
+          .from(apps)
+          .where(inArray(apps.id, appIds)),
+    workflowIds.length === 0
+      ? []
+      : db
+          .select({ id: workflowResources.id, name: workflowResources.name })
+          .from(workflowResources)
+          // A deleted workflow is gone: its spend stays, by its ID, with
+          // no name, so nothing links to it.
+          .where(
+            and(
+              inArray(workflowResources.id, workflowIds),
+              isNull(workflowResources.deletedAt)
+            )
+          ),
+  ]);
+  return {
+    apps: new Map(appRows.map(({ id, name }) => [id, name])),
+    workflows: new Map(workflowRows.map(({ id, name }) => [id, name])),
+  };
+};
+
+/** The first millisecond of UTC month `month` (`yyyy-mm`), and of the one after. */
+const monthBounds = (month: string): { from: Date; until: Date } => {
+  const from = new Date(`${month}-01T00:00:00Z`);
+  const until = new Date(from);
+  until.setUTCMonth(until.getUTCMonth() + 1);
+  return { from, until };
+};
+
+/**
+ * The runs of `workflows` started in `month`, of any version, by each
+ * one's key.
+ */
+const monthRunsOf = async (
+  db: DrizzleD1Database,
+  workflows: readonly SpendWorkflow[],
+  month: string
+): Promise<Map<string, number>> => {
+  const { from, until } = monthBounds(month);
+  const { workflowIds } = idsOf(workflows);
+  const independentRuns =
+    workflowIds.length === 0
+      ? []
+      : await db
+          .select({
+            workflowId: workflowResourceRuns.workflowResourceId,
+            runs: count(),
+          })
+          .from(workflowResourceRuns)
+          .where(
+            and(
+              inArray(workflowResourceRuns.workflowResourceId, workflowIds),
+              gte(workflowResourceRuns.createdAt, from),
+              lt(workflowResourceRuns.createdAt, until)
+            )
+          )
+          .groupBy(workflowResourceRuns.workflowResourceId);
+  return new Map(
+    independentRuns.map(
+      ({ runs, workflowId }) =>
+        [workflowKey({ appId: null, workflowId }), runs] as const
+    )
+  );
+};
+
+/**
+ * What a person's chat turn is called for (chat-harness.ts,
+ * workspace.ts): the month's spend counts chat by it.
+ */
+export const chatTurnPurpose = "chat.turn";
+
+/** Milliseconds in a day. */
+const dayMs = 86_400_000;
+
+/**
+ * How many days of UTC month `month` have begun by `now`: up to today in
+ * the month it is, all of one that is over, none of one to come.
+ */
+const daysSoFar = (month: string, now: Date): number => {
+  const { from, until } = monthBounds(month);
+  const length = Math.round((until.getTime() - from.getTime()) / dayMs);
+  const begun = Math.floor((now.getTime() - from.getTime()) / dayMs) + 1;
+  return Math.min(length, Math.max(0, begun));
+};
+
+/**
+ * What the models cost in `month` on the organization's keys: the
+ * deployment's total, each UTC day's, chat's, and the workflows that spent
+ * most (at most `modelSpendListed`), an App's and an independent one's
+ * alike, each with its name and its App's where core still has them, and
+ * its runs started in the month: for admins to read (models-rpc.ts).
+ */
+export const monthSpend = async (
+  env: Pick<Env, "DB">,
+  month: string,
+  now = new Date()
+): Promise<ModelMonthSpend> => {
+  const db = drizzle(env.DB);
+  const spent = sql<number>`sum(${modelUsage.cost})`;
+  // The UTC day of the month each call was answered on, `01` to `31`:
+  // `created_at` is in milliseconds.
+  const day = sql<string>`strftime('%d', ${modelUsage.createdAt} / 1000, 'unixepoch')`;
+  const [byDay, rows] = await Promise.all([
+    // One pass over the month's rows: at most 31, each day's spend and
+    // its chat's; the total and chat's are their sums.
+    db
+      .select({
+        day,
+        amount: spent,
+        chat: sql<number>`sum(case when ${modelUsage.purpose} = ${chatTurnPurpose} then ${modelUsage.cost} else 0 end)`,
+      })
+      .from(modelUsage)
+      .where(organizationIn(month))
+      .groupBy(day),
+    // One more than are listed, to tell whether any are left out.
+    db
+      .select({
+        appId: modelUsage.workflowAppId,
+        workflowId: modelUsage.workflowId,
+        amount: spent,
+      })
+      .from(modelUsage)
+      .where(and(organizationIn(month), isNotNull(modelUsage.workflowId)))
+      .groupBy(modelUsage.workflowAppId, modelUsage.workflowId)
+      .orderBy(desc(spent))
+      .limit(modelSpendListed + 1),
+  ]);
+  const listed = rows
+    .slice(0, modelSpendListed)
+    .flatMap(({ appId, workflowId, amount }) =>
+      // Never expected: the query keeps only rows with a workflow.
+      workflowId === null ? [] : [{ workflow: { appId, workflowId }, amount }]
+    );
+  const workflows = listed.map(({ workflow }) => workflow);
+  const [names, runs] = await Promise.all([
+    workflowNamesOf(db, workflows),
+    monthRunsOf(db, workflows, month),
+  ]);
+  // Every day so far, and on to the latest a call was recorded on, if
+  // later (a clock ahead of `now`'s), so the days always add up to the
+  // total.
+  const days: number[] = Array.from(
+    {
+      length: Math.max(
+        daysSoFar(month, now),
+        ...byDay.map(({ day: of }) => Number(of))
+      ),
+    },
+    () => 0
+  );
+  for (const { day: of, amount } of byDay) {
+    days[Number(of) - 1] = amount;
+  }
+  return {
+    month,
+    // Added up from the 1st, as a reader adds the days: the same sum to
+    // the last bit.
+    total: days.reduce((sum, amount) => sum + amount, 0),
+    days,
+    chat: byDay.reduce((sum, { chat }) => sum + chat, 0),
+    workflows: listed.map(({ workflow, amount }) => ({
+      ...workflow,
+      name: workflowNameOf(workflow, names),
+      appName: appNameOf(workflow.appId, names),
+      amount,
+      runs: runs.get(workflowKey(workflow)) ?? 0,
+    })),
+    more: rows.length > modelSpendListed,
+  };
+};
+
+/** A model binding, by its App and alias. */
+export interface SpendBinding {
+  app: string;
+  alias: string;
+}
+
+/** The key a model binding's spend is told apart by. */
+export const bindingKey = ({ app, alias }: SpendBinding): string =>
+  JSON.stringify([app, alias]);
+
+/**
+ * What the calls through each of `bindings` spent in `month`, in US
+ * dollars, by `bindingKey`: only the bindings that spent anything. The
+ * binding's App and alias, never its row, so approving the alias again
+ * keeps what was spent.
+ */
+export const bindingSpendOf = async (
+  env: Pick<Env, "DB">,
+  month: string,
+  bindings: readonly SpendBinding[]
+): Promise<Map<string, number>> => {
+  const appIds = [...new Set(bindings.map(({ app }) => app))];
+  if (appIds.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      app: modelUsage.bindingAppId,
+      alias: modelUsage.bindingAlias,
+      amount: sql<number>`sum(${modelUsage.cost})`,
+    })
+    .from(modelUsage)
+    .where(
+      and(
+        organizationIn(month),
+        inList(modelUsage.bindingAppId, appIds),
+        isNotNull(modelUsage.bindingAlias)
+      )
+    )
+    .groupBy(modelUsage.bindingAppId, modelUsage.bindingAlias);
+  return new Map(
+    rows.flatMap(({ app, alias, amount }) =>
+      app === null || alias === null
+        ? []
+        : [[bindingKey({ app, alias }), amount] as const]
+    )
+  );
+};
+
+/** What one model cost one of Grasp's features on Grasp's keys in a month. */
+export interface PlatformSpendByPeriod {
+  period: string;
+  /** The feature as recorded; null for a request without one. */
+  feature: string | null;
+  model: string;
+  micros: number;
+}
+
+/**
+ * What makes a call's purpose the Brain's: its first segment is `brain`
+ * (`brain.recall_analysis`, `brain.extract.check`). A purpose is
+ * lowercase segments joined by dots (models.ts `purposePattern`), so a
+ * new Brain purpose is counted without a change here, and no other
+ * purpose (`chat.turn`, `brainstorm.x`) can match.
+ */
+export const brainPurposePrefix = "brain.";
+
+const isBrainPurpose = sql`substr(${modelUsage.purpose}, 1, ${brainPurposePrefix.length}) = ${brainPurposePrefix}`;
+
+/**
+ * What the Brain's model calls used in `month`, by purpose, as the
+ * gateway recorded each answered request (model-usage.ts): calls, tokens
+ * and US dollars at list prices, on whichever key, the dearest first.
+ * Totals only: nothing of who asked or what was said. The Brain keeps no
+ * figures of its own.
+ */
+export const brainSpendByPurpose = async (
+  env: Pick<Env, "DB">,
+  month: string
+): Promise<BrainModelSpend> => {
+  const cost = sql<number>`sum(${modelUsage.cost})`;
+  const rows = await drizzle(env.DB)
+    .select({
+      purpose: modelUsage.purpose,
+      calls: count(),
+      inputTokens: sql<number>`sum(${modelUsage.inputTokens})`,
+      outputTokens: sql<number>`sum(${modelUsage.outputTokens})`,
+      cost,
+    })
+    .from(modelUsage)
+    .where(and(eq(modelUsage.period, month), isBrainPurpose))
+    .groupBy(modelUsage.purpose)
+    .orderBy(desc(cost), modelUsage.purpose);
+  return {
+    month,
+    purposes: rows.flatMap(({ purpose, ...used }) =>
+      // Never expected: the query keeps only rows with a Brain purpose.
+      purpose === null ? [] : [{ purpose, ...used }]
+    ),
+  };
+};
+
+/**
+ * What Grasp's own features cost on its keys in each of `periods`, by
+ * feature and model, the dearest first: none that came to nothing.
+ */
+export const platformSpend = async (
+  env: Pick<Env, "DB">,
+  periods: readonly string[]
+): Promise<PlatformSpendByPeriod[]> => {
+  const spent = sql<number>`sum(${modelUsage.cost})`;
+  const rows = await drizzle(env.DB)
+    .select({
+      period: modelUsage.period,
+      feature: modelUsage.feature,
+      model: modelUsage.model,
+      amount: spent,
+    })
+    .from(modelUsage)
+    .where(
+      and(
+        eq(modelUsage.credential, "platform"),
+        inList(modelUsage.period, periods)
+      )
+    )
+    .groupBy(modelUsage.period, modelUsage.feature, modelUsage.model)
+    .orderBy(desc(spent));
+  return rows.flatMap(({ amount, ...row }) => {
+    const micros = Math.round(amount * microsPerDollar);
+    return micros > 0 ? [{ ...row, micros }] : [];
+  });
+};
+
+/**
+ * What the organization's own AI cost on Grasp's AI in `month`, in US
+ * dollars at list prices: every answered call of its own on Grasp's key.
+ */
+export const graspAiSpent = async (
+  env: Pick<Env, "DB">,
+  month: string
+): Promise<number> => {
+  const [row] = await drizzle(env.DB)
+    .select({ total: sql<number | null>`sum(${modelUsage.cost})` })
+    .from(modelUsage)
+    .where(
+      and(
+        eq(modelUsage.period, month),
+        eq(modelUsage.credential, "platform"),
+        eq(modelUsage.feature, "organization")
+      )
+    );
+  return row?.total ?? 0;
+};
+
+/** The organization's use of Grasp's AI in `month` against its limit. */
+export const graspAiMonth = async (
+  env: Pick<Env, "DB">,
+  month: string
+): Promise<{ spentUsd: number; limitUsd: number; reached: boolean }> => {
+  const spentUsd = await graspAiSpent(env, month);
+  const limitUsd = graspAi.monthlyLimitUsd;
+  return { spentUsd, limitUsd, reached: spentUsd >= limitUsd };
+};

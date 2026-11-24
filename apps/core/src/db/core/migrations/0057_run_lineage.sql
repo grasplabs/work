@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_runs` ADD `root_run_id` text;

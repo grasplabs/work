@@ -1,0 +1,457 @@
+import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
+import type { Pack } from "@grasp-os/brain-next/contract";
+import {
+  modelFileKey,
+  modelFilesOf,
+  shippedModel,
+} from "@grasp-os/embed/model-files";
+import { brainWithoutMeaningReasons } from "@grasp-os/shared/brain-report";
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+import {
+  calls,
+  poisonWord,
+  putTestModel,
+} from "../../../packages/embed/test/test-models.ts";
+import type {
+  BreakableEmbedder,
+  Breakage,
+} from "../../../packages/embed/test/test-models.ts";
+import {
+  addSource,
+  brainStaffReport,
+  brainWorkOverview,
+  recallAs,
+  workBrain,
+} from "../src/brain-next.ts";
+import type {
+  RecalledPack,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
+import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
+import { signedInWithRole } from "./sign-in.ts";
+
+// Recall by meaning through core (GRA-1769), with the embed package's
+// int8 test model as if it shipped and core's EMBEDDER bound to its
+// breakable embedder (vite.brain-meaning.config.ts). Core embeds the
+// question with its question embedder and hands the vector on with its
+// build; however that embedder fails, every recall answers, exactly as
+// recall by words and exact parts alone, and the log says why, with
+// nothing of the question or the person.
+
+const idp = mockIdp();
+
+/** `value`, as the type its binding has in this project. */
+const asBound = (value: unknown): never =>
+  // SAFETY: vite.brain-meaning.config.ts binds EMBEDDER to
+  // `BreakableEmbedder`, which core's `Embedder` type doesn't know.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  value as never;
+
+/** Core's embedders, as this project binds them. */
+const embedders = (): DurableObjectNamespace<BreakableEmbedder> =>
+  asBound(env.EMBEDDER);
+
+/** Core's question embedder: the object every question goes to. */
+const questions = () => embedders().getByName("questions");
+
+const store = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+const english =
+  "The supplier sends the invoice on the first day of every month. Payment is due thirty days later.";
+
+/** A question in Dutch sharing no word with the passage. */
+const question = "Wanneer moeten wij de leverancier betalen?";
+
+/** A second passage, in Dutch, sharing a word with `withWords` only. */
+const dutch = "Pallets staan klaar in hal drie.";
+
+/** A question the words way finds `dutch` for. */
+const withWords = `${question} En de pallets?`;
+
+/** Ticks of the Brain's work, an hour apart, until every passage is embedded. */
+const embedEverything = async (): Promise<void> => {
+  let at = Date.now();
+  for (let tick = 0; tick < 50; tick += 1) {
+    at += 60 * 60 * 1000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(at), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- read after each tick
+    const { embedding } = await brainWorkOverview(env);
+    if (
+      embedding.rebuilt &&
+      embedding.embedded + embedding.unembeddable === embedding.chunks
+    ) {
+      return;
+    }
+  }
+  throw new Error("Not every passage was embedded");
+};
+
+/** How many recalls the store counted by meaning, and without it for any reason. */
+const recallCounts = async (): Promise<{
+  meaning: number;
+  without: number;
+}> => {
+  const { recall } = await brainStaffReport(env);
+  return {
+    meaning: recall.ways.meaning.recalls,
+    without: Object.values(recall.withoutMeaning).reduce(
+      (sum, count) => sum + count,
+      0
+    ),
+  };
+};
+
+/** What core logged as warnings while `run` ran, and its answer. */
+const warnedOf = async <T>(
+  run: () => Promise<T>
+): Promise<{ value: T; warned: unknown[] }> => {
+  const warned: unknown[] = [];
+  const spy = vi
+    .spyOn(console, "warn")
+    .mockImplementation((...args: unknown[]) => {
+      warned.push(...args);
+    });
+  try {
+    return { value: await run(), warned };
+  } finally {
+    spy.mockRestore();
+  }
+};
+
+describe("recall by meaning, through core", () => {
+  let personId = "";
+  /** The team of the person alone their sources are for. */
+  let readers: SourceReaders = { kind: "none" };
+  /** The person's sources, by the Brain's key for each (core's brain-next.ts). */
+  const sources = new Map<string, SourceRef>();
+  /**
+   * Sources the person may not read, holding the words `withWords` finds
+   * by: another person's team's, and that person's own.
+   */
+  const hidden = new Set<string>();
+
+  /**
+   * The pack the store gives the person by words and exact parts alone,
+   * each item citing its source as core does.
+   */
+  const withoutMeaning = async (asked: string): Promise<RecalledPack> => {
+    const pack: Pack = await store().recall({
+      question: asked,
+      reader: {
+        person: personId,
+        groups: readers.kind === "team" ? [`team:${readers.teamId}`] : [],
+      },
+      budget: { tokens: recallBudgetMax },
+    });
+    return {
+      ...pack,
+      items: pack.items.map((item) => ({
+        ...item,
+        source: sources.get(item.source) ?? { producer: "upload", id: "" },
+      })),
+      memories: pack.memories.map((memory) => ({
+        ...memory,
+        store: "shared" as const,
+        // This file adds no memory: a type's adapter, never compared.
+        said: "system" as const,
+        source:
+          memory.source === null
+            ? null
+            : {
+                source: sources.get(memory.source.source) ?? {
+                  producer: "upload",
+                  id: "",
+                },
+                version: memory.source.version,
+              },
+      })),
+    };
+  };
+
+  /** What core recalls for `asked`, as the person, and what it logged. */
+  const recalled = async (asked: string) =>
+    await warnedOf(
+      async () =>
+        await recallAs(env, personId, {
+          personal: true,
+          question: asked,
+          budget: { tokens: recallBudgetMax },
+        })
+    );
+
+  /**
+   * The person and their passage, embedded, once for the file: inside the
+   * first test, as the identity provider answers inside a test only.
+   */
+  const setUp = async (): Promise<void> => {
+    if (personId !== "") {
+      return;
+    }
+    ({ userId: personId } = await signedInWithRole(idp, "user"));
+    // In the shared store, which core's clock embeds: a person's own store
+    // does its own work (its alarm).
+    readers = await soleReadersOf(personId);
+    for (const text of [english, dutch]) {
+      const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+      sources.set(`${source.producer}:${source.id}`, source);
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text,
+        readers,
+      });
+    }
+    // What the person may not read, holding the words they recall by, so a
+    // recall that goes without meaning shows whether it keeps to them.
+    const { userId: other } = await signedInWithRole(idp, "user");
+    for (const othersReaders of [
+      await soleReadersOf(other),
+      { kind: "owner", personId: other } as const,
+    ]) {
+      const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+      hidden.add(source.id);
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: "De pallets voor de andere klant staan in hal vier.",
+        readers: othersReaders,
+      });
+    }
+    await embedEverything();
+    // Loaded once, as core's clock warms it, so no question waits for it.
+    await questions().embed("Warm-up.");
+  };
+
+  beforeEach(async () => {
+    await questions().breakAs(null);
+    await setUp();
+  });
+
+  it("finds a passage that shares no word with the question by meaning, logs nothing, and counts the recall by meaning for staff", async () => {
+    const before = await recallCounts();
+    const { value, warned } = await recalled(question);
+    const after = await recallCounts();
+    const byWords = await withoutMeaning(question);
+
+    expect({
+      english: value.items
+        .filter(({ text }) => text === english)
+        .map(({ found }) => found),
+      hiddenCited: value.items.filter(({ source }) => hidden.has(source.id)),
+      byWords: byWords.items,
+      warned,
+      meaning: after.meaning - before.meaning,
+      without: after.without - before.without,
+    }).toStrictEqual({
+      english: ["meaning"],
+      hiddenCited: [],
+      byWords: [],
+      warned: [],
+      meaning: 1,
+      without: 0,
+    });
+  });
+
+  it.for<{ breakage: Breakage; asked: string; reason: string }>([
+    { breakage: "held", asked: withWords, reason: "timed_out" },
+    { breakage: "crash", asked: withWords, reason: "failed" },
+    {
+      breakage: "trap",
+      asked: `${withWords} ${poisonWord}`,
+      reason: "refused",
+    },
+    { breakage: "nan", asked: withWords, reason: "unusable" },
+    { breakage: "zeros", asked: withWords, reason: "unusable" },
+  ])(
+    "answers by words and exact parts alone when the question embedder is $breakage, logging $reason and nothing of the question or the person, and counting it for staff",
+    async ({ breakage, asked, reason }) => {
+      await questions().breakAs(breakage);
+
+      const before = await brainStaffReport(env);
+      const { value, warned } = await recalled(asked);
+      const after = await brainStaffReport(env);
+      await questions().breakAs(null);
+
+      const byWords = await withoutMeaning(asked);
+      const said = JSON.stringify(warned);
+      expect({
+        pack: value,
+        byWords: byWords.items.map(({ text, found }) => ({ text, found })),
+        hiddenCited: value.items.filter(({ source }) => hidden.has(source.id)),
+        warned,
+        tellsQuestion: said.includes("leverancier"),
+        tellsPerson: said.includes(personId),
+        counted: Object.fromEntries(
+          brainWithoutMeaningReasons.map((each) => [
+            each,
+            after.recall.withoutMeaning[each] -
+              before.recall.withoutMeaning[each],
+          ])
+        ),
+        meaning:
+          after.recall.ways.meaning.recalls -
+          before.recall.ways.meaning.recalls,
+      }).toStrictEqual({
+        pack: byWords,
+        byWords: [{ text: dutch, found: "words" }],
+        hiddenCited: [],
+        warned: [{ event: "brain.recall.without_meaning", reason }],
+        tellsQuestion: false,
+        tellsPerson: false,
+        counted: Object.fromEntries(
+          brainWithoutMeaningReasons.map((each) => [
+            each,
+            each === reason ? 1 : 0,
+          ])
+        ),
+        meaning: 0,
+      });
+    }
+  );
+
+  it("answers by words while the model's files are missing, asking the question embedder once and warning of no recall, and by meaning once they are back", async () => {
+    // The question embedder fails as one does without the files, and the
+    // files are gone from the bucket, as on a stack started without them.
+    await questions().breakAs("crash");
+    await Promise.all(
+      modelFilesOf(shippedModel).map(async (file) => {
+        await env.MODEL_FILES.delete(modelFileKey(file));
+      })
+    );
+    const before = await recallCounts();
+    const askedBefore = calls.length;
+    const first = await recalled(withWords);
+    const askedFirst = calls.length;
+    const second = await recalled(withWords);
+    const askedSecond = calls.length;
+    const missing = await recallCounts();
+    await putTestModel(env.MODEL_FILES, shippedModel);
+    await questions().breakAs(null);
+    const back = await recalled(question);
+
+    expect({
+      found: [first, second].map(({ value }) =>
+        value.items.map(({ text, found }) => ({ text, found }))
+      ),
+      warned: [first.warned, second.warned],
+      asked: [askedFirst - askedBefore, askedSecond - askedFirst],
+      without: missing.without - before.without,
+      back: back.value.items
+        .filter(({ text }) => text === english)
+        .map(({ found }) => found),
+      backWarned: back.warned,
+    }).toStrictEqual({
+      found: [
+        [{ text: dutch, found: "words" }],
+        [{ text: dutch, found: "words" }],
+      ],
+      warned: [[], []],
+      asked: [1, 0],
+      without: 2,
+      back: ["meaning"],
+      backWarned: [],
+    });
+  });
+
+  it.for<{
+    when: "after a failed question" | "while the files are missing";
+    bucket: "throws" | "hangs";
+    reason: string;
+  }>([
+    { when: "after a failed question", bucket: "throws", reason: "failed" },
+    { when: "after a failed question", bucket: "hangs", reason: "failed" },
+    { when: "while the files are missing", bucket: "throws", reason: "failed" },
+    // The look at the bucket takes the whole limit, so the question is late.
+    {
+      when: "while the files are missing",
+      bucket: "hangs",
+      reason: "timed_out",
+    },
+  ])(
+    "answers by words within the question's limit when the model files bucket $bucket $when",
+    async ({ when, bucket, reason }) => {
+      const files = env.MODEL_FILES;
+      await questions().breakAs("crash");
+      if (when === "while the files are missing") {
+        await Promise.all(
+          modelFilesOf(shippedModel).map(async (file) => {
+            await files.delete(modelFileKey(file));
+          })
+        );
+        // Core now knows they are missing, and looks at the bucket first.
+        await recalled(withWords);
+      }
+      // A bucket that is down, or one that never answers.
+      const broken = {
+        head: async (): Promise<never> =>
+          bucket === "throws"
+            ? await Promise.reject(new Error("The bucket is down"))
+            : await Promise.withResolvers<never>().promise,
+      };
+      Reflect.set(env, "MODEL_FILES", broken);
+      const startedAt = Date.now();
+      try {
+        const { value, warned } = await recalled(withWords);
+        const tookMs = Date.now() - startedAt;
+        Reflect.set(env, "MODEL_FILES", files);
+        await questions().breakAs(null);
+        const byWords = await withoutMeaning(withWords);
+
+        expect({
+          pack: value,
+          warned,
+          inTime: tookMs < 2000,
+        }).toStrictEqual({
+          pack: byWords,
+          warned: [{ event: "brain.recall.without_meaning", reason }],
+          inTime: true,
+        });
+      } finally {
+        Reflect.set(env, "MODEL_FILES", files);
+        await putTestModel(files, shippedModel);
+        await questions().breakAs(null);
+        // So no later test starts with the files known missing.
+        await recalled(question);
+      }
+    }
+  );
+
+  it("asks the question embedder nothing as of a moment, and logs nothing", async () => {
+    // Held: a call would wait for the deadline and log it.
+    await questions().breakAs("held");
+    const before = calls.length;
+
+    const { value, warned } = await warnedOf(
+      async () =>
+        await recallAs(env, personId, {
+          personal: true,
+          question: withWords,
+          budget: { tokens: recallBudgetMax },
+          asOf: new Date(),
+        })
+    );
+    const asked = calls
+      .slice(before)
+      .filter(({ texts }) => texts.includes(withWords)).length;
+    await questions().breakAs(null);
+
+    expect({
+      asked,
+      warned,
+      found: value.items.map(({ text, found }) => ({ text, found })),
+    }).toStrictEqual({
+      asked: 0,
+      warned: [],
+      found: [{ text: dutch, found: "words" }],
+    });
+  });
+});

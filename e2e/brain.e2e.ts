@@ -1,0 +1,117 @@
+import { expect } from "@playwright/test";
+
+import { test } from "./csp.ts";
+import { peopleIn } from "./people.ts";
+
+// The Brain, end to end: a person opens it from the sidebar on its atlas,
+// goes into a part of it there and opens a note, and finds the note on the
+// atlas again; and opens a region from the brain's navigation and the note
+// in it there. Every deployment's brain has its board in front, with its
+// Vision, whatever core holds yet, so that is the way in. What the brain is built from is
+// core's test (apps/core/test/brain.test.ts); how it is built, and laid out
+// as an atlas, the brain's own (apps/web/src/brain/*.test.ts).
+
+/** How long a page of the brain may take to read the brain. */
+const brainRead = { timeout: 15_000 };
+
+test("a person opens the brain on its atlas, goes into a part of it, opens a note there and finds it on the atlas again", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("brain");
+  const page = await pageOf(member);
+  await page.goto("/");
+
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: "Brain", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/brain$/u);
+  const main = page.getByRole("main");
+  const board = main.getByRole("button", { name: /^Board/u });
+  await expect(board).toBeVisible(brainRead);
+
+  // A region of the brain, up close: its notes as neurons, and the way back
+  // on the canvas, the one trail there is.
+  await board.click();
+  await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
+  const trail = main.getByRole("navigation", {
+    name: "Where you are in the brain",
+  });
+  await expect(trail).toContainText("Board");
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).not.toContainText("Board");
+
+  // The note opens on its own page, its dots building the page.
+  await main.getByRole("button", { name: "Vision page" }).click();
+  await expect(page).toHaveURL(/\/brain\/vision$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Vision page" })
+  ).toBeVisible();
+
+  // And back on the atlas where it sits, in hand.
+  await page.getByRole("button", { name: "Show in the brain" }).click();
+  await expect(page).toHaveURL(/\/brain\?note=vision$/u);
+  await expect(trail).toContainText("Vision page");
+
+  // Escape steps out: from the note to its region, from the region to the whole brain.
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
+  // The part is open once the note is no longer in hand on its way back.
+  await expect(trail).not.toContainText("Vision page");
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/brain$/u);
+  await expect(trail).toBeHidden();
+});
+
+test("a person opens a region from the brain's navigation, and a note in it", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("brain");
+  const page = await pageOf(member);
+  await page.goto("/brain");
+
+  // The navigation lists the brain's regions: the board first.
+  const nav = page.getByRole("complementary", { name: "The brain" });
+  await nav.getByRole("link", { name: /^Board/u }).click(brainRead);
+  await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
+
+  // The region opens in the navigation too, to the notes it holds.
+  await nav.getByRole("link", { name: "Vision page" }).click();
+  await expect(page).toHaveURL(/\/brain\/vision$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Vision page" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).toContainText("Board");
+});
+
+test("a person folds the brain's navigation to a rail, which marks the page they are on", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("brain");
+  const page = await pageOf(member);
+  await page.goto("/brain");
+
+  const nav = page.getByRole("complementary", { name: "The brain" });
+  await nav
+    .getByRole("button", { name: "Fold the navigation" })
+    .click(brainRead);
+  const here = (name: string) => nav.getByRole("link", { name, exact: true });
+
+  // On the brain itself, the brain is where you are.
+  await expect(here("Brain")).toHaveAttribute("aria-current", "page");
+
+  // On its log, the log is, and the brain no longer.
+  await here("Activity").click();
+  await expect(page).toHaveURL(/\/brain\/activity$/u);
+  await expect(here("Activity")).toHaveAttribute("aria-current", "page");
+  await expect(here("Brain")).not.toHaveAttribute("aria-current", "page");
+
+  // And on its sources, they are.
+  await here("Sources").click();
+  await expect(page).toHaveURL(/\/brain\/sources$/u);
+  await expect(here("Sources")).toHaveAttribute("aria-current", "page");
+  await expect(here("Activity")).not.toHaveAttribute("aria-current", "page");
+});

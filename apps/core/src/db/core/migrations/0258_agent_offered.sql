@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `offered_at` integer;

@@ -1,0 +1,669 @@
+import type { AuditDetailValue } from "@grasp-os/shared/audit";
+import { actorOf } from "@grasp-os/shared/audit";
+import {
+  auditErrors,
+  auditExportFormatSchema,
+  auditExportOptionsSchema,
+  auditExportMaxRecords,
+  auditFilterSchema,
+  auditPositionSchema,
+} from "@grasp-os/shared/audit-log";
+import type {
+  AuditApi,
+  AuditExportFormat,
+  AuditExportOptions,
+  AuditFilter,
+  AuditPage,
+  AuditRecord,
+  AuditRetention,
+  ChainVerification,
+  FullVerification,
+  ParsedAuditFilter,
+} from "@grasp-os/shared/audit-log";
+import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
+import type {
+  UnknownOutcomeCursor,
+  UnknownOutcomeListing,
+} from "@grasp-os/shared/connect";
+import { authErrors, requestErrors } from "@grasp-os/shared/errors";
+import {
+  isMemberAdmin,
+  requireAdmin,
+  roleErrors,
+} from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+
+import {
+  actorIdsOf,
+  archiveRetentionDays,
+  auditLog,
+  auditRetentionDays,
+} from "./audit-log.ts";
+import type { SearchRange } from "./audit-log.ts";
+import { appendAuditEvent } from "./audit-outbox.ts";
+import { identify } from "./auth/identity.ts";
+import { personOf } from "./connections.ts";
+import { errorResponse } from "./errors.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+import { routeMember } from "./staff-audit.ts";
+import { runRetentionDays } from "./workflows/engine.ts";
+
+// Reading the audit log (threat model section 13, R16): admins search it,
+// export it and verify its chain. Admins see all of it, so an export holds
+// no more than a search shows them. Reads are recorded in the log itself
+// before anything is returned, so a read that can't be recorded returns
+// nothing. Grasp staff read it only through the admin role their staff
+// access gives them, and are recorded as staff; they can't change retention
+// or archive anything (that's deployment config and the log's own alarm).
+// A JSON export ends with every person's calls of unknown outcome as it
+// ends (`openObligations`), as the admin listing shows them and recorded
+// as that read is; staff, whom connect refuses them, get none.
+
+/** Most records one page of a search holds. */
+const searchPageSize = 100;
+
+/** Records an export reads from the log at a time. */
+const exportPageSize = 500;
+
+/**
+ * Pages of open obligations a JSON export holds (`openObligations`), each
+ * of `unknownOutcomeListLimit`: 1,000 at most. One more is read to tell
+ * whether that was all of them.
+ */
+const obligationPagesPerExport = 5;
+
+/** An open obligation as an export holds it: a listing, without its paging. */
+type ExportedObligation = Omit<UnknownOutcomeListing, "cursor" | "id">;
+
+/** A JSON export's `openObligations`, as `AuditApi.export` describes it. */
+interface OpenObligations {
+  listedAt: string;
+  complete: boolean;
+  obligations: ExportedObligation[];
+}
+
+/**
+ * Every person's calls of unknown outcome, as connect lists them for the
+ * organization's admins (`listAllUnknownOutcomes`), for `person`'s
+ * export. Read page by page from `listedAt`, newest first, not as one
+ * snapshot: a call that becomes of unknown outcome while it reads is newer
+ * than the pages it has yet to read, so it may be missing, even with
+ * `complete` true, which speaks of the calls there were when it began; one
+ * resolved meanwhile may still be listed. The audit log's own events of
+ * each call are exact, and the next export lists what this one missed.
+ * `null` for Grasp staff, whom connect refuses them, as the admin listing
+ * does. The read is recorded, as the listing's is, before the
+ * export holds it.
+ */
+const openObligations = async (
+  env: Env,
+  person: Identity
+): Promise<OpenObligations | null> => {
+  if (!isMemberAdmin(person)) {
+    return null;
+  }
+  const listedAt = new Date().toISOString();
+  const connectPerson = await personOf(env, person);
+  const obligations: ExportedObligation[] = [];
+  let before: UnknownOutcomeCursor | undefined;
+  let complete = false;
+  for (let page = 0; page < obligationPagesPerExport; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const listed = await env.CONNECT.listAllUnknownOutcomes(
+      connectPerson,
+      before
+    );
+    for (const { cursor: _cursor, id: _id, ...obligation } of listed) {
+      obligations.push(obligation);
+    }
+    before = listed.at(-1)?.cursor;
+    if (listed.length < unknownOutcomeListLimit || before === undefined) {
+      complete = true;
+      break;
+    }
+  }
+  if (!complete) {
+    // Exactly full: whether any is left past the last one held.
+    const past = await env.CONNECT.listAllUnknownOutcomes(
+      connectPerson,
+      before
+    );
+    complete = past.length === 0;
+  }
+  await appendAuditEvent(env, {
+    actor: actorOf(person),
+    action: "connection.call.unknown_listed",
+    detail: { count: obligations.length, via: "audit.exported" },
+  });
+  return { listedAt, complete, obligations };
+};
+
+const parseFilter = (filter: unknown): ParsedAuditFilter =>
+  auditErrors.parse("audit.invalid", auditFilterSchema, filter);
+
+const parsePosition = (position: unknown): number | undefined =>
+  position === undefined
+    ? undefined
+    : auditErrors.parse("audit.invalid", auditPositionSchema, position);
+
+/**
+ * A filter as audit detail: each field it sets, an identifier or a time, as
+ * `filter.<field>`, so a search for a resource isn't itself found as an
+ * event about that resource (`detail.resource`).
+ */
+const filterDetail = (
+  filter: ParsedAuditFilter
+): Record<string, AuditDetailValue> =>
+  Object.fromEntries(
+    Object.entries(filter)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [`filter.${key}`, value])
+  );
+
+/** Records that `by` read the log, before they get what they read. */
+const recordRead = async (
+  env: Env,
+  by: Identity,
+  action: "audit.searched" | "audit.exported" | "audit.verified",
+  detail: Record<string, AuditDetailValue>
+): Promise<void> => {
+  await appendAuditEvent(env, { actor: actorOf(by), action, detail });
+};
+
+/**
+ * A spreadsheet reads a cell as a formula when it starts with `=`, `+`,
+ * `-` or `@`, also after whitespace (an ID can start with a space), or
+ * with a tab or carriage return. Such a cell is written with a `'` in
+ * front (CSV injection). A stored event starts with `{`, so the event
+ * column holds it exactly; only a stored row that isn't an event can
+ * look like a formula, and gets the `'`. The JSON export is the exact
+ * form.
+ */
+const formulaStart = /^\s*[=+\-@]|^[\t\r]/u;
+const csvQuoted = /[",\r\n]/u;
+
+/** One CSV cell (RFC 4180), safe to open in a spreadsheet. */
+const csvCell = (value: string | number | boolean | null | undefined) => {
+  const text = value === null || value === undefined ? "" : String(value);
+  const safe = formulaStart.test(text) ? `'${text}` : text;
+  return csvQuoted.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
+
+const csvColumns = [
+  "seq",
+  "received_at",
+  "at",
+  "type",
+  "action",
+  "actor_type",
+  "actor_id",
+  "target_type",
+  "target_id",
+  "source",
+  "request_id",
+  "verified",
+  "version",
+  "prev_hash",
+  "hash",
+  "event",
+];
+
+const csvRow = (cells: readonly Parameters<typeof csvCell>[0][]): string =>
+  `${cells.map((cell) => csvCell(cell)).join(",")}\r\n`;
+
+const csvRecord = ({ event, ...record }: AuditRecord): string =>
+  csvRow([
+    record.seq,
+    record.receivedAt,
+    event?.at,
+    record.type,
+    event?.action,
+    event?.actor.type,
+    // The most specific: a workflow run's, rather than its App's.
+    event ? actorIdsOf(event.actor).at(-1) : undefined,
+    event?.target?.type,
+    event?.target?.id,
+    event?.source,
+    event?.requestId,
+    record.verified,
+    record.version,
+    record.prevHash,
+    record.hash,
+    record.eventJson,
+  ]);
+
+/** A record as JSON: its event only as the stored bytes, `eventJson`. */
+const jsonRecord = ({ event: _parsed, ...record }: AuditRecord): string =>
+  JSON.stringify(record);
+
+/**
+ * An export, oldest first, as a stream that reads the log a page at a time
+ * while the client takes it in: `json` or `csv`, per `AuditApi.export`.
+ * It reads only when the client asks for more, and checks the session and
+ * role again (`recheck`) before every read of the log. It reads the
+ * positions that matched when it began, up to the head then, so it ends;
+ * if retention archives some it hasn't read yet, it stops.
+ */
+const exportStream = (
+  env: Env,
+  filter: ParsedAuditFilter,
+  format: AuditExportFormat,
+  recheck: () => Promise<void>,
+  obligations: () => Promise<OpenObligations | null>,
+  archive = false
+): ReadableStream<Uint8Array> => {
+  const log = auditLog(env);
+  const encoder = new TextEncoder();
+  const unverified: number[] = [];
+  /** With the archive: the stretches purged before the export read them. */
+  const purged: { from: number; through: number }[] = [];
+  let count = 0;
+  let cursor: number | undefined;
+  let range: SearchRange | undefined;
+
+  /** The start of the export; fixes the positions it reads. */
+  const header = async (): Promise<string> => {
+    const chain = await log.head();
+    const found = await log.range(filter);
+    // With the archive, every position up to the head: the log's index
+    // of receipt times covers only what it holds, and the filter's times
+    // are matched entry by entry.
+    range = archive
+      ? { low: 1, high: chain.seq }
+      : { low: found.low, high: Math.min(found.high, chain.seq) };
+    return format === "csv"
+      ? csvRow(csvColumns)
+      : `{"exportedAt":${JSON.stringify(new Date().toISOString())},"filter":${JSON.stringify(filter)},"chain":${JSON.stringify(chain)},"records":[\n`;
+  };
+
+  /** The end of the export: for JSON, how its records checked out. */
+  const footer = async (): Promise<string> => {
+    if (format === "csv") {
+      return "";
+    }
+    const recordCheck = {
+      ok: unverified.length === 0,
+      records: count,
+      unverified,
+    };
+    const lastFullVerification = await log.lastFullVerification();
+    const archived = archive ? `,"archive":${JSON.stringify({ purged })}` : "";
+    // Read last, after the session and role were checked for the last
+    // page: what is open as the export ends.
+    const open = await obligations();
+    return `\n],"recordCheck":${JSON.stringify(recordCheck)},"lastFullVerification":${JSON.stringify(lastFullVerification)},"openObligations":${JSON.stringify(open)}${archived}}\n`;
+  };
+
+  /** The next page of records as text, and whether it was the last. */
+  const page = async (
+    within: SearchRange
+  ): Promise<{ text: string; done: boolean }> => {
+    let found: AuditPage | null = await log.search({
+      filter,
+      order: "oldest",
+      cursor,
+      limit: exportPageSize,
+      range: within,
+    });
+    if (found === null && archive) {
+      // The log no longer holds the next position: it is archived, from
+      // before the export began or since. Read on from the archive.
+      const read = await log.readArchive({
+        filter,
+        after: cursor ?? 0,
+        through: within.high,
+        limit: exportPageSize,
+      });
+      if ("unreadable" in read) {
+        throw auditErrors.create("audit.archive_unreadable");
+      }
+      if (read.purged !== undefined) {
+        purged.push(read.purged);
+      }
+      found = { records: read.records, next: read.next };
+    }
+    if (found === null) {
+      throw auditErrors.create("audit.export_interrupted");
+    }
+    if (count + found.records.length > auditExportMaxRecords) {
+      throw auditErrors.create("audit.export_too_large");
+    }
+    const lines = found.records.map((record, index) => {
+      if (!record.verified) {
+        unverified.push(record.seq);
+      }
+      if (format === "csv") {
+        return csvRecord(record);
+      }
+      return `${count + index === 0 ? "" : ",\n"}${jsonRecord(record)}`;
+    });
+    count += found.records.length;
+    cursor = found.next ?? cursor;
+    return { text: lines.join(""), done: found.next === null };
+  };
+
+  return new ReadableStream<Uint8Array>(
+    {
+      pull: async (controller) => {
+        try {
+          if (range === undefined) {
+            await recheck();
+            controller.enqueue(encoder.encode(await header()));
+            return;
+          }
+          // A page can match nothing: read on until there's something to
+          // send, checking again before each page, as a session can end
+          // while a sparse filter reads through a long stretch.
+          let chunk = { text: "", done: false };
+          while (chunk.text === "" && !chunk.done) {
+            // Pages one after another, each from where the last stopped.
+            // oxlint-disable-next-line no-await-in-loop
+            await recheck();
+            // oxlint-disable-next-line no-await-in-loop
+            chunk = await page(range);
+          }
+          const text = chunk.done
+            ? `${chunk.text}${await footer()}`
+            : chunk.text;
+          if (text !== "") {
+            controller.enqueue(encoder.encode(text));
+          }
+          if (chunk.done) {
+            controller.close();
+          }
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+    },
+    // Nothing is read ahead: a pull runs only when the client asks for
+    // more, and checks the session again before each page it reads.
+    { highWaterMark: 0 }
+  );
+};
+
+/**
+ * Starts an export for `person`, an admin: checks the filter and format,
+ * records the export in the log before anything is read, and returns the
+ * stream, which checks again with `recheck` before every read. Over
+ * `/rpc` (`AuditRpc.export`) and as a download (`auditExportResponse`).
+ */
+const startExport = async (
+  env: Env,
+  person: Identity,
+  filter: unknown,
+  format: unknown,
+  recheck: () => Promise<void>,
+  options?: unknown
+): Promise<{
+  stream: ReadableStream<Uint8Array>;
+  format: AuditExportFormat;
+}> => {
+  requireAdmin(person);
+  const parsed = parseFilter(filter);
+  const parsedFormat = auditErrors.parse(
+    "audit.invalid",
+    auditExportFormatSchema,
+    format
+  );
+  const { archive = false } =
+    auditErrors.parse("audit.invalid", auditExportOptionsSchema, options) ?? {};
+  await recordRead(env, person, "audit.exported", {
+    ...filterDetail(parsed),
+    format: parsedFormat,
+    // With the archive: how many purged stretches it passes over as it
+    // begins, so the record says the export can't be whole. Any purged
+    // while it runs are named in its JSON.
+    ...(archive
+      ? { archive, purged: await auditLog(env).purgedStretches() }
+      : {}),
+  });
+  return {
+    stream: exportStream(
+      env,
+      parsed,
+      parsedFormat,
+      recheck,
+      async () => {
+        await recheck();
+        return await openObligations(env, person);
+      },
+      archive
+    ),
+    format: parsedFormat,
+  };
+};
+
+/** `Sec-Fetch-Site` values of a request this site's own pages made. */
+const sameSiteFetches = new Set(["same-origin", "none"]);
+
+const exportTypes: Record<AuditExportFormat, string> = {
+  json: "application/json",
+  csv: "text/csv; charset=utf-8",
+};
+
+/**
+ * `GET /api/audit/export?format=<json|csv>&<filter>`: an export as a
+ * download, which the browser writes to disk as it arrives, the same
+ * export `AuditApi.export` streams over `/rpc`: for admins, recorded
+ * before anything is read, and the session and role checked again
+ * before every page. The filter's fields are query parameters, as
+ * `auditFilterSchema` names them; any other parameter is refused. The
+ * session cookie is `SameSite=Lax`, so a link from another site would
+ * send it: a request the browser marks as from another site
+ * (`Sec-Fetch-Site`) is refused, so no other site starts an export. An
+ * export only reads and records its own event.
+ */
+export const auditExportResponse = async (
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  const fromElsewhere = fetchSite !== null && !sameSiteFetches.has(fetchSite);
+  if (request.method !== "GET") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (fromElsewhere) {
+    return errorResponse(
+      403,
+      requestErrors.create("request.forbidden"),
+      requestId
+    );
+  }
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "audit.export",
+    {
+      query: new URL(request.url).search,
+    }
+  );
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const { searchParams } = new URL(request.url);
+  const filter = Object.fromEntries(
+    [...searchParams].filter(
+      ([name]) => name !== "format" && name !== "archive"
+    )
+  );
+  const recheck = async (): Promise<void> => {
+    const now = await identify(env, request.headers);
+    if (now?.userId !== person.userId) {
+      throw authErrors.create("auth.unauthenticated");
+    }
+    requireAdmin(now);
+  };
+  try {
+    const { stream, format } = await startExport(
+      env,
+      person,
+      filter,
+      searchParams.get("format"),
+      recheck,
+      // `archive=1` takes in what retention archived.
+      searchParams.has("archive")
+        ? { archive: searchParams.get("archive") === "1" }
+        : undefined
+    );
+    const day = new Date().toISOString().slice(0, "yyyy-mm-dd".length);
+    return new Response(stream, {
+      headers: {
+        "content-type": exportTypes[format],
+        "content-disposition": `attachment; filename="audit-log-${day}.${format}"`,
+        "cache-control": "private, no-store",
+      },
+    });
+  } catch (error) {
+    if (roleErrors.codeOf(error) !== undefined) {
+      return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
+    }
+    const code = auditErrors.codeOf(error);
+    if (code !== undefined) {
+      return errorResponse(400, auditErrors.create(code), requestId);
+    }
+    throw error;
+  }
+};
+
+/**
+ * The audit log over `/rpc`, for admins. Built once per session with core's
+ * env and a session check; every method checks the session first.
+ */
+export class AuditRpc extends CoreRpcTarget implements AuditApi {
+  readonly #env: Env;
+  readonly #check: SessionCheck;
+
+  constructor(env: Env, check: SessionCheck) {
+    super();
+    this.#env = env;
+    this.#check = check;
+  }
+
+  async search(filter?: AuditFilter, before?: number): Promise<AuditPage> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = parseFilter(filter);
+      const cursor = parsePosition(before);
+      const page = (await auditLog(this.#env).search({
+        filter: parsed,
+        order: "newest",
+        cursor,
+        limit: searchPageSize,
+      })) ?? { records: [], next: null };
+      // Every search is recorded once, and so is every later page that
+      // returns something: nothing is read without a record of it, and
+      // paging through empty stretches doesn't fill the log.
+      if (cursor === undefined || page.records.length > 0) {
+        await recordRead(this.#env, person, "audit.searched", {
+          ...filterDetail(parsed),
+          ...(cursor === undefined ? {} : { before: cursor }),
+          records: page.records.length,
+        });
+      }
+      return page;
+    });
+  }
+
+  async export(
+    filter: AuditFilter | undefined,
+    format: AuditExportFormat,
+    options?: AuditExportOptions
+  ): Promise<ReadableStream<Uint8Array>> {
+    return await withPerson(this.#check, async (person) => {
+      const recheck = async (): Promise<void> => {
+        await withPerson(this.#check, requireAdmin);
+      };
+      const started = await startExport(
+        this.#env,
+        person,
+        filter,
+        format,
+        recheck,
+        options
+      );
+      return started.stream;
+    });
+  }
+
+  async verify(after?: number): Promise<ChainVerification> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const from = parsePosition(after) ?? 0;
+      const result = await auditLog(this.#env).verify(from);
+      // A pass that got to the head, or found a break, is recorded; the
+      // steps along the way aren't.
+      if (!result.ok || result.done) {
+        await recordRead(this.#env, person, "audit.verified", {
+          after: from,
+          ok: result.ok,
+          ...(result.ok
+            ? { through: result.through, head: result.head }
+            : { brokenAt: result.brokenAt, reason: result.reason }),
+        });
+      }
+      return result;
+    });
+  }
+
+  async lastVerification(): Promise<FullVerification | null> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await auditLog(this.#env).lastFullVerification();
+    });
+  }
+
+  async searchArchive(
+    filter?: AuditFilter,
+    before?: number
+  ): Promise<AuditPage> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = parseFilter(filter);
+      const cursor = parsePosition(before);
+      const page = await auditLog(this.#env).searchArchive({
+        filter: parsed,
+        ...(cursor === undefined ? {} : { before: cursor }),
+        limit: searchPageSize,
+      });
+      if ("unreadable" in page) {
+        throw auditErrors.create("audit.archive_unreadable");
+      }
+      // Recorded as a search of the log is: the first page, and every
+      // later one that returns something.
+      if (cursor === undefined || page.records.length > 0) {
+        await recordRead(this.#env, person, "audit.searched", {
+          ...filterDetail(parsed),
+          archive: true,
+          ...(cursor === undefined ? {} : { before: cursor }),
+          records: page.records.length,
+        });
+      }
+      return page;
+    });
+  }
+
+  async retention(): Promise<AuditRetention> {
+    return await withPerson(this.#check, (person) => {
+      requireAdmin(person);
+      return {
+        auditDays: auditRetentionDays,
+        archiveDays: archiveRetentionDays,
+        runDays: runRetentionDays,
+      };
+    });
+  }
+}

@@ -1,0 +1,157 @@
+/**
+ * A mail provider's MCP server behind a Composio connection, as the connect
+ * Worker reaches it in core's tests: part of the `connect-providers` Worker
+ * (test/connect-providers.ts), so the real connect runs unchanged behind
+ * core. It has two tools: `mail.send`, and `mail.search`, a read (which
+ * the server doesn't say: only the admin's allowlist does), also listed
+ * as `MAIL_SEND` and `MAIL_SEARCH`, with their input named, by which an
+ * App's connector resource can declare them. It records
+ * every call that reached `mail.send`, every mail it really sent and every
+ * search. Each server (by the name in its URL)
+ * answers its next calls as a test plans them, and holds a search whose
+ * query starts with `hold` until the test lets it go. A test can give a
+ * server other tools instead (`ToolkitServer`), as a Composio toolkit's
+ * server lists them, and change them between requests. Imported by
+ * vite.config.ts (Node) and the tests (workerd), so it only holds data.
+ */
+
+/** A server's URL, as its connection stores it. */
+export const mailServerUrl = (name: string): string =>
+  `https://backend.composio.dev/v3/mcp/${name}?user_id=grasp`;
+
+/** Where tests plan a server's calls and read what it did. */
+export const mailControlUrl = (name: string): string =>
+  `https://mail-control.test/${name}`;
+
+/**
+ * How the server answers its next call: `unavailable` (a 503 to the call's
+ * look at its tools, before anything is sent); or, to the call itself,
+ * `sent` (it sends the mail), `invalid` (the tool refuses the input and
+ * says so in its result), `slow` (it holds the call, as a server that
+ * takes its time does, until the test lets it go; then sends the mail) or
+ * `lost` (it sends the mail, and its answer is a 502 a gateway made of it).
+ */
+export type MailAnswer = "sent" | "unavailable" | "invalid" | "slow" | "lost";
+
+/**
+ * A server's tools, set by a test in place of the mail tools: what
+ * `tools/list` answers (`list`, each tool as MCP lists it), and each tool's
+ * result by its name (`answers`, an MCP tool result). Every call that
+ * reached one of them is recorded.
+ */
+export interface ToolkitServer {
+  list?: unknown[];
+  answers?: Record<string, unknown>;
+}
+
+/** The server, as script for the `connect-providers` Worker. */
+export const mailServerScript = `
+const mailServers = new Map();
+const mailServerNamed = (name) => {
+  let server = mailServers.get(name);
+  if (!server) {
+    server = { plan: [], calls: 0, sent: [], searched: [], holding: false, released: false, holds: 0, releases: 0, list: null, answers: {}, ran: [] };
+    mailServers.set(name, server);
+  }
+  return server;
+};
+const rpcResult = (id, result) => Response.json({ jsonrpc: "2.0", id, result });
+
+const mailServer = async (request, url) => {
+  if (url.hostname === "mail-control.test") {
+    const server = mailServerNamed(url.pathname.slice(1));
+    if (request.method === "POST") {
+      const control = await request.json();
+      if (control.release) {
+        server.released = true;
+        server.releases += 1;
+      } else if (control.list || control.answers) {
+        server.list = control.list ?? server.list;
+        server.answers = control.answers ?? server.answers;
+      } else {
+        server.plan = control.plan;
+      }
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ calls: server.calls, sent: server.sent, searched: server.searched, holding: server.holding, ran: server.ran });
+  }
+  const server = mailServerNamed(url.pathname.split("/").at(-1));
+  const { id, method, params } = await request.json();
+  if (id === undefined) {
+    return new Response(null, { status: 202 });
+  }
+  if (method === "initialize") {
+    return rpcResult(id, {
+      protocolVersion: "2025-06-18",
+      capabilities: { tools: {} },
+      serverInfo: { name: "mail", version: "1.0.0" },
+    });
+  }
+  if (method === "tools/list") {
+    if (server.plan[0] === "unavailable") {
+      server.plan.shift();
+      return new Response("Service Unavailable", { status: 503 });
+    }
+    if (server.list) {
+      return rpcResult(id, { tools: server.list });
+    }
+    return rpcResult(id, {
+      tools: [
+        { name: "mail.send", inputSchema: { type: "object" }, annotations: { readOnlyHint: false } },
+        { name: "mail.search", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+        {
+          name: "MAIL_SEND",
+          inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" } }, required: ["to", "subject"] },
+          outputSchema: { type: "object", properties: { messageId: { type: "string" } }, required: ["messageId"] },
+          annotations: { readOnlyHint: false },
+        },
+        {
+          name: "MAIL_SEARCH",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          outputSchema: { type: "object", properties: { messages: { type: "array", items: { type: "string" } } }, required: ["messages"] },
+        },
+      ],
+    });
+  }
+  if (Object.hasOwn(server.answers, params.name)) {
+    server.ran.push({ tool: params.name, arguments: params.arguments });
+    return rpcResult(id, server.answers[params.name]);
+  }
+  if (params.name === "mail.search" || params.name === "MAIL_SEARCH") {
+    server.searched.push(params.arguments.query);
+    if (params.arguments.query.startsWith("hold")) {
+      // Each held search waits for a release of its own, so the server
+      // holds the next one too once the last was let go.
+      const ticket = server.holds;
+      server.holds += 1;
+      server.holding = true;
+      while (server.releases <= ticket) {
+        await scheduler.wait(20);
+      }
+      server.holding = false;
+    }
+    const found = { messages: [params.arguments.query + "-1"] };
+    return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(found) }], structuredContent: found });
+  }
+  const answer = server.plan.shift() ?? "sent";
+  server.calls += 1;
+  if (answer === "slow") {
+    // Checks on a timer, so the runtime sees the call waiting on something.
+    server.holding = true;
+    while (!server.released) {
+      await scheduler.wait(20);
+    }
+    server.holding = false;
+  }
+  if (answer === "invalid") {
+    return rpcResult(id, { content: [{ type: "text", text: "Invalid recipient" }], isError: true });
+  }
+  const { to, subject } = params.arguments;
+  server.sent.push({ to, subject });
+  if (answer === "lost") {
+    return new Response("Bad Gateway", { status: 502 });
+  }
+  const sent = { messageId: "message-" + server.sent.length };
+  return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(sent) }], structuredContent: sent });
+};
+`;

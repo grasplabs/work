@@ -1,0 +1,1726 @@
+import {
+  descriptorFromText,
+  schemaFromDescriptor,
+} from "@grasp-os/runtime/host";
+import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError, issuesOf } from "@grasp-os/shared/errors";
+import {
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  ChatId,
+  WorkflowResourceId,
+  WorkspaceId,
+} from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import {
+  coreStartKeyPrefix,
+  maxLiveRunsPerPrincipal,
+  workflowResourceErrors,
+  workflowStartSchema,
+} from "@grasp-os/shared/workflow-resources";
+import type { WorkflowStart } from "@grasp-os/shared/workflow-resources";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { chatAuthority, chatContext } from "./agent-scope.ts";
+import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
+import { activeMember, organizationId } from "./auth/auth.ts";
+import type { Acting } from "./auth/identity.ts";
+import {
+  permissions,
+  triggerResources,
+  workflowResources,
+  workflowResourceVersions,
+  workflowStartReceipts,
+  runChatSources,
+  keptRunEvidence,
+  runStateWriters,
+} from "./db/core/schema.ts";
+import { isUniqueViolation } from "./db/d1.ts";
+import { appHost, workspace } from "./durable-objects.ts";
+import { allowingPermissionSql } from "./permissions.ts";
+import { viaProjectSql } from "./project-sql.ts";
+import { isRestricted } from "./restricted.ts";
+import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
+import { buildOf } from "./workflow-builds.ts";
+import type { SealedBuild } from "./workflow-builds.ts";
+import { frozenParams } from "./workflow-params.ts";
+import { isPaused } from "./workflow-pause.ts";
+import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
+import { workflowRoleSql } from "./workflow-roles.ts";
+import { readableStateOf } from "./workflow-state.ts";
+import { triggeredAccountClaimed } from "./workflows/quotas.ts";
+import type { LineagePlace } from "./workflows/quotas.ts";
+import { frozenBindingsOf } from "./workflows/resource-authority.ts";
+import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
+import { tellQueryFollowers } from "./workflows/run-changes.ts";
+import { runEvidenceMaxRows } from "./workflows/run-evidence.ts";
+import { startFilesDropped } from "./workflows/run-files.ts";
+import { inboxesAdmitted } from "./workflows/run-inboxes.ts";
+import { handFiles } from "./workflows/start-files.ts";
+import type { StartFiles } from "./workflows/start-files.ts";
+import { snapshotFrom, snapshotStored } from "./workflows/state-snapshots.ts";
+import type { StateSnapshot } from "./workflows/state-snapshots.ts";
+
+// Starting an independent workflow (platform specification 13.2, 15.1, 24):
+// who may, for whom, and on which version: always the one live, for
+// everyone (a builder's test run of the draft is no start, see
+// workflows/candidate-runs.ts). Every start is admitted
+// in one statement that writes its receipt only while the authorization
+// it was decided on still holds, read again as the statement runs; a
+// start the host decided on earlier can't land on authority that changed
+// since. Running what was admitted is the engine's (GRA-268); this is the
+// start contract every invoker shares.
+//
+// Who may start a workflow, and as whom:
+//
+// - A person: anyone with a role in it (`user` or `builder`), acting for
+//   themselves.
+// - An App: only with a permission of its own, `start` on the workflow,
+//   granted by an admin, acting for the person its call acts for.
+//   The App's role or grouping gives it nothing else.
+// - An agent: with a permission of its own, `start` on the workflow
+//   (a chat's own only in that chat), and only for a person who could
+//   start it themselves: the agent's grant and the person's role, both.
+// - A trigger (a system event, a connector event, a webhook, a schedule):
+//   with a permission of its own, `start` on the workflow, live and
+//   enabled, acting for the person it was bound to, never the workflow's
+//   owner.
+//
+// Threat model, and how each is closed:
+//
+// - A start of a version that isn't live: a start names no version; it
+//   runs the live one, read as it is decided and required, with its
+//   manifest hash, in the admitting statement (`workflow.version_not_found`
+//   while none is live; to code, `workflow.start_denied`). A version rolled
+//   back, or one never made live, starts nothing; a publish between the
+//   decision and the admission refuses the start as stale, so a trigger
+//   decides again on the new one. A person's start form names the version
+//   they filled it in for, and is refused once another went live
+//   (`workflow.version_not_live`).
+// - A stale grant: the admitting statement requires the permission active
+//   then; a revoked grant admits nothing (`workflow.start_denied`).
+// - A revoked App release: an App's start requires its version's release
+//   not revoked, read in the admitting statement, so the kill switch stops
+//   starts its code made, or staged before, as it stops its calls.
+// - A caller taking one of core's keys: keys core derives (an App
+//   action's starts, a committed mutation's) begin with
+//   `coreStartKeyPrefix`, which a person's or an agent's key may not.
+// - Revocation racing a start: the check and the receipt are one
+//   statement, so of a revocation and a start, the start lands only if it
+//   was admitted before the revocation committed. A start decided before
+//   and admitted after is refused: the grant is read again, and any change
+//   of the workflow's members or of grants on it moves its policy
+//   generation, which the admitting statement requires unchanged.
+// - Team membership changing mid-start: a person's role through a team is
+//   read from the team's members (Better Auth's `team_members`) in the
+//   admitting statement, not from the session's list of teams.
+// - A person who left: every principal must be an active member when the
+//   statement runs.
+// - A paused workflow (workflow-pause.ts): a new start is refused
+//   (`workflow.paused`), and a pause moves the policy generation on, so
+//   one decided before it is refused as it is admitted.
+// - The same start sent twice: one receipt per invoker, person acted for
+//   and idempotency key; the same key with the same input is the same
+//   start (every start follows the live version, so one sent again after a
+//   publish is the start it made), with another is refused
+//   (`workflow.start_conflict`). One person never gets another's receipt
+//   through the same App, agent or trigger. A start sent again is
+//   answered with its receipt once the invoker's own access is checked
+//   again, before anything the workflow's configuration requires now: a
+//   retry after an approval was revoked, or a version published, is still
+//   the start that was admitted.
+// - Probing through code: an App, agent or trigger is checked against its
+//   own grant before anything is read of the workflow, and every refusal
+//   it gets is `workflow.start_denied`, so it can't learn which workflows
+//   or versions exist.
+// - A trigger acting for someone who lost access: its principal must still
+//   have a role in the workflow when each start is admitted.
+// - Input the workflow doesn't accept: checked against the version's
+//   contract by the SDK's validator, within the function input limit;
+//   refusals name paths, never values.
+// - A parameter edit racing a start: a start freezes the values of the
+//   revision in force as it is decided, and the admitting statement
+//   requires that revision still in force; an edit in between refuses it.
+// - A binding unapproved, approved for another contract, or approved for
+//   another version: a start freezes, for each catalog binding of its
+//   version, the active approval an admin gave for that exact version and
+//   declaration, and its target; the admitting statement requires each
+//   approval and the permission it names still active
+//   (`workflow.binding_unapproved` when there is none, or its target can't
+//   serve it now, workflow-bindings.ts's own answer). A version a
+//   builder published after the review, or one before it, is code nobody
+//   reviewed for that target, and serves nothing until approved itself.
+// - Restricted data carried into an unrestricted run: a start by an App
+//   that read restricted data, or made by the call of an agent whose chat
+//   did, starts in restricted mode (`restrictedStart`), read after the
+//   code formed its input; its receipt and run pin it, the database
+//   refuses any change of it, and every call of the run reads it there
+//   (restricted.ts), so no later step, retry or replay runs without it.
+// - A frozen snapshot changed later: a receipt, with its frozen params and
+//   bindings and their hashes, is a row written once; the database refuses
+//   any change of it but retention removing its input and values, any
+//   deletion, and any insert over its ID, key or rowid, whatever the
+//   conflict clause (migrations 0080, 0095 and 0101). Its audit event
+//   names the bindings' hash, never a parameter's value nor a hash of the
+//   values, which a guess at a short sensitive one could be checked
+//   against.
+
+/** The agent whose call of an App made the App's start, and its chat. */
+export interface StartingAgent {
+  readonly agentId: string;
+  readonly workspaceId: WorkspaceId;
+  readonly chatId: ChatId;
+}
+
+/** Who starts a workflow: what the host established, never the caller. */
+export type StartInvoker =
+  | { type: "person"; person: Acting }
+  | { type: "app"; authority: Authority; agent?: StartingAgent | null }
+  | { type: "agent"; authority: Authority; context?: WorkContext }
+  /**
+   * A trigger fired by mail a workflow run sent (a stamped message,
+   * workflows/connector-triggers.ts) starts its run as that run's
+   * descendant, in `cause`, or it would open a lineage of its own past the
+   * run's limits (GRA-692).
+   */
+  | { type: "trigger"; triggerId: string; cause?: TriggerCause };
+
+/**
+ * The run whose mail fired a trigger: where its lineage admitted the
+ * trigger's run already (quotas.ts, `admitInLineage`), and whether it ran
+ * restricted, which the trigger's run then does too. The trigger's run
+ * joins its lineage, never its life: it isn't the run's child, and goes
+ * on after the run ends. Its work is charged to its workflow's own
+ * account there (`triggeredAccountFor`), never the lineage's allowances.
+ */
+export interface TriggerCause {
+  readonly runId: string;
+  readonly restricted: boolean;
+  readonly place: LineagePlace;
+}
+
+/**
+ * What workflow `id` keeps between its runs that the person it starts for,
+ * `principal`, may read (workflow-state.ts `readableStateOf`), read once
+ * as a start that admits a run (`buildHash`) is decided and frozen with
+ * it, for its run alone: a write landing after this is the next start's
+ * to read. With how many keys it left out, as withheld. Null for a start
+ * that admits no run.
+ */
+const frozenState = async (
+  env: Env,
+  id: string,
+  principal: string,
+  buildHash: string | null
+): Promise<
+  (StateSnapshot & { withheld: number; writers: string[] }) | null
+> => {
+  if (buildHash === null) {
+    return null;
+  }
+  const { values, withheld, writers } = await readableStateOf(
+    env,
+    id,
+    principal
+  );
+  return { ...(await snapshotFrom(values)), withheld, writers };
+};
+
+/**
+ * That each of `state`'s writers, the runs that set the keys a start froze, still
+ * keeps its evidence, as SQL for the admitting statement: not past its
+ * details, or kept past them (`keptRunEvidence`). A writer released
+ * between the start's read and its admission would leave its copy
+ * unchecked in the run, so the start is refused, and the next freezes the
+ * state anew (GRA-1996).
+ */
+export const writersHeldSql = (
+  state: { writers: readonly string[] } | null
+): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(state?.writers ?? [])}) AS writer
+    WHERE writer.value NOT IN (SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence})
+      AND EXISTS (SELECT 1 FROM ${workflowStartReceipts} AS done
+        WHERE done.id = writer.value AND done.details_removed_at IS NOT NULL))`;
+
+/**
+ * The statement recording `state`'s writers as the runs whose keys run
+ * `runId` started from (`runStateWriters`), for the batch that admits it,
+ * under `admitted`. None for no writers, or no state.
+ */
+export const writersAdmitted = (
+  env: Env,
+  runId: string,
+  state: { writers: readonly string[] } | null,
+  admitted: SQL
+): BatchItem<"sqlite">[] =>
+  state === null || state.writers.length === 0
+    ? []
+    : [
+        drizzle(env.DB)
+          .insert(runStateWriters)
+          .select(
+            sql`SELECT ${runId}, value FROM json_each(${JSON.stringify(state.writers)}) WHERE ${admitted}`
+          )
+          .onConflictDoNothing(),
+      ];
+
+/**
+ * A new start the host decided on: what it freezes, and what admitting it
+ * requires to still hold.
+ */
+export interface StartAuthorization {
+  workflowId: string;
+  version: number;
+  manifestHash: string;
+  invoker: WorkflowStart["invoker"];
+  originAppVersion: number | null;
+  principal: string;
+  generation: number;
+  /** The invoker's idempotency key. */
+  key: string;
+  /** The validated input (canonical JSON), and its SHA-256. */
+  input: string;
+  inputHash: string;
+  /** The parameter values it froze (canonical JSON), and their revision. */
+  params: string;
+  paramsRevision: number;
+  /** The bindings it froze (canonical JSON). */
+  bindings: string;
+  /**
+   * What the workflow kept between its runs as it was decided
+   * (workflows/state-snapshots.ts), which its run reads in every
+   * activation, with how many keys it left out as withheld, and the runs
+   * that set the keys it holds (GRA-1996); null for a start that admits
+   * no run.
+   */
+  state: (StateSnapshot & { withheld: number; writers: string[] }) | null;
+  /**
+   * Whether it starts in restricted mode (`restrictedStart`): its run is
+   * restricted for good.
+   */
+  restricted: boolean;
+  /** The executable identity of the version's build, which the start's run is admitted for. */
+  buildHash: string;
+  /** For the audit log: who started it. */
+  actor: AuditActor;
+  /**
+   * For a run an event's trigger starts, where it sits in that event's
+   * run's lineage, pinned with its row (resource-runs.ts,
+   * `RunAdmission.lineage`).
+   */
+  lineage?: { rootRunId: string; depth: number };
+  /**
+   * That it still holds, as SQL, read as the admitting statement runs: of
+   * a fixed size whatever the version binds, as `required` holds the
+   * approvals, permissions and workflows its bindings need as one value.
+   */
+  holds: SQL;
+  /**
+   * The ID its receipt and run are admitted under, minted with the
+   * decision when its start hands the run files (GRA-885), so the copies
+   * are the run's; minted as it is admitted otherwise.
+   */
+  id?: string | undefined;
+  /**
+   * What else its admitting batch writes, only while `admitted` (its
+   * receipt written) holds: the files its start handed the run, done and
+   * audited.
+   */
+  alsoAdmitted?: ((admitted: SQL) => BatchItem<"sqlite">[]) | undefined;
+}
+
+/**
+ * What deciding a start answers: the start already admitted under the
+ * invoker's key, or a new one to admit.
+ */
+export type StartDecision =
+  | { start: WorkflowStart }
+  | { authorization: StartAuthorization };
+
+const denied = () => workflowResourceErrors.create("workflow.start_denied");
+
+/**
+ * Audits a start of workflow `workflowId` refused for `reason`, by
+ * `actor`: what was decided (`detail`), never the input itself.
+ */
+const refusedStart = async (
+  env: Env,
+  actor: AuditActor,
+  workflowId: string,
+  detail: Record<string, AuditDetailValue>,
+  reason: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor,
+      action: "workflow.start.refused",
+      target: { type: "workflow_resource", id: workflowId },
+      detail: { ...detail, receipt: null, reason },
+    }),
+  ]);
+};
+
+/**
+ * The refusals of starts whose decision went stale before they were
+ * admitted: the admitting statement found what was decided no longer
+ * held. To the caller they are `workflow.start_denied` like any other (it
+ * learns nothing more), but a caller that decides again (a commit's
+ * dispatch) can tell them from a decision that denied.
+ */
+const staleRefusals = new WeakSet<object>();
+
+/** Whether `error` refused a start whose decision went stale. */
+export const isStaleRefusal = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && staleRefusals.has(error);
+
+/**
+ * Whether `error` refused a start for now only: what the workflow keeps
+ * between its runs couldn't be checked (workflow-state.ts
+ * `readableStateOf`: a database or the Brain away), so the same start may
+ * go through later (GRA-1996). Every way a start is made backs off on it,
+ * or lets its person try again, and none counts it toward stopping or
+ * settles it for good.
+ */
+export const refusedForNow = (error: unknown): boolean =>
+  workflowResourceErrors.codeOf(error) === "workflow.state_unchecked";
+
+/**
+ * The refusal of `invoker`'s start of a version that isn't the live one:
+ * only the live version starts, for everyone. Stale, for a caller that
+ * decides again, as a publish between reading the version and deciding
+ * makes it; to code, `start_denied`, as any refusal.
+ */
+const notLive = (invoker: StartInvoker): Error => {
+  const refused =
+    invoker.type === "person"
+      ? workflowResourceErrors.create("workflow.version_not_live")
+      : denied();
+  staleRefusals.add(refused);
+  return refused;
+};
+
+/** The args descriptor stored with a version's contract. */
+const contractArgsSchema = z.object({ args: z.json() });
+
+/** That `person` is an active member of the organization, as SQL. */
+const activeSql = (person: string): SQL => activeMember(person);
+
+/**
+ * That App `app` lets `person` in now, as SQL, beside their role
+ * (`appRoleSql`), as `stillOpenTo` decides it (app-access.ts): never an
+ * archived App, and one not live yet only for its builders, in a role
+ * that builds.
+ */
+const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
+  EXISTS (SELECT 1 FROM apps AS lived
+    WHERE lived.id = ${app} AND lived.archived_at IS NULL)
+  AND (EXISTS (SELECT 1 FROM apps AS out
+      WHERE out.id = ${app} AND out.current_version IS NOT NULL)
+    OR (${activeMember(person, ["admin", "builder"])}
+      AND (${activeMember(person, ["admin"])}
+        OR EXISTS (SELECT 1 FROM apps AS owned
+          WHERE owned.id = ${app} AND owned.owner_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'person' AND shared.member_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          JOIN teams ON teams.id = shared.member_id
+            AND teams.organization_id = ${organizationId}
+          JOIN team_members ON team_members.team_id = shared.member_id
+            AND team_members.user_id = ${person}
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'team')
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND ${viaProjectSql(sql.raw("shared.member_type"), sql.raw("shared.member_id"), person)})))))`;
+
+/**
+ * That `person` has a role in App `app` now, as SQL: an admin of the
+ * organization, its owner, or someone it is shared with, as a person or
+ * through a team they are in now, while the App lets them in
+ * (`appStatusAdmitsSql`). Only while they are an active member.
+ */
+const appRoleSql = (
+  person: string,
+  app: string
+): SQL => sql`(${activeSql(person)}
+  AND (${activeMember(person, ["admin"])}
+    OR EXISTS (SELECT 1 FROM apps AS owned
+      WHERE owned.id = ${app} AND owned.owner_id = ${person})
+    OR EXISTS (SELECT 1 FROM app_members AS shared
+      WHERE shared.app_id = ${app}
+        AND shared.member_type = 'person' AND shared.member_id = ${person})
+    OR EXISTS (SELECT 1 FROM app_members AS shared
+      JOIN teams ON teams.id = shared.member_id
+        AND teams.organization_id = ${organizationId}
+      JOIN team_members ON team_members.team_id = shared.member_id
+        AND team_members.user_id = ${person}
+      WHERE shared.app_id = ${app} AND shared.member_type = 'team')
+    OR EXISTS (SELECT 1 FROM app_members AS shared
+      WHERE shared.app_id = ${app}
+        AND ${viaProjectSql(sql.raw("shared.member_type"), sql.raw("shared.member_id"), person)}))
+  AND ${appStatusAdmitsSql(person, app)})`;
+
+/** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
+const grantSql = (allowing: SQL): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
+
+/**
+ * That App `app`, at `appVersion`, holds its grant of `action` on
+ * workflow `workflow` for `person` now, as SQL (`appStartHoldsSql`).
+ */
+const appGrantHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId,
+  action: "start" | "send"
+): SQL => sql`(${appRoleSql(person, app)}
+  AND EXISTS (SELECT 1 FROM app_versions AS code
+    WHERE code.app_id = ${app} AND code.version = ${appVersion})
+  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
+    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
+      AND sealed.revoked_at IS NOT NULL)
+  AND ${grantSql(
+    allowingPermissionSql(
+      { type: "app", appId: app },
+      { type: "workflow", workflowId: workflow },
+      action
+    )
+  )})`;
+
+/**
+ * That App `app`, at `appVersion`, may start workflow `workflow` for
+ * `person` now, as SQL: the App's own grant, from a version the App has
+ * whose release isn't revoked,
+ * for someone who may use the App now. What a start by the App is
+ * admitted on, and what a page is told it may do (page-workflows.ts),
+ * so the two never differ.
+ */
+export const appStartHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "start");
+
+/**
+ * That App `app`, at `appVersion`, may send events to `person`'s runs of
+ * workflow `workflow` now, as SQL: as `appStartHoldsSql`, by the App's own
+ * `send` grant, which its `start` grant doesn't imply (spec 10.4.6).
+ */
+export const appSendHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "send");
+
+/**
+ * The live workflow `id` at `version`, its policy generation and the
+ * version's manifest and input descriptor. A workflow that isn't live is
+ * `workflow.resource_unavailable`; a version it never published
+ * `workflow.version_not_found`.
+ */
+export const pinned = async (
+  env: Env,
+  id: string,
+  /** The version; without one, the one live now. */
+  version?: number
+): Promise<{
+  /** The version read. */
+  version: number;
+  generation: number;
+  configRevision: number;
+  /** The version live now, if any. */
+  currentVersion: number | null;
+  manifestHash: string;
+  inputDescriptor: string;
+  /** The executable identity of its build. */
+  buildHash: string;
+}> => {
+  const row = await drizzle(env.DB)
+    .select({
+      version: workflowResourceVersions.version,
+      generation: workflowResources.policyGeneration,
+      configRevision: workflowResources.configRevision,
+      currentVersion: workflowResources.currentVersion,
+      manifestHash: workflowResourceVersions.manifestHash,
+      contract: workflowResourceVersions.contract,
+      manifest: workflowResourceVersions.manifest,
+    })
+    .from(workflowResources)
+    .leftJoin(
+      workflowResourceVersions,
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflowResources.id),
+        eq(
+          workflowResourceVersions.version,
+          version ?? workflowResources.currentVersion
+        )
+      )
+    )
+    .where(
+      and(eq(workflowResources.id, id), isNull(workflowResources.deletedAt))
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.resource_unavailable");
+  }
+  if (
+    row.version === null ||
+    row.manifestHash === null ||
+    row.contract === null ||
+    row.manifest === null
+  ) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  // Read from the manifest the admitting statement pins by its hash: the
+  // run is admitted for the build that manifest seals.
+  let build: SealedBuild;
+  try {
+    build = buildOf(row.manifest);
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
+    throw workflowResourceErrors.create("workflow.version_corrupt");
+  }
+  // Read once its manifest is of this host's format (`buildOf`).
+  const { args } = contractArgsSchema.parse(JSON.parse(row.contract));
+  return {
+    version: row.version,
+    generation: row.generation,
+    configRevision: row.configRevision,
+    currentVersion: row.currentVersion,
+    manifestHash: row.manifestHash,
+    inputDescriptor: JSON.stringify(args),
+    buildHash: build.hash,
+  };
+};
+
+/**
+ * What a start's bindings need to still hold as it is admitted: the
+ * approvals serving its catalog bindings, and the permissions of the
+ * workflow they use.
+ */
+interface Required {
+  approvals: string[];
+  permissions: string[];
+}
+
+/**
+ * That everything `required` (JSON text of `Required`) names still holds
+ * for workflow `id`, as SQL: each approval active, which serves the
+ * declaration it was frozen for; each permission active and the
+ * workflow's own.
+ * One bound value, read with `json_each`, so the
+ * statement stays within D1's bound parameters however many bindings a
+ * version declares.
+ */
+const requiredSql = (id: string, required: string): SQL =>
+  sql`(NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.approvals') AS needed
+      WHERE NOT EXISTS (SELECT 1 FROM workflow_binding_approvals AS approval
+        WHERE approval.id = needed.value AND approval.workflow_resource_id = ${id}
+          AND approval.status = 'active'))
+    AND NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.permissions') AS needed
+      WHERE NOT EXISTS (SELECT 1 FROM permissions AS held
+        WHERE held.id = needed.value AND held.status = 'active'
+          AND held.subject_type = 'workflow' AND held.subject_id = ${id})))`;
+
+/**
+ * The bindings version `version` of workflow `id` declares, as a start
+ * freezes them: for each catalog binding the active approval given
+ * for this version's exact declaration and its target
+ * (`workflow.binding_unapproved` naming the alias when there is none), as
+ * canonical JSON; and what of them must still hold as it is admitted.
+ */
+const frozenBindings = async (
+  env: Env,
+  id: string,
+  version: number
+): Promise<{ text: string; required: Required }> => {
+  const versions = await bindingsOf(env, id);
+  const declared = versions.get(version) ?? [];
+  const frozen: Record<string, unknown>[] = [];
+  const required: Required = { approvals: [], permissions: [] };
+  for (const binding of declared) {
+    // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
+    const approval = await approvalServing(env, id, binding);
+    if (approval === undefined) {
+      throw workflowResourceErrors.create("workflow.binding_unapproved", {
+        issues: [`${binding.alias}: No approval serves its contract.`],
+      });
+    }
+    // The approved target can still serve it now, as it could when it was
+    // approved: the same answer, so no approval outlives its target.
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one target per binding
+      await requireTargetServes(env, id, binding, approval.target);
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw workflowResourceErrors.create("workflow.binding_unapproved", {
+          issues: [`${binding.alias}: Its approved target can't serve it now.`],
+        });
+      }
+      throw error;
+    }
+    frozen.push({ ...binding, approval: approval.id, target: approval.target });
+    required.approvals.push(approval.id);
+    if ("permissionId" in approval.target) {
+      required.permissions.push(approval.target.permissionId);
+    }
+  }
+  frozen.sort((a, b) => (String(a.alias) < String(b.alias) ? -1 : 1));
+  return { text: canonicalJson(z.json().parse(frozen)), required };
+};
+
+/** The trigger `id`, if it is live and enabled. */
+const liveTrigger = async (env: Env, id: string) =>
+  await drizzle(env.DB)
+    .select({
+      workflowId: triggerResources.workflowResourceId,
+      principal: triggerResources.principalBinding,
+    })
+    .from(triggerResources)
+    .where(
+      and(
+        eq(triggerResources.id, id),
+        isNull(triggerResources.deletedAt),
+        eq(triggerResources.enabled, true)
+      )
+    )
+    .get();
+
+/** What an invoker contributes to an authorization: who, for whom, and its rule. */
+interface InvokerRule {
+  invoker: WorkflowStart["invoker"];
+  originAppVersion: number | null;
+  principal: string;
+  actor: AuditActor;
+  holds: SQL;
+}
+
+const ruleOf = async (
+  env: Env,
+  invoker: StartInvoker,
+  id: string
+): Promise<InvokerRule> => {
+  // An ID no workflow could have: unavailable to a person, as for one that
+  // doesn't exist; to code, `start_denied`, as for anything it may not start.
+  const workflowId = workflowResourceIdSchema.safeParse(id);
+  if (!workflowId.success) {
+    throw invoker.type === "person"
+      ? workflowResourceErrors.create("workflow.resource_unavailable")
+      : denied();
+  }
+  const object = { type: "workflow", workflowId: workflowId.data } as const;
+  switch (invoker.type) {
+    case "person": {
+      // A role now, as `get` decides it, before anything says more.
+      await requireWorkflowRole(env, invoker.person, id, "user");
+      const person = invoker.person.userId;
+      return {
+        invoker: { type: "person", id: person },
+        originAppVersion: null,
+        principal: person,
+        actor: invoker.person.actor ?? actorOf(invoker.person),
+        holds: workflowRoleSql(person, id),
+      };
+    }
+    case "app": {
+      const { subject, appVersion, onBehalfOf } = invoker.authority;
+      if (subject.type !== "app" || appVersion === undefined) {
+        throw denied();
+      }
+      return {
+        invoker: { type: "app", id: subject.appId },
+        originAppVersion: appVersion,
+        principal: onBehalfOf,
+        actor: delegateActorOf(invoker.authority),
+        holds: appStartHoldsSql(
+          subject.appId,
+          appVersion,
+          onBehalfOf,
+          workflowId.data
+        ),
+      };
+    }
+    case "agent": {
+      const { subject, onBehalfOf } = invoker.authority;
+      if (subject.type !== "agent") {
+        throw denied();
+      }
+      return {
+        invoker: { type: "agent", id: subject.agentId },
+        originAppVersion: null,
+        principal: onBehalfOf,
+        actor: delegateActorOf(invoker.authority),
+        holds: sql`(${workflowRoleSql(onBehalfOf, id)} AND ${grantSql(
+          allowingPermissionSql(subject, object, "start", {
+            context: invoker.context,
+            onBehalfOf,
+          })
+        )})`,
+      };
+    }
+    case "trigger": {
+      const trigger = await liveTrigger(env, invoker.triggerId);
+      if (trigger === undefined || trigger.workflowId !== id) {
+        throw workflowResourceErrors.create("workflow.trigger_unavailable");
+      }
+      const subject = {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(invoker.triggerId),
+      } as const;
+      return {
+        invoker: { type: "trigger", id: invoker.triggerId },
+        originAppVersion: null,
+        principal: trigger.principal,
+        actor: { type: "system" },
+        // Its principal must still have a role in the workflow: a trigger
+        // never acts for someone the workflow is no longer shared with.
+        holds: sql`(${workflowRoleSql(trigger.principal, id)}
+          AND EXISTS (SELECT 1 FROM trigger_resources AS live
+            WHERE live.id = ${invoker.triggerId} AND live.deleted_at IS NULL
+              AND live.enabled = 1
+              AND live.workflow_resource_id = ${id}
+              AND live.principal_binding = ${trigger.principal})
+          AND ${grantSql(allowingPermissionSql(subject, object, "start"))})`,
+      };
+    }
+    default: {
+      return invoker satisfies never;
+    }
+  }
+};
+
+/**
+ * `input` as the version's contract takes it, normalized, as canonical
+ * JSON: `workflow.start_invalid` with its issues (paths, never values)
+ * otherwise, or when it is over the function input limit. `at` is where
+ * the input stands in what was sent, before each issue's path: a
+ * trigger's `config.input`, nothing for a start's own.
+ */
+export const acceptedInput = (
+  descriptor: string,
+  input: unknown,
+  at = ""
+): string => {
+  const schema = schemaFromDescriptor(descriptor);
+  const checked = schema["~standard"].validate(input);
+  if ("then" in checked) {
+    throw new Error("A workflow's input schema validated asynchronously");
+  }
+  if (checked.issues !== undefined) {
+    throw workflowResourceErrors.create("workflow.start_invalid", {
+      issues: issuesOf(
+        {
+          issues: checked.issues.map(({ path, message }) => ({
+            path: (path ?? []).map(String),
+            message,
+          })),
+        },
+        at
+      ),
+    });
+  }
+  const parsed = z.json().safeParse(checked.value);
+  if (!parsed.success) {
+    throw workflowResourceErrors.create("workflow.start_invalid");
+  }
+  const text = canonicalJson(parsed.data);
+  if (
+    new TextEncoder().encode(text).byteLength > platformLimits.functionArgsBytes
+  ) {
+    throw workflowResourceErrors.create("workflow.start_invalid", {
+      issues: [`${at === "" ? "args" : at}: Too large for a start.`],
+    });
+  }
+  return text;
+};
+
+const startOf = (
+  row: typeof workflowStartReceipts.$inferSelect
+): WorkflowStart => ({
+  id: row.id,
+  workflowId: row.workflowResourceId,
+  version: row.workflowResourceVersion,
+  manifestHash: row.manifestHash,
+  invoker: { type: row.invokerType, id: row.invokerId },
+  principal: row.principalId,
+  authorityGeneration: row.authorityGeneration,
+  inputHash: row.inputHash,
+  paramsRevision: row.paramsRevision,
+  bindingsHash: row.bindingsHash,
+  // Every start admits its run, under the start's own ID.
+  runId: row.id,
+  createdAt: row.createdAt.toISOString(),
+});
+
+/**
+ * The receipt of `invoker`'s start for `principal` under `key`, if there
+ * is one: keys are an invoker's for each person it acts for, so one person
+ * never gets another's start through the same App, agent or trigger.
+ */
+export const receiptOf = async (
+  env: Env,
+  invoker: WorkflowStart["invoker"],
+  principal: string,
+  key: string
+) =>
+  await drizzle(env.DB)
+    .select()
+    .from(workflowStartReceipts)
+    .where(
+      and(
+        eq(workflowStartReceipts.invokerType, invoker.type),
+        eq(workflowStartReceipts.invokerId, invoker.id),
+        eq(workflowStartReceipts.principalId, principal),
+        eq(workflowStartReceipts.idempotencyKey, key)
+      )
+    )
+    .get();
+
+/** The same start as `row`, or `workflow.start_conflict`. */
+const sameStart = (
+  row: typeof workflowStartReceipts.$inferSelect,
+  start: {
+    workflowId: string;
+    principal: string;
+    originAppVersion: number | null;
+  },
+  inputHash: string
+): WorkflowStart => {
+  // An App's start is the same start across the App's versions: a call
+  // retried after an upgrade derives the same key, and the same person and
+  // input make it the same start, whichever of the App's versions asks
+  // (GRA-376). Its receipt keeps the version that started it.
+  const sameOrigin =
+    row.invokerType === "app"
+      ? row.originAppVersion !== null && start.originAppVersion !== null
+      : row.originAppVersion === start.originAppVersion;
+  // Every start follows the workflow's live version: one sent again after
+  // a publish is the start it made, on the version it started on.
+  if (
+    row.workflowResourceId !== start.workflowId ||
+    row.principalId !== start.principal ||
+    !sameOrigin ||
+    row.inputHash !== inputHash
+  ) {
+    throw workflowResourceErrors.create("workflow.start_conflict");
+  }
+  return startOf(row);
+};
+
+/**
+ * The refusal of a start of version `version` of workflow `id` decided on
+ * `decided` (its policy generation and parameter revision): stale, for a
+ * caller that decides again as for an admission's, when what it was
+ * decided on changed as it was read (a member, a parameter edit).
+ */
+const deniedAt = async (
+  env: Env,
+  id: string,
+  version: number,
+  decided: { generation: number; configRevision: number }
+): Promise<Error> => {
+  const refused = denied();
+  let now: Awaited<ReturnType<typeof pinned>> | undefined;
+  try {
+    now = await pinned(env, id, version);
+  } catch (error) {
+    // Gone or never published: no fresh decision would start it. Anything
+    // else (D1 failing for a moment) isn't a decision, and is retried.
+    const code = workflowResourceErrors.codeOf(error);
+    if (
+      code === "workflow.resource_unavailable" ||
+      code === "workflow.version_not_found"
+    ) {
+      return refused;
+    }
+    throw error;
+  }
+  if (
+    now.generation !== decided.generation ||
+    now.configRevision !== decided.configRevision ||
+    now.currentVersion !== version
+  ) {
+    staleRefusals.add(refused);
+  }
+  return refused;
+};
+
+/**
+ * Whether a start by `invoker` starts in restricted mode (restricted.ts):
+ * an App's while the App has read restricted data, or the chat of the
+ * agent whose call made it has; an agent's while its chat has. A chat
+ * that can't be read, or an agent's start that names none, counts as
+ * restricted: failing closed. A person's or
+ * a trigger's carries no App's or chat's data, and never is.
+ *
+ * Read once, as the start is decided, after the code that asked for it
+ * formed its input: a flag is set before restricted data is returned and
+ * never cleared, so a read that fed the input is seen, and the receipt
+ * and run keep what was read (`admitWorkflowStart`).
+ */
+const restrictedStart = async (
+  env: Env,
+  invoker: StartInvoker
+): Promise<boolean> => {
+  const chatRestricted = async (
+    work: () => { authority: Authority; context: WorkContext }
+  ): Promise<boolean> => {
+    try {
+      const { authority, context } = work();
+      return await isRestricted(env, authority, context);
+    } catch (error) {
+      if (isExpectedError(error)) {
+        return true;
+      }
+      throw error;
+    }
+  };
+  switch (invoker.type) {
+    case "app": {
+      const { subject, onBehalfOf } = invoker.authority;
+      if (subject.type !== "app") {
+        throw denied();
+      }
+      if (await appHost(env, subject.appId).isRestricted()) {
+        return true;
+      }
+      const { agent } = invoker;
+      return agent === undefined || agent === null
+        ? false
+        : await chatRestricted(() => ({
+            authority: chatAuthority({
+              agentId: agent.agentId,
+              personId: onBehalfOf,
+            }),
+            context: chatContext(agent),
+          }));
+    }
+    case "agent": {
+      const { authority, context } = invoker;
+      // No chat to read: failing closed.
+      return context === undefined
+        ? true
+        : await chatRestricted(() => ({ authority, context }));
+    }
+    case "person": {
+      return false;
+    }
+    case "trigger": {
+      // Restricted spreads to the run an event of a restricted run starts.
+      return invoker.cause?.restricted ?? false;
+    }
+    default: {
+      return invoker satisfies never;
+    }
+  }
+};
+
+/**
+ * The chat whose agent is behind a start by `invoker`: the agent's own
+ * start from its chat (held-starts.ts), or an App's start an agent's call
+ * made. None for any other start.
+ */
+const startingChatOf = (invoker: StartInvoker): StartingAgent | undefined => {
+  if (invoker.type === "app") {
+    return invoker.agent ?? undefined;
+  }
+  if (
+    invoker.type !== "agent" ||
+    invoker.context?.type !== "chat" ||
+    invoker.authority.subject.type !== "agent"
+  ) {
+    return undefined;
+  }
+  return {
+    agentId: invoker.authority.subject.agentId,
+    workspaceId: invoker.context.workspaceId,
+    chatId: invoker.context.chatId,
+  };
+};
+
+/**
+ * What the chat behind a start by `invoker` has read, withheld or not
+ * (GRA-1093): the chat of the agent that started it, itself or through
+ * an App's call (`startingChatOf`). Its run is held to them
+ * (workflows/resource-reads.ts), as its input may carry any. None for any
+ * other start. More than a run keeps is refused (`brain.budget_exceeded`),
+ * never cut short.
+ *
+ * Refused (`workflow.start_denied`, recorded by `refuse`) once that chat
+ * is deleted, or being deleted. A start its
+ * agent's call staged in an App's outbox is delivered later, its input
+ * still carrying what the chat had read, while the chat's sources went
+ * with it: the start is refused rather than admitted unheld. Refused, not
+ * held to a copy taken as it was staged: what a run is held to is always
+ * read from the chat as the start is admitted, one place and one time,
+ * and a deleted chat's starts go with it, as its held writes do.
+ */
+const chatPinsOf = async (
+  env: Env,
+  invoker: StartInvoker,
+  refuse: () => Promise<void>
+): Promise<ChatPins | undefined> => {
+  const agent = startingChatOf(invoker);
+  if (agent === undefined || !("authority" in invoker)) {
+    return undefined;
+  }
+  const sources = await workspace(env, agent.workspaceId).heldSourcesOf(
+    agent.chatId
+  );
+  if (sources === null) {
+    await refuse();
+    throw denied();
+  }
+  if (sources.length > runEvidenceMaxRows) {
+    throw workflowResourceErrors.create("brain.budget_exceeded");
+  }
+  return {
+    scope: {
+      workspaceId: agent.workspaceId,
+      chatId: agent.chatId,
+      agentId: agent.agentId,
+      personId: invoker.authority.onBehalfOf,
+    },
+    sources,
+  };
+};
+
+/** The chat a run was started from, and what it had read. */
+interface ChatPins {
+  scope: {
+    workspaceId: string;
+    chatId: string;
+    agentId: string;
+    personId: string;
+  };
+  sources: readonly string[];
+}
+
+/** `pins` copied onto run `runId`, once it is `admitted`. */
+const pinsAdmitted = (
+  env: Env,
+  runId: string,
+  pins: ChatPins | undefined,
+  admitted: SQL
+): BatchItem<"sqlite">[] => {
+  if (pins === undefined || pins.sources.length === 0) {
+    return [];
+  }
+  const { workspaceId, chatId, agentId, personId } = pins.scope;
+  const db = drizzle(env.DB);
+  return [
+    db
+      .insert(runChatSources)
+      .select(
+        sql`SELECT ${runId}, value, ${workspaceId}, ${chatId}, ${agentId}, ${personId} FROM json_each(${JSON.stringify(pins.sources)}) WHERE ${admitted}`
+      )
+      .onConflictDoNothing(),
+  ];
+};
+
+/**
+ * The inboxes (run-inboxes.ts) of run `runId` a start admits, if it
+ * `runs` one: for the event bindings it froze (`bindings`, as its receipt
+ * keeps them) whose contract takes events from outside.
+ */
+const startInboxes = async (
+  env: Env,
+  start: { runId: string; workflowId: string; bindings: string; runs: boolean }
+): Promise<(admitted: SQL) => BatchItem<"sqlite">[]> =>
+  await inboxesAdmitted(env, {
+    runId: start.runId,
+    workflowId: start.workflowId,
+    bindings: start.runs ? frozenBindingsOf(start.bindings).values() : [],
+  });
+
+/** Where a start of `invoker` sits in a lineage, if not at a root of its own. */
+const lineageOf = (
+  invoker: StartInvoker
+): Pick<StartAuthorization, "lineage"> => {
+  if (invoker.type === "trigger" && invoker.cause !== undefined) {
+    return {
+      lineage: {
+        rootRunId: invoker.cause.place.rootRunId,
+        depth: invoker.cause.place.depth,
+      },
+    };
+  }
+  return {};
+};
+
+/**
+ * That `key`, which a person or an agent chose, isn't one core derives
+ * (`coreStartKeyPrefix`): `workflow.start_invalid` otherwise.
+ */
+const requireOwnKey = (invoker: StartInvoker, key: string): void => {
+  if (
+    (invoker.type === "person" || invoker.type === "agent") &&
+    key.startsWith(coreStartKeyPrefix)
+  ) {
+    throw workflowResourceErrors.create("workflow.start_invalid", {
+      issues: [`key: Keys beginning with "${coreStartKeyPrefix}" are core's.`],
+    });
+  }
+};
+
+/**
+ * Decides on `request` (`workflowStartSchema`: the args, the invoker's
+ * idempotency key and the version a person expects) to start the live
+ * version of workflow `id` for
+ * `invoker` (see the rules above). The invoker's own access is checked
+ * first, every time; then the input, as the version a start already
+ * admitted under the key started on takes it, or the live one for a new
+ * start; then such a start is answered as it was
+ * (`workflow.start_conflict` if the key was used for another); only a new
+ * start freezes the workflow's parameters and bindings and needs them to
+ * hold now.
+ *
+ * Refused with `workflow.resource_unavailable` (a person with no role, as
+ * for a workflow that doesn't exist), `workflow.version_not_found`,
+ * `workflow.start_invalid`, `workflow.trigger_unavailable`,
+ * `workflow.binding_unapproved`, `workflow.params_invalid` or
+ * `workflow.start_denied`. A new start is admitted only while it still
+ * holds (`admitWorkflowStart`).
+ */
+export const decideWorkflowStart = async (
+  env: Env,
+  invoker: StartInvoker,
+  id: unknown,
+  request: unknown,
+  /**
+   * The files the start may hand its run: an App's, for its page's or
+   * code's start; a message's attachments, for its email trigger's.
+   */
+  files?: StartFiles
+): Promise<StartDecision> => {
+  const {
+    args: input,
+    key,
+    expected,
+  } = workflowResourceErrors.parse(
+    "workflow.start_invalid",
+    workflowStartSchema,
+    request
+  );
+  if (typeof id !== "string" || id.length === 0 || id.length > 128) {
+    throw workflowResourceErrors.create("workflow.resource_unavailable");
+  }
+  requireOwnKey(invoker, key);
+  const rule = await ruleOf(env, invoker, id);
+  if (invoker.type !== "person") {
+    // Code and triggers learn nothing of a workflow they may not start:
+    // their own rule first, and then any refusal is `start_denied`.
+    const allowed = await drizzle(env.DB).get<{ holds: number }>(
+      sql`SELECT ${rule.holds} AS holds`
+    );
+    if (allowed.holds === 0) {
+      throw denied();
+    }
+  }
+  // A start admitted before under the key, retried as its answer was
+  // lost: its input is read as the version it started took it, which a
+  // publish since may have replaced; only a new start is read as the
+  // version live now, which it runs. Answered only once the invoker's
+  // access holds (below).
+  const existing = await receiptOf(env, rule.invoker, rule.principal, key);
+  const startedOn =
+    existing?.workflowResourceId === id
+      ? existing.workflowResourceVersion
+      : undefined;
+  let found: Awaited<ReturnType<typeof pinned>>;
+  try {
+    found = await pinned(env, id, startedOn);
+  } catch (error) {
+    if (invoker.type !== "person" && isExpectedError(error)) {
+      throw denied();
+    }
+    throw error;
+  }
+  const {
+    version,
+    generation,
+    configRevision,
+    manifestHash,
+    inputDescriptor,
+    buildHash,
+  } = found;
+  const base = {
+    version,
+    manifestHash,
+    invokerType: rule.invoker.type,
+    invoker: rule.invoker.id,
+    principal: rule.principal,
+    generation,
+  };
+  let text: string;
+  try {
+    text = acceptedInput(inputDescriptor, input);
+  } catch (error) {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash: null },
+      "workflow.start_invalid"
+    );
+    throw error;
+  }
+  const inputHash = await sha256Hex(text);
+  if (invoker.type === "person") {
+    // Their access as it is now, before even a start already admitted is
+    // answered: the role check above goes by the session's teams, which
+    // may still list one they left.
+    const live = await drizzle(env.DB).get<{ holds: number }>(
+      sql`SELECT ${rule.holds} AS holds`
+    );
+    if (live.holds === 0) {
+      await refusedStart(
+        env,
+        rule.actor,
+        id,
+        { ...base, inputHash },
+        "workflow.start_denied"
+      );
+      throw denied();
+    }
+  }
+  if (existing !== undefined) {
+    try {
+      return {
+        start: sameStart(existing, { workflowId: id, ...rule }, inputHash),
+      };
+    } catch (error) {
+      await refusedStart(
+        env,
+        rule.actor,
+        id,
+        { ...base, inputHash },
+        "workflow.start_conflict"
+      );
+      throw error;
+    }
+  }
+  // A new start only: one admitted before, retried under its key, answers
+  // what it admitted, whatever was revoked since (its run, if it hasn't
+  // ended, stops at its next call). Another version live than the one the
+  // person filled the start in for: they are told.
+  if (expected !== undefined && expected !== version) {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash },
+      "workflow.version_not_live"
+    );
+    throw notLive(invoker);
+  }
+  // Paused (workflow-pause.ts): nothing starts. A pause moves the
+  // policy generation on, so a start decided before it is refused as it
+  // is admitted.
+  if (await isPaused(env, id)) {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash },
+      "workflow.paused"
+    );
+    throw workflowResourceErrors.create("workflow.paused");
+  }
+  // Read after the invoker's code formed the input it starts with, so a
+  // restricted read that fed it is seen (`restrictedStart`).
+  const restricted = await restrictedStart(env, invoker);
+  // And what the chat behind it had read, copied onto its run as it is
+  // admitted (`chatPinsOf`).
+  const pins = await chatPinsOf(env, invoker, async () => {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash },
+      "workflow.start_denied"
+    );
+  });
+  // Frozen now, from what was read above: the parameter values of the
+  // revision in force, and what serves each binding.
+  const params = await frozenParams(env, id, version, configRevision);
+  const bindings = await frozenBindings(env, id, version);
+  const state = await frozenState(env, id, rule.principal, buildHash);
+  // Read again as the admitting statement runs: the workflow live at the
+  // same policy generation, parameter revision and live version, the same
+  // manifest, everything its bindings need, the invoker's own rule, and
+  // every run whose keys it froze still keeping its evidence.
+  const holds = sql`(EXISTS (SELECT 1 FROM workflow_resources AS live
+      WHERE live.id = ${id} AND live.deleted_at IS NULL
+        AND live.current_version = ${version}
+        AND live.policy_generation = ${generation}
+        AND live.config_revision = ${configRevision})
+    AND EXISTS (SELECT 1 FROM workflow_resource_versions AS pinned
+      WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
+        AND pinned.manifest_hash = ${manifestHash})
+    AND ${requiredSql(id, JSON.stringify(bindings.required))}
+    AND ${rule.holds}
+    AND ${writersHeldSql(state)})`;
+  const decided = await drizzle(env.DB).get<{ holds: number }>(
+    sql`SELECT ${holds} AS holds`
+  );
+  if (decided.holds === 0) {
+    throw await deniedAt(env, id, version, { generation, configRevision });
+  }
+  // The ID its run will have: its inboxes' tokens and its files' copies
+  // are made under it.
+  const runId = crypto.randomUUID();
+  const inboxes = await startInboxes(env, {
+    runId,
+    workflowId: id,
+    bindings: bindings.text,
+    runs: buildHash !== null,
+  });
+  // Its files, copied last, once everything else said yes: no run's until
+  // it is admitted.
+  const handed = await handFiles(
+    env,
+    descriptorFromText(inputDescriptor),
+    text,
+    { runId, workflowId: id },
+    files
+  );
+  return {
+    authorization: {
+      // The ID its files, pins and inboxes were made under.
+      id: runId,
+      alsoAdmitted: (admitted) => [
+        ...(handed.admitted?.(admitted) ?? []),
+        ...pinsAdmitted(env, runId, pins, admitted),
+        ...writersAdmitted(env, runId, state, admitted),
+        ...inboxes(admitted),
+      ],
+      workflowId: id,
+      version,
+      manifestHash,
+      invoker: rule.invoker,
+      originAppVersion: rule.originAppVersion,
+      principal: rule.principal,
+      generation,
+      key,
+      // As the run reads it; its hash is of the input as it was sent, so
+      // the same start sent again is the same start.
+      input: handed.input,
+      inputHash,
+      params,
+      paramsRevision: configRevision,
+      bindings: bindings.text,
+      state,
+      restricted,
+      buildHash,
+      actor: rule.actor,
+      ...lineageOf(invoker),
+      holds,
+    },
+  };
+};
+
+/**
+ * That the person a start acts for has fewer than
+ * `maxLiveRunsPerPrincipal` runs of the workflow that haven't ended, as
+ * SQL, for a start that admits a run (its version is executable). Until
+ * lineage quotas hold these runs (GRA-567), it bounds what one person's
+ * starts make core spend at once.
+ */
+const underRunLimit = (authorization: StartAuthorization): SQL =>
+  sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
+        WHERE live.workflow_resource_id = ${authorization.workflowId}
+          AND live.principal_id = ${authorization.principal}
+          AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
+
+/** The hash of the snapshot `authorization` froze, if any. */
+const stateHashOf = ({ state }: StartAuthorization): string | null =>
+  state?.hash ?? null;
+
+/** The statement storing the snapshot `authorization` froze, if any. */
+const snapshotFor = (
+  db: DrizzleD1Database,
+  { state }: StartAuthorization,
+  at: Date
+) => (state === null ? [] : [snapshotStored(db, state, at)]);
+
+/**
+ * The statements that claim the account a run `authorization` admits is
+ * charged to, for a run a trigger starts in another run's lineage (a
+ * stamped message of that run, `TriggerCause`): its workflow's
+ * account there, never the lineage's own allowances, which a busy
+ * workflow's runs would otherwise use up for the run that caused them and
+ * every other workflow triggered there (quotas.ts,
+ * `triggeredAccountClaimed`). Its restricted mode is its start's, as
+ * decided (`restrictedStart`): an account changes what its work is
+ * charged to, never that. None for any other start, or one that admits no
+ * run: `claim` goes before its run's row, `aged` after it.
+ */
+const triggeredAccountFor = (
+  db: DrizzleD1Database,
+  { lineage, workflowId }: StartAuthorization,
+  run: { run: string; createdAt: number; admitted: SQL }
+) => {
+  if (lineage === undefined) {
+    return { claim: [], aged: [] };
+  }
+  const { claim, aged } = triggeredAccountClaimed(db, {
+    ...run,
+    root: lineage.rootRunId,
+    workflow: workflowId,
+  });
+  return { claim: [claim], aged: [aged] };
+};
+
+/**
+ * Admits the new start `authorization` decided on: its receipt, written in
+ * one statement only while the authorization, and `also` (what its caller
+ * requires besides, as SQL), still hold, with its audit event. A start
+ * whose authority changed since is refused (`workflow.start_denied`) and
+ * the refusal audited; the same key admitted meanwhile answers that start.
+ */
+export const admitWorkflowStart = async (
+  env: Env,
+  authorization: StartAuthorization,
+  also: SQL = sql`1`,
+  /** What else its audit events name (the agent that had it made, say). */
+  noted: Readonly<Record<string, string>> = {},
+  /**
+   * Asked last before the admitting batch, nothing awaited between:
+   * throws to start nothing (a caller that may no longer act).
+   */
+  beforeAdmit?: () => void
+): Promise<WorkflowStart> => {
+  const id = authorization.id ?? crypto.randomUUID();
+  const createdAt = new Date();
+  const bindingsHash = await sha256Hex(authorization.bindings);
+  const receiptWritten = sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${id})`;
+  const alsoAdmitted = authorization.alsoAdmitted?.(receiptWritten) ?? [];
+  const db = drizzle(env.DB);
+  const account = triggeredAccountFor(db, authorization, {
+    run: id,
+    createdAt: createdAt.getTime(),
+    admitted: receiptWritten,
+  });
+  const values = [
+    id,
+    authorization.invoker.type,
+    authorization.invoker.id,
+    authorization.key,
+    authorization.workflowId,
+    authorization.version,
+    authorization.manifestHash,
+    authorization.originAppVersion,
+    // `trigger_version`, unused since a trigger has no versions.
+    null,
+    authorization.principal,
+    authorization.generation,
+    authorization.input,
+    authorization.inputHash,
+    authorization.params,
+    authorization.paramsRevision,
+    authorization.bindings,
+    bindingsHash,
+    createdAt.getTime(),
+    null,
+    authorization.restricted ? 1 : 0,
+    stateHashOf(authorization),
+    authorization.state !== null && authorization.state.withheld > 0
+      ? authorization.state.withheld
+      : null,
+  ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
+  const detail = {
+    ...noted,
+    receipt: id,
+    version: authorization.version,
+    manifestHash: authorization.manifestHash,
+    invokerType: authorization.invoker.type,
+    invoker: authorization.invoker.id,
+    originAppVersion: authorization.originAppVersion,
+    principal: authorization.principal,
+    generation: authorization.generation,
+    inputHash: authorization.inputHash,
+    // The revision of the frozen values, never the values nor a hash of
+    // them: a sensitive one stays out.
+    paramsRevision: authorization.paramsRevision,
+    bindingsHash,
+    restricted: authorization.restricted,
+    // How many keys of what the workflow keeps its run reads as unset:
+    // the run that set each read what the company may no longer read.
+    ...(authorization.state !== null && authorization.state.withheld > 0
+      ? { stateWithheld: authorization.state.withheld }
+      : {}),
+  };
+  // Why it wasn't admitted, if it isn't: read in the admitting batch, just
+  // before its insert, so the reason is the state it was refused in.
+  let refusedFor: { under: number } | undefined;
+  beforeAdmit?.();
+  try {
+    const [[state]] = await auditedBatch(env, db, [
+      db
+        .select({
+          under: sql<number>`${underRunLimit(authorization)}`.as("under"),
+        })
+        .from(sql`(SELECT 1)`),
+      // Its run's snapshot, before the receipt that names it.
+      ...snapshotFor(db, authorization, createdAt),
+      db
+        .insert(workflowStartReceipts)
+        .select(
+          sql`SELECT ${sql.join(values, sql`, `)} WHERE ${authorization.holds} AND ${also} AND ${underRunLimit(authorization)}`
+        ),
+      // Its workflow's account in the lineage a trigger started it in.
+      ...account.claim,
+      // Its run, pinned to the version's build, with the receipt or not at
+      // all (resource-runs.ts): the engine is sent it once this commits.
+      runAdmitted(db, {
+        receipt: id,
+        workflowId: authorization.workflowId,
+        version: authorization.version,
+        manifestHash: authorization.manifestHash,
+        buildHash: authorization.buildHash,
+        principal: authorization.principal,
+        restricted: authorization.restricted,
+        createdAt: createdAt.getTime(),
+        ...(authorization.lineage === undefined
+          ? {}
+          : { lineage: authorization.lineage }),
+      }),
+      ...account.aged,
+      // The files its start handed its run: theirs once it is admitted.
+      ...alsoAdmitted,
+      // Only once the receipt is written, read as such: never inferred from
+      // the statement just before it, whichever that is.
+      outboxedWhere(
+        db,
+        {
+          actor: authorization.actor,
+          action: "workflow.start.admitted",
+          target: { type: "workflow_resource", id: authorization.workflowId },
+          detail,
+        },
+        sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${id})`
+      ),
+    ]);
+    refusedFor = state;
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+    // The same key, admitted as this ran.
+  }
+  // Its run, if this admitted one, joins the person's runs an App's
+  // workflow queries list: those followed live read again.
+  await tellQueryFollowers(env, id);
+  const admitted = await receiptOf(
+    env,
+    authorization.invoker,
+    authorization.principal,
+    authorization.key
+  );
+  if (admitted !== undefined) {
+    try {
+      return sameStart(admitted, authorization, authorization.inputHash);
+    } catch (error) {
+      await refusedStart(
+        env,
+        authorization.actor,
+        authorization.workflowId,
+        detail,
+        "workflow.start_conflict"
+      );
+      throw error;
+    }
+  }
+  // Refused by the cap on live runs, or by authority that changed: said as
+  // which, as the admitting batch found it.
+  const limited = refusedFor?.under === 0;
+  const reason = limited ? "workflow.run_limit" : "workflow.start_denied";
+  await refusedStart(
+    env,
+    authorization.actor,
+    authorization.workflowId,
+    detail,
+    reason
+  );
+  if (limited) {
+    throw workflowResourceErrors.create("workflow.run_limit", {
+      limit: maxLiveRunsPerPrincipal,
+    });
+  }
+  const refused = denied();
+  staleRefusals.add(refused);
+  throw refused;
+};
+
+/**
+ * Starts workflow `id` for `invoker` with `request`: decided, then, for a
+ * new start, admitted while `also` holds too.
+ */
+export const startWorkflow = async (
+  env: Env,
+  invoker: StartInvoker,
+  id: unknown,
+  request: unknown,
+  also?: SQL,
+  noted?: Readonly<Record<string, string>>,
+  /**
+   * Asked just before a new start is admitted, nothing awaited between:
+   * throws to start nothing (a caller that may no longer act).
+   */
+  beforeAdmit?: () => void,
+  /**
+   * The files the start may hand its run: an App's, for its page's or
+   * code's start; a message's attachments, for its email trigger's.
+   */
+  files?: StartFiles
+): Promise<WorkflowStart> => {
+  const decision = await decideWorkflowStart(env, invoker, id, request, files);
+  let start: WorkflowStart;
+  if ("start" in decision) {
+    ({ start } = decision);
+  } else {
+    const copiedFor = decision.authorization.id;
+    try {
+      start = await admitWorkflowStart(
+        env,
+        decision.authorization,
+        also,
+        noted,
+        beforeAdmit
+      );
+    } catch (error) {
+      if (copiedFor !== undefined) {
+        await startFilesDropped(env, copiedFor);
+      }
+      throw error;
+    }
+    // Another start admitted under the same key meanwhile: these copies
+    // are no run's.
+    if (copiedFor !== undefined && start.id !== copiedFor) {
+      await startFilesDropped(env, copiedFor);
+    }
+  }
+  // Its run, sent to the engine while it is still starting: a start sent
+  // again finishes one core stopped in the middle of (resource-runs.ts).
+  return { ...start, runId: await startResourceRun(env, start.id) };
+};

@@ -1,0 +1,353 @@
+import type { AgentProposer } from "@grasp-os/shared/apps";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
+import { roleSchema } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+
+import {
+  accounts,
+  members,
+  teamMembers,
+  teams,
+  users,
+} from "../db/core/schema.ts";
+import { staffMayStay } from "../onboarding/gate.ts";
+import { reachesWorkspace } from "../session-check.ts";
+import { authFor, currentMembership, organizationId } from "./auth.ts";
+import { providerIds, signInConfig } from "./config.ts";
+import { isGuestNow } from "./guest-codes.ts";
+
+/**
+ * A member's reads as `memberOf` makes them, for one batch with others,
+ * so what else is read is of the same snapshot of the database (core's
+ * Brain module reads the shared connections' audiences so).
+ */
+export const memberReads = (db: DrizzleD1Database, userId: string) =>
+  [
+    db
+      .select({ role: members.role })
+      .from(members)
+      .where(currentMembership(userId)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teams.organizationId, organizationId)
+        )
+      )
+      .orderBy(teams.name),
+  ] as const;
+
+/**
+ * A person's role in the organization, read now. `undefined` when they have
+ * no membership, a removed one, or a role that isn't exactly one of ours:
+ * no access.
+ */
+export const memberRole = async (
+  database: D1Database,
+  userId: string
+): Promise<Role | undefined> => {
+  const [read] = memberReads(drizzle(database), userId);
+  const [membership] = await read;
+  const role = roleSchema.safeParse(membership?.role);
+  return role.success ? role.data : undefined;
+};
+
+/** A person's name as their account holds it, read now; `undefined` for none. */
+export const accountNameOf = async (
+  database: D1Database,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(database)
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId));
+  const name = user?.name.trim();
+  return name === undefined || name === "" ? undefined : name;
+};
+
+/** The teams of the organization a person is in, read now, by name. */
+export const teamsOf = async (
+  database: D1Database,
+  userId: string
+): Promise<Identity["teams"]> => {
+  const [, read] = memberReads(drizzle(database), userId);
+  return await read;
+};
+
+/**
+ * A member of the organization, as the checks on what they may do see
+ * them: an {@link Identity} without its session.
+ */
+export type Member = Pick<Identity, "userId" | "role" | "teams" | "staff">;
+
+/**
+ * Who acts: a member, or the chat's agent acting for one (agent-builds.ts)
+ * with their role and rights, as `actor`, the audit log's name for it.
+ */
+export type Acting = Member & {
+  actor?: AuditActor;
+  /** The chat's agent acting, as what it writes records it. */
+  via?: AgentProposer;
+};
+
+/** The member `userId`, from what `memberReads` read; `undefined` with no current membership. */
+export const memberFrom = (
+  userId: string,
+  membership: readonly { role: string }[],
+  memberTeams: Identity["teams"]
+): Member | undefined => {
+  const role = roleSchema.safeParse(membership[0]?.role);
+  return role.success
+    ? { userId, role: role.data, teams: memberTeams, staff: false }
+    : undefined;
+};
+
+/**
+ * A member's role and teams, read now; `undefined` once they have no
+ * current membership. What `identify` finds of a signed-in member, for
+ * whoever acts on a member's behalf without their session (an agent).
+ */
+export const memberOf = async (
+  database: D1Database,
+  userId: string
+): Promise<Member | undefined> => {
+  const [role, memberTeams] = await Promise.all([
+    memberRole(database, userId),
+    teamsOf(database, userId),
+  ]);
+  return role === undefined
+    ? undefined
+    : { userId, role, teams: memberTeams, staff: false };
+};
+
+/**
+ * Who `userId` is now as someone an App may act for after their call
+ * (a committed mutation's notification, app-notifications.ts): a member
+ * (`memberOf`), or a guest (guest-access.ts), an App's user in no team.
+ * `undefined` for neither. What they may do in the App is then
+ * `functionRoles`' to decide, as for their call itself.
+ */
+export const appUserOf = async (
+  database: D1Database,
+  userId: string
+): Promise<(Member & Pick<Identity, "guest">) | undefined> => {
+  const member = await memberOf(database, userId);
+  if (member !== undefined) {
+    return member;
+  }
+  return (await isGuestNow({ DB: database }, userId))
+    ? { userId, role: "user", teams: [], staff: false, guest: true }
+    : undefined;
+};
+
+/**
+ * A Grasp staff member's role now, from the sign-in config:
+ * `undefined` once the staff window has closed, they are no longer on the
+ * staff list the admin keeps, the company's admin ended staff access,
+ * or, with the onboarding scope, 7 days after Grasp's go (all checked now,
+ * not only when they signed in).
+ */
+export const staffRole = async (
+  env: Env,
+  userId: string
+): Promise<Role | undefined> => {
+  const config = signInConfig(env);
+  if (!(config?.staff && staffWindowOpen(config, Date.now()))) {
+    return undefined;
+  }
+  const { scope, opened } = config.staff;
+  if (!(await staffMayStay(env, opened, scope))) {
+    return undefined;
+  }
+  const [account] = await drizzle(env.DB)
+    .select({ oid: accounts.oid })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.userId, userId),
+        eq(accounts.providerId, providerIds.staff)
+      )
+    );
+  const listed = (config.staff.oids ?? []).some(
+    (oid) => oid.toLowerCase() === account?.oid?.toLowerCase()
+  );
+  return listed ? config.staff.role : undefined;
+};
+
+/**
+ * Who a current session's person is, read now: a staff session's role
+ * from the sign-in config, anyone else's from their membership.
+ * `undefined` once they have neither.
+ *
+ * A session for someone's interview alone is nobody's here (GRA-1790).
+ *
+ * So is a guest's (roles.ts `guestRole`): `memberOf` finds no member in
+ * them, so every route that asks who a request comes from, the ones
+ * added later included, answers a guest as nobody signed in. What is
+ * open to guests is named in one place (guest-access.ts), which alone
+ * reads their identity (`guestIdentity`).
+ *
+ * A staff session reaches the onboarding alone, whatever the config's
+ * staff scope: Grasp's staff identity is for managing a deployment, never
+ * for acting inside the client's workspace. A staff member who needs to
+ * act there is added as a member and signs in as one, as anyone does.
+ */
+export const sessionIdentity = async (
+  env: Env,
+  session: {
+    userId: string;
+    email: string;
+    name: string;
+    expiresAt: Date;
+    staff: boolean;
+    /** A session for the person's own interview alone (GRA-1790). */
+    interview: boolean;
+  }
+): Promise<Identity | undefined> => {
+  // Nobody, to every route that asks who it is: only the interview's own
+  // routes read such a session (onboarding/interview-caller.ts).
+  if (session.interview) {
+    return undefined;
+  }
+  const person = {
+    userId: session.userId,
+    email: session.email,
+    name: session.name,
+    expiresAt: session.expiresAt.toISOString(),
+  };
+  if (session.staff) {
+    const role = await staffRole(env, session.userId);
+    if (role === undefined) {
+      return undefined;
+    }
+    return {
+      ...person,
+      role,
+      teams: [],
+      staff: true,
+      onboardingOnly: true,
+    };
+  }
+
+  const member = await memberOf(env.DB, session.userId);
+  if (member === undefined) {
+    return undefined;
+  }
+  return { ...person, ...member, staff: false };
+};
+
+/** A session, as `sessionIdentity` and `guestIdentity` read it. */
+type ReadSession = Parameters<typeof sessionIdentity>[1];
+
+/**
+ * Who a current session's person is as a guest (roles.ts `guestRole`),
+ * read now: an App's user, in no team, marked `guest`. `undefined` for
+ * anyone else, a member, Grasp staff and an interview's session among
+ * them, and once they are no guest (removed). Only what a guest's
+ * session may reach asks this (guest-access.ts): everything else asks
+ * `sessionIdentity`, which answers a guest as nobody.
+ */
+const guestIdentity = async (
+  env: Env,
+  session: ReadSession
+): Promise<Identity | undefined> => {
+  if (session.staff || session.interview) {
+    return undefined;
+  }
+  return (await isGuestNow(env, session.userId))
+    ? {
+        userId: session.userId,
+        email: session.email,
+        name: session.name,
+        expiresAt: session.expiresAt.toISOString(),
+        role: "user",
+        teams: [],
+        staff: false,
+        guest: true,
+      }
+    : undefined;
+};
+
+/** A signed-in session, as Better Auth and core's records have it now. */
+export interface SignedInSession {
+  /** Its ID: never its token, which only its cookie carries. */
+  sessionId: string;
+  expiresAt: Date;
+  person: Identity;
+}
+
+/**
+ * The session behind a request's cookie and who it is, as `identify`
+ * reads them; `undefined` as there.
+ */
+export const signedInSession = async (
+  env: Env,
+  headers: Headers,
+  /**
+   * Whether a guest's session counts, as their identity (`guestIdentity`):
+   * only for what guest-access.ts opens to guests.
+   */
+  { guests = false }: { guests?: boolean } = {}
+): Promise<SignedInSession | undefined> => {
+  const config = signInConfig(env);
+  const auth = await authFor(env, config);
+  if (!(auth && config)) {
+    return undefined;
+  }
+  const found = await auth.api.getSession({ headers });
+  if (!found) {
+    return undefined;
+  }
+  const { session, user } = found;
+  const read: ReadSession = {
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    expiresAt: session.expiresAt,
+    staff: session.staff,
+    interview: session.interview,
+  };
+  const person =
+    (await sessionIdentity(env, read)) ??
+    (guests ? await guestIdentity(env, read) : undefined);
+  return person === undefined
+    ? undefined
+    : { sessionId: session.id, expiresAt: session.expiresAt, person };
+};
+
+/**
+ * Who a request comes from: the person behind its session cookie, with their
+ * role and teams read now, from the database. Called on every request that
+ * needs a person, so a revoked or expired session, a changed role, a
+ * removal or a closed staff window takes effect on the next one; an open
+ * RPC connection reads it again every few seconds (rpc.ts).
+ * `undefined` means nobody is signed in.
+ */
+export const identify = async (
+  env: Env,
+  headers: Headers
+): Promise<Identity | undefined> => {
+  const signedIn = await signedInSession(env, headers);
+  return signedIn?.person;
+};
+
+/**
+ * Who a request comes from, as `identify` says, for a route outside the
+ * onboarding: `undefined` for Grasp staff, who reach the onboarding alone,
+ * as for nobody signed in.
+ */
+export const identifyFull = async (
+  env: Env,
+  headers: Headers
+): Promise<Identity | undefined> => {
+  const person = await identify(env, headers);
+  return person !== undefined && reachesWorkspace(person) ? person : undefined;
+};

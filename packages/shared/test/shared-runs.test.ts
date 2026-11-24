@@ -1,0 +1,231 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { describe, expect, it } from "vite-plus/test";
+
+import { inTurn, sharedRun } from "../src/shared-runs.ts";
+import type { SharedRun, Turns } from "../src/shared-runs.ts";
+
+// Work shared across the requests of an isolate (src/shared-runs.ts):
+// pure scheduling, so tested on its own. Another request's work is an
+// entry it notes its end on; a cancelled request's never notes one
+// (workerd drops the rest of it), which an entry left as it is stands in
+// for here.
+
+/** How long the work here may take before it is taken for abandoned. */
+const abandonAfterMs = 50;
+
+describe("work shared across requests", () => {
+  it("starts one replacement for an abandoned run, however many wait on it", async () => {
+    // Another request's build, abandoned: it never notes an end.
+    const runs = new Map<string, SharedRun<string>>([
+      ["build", { started: Date.now(), abandonAfterMs }],
+    ]);
+    let starts = 0;
+    const start = async (): Promise<string> => {
+      starts += 1;
+      await sleep(10);
+      return "rebuilt";
+    };
+
+    const answers = await Promise.all(
+      Array.from(
+        { length: 10 },
+        async () => await sharedRun(runs, "build", abandonAfterMs, start)
+      )
+    );
+
+    expect({
+      starts,
+      answers: new Set(answers),
+      left: runs.size,
+    }).toStrictEqual({ starts: 1, answers: new Set(["rebuilt"]), left: 0 });
+  });
+
+  it("starts one replacement however quickly it finishes, though each waiter's time runs out on its own", async () => {
+    // Another request's build, abandoned: it never notes an end.
+    const runs = new Map<string, SharedRun<string>>([
+      ["build", { started: Date.now(), abandonAfterMs }],
+    ]);
+    let starts = 0;
+    // Each waiter asks a moment after the one before, so their times run
+    // out one after the other, after the first one's replacement finished.
+    const answers = await Promise.all(
+      Array.from({ length: 10 }, async (_, index) => {
+        await sleep(index * 5);
+        return await sharedRun(runs, "build", abandonAfterMs, async () => {
+          starts += 1;
+          return await Promise.resolve("rebuilt");
+        });
+      })
+    );
+
+    expect({
+      starts,
+      answers: new Set(answers),
+      left: runs.size,
+    }).toStrictEqual({ starts: 1, answers: new Set(["rebuilt"]), left: 0 });
+  });
+
+  it("shares a run that settles in time, and hands its failure to every waiter", async () => {
+    const runs = new Map<string, SharedRun<string>>();
+    const running: SharedRun<string> = { started: Date.now(), abandonAfterMs };
+    runs.set("build", running);
+    let starts = 0;
+    const waiting = Array.from(
+      { length: 3 },
+      async () =>
+        await sharedRun(runs, "build", abandonAfterMs, async () => {
+          starts += 1;
+          await Promise.resolve();
+          return "own";
+        }).catch((error: unknown) =>
+          error instanceof Error ? error.message : "?"
+        )
+    );
+    running.outcome = { error: new Error("The build failed.") };
+
+    await expect(Promise.all(waiting)).resolves.toStrictEqual([
+      "The build failed.",
+      "The build failed.",
+      "The build failed.",
+    ]);
+    expect(starts).toBe(0);
+  });
+
+  it("starts no replacement for a waiter given up on while it waited, and leaves it to another", async () => {
+    // Another request's build, abandoned: it never notes an end.
+    const runs = new Map<string, SharedRun<string>>([
+      ["build", { started: Date.now(), abandonAfterMs }],
+    ]);
+    let starts = 0;
+    const start = async (): Promise<string> => {
+      starts += 1;
+      return await Promise.resolve("rebuilt");
+    };
+    const giveUp = new AbortController();
+    const givenUp = sharedRun(
+      runs,
+      "build",
+      abandonAfterMs,
+      start,
+      giveUp.signal
+    );
+    // Its lease lost while it waits on the abandoned build.
+    await sleep(abandonAfterMs / 2);
+    giveUp.abort(new Error("lost its lease"));
+    let first: string;
+    try {
+      first = await givenUp;
+    } catch (error) {
+      first = error instanceof Error ? error.message : String(error);
+    }
+    const startsThen = starts;
+    // Another waiter still replaces the abandoned build, and shares it.
+    const other = await sharedRun(runs, "build", abandonAfterMs, start);
+    expect({ first, startsThen, other, starts }).toStrictEqual({
+      first: "lost its lease",
+      startsThen: 0,
+      other: "rebuilt",
+      starts: 1,
+    });
+  });
+
+  it("drops abandoned work nobody asks for or waits on at the next call for any key, and keeps work still running", async () => {
+    const runs = new Map<string, SharedRun<string>>();
+    const now = Date.now();
+    // Abandoned, and no longer waited on: started twice its own time ago.
+    runs.set("gone", {
+      started: now - 2 * abandonAfterMs - 1,
+      abandonAfterMs,
+    });
+    // Abandoned, but a waiter may still be about to follow its link.
+    runs.set("just abandoned", {
+      started: now - abandonAfterMs - 1,
+      abandonAfterMs,
+    });
+    // Within its own time, however short the caller's.
+    runs.set("running", {
+      started: now - 2 * abandonAfterMs - 1,
+      abandonAfterMs: 60_000,
+    });
+
+    const answer = await sharedRun(runs, "other", 1, async () => {
+      await Promise.resolve();
+      return "own";
+    });
+
+    expect({ answer, left: [...runs.keys()] }).toStrictEqual({
+      answer: "own",
+      left: ["just abandoned", "running"],
+    });
+  });
+});
+
+/** A read that takes a moment. */
+const reading = async (): Promise<string> => {
+  await sleep(1);
+  return "read";
+};
+
+describe("work run in turn", () => {
+  it("never runs two turns at once, and runs each, in order", async () => {
+    const turns: Turns = {};
+    let running = 0;
+    let most = 0;
+    const order: number[] = [];
+    const read = async (index: number): Promise<number> => {
+      running += 1;
+      most = Math.max(most, running);
+      await sleep(10);
+      order.push(index);
+      running -= 1;
+      return index;
+    };
+
+    const answers = await Promise.all(
+      [1, 2, 3].map(
+        async (index) =>
+          await inTurn(
+            turns,
+            abandonAfterMs * 10,
+            async () => await read(index)
+          )
+      )
+    );
+
+    expect({ answers, order, most, left: turns.last }).toStrictEqual({
+      answers: [1, 2, 3],
+      order: [1, 2, 3],
+      most: 1,
+      left: undefined,
+    });
+  });
+
+  it("takes a turn that never ends, as a cancelled request's, for abandoned once its time is up", async () => {
+    const turns: Turns = {
+      last: {
+        endsBy: Date.now() + abandonAfterMs,
+      },
+    };
+    const started = Date.now();
+
+    const answer = await inTurn(turns, abandonAfterMs, reading);
+
+    expect({
+      answer,
+      waited: Date.now() - started >= abandonAfterMs - 5,
+    }).toStrictEqual({ answer: "read", waited: true });
+  });
+
+  it("starts the next turn once one fails", async () => {
+    const turns: Turns = {};
+    const failing = inTurn(turns, abandonAfterMs * 10, async () => {
+      await sleep(5);
+      throw new Error("The read failed");
+    });
+    const next = inTurn(turns, abandonAfterMs * 10, reading);
+
+    await expect(failing).rejects.toThrow("The read failed");
+    await expect(next).resolves.toBe("read");
+  });
+});

@@ -1,0 +1,83 @@
+// Byte encodings core and connect both need, with nothing but Web APIs, so
+// they run the same on workerd and in the browser.
+
+const base64UrlPattern = /^[A-Za-z0-9_-]*$/u;
+
+/** Bytes as unpadded base64url (RFC 4648 §5). */
+export const toBase64Url = (bytes: Uint8Array): string =>
+  btoa(String.fromCodePoint(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/[=]+$/u, "");
+
+/** Unpadded base64url as bytes; throws a `TypeError` on anything else. */
+export const fromBase64Url = (text: string): Uint8Array<ArrayBuffer> => {
+  if (!base64UrlPattern.test(text)) {
+    throw new TypeError("Not base64url");
+  }
+  const binary = atob(text.replaceAll("-", "+").replaceAll("_", "/"));
+  return Uint8Array.from(binary, (char) => char.codePointAt(0) ?? 0);
+};
+
+/** Bytes as lowercase hex. */
+export const toHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const HEX = /^(?:[0-9a-f]{2})*$/u;
+
+/** The bytes lowercase hex `text` spells; undefined for anything else. */
+export const fromHex = (text: string): Uint8Array<ArrayBuffer> | undefined => {
+  if (!HEX.test(text)) {
+    return undefined;
+  }
+  return Uint8Array.from({ length: text.length / 2 }, (_, index) =>
+    Number.parseInt(text.slice(index * 2, index * 2 + 2), 16)
+  );
+};
+
+/** SHA-256 of `bytes`, in lowercase hex. */
+export const sha256HexOfBytes = async (
+  bytes: ArrayBuffer | Uint8Array
+): Promise<string> =>
+  toHex(
+    new Uint8Array(
+      // A copy whose buffer is an ArrayBuffer, as `digest` takes it.
+      await crypto.subtle.digest(
+        "SHA-256",
+        bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes)
+      )
+    )
+  );
+
+/** SHA-256 of `text` (UTF-8), in lowercase hex. */
+export const sha256Hex = async (text: string): Promise<string> =>
+  toHex(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+    )
+  );
+
+/** Bytes as standard, padded base64 (RFC 4648 §4), for any length. */
+export const toBase64 = (bytes: Uint8Array): string => {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCodePoint(byte);
+  }
+  return btoa(binary);
+};
+
+/**
+ * The integrity hash of `bytes` as npm writes one (Subresource
+ * Integrity): `sha512-` and the SHA-512 digest in base64.
+ */
+export const sha512Integrity = async (bytes: Uint8Array): Promise<string> =>
+  `sha512-${toBase64(
+    new Uint8Array(
+      // A copy whose buffer is an ArrayBuffer, as `digest` takes it.
+      await crypto.subtle.digest("SHA-512", new Uint8Array(bytes))
+    )
+  )}`;
+
+/** `bytes` random bytes from the platform's CSPRNG, as base64url. */
+export const randomToken = (bytes = 32): string =>
+  toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));

@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_store` ADD `cursor_key` text;

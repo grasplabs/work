@@ -1,0 +1,559 @@
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { env, exports } from "cloudflare:workers";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
+
+import worker from "../src/index.ts";
+import {
+  fakeCores,
+  mapHost,
+  routerKeyAdmin,
+  testRouterKey,
+} from "./fixtures.ts";
+
+/**
+ * A stand-in for Cloudflare's rate limiter that lets `allowed` requests
+ * through per key. The real one counts in wall-clock windows, which a test
+ * can't pin down.
+ */
+const limiterAllowing = (allowed: number): RateLimit => {
+  const counts = new Map<string, number>();
+  return {
+    limit: async ({ key }) => {
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      return await Promise.resolve({ success: count <= allowed });
+    },
+  };
+};
+
+const signInFrom = async (
+  ip: string,
+  url: string,
+  limiter: RateLimit
+): Promise<Response> =>
+  await worker.fetch(
+    new Request(url, {
+      method: "POST",
+      headers: { "cf-connecting-ip": ip },
+    }),
+    { ...env, AUTH_RATE_LIMIT: limiter }
+  );
+
+describe("sign-in rate limit", () => {
+  const cores = fakeCores();
+
+  beforeAll(async () => {
+    const admin = await routerKeyAdmin();
+    await admin.create(testRouterKey);
+    const core = { coreUrl: "https://grasp-os-core.acme.workers.dev" };
+    await Promise.all([
+      mapHost("acme.limit.test", { ...core, clientId: "acme", generation: 1 }),
+      mapHost("beta.limit.test", { ...core, clientId: "beta", generation: 1 }),
+    ]);
+  });
+
+  it("limits sign-in per hostname and client IP, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const signIn = "https://acme.limit.test/api/auth/sign-in/sso";
+
+    const first = await signInFrom("192.0.2.1", signIn, limiter);
+    const second = await signInFrom("192.0.2.1", signIn, limiter);
+    const refused = await signInFrom("192.0.2.1", signIn, limiter);
+    const otherIp = await signInFrom("192.0.2.2", signIn, limiter);
+    const otherHost = await signInFrom(
+      "192.0.2.1",
+      "https://beta.limit.test/api/auth/sign-in/sso",
+      limiter
+    );
+
+    expect(
+      [first, second, refused, otherIp, otherHost].map(({ status }) => status)
+    ).toStrictEqual([200, 200, 429, 200, 200]);
+    // The headers core puts on its own responses, as the router answers in
+    // its place; the request ID is also in the error, as core's are.
+    const requestId = refused.headers.get("x-request-id") ?? "";
+    const error = errorPayloadSchema.parse(await refused.json());
+    expect({
+      retryAfter: refused.headers.get("retry-after"),
+      nosniff: refused.headers.get("x-content-type-options"),
+      hsts: refused.headers.get("strict-transport-security"),
+      requestIdIsUuid: /^[0-9a-f-]{36}$/u.test(requestId),
+      code: error.code,
+      errorRequestId: error.details?.requestId,
+    }).toStrictEqual({
+      retryAfter: "60",
+      nosniff: "nosniff",
+      hsts: "max-age=31536000; includeSubDomains",
+      requestIdIsUuid: true,
+      code: "request.rate_limited",
+      errorRequestId: requestId,
+    });
+    expect(cores.received).toHaveLength(4);
+  });
+
+  it("counts every IPv6 address in one /64 against one budget", async () => {
+    const limiter = limiterAllowing(2);
+    const signIn = "https://acme.limit.test/api/auth/sign-in/sso";
+
+    const first = await signInFrom("2001:db8:1:2::1", signIn, limiter);
+    const second = await signInFrom("2001:db8:1:2:aaaa::7", signIn, limiter);
+    const refused = await signInFrom(
+      "2001:db8:1:2:ffff:ffff:ffff:ffff",
+      signIn,
+      limiter
+    );
+    const otherPrefix = await signInFrom("2001:db8:1:3::1", signIn, limiter);
+
+    expect(
+      [first, second, refused, otherPrefix].map(({ status }) => status)
+    ).toStrictEqual([200, 200, 429, 200]);
+  });
+
+  it("never limits signing out", async () => {
+    const limiter = limiterAllowing(0);
+
+    const signOut = await signInFrom(
+      "192.0.2.6",
+      "https://acme.limit.test/api/auth/sign-out",
+      limiter
+    );
+
+    expect(signOut.status).toBe(200);
+    expect(
+      cores.received.map(({ url }) => new URL(url).pathname)
+    ).toStrictEqual(["/api/auth/sign-out"]);
+  });
+
+  it("limits only core's sign-in routes", async () => {
+    const limiter = limiterAllowing(0);
+    const paths = [
+      "/",
+      "/api/things",
+      "/api/authority",
+      "/api/auth",
+      "/api/auth/get-session",
+    ];
+
+    const statuses = await Promise.all(
+      paths.map(async (path) => {
+        const response = await signInFrom(
+          "192.0.2.3",
+          `https://acme.limit.test${path}`,
+          limiter
+        );
+        return response.status;
+      })
+    );
+
+    expect(statuses).toStrictEqual([200, 200, 200, 429, 429]);
+  });
+
+  it("lets sign-in through when the limiter fails", async () => {
+    const broken: RateLimit = {
+      limit: async () => {
+        await Promise.resolve();
+        throw new Error("rate limiter unavailable");
+      },
+    };
+
+    const response = await signInFrom(
+      "192.0.2.4",
+      "https://acme.limit.test/api/auth/sign-in/sso",
+      broken
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("counts with the rate limiter binding it's deployed with", async () => {
+    const response = await exports.default.fetch(
+      "https://acme.limit.test/api/auth/get-session",
+      { headers: { "cf-connecting-ip": "192.0.2.5" } }
+    );
+
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("event source rate limits", () => {
+  const cores = fakeCores();
+
+  beforeAll(async () => {
+    const admin = await routerKeyAdmin();
+    await admin.create(testRouterKey);
+    const core = { coreUrl: "https://grasp-os-core.acme.workers.dev" };
+    await mapHost("acme.public.test", {
+      ...core,
+      clientId: "acme",
+      generation: 1,
+    });
+  });
+
+  it("limits an event source's URL per client address and per URL, each by its own limit, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const perSource = limiterAllowing(2);
+    const before = cores.received.length;
+    const deliver = async (ip: string, token: string) =>
+      await worker.fetch(
+        new Request(`https://acme.public.test/api/hooks/${token}`, {
+          method: "POST",
+          headers: { "cf-connecting-ip": ip },
+          body: "{}",
+        }),
+        {
+          ...env,
+          WEBHOOK_RATE_LIMIT: limiter,
+          WEBHOOK_SOURCE_RATE_LIMIT: perSource,
+        }
+      );
+    const one = "a".repeat(32);
+    const responses = [
+      // One address guessing URLs: its own budget runs out.
+      await deliver("192.0.2.41", "b".repeat(32)),
+      await deliver("192.0.2.41", "c".repeat(32)),
+      await deliver("192.0.2.41", "d".repeat(32)),
+      // One URL from many addresses: its budget runs out too.
+      await deliver("192.0.2.42", one),
+      await deliver("192.0.2.43", one),
+      await deliver("192.0.2.44", one),
+    ];
+    const refused = responses.at(2);
+    expect({
+      statuses: responses.map(({ status }) => status),
+      retryAfter: refused?.headers.get("retry-after"),
+      reached: cores.received.length - before,
+    }).toStrictEqual({
+      statuses: [200, 200, 429, 200, 200, 429],
+      retryAfter: "60",
+      reached: 4,
+    });
+  });
+
+  it("counts one source's deliveries from all addresses against the source's own, larger budget, not an address's", async () => {
+    // An address's budget: two; the source's: four, across its sender's
+    // addresses.
+    const perAddress = limiterAllowing(2);
+    const perSource = limiterAllowing(4);
+    const before = cores.received.length;
+    const deliver = async (ip: string) =>
+      await worker.fetch(
+        new Request(`https://acme.public.test/api/hooks/${"e".repeat(32)}`, {
+          method: "POST",
+          headers: { "cf-connecting-ip": ip },
+          body: "{}",
+        }),
+        {
+          ...env,
+          WEBHOOK_RATE_LIMIT: perAddress,
+          WEBHOOK_SOURCE_RATE_LIMIT: perSource,
+        }
+      );
+    const responses = [
+      await deliver("192.0.2.51"),
+      await deliver("192.0.2.51"),
+      await deliver("192.0.2.52"),
+      await deliver("192.0.2.52"),
+      await deliver("192.0.2.53"),
+      await deliver("192.0.2.53"),
+    ];
+    const statuses = responses.map(({ status }) => status);
+    expect({
+      statuses,
+      reached: cores.received.length - before,
+    }).toStrictEqual({
+      statuses: [200, 200, 200, 200, 429, 429],
+      reached: 4,
+    });
+  });
+
+  it("refuses a limited endpoint whose limiter a stage doesn't bind, never letting it through unlimited", async () => {
+    const before = cores.received.length;
+    // A stage whose config left the event sources' limit out.
+    const stage = { ...env };
+    Reflect.deleteProperty(stage, "WEBHOOK_RATE_LIMIT");
+    const unbound = await worker.fetch(
+      new Request(`https://acme.public.test/api/hooks/${"f".repeat(32)}`, {
+        method: "POST",
+        headers: { "cf-connecting-ip": "192.0.2.23" },
+        body: "{}",
+      }),
+      stage
+    );
+    expect({
+      status: unbound.status,
+      reached: cores.received.length - before,
+    }).toStrictEqual({ status: 503, reached: 0 });
+  });
+});
+
+/** An interview page's request to core, through the router. */
+const interviewFrom = async (
+  ip: string,
+  url: string,
+  limiter: RateLimit
+): Promise<Response> =>
+  await worker.fetch(
+    new Request(url, {
+      method: "POST",
+      headers: { "cf-connecting-ip": ip },
+      body: "{}",
+    }),
+    {
+      ...env,
+      INTERVIEW_RATE_LIMIT: limiter,
+      AUTH_RATE_LIMIT: limiterAllowing(1000),
+    }
+  );
+
+describe("interview link rate limit", () => {
+  const cores = fakeCores();
+
+  beforeAll(async () => {
+    const admin = await routerKeyAdmin();
+    await admin.create(testRouterKey);
+    const core = { coreUrl: "https://grasp-os-core.acme.workers.dev" };
+    await Promise.all([
+      mapHost("acme.interview.test", {
+        ...core,
+        clientId: "acme",
+        generation: 1,
+      }),
+      mapHost("beta.interview.test", {
+        ...core,
+        clientId: "beta",
+        generation: 1,
+      }),
+    ]);
+  });
+
+  it("limits an interview link's endpoint per hostname and client address, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const interview = "https://acme.interview.test/api/interview";
+    const statuses = [
+      await interviewFrom("192.0.2.21", interview, limiter),
+      await interviewFrom("192.0.2.21", interview, limiter),
+      await interviewFrom("192.0.2.21", interview, limiter),
+      // The same /64 counts as one address.
+      await interviewFrom("2001:db8:8:8::1", interview, limiter),
+      await interviewFrom("2001:db8:8:8::2", interview, limiter),
+      await interviewFrom("2001:db8:8:8::3", interview, limiter),
+      await interviewFrom("192.0.2.22", interview, limiter),
+      await interviewFrom(
+        "192.0.2.21",
+        "https://beta.interview.test/api/interview",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 200, 429, 200, 200, 429, 200, 200]);
+    expect(
+      cores.received.filter(
+        ({ url }) => new URL(url).pathname === "/api/interview"
+      )
+    ).toHaveLength(6);
+  });
+
+  it("limits an interview's turns from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.24",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.24",
+        "https://acme.interview.test/api/interview/turn",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits an interview's read-back from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.25",
+        "https://acme.interview.test/api/interview/turn",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.25",
+        "https://acme.interview.test/api/interview/story",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits the lines a link has said from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.26",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.26",
+        "https://acme.interview.test/api/speech",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits the sockets a link opens to be heard from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.27",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.27",
+        "https://acme.interview.test/api/transcription",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits the recordings a link has written down from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.28",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.28",
+        "https://acme.interview.test/api/interview/hear",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits nothing else by it", async () => {
+    const none = limiterAllowing(0);
+    const others = await Promise.all(
+      ["/", "/interview", "/api/interviews", "/api/things"].map(
+        async (path) => {
+          const response = await interviewFrom(
+            "192.0.2.23",
+            `https://acme.interview.test${path}`,
+            none
+          );
+          return response.status;
+        }
+      )
+    );
+    expect(others).toStrictEqual([200, 200, 200, 200]);
+  });
+
+  it("counts with the rate limiter binding it's deployed with", async () => {
+    const response = await exports.default.fetch(
+      "https://acme.interview.test/api/interview",
+      { method: "POST", headers: { "cf-connecting-ip": "192.0.2.24" } }
+    );
+    expect(response.status).toBe(200);
+  });
+});
+
+/** A chat platform's webhook request to core, through the router. */
+const channelFrom = async (
+  ip: string,
+  url: string,
+  limiter: RateLimit
+): Promise<Response> =>
+  await worker.fetch(
+    new Request(url, {
+      method: "POST",
+      headers: { "cf-connecting-ip": ip },
+      body: "{}",
+    }),
+    {
+      ...env,
+      CHANNELS_RATE_LIMIT: limiter,
+      INTERVIEW_RATE_LIMIT: limiterAllowing(1000),
+      AUTH_RATE_LIMIT: limiterAllowing(1000),
+    }
+  );
+
+describe("chat platform rate limit", () => {
+  const cores = fakeCores();
+
+  beforeAll(async () => {
+    const admin = await routerKeyAdmin();
+    await admin.create(testRouterKey);
+    const core = { coreUrl: "https://grasp-os-core.acme.workers.dev" };
+    await Promise.all([
+      mapHost("acme.channels.test", {
+        ...core,
+        clientId: "acme",
+        generation: 1,
+      }),
+      mapHost("beta.channels.test", {
+        ...core,
+        clientId: "beta",
+        generation: 1,
+      }),
+    ]);
+  });
+
+  it("limits every platform's webhook per hostname and client address, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const teams = "https://acme.channels.test/api/channels/teams";
+    const statuses = [
+      await channelFrom("192.0.2.31", teams, limiter),
+      await channelFrom("192.0.2.31", teams, limiter),
+      await channelFrom("192.0.2.31", teams, limiter),
+      // Another platform's door shares the address's budget.
+      await channelFrom(
+        "192.0.2.31",
+        "https://acme.channels.test/api/channels/slack",
+        limiter
+      ),
+      await channelFrom("192.0.2.32", teams, limiter),
+      await channelFrom(
+        "192.0.2.31",
+        "https://beta.channels.test/api/channels/teams",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 200, 429, 429, 200, 200]);
+    expect(
+      cores.received.filter(({ url }) =>
+        new URL(url).pathname.startsWith("/api/channels/")
+      )
+    ).toHaveLength(4);
+  });
+
+  it("limits nothing else by it", async () => {
+    const none = limiterAllowing(0);
+    const others = await Promise.all(
+      ["/", "/api/channels", "/api/things", "/api/auth/session"].map(
+        async (path) => {
+          const response = await channelFrom(
+            "192.0.2.33",
+            `https://acme.channels.test${path}`,
+            none
+          );
+          return response.status;
+        }
+      )
+    );
+    expect(others).toStrictEqual([200, 200, 200, 200]);
+  });
+
+  it("counts with the rate limiter binding it's deployed with", async () => {
+    const response = await exports.default.fetch(
+      "https://acme.channels.test/api/channels/teams",
+      { method: "POST", headers: { "cf-connecting-ip": "192.0.2.34" } }
+    );
+    expect(response.status).toBe(200);
+  });
+});

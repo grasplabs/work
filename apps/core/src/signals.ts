@@ -1,0 +1,732 @@
+import { runIdSchema } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
+import { signalWindowDays } from "@grasp-os/shared/signals";
+import type { ImprovementSignal, SignalKind } from "@grasp-os/shared/signals";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  lt,
+  sql,
+} from "drizzle-orm";
+import type { SQL, SQLWrapper } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+
+import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  beforePreviousFinished,
+  claimComputation,
+  finishComputation,
+  isFinished,
+  latestFinished,
+  newComputation,
+  unfinishedBefore,
+} from "./daily-claims.ts";
+import type { Computation } from "./daily-claims.ts";
+import {
+  improvementSignalComputations as computations,
+  improvementSignals,
+  modelUsage,
+  workflowDecisions,
+  workflowResourceRuns,
+  workflowResources,
+} from "./db/core/schema.ts";
+import { chunks, statementsWithin } from "./db/d1.ts";
+import { auditableCode } from "./workflows/host.ts";
+
+// Improvement signals, level 1: where to look to improve the Apps'
+// workflows (@grasp-os/shared/signals has what each one means). Each is a
+// query over runs, decisions and model usage (the core database), over
+// the last `signalWindowDays` days.
+//
+// They're computed once a UTC day and kept in `improvement_signals`, so
+// reading them is a few indexed queries. The first run of the 15-minute
+// clock of a day that claims it (src/daily-claims.ts) computes them
+// (src/daily-signals.ts).
+//
+// A computation writes its signals under its own ID, in as many batches
+// as they take, and then finishes in one batch: it marks itself finished
+// and deletes every computation started before the finished one before it,
+// with their signals. It keeps that previous one, whose signals a reader
+// may still be reading (a board snapshot pages through the computation
+// finished by its time, statistics.ts). Readers take the finished
+// computation started last, in the same batch as its signals, so they see
+// one computation whole or the one before it. A computation that outlived its lease and was finished past has
+// lost its row: its next write of signals fails on the foreign key, and
+// its finishing batch changes nothing, as every statement in it goes by
+// its row (the update finds none, so no audit event, and the deletes run
+// only once it is marked finished).
+// Computing again is idempotent: another row, the same signals.
+//
+// Every App and workflow is covered, reading all of their runs and
+// decisions a page at a time. Evidence holds IDs and counts only (a few
+// rows' worth each), well within D1's row limit.
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+/**
+ * The subject of a workflow's waits for single people, added up; no
+ * decision's deciders are ever just `person`.
+ */
+export const peopleSubject = "person";
+
+/**
+ * The finished computation started last, whose signals are the current
+ * ones: read in the same batch as them, so one finishing meanwhile can't
+ * empty them.
+ */
+export const latestComputation = latestFinished(computations);
+
+/** Rows one read of runs or decisions returns. */
+const pageRows = 500;
+
+/** The runs, decisions or costliest runs a signal names as evidence. */
+const samples = 5;
+
+/** Inserts one batch writes. */
+const insertsPerBatch = 50;
+
+/** Statuses of a run that hasn't ended. */
+const unended: (typeof workflowResourceRuns.$inferSelect)["status"][] = [
+  "starting",
+  "running",
+  "paused",
+];
+
+/**
+ * A decision's run, as the signals name it: its workflow, of no App
+ * (`app_id` empty) and by its name, as its decisions' page names it.
+ * Decisions of a run that is gone have none: they're skipped.
+ */
+const decisionRun = {
+  runId: workflowDecisions.resourceRunId,
+  appId: sql<string>`''`,
+  workflowId: workflowResources.name,
+};
+
+/** One signal as it is stored: `app_id` and `workflow_id` empty for none. */
+interface SignalRow {
+  kind: SignalKind;
+  appId: string;
+  workflowId: string;
+  subject: string;
+  value: number;
+  evidence: Json;
+}
+
+type EvidenceOf<Kind extends SignalKind> = Extract<
+  ImprovementSignal,
+  { kind: Kind }
+>["evidence"];
+
+/** A row, with its evidence checked against its kind's at compile time. */
+const signalRow = <Kind extends SignalKind>(
+  kind: Kind,
+  where: { appId: string; workflowId: string; subject: string },
+  value: number,
+  evidence: EvidenceOf<Kind>
+): SignalRow => ({ kind, ...where, value, evidence });
+
+/** An App's workflow, as a map key. */
+export const workflowKey = (appId: string, workflowId: string): string =>
+  JSON.stringify([appId, workflowId]);
+
+/**
+ * A step's name without the key of a keyed step or the part of a
+ * decision (`review:<key>#ask`), whose key can come from what the run
+ * read; empty for none, or a name that isn't one.
+ */
+const stepName = (step: string | null): string =>
+  /^[A-Za-z][\w-]{0,63}(?=$|[:#])/u.exec(step ?? "")?.[0] ?? "";
+
+/**
+ * Reads every row `read` finds, a page at a time: `read` is given the last
+ * row of the page before, and returns the rows after it, in its order.
+ */
+const eachPage = async <Row>(
+  read: (after: Row | undefined) => Promise<Row[]>,
+  each: (row: Row) => void
+): Promise<void> => {
+  let after: Row | undefined;
+  for (;;) {
+    // One page after another: each starts where the last ended.
+    // oxlint-disable-next-line no-await-in-loop
+    const rows = await read(after);
+    for (const row of rows) {
+      each(row);
+    }
+    if (rows.length < pageRows) {
+      return;
+    }
+    after = rows.at(-1);
+  }
+};
+
+/** Rows after `after` in `(at, id)` order, ascending or descending. */
+const pastCursor = (
+  at: SQLWrapper,
+  id: SQLWrapper,
+  after: { at: Date; id: string } | undefined,
+  order: "asc" | "desc"
+): SQL | undefined => {
+  if (after === undefined) {
+    return undefined;
+  }
+  return order === "asc"
+    ? sql`(${at}, ${id}) > (${after.at.getTime()}, ${after.id})`
+    : sql`(${at}, ${id}) < (${after.at.getTime()}, ${after.id})`;
+};
+
+/**
+ * Each workflow's decisions that wait for one person (`person:<id>`), as
+ * one signal whose subject is `person`: the people added up, valued at the
+ * longest wait. An App's builders read it instead of the per-person
+ * signals, which name the people (signals-rpc.ts); admins read those.
+ */
+const waitingForPeople = (
+  groups: readonly {
+    appId: string;
+    workflowId: string;
+    deciders: string;
+    open: number;
+    oldest: { openedAt: string }[];
+  }[],
+  waited: (oldest: { openedAt: string }[]) => number
+): SignalRow[] => {
+  const people = groups.filter(({ deciders }) =>
+    deciders.startsWith("person:")
+  );
+  const workflows = Map.groupBy(people, ({ appId, workflowId }) =>
+    workflowKey(appId, workflowId)
+  );
+  return [...workflows.values()].flatMap((group) => {
+    const [first] = group;
+    if (first === undefined) {
+      return [];
+    }
+    return [
+      signalRow(
+        "waiting_for_person",
+        {
+          appId: first.appId,
+          workflowId: first.workflowId,
+          subject: peopleSubject,
+        },
+        Math.max(...group.map(({ oldest }) => waited(oldest))),
+        { open: group.reduce((sum, { open }) => sum + open, 0) }
+      ),
+    ];
+  });
+};
+
+/**
+ * Runs waiting longest for a person: each workflow's open decisions, by
+ * the deciders they're from, valued at how long the oldest has waited
+ * (`decisionRun`).
+ */
+const waitingSignals = async (
+  db: DrizzleD1Database,
+  now: Date
+): Promise<SignalRow[]> => {
+  const groups = new Map<
+    string,
+    {
+      appId: string;
+      workflowId: string;
+      deciders: string;
+      open: number;
+      oldest: NonNullable<EvidenceOf<"waiting_for_person">["oldest"]>;
+    }
+  >();
+  await eachPage(
+    async (after: { id: string; openedAt: Date } | undefined) =>
+      await db
+        .select({
+          id: workflowDecisions.id,
+          ...decisionRun,
+          step: workflowDecisions.step,
+          deciders: workflowDecisions.deciders,
+          openedAt: workflowDecisions.openedAt,
+        })
+        .from(workflowDecisions)
+        .leftJoin(
+          workflowResourceRuns,
+          eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+        )
+        .leftJoin(
+          workflowResources,
+          eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+        )
+        // Every decision still open, however long ago it opened: not only
+        // the window's. This is a snapshot of who is waited for now, and a
+        // decision open for months is the worst wait there is, the one
+        // this signal is for; cutting it off at the window would hide it.
+        // Open decisions are bounded by the runs still waiting on them.
+        .where(
+          and(
+            eq(workflowDecisions.status, "open"),
+            gt(workflowDecisions.expiresAt, now),
+            inArray(workflowResourceRuns.status, unended),
+            pastCursor(
+              workflowDecisions.openedAt,
+              workflowDecisions.id,
+              after && { at: after.openedAt, id: after.id },
+              "asc"
+            )
+          )
+        )
+        .orderBy(asc(workflowDecisions.openedAt), asc(workflowDecisions.id))
+        .limit(pageRows),
+    ({ workflowId, ...row }) => {
+      if (workflowId === null || row.runId === null) {
+        return;
+      }
+      const key = JSON.stringify([row.appId, workflowId, row.deciders]);
+      const group = groups.get(key) ?? {
+        appId: row.appId,
+        workflowId,
+        deciders: row.deciders,
+        open: 0,
+        oldest: [],
+      };
+      group.open += 1;
+      // Read oldest first, so the first are the oldest.
+      if (group.oldest.length < samples) {
+        group.oldest.push({
+          decision: row.id,
+          run: runIdSchema.parse(row.runId),
+          step: stepName(row.step),
+          openedAt: row.openedAt.toISOString(),
+        });
+      }
+      groups.set(key, group);
+    }
+  );
+  const waited = (oldest: { openedAt: string }[]): number =>
+    now.getTime() - Date.parse(oldest[0]?.openedAt ?? now.toISOString());
+  const rows = [...groups.values()].map(
+    ({ appId, workflowId, deciders, open, oldest }) =>
+      signalRow(
+        "waiting_for_person",
+        { appId, workflowId, subject: deciders },
+        waited(oldest),
+        { open, oldest }
+      )
+  );
+  return [...rows, ...waitingForPeople([...groups.values()], waited)];
+};
+
+/**
+ * The window the runs' signals read (`signalsFrom`, then up to the
+ * computation's time): one range for each of them, so what they count
+ * beside each other is of the same runs.
+ */
+interface Window {
+  readonly from: Date;
+  readonly to: Date;
+}
+
+/** That `column` is in `window`, as a condition: from it, up to its end. */
+const within = (column: SQLiteColumn, { from, to }: Window): SQL | undefined =>
+  and(gte(column, from), lt(column, to));
+
+/**
+ * How many runs of each workflow started in `window`, by its name: what
+ * its signals are kept under, as its decisions' are, so a workflow that
+ * took a deleted one's released name counts with it, never beside it
+ * under the same key.
+ */
+const runsSince = async (
+  db: DrizzleD1Database,
+  window: Window
+): Promise<Map<string, number>> => {
+  const rows = await db
+    .select({ name: workflowResources.name, runs: count() })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowResources,
+      eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+    )
+    .where(within(workflowResourceRuns.createdAt, window))
+    .groupBy(workflowResources.name);
+  return new Map(rows.map(({ name, runs }) => [name, runs]));
+};
+
+/** The entries of `counts`, most first, then by name. */
+const mostFirst = (counts: ReadonlyMap<string, number>) =>
+  [...counts].toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b));
+
+/**
+ * Steps failing most: runs that started and ended failed in `window`, by
+ * the task they failed at (`failed_task`, empty for none), with their error codes,
+ * beside the runs of their workflow started in the window. Only the
+ * task's ID and the error's code, never its message or what the run read.
+ */
+const failingSignals = async (
+  db: DrizzleD1Database,
+  window: Window,
+  runs: ReadonlyMap<string, number>
+): Promise<SignalRow[]> => {
+  const groups = new Map<
+    string,
+    {
+      name: string;
+      step: string;
+      failures: number;
+      codes: Map<string, number>;
+      recent: NonNullable<EvidenceOf<"failing_step">["recent"]>;
+    }
+  >();
+  const endedAt = sql<number>`${workflowResourceRuns.endedAt}`;
+  await eachPage(
+    async (after: { id: string; endedAt: Date | null } | undefined) =>
+      await db
+        .select({
+          id: workflowResourceRuns.id,
+          name: workflowResources.name,
+          endedAt: workflowResourceRuns.endedAt,
+          step: workflowResourceRuns.failedTask,
+          code: workflowResourceRuns.failureCode,
+        })
+        .from(workflowResourceRuns)
+        .innerJoin(
+          workflowResources,
+          eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+        )
+        .where(
+          and(
+            eq(workflowResourceRuns.status, "failed"),
+            within(workflowResourceRuns.endedAt, window),
+            // Started in the window too, as the runs they're counted
+            // beside: never more failures than runs.
+            within(workflowResourceRuns.createdAt, window),
+            pastCursor(
+              endedAt,
+              workflowResourceRuns.id,
+              after?.endedAt ? { at: after.endedAt, id: after.id } : undefined,
+              "desc"
+            )
+          )
+        )
+        .orderBy(
+          desc(workflowResourceRuns.endedAt),
+          desc(workflowResourceRuns.id)
+        )
+        .limit(pageRows),
+    (row) => {
+      const step = row.step ?? "";
+      const key = JSON.stringify([row.name, step]);
+      const group = groups.get(key) ?? {
+        name: row.name,
+        step,
+        failures: 0,
+        codes: new Map<string, number>(),
+        recent: [],
+      };
+      group.failures += 1;
+      const code = auditableCode(row.code) ?? "workflow.run_failed";
+      group.codes.set(code, (group.codes.get(code) ?? 0) + 1);
+      // Read latest first.
+      if (group.recent.length < samples) {
+        group.recent.push(runIdSchema.parse(row.id));
+      }
+      groups.set(key, group);
+    }
+  );
+  return [...groups.values()].map((group) =>
+    signalRow(
+      "failing_step",
+      { appId: "", workflowId: group.name, subject: group.step },
+      group.failures,
+      {
+        failures: group.failures,
+        runs: runs.get(group.name) ?? 0,
+        errors: mostFirst(group.codes)
+          .slice(0, samples)
+          .map(([code, times]) => ({ code, count: times })),
+        recent: group.recent,
+      }
+    )
+  );
+};
+
+/** Money rounded to millionths of a dollar, as model spend is counted. */
+const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
+
+/**
+ * Cost per run, for each workflow with runs started in `window`: what its
+ * model calls cost in it (`model_usage`, by the workflow each call was
+ * made for and its lineage: model-spend.ts, `spendKeysOf`), over those
+ * runs, all read in one query over the one window. A call is charged to
+ * its lineage's account, the root unless a trigger started the run in
+ * another run's lineage, so `costliest` names lineages, by that run; a
+ * lineage whose run started outside the window counts for nothing. The
+ * window rolls (the last `signalWindowDays` days), while model spend
+ * counts a UTC calendar month: the two don't match.
+ */
+const costSignals = async (
+  db: DrizzleD1Database,
+  { from, to }: Window
+): Promise<SignalRow[]> => {
+  const [start, end] = [from.getTime(), to.getTime()];
+  const runs = workflowResourceRuns;
+  // Each workflow's runs, its total, and its costliest lineages, ranked in
+  // the query: never every lineage of the window in memory.
+  const rows = await db.all<{
+    name: string;
+    runs: number;
+    run: string | null;
+    cost: number | null;
+    total: number | null;
+  }>(sql`WITH started AS (
+      SELECT ${workflowResources.name} AS name, count(*) AS runs
+      FROM ${runs}
+      INNER JOIN ${workflowResources} ON ${workflowResources.id} = ${runs.workflowResourceId}
+      WHERE ${runs.createdAt} >= ${start} AND ${runs.createdAt} < ${end}
+      GROUP BY ${workflowResources.name}
+    ), ranked AS (
+      SELECT ${workflowResources.name} AS name, ${modelUsage.runId} AS run,
+        sum(${modelUsage.cost}) AS cost,
+        sum(sum(${modelUsage.cost})) OVER (PARTITION BY ${workflowResources.name}) AS total,
+        row_number() OVER (PARTITION BY ${workflowResources.name} ORDER BY sum(${modelUsage.cost}) DESC, ${modelUsage.runId}) AS place
+      FROM ${modelUsage}
+      INNER JOIN ${workflowResources} ON ${workflowResources.id} = ${modelUsage.workflowId}
+      INNER JOIN ${runs} ON ${runs.id} = ${modelUsage.runId}
+      WHERE ${modelUsage.createdAt} >= ${start} AND ${modelUsage.createdAt} < ${end}
+        AND ${modelUsage.workflowAppId} IS NULL
+        AND ${runs.createdAt} >= ${start} AND ${runs.createdAt} < ${end}
+      GROUP BY ${workflowResources.name}, ${modelUsage.runId}
+    )
+    SELECT started.name AS name, started.runs AS runs, ranked.run AS run,
+      ranked.cost AS cost, ranked.total AS total
+    FROM started
+    LEFT JOIN ranked ON ranked.name = started.name AND ranked.place <= ${samples}
+    ORDER BY started.name, ranked.place`);
+  return [...Map.groupBy(rows, ({ name }) => name)].map(([name, lineages]) => {
+    const started = lineages[0]?.runs ?? 0;
+    const cost = lineages[0]?.total ?? 0;
+    return signalRow(
+      "cost_per_run",
+      { appId: "", workflowId: name, subject: "" },
+      dollars(cost / started),
+      {
+        runs: started,
+        cost: dollars(cost),
+        costliest: lineages.flatMap(({ run, cost: amount }) =>
+          run === null || amount === null
+            ? []
+            : [{ run: runIdSchema.parse(run), cost: dollars(amount) }]
+        ),
+      }
+    );
+  });
+};
+
+/**
+ * Where corrections keep happening: each step's decisions answered since
+ * `from`, where any was rejected, changing what the workflow proposed.
+ * Who answered, and with what, stays out.
+ */
+const correctionSignals = async (
+  db: DrizzleD1Database,
+  from: Date
+): Promise<SignalRow[]> => {
+  const groups = new Map<
+    string,
+    {
+      appId: string;
+      workflowId: string;
+      step: string;
+      answered: number;
+      rejected: number;
+      recent: NonNullable<EvidenceOf<"correction">["recent"]>;
+    }
+  >();
+  const decidedAt = sql<number>`${workflowDecisions.decidedAt}`;
+  await eachPage(
+    async (after: { id: string; decidedAt: Date | null } | undefined) =>
+      await db
+        .select({
+          id: workflowDecisions.id,
+          ...decisionRun,
+          step: workflowDecisions.step,
+          status: workflowDecisions.status,
+          decidedAt: workflowDecisions.decidedAt,
+        })
+        .from(workflowDecisions)
+        .leftJoin(
+          workflowResourceRuns,
+          eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+        )
+        .leftJoin(
+          workflowResources,
+          eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+        )
+        .where(
+          and(
+            // Only an answer sets it (approved or rejected), and so the
+            // read goes by its index alone.
+            gte(workflowDecisions.decidedAt, from),
+            pastCursor(
+              decidedAt,
+              workflowDecisions.id,
+              after?.decidedAt
+                ? { at: after.decidedAt, id: after.id }
+                : undefined,
+              "desc"
+            )
+          )
+        )
+        .orderBy(desc(workflowDecisions.decidedAt), desc(workflowDecisions.id))
+        .limit(pageRows),
+    ({ workflowId, ...row }) => {
+      if (
+        (row.status !== "approved" && row.status !== "rejected") ||
+        workflowId === null
+      ) {
+        return;
+      }
+      const step = stepName(row.step);
+      const key = JSON.stringify([row.appId, workflowId, step]);
+      const group = groups.get(key) ?? {
+        appId: row.appId,
+        workflowId,
+        step,
+        answered: 0,
+        rejected: 0,
+        recent: [],
+      };
+      group.answered += 1;
+      if (row.status === "rejected") {
+        group.rejected += 1;
+        // Read latest first.
+        if (group.recent.length < samples) {
+          group.recent.push({
+            decision: row.id,
+            run: runIdSchema.parse(row.runId),
+          });
+        }
+      }
+      groups.set(key, group);
+    }
+  );
+  return [...groups.values()]
+    .filter(({ rejected }) => rejected > 0)
+    .map(({ appId, workflowId, step, answered, rejected, recent }) =>
+      signalRow("correction", { appId, workflowId, subject: step }, rejected, {
+        answered,
+        rejected,
+        recent,
+      })
+    );
+};
+
+/** The first moment of the window the signals read, before `now`. */
+const signalsFrom = (now: Date): Date =>
+  new Date(now.getTime() - signalWindowDays * dayMs);
+
+/** Every signal, as of `now`, over the window before it. */
+const computeSignals = async (env: Env, now: Date): Promise<SignalRow[]> => {
+  const db = drizzle(env.DB);
+  const window = { from: signalsFrom(now), to: now };
+  const runs = await runsSince(db, window);
+  const [waiting, failing, corrections, costs] = await Promise.all([
+    waitingSignals(db, now),
+    failingSignals(db, window, runs),
+    correctionSignals(db, window.from),
+    costSignals(db, window),
+  ]);
+  return [...waiting, ...failing, ...corrections, ...costs];
+};
+
+/**
+ * Claims the improvement signals of `now`'s UTC day (src/daily-claims.ts).
+ * In the same batch, the unfinished
+ * claims of earlier days go, with anything they wrote: a computation still
+ * running on one then stops at its next write, or finishes nothing (see
+ * `storeImprovementSignals`).
+ */
+export const claimImprovementSignals = async (
+  env: Env,
+  now: Date
+): Promise<Computation | undefined> => {
+  const db = drizzle(env.DB);
+  const computation = newComputation(now);
+  const stale = unfinishedBefore(computations, computation);
+  const [, removed, claimed] = await db.batch([
+    db
+      .delete(improvementSignals)
+      .where(
+        inArray(
+          improvementSignals.computation,
+          db.select({ id: computations.id }).from(computations).where(stale)
+        )
+      ),
+    db.delete(computations).where(stale),
+    claimComputation(db, computations, computation),
+  ]);
+  if (removed.meta.changes > 0) {
+    log.warn("signals.claims_dropped", { claims: removed.meta.changes });
+  }
+  return claimed.length === 0 ? undefined : computation;
+};
+
+/**
+ * Computes the claimed day's signals from the database, writes them,
+ * then finishes the
+ * computation in one batch, with its audit event: marks it finished, and
+ * deletes every computation started before the finished one before it,
+ * with their signals, only if it is still there to mark. That previous
+ * one stays, for whoever is still reading it.
+ */
+export const storeImprovementSignals = async (
+  env: Env,
+  computation: Computation
+): Promise<void> => {
+  const rows = await computeSignals(env, computation.startedAt);
+  const db = drizzle(env.DB);
+  const inserts = statementsWithin(rows, (part) =>
+    db
+      .insert(improvementSignals)
+      .values(part.map((row) => ({ ...row, computation: computation.id })))
+  );
+  for (const [first, ...rest] of chunks(inserts, insertsPerBatch)) {
+    if (first !== undefined) {
+      // Batches one after another, each within D1's limits.
+      // oxlint-disable-next-line no-await-in-loop
+      await db.batch([first, ...rest]);
+    }
+  }
+  const finished = isFinished(computations, computation);
+  // The finished computation before this one stays, with its signals.
+  const before = beforePreviousFinished(computations, computation);
+  await auditedBatch(env, db, [
+    finishComputation(db, computations, computation),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "improvement.signals.computed",
+      target: { type: "improvement_signals", id: computation.id },
+      detail: { day: computation.day, signals: rows.length },
+    }),
+    db
+      .delete(improvementSignals)
+      .where(
+        and(
+          finished,
+          inArray(
+            improvementSignals.computation,
+            db.select({ id: computations.id }).from(computations).where(before)
+          )
+        )
+      ),
+    db.delete(computations).where(and(finished, before)),
+  ]);
+};

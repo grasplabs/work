@@ -1,0 +1,634 @@
+import type {
+  InterviewFact,
+  InterviewProgress,
+  InterviewSaved,
+} from "@grasp-os/shared/interview-links";
+import type { FactTag } from "@grasp-os/shared/interview-turn";
+import type { Roster } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
+
+import { onboardingStore } from "../src/onboarding/store.ts";
+import { mockIdp } from "./idp.ts";
+import {
+  aloneInTheStore,
+  answering,
+  answeringWith,
+  approveAgreed,
+  onLink,
+  openLinkAs,
+  participate,
+  signedInAs,
+} from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
+import { claimsReply, intake } from "./onboarding-team.ts";
+import type { PartJudge } from "./onboarding-team.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
+
+// What needs the company's admin at the end of the onboarding
+// (src/onboarding/store.ts, `review` and `settle`, over `/rpc`): a step of
+// a piece of work its people told two ways, when nobody could say why. The
+// admin keeps both ways or says which holds. The model provider, which
+// draws the work, is the outside system, faked behind connect. The ways it
+// can fail, tried here:
+//
+// - The admin told who said which way, or anyone's name.
+// - A way nobody is checked to have told shown at all (GRA-1084,
+//   GRA-1987). Each way must rest on someone the brain's intake checked,
+//   in the drawing as it stands, the model's word never enough.
+// - Something settled that needs no settling, or by anyone but an admin
+//   (Grasp's staff are admins, and read and settle as one).
+// - A settlement made without a trace in the audit log.
+// - Settling counting nothing towards what Grasp knows.
+
+const idp = mockIdp();
+
+const dayMs = 24 * 60 * 60 * 1000;
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** The people of Ops besides Lea, its lead: ten who do its tickets. */
+const doers = [
+  "Max Mol",
+  "Mia Moor",
+  "Mo Mertens",
+  "Noor Nijs",
+  "Pim Peeters",
+  "Rik Rooms",
+  "Sam Smit",
+  "Tess Tol",
+  "Uma Uil",
+  "Vic Vos",
+] as const;
+
+/** Ops, led by Lea, with ten who do its tickets, in an onboarding that started yesterday. */
+const team = async () => {
+  const store = onboardingStore(env);
+  const id = unique();
+  const ids = {
+    team: `ops-${id}`,
+    lea: `lea-${id}`,
+    doers: doers.map((_, index) => `p${index}-${id}`),
+  };
+  const person = (personId: string, name: string, title: string) => ({
+    id: personId,
+    name,
+    team: ids.team,
+    email: `${personId}@acme.test`,
+    title,
+    away: false,
+  });
+  const roster: Roster = {
+    teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
+    people: [
+      person(ids.lea, "Lea Lind", "Team lead"),
+      ...ids.doers.map((personId, index) =>
+        person(personId, doers[index] ?? "", "Agent")
+      ),
+    ],
+  };
+  const by = { type: "system" } as const;
+  await store.setPaused(false, by);
+  await store.saveRoster(roster, by);
+  await store.savePlan({ start: isoDay(Date.now() - dayMs), days: 14 }, by);
+  await store.setAgreements(
+    { processing: true, assessment: true, council: "none" },
+    by
+  );
+  return ids;
+};
+
+type Ids = Awaited<ReturnType<typeof team>>;
+
+/** Each person's link as their page holds it, once opened: signed in once. */
+const devices = new Map<string, Device>();
+
+/** Someone's link, opened signed in as them the first time. */
+const deviceOf = async (person: string): Promise<Device> => {
+  const known = devices.get(person);
+  if (known !== undefined) {
+    return known;
+  }
+  const link = await onboardingStore(env).linkOf(person);
+  const secret = link?.split("#")[1] ?? "";
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
+  devices.set(person, device);
+  return device;
+};
+
+/** Agrees to someone's interview, on their device, with `facts`, from `version`. */
+const agree = async (
+  person: string,
+  tag: FactTag,
+  facts: string[],
+  version = 0
+) => {
+  const device = await deviceOf(person);
+  const agreed: InterviewFact[] = facts.map((record, index) => ({
+    id: `f${index}`,
+    tag,
+    text: record,
+    record,
+    agreed: true,
+    ...(tag === "who" ? {} : { share: "team" as const }),
+  }));
+  const progress: InterviewProgress = {
+    person: "completed",
+    told: true,
+    mode: "type",
+    lines: [{ from: "stephen", text: "What starts one?" }],
+    facts: agreed,
+    phase: "readback",
+    wants: "end",
+    startedAt: Date.now(),
+    confirmed: agreed.length,
+    adding: false,
+    addedAt: 0,
+  };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
+  const saved = await onLink({ action: "save", ...device, version, progress });
+  const { version: savedVersion }: InterviewSaved = await saved.json();
+  await approveAgreed(device, agreed);
+  return savedVersion;
+};
+
+const reply = (value: unknown): ProviderReply => ({
+  text: JSON.stringify(value),
+  inputTokens: 100,
+  outputTokens: 10,
+});
+
+/** What the first five say they do, and the other five. */
+const sheetWay = "I look the customer up in the client sheet.";
+const salesforceWay = "I look the customer up in Salesforce.";
+
+/** Tickets as drawn: the first five look the customer up one way, the other five another, as Max says, and nobody could say why. */
+const ticketsReply = (ids: Ids): ProviderReply => {
+  const [p0, p1, p2, p3, p4, p5, p6, p7, p8, p9] = ids.doers;
+  return reply({
+    steps: [
+      { text: "Open the ticket.", by: ids.doers },
+      {
+        text: "Look up the customer in the client sheet.",
+        by: [p0, p1, p2, p3, p4],
+        other: "Look up the customer in Salesforce, as Max does.",
+        other_by: [p5, p6, p7, p8, p9],
+        why: "conflict",
+      },
+    ],
+  });
+};
+
+/**
+ * Ops's map, tickets and the rota, drawn: tickets told two ways by five
+ * people each, and nobody could say why; the rota, Lea's own, one way.
+ * Then the team given to the brain, whose intake checks who told what as
+ * `part` answers. Ten agree: `others` gives the other five their own
+ * facts, when a test wants them different.
+ */
+const drawn = async (
+  ids: Ids,
+  part?: PartJudge,
+  others: readonly string[] = [salesforceWay],
+  { given = true }: { given?: boolean } = {}
+) => {
+  const store = onboardingStore(env);
+  await store.releaseDue();
+  await agree(ids.lea, "work", ["Ten of us handle new tickets."]);
+  await answering(
+    [
+      reply({
+        does: "Answers customers' questions",
+        works: [
+          {
+            name: "handling new tickets",
+            local: "nieuwe tickets afhandelen",
+            one: "ticket",
+            many: "tickets",
+            doers: ids.doers,
+            share: 0.8,
+          },
+          {
+            name: "planning the rota",
+            local: "het rooster plannen",
+            one: "rota",
+            many: "rotas",
+            doers: [ids.lea],
+            share: 0.2,
+          },
+        ],
+      }),
+    ],
+    async () => await store.drawNext()
+  );
+  await store.releaseDue();
+  for (const [index, person] of ids.doers.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+    await agree(person, "step", index < 5 ? [sheetWay] : [...others]);
+  }
+  await answering(
+    [
+      reply({ steps: [{ text: "Plan next week's rota.", by: [ids.lea] }] }),
+      ticketsReply(ids),
+    ],
+    async () => [await store.drawNext(), await store.drawNext()]
+  );
+  if (given) {
+    await intake(ids, [], part);
+  }
+  const [tickets, rota] = await store.teamWorks(ids.team);
+  return { tickets: tickets?.id ?? "", rota: rota?.id ?? "" };
+};
+
+/** Grasp's staff, signed in to the client's core. */
+const asStaff = async () => {
+  const session = await signedIn(idp, "grasp-staff", staffPerson());
+  const { core } = await openRpc(session);
+  return await core.authenticate();
+};
+
+/** What the store keeps of the difference checked in work `work`'s drawing. */
+const checkedOf = async (work: string) =>
+  await runInDurableObject(onboardingStore(env), (_instance, state) =>
+    state.storage.sql
+      .exec("SELECT way, other FROM checked_differences WHERE work = ?", work)
+      .toArray()
+  );
+
+/** Someone's `action` on their own link (`withdraw`, `delete`). */
+const onLinkOf = async (person: string, action: string) => {
+  await onLink({ action, ...(await deviceOf(person)) });
+};
+
+describe("what needs the admin", { timeout: 120_000 }, () => {
+  beforeEach(aloneInTheStore);
+
+  it("is a step told two ways that nobody could explain, each checked to be told, never who told which or anyone's name, and keeps how the admin settled it", async () => {
+    const ids = await team();
+    const { tickets } = await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const before = await api.onboarding.review();
+    const events = await auditedDuring(async () => {
+      await api.onboarding.settle(tickets, "first");
+    });
+    // Settled again, another way.
+    const after = await api.onboarding.settle(tickets, "both");
+    const told = JSON.stringify(before);
+    expect({
+      before,
+      named: [ids.lea, ...ids.doers, ...doers].some((each) =>
+        told.includes(each)
+      ),
+      events: events.map(({ action, actor, detail }) => ({
+        action,
+        actor: actor.type,
+        detail,
+      })),
+      after: after.differences.map(({ holds }) => holds),
+    }).toStrictEqual({
+      before: {
+        differences: [
+          {
+            work: tickets,
+            name: "nieuwe tickets afhandelen",
+            team: "Ops",
+            way: "Look up the customer in the client sheet.",
+            other: "Look up the customer in Salesforce, as someone does.",
+            holds: null,
+          },
+        ],
+        mapped: 2,
+      },
+      named: false,
+      events: [
+        {
+          action: "onboarding.work.settled",
+          actor: "person",
+          detail: { holds: "first" },
+        },
+      ],
+      after: ["both"],
+    });
+  });
+
+  it("keeps a name out of a difference once the roster calls that person something else", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const store = onboardingStore(env);
+    const { roster } = await store.view();
+    // Only Max's name changes, to one that doesn't hold "Max" alone.
+    await store.saveRoster(
+      {
+        teams: roster?.teams ?? [],
+        people: (roster?.people ?? []).map((each) =>
+          each.name === "Max Mol" ? { ...each, name: "Maximilian Mol" } : each
+        ),
+      },
+      { type: "system" }
+    );
+    const { api } = await signedInApi(idp, "admin");
+    const { differences } = await api.onboarding.review();
+    expect(differences.map(({ other }) => other)).toStrictEqual([
+      "Look up the customer in Salesforce, as someone does.",
+    ]);
+  });
+
+  it("keeps no checked difference's words once someone it rests on withdraws, deletes their interview, or a document it had goes", async () => {
+    // Withdrawing.
+    const withdrawn = await team();
+    const { tickets: first } = await drawn(withdrawn);
+    const before = await checkedOf(first);
+    await onLinkOf(withdrawn.doers[0] ?? "", "withdraw");
+    const afterWithdrawal = await checkedOf(first);
+    // Deleting the interview.
+    const deleted = await team();
+    const { tickets: second } = await drawn(deleted);
+    await onLinkOf(deleted.doers[0] ?? "", "delete");
+    const afterDeletion = await checkedOf(second);
+    // A document shared before it was drawn (as its time says), purged.
+    const documented = await team();
+    const store = onboardingStore(env);
+    const { tickets: third } = await drawn(documented);
+    const document = `doc-${crypto.randomUUID()}`;
+    await runInDurableObject(store, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO documents (id, name, at, by, reading) VALUES (?, 'Handbook', ?, 'admin', 'A handbook.')",
+        document,
+        new Date(Date.now() - 600_000).toISOString()
+      );
+    });
+    const beforePurge = await checkedOf(third);
+    await store.forgetDocuments([document], { type: "system" });
+    expect({
+      before: [before.length, beforePurge.length],
+      afterWithdrawal,
+      afterDeletion,
+      afterPurge: await checkedOf(third),
+    }).toStrictEqual({
+      before: [1, 1],
+      afterWithdrawal: [],
+      afterDeletion: [],
+      afterPurge: [],
+    });
+  });
+
+  it("writes no checked difference's words once someone it rests on withdraws or deletes their interview while it is checked", async () => {
+    // Between the intake's read and its write: while it checks who told
+    // what, the first of them withdraws, or deletes their interview.
+    const erasedWhileChecked = async (action: "withdraw" | "delete") => {
+      const ids = await team();
+      let erasing: Promise<void> | undefined;
+      const { tickets } = await drawn(ids, () => {
+        erasing ??= onLinkOf(ids.doers[0] ?? "", action);
+        return true;
+      });
+      await erasing;
+      return await checkedOf(tickets);
+    };
+    expect({
+      withdrawn: await erasedWhileChecked("withdraw"),
+      deleted: await erasedWhileChecked("delete"),
+    }).toStrictEqual({ withdrawn: [], deleted: [] });
+  });
+
+  it("drops a way as the save that moves everyone who told it to another team commits, before any drawing again", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const before = await api.onboarding.review();
+    // The five who told the Salesforce way move to Billing.
+    const { roster } = await onboardingStore(env).view();
+    const movers = new Set(ids.doers.slice(5));
+    await onboardingStore(env).saveRoster(
+      {
+        teams: [
+          ...(roster?.teams ?? []),
+          {
+            id: `${ids.team}-b`,
+            name: "Billing",
+            lead: null,
+            does: "",
+            off: false,
+          },
+        ],
+        people: (roster?.people ?? []).map((person) =>
+          movers.has(person.id) ? { ...person, team: `${ids.team}-b` } : person
+        ),
+      },
+      { type: "system" }
+    );
+    const after = await api.onboarding.review();
+    expect({
+      before: before.differences.map(({ other }) => other),
+      after: after.differences.map(({ other }) => other),
+    }).toStrictEqual({
+      before: ["Look up the customer in Salesforce, as someone does."],
+      after: [],
+    });
+  });
+
+  it("shows no difference whose teller moved to another team while the team's first intake checked it", async () => {
+    const ids = await team();
+    // The other five's own words carry a marker, so the call held below is
+    // one of this team's checks.
+    const marker = `marker${unique().replaceAll("-", "")}`;
+    const { tickets } = await drawn(
+      ids,
+      undefined,
+      [`${salesforceWay} ${marker}`],
+      { given: false }
+    );
+    const store = onboardingStore(env);
+    const { roster } = await store.view();
+    const mover = ids.doers[5] ?? "";
+    const moved = {
+      teams: [
+        ...(roster?.teams ?? []),
+        {
+          id: `${ids.team}-b`,
+          name: "Billing",
+          lead: null,
+          does: "",
+          off: false,
+        },
+      ],
+      people: (roster?.people ?? []).map((person) =>
+        person.id === mover ? { ...person, team: `${ids.team}-b` } : person
+      ),
+    };
+    // This team's intake is held at its first check of the marked words
+    // until a save moving one who told the Salesforce way to Billing has
+    // committed; then it goes on.
+    const checker = claimsReply([]);
+    let moving: Promise<unknown> | undefined;
+    const held = async (
+      requests: Parameters<typeof checker>[0]
+    ): Promise<ReturnType<typeof checker>> => {
+      if (JSON.stringify(requests.at(-1)?.body ?? null).includes(marker)) {
+        moving ??= store.saveRoster(moved, { type: "system" });
+        await moving;
+      }
+      return checker(requests);
+    };
+    let gave: string | null = null;
+    for (
+      let round = 0;
+      round < 20 && gave !== `brain:${ids.team}`;
+      round += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+      ({ result: gave } = await answeringWith(
+        held,
+        async () => await store.intakeNext()
+      ));
+    }
+    const { api } = await signedInApi(idp, "admin");
+    const { differences } = await api.onboarding.review();
+    expect({
+      held: moving !== undefined,
+      gave,
+      shown: differences.filter(({ work }) => work === tickets),
+      kept: await checkedOf(tickets),
+    }).toStrictEqual({
+      held: true,
+      gave: `brain:${ids.team}`,
+      shown: [],
+      kept: [],
+    });
+  });
+
+  it("shows no difference whose other way nobody is checked to tell, the drawing's word notwithstanding", async () => {
+    const ids = await team();
+    // Nobody's facts say the other way, as the check finds.
+    const { tickets } = await drawn(
+      ids,
+      (part) => !part.includes("Salesforce"),
+      [salesforceWay]
+    );
+    await intake(ids, [], (part) => !part.includes("Salesforce"));
+    const { api } = await signedInApi(idp, "admin");
+    const review = await api.onboarding.review();
+    expect({
+      review: review.differences,
+      settle: await outcome(api.onboarding.settle(tickets, "both")),
+    }).toStrictEqual({ review: [], settle: "onboarding.no_difference" });
+  });
+
+  it("shows a difference only while the drawing the brain checked stands: drawn again, it waits for the brain", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const checked = await api.onboarding.review();
+    // One of them agrees again, and tickets are drawn once more.
+    const [first = ""] = ids.doers;
+    await agree(first, "step", [sheetWay, "I close the ticket."], 1);
+    await answering(
+      [ticketsReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    const redrawn = await api.onboarding.review();
+    await intake(ids, []);
+    const again = await api.onboarding.review();
+    expect({
+      checked: checked.differences.length,
+      redrawn: redrawn.differences.length,
+      again: again.differences.length,
+    }).toStrictEqual({ checked: 1, redrawn: 0, again: 1 });
+  });
+
+  it("shows no difference of a team whose results may not show: switched off, or on again but waiting for the admin's confirmation, and shows it again at the team's next intake once confirmed", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    const count = async () => {
+      const { differences } = await api.onboarding.review();
+      return differences.length;
+    };
+    const checked = await count();
+    const { roster } = await store.view();
+    const listed = roster ?? { teams: [], people: [] };
+    const by = { type: "system" } as const;
+    await store.saveRoster(
+      {
+        ...listed,
+        teams: listed.teams.map((each) => ({ ...each, off: true })),
+      },
+      by
+    );
+    const off = await count();
+    await store.saveRoster(listed, by, { confirmed: false });
+    const waiting = await count();
+    await store.saveRoster(listed, by);
+    const confirmed = await count();
+    // Switching off took its drawing out, and the difference checked in it
+    // with it: the team's next intake checks it again, as it draws again.
+    await intake(ids, []);
+    expect({
+      checked,
+      off,
+      waiting,
+      confirmed,
+      again: await count(),
+    }).toStrictEqual({
+      checked: 1,
+      off: 0,
+      waiting: 0,
+      confirmed: 0,
+      again: 1,
+    });
+  });
+
+  it("settles only a difference there is, and only for an admin, Grasp's staff among them", async () => {
+    const ids = await team();
+    const { tickets, rota } = await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const { api: user } = await signedInApi(idp, "user");
+    const staff = await asStaff();
+    const staffReview = await staff.onboarding.review();
+    expect({
+      // The rota went one way: nothing to settle.
+      rota: await outcome(api.onboarding.settle(rota, "both")),
+      unknown: await outcome(api.onboarding.settle("nothing", "both")),
+      user: await outcome(user.onboarding.settle(tickets, "both")),
+      read: await outcome(user.onboarding.review()),
+      staff: staffReview.differences.length,
+    }).toStrictEqual({
+      rota: "onboarding.no_difference",
+      unknown: "onboarding.no_difference",
+      user: "role.forbidden",
+      read: "role.forbidden",
+      staff: 1,
+    });
+  });
+
+  it("counts towards what Grasp knows once it is settled", async () => {
+    const ids = await team();
+    const { tickets } = await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const reviewOf = async () => {
+      const { parts } = await api.onboardingGate.view();
+      return parts.find(({ source }) => source === "review")?.known;
+    };
+    const before = await reviewOf();
+    await api.onboarding.settle(tickets, "other");
+    const after = await reviewOf();
+    // Half for what is settled, and half for the work known: tickets,
+    // which everyone who does it told, is known once one way holds; the
+    // rota, Lea's own, waits for more than her overview.
+    expect({ before, after }).toStrictEqual({ before: 0, after: 0.75 });
+  });
+});

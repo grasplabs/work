@@ -1,0 +1,29 @@
+# Grasp OS
+
+An internal operating system for AI at work: company knowledge, Apps with their pages and durable workflows, agents, and the controls around them. Every model call goes through one gateway, every external call through one connector layer, and everything that happens lands in an audit log.
+
+Built on Cloudflare Workers with TypeScript, React and Vite+.
+
+## Repository
+
+| Path | What it is |
+| --- | --- |
+| `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
+| `apps/connect` | Connector Worker: access to outside systems |
+| `apps/web` | The frontend |
+| `apps/admin` | Grasp's admin: clients, deployments and releases |
+| `apps/router` | Routes each deployment's hostname |
+| `packages/sdk` | `@grasp-os/sdk`: the API for workflows and pages |
+| `packages/runtime` | `@grasp-os/runtime`: the platform's runtime under the SDK |
+| `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages, still used by `apps/web`, `apps/admin` and `apps/docs` for now |
+| `packages/compiler` | `@grasp-os/compiler`: builds App pages |
+| `packages/connectors/*` | Native connectors |
+| `packages/shared` | `@grasp-os/shared`: shared types and schemas |
+
+## Contributing
+
+We don't accept outside contributions.
+
+## License
+
+[AGPL-3.0](LICENSE)

@@ -1,0 +1,327 @@
+packages:
+  - apps/*
+  - packages/*
+  - packages/connectors/*
+
+# Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
+# blocked, and only the packages listed here may run install scripts.
+minimumReleaseAge: 4320
+blockExoticSubdeps: true
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false
+  # Install scripts of the model SDKs under pi-ai, which core never needs.
+  "@google/genai": false
+  protobufjs: false
+
+catalog:
+  # Tooling
+  "@commitlint/cli": 21.2.3
+  "@commitlint/config-conventional": 21.2.3
+  "@playwright/test": 1.63.0
+  # The UI kit's component tests in a real Chromium (packages/app-kit,
+  # vite.browser.config.ts): Vitest's browser mode drives it through
+  # Playwright, the same version as @playwright/test's.
+  "@vitest/browser-playwright": 4.1.11
+  entities: 9.0.0
+  playwright: 1.63.0
+  "@shadcn/lint": 0.1.5
+  "@secretlint/secretlint-rule-preset-recommend": 13.0.5
+  "@types/node": 26.6.2
+  # Roll up the App compiler's type chunks at release time
+  # (packages/compiler).
+  rolldown: 1.2.16
+  rolldown-plugin-dts: 0.29.0
+  # Type-checks App code in a stateless isolate of its own: tsrs, the Rust
+  # port of TypeScript 7's checker, as WebAssembly (packages/compiler).
+  "@tsrs/wasm": 0.20.1-ts7.1.0-beta
+  # The SDK docs (apps/docs): the site, its API reference from the SDK's
+  # types and doc comments (TypeDoc, on the typescript6 catalog's
+  # TypeScript, as its JavaScript API needs), and the guides' code blocks,
+  # read with a Markdown parser to type-check them.
+  blume: 2.2.6
+  typedoc: 0.28.20
+  typedoc-plugin-markdown: 4.14.1
+  mdast-util-from-markdown: 2.1.0
+  "@types/mdast": 4.0.4
+  # Reads the built pages for the hashes of their inline code (apps/docs).
+  parse5: 8.1.0
+  # The chat's agent searches the docs' pages (apps/core), as the docs'
+  # own search does (Blume's index is Orama's, this version).
+  "@orama/orama": 3.1.18
+  # Signs the release upload to R2's S3 API (scripts/release).
+  aws4fetch: 1.0.20
+  secretlint: 13.0.5
+  typescript: 7.0.2
+  ultracite: 7.12.0
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
+  vite-plus: 0.3.3
+  # Vite+'s own oxlint and oxfmt, as vite-plus pins them: what the repo
+  # lints and formats itself with, so the root's Ultracite reads its
+  # presets' types against them, not App code's (the `oxc` catalog).
+  # They move with vite-plus.
+  oxfmt: 0.68.0
+  oxlint: 1.83.0
+  vitest: 4.1.11
+  # vitest's own `expect`, which an App's tests assert with in the
+  # sandbox, where vitest's runner can't run (packages/runtime's testing
+  # module): the same version as vitest's.
+  "@vitest/expect": 4.1.11
+  # Same workerd as Wrangler; runs the on-prem smoke test.
+  workerd: 1.20261113.1
+  wrangler: 4.162.0
+
+  # Workers runtime and data
+  "@cloudflare/vite-plugin": 1.66.0
+  # Pins its own Wrangler and miniflare: the same as the catalog's
+  # Wrangler, so tests run the workerd deploys run with. Bump them together.
+  "@cloudflare/vitest-plugin": 1.8.2
+  "@cloudflare/workers-types": 5.20261113.1
+  capnweb: 0.12.0
+  # A mutation's seeded randomness, in its isolate (the SDK's runner):
+  # ChaCha20's keystream from the seed its receipt keeps.
+  "@noble/ciphers": 2.4.0
+  # The type of each static file the admin uploads for a release: the
+  # library Wrangler types its uploads with, so a client's assets are
+  # served as `wrangler deploy` would serve them.
+  mime: 4.1.2
+  # Schedule triggers: cron expressions, in a time zone.
+  croner: 10.0.1
+  # Reads an App table's CSV import (RFC 4180).
+  csv-parse: 7.0.3
+  # Inbound email to workflows.
+  postal-mime: 4.2.0
+  # Standard Webhooks' own library (MIT): only core's tests use it, to sign
+  # deliveries to webhook triggers as any sender of the standard does.
+  standardwebhooks: 1.1.1
+  drizzle-kit: 0.31.11
+  drizzle-orm: 0.45.3
+  # YAML frontmatter: core, the docs and the Brain read it.
+  yaml: 2.9.1
+  # Bundles an App's approved npm packages in the package builder's isolate
+  # (packages/compiler/src/packages), run on workerd.
+  esbuild-wasm: 0.28.2
+  # Unpacks an approved package's tarball (gzipped ustar, PAX and the ustar
+  # prefix included) and resolves a package's `exports` and `imports` with
+  # Node's conditions, in the package builder's isolate.
+  modern-tar: 0.8.6
+  resolve.exports: 2.0.4
+  # The import specifiers of an App's compiled modules, which the compiler
+  # points at flat names and at each page module's content-hashed address:
+  # Vite's lexer.
+  es-module-lexer: 3.0.4
+  # Where in an App's server code its module threw, read back through the
+  # module's source map (core's app-inspection.ts).
+  "@jridgewell/trace-mapping": 0.3.31
+  # Text of uploaded files, extracted in core: PDF, Word and Excel.
+  fflate: 0.8.3
+  unpdf: 1.8.1
+  # WebVTT captions, parsed in the extractor's sandbox: W3C's own parser
+  # and validator (webvtt.js, CC0).
+  webvtt-parser: 2.2.0
+  # Whether a proposed package's peer version meets the range it states
+  # (core's src/dependencies/peers.ts): npm's own range rules.
+  semver: 7.8.5
+  "@types/semver": 7.8.0
+  # Calendar arithmetic for the dates a memory names ("next Friday"), in
+  # the Brain (packages/brain-next extraction): the Temporal standard,
+  # which workerd doesn't have yet. Its implementation alone, never put on
+  # the global.
+  temporal-polyfill: 1.0.8
+  zod: 4.6.7
+  # The types of Standard Schema, which the SDK's value schemas implement.
+  "@standard-schema/spec": 1.1.0
+  # JSON Schema 2020-12 in workerd (MIT): only the Open Workflow profile's
+  # tests use it, to check accepted definitions against the vendored upstream
+  # schema. Nothing ships a general JSON Schema validator.
+  "@cfworker/json-schema": 4.1.1
+
+  # Identity, agents, connections
+  # Better Auth's core, for its IP normalisation in the router; same release
+  # as better-auth.
+  "@better-auth/core": 1.7.14
+  "@better-auth/sso": 1.7.14
+  "@earendil-works/pi-agent-core": 1.4.0
+  "@earendil-works/pi-ai": 1.4.0
+  # pi's durable agent runtime (MIT, marked experimental: pinned exactly,
+  # moved with pi-ai), and Chord, its document state and contexts: the chat
+  # agent as a pi-durable extension (apps/core/src/chat-agent.ts).
+  "@earendil-works/pi-durable": 1.4.0
+  "@earendil-works/chord": 1.4.0
+  # TypeBox, as pi-ai uses it: the schemas of the chat agent's tools
+  # (apps/core/src/agent-tools.ts) checked without echoing their input.
+  typebox: 1.3.27
+  "@modelcontextprotocol/sdk": 1.32.2
+  better-auth: 1.7.14
+  # The admin's Cloudflare Access check.
+  jose: 6.2.12
+  # Vercel's Chat SDK (MIT): one bot on Teams and Slack, its
+  # state in Durable Objects (packages/chat). Its adapters
+  # move together; keep them on chat's version.
+  "@chat-adapter/slack": 4.43.0
+  "@chat-adapter/teams": 4.43.0
+  chat: 4.43.0
+  # What the Teams and Slack adapters send through, on the version they
+  # resolve; core types its hook on their requests with it
+  # (apps/core/src/channels/through-connect.ts).
+  axios: 1.20.0
+
+  # Frontend
+  # Babel 7 until babel-plugin-react-compiler supports Babel 8.
+  "@babel/core": 7.29.7
+  "@base-ui/react": 1.8.0
+  "@fontsource-variable/geist": 5.2.8
+  "@fontsource-variable/newsreader": 5.3.0
+  # The code font, wherever code is shown (the theme's font-mono).
+  "@fontsource-variable/jetbrains-mono": 5.3.0
+  # Translations of the frontend: macros compiled at build time, catalogs
+  # in apps/web/src/locales.
+  "@lingui/babel-plugin-lingui-macro": 6.8.0
+  "@lingui/cli": 6.8.0
+  "@lingui/conf": 6.8.0
+  "@lingui/core": 6.8.0
+  "@lingui/format-po": 6.8.0
+  "@lingui/react": 6.8.0
+  "@lingui/vite-plugin": 6.8.0
+  "@messageformat/parser": 5.1.1
+  "@rolldown/plugin-babel": 0.2.4
+  # The kit's chat components (message-scroller): shadcn's own headless
+  # primitives.
+  "@shadcn/react": 0.3.1
+  # The kit's PromptEditor: the box to ask in, with its mentions as chips in
+  # the text and the dropdown that picks them (\`@\`, later \`/\`). TipTap's
+  # MIT core on ProseMirror, lean: no StarterKit, no formatting, none of its
+  # paid Pro extensions.
+  "@tiptap/core": 3.33.0
+  "@tiptap/extension-document": 3.33.0
+  "@tiptap/extension-hard-break": 3.33.0
+  "@tiptap/extension-mention": 3.33.0
+  "@tiptap/extension-paragraph": 3.33.0
+  "@tiptap/extension-text": 3.33.0
+  "@tiptap/extensions": 3.33.0
+  "@tiptap/pm": 3.33.0
+  "@tiptap/react": 3.33.0
+  "@tiptap/suggestion": 3.33.0
+  # The kit's SortableList: drag, with a keyboard and a screen reader too.
+  "@dnd-kit/core": 6.3.1
+  "@dnd-kit/sortable": 10.0.0
+  "@dnd-kit/utilities": 3.2.2
+  "@tailwindcss/vite": 4.3.3
+  # The state, subscriptions and lifecycle under the SDK's forms (useForm,
+  # @grasp-os/sdk/react) and their fields (@grasp-os/app-kit/form).
+  "@tanstack/react-form": 1.33.5
+  "@tanstack/react-router": 1.170.46
+  # The columns and rows under the kit's RecordGrid.
+  "@tanstack/react-table": 9.3.1
+  # Which of RecordGrid's rows and columns are drawn.
+  "@tanstack/react-virtual": 3.14.25
+  "@tanstack/react-start": 1.169.4
+  "@tanstack/router-plugin": 1.168.48
+  # The route tree of an App's pages, made in the compiler's isolate
+  # (route-tree.ts). Keep it on the version @tanstack/router-plugin uses.
+  "@tanstack/router-generator": 1.167.46
+  # TanStack Start's wire format for server functions: the admin's tests
+  # call them through the Worker's entry as its pages do. Keep it on the
+  # version @tanstack/react-start uses.
+  seroval: 1.7.5
+  "@types/react": 19.3.0
+  "@types/react-dom": 19.3.0
+  "@vitejs/plugin-react": 6.1.1
+  babel-plugin-react-compiler: 1.0.0
+  class-variance-authority: 0.7.1
+  clsx: 2.1.1
+  # The kit's command palette (components/command), as shadcn builds it.
+  cmdk: 1.1.1
+  # The kit's carousel.
+  embla-carousel-react: 8.6.0
+  # oxc's ESTree types, which the SDK reads oxc-parse.wasm's trees with
+  # (packages/runtime/src/oxc-parse.ts): the release of the oxc commit
+  # packages/compiler/oxc-wasm/pin.json names.
+  "@oxc-project/types": 0.156.0
+  # The WASI oxc.wasm runs on in the isolate, napi-rs's.
+  "@tybys/wasm-util": 0.10.4
+  # A DOM for the web app's component tests that click and type.
+  happy-dom: 21.0.4
+  # The kit's one-time-code input.
+  input-otp: 1.5.0
+  # The CSS parser the motion lint (scripts/lint) works a duration out with,
+  # as Vite and Tailwind already resolve it.
+  lightningcss: 1.33.0
+  lucide-react: 1.47.0
+  # The kit's motion, as the prototype animates (components/shimmer).
+  motion: 14.3.0
+  react: 19.3.0
+  # The kit's calendar.
+  react-day-picker: 10.0.2
+  react-dom: 19.3.0
+  # recharts' peer; same release as react.
+  react-is: 19.3.0
+  # Markdown, rendered in the frontend and the kit: no raw HTML.
+  react-markdown: 10.1.0
+  # Fast Refresh in a chat's preview frame (spec 19.2.1): the runtime the
+  # preview kit carries and the Babel plugin preview builds instrument with.
+  react-refresh: 0.19.0
+  # The kit's resizable panels.
+  react-resizable-panels: 4.14.2
+  # The kit's charts.
+  recharts: 3.10.1
+  # The agent's answers: code blocks highlighted by class, so the theme's
+  # tokens colour them with no inline style (the no-inline-styles lint rule).
+  rehype-highlight: 7.0.2
+  # An App's Code tab: its files and a draft's changes, virtualised and
+  # highlighted by the library's own highlighter (Highlights).
+  "@pierre/diffs": 1.6.2
+  remark-gfm: 4.0.1
+  shadcn: 4.23.0
+  tailwind-merge: 3.7.0
+  tailwindcss: 4.3.3
+  tw-animate-css: 1.4.0
+
+catalogs:
+  # oxlint and oxfmt, the releases App code is linted and formatted with:
+  # Grasp's isolate runs them compiled to WebAssembly from the same oxc tag
+  # (packages/compiler/oxc-wasm/pin.json), an exported App runs them as
+  # they are. They move together with the pin. A catalog of their own, not
+  # the default: the repo lints and formats itself with Vite+'s, which its
+  # Ultracite resolves as its peers, and a default entry would take over.
+  oxc:
+    # The parser an exported App's check reads its files with
+    # (packages/compiler/src/standalone-check.ts): the release of the oxc
+    # commit pin.json names, as oxc.wasm parses them.
+    oxc-parser: 0.156.0
+    oxfmt: 0.75.0
+    oxlint: 1.90.0
+  # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
+  # Cloudflare Vite plugin's v2, still in beta (apps/admin/cloudflare.config.ts).
+  # Core, connect and the web stay on the catalog's v1 until v2 is stable.
+  # TypeScript 6 for the SDK docs' build alone (apps/docs/build.ts):
+  # TypeDoc reads the SDK through TypeScript's JavaScript API, which 7 has
+  # none of. Blume depends on 6 itself (^6.0.3), so the docs bring it in
+  # either way; nothing that runs in a Worker or checks App code uses it.
+  typescript6:
+    typescript: 6.0.3
+  cf:
+    "@cloudflare/vite-plugin": 2.0.0-beta.v.8
+    cf: 1.0.0-beta.26
+
+# Vite+ replaces Vite and pins Vitest for every package in the workspace.
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+
+peerDependencyRules:
+  allowedVersions:
+    vite: "*"
+    # @shadcn/lint's optional parser, which pnpm installs beside it: it
+    # reads components with oxc-parser, which it prefers, so this one never
+    # runs; it resolves on the repo's TypeScript 7 only because it is
+    # installed.
+    "@typescript-eslint/parser>typescript": "7"
+    "@typescript-eslint/project-service>typescript": "7"
+    "@typescript-eslint/tsconfig-utils>typescript": "7"
+    "@typescript-eslint/typescript-estree>typescript": "7"
+
+patchedDependencies:
+  miniflare@5.20261113.0-beta: patches/miniflare@5.20261113.0-beta.patch

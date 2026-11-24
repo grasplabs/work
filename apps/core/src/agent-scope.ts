@@ -1,0 +1,635 @@
+import { agentErrors } from "@grasp-os/shared/agent";
+import {
+  auditDetailValueSchema,
+  auditProvenanceMaxItems,
+  delegateActorOf,
+} from "@grasp-os/shared/audit";
+import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
+import type { ChatChannel, ChatToolOutcome } from "@grasp-os/shared/chat";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  authoritySchema,
+  permissionActionSchema,
+  permissionErrors,
+} from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
+import { and, eq, gte, isNotNull, isNull, or } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { keepAuditEvent } from "./audit-outbox.ts";
+import {
+  toolReasonMaxChars,
+  toolSummaryEntriesMax,
+} from "./chat-tool-events.ts";
+import { permissions } from "./db/core/schema.ts";
+import { workspace } from "./durable-objects.ts";
+import type { WorkContext } from "./restricted.ts";
+
+// What every API of a chat's code (agent-apis.ts) knows of the call: who
+// the agent acts for and where, which code run made it, and whether that
+// run is still open. Core sets it in each stub's props; the code can call
+// the stub but never read or change them.
+
+/** Whom and where an agent's code acts for, as core sets it. */
+export interface AgentScope {
+  /** The Workspace object that holds the chat. */
+  workspaceId: WorkspaceId;
+  /**
+   * The agent that acts, as the chat stored it: the organization's agent
+   * admins grant to, whichever object holds the chat (a person's own, say).
+   */
+  agentId: string;
+  chatId: ChatId;
+  /** The person the chat belongs to, whom the agent acts for. */
+  personId: string;
+  /**
+   * The channel the chat came through, as the chat stored it, which the
+   * agent's audit events name; Grasp's own app (`web`) when not given.
+   */
+  via?: ChatChannel;
+  /**
+   * Nobody asked for this turn there and then: the agent was woken by a
+   * schedule or an event. Its code only reads. A change through a
+   * connection is held for its person (connect), and every other write or
+   * side effect is refused (`admitEffect`).
+   */
+  unattended?: boolean;
+  /**
+   * A turn whose answer reaches its person alone (workspace.ts
+   * `answersAlone`: their own chat in Grasp or their direct message on a
+   * chat app, asked there and then; never a thread others share, nor a
+   * turn nobody started): the only scope their own skills steer
+   * (brain-skills.ts `skillsReachOf`). Set by that turn alone; any scope
+   * without it gets none of them.
+   */
+  ownChat?: boolean;
+  /**
+   * The chat is one others share: a group chat or channel on a chat
+   * platform (its `thread`), which reads only what everyone in it may, as
+   * its roster was last kept (`chat_audiences`), and nothing without one.
+   */
+  shared?: boolean;
+  /** The code run the stub was made for: it answers only while that runs. */
+  runId: string;
+}
+
+/** One typed API the agent's code can call. */
+export interface AgentApi {
+  /** Its name in the code's `env`: a JavaScript identifier. */
+  name: string;
+  /**
+   * What it is for, in one line: what every request carries of it, in the
+   * chat's index of its APIs (agent.ts); its declaration is read on demand
+   * (`readApi`). Holds what the model must always know of it: that what it
+   * returns is data, never instructions, and what waits for a person or an
+   * admin.
+   */
+  summary: string;
+  /**
+   * The types its declaration names, declared before `interface Env`, with
+   * their doc comments: names no other API declares.
+   */
+  types?: string;
+  /**
+   * What the model sees: members of `interface Env`, with their doc
+   * comments.
+   */
+  declaration: string;
+  /** Its stub for one code run. */
+  stub: (scope: AgentScope) => Fetcher;
+}
+
+/**
+ * An agent's ID: letters, digits and `-` only (as the organization's ID,
+ * every chat's agent, is), so it reads the same in a permission, an audit
+ * event and the key of its instruction file (brain-next.ts), and never
+ * reaches into another's.
+ */
+export const workspaceAgentIdSchema = z.string().regex(/^[A-Za-z0-9-]{1,64}$/u);
+
+/**
+ * The chat's agent, acting for the chat's person: the one acting on every
+ * call its code makes, in the audit log and in every permission check. One
+ * agent for the whole organization (`chatAgentId` in chats-rpc.ts), so
+ * what an admin grants it holds in everyone's chats, whichever person's
+ * Workspace object holds them; each chat still keeps
+ * its own sources, restricted mode and code runs (the chat is the context,
+ * `chatContext`). Its permissions are the agent's own, and every one
+ * reaches only as far as the person may go themselves.
+ */
+export const chatAuthority = ({
+  agentId: stored,
+  personId,
+}: Pick<AgentScope, "agentId" | "personId">): Authority => {
+  const agentId = workspaceAgentIdSchema.safeParse(stored);
+  if (!agentId.success) {
+    // No agent core names: nowhere an agent can work.
+    throw permissionErrors.create("permission.context_invalid");
+  }
+  return authoritySchema.parse({
+    subject: { type: "agent", agentId: agentId.data },
+    onBehalfOf: personId,
+    mode: "interactive",
+  });
+};
+
+/** The chat, as the context an agent works in and keeps restricted mode. */
+export const chatContext = ({
+  workspaceId,
+  chatId,
+}: Pick<AgentScope, "workspaceId" | "chatId">): Extract<
+  WorkContext,
+  { type: "chat" }
+> => ({ type: "chat", workspaceId, chatId });
+
+/**
+ * What the Workspace object says of one API call of a code run: it may go
+ * on (with when the run opened), the run has made all the calls it may, a
+ * revocation closed it, or it has ended; and whether it is the run's first
+ * call refused so, which alone is audited.
+ */
+export type CodeRunCall =
+  | { call: "open"; first: boolean; openedAt: number }
+  | { call: "spent" | "ended" | "revoked"; first: boolean };
+
+/**
+ * Whether a code run may have a write admitted now (`admitFromCodeRun`):
+ * open, with when it opened, or closed, and why.
+ */
+export type CodeRunAdmission =
+  | { call: "open"; openedAt: number }
+  | { call: "ended" | "revoked" };
+
+/** Why a call or write from a run that isn't open is refused. */
+const refusalCodes = {
+  spent: "agent.run_calls_spent",
+  ended: "agent.run_ended",
+  revoked: "agent.run_revoked",
+} as const;
+
+/** The refusal of a call or write from a run that isn't open. */
+export const runRefusal = (call: keyof typeof refusalCodes) =>
+  agentErrors.create(refusalCodes[call]);
+
+/** Whether `error` is the refusal of a run that isn't open (`runRefusal`). */
+export const isRunRefusal = (error: unknown): boolean => {
+  const code = agentErrors.codeOf(error);
+  return (
+    code !== undefined && Object.values<string>(refusalCodes).includes(code)
+  );
+};
+
+/**
+ * Records with the chat what a call read from (a connection), before the call hands over what it read: every later model
+ * request of the chat carries them as provenance, so the client's model
+ * rules judge it by them (workspace.ts). A run that ended since the call
+ * began records nothing, and the call is refused: what it read never
+ * reaches code that can no longer be followed.
+ */
+export const recordSources = async (
+  env: Env,
+  { workspaceId, chatId, runId }: AgentScope,
+  sources: readonly string[],
+  /**
+   * What the run's result rests on, if not `sources`: a connection call's
+   * grant (`connectionRead`), where the chat's provenance names the
+   * connection alone.
+   */
+  runReads?: readonly string[]
+): Promise<void> => {
+  const recorded = await workspace(env, workspaceId).recordSources(
+    chatId,
+    runId,
+    sources,
+    runReads
+  );
+  if (recorded !== "open") {
+    throw runRefusal(recorded);
+  }
+};
+
+/**
+ * Records with the run alone what a call read that isn't the chat's
+ * provenance (an App's answer or files, the Brain's grant), before the
+ * call hands it over, so the run's result is withheld from the model once
+ * the agent may no longer read it for its person (history-access.ts). A
+ * run that ended since the call began records nothing, and the call is
+ * refused.
+ */
+export const recordRunReads = async (
+  env: Env,
+  { workspaceId, chatId, runId }: AgentScope,
+  reads: readonly string[]
+): Promise<void> => {
+  const unique = [...new Set(reads)];
+  // A few at a time, as the object takes them (`sourcesSchema`).
+  for (
+    let at = 0;
+    at < Math.max(unique.length, 1);
+    at += auditProvenanceMaxItems
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, each admitted
+    const recorded = await workspace(env, workspaceId).recordRunReads(
+      chatId,
+      runId,
+      unique.slice(at, at + auditProvenanceMaxItems)
+    );
+    if (recorded !== "open") {
+      throw runRefusal(recorded);
+    }
+  }
+};
+
+const connectionReadPrefix = "connection-read:";
+
+/** A connection call's read: the connection, the action, the resource. */
+const connectionReadSchema = z.tuple([
+  connectionIdSchema,
+  permissionActionSchema,
+  identifierSchema.nullable(),
+]);
+
+/**
+ * The source a run's call of `action` on connection `connectionId` is
+ * recorded as, under a grant for `resource` (`null`: the whole
+ * connection). Checked again as that grant, never as the connection: a
+ * grant left for another action or resource doesn't let its result
+ * through. Each part may be a full identifier, so this one may be longer
+ * than one (`runReadMaxLength` in workspace.ts).
+ */
+export const connectionRead = (
+  connectionId: string,
+  action: string,
+  resource: string | null
+): string =>
+  `${connectionReadPrefix}${JSON.stringify([connectionId, action, resource])}`;
+
+/** The connection call a source recorded by `connectionRead` names. */
+export const connectionReadOf = (
+  source: string
+):
+  | { connectionId: string; action: string; resource: string | null }
+  | undefined => {
+  if (!source.startsWith(connectionReadPrefix)) {
+    return undefined;
+  }
+  let parts: unknown;
+  try {
+    parts = JSON.parse(source.slice(connectionReadPrefix.length));
+  } catch {
+    return undefined;
+  }
+  const read = connectionReadSchema.safeParse(parts);
+  if (!read.success) {
+    return undefined;
+  }
+  const [connectionId, action, resource] = read.data;
+  return { connectionId, action, resource };
+};
+
+/** One call of a chat's code, as the audit log records it. */
+export interface AgentCall {
+  /** The API and method, such as `connections.list`. */
+  method: string;
+  target?: AuditEntry["target"];
+  /** Identifiers and counts, never what was read. */
+  detail?: Record<string, AuditDetailValue>;
+}
+
+/** How a call ended: done, refused (an expected error), or failed. */
+export type CallOutcome = "ok" | "refused" | "failed";
+
+/** The `agent.call` event for a call of the chat's code, as it ended. */
+export const agentCallEntry = (
+  scope: Omit<AgentScope, "runId">,
+  { method, target, detail = {} }: AgentCall,
+  ended?: { outcome: CallOutcome; reason: string | null }
+): AuditEntry => ({
+  actor: delegateActorOf(chatAuthority(scope), scope.via),
+  action: "agent.call",
+  target,
+  // The actor is the organization's agent, in everyone's chats: which chat
+  // called.
+  detail: {
+    ...detail,
+    method,
+    chat: scope.chatId,
+    outcome: ended?.outcome ?? "ok",
+    reason: ended?.reason ?? null,
+  },
+});
+
+/**
+ * Records a call of the chat's code as `agent.call`, by the workspace's
+ * agent acting for the chat's person, in the chat: for the calls nothing
+ * below records (a connection call and a model request
+ * record themselves). Through core's outbox, which never fails the call
+ * (`keepAuditEvent`).
+ */
+export const auditAgentCall = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  call: AgentCall,
+  ended?: { outcome: CallOutcome; reason: string | null }
+): Promise<void> => {
+  await keepAuditEvent(
+    env,
+    drizzle(env.DB),
+    agentCallEntry(scope, call, ended)
+  );
+};
+
+/**
+ * Shows one call of the chat's code in the chat, as it ended: a line under
+ * the code step that made it (`ChatToolEvent`), in the words its audit
+ * event has. Never fails the call: a chat that can't keep it shows
+ * nothing, and the audit log still has the call.
+ */
+export const recordToolCall = async (
+  env: Env,
+  scope: AgentScope,
+  { method, target, detail = {} }: AgentCall,
+  ended?: { outcome: ChatToolOutcome; reason: string | null }
+): Promise<void> => {
+  // Only what fits an audit event's detail: a name the code made up too
+  // long for one is left out, not the call.
+  const summary = Object.fromEntries(
+    Object.entries(detail)
+      .filter(([, value]) => auditDetailValueSchema.safeParse(value).success)
+      .slice(0, toolSummaryEntriesMax)
+  );
+  try {
+    await workspace(env, scope.workspaceId).recordToolCall(
+      scope.chatId,
+      scope.runId,
+      {
+        method,
+        target: target ?? null,
+        summary,
+        outcome: ended?.outcome ?? "ok",
+        reason: ended?.reason?.slice(0, toolReasonMaxChars) ?? null,
+      }
+    );
+  } catch (error) {
+    log.warn("agent.tool_event_unkept", {
+      chatId: scope.chatId,
+      method,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Records a call of the chat's code in the audit log (`auditAgentCall`)
+ * and shows it in the chat (`recordToolCall`).
+ */
+export const auditToolCall = async (
+  env: Env,
+  scope: AgentScope,
+  call: AgentCall,
+  ended?: { outcome: CallOutcome; reason: string | null }
+): Promise<void> => {
+  await Promise.all([
+    auditAgentCall(env, scope, call, ended),
+    recordToolCall(env, scope, call, ended),
+  ]);
+};
+
+/**
+ * Whether a permission the agent was granted, holding where this chat's
+ * runs act, was revoked since `since`: one that held everywhere, or in
+ * this chat alone. Not a request that was never granted (a person
+ * declining a chat's request revokes one), nor another chat's: neither
+ * gave the run authority, so neither ends it. A run open since before acts
+ * on authority it no longer has, so its lease closes. One read of the
+ * subject's index (`permissions_revoked_idx`).
+ */
+export const revokedSince = async (
+  env: Env,
+  { agentId, chatId }: Pick<AgentScope, "agentId" | "chatId">,
+  since: number
+): Promise<boolean> => {
+  const [revoked] = await drizzle(env.DB)
+    .select({ id: permissions.id })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "agent"),
+        eq(permissions.subjectId, agentId),
+        eq(permissions.status, "revoked"),
+        // From the millisecond the run opened, that one included. No
+        // margin before it: a revocation just before a run opened is in
+        // the grants the run's calls read, and a margin would end the
+        // next run after any revoke. The accepted residual is clock skew
+        // between machines: the Workspace object's clock and the one of
+        // the request that revoked may differ by a few milliseconds.
+        gte(permissions.revokedAt, new Date(since)),
+        // Granted once: both ways a permission becomes active set
+        // granted_at with it (`grantPermission`, and a person's own
+        // decision in chat-connections.ts), so only a request declined
+        // before anyone granted it is revoked without one.
+        isNotNull(permissions.grantedAt),
+        or(isNull(permissions.chatId), eq(permissions.chatId, chatId))
+      )
+    )
+    .limit(1);
+  return revoked !== undefined;
+};
+
+/**
+ * Closes the run's lease as revoked when a permission of its agent was
+ * revoked since it opened (`revokedSince`): `closed` when this call closed
+ * it (and alone records it), `closedBefore` when another got there first,
+ * `open` when nothing was revoked.
+ */
+const revocationOf = async (
+  env: Env,
+  scope: AgentScope,
+  openedAt: number
+): Promise<"open" | "closed" | "closedBefore"> => {
+  if (!(await revokedSince(env, scope, openedAt))) {
+    return "open";
+  }
+  const closed = await workspace(env, scope.workspaceId).revokeCodeRun(
+    scope.chatId,
+    scope.runId
+  );
+  return closed ? "closed" : "closedBefore";
+};
+
+/**
+ * Counts the call with the Workspace object, and refuses it from a code
+ * run that has ended (the turn moved on, or the run was cancelled or timed
+ * out while its code kept running), made all the calls it may, or was
+ * closed by a revocation of one of its agent's permissions, found here
+ * too. Every API checks it first, on every call. A run's refusals are
+ * recorded once: by the first refused call, or the one that found the
+ * revocation.
+ */
+export const requireOpenRun = async (
+  env: Env,
+  scope: AgentScope,
+  method: string
+): Promise<void> => {
+  const { workspaceId, chatId, runId } = scope;
+  const counted = await workspace(env, workspaceId).callFromCodeRun(
+    chatId,
+    runId
+  );
+  const revocation =
+    counted.call === "open"
+      ? await revocationOf(env, scope, counted.openedAt)
+      : "open";
+  if (counted.call === "open" && revocation === "open") {
+    return;
+  }
+  const refusal = runRefusal(
+    counted.call === "open" ? "revoked" : counted.call
+  );
+  if ((counted.call !== "open" && counted.first) || revocation === "closed") {
+    await auditToolCall(
+      env,
+      scope,
+      { method },
+      { outcome: "refused", reason: refusal.code }
+    );
+  }
+  throw refusal;
+};
+
+/**
+ * Admits a write or side effect of a code run as it commits, after its
+ * call was let in (`requireOpenRun`): refused once the run has closed,
+ * whether it ended, was cancelled, ran out of time or lost a permission
+ * meanwhile. Counts no call. The slow read of revocations comes first and
+ * the lease's own check last, right before the effect. A write into the
+ * Workspace object checks the lease once more in its own transaction.
+ *
+ * With `method`, a refusal is recorded here (for a call that nothing else
+ * records): the one that found a revocation, or one from a run that had
+ * ended; without, its caller records it (`auditedCall`). So a revoked
+ * run's refusals are recorded per refused call, not once per run.
+ *
+ * In an unattended turn (`AgentScope.unattended`) every effect is refused
+ * with `agent.unattended`, but one its caller admits there
+ * (`unattended`): a read that passes here to check the run is still open,
+ * or a change connect holds for the person.
+ */
+export const admitEffect = async (
+  env: Env,
+  scope: AgentScope,
+  method?: string,
+  { unattended = false }: { unattended?: boolean } = {}
+): Promise<void> => {
+  // A turn nobody was there for changes nothing itself: only what its
+  // caller says such a turn may have (`unattended`) goes on, a read, or a
+  // change connect holds for its person. Refused before anything else, and
+  // recorded when nothing else records the call.
+  if (scope.unattended === true && !unattended) {
+    const refusal = agentErrors.create("agent.unattended");
+    if (method !== undefined) {
+      await auditToolCall(
+        env,
+        scope,
+        { method },
+        { outcome: "refused", reason: refusal.code }
+      );
+    }
+    throw refusal;
+  }
+  const chats = workspace(env, scope.workspaceId);
+  const opened = await chats.admitFromCodeRun(scope.chatId, scope.runId);
+  let refused: "ended" | "revoked" | undefined;
+  let record = false;
+  if (opened.call === "open") {
+    const revocation = await revocationOf(env, scope, opened.openedAt);
+    if (revocation === "open") {
+      const now = await chats.admitFromCodeRun(scope.chatId, scope.runId);
+      refused = now.call === "open" ? undefined : now.call;
+    } else {
+      refused = "revoked";
+      record = revocation === "closed";
+    }
+  } else {
+    refused = opened.call;
+  }
+  if (refused === undefined) {
+    return;
+  }
+  const refusal = runRefusal(refused);
+  if (method !== undefined && (record || refused === "ended")) {
+    await auditToolCall(
+      env,
+      scope,
+      { method },
+      { outcome: "refused", reason: refusal.code }
+    );
+  }
+  throw refusal;
+};
+
+/** How a call that threw ended, and why, as the audit log names it. */
+export const endedBy = (
+  error: unknown
+): { outcome: CallOutcome; reason: string | null } =>
+  isExpectedError(error)
+    ? { outcome: "refused", reason: error.code }
+    : { outcome: "failed", reason: "internal.unexpected" };
+
+/**
+ * Runs one call of the chat's code and records it as `agent.call` once,
+ * however it ends: with what `detailOf` says of its result when it is
+ * done, and why when it is refused or fails. The error goes on as it was.
+ */
+export const auditedCall = async <T>(
+  env: Env,
+  scope: AgentScope,
+  call: AgentCall & {
+    detailOf?: (result: T) => Record<string, AuditDetailValue>;
+    /**
+     * How a call that answered ended, when its answer says it was refused
+     * or failed as data (an App function's result): recorded as such.
+     */
+    endedOf?: (
+      result: T
+    ) => { outcome: CallOutcome; reason: string | null } | undefined;
+  },
+  run: () => Promise<T>
+): Promise<T> => {
+  const { detailOf, endedOf, ...recorded } = call;
+  let result: T;
+  try {
+    result = await run();
+  } catch (error) {
+    await auditToolCall(env, scope, recorded, endedBy(error));
+    throw error;
+  }
+  await auditToolCall(
+    env,
+    scope,
+    {
+      ...recorded,
+      detail: { ...recorded.detail, ...detailOf?.(result) },
+    },
+    endedOf?.(result)
+  );
+  return result;
+};
+
+/**
+ * Records a call refused before it reached what records it itself (a
+ * connection call before connect), and throws the refusal on.
+ */
+export const auditRefusal = async (
+  env: Env,
+  scope: AgentScope,
+  call: AgentCall,
+  error: unknown
+): Promise<never> => {
+  await auditToolCall(env, scope, call, endedBy(error));
+  throw error;
+};

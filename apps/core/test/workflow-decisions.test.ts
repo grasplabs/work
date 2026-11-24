@@ -1,0 +1,1456 @@
+import { v } from "@grasp-os/runtime/app";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { teamsAdapter } from "../src/channels/teams.ts";
+import { refreshDailySignals } from "../src/daily-signals.ts";
+import {
+  answerDecision,
+  confirmDecision,
+  decisionEventType,
+  reviewDecision,
+  waitingDecisions,
+} from "../src/decisions/decisions.ts";
+import { listSignals } from "../src/signals-rpc.ts";
+import {
+  approveWorkflowBinding,
+  revokeWorkflowBinding,
+} from "../src/workflow-bindings.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { setWorkflowParams } from "../src/workflow-params.ts";
+import {
+  createWorkflowResource,
+  workflowVersions,
+} from "../src/workflow-resources.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
+import {
+  candidateRunFor,
+  startCandidateRun,
+} from "../src/workflows/candidate-runs.ts";
+import { runEngine } from "../src/workflows/engine.ts";
+import { listAllRuns } from "../src/workflows/overview.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { repairWakes } from "../src/workflows/wakes.ts";
+import { allEvents } from "./audit-events.ts";
+import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
+import { outcome, unique } from "./sign-in.ts";
+import { reached } from "./teams-door.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
+
+// The decision step in JSON workflows (grasp-workflow/2's `decision`, the
+// run host's `step.decision`, resource-decisions.ts and the decision
+// service in src/decisions/), from its threat model: only the
+// person the binding allows answers, never the run's own person, and only
+// with their confirmation; the run takes the outcome from the decision,
+// never from its wake; a decline or no answer never reaches `approved`;
+// authority revoked while the run waits refuses the outcome; and a replay
+// or a lost wake asks nothing twice. An invoice approval runs through the
+// dispatcher, the engine and the decision service.
+
+const identityOf = (userId: string, role: Role): Identity => ({
+  userId,
+  email: `${userId}@acme.test`,
+  name: "Person",
+  role,
+  teams: [],
+  staff: false,
+  expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+});
+
+/** A member of the organization with `role`, as their session has them. */
+const person = async (role: Role): Promise<Identity> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return identityOf(userId, role);
+};
+
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
+});
+
+/** The `reviewer` parameter's person, as a decision's recipients. */
+const theReviewer = { $expr: "[params.reviewer]" };
+
+/**
+ * Asks `recipients`, the reviewer by default, through the
+ * `invoiceApproval` binding, about the invoice the run started on.
+ */
+const reviewOf = (recipients: unknown = theReviewer) => ({
+  id: "review",
+  type: "decide",
+  decision: "invoiceApproval",
+  recipients,
+  prompt: { $expr: "params.approvalPrompt" },
+  input: { $expr: "args" },
+});
+
+/**
+ * Fails the run when nobody answered `review` in time: a timeout is never
+ * an approval.
+ */
+const unanswered = {
+  id: "unanswered",
+  type: "raise",
+  if: { $expr: "review !== null && review.timedOut" },
+  error: { code: "test.unanswered", message: "Failed." },
+};
+
+/**
+ * The invoice approval: an invoice above the approval threshold is
+ * reviewed, a smaller one approved at once; `review` asks of whom it
+ * asks, if given.
+ */
+const approvalSteps = (
+  review: Record<string, unknown> = reviewOf()
+): unknown[] => [
+  { ...review, if: { $expr: "args.amount > params.approvalThreshold" } },
+  unanswered,
+];
+
+/** What an approval ends with: approved, unless its review declined it. */
+const approvalStatus = {
+  $expr:
+    'review === null || (!review.timedOut && review.approved) ? "approved" : "rejected"',
+};
+
+/**
+ * The document around `steps`: number `approvalThreshold`, person
+ * `reviewer`, text `approvalPrompt`, the `invoiceApproval` decision
+ * binding, input with a numeric `amount` and the `{ status }` output,
+ * `status` its value.
+ */
+const definitionOf = (
+  contract: string,
+  steps: unknown[],
+  status: unknown = approvalStatus
+) =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: objectSchema({ amount: { kind: "number" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    params: {
+      approvalThreshold: {
+        label: "Approval threshold",
+        type: { kind: "number", default: 1000 },
+        sensitive: false,
+      },
+      reviewer: {
+        label: "Reviewer",
+        type: { kind: "person", default: "role:admin" },
+        sensitive: false,
+      },
+      approvalPrompt: {
+        label: "Approval prompt",
+        type: { kind: "string", default: "Approve this invoice?" },
+        sensitive: false,
+      },
+    },
+    permissions: { decisions: { invoiceApproval: { contract } } },
+    steps,
+  });
+
+/** Waits two seconds before what comes after it. */
+const hold = { id: "hold", type: "wait", for: "2 seconds" };
+
+/** What a reviewer may answer with: a comment, or nothing. */
+const response = v.union(v.null(), v.object({ comment: v.string() }));
+
+interface Setup {
+  /**
+   * Its deciders, as the admin approves the binding, made ready for them:
+   * the reviewer's own by default.
+   */
+  deciders?: (reviewer: Identity) => Promise<string[]>;
+  steps?: unknown[];
+  /** What the run ends with, if not the approval's status. */
+  status?: unknown;
+  /** What its contract takes as an answer's payload. */
+  answers?: { descriptor: unknown };
+  /**
+   * Its contract stored as it is, unchecked, as one published before
+   * publishing checked what a person can answer.
+   */
+  unchecked?: boolean;
+}
+
+/** Contract `contract` stored as it is, past `publishCatalogContract`'s checks. */
+const storedUnchecked = async (
+  by: Identity,
+  key: string,
+  contract: Record<string, string>
+): Promise<void> => {
+  const text = canonicalJson(contract);
+  await env.DB.prepare(
+    "INSERT INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at) VALUES (?, 'decision', ?, ?, ?, ?)"
+  )
+    .bind(key, text, await sha256Hex(text), by.userId, Date.now())
+    .run();
+};
+
+/**
+ * The approval workflow of `owner`'s, published from `steps`, its decision
+ * binding approved by an admin for `deciders`, its reviewer `reviewer`.
+ */
+const approvalWorkflow = async ({
+  deciders = async (reviewer) =>
+    await Promise.resolve([`person:${reviewer.userId}`]),
+  steps = approvalSteps(),
+  status,
+  answers = response,
+  unchecked = false,
+}: Setup = {}) => {
+  const admin = await person("admin");
+  const owner = await person("builder");
+  const reviewer = await person("user");
+  const contract = `invoice-approval-${unique()}`;
+  const published = {
+    kind: "decision",
+    input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
+    response: JSON.stringify(answers.descriptor),
+  };
+  await (unchecked
+    ? storedUnchecked(admin, contract, published)
+    : publishCatalogContract(env, admin, { key: contract, ...published }));
+  const workflow = await createWorkflowResource(
+    env,
+    owner,
+    `approve-${unique()}`
+  );
+  await publishDefinition(
+    env,
+    owner,
+    workflow.id,
+    definitionOf(contract, steps, status)
+  );
+  const [version] = await workflowVersions(env, owner, workflow.id);
+  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "invoiceApproval",
+    target: { kind: "decision", deciders: await deciders(reviewer) },
+    reviewed: { version: 1 },
+  });
+  await setWorkflowParams(env, owner, workflow.id, {
+    values: { reviewer: `person:${reviewer.userId}` },
+    expectedRevision: 0,
+  });
+  return { admin, owner, reviewer, workflow, version, approval };
+};
+
+/** Starts version 1 of workflow `id` for `by`, on an invoice of `amount`. */
+const started = async (
+  by: Identity,
+  id: string,
+  amount: number
+): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    id,
+    { expected: 1, args: { amount }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  return runId;
+};
+
+/** Run `runId` of workflow `id` once it has ended. */
+const ended = async (
+  by: Identity,
+  id: string,
+  runId: string
+): Promise<WorkflowResourceRun> =>
+  await vi.waitFor(
+    async () => {
+      const run = await resourceRunFor(env, by, id, runId);
+      expect(run.endedAt).not.toBeNull();
+      return run;
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/** What a run ended with: its status, and its output or error code. */
+const endOf = (run: WorkflowResourceRun) => ({
+  status: run.status,
+  ...(run.status === "completed"
+    ? { output: run.result }
+    : { code: run.error?.code }),
+});
+
+/** The decisions run `runId` opened, as their rows have them. */
+const decisionsOf = async (runId: string) => {
+  const { results } = await env.DB.prepare(
+    "SELECT id, deciders, description, status, input, starter_excluded FROM workflow_decisions WHERE resource_run_id = ?"
+  )
+    .bind(runId)
+    .all<{
+      id: string;
+      deciders: string;
+      description: string;
+      status: string;
+      input: string | null;
+      starter_excluded: number;
+    }>();
+  return results;
+};
+
+/** How many decisions run `runId` opened. */
+const decisionCount = async (runId: string): Promise<number> => {
+  const rows = await decisionsOf(runId);
+  return rows.length;
+};
+
+/** The decision run `runId` opened, once it has. */
+const openedBy = async (runId: string): Promise<string> =>
+  await vi.waitFor(
+    async () => {
+      const [decision] = await decisionsOf(runId);
+      if (decision === undefined) {
+        throw new Error("No decision yet");
+      }
+      return decision.id;
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+
+/**
+ * `by`'s answer to `decision` through the trusted host decision UI:
+ * reviewed, confirmed, then answered with that confirmation.
+ */
+const confirmedAnswer = async (
+  by: Identity,
+  decision: string,
+  answer: { approved: boolean; payload?: { comment: string } }
+) => {
+  const review = await reviewDecision(env, by, decision, answer);
+  if (review.state === "recorded") {
+    return review.decision;
+  }
+  const { confirmation } = await confirmDecision(
+    env,
+    by,
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  return await answerDecision(env, by, decision, review.response, confirmation);
+};
+
+/** The receipts of run `runId`'s decision calls, by outcome. */
+const receiptsOf = async (runId: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target, detail }) =>
+        action === "workflow.run.called" &&
+        target?.id === runId &&
+        detail?.call === "grasp.decision"
+    )
+    .map(({ detail }) => detail?.outcome);
+};
+
+/**
+ * Revokes `approval`, workflow `id`'s decision binding, by `admin`, in the
+ * write that keeps its run's decision: as an admin's revocation landing
+ * after the open last looked at the binding and before the run asks
+ * anyone, which no call of `revokeWorkflowBinding` can be timed to hit.
+ */
+const revokedAsOpened = async (
+  id: string,
+  approval: string,
+  admin: Identity
+): Promise<void> => {
+  const trigger = `revoke_as_opened_${unique().replaceAll("-", "_")}`;
+  await env.DB.prepare(
+    `CREATE TRIGGER ${trigger} AFTER INSERT ON workflow_decisions WHEN NEW.resource_run_id IN (SELECT id FROM workflow_resource_runs WHERE workflow_resource_id = '${id}') BEGIN UPDATE workflow_binding_approvals SET status = 'revoked', revoked_by = '${admin.userId}', revoked_at = ${Date.now()} WHERE id = '${approval}'; END`
+  ).run();
+};
+
+/**
+ * Pins, to each run of workflow `id` as it starts, a source the chat it
+ * started from had read and its agent can no longer read, as a start
+ * from a chat pins what the chat read (workflow-starts.ts).
+ */
+const startedFromUnreadableChat = async (id: string): Promise<void> => {
+  const trigger = `chat_pinned_${unique().replaceAll("-", "_")}`;
+  await env.DB.prepare(
+    `CREATE TRIGGER ${trigger} AFTER INSERT ON workflow_resource_runs WHEN NEW.workflow_resource_id = '${id}' BEGIN INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (NEW.id, '${crypto.randomUUID()}', '${crypto.randomUUID()}', '${crypto.randomUUID()}', '${crypto.randomUUID()}', NEW.principal_id); END`
+  ).run();
+};
+
+/** How often decision `decision` was opened, as the audit log has it. */
+const openings = async (decision: string): Promise<number> => {
+  const events = await allEvents();
+  return events.filter(
+    ({ action, target }) =>
+      action === "workflow.decision.opened" && target?.id === decision
+  ).length;
+};
+
+/** The asks of decision `decision`, as the audit log has them. */
+const asksOf = async (decision: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target }) =>
+        action === "workflow.decision.asked" && target?.id === decision
+    )
+    .map(({ detail, provenance }) => ({
+      recipients: detail?.recipients,
+      listed: detail?.listed,
+      whom: provenance,
+    }));
+};
+
+/**
+ * A running independent run of workflow `workflow` acting for
+ * `principal`, as core keeps one, with an open decision for `deciders` at
+ * each of `steps`, opened `ago` milliseconds ago, latest last.
+ */
+const seededDecisions = async (
+  workflow: string,
+  principal: string,
+  deciders: string,
+  steps: number,
+  ago: number
+): Promise<string[]> => {
+  const runId = `seeded-${unique()}`;
+  const now = Date.now();
+  const ids = Array.from({ length: steps }, () => crypto.randomUUID());
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input, input_hash, params, params_revision, bindings, bindings_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'manifest', ?, 0, '{}', 'hash', '{}', 0, '[]', '', ?)"
+    ).bind(runId, principal, runId, workflow, principal, now - ago),
+    env.DB.prepare(
+      "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'manifest', 'build', ?, 'running', ?)"
+    ).bind(runId, workflow, principal, now - ago),
+    ...ids.map((id, index) =>
+      env.DB.prepare(
+        "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, starter_excluded, description, status, opened_at, expires_at, input) VALUES (?, ?, ?, ?, 1, 'Approve it?', 'open', ?, ?, '{}')"
+      ).bind(
+        id,
+        runId,
+        `task:ask@each.${index}`,
+        deciders,
+        now - ago + index,
+        now + 3_600_000
+      )
+    ),
+  ]);
+  return ids;
+};
+
+/**
+ * A private Teams chat `who` wrote to Stephen in, with their app set to
+ * `locale`, kept as the door keeps it (channels/door.ts): its Teams
+ * conversation id.
+ */
+const teamsChatOf = async (who: Identity, locale: string): Promise<string> => {
+  const conversation = `a:${unique()}`;
+  const adapter = await teamsAdapter(env);
+  const threadId = adapter.encodeThreadId({
+    conversationId: conversation,
+    serviceUrl: "https://smba.trafficmanager.net/emea/",
+    conversationType: "personal",
+  });
+  await env.DB.prepare(
+    "INSERT INTO channel_conversations (platform, thread_id, user_id, locale, created_at, last_message_at) VALUES ('teams', ?, ?, ?, ?, ?)"
+  )
+    .bind(threadId, who.userId, locale, Date.now(), Date.now())
+    .run();
+  return conversation;
+};
+
+/** The IDs of the decisions waiting for `by` to answer (their inbox). */
+const inboxOf = async (by: Identity): Promise<string[]> => {
+  const waiting = await waitingDecisions(env, by);
+  return waiting.map(({ id }) => id);
+};
+
+/**
+ * Answers run `runId`'s decisions in turn, as each opens: the first open
+ * one not answered yet gets the next of `answers`. Their IDs, in order.
+ */
+const answerInTurn = async (
+  reviewer: Identity,
+  runId: string,
+  answers: readonly boolean[]
+): Promise<string[]> => {
+  const answered: string[] = [];
+  for (const approved of answers) {
+    // One decision after another: each opens once the one before it is answered.
+    // oxlint-disable-next-line no-await-in-loop
+    const next = await vi.waitFor(
+      async () => {
+        const rows = await decisionsOf(runId);
+        const open = rows.find(
+          ({ id, status }) => status === "open" && !answered.includes(id)
+        );
+        if (open === undefined) {
+          throw new Error("No decision open yet");
+        }
+        return open.id;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    // oxlint-disable-next-line no-await-in-loop
+    await confirmedAnswer(reviewer, next, { approved });
+    answered.push(next);
+  }
+  return answered;
+};
+
+/**
+ * A loop asking `review`'s decision of each of `items` (an expression),
+ * of `input` (in the item's scope). The run ends `"asked"`: what each item
+ * was answered, its decision's row has.
+ */
+const askEach = (items: string, input: unknown) => ({
+  id: "eachInvoice",
+  type: "forEach",
+  items: { $expr: items },
+  do: [{ ...reviewOf(), input }],
+});
+
+describe("an invoice approval's decision", () => {
+  it("publishes executable, against the build its run loads", async () => {
+    const { version } = await approvalWorkflow();
+    expect({
+      executable: version?.build?.hash !== undefined,
+    }).toStrictEqual({ executable: true });
+  });
+
+  it("takes the approved branch once the reviewer approves, the decision showing what it is about", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const answered = await confirmedAnswer(reviewer, decision, {
+      approved: true,
+      payload: { comment: "Matches the PO" },
+    });
+    const run = await ended(owner, workflow.id, runId);
+    const [row] = await decisionsOf(runId);
+    expect({
+      answered: {
+        status: answered.status,
+        input: answered.input,
+        description: answered.description,
+        workflowResource: answered.workflowResource.id,
+      },
+      row: {
+        deciders: row?.deciders,
+        starterExcluded: row?.starter_excluded,
+      },
+      end: endOf(run),
+      // A replay after the answer opened nothing more: one decision, one
+      // opening, one receipt of each half of the call.
+      decisions: await decisionCount(runId),
+      openings: await openings(decision),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      answered: {
+        status: "approved",
+        input: { amount: 5000 },
+        description: "Approve this invoice?",
+        workflowResource: workflow.id,
+      },
+      row: { deciders: `person:${reviewer.userId}`, starterExcluded: 1 },
+      end: { status: "completed", output: { status: "approved" } },
+      decisions: 1,
+      openings: 1,
+      receipts: ["opened", "answered"],
+    });
+  });
+
+  it("takes the rejected branch when the reviewer declines: a decline never falls through to approved", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    await confirmedAnswer(reviewer, decision, { approved: false });
+    const run = await ended(owner, workflow.id, runId);
+    expect(endOf(run)).toStrictEqual({
+      status: "completed",
+      output: { status: "rejected" },
+    });
+  });
+
+  it("takes the approved branch for a small invoice without asking anyone", async () => {
+    const { owner, workflow } = await approvalWorkflow();
+    const runId = await started(owner, workflow.id, 10);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "approved" } },
+      decisions: [],
+    });
+  });
+});
+
+describe("who answers a JSON workflow's decision", () => {
+  it("is only its recipient, confirmed: not the run's person, an admin, another member, nor an event of its type", async () => {
+    const { admin, owner, reviewer, workflow } = await approvalWorkflow();
+    const other = await person("user");
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const tries = {
+      owner: await outcome(
+        confirmDecision(env, owner, decision, "", { approved: true })
+      ),
+      admin: await outcome(
+        confirmDecision(env, admin, decision, "", { approved: true })
+      ),
+      other: await outcome(
+        reviewDecision(env, other, decision, { approved: true })
+      ),
+      // The recipient without a confirmation: nothing is recorded.
+      unconfirmed: await outcome(
+        answerDecision(env, reviewer, decision, { approved: true }, "")
+      ),
+    };
+    // A stray event of the decision's wake type, as anyone with the
+    // engine could send: the run looks, finds nothing answered, and waits
+    // on.
+    await runEngine(env).sendEvent(
+      runId,
+      decisionEventType(decision),
+      `forged:${unique()}`
+    );
+    await scheduler.wait(1000);
+    const stillWaiting = await resourceRunFor(env, owner, workflow.id, runId);
+    await confirmedAnswer(reviewer, decision, { approved: false });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      tries,
+      waitingAfterForgedWake: stillWaiting.endedAt,
+      end: endOf(run),
+    }).toStrictEqual({
+      tries: {
+        owner: "decision.forbidden",
+        admin: "decision.forbidden",
+        other: "decision.forbidden",
+        unconfirmed: "decision.unconfirmed",
+      },
+      waitingAfterForgedWake: null,
+      end: { status: "completed", output: { status: "rejected" } },
+    });
+  });
+
+  it("refuses an answer its contract doesn't take, leaving the decision open for one it does", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      answers: v.object({ comment: v.string() }),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const bare = await outcome(
+      confirmedAnswer(reviewer, decision, { approved: true })
+    );
+    const [stillOpen] = await decisionsOf(runId);
+    await confirmedAnswer(reviewer, decision, {
+      approved: true,
+      payload: { comment: "Matches the PO" },
+    });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      bare,
+      status: stillOpen?.status,
+      end: endOf(run),
+    }).toStrictEqual({
+      bare: "decision.invalid",
+      status: "open",
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("refuses a decision contract whose response schema takes nothing a person can answer: at publication, and at the call", async () => {
+    const admin = await person("admin");
+    const reasons = v.object({ reason: v.string() });
+    const publishing = await outcome(
+      publishCatalogContract(env, admin, {
+        key: `invoice-approval-${unique()}`,
+        kind: "decision",
+        input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
+        response: JSON.stringify(reasons.descriptor),
+      })
+    );
+    // One stored before publishing checked it: refused before it opens.
+    const { owner, workflow } = await approvalWorkflow({
+      answers: reasons,
+      unchecked: true,
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      publishing,
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+    }).toStrictEqual({
+      publishing: "workflow.contract_invalid",
+      end: { status: "failed", code: "workflow.call_invalid" },
+      decisions: [],
+    });
+  });
+
+  it("refuses a recipient the binding doesn't cover, opening nothing", async () => {
+    const { owner, workflow } = await approvalWorkflow({
+      deciders: async () => await Promise.resolve(["role:admin"]),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_denied" },
+      decisions: [],
+      receipts: ["workflow.call_denied"],
+    });
+  });
+
+  it("asks a member of a team the binding names", async () => {
+    const teamId = crypto.randomUUID();
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      deciders: async (asked) => {
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Finance', 'organization', ?)"
+          ).bind(teamId, Date.now()),
+          env.DB.prepare(
+            "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+          ).bind(crypto.randomUUID(), teamId, asked.userId, Date.now()),
+        ]);
+        return [`team:${teamId}`];
+      },
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    expect(endOf(run)).toStrictEqual({
+      status: "completed",
+      output: { status: "approved" },
+    });
+  });
+});
+
+/** The approval asking its reviewer and team `teamId`'s members both. */
+const askingReviewerAndTeam = (teamId: string) =>
+  approvalSteps(
+    reviewOf({
+      $expr: `[params.reviewer, ${JSON.stringify(`team:${teamId}`)}]`,
+    })
+  );
+
+/** Team `teamId`, with a new member of it, as their session has them. */
+const teamWithMember = async (teamId: string): Promise<Identity> => {
+  const member = await person("user");
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Finance', 'organization', ?)"
+    ).bind(teamId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+    ).bind(crypto.randomUUID(), teamId, member.userId, Date.now()),
+  ]);
+  return { ...member, teams: [{ id: teamId, name: "Finance" }] };
+};
+
+describe("a JSON workflow's decision asked of several", () => {
+  it("opens one decision any of them answers, once, waiting for each of them", async () => {
+    const teamId = crypto.randomUUID();
+    const colleague = await teamWithMember(teamId);
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      steps: askingReviewerAndTeam(teamId),
+      deciders: async (asked) =>
+        await Promise.resolve([`person:${asked.userId}`, `team:${teamId}`]),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const waiting = {
+      reviewer: await inboxOf(reviewer),
+      colleague: await inboxOf(colleague),
+      owner: await inboxOf(owner),
+    };
+    await confirmedAnswer(colleague, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    const late = await outcome(
+      confirmedAnswer(reviewer, decision, { approved: false })
+    );
+    const decisions = await decisionsOf(runId);
+    expect({
+      waiting: {
+        reviewer: waiting.reviewer.includes(decision),
+        colleague: waiting.colleague.includes(decision),
+        owner: waiting.owner.includes(decision),
+      },
+      late,
+      decisions: decisions.map(({ status }) => status),
+      end: endOf(run),
+    }).toStrictEqual({
+      waiting: { reviewer: true, colleague: true, owner: false },
+      late: "decision.closed",
+      decisions: ["approved"],
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("refuses the call, opening nothing, when one of them is outside the binding", async () => {
+    const teamId = crypto.randomUUID();
+    await teamWithMember(teamId);
+    const { owner, workflow } = await approvalWorkflow({
+      steps: askingReviewerAndTeam(teamId),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_denied" },
+      decisions: [],
+    });
+  });
+});
+
+describe("asking the people a JSON workflow's decision is for", () => {
+  it("asks its recipient once, audited, the decision waiting in their inbox and nobody else's", async () => {
+    const { admin, owner, reviewer, workflow } = await approvalWorkflow();
+    const other = await person("user");
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const asks = await vi.waitFor(
+      async () => {
+        const found = await asksOf(decision);
+        expect(found).not.toStrictEqual([]);
+        return found;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const waiting = {
+      reviewer: await inboxOf(reviewer),
+      owner: await inboxOf(owner),
+      admin: await inboxOf(admin),
+      other: await inboxOf(other),
+    };
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    const afterAnswer = await inboxOf(reviewer);
+    const asksAfterReplay = await asksOf(decision);
+    expect({
+      asks,
+      waiting: {
+        reviewer: waiting.reviewer.includes(decision),
+        owner: waiting.owner.includes(decision),
+        admin: waiting.admin.includes(decision),
+        other: waiting.other.includes(decision),
+      },
+      // Answered, it waits for nobody; and a replay asked nobody again.
+      afterAnswer: afterAnswer.includes(decision),
+      asksAfterReplay: asksAfterReplay.length,
+      end: endOf(run),
+    }).toStrictEqual({
+      asks: [{ recipients: 1, listed: true, whom: [reviewer.userId] }],
+      waiting: { reviewer: true, owner: false, admin: false, other: false },
+      afterAnswer: false,
+      asksAfterReplay: 1,
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("lists its run as waiting, with a link to the decision for someone who may answer it, and to the run's person without one", async () => {
+    const { owner, reviewer: asked, workflow } = await approvalWorkflow();
+    // A builder of the workflow, who sees each of its runs.
+    await env.DB.prepare(
+      "UPDATE members SET role = 'builder' WHERE user_id = ?"
+    )
+      .bind(asked.userId)
+      .run();
+    const reviewer = identityOf(asked.userId, "builder");
+    await shareWorkflowResource(env, owner, workflow.id, {
+      type: "person",
+      id: reviewer.userId,
+      role: "builder",
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const listedFor = async (by: Identity) => {
+      const { runs } = await listAllRuns(env, by);
+      const run = runs.find(({ id }) => id === runId);
+      return run === undefined
+        ? undefined
+        : { status: run.status, decision: run.decision };
+    };
+
+    expect({
+      reviewer: await listedFor(reviewer),
+      owner: await listedFor(owner),
+    }).toStrictEqual({
+      reviewer: { status: "waiting", decision },
+      owner: { status: "waiting", decision: undefined },
+    });
+  });
+
+  it("tells its recipient once in their own Teams chat with Stephen, in their language, with the link: one without a chat finds it in their inbox alone", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const conversation = await teamsChatOf(reviewer, "nl");
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(asksOf(decision)).resolves.not.toStrictEqual([]);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const told = await reached(conversation);
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    await ended(owner, workflow.id, runId);
+    const link = `/decisions/${encodeURIComponent(decision)}`;
+    const toldAfter = await reached(conversation);
+    expect({
+      lines: told.lines,
+      // Answered and ended, it said nothing more.
+      after: toldAfter.lines.length,
+    }).toStrictEqual({
+      lines: [
+        expect.stringMatching(
+          new RegExp(
+            `^Een workflow wacht op jouw beslissing\\. Beslis in Grasp: https://[^ ]+${link.replaceAll("/", "\\/")}$`,
+            "u"
+          )
+        ),
+      ],
+      after: 1,
+    });
+  });
+
+  it("asks more people than one ask lists without failing the run, audited by count, and one of them answers", async () => {
+    const { owner, workflow } = await approvalWorkflow({
+      deciders: async () => await Promise.resolve(["role:user"]),
+      steps: approvalSteps(reviewOf(["role:user"])),
+    });
+    const people = await Promise.all(
+      Array.from({ length: 51 }, async () => await person("user"))
+    );
+    const [answering] = people;
+    if (answering === undefined) {
+      throw new Error("No people");
+    }
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const [asked] = await vi.waitFor(
+      async () => {
+        const found = await asksOf(decision);
+        expect(found).not.toStrictEqual([]);
+        return found;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const waiting = await inboxOf(answering);
+    await confirmedAnswer(answering, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      listed: asked?.listed,
+      whom: asked?.whom,
+      manyAsked: Number(asked?.recipients) > 50,
+      inInbox: waiting.includes(decision),
+      end: endOf(run),
+    }).toStrictEqual({
+      listed: false,
+      whom: [],
+      manyAsked: true,
+      inInbox: true,
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("finds the decisions waiting for someone past more newer ones they may not answer than a page holds", async () => {
+    const owner = await person("builder");
+    const asked = await person("user");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `inbox-${unique()}`
+    );
+    // Older, theirs to answer: a run acting for someone else.
+    const [theirs] = await seededDecisions(
+      workflow.id,
+      owner.userId,
+      `person:${asked.userId}`,
+      1,
+      7_200_000
+    );
+    // Newer, naming them, but of runs acting for them: never theirs (R8).
+    await seededDecisions(
+      workflow.id,
+      asked.userId,
+      `person:${asked.userId}`,
+      250,
+      3_600_000
+    );
+    await expect(inboxOf(asked)).resolves.toStrictEqual([theirs]);
+  });
+
+  it("counts its decisions among the waits for people and the corrections the signals show", async () => {
+    const { admin, owner, reviewer, workflow } = await approvalWorkflow();
+    const declined = await started(owner, workflow.id, 5000);
+    await confirmedAnswer(reviewer, await openedBy(declined), {
+      approved: false,
+    });
+    await ended(owner, workflow.id, declined);
+    const waiting = await started(owner, workflow.id, 6000);
+    const open = await openedBy(waiting);
+    await refreshDailySignals(env, new Date());
+    const { signals } = await listSignals(env, admin, {});
+    const ours = signals
+      .filter((signal) => signal.workflow === workflow.name)
+      .map(({ kind, app, subject, evidence }) => ({
+        kind,
+        app,
+        subject,
+        evidence:
+          "oldest" in evidence
+            ? evidence.oldest?.map(({ decision, run, step }) => ({
+                decision,
+                run,
+                step,
+              }))
+            : evidence,
+      }))
+      .map(({ evidence, ...signal }) => ({
+        ...signal,
+        evidence:
+          evidence !== undefined &&
+          !Array.isArray(evidence) &&
+          "answered" in evidence
+            ? { answered: evidence.answered, rejected: evidence.rejected }
+            : evidence,
+      }));
+    expect(ours).toStrictEqual(
+      expect.arrayContaining([
+        {
+          kind: "waiting_for_person",
+          app: null,
+          subject: `person:${reviewer.userId}`,
+          evidence: [{ decision: open, run: waiting, step: "review" }],
+        },
+        {
+          kind: "correction",
+          app: null,
+          subject: "review",
+          evidence: { answered: 1, rejected: 1 },
+        },
+      ])
+    );
+  });
+});
+
+describe("authority behind a JSON workflow's decision", () => {
+  it("refuses the outcome once the binding is revoked, as its decision opens or while the run waits, never taking it as approved", async () => {
+    // While it waits: its people asked, then the binding revoked.
+    const waits = await approvalWorkflow();
+    const waiting = await started(waits.owner, waits.workflow.id, 5000);
+    const decision = await openedBy(waiting);
+    await vi.waitFor(
+      async () => {
+        await expect(asksOf(decision)).resolves.toHaveLength(1);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await revokeWorkflowBinding(
+      env,
+      waits.admin,
+      waits.workflow.id,
+      waits.approval.id
+    );
+    await confirmedAnswer(waits.reviewer, decision, { approved: true });
+    const waited = await ended(waits.owner, waits.workflow.id, waiting);
+    // As it opens: revoked the moment its decision is kept, after the
+    // open's last look at the binding and before its people are asked.
+    const opens = await approvalWorkflow();
+    await revokedAsOpened(opens.workflow.id, opens.approval.id, opens.admin);
+    const opening = await started(opens.owner, opens.workflow.id, 5000);
+    const opened = await openedBy(opening);
+    const refused = await ended(opens.owner, opens.workflow.id, opening);
+    expect({
+      waits: { end: endOf(waited), receipts: await receiptsOf(waiting) },
+      opens: {
+        end: endOf(refused),
+        receipts: await receiptsOf(opening),
+        asks: await asksOf(opened),
+      },
+    }).toStrictEqual({
+      waits: {
+        end: { status: "failed", code: "workflow.call_denied" },
+        receipts: ["opened", "workflow.call_denied"],
+      },
+      // Its people never shown what it asks; its refusal kept as the
+      // answer's would be.
+      opens: {
+        end: { status: "failed", code: "workflow.call_denied" },
+        receipts: ["opened", "workflow.call_denied"],
+        asks: [],
+      },
+    });
+  });
+
+  it("refuses to open a decision once the binding is revoked before the call", async () => {
+    const { admin, owner, workflow, approval } = await approvalWorkflow({
+      steps: [hold, ...approvalSteps()],
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_denied" },
+      decisions: [],
+      receipts: ["workflow.call_denied"],
+    });
+  });
+
+  it("refuses to open a decision once the run's evidence can no longer be read, its refusal kept", async () => {
+    const { owner, workflow } = await approvalWorkflow();
+    // Started from a chat that had read a source its agent can no longer
+    // read: its input may carry it, and a decision shows it to others.
+    await startedFromUnreadableChat(workflow.id);
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "brain.revoked" },
+      decisions: [],
+      receipts: ["brain.revoked"],
+    });
+  });
+
+  it("fails the run when nobody answers before the step's timeout: no outcome is made up", async () => {
+    const { owner, workflow } = await approvalWorkflow({
+      steps: approvalSteps({ ...reviewOf(), timeout: "2 seconds" }),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    const statuses = rows.map(({ status }) => status);
+    expect({
+      end: endOf(run),
+      decisions: statuses,
+    }).toStrictEqual({
+      end: { status: "failed", code: "test.unanswered" },
+      decisions: ["timed_out"],
+    });
+  });
+});
+
+describe("a JSON workflow's decision in a loop", () => {
+  it("opens one decision per item, each answered on its own", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      steps: [askEach("[100, 200]", { amount: { $expr: "item" } })],
+      status: "asked",
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const asked = await answerInTurn(reviewer, runId, [true, false]);
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    expect({
+      end: endOf(run),
+      // In the order they were asked: each item's own input and answer.
+      asked: asked.map((id) => {
+        const row = rows.find((each) => each.id === id);
+        return { input: row?.input, status: row?.status };
+      }),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "asked" } },
+      asked: [
+        { input: '{"amount":100}', status: "approved" },
+        { input: '{"amount":200}', status: "rejected" },
+      ],
+    });
+  });
+
+  it("opens one decision per item of nested loops, each in its own item's scope", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      steps: [
+        {
+          id: "eachBatch",
+          type: "forEach",
+          items: { $expr: "[1, 2]" },
+          // The inner loop's items are read in the outer item's scope.
+          do: [
+            askEach("item === 1 ? [100, 200] : [200, 400]", {
+              amount: { $expr: "item" },
+            }),
+          ],
+        },
+      ],
+      status: "asked",
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const asked = await answerInTurn(reviewer, runId, [
+      true,
+      false,
+      false,
+      true,
+    ]);
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    expect({
+      end: endOf(run),
+      // In the order they were asked: each item's own input.
+      inputs: asked.map((id) => rows.find((row) => row.id === id)?.input),
+      decisions: rows.length,
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "asked" } },
+      inputs: [
+        '{"amount":100}',
+        '{"amount":200}',
+        '{"amount":200}',
+        '{"amount":400}',
+      ],
+      decisions: 4,
+    });
+  });
+
+  it("keeps an item waiting for its own decision when an earlier item's decision wakes the run again", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      steps: [askEach("[100, 200]", { amount: { $expr: "item" } })],
+      status: "asked",
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    // Items run one after another: the second item's decision opens only
+    // once the first's is answered.
+    const [first] = await answerInTurn(reviewer, runId, [true]);
+    if (first === undefined) {
+      throw new Error("No first decision");
+    }
+    const second = await vi.waitFor(
+      async () => {
+        const rows = await decisionsOf(runId);
+        const next = rows.find(({ id }) => id !== first);
+        if (next === undefined) {
+          throw new Error("No second decision yet");
+        }
+        return next.id;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    // The first item's wake again, while the second item's decision is
+    // open: the run looks at its own item's decision, finds it open, and
+    // waits on.
+    await runEngine(env).sendEvent(
+      runId,
+      decisionEventType(first),
+      `again:${unique()}`
+    );
+    await scheduler.wait(1000);
+    const meanwhile = await resourceRunFor(env, owner, workflow.id, runId);
+    const rowsMeanwhile = await decisionsOf(runId);
+    const secondRow = rowsMeanwhile.find(({ id }) => id === second);
+    await confirmedAnswer(reviewer, second, { approved: false });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      waitingMeanwhile: meanwhile.endedAt,
+      secondMeanwhile: secondRow?.status,
+      end: endOf(run),
+    }).toStrictEqual({
+      waitingMeanwhile: null,
+      secondMeanwhile: "open",
+      end: { status: "completed", output: { status: "asked" } },
+    });
+  });
+});
+
+describe("durability of a JSON workflow's decision", () => {
+  it("goes on only with the decision its step opened asking exactly what the step built", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      steps: [hold, ...approvalSteps()],
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    // As an attempt cut off after opening its decision leaves it: open,
+    // under the step's name, though asking something else than the
+    // attempt run again builds.
+    const planted = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, starter_excluded, description, status, opened_at, expires_at, input) VALUES (?, ?, 'review:task', ?, 1, 'Approve this other invoice?', 'open', ?, ?, ?)"
+    )
+      .bind(
+        planted,
+        runId,
+        `person:${reviewer.userId}`,
+        Date.now(),
+        Date.now() + 3_600_000,
+        JSON.stringify({ amount: 1 })
+      )
+      .run();
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    expect({
+      end: endOf(run),
+      decisions: rows.map(({ id }) => id),
+      asks: await asksOf(planted),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_invalid" },
+      decisions: [planted],
+      asks: [],
+    });
+  });
+
+  it("goes on with the answer once when its wake is lost and the run restarts, asking nothing twice", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    // Down while it waits, and the engine unreachable as the answer comes
+    // in: the answer is recorded, and the wake it owes is lost.
+    await stopped(runId);
+    await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () => await confirmedAnswer(reviewer, decision, { approved: true })
+    );
+    // The same answer again, as after an acknowledgement that never came:
+    // the decision already taken. Another answer finds it closed.
+    const again = await outcome(
+      answerDecision(env, reviewer, decision, { approved: true }, "")
+    );
+    const other = await outcome(
+      answerDecision(env, reviewer, decision, { approved: false }, "")
+    );
+    // The repair sends the wake while the run is down; it takes it once
+    // it is back.
+    await repairWakes(env, new Date(Date.now() + 60_000));
+    await resumed(runId);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      again,
+      other,
+      end: endOf(run),
+      decisions: await decisionCount(runId),
+      openings: await openings(decision),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      again: "ok",
+      other: "decision.closed",
+      end: { status: "completed", output: { status: "approved" } },
+      decisions: 1,
+      openings: 1,
+      receipts: ["opened", "answered"],
+    });
+  });
+});
+
+describe("a test run of a JSON workflow's decision", () => {
+  it("asks nobody: its fixture answers, held to a decision's outcome and the contract's response", async () => {
+    const admin = await person("admin");
+    const owner = await person("builder");
+    const contract = `invoice-approval-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: contract,
+      kind: "decision",
+      input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
+      response: JSON.stringify(response.descriptor),
+    });
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `approve-${unique()}`
+    );
+    const { revision: base } = await workflowDraft(env, owner, workflow.id);
+    const saved = await editWorkflowDraft(env, owner, workflow.id, {
+      revision: base,
+      source: definitionOf(contract, approvalSteps()),
+    });
+    const run = async (
+      answer: unknown,
+      reviewer = `person:${crypto.randomUUID()}`
+    ) => {
+      const { runId } = await startCandidateRun(env, owner, workflow.id, {
+        revision: saved.revision,
+        args: { amount: 5000 },
+        params: { reviewer },
+        fixtures: { invoiceApproval: { result: answer } },
+      });
+      const ran = await vi.waitFor(
+        async () => {
+          const found = await candidateRunFor(env, owner, workflow.id, runId);
+          if (found.status === "starting" || found.status === "running") {
+            throw new Error(`Test run ${runId} is ${found.status}`);
+          }
+          return found;
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+      return {
+        end:
+          ran.status === "completed"
+            ? { status: ran.status, output: ran.result }
+            : { status: ran.status, code: ran.error?.code },
+        decisions: await decisionCount(runId),
+      };
+    };
+    expect({
+      problems: saved.problems,
+      declined: await run({
+        answered: true,
+        approved: false,
+        by: "fixture",
+        value: null,
+      }),
+      // Not a decision's outcome: refused, never read as approved.
+      approvedOnly: await run({ approved: true }),
+      offContract: await run({
+        answered: true,
+        approved: true,
+        by: "fixture",
+        value: { comment: 7 },
+      }),
+      // Asking the person it acts for, as a real run is refused.
+      ownReviewer: await run(
+        { answered: true, approved: true, by: "fixture", value: null },
+        `person:${owner.userId}`
+      ),
+    }).toStrictEqual({
+      problems: [],
+      declined: {
+        end: { status: "completed", output: { status: "rejected" } },
+        decisions: 0,
+      },
+      approvedOnly: {
+        end: { status: "failed", code: "workflow.call_invalid" },
+        decisions: 0,
+      },
+      offContract: {
+        end: { status: "failed", code: "workflow.call_invalid" },
+        decisions: 0,
+      },
+      ownReviewer: {
+        end: { status: "failed", code: "workflow.call_invalid" },
+        decisions: 0,
+      },
+    });
+  });
+});

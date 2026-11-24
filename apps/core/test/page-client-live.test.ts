@@ -1,0 +1,1201 @@
+import { GraspClient } from "@grasp-os/runtime/host";
+import type { ClientTransport } from "@grasp-os/runtime/host";
+import { storeIdSchema } from "@grasp-os/shared/ids";
+import { querySubscriptionLimits } from "@grasp-os/shared/pages";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { definedWith, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
+import { commitApp, pastAccessRecheck } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { apiOf, referenceTo } from "./notes-client-app.ts";
+import type { Opened, Push } from "./page-client.ts";
+import {
+  mockSessionIdp,
+  personApi,
+  openedApp,
+  pageTransport,
+  clientFor,
+  reading,
+  eventually,
+  shown,
+  requestOf,
+  later,
+  storeObjectOf,
+  pushSchema,
+  pageFollower,
+  titlesOf,
+  silentlyRetitle,
+  memberOf,
+  withSecrets,
+} from "./page-client.ts";
+import { openRpc, outcome } from "./sign-in.ts";
+
+// Live queries (spec 11): what a page's `useQuery` does through the same
+// client, over core's real connection, function route and store. A query
+// is followed once however many components read it; a change saved
+// elsewhere reaches it without the page asking; pushes stay in order,
+// never cross people, stop with access, survive a store restart, and
+// pile up no further than one replacement each.
+
+mockSessionIdp();
+
+/**
+ * A transport that counts what it follows and holds the answers of
+ * calls while `held` is set, to deliver them late.
+ */
+const countingTransport = (transport: ClientTransport) => {
+  let follows = 0;
+  let gate: Promise<unknown> | undefined;
+  return {
+    transport: {
+      call: async (request: string) => {
+        const answer = await transport.call(request);
+        await gate;
+        return answer;
+      },
+      watch: async (...args: Parameters<ClientTransport["watch"]>) => {
+        follows += 1;
+        return await transport.watch(...args);
+      },
+    } satisfies ClientTransport,
+    follows: () => follows,
+    /** Holds every answer until the function it answers is called. */
+    hold: () => {
+      const { promise, resolve } = Promise.withResolvers<null>();
+      gate = promise;
+      return () => {
+        gate = undefined;
+        resolve(null);
+      };
+    },
+  };
+};
+
+describe("live queries", { timeout: 120_000 }, () => {
+  it("follows a query once for every reader, and shows a change saved in another tab without asking", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const counted = countingTransport(pageTransport(opened, opened.pages));
+    const client = new GraspClient(counted.transport);
+    const args = { pagination: { pageSize: 10 } };
+    const first = reading(client, api.list, args);
+    const second = reading(client, api.list, args);
+    await eventually(() => {
+      expect(shown(first.now())).toStrictEqual([]);
+    });
+    // A component that renders again lets go and subscribes in one go,
+    // as React does: the subscription stays.
+    first.stop();
+    const again = reading(client, api.list, args);
+
+    // Another tab of the same session: its own connection to core.
+    const { core } = await openRpc(opened.cookie);
+    const otherPages = core.authenticate().pages;
+    const other = clientFor(opened, otherPages).client;
+    await other.mutation(api.create, { title: "From the other tab" });
+
+    await eventually(() => {
+      expect(shown(second.now())).toStrictEqual(["From the other tab"]);
+    });
+    expect({
+      again: shown(again.now()),
+      follows: counted.follows(),
+    }).toStrictEqual({
+      again: ["From the other tab"],
+      follows: 1,
+    });
+  });
+
+  it("never shows one person's records to another, and pushes each their own", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+    const { lease } = await member.api.pages.open(opened.app);
+    const owner = clientFor(opened).client;
+    const theirs = clientFor(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.pages
+    ).client;
+    const args = { pagination: { pageSize: 10 } };
+    const ownerList = reading(owner, api.list, args);
+    const memberList = reading(theirs, api.list, args);
+    await eventually(() => {
+      expect(shown(memberList.now())).toStrictEqual([]);
+    });
+
+    await owner.mutation(api.create, { title: "The owner's" });
+    await theirs.mutation(api.create, { title: "The member's" });
+
+    await eventually(() => {
+      expect({
+        owner: shown(ownerList.now()),
+        member: shown(memberList.now()),
+      }).toStrictEqual({ owner: ["The owner's"], member: ["The member's"] });
+    });
+  });
+
+  it("shows a query no one followed through a change this page saved afresh, never as it was before", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const id = await client.mutation(api.create, { title: "First" });
+    const note = reading(client, api.get, { id });
+    await eventually(() => {
+      expect(note.now().value).toMatchObject({ title: "First" });
+    });
+    // Nobody reads the note now, as when another note is opened: it is
+    // kept for a remount, but followed by no one.
+    note.stop();
+    await scheduler.wait(0);
+    await client.mutation(api.update, {
+      id,
+      title: "Second",
+      body: "",
+    });
+
+    // Opened again: never the note as it was before the change, which an
+    // editor would take as its starting point.
+    const again = reading(client, api.get, { id });
+    const first = again.now().value;
+    await eventually(() => {
+      expect(again.now().value).toMatchObject({ title: "Second" });
+    });
+    expect(first).toBeUndefined();
+  });
+
+  it("never lets a late answer of a read replace a newer push, followed or no longer", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const counted = countingTransport(pageTransport(opened, opened.pages));
+    const client = new GraspClient(counted.transport);
+    const id = await client.mutation(api.create, { title: "First" });
+    const note = reading(client, api.get, { id });
+    await eventually(() => {
+      expect(note.now().value).toMatchObject({ title: "First" });
+    });
+
+    // A read whose answer is held back while the note moves on.
+    const open = counted.hold();
+    const late = client.query(api.get, { id });
+    const other = clientFor(opened).client;
+    await other.mutation(api.update, {
+      id,
+      title: "Second",
+      body: "",
+    });
+    await eventually(() => {
+      expect(note.now().value).toMatchObject({ title: "Second" });
+    });
+    // Nobody follows the note now: the read sent before the push is still
+    // older than what it shows.
+    note.stop();
+    await scheduler.wait(0);
+    open();
+    await late;
+
+    expect(note.now().value).toMatchObject({ title: "Second" });
+  });
+
+  it("clears what a page shows once the person loses access, before anything more reaches it", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+    const { lease } = await member.api.pages.open(opened.app);
+    const theirs = clientFor(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.pages
+    ).client;
+    await theirs.mutation(api.create, { title: "Mine" });
+    const list = reading(theirs, api.list, { pagination: {} });
+    await eventually(() => {
+      expect(shown(list.now())).toStrictEqual(["Mine"]);
+    });
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+    const owner = clientFor(opened).client;
+    // Any commit to what the query read has it read again, as them.
+    await pastAccessRecheck(async () => {
+      await vi.waitFor(
+        async () => {
+          await owner.mutation(api.create, { title: "Elsewhere" });
+          expect(list.now().error).toBeDefined();
+        },
+        { timeout: 10_000, interval: 250 }
+      );
+    });
+
+    expect({
+      value: list.now().value,
+      code: list.now().error?.code,
+    }).toStrictEqual({ value: undefined, code: "app.not_found" });
+  });
+
+  it("ends a page's live queries once its App is archived, its builders' included, with nothing written to set them off", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const member = await personApi("builder");
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    const { lease } = await member.api.pages.open(opened.app);
+    const theirs = reading(
+      clientFor(
+        { ...opened, lease, cookie: member.session, userId: member.userId },
+        member.api.pages
+      ).client,
+      api.list,
+      { pagination: {} }
+    );
+    const builders = reading(clientFor(opened).client, api.list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect([shown(theirs.now()), shown(builders.now())]).toStrictEqual([
+        [],
+        [],
+      ]);
+    });
+
+    // Nobody uses an archived App, its builders included.
+    await opened.builder.api.apps.archive(opened.app);
+    await vi.waitFor(
+      () => {
+        expect([theirs.now().error, builders.now().error]).not.toContain(
+          undefined
+        );
+      },
+      { timeout: 10_000, interval: 250 }
+    );
+
+    expect({
+      user: { value: theirs.now().value, code: theirs.now().error?.code },
+      builder: {
+        value: builders.now().value,
+        code: builders.now().error?.code,
+      },
+    }).toStrictEqual({
+      user: { value: undefined, code: "app.not_found" },
+      // Cleared as for anyone who lost the App, before anything more reaches it.
+      builder: { value: undefined, code: "app.not_found" },
+    });
+  });
+
+  it("lets the store drop a watch core let go of, even when telling it so failed", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const store = storeObjectOf(opened);
+    // The store stays up, but core's word that it let go of a watch never
+    // arrives.
+    let undo: (() => void) | undefined;
+    await runInDurableObject(store, (instance) => {
+      // SAFETY: a store's object's prototype holds its methods.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const methods = Object.getPrototypeOf(instance) as Record<
+        string,
+        unknown
+      >;
+      const original = methods.unwatch;
+      methods.unwatch = () => {
+        throw new Error("Lost on the way.");
+      };
+      undo = () => {
+        methods.unwatch = original;
+      };
+    });
+    try {
+      const { client } = clientFor(opened);
+      const list = reading(client, api.list, { pagination: {} });
+      await eventually(() => {
+        expect(shown(list.now())).toStrictEqual([]);
+      });
+      list.stop();
+      await scheduler.wait(500);
+
+      // The store's sweep asks each watcher whether it is still there:
+      // one core let go of says no, so the next sweep finds none left to
+      // keep its alarm for.
+      await runDurableObjectAlarm(store);
+      await runDurableObjectAlarm(store);
+      const alarm = await runInDurableObject(
+        store,
+        async (_instance, state) => await state.storage.getAlarm()
+      );
+      expect(alarm).toBeNull();
+    } finally {
+      undo?.();
+    }
+  });
+
+  it("follows again after the store restarts, and shows a change saved just before", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const list = reading(client, api.list, { pagination: {} });
+    await eventually(() => {
+      expect(shown(list.now())).toStrictEqual([]);
+    });
+
+    const other = clientFor(opened).client;
+    await other.mutation(api.create, { title: "Before the restart" });
+    // Restarted, as a deploy restarts it, right after the commit: what
+    // it held of the page's watch is gone with it.
+    await runInDurableObject(storeObjectOf(opened), (_store, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    await eventually(() => {
+      expect(shown(list.now())).toStrictEqual(["Before the restart"]);
+    });
+    await other.mutation(api.create, { title: "After the restart" });
+
+    await eventually(() => {
+      expect(shown(list.now())).toStrictEqual([
+        "After the restart",
+        "Before the restart",
+      ]);
+    });
+  });
+
+  it("keeps one replacement for a page that doesn't take its pushes, and sends the latest once it does", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const received: { revision: number; titles: string[] }[] = [];
+    const taken = Promise.withResolvers<null>();
+    let first = true;
+    const pushed = z.object({
+      revision: z.number(),
+      result: z.object({
+        ok: z.literal(true),
+        value: z.object({ items: z.array(z.object({ title: z.string() })) }),
+      }),
+    });
+    // The page takes the first push only once the test lets it.
+    const callback = async (push: unknown): Promise<void> => {
+      const { revision, result } = pushed.parse(push);
+      received.push({
+        revision,
+        titles: result.value.items.map(({ title }) => title),
+      });
+      if (first) {
+        first = false;
+        await taken.promise;
+      }
+    };
+    await opened.pages.frame(opened.app, opened.lease).watchQuery(
+      requestOf(api.list, { pagination: { pageSize: 50 } }),
+      // Core waits for what a page's callback answers: that is the point.
+      // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- see above
+      callback
+    );
+    await eventually(() => {
+      expect(received).toHaveLength(1);
+    });
+
+    const { client } = clientFor(opened);
+    const saves = 8;
+    for (let note = 1; note <= saves; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one save after the other
+      await client.mutation(api.create, { title: `Note ${note}` });
+    }
+    // Room for the reads those saves cause, while the page holds the first.
+    await scheduler.wait(1000);
+    taken.resolve(null);
+    await eventually(() => {
+      expect(received.at(-1)?.titles).toHaveLength(saves);
+    });
+
+    const revisions = received.map(({ revision }) => revision);
+    expect({
+      inOrder: revisions.every(
+        (revision, at) => at === 0 || revision > (revisions[at - 1] ?? 0)
+      ),
+      fewerThanSaves: received.length < 1 + saves,
+    }).toStrictEqual({ inOrder: true, fewerThanSaves: true });
+  });
+
+  it("holds a page to its live queries at once", async () => {
+    const opened = await openedApp();
+    const follow = async (n: number) =>
+      await outcome(
+        opened.pages
+          .frame(opened.app, opened.lease)
+          .watchQuery(JSON.stringify({ n }), () => {
+            // Each is refused as a call it can't read, and stays followed.
+          })
+      );
+    const answers: string[] = [];
+    // Following counts as a request: twenty a moment, as a page would.
+    for (let minute = 0; minute < 6; minute += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one minute after the other
+      const batch = await later(
+        minute + 1,
+        async () =>
+          await Promise.all(
+            Array.from(
+              { length: 17 },
+              async (_, at) => await follow(minute * 17 + at)
+            )
+          )
+      );
+      answers.push(...batch);
+    }
+
+    expect({
+      followed: answers.filter((answer) => answer === "ok").length,
+      refused: [...new Set(answers.filter((answer) => answer !== "ok"))],
+    }).toStrictEqual({ followed: 100, refused: ["page.too_many_queries"] });
+  });
+});
+describe("live queries: what goes out, and when", { timeout: 180_000 }, () => {
+  it("checks access again before a result that waited goes out, with no write to set it off", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { them, lease, member } = await memberOf(opened);
+    const received: Push[] = [];
+    const first = Promise.withResolvers<null>();
+    // The page holds its first push back while a newer result waits.
+    // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+    const callback: (push: unknown) => void = async (push) => {
+      const read = pushSchema.parse(push);
+      received.push(read);
+      if (read.revision === 1) {
+        await first.promise;
+      }
+    };
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(api.list, { pagination: {} }), callback);
+    await eventually(() => {
+      expect(received).toHaveLength(1);
+    });
+    await clientFor(opened).client.mutation(api.create, { title: "Theirs" });
+    // Room for the read that commit causes: its result waits behind the first.
+    await scheduler.wait(1500);
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+    await pastAccessRecheck(async () => {
+      first.resolve(null);
+      await eventually(() => {
+        expect(received.length).toBeGreaterThan(1);
+      });
+    });
+
+    expect(received.slice(1).map(({ result }) => result.ok)).toStrictEqual([
+      false,
+    ]);
+  });
+
+  it("reads again when the store told of a write before its watch was in place", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const store = storeObjectOf(opened);
+    const storeId = storeIdSchema.parse(opened.release.store?.storeId);
+    // The owner's pages gone without a word, at the person's bound: the
+    // next watch waits while the store asks them whether they're there.
+    const asked = Promise.withResolvers<null>();
+    await Promise.all(
+      Array.from(
+        { length: querySubscriptionLimits.perPerson },
+        async () =>
+          await store.watch(
+            storeId,
+            opened.builder.userId,
+            {},
+            // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- a dead page never answers
+            async (tables: string[]) => {
+              if (tables.length === 0) {
+                asked.resolve(null);
+              }
+              await Promise.withResolvers<never>().promise;
+            }
+          )
+      )
+    );
+    const list = reading(clientFor(opened).client, api.list, {
+      pagination: {},
+    });
+    // The query is read, and its watch waits on the sweep: a write now
+    // is one the store tells the watch of the moment it is in place,
+    // before core heard its ID.
+    await asked.promise;
+    await clientFor(opened).client.mutation(api.create, {
+      title: "Landed meanwhile",
+    });
+    // With no alarm set, the store sets one before it answers the watch,
+    // so its word of the write reaches core first.
+    await runInDurableObject(store, async (_store, state) => {
+      await state.storage.deleteAlarm();
+    });
+
+    await vi.waitFor(
+      () => {
+        expect(shown(list.now())).toStrictEqual(["Landed meanwhile"]);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+  });
+
+  it("keeps reading other queries while pages hold refusals back", async () => {
+    const opened = await openedApp();
+    const other = await openedApp();
+    const api = apiOf(opened.release);
+    const otherApi = apiOf(other.release);
+    const { them, lease, member } = await memberOf(opened);
+    await other.builder.api.apps.members.add(other.app, {
+      ...them,
+      role: "user",
+    });
+    const { lease: otherLease } = await member.api.pages.open(other.app);
+    const refusals: Push[] = [];
+    // A page that never takes the last result of what it follows.
+    // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+    const holding: (push: unknown) => void = async (push) => {
+      const read = pushSchema.parse(push);
+      if (!read.result.ok) {
+        refusals.push(read);
+        await Promise.withResolvers<never>().promise;
+      }
+    };
+    for (let size = 1; size <= 4; size += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await member.api.pages
+        .frame(opened.app, lease)
+        .watchQuery(
+          requestOf(api.list, { pagination: { pageSize: size } }),
+          holding
+        );
+    }
+    await scheduler.wait(1000);
+    await opened.builder.api.apps.members.remove(opened.app, them);
+    const owner = clientFor(opened).client;
+    await pastAccessRecheck(async () => {
+      await vi.waitFor(
+        async () => {
+          await owner.mutation(api.create, { title: "Again" });
+          expect(refusals).toHaveLength(4);
+        },
+        { timeout: 15_000, interval: 300 }
+      );
+    });
+
+    const elsewhere = pageFollower();
+    await member.api.pages
+      .frame(other.app, otherLease)
+      .watchQuery(
+        requestOf(otherApi.list, { pagination: {} }),
+        elsewhere.callback
+      );
+    await eventually(() => {
+      expect(titlesOf(elsewhere.received[0])).toStrictEqual([]);
+    });
+  });
+
+  it("reads afresh for a page that fell behind, rather than keep its result while it catches up", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    // Two notes near a body's bound: a list of them near an answer's.
+    for (const title of ["One", "Two"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(api.create, { title, body: "x".repeat(100_000) });
+    }
+    const pushes: Push[][] = [[], []];
+    const first = Promise.withResolvers<null>();
+    const followerOf = (index: number): ((push: unknown) => void) => {
+      // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+      const callback: (push: unknown) => void = async (push) => {
+        const read = pushSchema.parse(push);
+        pushes[index]?.push(read);
+        if (read.revision === 1) {
+          await first.promise;
+        }
+      };
+      return callback;
+    };
+    const followers = [followerOf(0), followerOf(1)];
+    for (const [index, callback] of followers.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await opened.pages
+        .frame(opened.app, opened.lease)
+        .watchQuery(
+          requestOf(api.list, { pagination: { pageSize: 10 + index } }),
+          callback
+        );
+    }
+    await eventually(() => {
+      expect(pushes.map((list) => list.length)).toStrictEqual([1, 1]);
+    });
+    // A write both read again: past what the page may have waiting.
+    await client.mutation(api.create, { title: "Three" });
+    await scheduler.wait(1500);
+    await silentlyRetitle(opened, "Since then");
+    first.resolve(null);
+
+    await eventually(() => {
+      for (const list of pushes) {
+        expect(titlesOf(list.at(-1))).toStrictEqual([
+          "Since then",
+          "Since then",
+          "Since then",
+        ]);
+      }
+    });
+  });
+});
+describe("live queries and a person's roles", { timeout: 180_000 }, () => {
+  it("never pushes what was read for a builder once the person is only a user, even a result that waited", async () => {
+    const opened = await openedApp(withSecrets());
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.pages.open(opened.app);
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const received: Push[] = [];
+    const first = Promise.withResolvers<null>();
+    // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+    const callback: (push: unknown) => void = async (push) => {
+      const read = pushSchema.parse(push);
+      received.push(read);
+      if (read.revision === 1) {
+        await first.promise;
+      }
+    };
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(secrets, {}), callback);
+    await eventually(() => {
+      expect(received).toHaveLength(1);
+    });
+    // A builders' record, read for them while they are one: it waits.
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    await scheduler.wait(1500);
+
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+    await pastAccessRecheck(async () => {
+      first.resolve(null);
+      await eventually(() => {
+        expect(received.length).toBeGreaterThan(1);
+      });
+    });
+    await scheduler.wait(500);
+
+    expect(
+      received.some(({ result }) =>
+        JSON.stringify(result).includes("Builders only")
+      )
+    ).toBeFalsy();
+  });
+
+  it("keeps a refusal its query's first read met once a version, through a refused outbox write and a publish", async () => {
+    const secretFiles = withSecrets();
+    const glanceFiles = withFiles(secretFiles, {
+      "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    try {
+      await ctx.db.query("secrets").take(10);
+    } catch {
+      // Only its builders read the secrets.
+    }
+    return notes.length;
+  },
+});
+`,
+    });
+    const opened = await openedApp(glanceFiles);
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    const shows = async (count: number) => {
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: count,
+        });
+      });
+    };
+    const keptVersions = async () => {
+      const events = await allEvents();
+      return events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === opened.app
+        )
+        .map(({ detail }) => detail?.version);
+    };
+    // Core's database refuses the first read's evidence in its outbox.
+    const trigger = `refuse_${opened.app.replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_outbox
+       WHEN NEW.event LIKE '%app.use.refused%'
+       BEGIN SELECT RAISE(ABORT, 'refused for the test'); END`
+    ).run();
+    try {
+      await member.api.pages
+        .frame(opened.app, lease)
+        .watchQuery(requestOf(glance, {}), follower.callback);
+      await shows(0);
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
+    }
+    await client.mutation(api.create, { title: "First" });
+    await shows(1);
+    const refusedOutbox = await keptVersions();
+    // A second version made current while the query is followed.
+    const { version } = await commitApp(
+      opened.builder.api,
+      opened.app,
+      withFiles(glanceFiles, {
+        "server/notes.ts": `${glanceFiles.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
+      })
+    );
+    await opened.builder.api.versions.rollback(
+      { kind: "app", id: opened.app },
+      version
+    );
+    await client.mutation(api.create, { title: "Second" });
+    await shows(2);
+    await client.mutation(api.create, { title: "Third" });
+    await shows(3);
+    expect({ refusedOutbox, published: await keptVersions() }).toStrictEqual({
+      // Kept all the same, straight to the log, and once.
+      refusedOutbox: [1],
+      // Once more for the version it was refused in next.
+      published: [1, version],
+    });
+  });
+
+  it("keeps the evidence of each table its query is first refused on a read a write caused, each once only", async () => {
+    const secretFiles = withSecrets();
+    const opened = await openedApp(
+      withFiles(
+        definedWith(secretFiles, {
+          op: "addTable",
+          name: "vault",
+          fields: { text: "v.string()" },
+          access: { read: "appBuilders", write: "appBuilders" },
+        }),
+        {
+          "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    // The secrets once there are two notes, and the vault after them
+    // once there are three.
+    if (notes.length < 2) {
+      return notes.length;
+    }
+    try {
+      await ctx.db.query("secrets").take(10);
+    } catch {
+      // Only its builders read the secrets.
+    }
+    if (notes.length >= 3) {
+      try {
+        await ctx.db.query("vault").take(10);
+      } catch {
+        // Nor the vault.
+      }
+    }
+    return -notes.length;
+  },
+});
+`,
+        }
+      )
+    );
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(glance, {}), follower.callback);
+    const keptNow = async () => {
+      const events = await allEvents();
+      return events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === opened.app
+        )
+        .map(({ detail }) => detail);
+    };
+    const kept = [];
+    for (const [count, shows] of [
+      [1, 1],
+      [2, -2],
+      [3, -3],
+      [4, -4],
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write, one read again
+      await client.mutation(api.create, { title: `Note ${count}` });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: shows,
+        });
+      });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const now = await keptNow();
+      kept.push(now.length);
+    }
+    expect({ kept, details: await keptNow() }).toStrictEqual({
+      // None until a write makes it read the secrets, then that one only;
+      // the vault once a write makes it read that too, after the secrets
+      // kept already.
+      kept: [0, 1, 2, 2],
+      details: [
+        {
+          version: 1,
+          person: member.userId,
+          runId: null,
+          function: "notes.glance",
+          useKind: "table",
+          useName: "secrets",
+          reason: "request_not_allowed",
+          errorCode: "data.access_denied",
+        },
+        {
+          version: 1,
+          person: member.userId,
+          runId: null,
+          function: "notes.glance",
+          useKind: "table",
+          useName: "vault",
+          reason: "request_not_allowed",
+          errorCode: "data.access_denied",
+        },
+      ],
+    });
+  });
+
+  it("keeps the evidence of a table its query is refused once, on its first read, however often a write reads it again", async () => {
+    const secretFiles = withSecrets();
+    const opened = await openedApp(
+      withFiles(secretFiles, {
+        "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    try {
+      return notes.length + (await ctx.db.query("secrets").take(10)).length;
+    } catch {
+      // Only its builders read the secrets.
+      return notes.length;
+    }
+  },
+});
+`,
+      })
+    );
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(glance, {}), follower.callback);
+    // Each of their notes a write their query is read again for, its
+    // secrets refused each time.
+    for (const count of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write, one read again
+      await client.mutation(api.create, { title: `Note ${count}` });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: count,
+        });
+      });
+    }
+    const events = await allEvents();
+    const kept = events.filter(
+      (event) =>
+        event.action === "app.use.refused" && event.target?.id === opened.app
+    );
+    expect(kept.map(({ detail }) => detail)).toStrictEqual([
+      {
+        version: 1,
+        person: member.userId,
+        runId: null,
+        function: "notes.glance",
+        useKind: "table",
+        useName: "secrets",
+        reason: "request_not_allowed",
+        errorCode: "data.access_denied",
+      },
+    ]);
+  });
+});
+/**
+ * An App whose secrets are read by the team each names, opened by a
+ * member in Sales; its builder is in Sales and Support.
+ */
+const teamSecrets = async () => {
+  const secretFiles = withSecrets();
+  const teamFiles: TestApp = withFiles(
+    definedWith(
+      secretFiles,
+      { op: "addField", table: "secrets", name: "team", type: "v.string()" },
+      {
+        op: "setAccess",
+        table: "secrets",
+        access: {
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [{ kind: "team", field: "team" }] },
+        },
+      }
+    ),
+    {
+      "server/notes.ts": (secretFiles.files["server/notes.ts"] ?? "").replace(
+        "export const tell = mutation({\n  args: { text: v.string() },",
+        "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
+      ),
+    }
+  );
+  const opened = await openedApp(teamFiles);
+  const member = await personApi("user");
+  await opened.builder.api.apps.members.add(opened.app, {
+    type: "person",
+    id: member.userId,
+    role: "user",
+  });
+  const sales = crypto.randomUUID();
+  const support = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Sales', 'organization', ?), (?, 'Support', 'organization', ?)"
+    ).bind(sales, Date.now(), support, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO team_members (id, team_id, user_id) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)"
+    ).bind(
+      crypto.randomUUID(),
+      sales,
+      opened.builder.userId,
+      crypto.randomUUID(),
+      support,
+      opened.builder.userId,
+      crypto.randomUUID(),
+      sales,
+      member.userId
+    ),
+  ]);
+  const { lease } = await member.api.pages.open(opened.app);
+  const secrets = referenceTo<Record<never, never>, unknown, "query">(
+    opened.release,
+    "notes.secrets"
+  );
+  const tell = referenceTo<{ text: string; team: string }, unknown, "mutation">(
+    opened.release,
+    "notes.tell"
+  );
+  return { opened, member, sales, support, lease, secrets, tell };
+};
+
+/**
+ * Waits for core to next move a live query's watch in the opened App's
+ * store on to what it read again (`QuerySubscriptions.#keepWatched`),
+ * which it does once that read is over. Answers the wait, called after
+ * whatever should set off the read.
+ */
+const nextRewatch = async (opened: Opened): Promise<() => Promise<void>> => {
+  // A flag, not a promise: a promise settled in the store's object can't
+  // be awaited from the test's.
+  const seen = { rewatched: false };
+  await runInDurableObject(storeObjectOf(opened), (instance) => {
+    // SAFETY: a store's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as Record<string, unknown>;
+    const original = methods.rewatch;
+    if (typeof original !== "function") {
+      throw new TypeError("A store's object moves its watches on");
+    }
+    methods.rewatch = function rewatch(
+      this: unknown,
+      ...args: unknown[]
+    ): unknown {
+      methods.rewatch = original;
+      seen.rewatched = true;
+      const moved: unknown = Reflect.apply(original, this, args);
+      return moved;
+    };
+  });
+  return async () => {
+    await eventually(() => {
+      expect(seen.rewatched).toBeTruthy();
+    });
+  };
+};
+
+describe("live queries and a person's teams", { timeout: 180_000 }, () => {
+  it("pushes nothing at all for a row the person's teams don't read, and once for one they do", async () => {
+    const { opened, member, sales, support, lease, secrets, tell } =
+      await teamSecrets();
+    const received: Push[] = [];
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(secrets, {}), (push: unknown) => {
+        received.push(pushSchema.parse(push));
+      });
+    await eventually(() => {
+      expect(received).toHaveLength(1);
+    });
+
+    // Support's secret first, read again on its own: core moves its watch
+    // on only once a read writes didn't tear is over, so Sales' write,
+    // made after that, is never gathered into the same read. A push of
+    // the same result would tell the person the table was written.
+    const readAgain = await nextRewatch(opened);
+    const { client } = clientFor(opened);
+    await client.mutation(tell, { text: "Support only", team: support });
+    await readAgain();
+    await client.mutation(tell, { text: "Sales news", team: sales });
+    await eventually(() => {
+      expect(received).toHaveLength(2);
+    });
+
+    expect(
+      received.map(({ result }) =>
+        JSON.stringify(result).includes("Sales news")
+      )
+    ).toStrictEqual([false, true]);
+  });
+
+  it("never pushes what was read under a team the person has left, even a result that waited", async () => {
+    const { opened, member, sales, lease, secrets, tell } = await teamSecrets();
+    const received: Push[] = [];
+    const first = Promise.withResolvers<null>();
+    // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+    const callback: (push: unknown) => void = async (push) => {
+      const read = pushSchema.parse(push);
+      received.push(read);
+      if (read.revision === 1) {
+        await first.promise;
+      }
+    };
+    // A second reader of the same query on the same connection, which
+    // holds nothing: the connection reads the query once for both, so
+    // what this one is pushed, the held one's next push was read as.
+    const seen: Push[] = [];
+    const watcher = member.api.pages.frame(opened.app, lease);
+    await watcher.watchQuery(requestOf(secrets, {}), callback);
+    await eventually(() => {
+      expect(received).toHaveLength(1);
+    });
+    await watcher.watchQuery(requestOf(secrets, {}), (push: unknown) => {
+      seen.push(pushSchema.parse(push));
+    });
+    // Sales' secret, read for the member while they are in Sales: the
+    // held reader's push of it waits.
+    await clientFor(opened).client.mutation(tell, {
+      text: "Sales only",
+      team: sales,
+    });
+    await eventually(() => {
+      expect(
+        seen.some(({ result }) => JSON.stringify(result).includes("Sales only"))
+      ).toBeTruthy();
+    });
+
+    // They leave Sales: core tells no one, and their next check reads it.
+    await env.DB.prepare(
+      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+    )
+      .bind(sales, member.userId)
+      .run();
+    await pastAccessRecheck(async () => {
+      first.resolve(null);
+      await eventually(() => {
+        expect(received.length).toBeGreaterThan(1);
+      });
+    });
+
+    // Its next push is read again under the teams they have now.
+    expect(
+      received.some(({ result }) =>
+        JSON.stringify(result).includes("Sales only")
+      )
+    ).toBeFalsy();
+  });
+});
+describe(
+  "live queries and a failure to try again",
+  { timeout: 120_000 },
+  () => {
+    it("follows again after a read that failed before it read anything, rather than push it as final", async () => {
+      const opened = await openedApp();
+      const api = apiOf(opened.release);
+      // A core where no sandbox bounds App code: every read is refused as
+      // unavailable, to try again, before it reads the store.
+      const { core } = await openRpc(opened.cookie, {
+        coreEnv: {
+          ...env,
+          RUNTIME_PROFILE: "workerd",
+          SANDBOX_HOST: undefined,
+          SANDBOX_IN_PROCESS: undefined,
+        },
+      });
+      const follower = pageFollower();
+      await core
+        .authenticate()
+        .pages.frame(opened.app, opened.lease)
+        .watchQuery(requestOf(api.list, { pagination: {} }), follower.callback);
+
+      await eventually(() => {
+        expect(follower.state.released).toBeTruthy();
+      });
+      expect(follower.received).toStrictEqual([]);
+    });
+  }
+);

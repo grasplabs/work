@@ -1,0 +1,380 @@
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import {
+  definitionSources,
+  definitionText,
+  emptyDefinition,
+} from "@grasp-os/runtime/definition";
+import { appLimits } from "@grasp-os/shared/app-limits";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import {
+  blueprintsDir,
+  checkShippedIds,
+  writeBlueprints,
+} from "./build-blueprints.ts";
+
+// The build step's checks, in Node (the root config's "scripts" project):
+// each built-in that the install would refuse fails the build instead.
+// Each test writes its fixture, a folder of built-ins, into a directory of
+// its own, and the module into it too, never core's dist/.
+
+const made: string[] = [];
+
+/** The definition every fixture's built-in has, unless `beside` says otherwise. */
+const fixtureDefinition = emptyDefinition("Fixture");
+
+/**
+ * A folder of one built-in, `id`, with `files` by path, `manifest` added
+ * to its `blueprint.json`, and `beside` by path beside them in its
+ * folder (its `definition.json`, `fixtureDefinition`'s unless `beside` names
+ * one); returns it.
+ */
+const fixture = (
+  id: string,
+  files: Record<string, string>,
+  manifest: Record<string, unknown> = {},
+  beside: Record<string, string> = {}
+): string => {
+  const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+  made.push(dir);
+  const folder = path.join(dir, id);
+  mkdirSync(path.join(folder, "files"), { recursive: true });
+  writeFileSync(
+    path.join(folder, "blueprint.json"),
+    JSON.stringify({
+      name: "Fixture",
+      description: "A test's built-in.",
+      ...manifest,
+    })
+  );
+  for (const [file, text] of Object.entries(files)) {
+    const where = path.join(folder, "files", file);
+    mkdirSync(path.dirname(where), { recursive: true });
+    writeFileSync(where, text);
+  }
+  for (const [file, text] of Object.entries({
+    "definition.json": definitionText(fixtureDefinition),
+    ...beside,
+  })) {
+    const where = path.join(folder, file);
+    mkdirSync(path.dirname(where), { recursive: true });
+    writeFileSync(where, text);
+  }
+  return dir;
+};
+
+/** Embeds the built-ins in `dir` into a module in `dir`; returns its path. */
+const build = (dir: string): string => {
+  const out = path.join(dir, "blueprints.js");
+  writeBlueprints([dir], out);
+  return out;
+};
+
+/** The config and schema `fixtureDefinition` generates, which a built-in must hold. */
+const schema = definitionSources(fixtureDefinition);
+
+/** A permission on what the platform offers: its statistics, unless `actions` say otherwise. */
+const onPlatform = (binding = "STATS", actions = ["statistics"]) => ({
+  object: { type: "platform" },
+  actions,
+  binding,
+});
+
+/** The built-ins a module embeds. */
+const embedded = (out: string): unknown =>
+  JSON.parse(
+    readFileSync(out, "utf-8")
+      .replace(/^export default /u, "")
+      .replace(/;\n$/u, "")
+  );
+
+/** `count` files of `length` characters each. */
+const many = (count: number, length: number): Record<string, string> =>
+  Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [
+      `app/file-${index}.ts`,
+      "x".repeat(length),
+    ])
+  );
+
+describe("the built-in blueprints' build", () => {
+  afterEach(() => {
+    for (const dir of made.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("embeds a built-in that passes every check", () => {
+    const out = build(fixture("fine", schema));
+    expect(embedded(out)).toStrictEqual([
+      {
+        id: "fine",
+        name: "Fixture",
+        description: "A test's built-in.",
+        permissions: [],
+        contracts: [],
+        workflows: [],
+        definition: definitionText(fixtureDefinition),
+        files: schema,
+      },
+    ]);
+  });
+
+  it("embeds none from a release that ships none, its folder holding only its ids.json", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+    made.push(dir);
+    const folder = path.join(dir, "blueprints");
+    mkdirSync(folder);
+    writeFileSync(path.join(folder, "ids.json"), '{ "crm": "retired" }\n');
+    const out = path.join(dir, "blueprints.js");
+    expect({
+      count: writeBlueprints([folder], out),
+      embedded: embedded(out),
+    }).toStrictEqual({ count: 0, embedded: [] });
+  });
+
+  it("fails without the folder, rather than ship none", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+    made.push(dir);
+    expect(() =>
+      writeBlueprints([path.join(dir, "blueprints")], path.join(dir, "out.js"))
+    ).toThrow("isn't there");
+    expect(existsSync(path.join(dir, "out.js"))).toBeFalsy();
+  });
+
+  it("hold the release's folder to its ids.json", () => {
+    expect(() => {
+      checkShippedIds(blueprintsDir);
+    }).not.toThrow();
+  });
+
+  it.each([
+    ["isn't listed", "fine", {}, "add"],
+    [
+      "isn't listed, its name a property every object has",
+      "constructor",
+      {},
+      "add",
+    ],
+    ["is retired", "fine", { fine: "retired" }, "an earlier release removed"],
+    [
+      "is listed as shipped but gone",
+      "fine",
+      { fine: "shipped", gone: "shipped" },
+      'mark it "retired"',
+    ],
+    ["has no ids.json", "fine", null, "isn't there"],
+  ])(
+    "refuse a release whose built-in %s",
+    (_case, id, ids: Record<string, string> | null, message) => {
+      const dir = fixture(id, schema);
+      if (ids !== null) {
+        writeFileSync(path.join(dir, "ids.json"), JSON.stringify(ids));
+      }
+      expect(() => {
+        checkShippedIds(dir);
+      }).toThrow(message);
+    }
+  );
+
+  it.each([
+    ["no definition.json", { "definition.json": "" }, "definition"],
+    [
+      "a definition.json that isn't a definition",
+      { "definition.json": '{"name":"Fixture"}' },
+      "definition",
+    ],
+    [
+      "a config its definition doesn't generate",
+      {
+        "definition.json": definitionText(emptyDefinition("Another")),
+      },
+      "grasp.config.ts",
+    ],
+  ])("fails for a built-in with %s", (_case, beside, message) => {
+    const dir = fixture("defined", schema, {}, beside);
+    if (beside["definition.json"] === "") {
+      rmSync(path.join(dir, "defined", "definition.json"));
+    }
+    expect(() => build(dir)).toThrow(message);
+    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
+  });
+
+  it("embeds a built-in without what Grasp generates from its server code, which its install generates again", () => {
+    const out = build(
+      fixture("generated", {
+        ...schema,
+        "server/_generated/server.ts": "export const query = 1;\n",
+        "server/_generated/extra.ts": "export const extra = 1;\n",
+      })
+    );
+    expect(embedded(out)).toStrictEqual([
+      {
+        id: "generated",
+        name: "Fixture",
+        description: "A test's built-in.",
+        permissions: [],
+        contracts: [],
+        workflows: [],
+        definition: definitionText(fixtureDefinition),
+        files: schema,
+      },
+    ]);
+  });
+
+  it("embeds the workflows a built-in ships, their definitions' text, and the contracts they bind", () => {
+    const definition =
+      '{"$schema":"https://grasp.work/schemas/grasp-workflow/2.json","steps":[]}';
+    const contract = { key: "fixture/greeter", kind: "model" };
+    const out = build(
+      fixture(
+        "ships",
+        schema,
+        {
+          contracts: [contract],
+          workflows: [
+            {
+              alias: "greet",
+              binding: "GREET",
+              definition: "workflows/greet.json",
+            },
+          ],
+        },
+        { "workflows/greet.json": definition }
+      )
+    );
+    expect(embedded(out)).toMatchObject([
+      {
+        contracts: [contract],
+        workflows: [{ alias: "greet", binding: "GREET", definition }],
+        files: schema,
+      },
+    ]);
+  });
+
+  it.each([
+    ["no definition file", {}, {}, {}],
+    ["a definition that isn't JSON", {}, {}, { "workflows/greet.json": "{" }],
+    [
+      "a binding name a permission has",
+      { permissions: [onPlatform("GREET")] },
+      {},
+      { "workflows/greet.json": "{}" },
+    ],
+    [
+      "a definition outside its workflows/",
+      {},
+      { definition: "files/schema.ts" },
+      {},
+    ],
+    ["an alias that isn't lowercase", {}, { alias: "Greet" }, {}],
+  ])(
+    "fails for a shipped workflow with %s",
+    (_case, manifest, change, beside) => {
+      const dir = fixture(
+        "ships",
+        schema,
+        {
+          ...manifest,
+          workflows: [
+            {
+              alias: "greet",
+              binding: "GREET",
+              definition: "workflows/greet.json",
+              ...change,
+            },
+          ],
+        },
+        beside
+      );
+      expect(() => build(dir)).toThrow("ships");
+      expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
+    }
+  );
+
+  it("embeds the permissions a built-in declares", () => {
+    const out = build(fixture("asks", schema, { permissions: [onPlatform()] }));
+    expect(embedded(out)).toMatchObject([{ permissions: [onPlatform()] }]);
+  });
+
+  it.each([
+    ["an action the platform doesn't have", [onPlatform("STATS", ["delete"])]],
+    [
+      "more than one action on the platform",
+      [onPlatform("STATS", ["statistics", "brain"])],
+    ],
+    ["a binding name twice", [onPlatform(), onPlatform("STATS", ["brain"])]],
+    ["a platform binding name", [onPlatform("DB")]],
+    [
+      "a Knowledge collection, which nothing grants any more",
+      [
+        {
+          object: { type: "collection", collectionId: "tasks" },
+          actions: ["read"],
+          binding: "TASKS",
+        },
+      ],
+    ],
+    [
+      "a connection, whose ID differs in each deployment",
+      [
+        {
+          object: { type: "connection", connectionId: "connection-outlook" },
+          actions: ["mail.list"],
+          binding: "OUTLOOK",
+        },
+      ],
+    ],
+  ])("fails for a declared permission with %s", (_case, permissions) => {
+    const dir = fixture("asks", schema, { permissions });
+    expect(() => build(dir)).toThrow("blueprint.json");
+    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
+  });
+
+  // Collections were Knowledge's, which the Brain replaced (GRA-1735).
+  it("fails for a manifest that declares collections", () => {
+    const dir = fixture("asks", schema, {
+      collections: [{ id: "tasks", name: "Tasks", description: "To do." }],
+    });
+    expect(() => build(dir)).toThrow("blueprint.json");
+    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
+  });
+
+  it.each([
+    ["a hidden file", "hidden", { ...schema, ".env": "SECRET=1\n" }, "files/"],
+    ["a path an App can't have", "spaced", { "app/my file.ts": "" }, "files/"],
+    [
+      "a file over an App's limit",
+      "large",
+      { "server/schema.ts": "x".repeat(appLimits.fileLength + 1) },
+      "files/",
+    ],
+    [
+      "more files than an App may have",
+      "crowded",
+      many(appLimits.files + 1, 1),
+      "files/",
+    ],
+    [
+      "files over an App's total",
+      "heavy",
+      many(6, appLimits.fileLength),
+      "characters",
+    ],
+    ["no files", "empty", {}, "files/"],
+  ])("fails for %s", (_case, id, files, message) => {
+    const dir = fixture(id, files);
+    expect(() => build(dir)).toThrow(message);
+    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
+  });
+});

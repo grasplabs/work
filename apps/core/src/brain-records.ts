@@ -1,0 +1,889 @@
+import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import type {
+  Candidate,
+  Gap,
+  Source,
+  Stakeholder,
+  Statement,
+  Team,
+  TeamCount,
+  Step,
+  Tool,
+  Goal,
+  Workflow,
+  WorkflowDrawing,
+} from "@grasp-os/shared/brain";
+import {
+  brainGapSubjects,
+  brainRecordErrors,
+  brainRecordSchema,
+  brainRecordsMaxPerType,
+  brainRecordsSchema,
+  onboardingSourceIds,
+} from "@grasp-os/shared/brain-records";
+import type {
+  BrainRecord,
+  BrainRecordType,
+  BrainRecordsAdded,
+} from "@grasp-os/shared/brain-records";
+import { issuesOf } from "@grasp-os/shared/errors";
+import { canonicalJson } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { requireAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { and, asc, count, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { brainRecords, workflowResources } from "./db/core/schema.ts";
+import { inList, statementsWithin } from "./db/d1.ts";
+
+// The brain's records, as core keeps them (`brain_records`), and adding
+// them (`brain.addRecords`). Threat model, and how each is closed (the
+// design and its threat note are on GRA-527):
+//
+// - Someone who shouldn't write the brain: admins alone add records (Grasp
+//   staff are admins: they run the interviews), on the live session.
+// - A person in a record: a record has no author, transcript or article
+//   (`brainRecordSchema` refuses anything it doesn't name); who added it
+//   is in the audit log alone.
+// - History rewritten: an id, once held, is never written over, whatever
+//   type it is sent as (ids are unique across types). A record
+//   sent again exactly so is left as it is (a retry); a different one
+//   under its id is refused, and nothing in the call is kept.
+// - References to nothing: a record's source, tools, candidate and the
+//   statement it follows up must be the brain's, already kept or added
+//   earlier in the same call, so the brain never shows a fact without its
+//   source. The onboarding's sources count only once they exist.
+// - A flood: at most `brainRecordsMaxPerCall` records a call, and
+//   `brainRecordsMaxPerType` of each type in all, so `brain.read` stays
+//   bounded.
+// - A change without its record: the records and their audit event are one
+//   batch, kept together or not at all.
+// - The onboarding's ids taken or forged: the Brain page shows the
+//   onboarding's teams, claims, drawings and sources under a roster
+//   team's id (`team-<id>`) or an `onb-` one, and a workflow is only ever
+//   the onboarding's; `brain.addRecords` refuses all of them
+//   (`brainRecordInputSchema`). The onboarding keeps what it learned
+//   itself (GRA-1748): none of it is a record here.
+
+/** A record's key across types, as its audit event names it. */
+const keyOf = ({ type, id }: { type: string; id: string }): string =>
+  `${type}:${id}`;
+
+/** The record as stored: canonical JSON of what the schema parsed. */
+const bodyOf = (record: BrainRecord): string => canonicalJson(record);
+
+/** A record core holds: its type and its body as stored. */
+interface Held {
+  type: string;
+  body: string;
+  /**
+   * An admin took it out of the brain (brain-forget.ts): the same id sent
+   * again leaves it as removed, and nothing new may name it.
+   */
+  forgotten: boolean;
+}
+
+/** The records core holds among the ids `wanted`, of whatever type. */
+const heldOf = async (
+  env: Env,
+  wanted: readonly string[]
+): Promise<Map<string, Held>> => {
+  if (wanted.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      id: brainRecords.id,
+      type: brainRecords.type,
+      body: brainRecords.body,
+      forgottenAt: brainRecords.forgottenAt,
+    })
+    .from(brainRecords)
+    // Every id as one bound parameter: D1 binds at most 100 to a
+    // statement, and a call can name more ids than that.
+    .where(
+      sql`${brainRecords.id} IN (SELECT value FROM json_each(${JSON.stringify(wanted)}))`
+    );
+  return new Map(
+    rows.map(({ id, type, body, forgottenAt }) => [
+      id,
+      {
+        type,
+        body,
+        forgotten: forgottenAt !== null,
+      },
+    ])
+  );
+};
+
+/**
+ * What a reference must be: a record of a type, or a note (a record of
+ * one of `brainGapSubjects`), which is what a gap may be about.
+ */
+type ReferenceType = BrainRecordType | "note";
+
+const noteTypes: ReadonlySet<string> = new Set(brainGapSubjects);
+
+/** One thing a record names: a team may also be the onboarding's. */
+interface Reference {
+  type: ReferenceType;
+  id: string;
+}
+
+const teamsOf = (ids: readonly string[]): Reference[] =>
+  ids.map((id) => ({ type: "team", id }));
+
+/** What each record names, by the type it must be. */
+const referencesOf = (record: BrainRecord): Reference[] => {
+  switch (record.type) {
+    case "candidate": {
+      return [];
+    }
+    case "source": {
+      return teamsOf(record.teamIds);
+    }
+    case "team": {
+      return [{ type: "source", id: record.sourceId }];
+    }
+    case "teamCount":
+    case "stakeholder": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "team", id: record.teamId },
+      ];
+    }
+    case "tool": {
+      return [
+        { type: "source", id: record.sourceId },
+        ...teamsOf(record.teamIds),
+      ];
+    }
+    case "statement": {
+      return [
+        { type: "source", id: record.sourceId },
+        ...teamsOf(record.teamIds),
+        ...record.toolIds.map((id) => ({ type: "tool" as const, id })),
+        ...(record.candidateId === undefined
+          ? []
+          : [{ type: "candidate" as const, id: record.candidateId }]),
+        ...(record.followsUp === undefined
+          ? []
+          : [{ type: "statement" as const, id: record.followsUp }]),
+      ];
+    }
+    case "gap": {
+      return [
+        { type: "source", id: record.sourceId },
+        ...record.about.map((id) => ({ type: "note" as const, id })),
+      ];
+    }
+    case "workflow": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "team", id: record.teamId },
+      ];
+    }
+    case "workflowVersion": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "workflow", id: record.workflowId },
+      ];
+    }
+    case "goal": {
+      return [{ type: "source", id: record.sourceId }];
+    }
+    case "goalVersion": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "goal", id: record.goalId },
+      ];
+    }
+    case "goalLink": {
+      return [{ type: "goal", id: record.goalId }];
+    }
+    default: {
+      return [];
+    }
+  }
+};
+
+/** What the onboarding gives the brain now, that a record may name. */
+export interface OnboardingHeld {
+  /** Its sources: the kickoff once brought in, the staff list once saved. */
+  sources: ReadonlySet<string>;
+  /**
+   * Its teams a value may be for: the roster's, by the ids the admin gave
+   * them, and the kickoff's (brain-rpc.ts `kickoffTeamsOf`).
+   */
+  teams: ReadonlySet<string>;
+}
+
+const nothingOnboarded: OnboardingHeld = {
+  sources: new Set(),
+  teams: new Set(),
+};
+
+/**
+ * What the onboarding gives the brain, read (by `read`, brain-rpc.ts) only
+ * when a record may name it: a team, or one of its source ids.
+ */
+const onboardingHeld = async (
+  records: readonly BrainRecord[],
+  read: () => Promise<OnboardingHeld>
+): Promise<OnboardingHeld> => {
+  const named = records.some(
+    (record) =>
+      record.type === "team" ||
+      referencesOf(record).some(
+        ({ type, id }) =>
+          type === "team" || (type === "source" && onboardingSourceIds.has(id))
+      )
+  );
+  return named ? await read() : nothingOnboarded;
+};
+
+const types = [
+  "source",
+  "tool",
+  "candidate",
+  "statement",
+  "team",
+  "teamCount",
+  "stakeholder",
+  "gap",
+  "workflow",
+  "workflowVersion",
+  "goal",
+  "goalVersion",
+  "goalLink",
+] as const;
+
+/** The records `input` holds, each once, or why it holds none. */
+const recordsOf = (input: unknown): BrainRecord[] => {
+  const parsed = brainRecordsSchema.safeParse(input);
+  if (!parsed.success) {
+    throw brainRecordErrors.create("brain.record_invalid", {
+      issues: issuesOf(parsed.error),
+    });
+  }
+  // Ids are the brain's across types: one id is one record.
+  const ids = new Set<string>();
+  for (const record of parsed.data) {
+    if (ids.has(record.id)) {
+      throw brainRecordErrors.create("brain.record_invalid", {
+        issues: [`${record.id}: sent twice in one call`],
+      });
+    }
+    ids.add(record.id);
+  }
+  return parsed.data;
+};
+
+/** What core holds of every id `records` add or name. */
+const heldFor = async (
+  env: Env,
+  records: readonly BrainRecord[]
+): Promise<Map<string, Held>> =>
+  await heldOf(env, [
+    ...new Set(
+      records.flatMap((record) => [
+        record.id,
+        ...referencesOf(record).map(({ id }) => id),
+      ])
+    ),
+  ]);
+
+/**
+ * The records of `records` core doesn't hold yet; refuses one held
+ * differently, and one naming what neither core holds nor the call adds
+ * before it. Only what came before counts, so references never go round
+ * in a circle (two statements following each other up).
+ */
+const freshOf = (
+  records: readonly BrainRecord[],
+  held: Map<string, Held>,
+  onboarding: OnboardingHeld
+): BrainRecord[] => {
+  /** The records the call adds before the one being checked, by id. */
+  const before = new Map<string, BrainRecordType>();
+  /**
+   * Whether `reference` is a record of its type, in the call or held: for
+   * a record not held yet, one taken out of the brain isn't, so nothing
+   * new rests on what is gone.
+   */
+  const isRecord = ({ type, id }: Reference, adding: boolean): boolean => {
+    const stored = held.get(id);
+    const found =
+      before.get(id) ??
+      (adding && stored?.forgotten === true ? undefined : stored?.type);
+    return (
+      found !== undefined &&
+      (type === "note" ? noteTypes.has(found) : found === type)
+    );
+  };
+  const fresh: BrainRecord[] = [];
+  for (const record of records) {
+    const stored = held.get(record.id);
+    if (stored === undefined) {
+      fresh.push(record);
+    } else if (
+      stored.type !== record.type ||
+      (!stored.forgotten && stored.body !== bodyOf(record))
+    ) {
+      throw brainRecordErrors.create("brain.record_conflict", {
+        issues: [`${keyOf(record)}: held already, differently`],
+      });
+    }
+    for (const reference of referencesOf(record)) {
+      const known =
+        isRecord(reference, stored === undefined) ||
+        (reference.type === "source" && onboarding.sources.has(reference.id)) ||
+        (reference.type === "team" && onboarding.teams.has(reference.id));
+      if (!known) {
+        throw brainRecordErrors.create("brain.record_missing", {
+          issues: [`${keyOf(record)}: no ${keyOf(reference)} before it`],
+        });
+      }
+    }
+    before.set(record.id, record.type);
+  }
+  return fresh;
+};
+
+/**
+ * Refuses `fresh` when it would take a type past its cap. Counted before
+ * the batch that adds them: calls racing past it overshoot by at most
+ * their own records each, which keeps `brain.read` as bounded as the cap
+ * means it to be.
+ */
+const requireRoom = async (
+  env: Env,
+  fresh: readonly BrainRecord[]
+): Promise<void> => {
+  // Live records alone: a retired one (a replaced kickoff's) is kept but
+  // read by no one, so it takes no room from what replaces it.
+  const counts = await drizzle(env.DB)
+    .select({ type: brainRecords.type, held: count() })
+    .from(brainRecords)
+    .where(isNull(brainRecords.retiredAt))
+    .groupBy(brainRecords.type);
+  for (const type of types) {
+    const adding = fresh.filter((record) => record.type === type).length;
+    const holding = counts.find((row) => row.type === type)?.held ?? 0;
+    if (adding > 0 && holding + adding > brainRecordsMaxPerType[type]) {
+      throw brainRecordErrors.create("brain.records_full");
+    }
+  }
+};
+
+/** Whether `error`, or what it wraps, is `brain_records` refusing an id it holds. */
+const isTakenId = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.message.includes("UNIQUE constraint failed: brain_records.id") ||
+    isTakenId(error.cause));
+
+/** How often a call writes after racing another for its ids. */
+const maxWriteAttempts = 3;
+
+/**
+ * Writes `fresh` as `actor`, with its audit event, in one batch: none of
+ * it when the unique index finds an id taken since it was read.
+ */
+const writeRecords = async (
+  env: Env,
+  actor: AuditActor,
+  fresh: readonly BrainRecord[]
+): Promise<void> => {
+  await requireRoom(env, fresh);
+  const db = drizzle(env.DB);
+  const addedAt = new Date();
+  const row = (record: BrainRecord) => ({
+    type: record.type,
+    id: record.id,
+    body: bodyOf(record),
+    addedAt,
+  });
+  // As many rows an insert as D1 binds, counted from the insert itself.
+  const [first, ...more] = statementsWithin(fresh, (part) =>
+    db.insert(brainRecords).values(part.map(row))
+  );
+  if (first === undefined) {
+    return;
+  }
+  await auditedBatch(env, db, [
+    first,
+    ...more,
+    outboxed(db, {
+      actor,
+      action: "brain.records.added",
+      target: { type: "brain", id: "records" },
+      provenance: fresh.map(keyOf),
+      detail: { added: fresh.length },
+    }),
+  ]);
+};
+
+/**
+ * Keeps `records` as `actor`, all or none, beside what `onboarding` gives
+ * the brain. A record held already, exactly so, is left as it is.
+ */
+const keepRecords = async (
+  env: Env,
+  actor: AuditActor,
+  records: readonly BrainRecord[],
+  onboarding: OnboardingHeld
+): Promise<BrainRecordsAdded> => {
+  // Another call can add some of these ids between the read and the
+  // write: the unique index then refuses the whole batch, and what is
+  // still fresh is read again and written once more.
+  for (let attempt = 1; ; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read again after a race
+    const fresh = freshOf(records, await heldFor(env, records), onboarding);
+    const unchanged = records.length - fresh.length;
+    if (fresh.length === 0) {
+      return { added: 0, unchanged };
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- write again after a race
+      await writeRecords(env, actor, fresh);
+      return { added: fresh.length, unchanged };
+    } catch (error) {
+      if (!isTakenId(error) || attempt === maxWriteAttempts) {
+        throw isTakenId(error)
+          ? brainRecordErrors.create("brain.record_conflict")
+          : error;
+      }
+    }
+  }
+};
+
+/**
+ * Refuses a goal link (`goalLink`, `linked`) to a workflow the company
+ * doesn't have: an independent workflow that never was, or was deleted.
+ * Taking one off needs none: a workflow that went keeps its link until it
+ * is taken off.
+ */
+const requireLinkedWorkflows = async (
+  env: Env,
+  records: readonly BrainRecord[]
+): Promise<void> => {
+  const links = records.flatMap((record) =>
+    record.type === "goalLink" && record.linked ? [record] : []
+  );
+  if (links.length === 0) {
+    return;
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: workflowResources.id })
+    .from(workflowResources)
+    .where(
+      and(
+        inList(workflowResources.id, [
+          ...new Set(links.map(({ workflow }) => workflow)),
+        ]),
+        isNull(workflowResources.deletedAt)
+      )
+    );
+  const held = new Set(rows.map(({ id }) => id));
+  for (const link of links) {
+    if (!held.has(link.workflow)) {
+      throw brainRecordErrors.create("brain.record_missing", {
+        issues: [`${keyOf(link)}: no workflow ${link.workflow}`],
+      });
+    }
+  }
+};
+
+/**
+ * Adds `input` to the brain's records as `person`, all or none: for admins. A
+ * record held already, exactly so, is left as it is. `onboarding` reads
+ * what the onboarding gives the brain, when a record names it.
+ */
+export const addBrainRecords = async (
+  env: Env,
+  person: Identity,
+  input: unknown,
+  onboarding: () => Promise<OnboardingHeld>
+): Promise<BrainRecordsAdded> => {
+  requireAdmin(person);
+  const records = recordsOf(input);
+  await requireLinkedWorkflows(env, records);
+  const held = await onboardingHeld(records, onboarding);
+  // A staff-list team is named by its members' team's own id (GRA-2055):
+  // a team record under it would take the onboarding's team, so none may.
+  const taken = records.filter(
+    ({ type, id }) => type === "team" && held.teams.has(id)
+  );
+  if (taken.length > 0) {
+    throw brainRecordErrors.create("brain.record_invalid", {
+      issues: taken.map(({ id }) => `${id}: the onboarding's team`),
+    });
+  }
+  return await keepRecords(env, actorOf(person), records, held);
+};
+
+/** A stored body as JSON; `undefined` when it isn't. */
+const parsedBody = (body: string): unknown => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+};
+
+/** A dated value of a team, by the team it is for. */
+interface ForTeam<T> {
+  teamId: string;
+  value: T;
+}
+
+/** The brain's records, as the brain reads them, oldest first. */
+export interface HeldRecords {
+  sources: Source[];
+  tools: Tool[];
+  candidates: Candidate[];
+  statements: Statement[];
+  /** Its team records, each with the counts and stakeholders added for it. */
+  teams: Team[];
+  /** Counts added for teams that aren't records: the onboarding's. */
+  teamCounts: ForTeam<TeamCount>[];
+  /** Stakeholders added for teams that aren't records: the onboarding's. */
+  stakeholders: ForTeam<Stakeholder>[];
+  gaps: GapRecord[];
+  /** Its workflows, each with its drawings, the newest its baseline. */
+  workflows: Workflow[];
+  /** Drawings of workflows, before they join theirs. */
+  drawings: ForWorkflow[];
+  /**
+   * The board's goals, each with its wordings in date order and every
+   * workflow linked to it now, whoever may see it.
+   */
+  goals: Goal[];
+  /** Later wordings and links of goals, before they join theirs. */
+  goalChanges: GoalChange[];
+}
+
+/** A later wording of a goal, or a link to it or off it, as added. */
+type GoalChange = Extract<BrainRecord, { type: "goalVersion" | "goalLink" }>;
+
+/** A drawing, by the workflow it is of. */
+interface ForWorkflow {
+  workflowId: string;
+  value: WorkflowDrawing;
+}
+
+/** A gap as added, before what became of it. */
+export type GapRecord = Omit<
+  Gap,
+  "askedAt" | "closedAt" | "answer" | "answeredBy"
+>;
+
+/** Puts `record` where the brain reads it, as the brain's own type. */
+const collect = (held: HeldRecords, record: BrainRecord): void => {
+  switch (record.type) {
+    case "source": {
+      const { type: _source, ...source } = record;
+      held.sources.push({ ...source, forgettable: true });
+      break;
+    }
+    case "tool": {
+      const { type: _tool, ...tool } = record;
+      held.tools.push(tool);
+      break;
+    }
+    case "candidate": {
+      const { type: _candidate, ...candidate } = record;
+      held.candidates.push(candidate);
+      break;
+    }
+    case "statement": {
+      const { type: _statement, ...statement } = record;
+      held.statements.push(statement);
+      break;
+    }
+    case "team": {
+      const { id, name, sourceId } = record;
+      held.teams.push({ id, name, sourceId, counts: [], stakeholders: [] });
+      break;
+    }
+    case "teamCount": {
+      const { teamId, sourceId, date, people, roles } = record;
+      held.teamCounts.push({
+        teamId,
+        value: {
+          sourceId,
+          date,
+          people,
+          ...(roles === undefined ? {} : { roles }),
+        },
+      });
+      break;
+    }
+    case "stakeholder": {
+      const { teamId, sourceId, date, role } = record;
+      held.stakeholders.push({ teamId, value: { sourceId, date, role } });
+      break;
+    }
+    case "gap": {
+      const { type: _gap, ...gap } = record;
+      held.gaps.push(gap);
+      break;
+    }
+    case "workflow": {
+      const { id, name, local, teamId, status } = record;
+      held.workflows.push({
+        id,
+        name,
+        ...(local === undefined ? {} : { local }),
+        teamId,
+        status,
+        baseline: { steps: [] },
+        drawings: [],
+      });
+      break;
+    }
+    case "workflowVersion": {
+      const { type: _version, workflowId, ...value } = record;
+      held.drawings.push({ workflowId, value });
+      break;
+    }
+    case "goal": {
+      const { id, title, howWeNotice, sourceId, date } = record;
+      held.goals.push({
+        id,
+        versions: [{ title, howWeNotice, sourceId, date }],
+        workflows: [],
+      });
+      break;
+    }
+    case "goalVersion":
+    case "goalLink": {
+      held.goalChanges.push(record);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+};
+
+/** Oldest date first: a value added later for an earlier day goes before. */
+const byDate = <T extends { date: string }>(values: T[]): T[] =>
+  // A stable sort: values of one day keep the order they were added in,
+  // so the one added last counts, as the brain reads a history.
+  values.toSorted((a, b) => a.date.localeCompare(b.date));
+
+/**
+ * Puts `team`'s counts and stakeholders in date order, which is how the
+ * brain reads them (the last one counts), whatever order they came in.
+ */
+export const datedInOrder = (team: Team): void => {
+  team.counts = byDate(team.counts);
+  team.stakeholders = byDate(team.stakeholders);
+};
+
+/** The steps of a drawing, as a workflow's baseline. */
+export const stepsOf = ({ steps }: WorkflowDrawing): Step[] =>
+  steps.map(({ text, who, tool, minutes }) => ({
+    text,
+    ...(who === "" ? {} : { who }),
+    ...(tool === "" ? {} : { tool }),
+    ...(minutes === null ? {} : { minutes }),
+  }));
+
+/**
+ * Gives each workflow its drawings, oldest first, and the newest as its
+ * baseline: a drawing for a workflow that isn't held is left out.
+ */
+const withDrawings = (held: HeldRecords): void => {
+  const workflows = new Map(held.workflows.map((each) => [each.id, each]));
+  for (const { workflowId, value } of held.drawings) {
+    workflows.get(workflowId)?.drawings?.push(value);
+  }
+  for (const workflow of held.workflows) {
+    const drawings = byDate(workflow.drawings ?? []);
+    const newest = drawings.at(-1);
+    workflow.drawings = drawings;
+    workflow.baseline = { steps: newest === undefined ? [] : stepsOf(newest) };
+  }
+  held.drawings = [];
+};
+
+/**
+ * Gives each goal its later wordings after its first, in date order (the
+ * newest counts),
+ * and the workflows linked to it now: the newest link for each workflow
+ * counts, in the order they were last linked. A change for a
+ * goal that isn't held is left out.
+ */
+const withGoalChanges = (held: HeldRecords): void => {
+  const goals = new Map(held.goals.map((goal) => [goal.id, goal]));
+  const linked = new Map<string, Set<string>>();
+  for (const change of held.goalChanges) {
+    const goal = goals.get(change.goalId);
+    if (goal === undefined) {
+      continue;
+    }
+    if (change.type === "goalVersion") {
+      const { title, howWeNotice, sourceId, date } = change;
+      goal.versions.push({ title, howWeNotice, sourceId, date });
+      continue;
+    }
+    const links = linked.get(goal.id) ?? new Set<string>();
+    linked.set(goal.id, links);
+    links.delete(change.workflow);
+    if (change.linked) {
+      links.add(change.workflow);
+    }
+  }
+  for (const goal of held.goals) {
+    // Where it was set stays first; later wordings follow by date.
+    const [set, ...later] = goal.versions;
+    goal.versions = set === undefined ? [] : [set, ...byDate(later)];
+    goal.workflows = [...(linked.get(goal.id)?.values() ?? [])];
+  }
+  held.goalChanges = [];
+};
+
+/**
+ * What stays of a record an admin took out of the brain (brain-forget.ts):
+ * for a source, what still names it needs to say it was removed, so its
+ * kind and day; for anything else, nothing but what it was.
+ */
+export const forgottenBodyOf = (record: {
+  type: string;
+  id: string;
+  body: string;
+}): string => {
+  const { type, id } = record;
+  if (type !== "source") {
+    return canonicalJson({ type, id });
+  }
+  const parsed = brainRecordSchema.safeParse(parsedBody(record.body));
+  const source =
+    parsed.success && parsed.data.type === "source" ? parsed.data : undefined;
+  return canonicalJson({
+    type,
+    id,
+    ...(source === undefined ? {} : { kind: source.kind, date: source.date }),
+  });
+};
+
+const removedSourceSchema = z.strictObject({
+  type: z.literal("source"),
+  id: z.string(),
+  kind: z
+    .enum(["interview", "chat", "document", "import", "runLog"])
+    .default("document"),
+  date: z.iso.date().optional(),
+});
+
+/** A removed source as the brain shows it, from its tombstone; undefined for anything else. */
+const removedSourceOf = (body: string, at: Date): Source | undefined => {
+  const parsed = removedSourceSchema.safeParse(parsedBody(body));
+  if (!parsed.success) {
+    return undefined;
+  }
+  const removedAt = at.toISOString().slice(0, 10);
+  const { id, kind, date } = parsed.data;
+  return { id, kind, title: "", date: date ?? removedAt, removedAt };
+};
+
+/**
+ * `held` without what names a statement taken out of the brain: one that
+ * followed it up stands on its own, and a gap is no longer about it.
+ */
+const withoutForgotten = (
+  held: HeldRecords,
+  forgotten: ReadonlySet<string>
+): void => {
+  if (forgotten.size === 0) {
+    return;
+  }
+  held.statements = held.statements.map((statement) => {
+    if (
+      statement.followsUp === undefined ||
+      !forgotten.has(statement.followsUp)
+    ) {
+      return statement;
+    }
+    const { followsUp: _gone, ...rest } = statement;
+    return rest;
+  });
+  held.gaps = held.gaps.map((gap) => ({
+    ...gap,
+    about: gap.about.filter((id) => !forgotten.has(id)),
+  }));
+};
+
+/** Every record core keeps, in the order they were added. */
+export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
+  const held: HeldRecords = {
+    sources: [],
+    tools: [],
+    candidates: [],
+    statements: [],
+    teams: [],
+    teamCounts: [],
+    stakeholders: [],
+    gaps: [],
+    workflows: [],
+    drawings: [],
+    goals: [],
+    goalChanges: [],
+  };
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      id: brainRecords.id,
+      body: brainRecords.body,
+      forgottenAt: brainRecords.forgottenAt,
+    })
+    .from(brainRecords)
+    // A retired record is kept, but no longer counts.
+    .where(isNull(brainRecords.retiredAt))
+    .orderBy(asc(brainRecords.position));
+  const forgotten = new Set<string>();
+  for (const { id, body, forgottenAt } of rows) {
+    if (forgottenAt !== null) {
+      forgotten.add(id);
+      const removed = removedSourceOf(body, forgottenAt);
+      if (removed !== undefined) {
+        held.sources.push(removed);
+      }
+      continue;
+    }
+    let record: BrainRecord;
+    try {
+      record = brainRecordSchema.parse(JSON.parse(body));
+    } catch (error) {
+      // Written through the same schema: a row it can't read is left out
+      // rather than failing the brain for everyone.
+      log.error("brain.record_unreadable", errorFields(error));
+      continue;
+    }
+    collect(held, record);
+  }
+  // A team's counts and stakeholders go with it when it is a record; the
+  // rest are for the onboarding's teams, which brain-rpc.ts gives them to.
+  const teams = new Map(held.teams.map((team) => [team.id, team]));
+  held.teamCounts = held.teamCounts.filter(({ teamId, value }) => {
+    teams.get(teamId)?.counts.push(value);
+    return !teams.has(teamId);
+  });
+  held.stakeholders = held.stakeholders.filter(({ teamId, value }) => {
+    teams.get(teamId)?.stakeholders.push(value);
+    return !teams.has(teamId);
+  });
+  for (const team of held.teams) {
+    datedInOrder(team);
+  }
+  withoutForgotten(held, forgotten);
+  withDrawings(held);
+  withGoalChanges(held);
+  return held;
+};

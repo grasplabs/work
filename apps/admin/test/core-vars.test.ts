@@ -1,0 +1,156 @@
+import { clientDomain, stages } from "@grasp-os/shared/names";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { oauthRelayOf, signInApps } from "../src/deploy/context.ts";
+import {
+  derivedCoreConfig,
+  onboardingSender,
+} from "../src/deploy/core-config.ts";
+import { configuredCoreVars } from "../src/deploy/core-vars.ts";
+import { staff } from "./hosting.ts";
+
+// A placed client's core vars (src/deploy/core-vars.ts), as its operation
+// uploads core with them (src/hosting/operation.ts): what the admin
+// derives and the change core records.
+
+const domain = "grasp.test";
+
+const signIn = {
+  domains: ["acme.test"],
+  admins: ["ada@acme.test"],
+  googleHostedDomain: "acme.test",
+};
+
+const change = {
+  by: staff.email,
+  what: "release",
+  release: "26.01.100000001",
+  at: new Date(0).toISOString(),
+} as const;
+
+describe("a placed client's core vars", () => {
+  it("gives core what the admin derives and the change it records, and nothing else", () => {
+    const clientId = "acme";
+
+    const vars = configuredCoreVars(
+      clientId,
+      derivedCoreConfig({
+        clientId,
+        signIn: JSON.stringify(signIn),
+        domain,
+        apps: signInApps(env),
+      }),
+      change
+    );
+
+    expect({
+      names: Object.keys(vars).toSorted(),
+      clientId: vars.CLIENT_ID,
+      mailFrom: vars.MAIL_FROM,
+      change: vars.PLATFORM_CHANGE,
+    }).toStrictEqual({
+      names: [
+        "CLIENT_ID",
+        "MAIL_FROM",
+        "PLATFORM_CHANGE",
+        "RUNTIME_PROFILE",
+        "SIGN_IN",
+      ],
+      clientId,
+      mailFrom: onboardingSender(clientId, domain),
+      change,
+    });
+  });
+});
+
+describe("a hosted client's sign-in, in relay mode", () => {
+  /** Client acme's derived `SIGN_IN` under `servedUnder`, as an admin with `vars` deploys it. */
+  const signInWith = (stage: string, servedUnder: string): unknown => {
+    const relay = oauthRelayOf({ STAGE: stage, CLIENT_DOMAIN: servedUnder });
+    return derivedCoreConfig({
+      clientId: "acme",
+      signIn: JSON.stringify(signIn),
+      domain: servedUnder,
+      apps: signInApps(env),
+      ...(relay === undefined ? {} : { oauthRelay: relay }),
+    }).SIGN_IN;
+  };
+
+  it("sends each stage's hosted clients back through that stage's relay", () => {
+    expect(
+      stages.map((stage) => signInWith(stage, clientDomain(stage)))
+    ).toMatchObject([
+      {
+        origin: "https://acme.ongrasp.app",
+        callbackOrigin: "https://auth.ongrasp.app",
+      },
+      {
+        origin: "https://acme.staging.ongrasp.app",
+        callbackOrigin: "https://auth.staging.ongrasp.app",
+      },
+    ]);
+  });
+
+  it("leaves a client's IdPs returning to its own origin under a domain no stage's relay serves, or another stage's", () => {
+    const config = signInWith("production", domain);
+    const other = signInWith("production", clientDomain("staging"));
+
+    expect(other).not.toHaveProperty("callbackOrigin");
+    expect(config).toMatchObject({ origin: `https://acme.${domain}` });
+    expect(config).not.toHaveProperty("callbackOrigin");
+  });
+
+  it("refuses relay mode for a client under a domain its stage's relay doesn't serve", () => {
+    const refusal = (): unknown => {
+      try {
+        derivedCoreConfig({
+          clientId: "acme",
+          signIn: JSON.stringify(signIn),
+          domain: clientDomain("staging"),
+          apps: signInApps(env),
+          oauthRelay: "production",
+        });
+      } catch (error) {
+        return error instanceof Error && "code" in error
+          ? error.code
+          : "thrown";
+      }
+      return "taken";
+    };
+
+    expect(refusal()).toBe("sign_in_incomplete");
+  });
+
+  it("names the onboarding its company starts with, only where staff chose one", () => {
+    const inputs = {
+      clientId: "acme",
+      signIn: JSON.stringify(signIn),
+      domain,
+      apps: signInApps(env),
+    };
+    expect({
+      chosen: derivedCoreConfig({ ...inputs, startingFlow: "setup" })
+        .ONBOARDING_START,
+      whole: "ONBOARDING_START" in derivedCoreConfig(inputs),
+      none:
+        "ONBOARDING_START" in
+        derivedCoreConfig({ ...inputs, startingFlow: null }),
+    }).toStrictEqual({ chosen: "setup", whole: false, none: false });
+  });
+
+  it("says since when its deployment is closed, only for a company added with an onboarding", () => {
+    const inputs = {
+      clientId: "acme",
+      signIn: JSON.stringify(signIn),
+      domain,
+      apps: signInApps(env),
+    };
+    const added = new Date("2026-11-21T09:00:00.000Z");
+    expect({
+      closed: derivedCoreConfig({ ...inputs, closedFrom: added })
+        .ONBOARDING_CLOSED_FROM,
+      open: "ONBOARDING_CLOSED_FROM" in derivedCoreConfig(inputs),
+    }).toStrictEqual({ closed: "2026-11-21T09:00:00.000Z", open: false });
+  });
+});

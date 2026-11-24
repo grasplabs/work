@@ -1,0 +1,183 @@
+import type {
+  ActionManifest,
+  SyncManifest,
+} from "@grasp-os/connector-kit/manifest";
+import type { CapabilityClaims } from "@grasp-os/shared/capability";
+import { connectErrors } from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { exports } from "cloudflare:workers";
+
+import { nativeConnector } from "./bundled-connectors.ts";
+import type { NativeConnector } from "./bundled-connectors.ts";
+import type { Connection } from "./connections.ts";
+import { loadConnector } from "./connector-isolate.ts";
+import type { EgressProps } from "./egress.ts";
+import { callTimeoutMs, mcpServer } from "./mcp.ts";
+import type { McpServer, McpTool, NativeMcpServer } from "./mcp.ts";
+import { credentialFor } from "./tokens.ts";
+
+// Native connectors: our own MCP servers (packages/connectors), shipped in
+// connect's release (build.ts) and run each in an isolate of its own
+// through the Worker Loader. The isolate has an empty env, can't import
+// connect's, and reaches the network only through the egress handler
+// (egress.ts), whose props carry this call's token and the requests the
+// called action declares. The token stays in connect: the connector's code
+// never sees it (threat model R1, R9, EG1).
+//
+// Every call loads its own isolate (`LOADER.load`, not a cached `get`):
+// the loader keeps an isolate's `globalOutbound` for as long as it keeps
+// the isolate, so a cached one would send a later call's requests with an
+// earlier call's token, for another connection or person. A fresh isolate
+// also leaves nothing from one call in module state for the next (EG5).
+//
+// Whatever a connector logs stays in its isolate: connector-isolate.ts
+// loads it silenced (GRA-940).
+
+/** The build a connector's code makes (`nativeRelease`). */
+const releaseOf = async ({
+  manifest,
+  code,
+}: NativeConnector): Promise<string> => {
+  const hash = await sha256Hex(code);
+  return `${manifest.name}@${manifest.version}+${hash.slice(0, 16)}`;
+};
+
+/** Each connector's release, as `nativeRelease` derives it, once. */
+const releases = new Map<NativeConnector, Promise<string>>();
+
+/**
+ * Which build of a connector this is: `name@version+<hash>`, the hash the
+ * first 16 hex characters of its bundled code's SHA-256. A call of unknown
+ * outcome is recovered only by the build that claimed it, so any change
+ * of its code (how it tags, finds or repeats) stops recovery of calls the
+ * old build claimed, whether or not anyone bumped the version.
+ */
+export const nativeRelease = async (
+  connector: NativeConnector
+): Promise<string> => {
+  let release = releases.get(connector);
+  if (release === undefined) {
+    release = releaseOf(connector);
+    releases.set(connector, release);
+  }
+  return await release;
+};
+
+/**
+ * Largest answer connect reads from a native connector, in bytes: a read
+ * of a file or an attachment carries its content, and the connector kit
+ * keeps that to 8 MiB as JSON (4 MiB of file, in base64 or as escaped
+ * text; `contentAs`), with room to spare.
+ */
+const nativeResponseBytes = 16 * 1024 * 1024;
+
+/** The URL connect's MCP client posts to; the isolate answers any. */
+const connectorEndpoint = "https://connector.internal/mcp";
+
+/** An action of a native connector, as its manifest declares it. */
+export interface NativeAction {
+  connector: NativeConnector;
+  declared: ActionManifest;
+  /** The action as connect's policy reads a tool (policy.ts). */
+  tool: McpTool;
+}
+
+/**
+ * The action `action` of the native connector `connection` names, from the
+ * release's manifest alone: nothing is loaded and no token is read. Refuses
+ * a connector this release doesn't have, one for another provider than the
+ * connection's (its token must never go to another provider's hosts), and
+ * an action the connector doesn't declare.
+ */
+export const nativeAction = (
+  connection: Connection,
+  action: string
+): NativeAction => {
+  const connector = nativeConnector(connection.server);
+  if (connector?.manifest.provider !== connection.provider) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
+  const { actions } = connector.manifest;
+  const declared = Object.hasOwn(actions, action) ? actions[action] : undefined;
+  if (declared === undefined) {
+    throw connectErrors.create("connect.action_not_found");
+  }
+  return {
+    connector,
+    declared,
+    tool: {
+      name: action,
+      readOnly: declared.readOnly,
+      resourceField: declared.resource ?? undefined,
+      inputProperties: declared.input,
+    },
+  };
+};
+
+/** A native connector's server in a fresh isolate, its egress held to `routes`. */
+const isolateServer = async (
+  env: Env,
+  connection: Connection,
+  { manifest, code }: NativeConnector,
+  egress: Pick<EgressProps, "callId" | "routes" | "values">
+): Promise<NativeMcpServer> => {
+  const props: EgressProps = {
+    connector: `${manifest.name}@${manifest.version}`,
+    hosts: manifest.hosts,
+    ...egress,
+    credential: await credentialFor(env, connection.id),
+    // The egress closes when connect's MCP client gives up on the call.
+    expiresAt: Date.now() + callTimeoutMs,
+  };
+  const entrypoint = loadConnector(
+    env.LOADER,
+    code,
+    exports.ConnectorEgress({ props })
+  ).getEntrypoint();
+  return mcpServer(
+    connectorEndpoint,
+    async (request) => await entrypoint.fetch(request),
+    nativeResponseBytes
+  );
+};
+
+/**
+ * The MCP server for one call of a native action, in a fresh isolate of
+ * its connector. Only now is the connection's token read: every policy
+ * check that can refuse the call has passed by then. The egress lets
+ * through only the action's routes, with a path segment named after its
+ * resource property bound to the resource the capability names.
+ */
+export const nativeServer = async (
+  env: Env,
+  connection: Connection,
+  { connector, declared }: NativeAction,
+  claims: Pick<CapabilityClaims, "jti" | "resource">,
+  routes: ActionManifest["routes"] = declared.routes
+): Promise<McpServer> =>
+  await isolateServer(env, connection, connector, {
+    callId: claims.jti,
+    routes,
+    values:
+      declared.resource === null || claims.resource === null
+        ? {}
+        : { [declared.resource]: claims.resource },
+  });
+
+/**
+ * The server for one sync page of `connector` (sync.ts), in a fresh
+ * isolate: the egress lets through only the sync's routes, with a
+ * `{place}` path segment bound to `place`.
+ */
+export const syncServer = async (
+  env: Env,
+  connection: Connection,
+  connector: NativeConnector,
+  routes: SyncManifest["routes"],
+  place: string
+): Promise<NativeMcpServer> =>
+  await isolateServer(env, connection, connector, {
+    callId: `sync-${crypto.randomUUID()}`,
+    routes: [...routes],
+    values: { place },
+  });

@@ -1,0 +1,171 @@
+import type {
+  BoardReport,
+  BoardReportApi,
+  BoardReportPart,
+  SignalCount,
+} from "@grasp-os/shared/board-report";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+
+import type { AppsRpc } from "./apps-rpc.ts";
+import type { OnboardingRpc } from "./onboarding/rpc.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+import type { SignalsRpc } from "./signals-rpc.ts";
+import type { WorkflowsRpc } from "./workflows/rpc.ts";
+
+// The board's weekly report, read in one call over `/rpc`
+// (`boardReport.read()`). It keeps nothing of its own: each part is read
+// through the namespace the person reaches it by anyway, with that
+// namespace's checks, so the report says nothing they couldn't read
+// already, and a part one refuses them is left out rather than failed.
+// The week it is about is core's own count (onboarding/cadence.ts), the
+// same the inbox's report bar shows.
+
+/** The namespaces the report is read from: the session's own. */
+interface BoardReportSources {
+  onboarding: OnboardingRpc;
+  workflows: WorkflowsRpc;
+  signals: SignalsRpc;
+  apps: AppsRpc;
+}
+
+/** Whether core refused `error` to the person's role: theirs to see none of, not a failure. */
+const refusedToRole = (error: unknown): boolean =>
+  roleErrors.codeOf(error) === "role.forbidden";
+
+/** `read`, or none when the person's role may not read it. */
+const orNone = async <T>(read: Promise<T>): Promise<T | undefined> => {
+  try {
+    return await read;
+  } catch (error) {
+    if (refusedToRole(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Reads one part. A part that fails leaves the rest: the report says it
+ * couldn't be read, with the code when the failure is one a caller may see.
+ */
+const partOf = async <T>(
+  part: string,
+  read: () => Promise<T>
+): Promise<BoardReportPart<T>> => {
+  try {
+    return { state: "read", data: await read() };
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return { state: "unread", code: error.code };
+    }
+    log.error("board_report.part_failed", { part, ...errorFields(error) });
+    return { state: "unread", code: "internal.unexpected" };
+  }
+};
+
+/**
+ * How many improvement signals of each kind the person reads: every one
+ * for admins, each App's they build for builders (an App whose signals
+ * core refuses them left out). Null when they read none.
+ */
+const signalCounts = async (
+  { signals, apps }: BoardReportSources,
+  person: Identity
+): Promise<SignalCount[] | null> => {
+  const improvement = async () => {
+    if (isAdmin(person.role)) {
+      const all = await orNone(signals.list());
+      return all === undefined ? [] : [all];
+    }
+    if (!canBuild(person.role)) {
+      return [];
+    }
+    const openable = (await orNone(apps.list())) ?? [];
+    const each = await Promise.all(
+      openable.map(async ({ id }) => await orNone(signals.list({ app: id })))
+    );
+    return each.filter((read) => read !== undefined);
+  };
+  const improved = await improvement();
+  if (improved.length === 0) {
+    return null;
+  }
+  const counts = new Map<SignalCount["kind"], number>();
+  const kinds = improved
+    .flatMap(({ signals: listed }) => listed)
+    .map(({ kind }) => kind);
+  for (const kind of kinds) {
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  return [...counts].map(([kind, count]) => ({ kind, count }));
+};
+
+/** The board's weekly report, for `person`, as it stands now. */
+const boardReportOf = async (
+  sources: BoardReportSources,
+  person: Identity
+): Promise<BoardReport> => {
+  const { onboarding, workflows } = sources;
+  const programme = await partOf(
+    "programme",
+    async () => await onboarding.programme()
+  );
+  // The report's window once the programme is known; without one, the
+  // days run activity counts by default.
+  const window =
+    programme.state === "read" && programme.data !== null
+      ? programme.data.reportWindow
+      : undefined;
+  const runs = partOf("runs", async () => await workflows.activity(window));
+  const [ran, better, people] = await Promise.all([
+    runs,
+    partOf("signals", async () => await signalCounts(sources, person)),
+    isAdmin(person.role)
+      ? partOf("people", async () => {
+          const { progress } = await onboarding.view();
+          return progress;
+        })
+      : undefined,
+  ]);
+  const idleWorkflows = await partOf("workflows", async () => {
+    const listed = (await orNone(workflows.overview())) ?? [];
+    const ranNames = new Set(
+      ran.state === "read"
+        ? ran.data.workflows.map(({ workflowId }) => workflowId)
+        : []
+    );
+    return listed.filter((workflow) => !ranNames.has(workflow.workflowId))
+      .length;
+  });
+  return {
+    programme,
+    runs: ran,
+    idleWorkflows,
+    better,
+    ...(people === undefined ? {} : { people }),
+  };
+};
+
+/** The signed-in person's weekly report. */
+export class BoardReportRpc extends CoreRpcTarget implements BoardReportApi {
+  readonly #check: SessionCheck;
+  readonly #sources: BoardReportSources;
+
+  constructor(check: SessionCheck, sources: BoardReportSources) {
+    super();
+    this.#check = check;
+    this.#sources = sources;
+  }
+
+  async read(): Promise<BoardReport> {
+    return await withPerson(
+      this.#check,
+      async (person) => await boardReportOf(this.#sources, person)
+    );
+  }
+}

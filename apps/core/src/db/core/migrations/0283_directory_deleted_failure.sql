@@ -1,0 +1,1 @@
+ALTER TABLE `directory_reads` ADD `deleted_failure` text;

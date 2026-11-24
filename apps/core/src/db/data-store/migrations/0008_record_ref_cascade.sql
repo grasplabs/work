@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_record_refs` ADD `cascade` integer DEFAULT false NOT NULL;

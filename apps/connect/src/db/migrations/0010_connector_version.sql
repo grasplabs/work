@@ -1,0 +1,1 @@
+ALTER TABLE `idempotent_calls` ADD `connector_version` text;

@@ -1,0 +1,1202 @@
+/**
+ * The outside systems the connect Worker reaches in core's tests: a Worker
+ * of its own, set as connect's outbound service in vite.config.ts, so the
+ * real connect runs unchanged behind core. Entra ID's token endpoint checks
+ * PKCE and Grasp's client secret as Entra does, and issues tokens for the
+ * account the code names; Composio's API answers as test/composio-api.ts
+ * says; a mail provider's MCP server answers as
+ * test/mail-server.ts says; Microsoft Graph's delta queries answer as
+ * connect's test/graph-events-fake.ts says, with mail tests post to
+ * `graphControlUrl`. Imported by vite.config.ts (Node) and the tests
+ * (workerd), so it only holds data.
+ */
+import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
+import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
+import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
+import { osvFake } from "../../connect/test/osv-fake.ts";
+import {
+  outsideApiFake,
+  outsideApiInsideOrigin,
+  outsideApiOrigin,
+  outsideApiSlowMs,
+} from "../../connect/test/outside-api-fake.ts";
+import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { aiProvidersFake } from "./ai-providers-fake.ts";
+import { botConnectorFake } from "./bot-connector-fake.ts";
+import { composioApiScript, composioLogoScript } from "./composio-api.ts";
+import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
+import { mailServerScript } from "./mail-server.ts";
+import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
+import { stephenGoogleFake } from "./stephen-google-fake.ts";
+import { stephenGraphFake } from "./stephen-graph-fake.ts";
+
+/**
+ * Grasp's own keys at OpenAI, Anthropic and KugelAudio, for platform
+ * features, as set on connect in the tests; none for the other providers,
+ * which aren't offered for them.
+ */
+export const platformOpenAiKey = "test-platform-openai-key-0001";
+export const platformAnthropicKey = "test-platform-anthropic-key-0001";
+export const platformKugelAudioKey = "test-platform-kugelaudio-key-0001";
+
+/** Connect's version metadata, as set on connect in the tests. */
+export const connectVersionMetadata = {
+  id: "c0ec7000-0000-4000-8000-000000000001",
+  tag: "",
+  timestamp: "2026-10-29T00:00:00.000Z",
+};
+
+/** Grasp's Entra app for connections, as set on connect in the tests. */
+export const connectClient = clients.microsoft;
+
+/** Grasp's Google client for connections, as set on connect in the tests. */
+export const googleConnectClient = clients.google;
+
+/** Grasp's Entra app for the directory's connection, as set on connect. */
+export const directoryClient = clients.microsoftDirectory;
+/** The directory's own Google client, as set on connect. */
+export const googleDirectoryClient = clients.googleDirectory;
+
+/**
+ * Where tests set who is in the tenant's directory, for the directory's
+ * reads: POST `{ users }` as Graph has them (`/users` with `$select` and
+ * `$expand=manager`), a hundred to a page; `{ failAt }`, the offset of
+ * a page Graph then fails with a server error; and `{ loopAt }`, the
+ * offset of a page whose next link points back at itself (null for none).
+ * Its groups: `{ groups }` as Graph answers a group, and `{ members }`,
+ * each group's transitive members by its lower-case ID; `{ groupFail }`,
+ * a group's ID whose members Graph then fails to list (null for none),
+ * with HTTP `{ groupFailStatus }` (500 unless told).
+ * `{ granted }` is what Entra says the directory's app was granted, at
+ * connecting and at each renewal (null for `directoryGranted`).
+ * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
+ * `{ deletedFailAt }` with `{ deletedFailStatus }` and `{ deletedFailBody }`
+ * (null for Graph's error), and `{ deletedNext }`, the next link every page of
+ * them answers in place of its own (null for its own).
+ */
+export const directoryControlUrl = "https://graph-control.test/directory";
+
+/**
+ * Where tests set what HiBob holds, for the HR platform's reads: POST
+ * `{ employees }` as its people search answers them, and `{ key }`, the
+ * one service user it takes, as `<id>:<token>`.
+ */
+export const hibobControlUrl = "https://hibob-control.test/people";
+
+/** What the directory's Entra app is granted, as Entra's token answer says. */
+export const directoryGranted =
+  "openid profile email User.Read User.Read.All Group.ReadBasic.All";
+
+/** Grasp's Entra app for the documents' connection, as set on connect. */
+export const documentsClient = clients.microsoftDocuments;
+
+/**
+ * Where tests set what the admin's OneDrive holds, for the documents'
+ * reads: POST `{ files }`, each `{ id, name, base64 }`, at its top. Graph
+ * answers them as `/me/drive/root/children` and `/me/drive/items/{id}`,
+ * and SharePoint serves each one's bytes from its download link.
+ */
+export const documentsControlUrl = "https://graph-control.test/documents";
+
+/** What the documents' Entra app is granted, as Entra's token answer says. */
+export const documentsGranted =
+  "openid profile email User.Read Files.Read.All Sites.Read.All";
+
+/**
+ * The code Entra sends back once `subject` in `tenant` consents at `url`:
+ * it carries the authorization's PKCE challenge, so only the flow's own
+ * verifier redeems it.
+ */
+export const consentCode = (
+  url: URL,
+  tenant: string,
+  subject: string,
+  granted?: string
+) =>
+  [
+    url.searchParams.get("code_challenge"),
+    tenant,
+    subject,
+    // What Entra says it granted (`scope`), when the test gives it: base64,
+    // since rights have dots of their own.
+    ...(granted === undefined ? [] : [btoa(granted)]),
+  ].join(".");
+
+/**
+ * Where tests post a message arriving in a mailbox's inbox:
+ * `{ mailbox, message }`, as Graph's delta queries then show it.
+ */
+export const graphControlUrl = "https://graph-control.test/receive";
+
+/**
+ * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
+ * order: `{ mailbox, subject, to, replyTo, headers, attachments }` each
+ * (`headers` its `internetMessageHeaders`, `attachments` the file
+ * attachments it was given), and the drafts it made (`draft: true`).
+ */
+export const graphSentUrl = "https://graph-control.test/sent";
+
+/**
+ * Where tests have Graph lose the answers of a mailbox's next writes (a
+ * mail sent, a draft made): POST `{ mailbox, writes }`, how many. Each such write is
+ * carried out, then answered with a 502, as a gateway that lost it would.
+ */
+export const graphLoseUrl = "https://graph-control.test/lose";
+
+/**
+ * Where Stephen's eval sets a mailbox's calendar and mail, or a workbook's
+ * table, and reads the writes that reached them (test/stephen-graph-fake.ts).
+ */
+export const stephenGraphUrl = "https://graph-control.test/stephen";
+
+/**
+ * Where Stephen's eval on Google sets a mailbox's mail and calendar, a
+ * shared drive's files or a spreadsheet, and reads the writes that reached
+ * them (test/stephen-google-fake.ts).
+ */
+export const stephenGoogleUrl = "https://google-control.test/stephen";
+
+/**
+ * Where tests change the address Google gives an account from then on:
+ * `{ subject, email }`, as an admin renaming it in Workspace does. A
+ * renewal of that account's tokens is answered with it, and so is Google's
+ * userinfo endpoint; with \`email\` null, a renewal comes without an ID
+ * token, and the userinfo endpoint names no address.
+ */
+export const googleAddressUrl = "https://google-control.test/address";
+
+/**
+ * Where tests hold a call to Google mid-way: POST \`{ hold: true, prefix? }\`
+ * holds the next request whose URL starts with \`prefix\` until POST
+ * \`{ hold: false }\`, and then answers it as ever; GET answers
+ * \`{ reached }\`, whether a held one is waiting. By default the look-up of an account's addresses (connect's
+ * account-addresses.ts, which goes on without them): a connection's
+ * finishing, after Google's code exchange and before connect stores it.
+ */
+export const googleHoldUrl = "https://google-control.test/hold";
+
+/**
+ * Where tests set the groups a member is directly in, at Microsoft or
+ * Google alike: POST `{ member, groups }`, the member a Microsoft object
+ * ID, a Google address or a group's ID, each lower case; or `{ member,
+ * failing }`, which makes every read of that member's groups fail (503)
+ * while true: on Microsoft the account's, on Google each query naming the
+ * member. A Google group whose ID starts with `mapped-` comes back mapped
+ * from another identity source, with a namespace. Graph's `/me/transitiveMemberOf` answers the token's own
+ * account's groups through every nesting, Cloud Identity's
+ * `searchDirectGroups` a member's direct ones, as each documents.
+ */
+export const groupsControlUrl = "https://groups-control.test/groups";
+
+/** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
+export const graphDraftsUrl = "https://graph-control.test/drafts";
+
+/**
+ * Where tests put a file attachment on a message of a mailbox, as Graph
+ * then answers it (`/users/{mailbox}/messages/{message}/attachments/{id}`):
+ * POST `{ mailbox, message, id, name, contentType, contentBytes }`, its
+ * bytes as base64.
+ */
+export const graphAttachmentUrl = "https://graph-control.test/attachment";
+
+/**
+ * Where tests read how often Graph handed out an attachment's content
+ * (not its fields alone): GET `?mailbox=…&message=…&id=…`, answered
+ * `{ reads }`.
+ */
+export const graphAttachmentReadsUrl =
+  "https://graph-control.test/attachment-reads";
+
+/**
+ * Where tests publish a package on the fake npm registry: POST one
+ * version as connect's test/npm-registry-fake.ts takes it, as JSON.
+ */
+export const npmPublishUrl = "https://npm-control.test/publish";
+/** POST `{ name, advisory }`: the registry knows `advisory` for `name`. */
+export const npmAdviseUrl = "https://npm-control.test/advise";
+
+/** POST `{ name, version, id }`: OSV.dev knows entry `id` for that version. */
+export const osvReportUrl = "https://osv-control.test/report";
+
+/**
+ * POST `{ name, status }`: OSV.dev answers a batch naming the package with
+ * that status and no results; `{ name, status: null }` restores its own.
+ */
+export const osvAnswerUrl = "https://osv-control.test/answer";
+
+/**
+ * Where tests publish Microsoft's Bot Framework signing keys, as
+ * login.botframework.com serves them to connect: POST `{ keys }`, public
+ * JWKs each with its `endorsements`, added to those published before (a
+ * key with the same `kid` replaced).
+ */
+export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
+
+/**
+ * Where tests have login.botframework.com fail its key set: POST
+ * `{ status }` to have it answer with that status, `{ status: null }` to
+ * have it answer as before.
+ */
+export const botFrameworkFailUrl = "https://botframework-control.test/fail";
+
+/**
+ * Where tests that post through core's own route, and so are checked
+ * against the isolate's keys, take the one signing key they share: POST
+ * `{ key }`, a private JWK with its `kid`, to have it published, and get
+ * back the key the first test file published, this one or an earlier
+ * one. Test files may share an isolate, which fetches the keys at most
+ * once a minute: one key, published before any of them posts, is always
+ * among them.
+ */
+export const botFrameworkSharedKeyUrl =
+  "https://botframework-control.test/shared-key";
+
+/** Where tests read the paths login.botframework.com was asked for, in order. */
+export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
+
+/**
+ * The client's Teams bot, as core (`TEAMS_BOT_ID`) and connect
+ * (`TEAMS_BOT_*`) are set up with it in the tests, and Entra knows it.
+ */
+export const teamsBot = {
+  id: "5b1e7c2a-3f4d-4e6b-9a8c-1d2e3f4a5b6c",
+  tenant: acmeTenant,
+  secret: "acme-teams-bot-secret",
+} as const;
+
+/**
+ * Where tests set the Bot Connector's rosters: POST `{ members }`, each
+ * `<conversation id> <user id>` to the member Teams answers with.
+ */
+export const botConnectorMembersUrl =
+  "https://bot-connector-control.test/members";
+
+/**
+ * Where tests have Teams refuse a conversation's next edits as too many
+ * requests: POST `{ conversation, count }`.
+ */
+export const botConnectorEditsUrl = "https://bot-connector-control.test/edits";
+
+/**
+ * Where tests read what reached the Bot Connector, in order: `{ posted,
+ * asked }`, the activities it took (`{ conversation, activity }` each) and
+ * the roster reads (`<conversation id> <user id>` each).
+ */
+export const botConnectorPostedUrl =
+  "https://bot-connector-control.test/posted";
+
+/**
+ * The client's Slack app, as core (`SLACK_SIGNING_SECRET`) and connect
+ * (`SLACK_BOT_TOKEN`) are set up with it in the tests.
+ */
+export const slackApp = {
+  signingSecret: "acme-slack-signing-secret-for-tests",
+  botToken: "acme-slack-bot-token-for-tests",
+  botUserId: "UBOTSTEPHEN",
+} as const;
+
+/**
+ * Where tests read what reached Slack's Web API, in order: each call's
+ * method, its form or JSON fields, and whether it carried the bot's token.
+ */
+export const slackPostedUrl = "https://slack-control.test/posted";
+
+/**
+ * A company's webhook receiver (core's app-webhooks.ts, connect's
+ * webhooks.ts), on a public-looking host: it answers 200, but a path
+ * `/status/<code>` with that status, `/redirect` with a redirect, and
+ * `/fail-<n>/...` with 503 its first `n` times.
+ */
+export const webhookReceiverOrigin = "https://hooks.acme-receiver.test";
+
+/**
+ * Where tests read what reached the webhook receiver, in order: each
+ * request's URL, method, headers and body.
+ */
+export const webhookReceivedUrl = "https://webhook-control.test/received";
+
+/**
+ * Where tests read what reached the outside API an admin approves as an
+ * HTTP connection (connect's test/outside-api-fake.ts), in order: each
+ * request's URL, method, headers and body.
+ */
+export const httpApiReceivedUrl = "https://http-api-control.test/received";
+
+/**
+ * Where tests remove the bot from a conversation, as uninstalling its app
+ * does: POST `{ conversation }`; the Bot Connector refuses its posts there
+ * with 403 from then on.
+ */
+export const botConnectorUninstallUrl =
+  "https://bot-connector-control.test/uninstall";
+
+/**
+ * Where tests make Teams fail one post: POST `{ conversation, holding }`;
+ * the Bot Connector answers 502, once, to the next post in that
+ * conversation whose body holds `holding`.
+ */
+export const botConnectorFailOnceUrl =
+  "https://bot-connector-control.test/fail-once";
+
+/** Where tests read the paths the fake npm registry was asked for, in order. */
+export const npmAskedUrl = "https://npm-control.test/asked";
+
+/** The tokens the fake issues for `subject`, to look for where they mustn't be. */
+export const tokensFor = (subject: string): string[] => [
+  `access.${subject}`,
+  `refresh.${subject}`,
+];
+
+export const connectProvidersScript = `
+${mailServerScript}
+${composioApiScript}
+${composioLogoScript}
+const base64Url = (bytes) =>
+  btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+const encoded = (value) =>
+  base64Url(new TextEncoder().encode(JSON.stringify(value)));
+/** Each Google account's Workspace domain and address now, by its subject. */
+const googleAccounts = new Map();
+/** Each member's direct groups (\`groupsControlUrl\`), by its key, lower case. */
+const directGroups = new Map();
+/** The members whose group reads fail. */
+const failingGroups = new Set();
+/** Every group \`member\` is in, through any nesting, each once. */
+const transitiveGroups = (member) => {
+  const found = new Set();
+  let members = [member];
+  while (members.length > 0) {
+    const next = [];
+    for (const each of members) {
+      for (const group of directGroups.get(each) ?? []) {
+        if (!found.has(group)) {
+          found.add(group);
+          next.push(group);
+        }
+      }
+    }
+    members = next;
+  }
+  return [...found];
+};
+/** The subject an access token of the fakes names: \`access.<subject>\`, maybe with a renewal's suffix. */
+const subjectOf = (request) => {
+  const authorization = request.headers.get("authorization") ?? "";
+  const [subject = ""] = authorization.startsWith("Bearer access.")
+    ? authorization.slice("Bearer access.".length).split(".")
+    : [];
+  return subject;
+};
+/**
+ * Graph's \`GET /me/transitiveMemberOf\`
+ * (https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof?view=graph-rest-1.0):
+ * the token's account's groups, nested ones too, 100 a page (Graph's
+ * default) with a directory role among them, as Graph lists roles too.
+ * Query options other than its own \`$skiptoken\` are advanced queries,
+ * refused here as Graph refuses them without \`ConsistencyLevel\`.
+ */
+const graphMemberOf = (request, url) => {
+  if ([...url.searchParams.keys()].some((key) => key !== "$skiptoken")) {
+    return Response.json({ error: { code: "Request_UnsupportedQuery" } }, { status: 400 });
+  }
+  const subject = subjectOf(request).toLowerCase();
+  if (subject === "") {
+    return Response.json({ error: { code: "InvalidAuthenticationToken" } }, { status: 401 });
+  }
+  if (failingGroups.has(subject)) {
+    return Response.json({ error: { code: "serviceNotAvailable" } }, { status: 503 });
+  }
+  const all = [
+    { "@odata.type": "#microsoft.graph.directoryRole", id: "62e90394-69f5-4237-9190-012177145e10" },
+    ...transitiveGroups(subject).map((id) => ({ "@odata.type": "#microsoft.graph.group", id })),
+  ];
+  const start = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const value = all.slice(start, start + 100);
+  return Response.json({
+    value,
+    ...(start + 100 < all.length
+      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$skiptoken=" + (start + 100) }
+      : {}),
+  });
+};
+const groupQueryStart = "member_key_id == '";
+const groupQueryEnd = "' && 'cloudidentity.googleapis.com/groups.discussion_forum' in labels";
+/** The member a \`searchDirectGroups\` query names, in the one shape connect asks it; null for any other. */
+const groupQueryMember = (query) =>
+  query.startsWith(groupQueryStart) && query.endsWith(groupQueryEnd) &&
+  query.length > groupQueryStart.length + groupQueryEnd.length
+    ? query.slice(groupQueryStart.length, query.length - groupQueryEnd.length)
+    : null;
+/**
+ * Cloud Identity's \`groups.memberships.searchDirectGroups\`
+ * (https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups.memberships/searchDirectGroups):
+ * a member's direct groups, at most \`pageSize\` (1000 at most) a page,
+ * for a token whose grant holds \`cloud-identity.groups.readonly\`; any
+ * other option, or a query of another shape, is refused.
+ */
+const searchDirectGroups = (request, url) => {
+  const allowed = new Set(["query", "pageSize", "pageToken", "orderBy"]);
+  const member = groupQueryMember(url.searchParams.get("query") ?? "");
+  const pageSize = Number(url.searchParams.get("pageSize") ?? "200");
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key)) || member === null || member.includes("'") || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+    return Response.json({ error: { code: 400, status: "INVALID_ARGUMENT" } }, { status: 400 });
+  }
+  const account = googleAccounts.get(subjectOf(request));
+  if (account === undefined || !(account.scope ?? "").split(" ").includes("https://www.googleapis.com/auth/cloud-identity.groups.readonly")) {
+    return Response.json({ error: { code: 403, status: "PERMISSION_DENIED" } }, { status: 403 });
+  }
+  if (failingGroups.has(member)) {
+    return Response.json({ error: { code: 503, status: "UNAVAILABLE" } }, { status: 503 });
+  }
+  const groups = directGroups.get(member) ?? [];
+  const start = Number(url.searchParams.get("pageToken") ?? "0");
+  return Response.json({
+    memberships: groups.slice(start, start + pageSize).map((id) => ({
+      group: "groups/" + id.replace(/[^a-z0-9]/gu, ""),
+      // A group mapped from another identity source carries its namespace.
+      groupKey: id.startsWith("mapped-") ? { id, namespace: "identitysources/acme" } : { id },
+      roles: [{ name: "MEMBER" }],
+    })),
+    ...(start + pageSize < groups.length ? { nextPageToken: String(start + pageSize) } : {}),
+  });
+};
+/** A hold on the next look-up of a Google account's addresses, while a test asks for one. */
+let googleHold = null;
+/**
+ * Google's token endpoint renewing an account's tokens, as Google does for
+ * a grant with \`openid\`: with an ID token for the account as it is now.
+ */
+const googleRefresh = async (request) => {
+  const form = new URLSearchParams(await request.text());
+  const subject = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+  const account = googleAccounts.get(subject);
+  if (form.get("grant_type") !== "refresh_token" || account === undefined) {
+    return undefined;
+  }
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: ${JSON.stringify(clients.google.id)},
+    sub: subject,
+    hd: account.domain,
+    email: account.email,
+    email_verified: true,
+  };
+  return Response.json({
+    token_type: "Bearer",
+    access_token: "access." + subject + "." + crypto.randomUUID(),
+    expires_in: 3599,
+    ...(account.email === null
+      ? {}
+      : { id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join(".") }),
+  });
+};
+/**
+ * Google's token endpoint redeeming a code \`consentCode\` made for Grasp's
+ * Google client, with what was granted: the account it names, in the
+ * Workspace domain it names. \`undefined\` for every other request to it.
+ */
+const googleConsent = async (request) => {
+  const form = new URLSearchParams(await request.text());
+  const secrets = {
+    [${JSON.stringify(clients.google.id)}]: ${JSON.stringify(clients.google.secret)},
+    [${JSON.stringify(clients.googleDirectory.id)}]: ${JSON.stringify(clients.googleDirectory.secret)},
+  };
+  const client = form.get("client_id") ?? "";
+  if (form.get("grant_type") !== "authorization_code" || secrets[client] === undefined) {
+    return undefined;
+  }
+  // The domain has dots of its own: the code always ends in what was granted.
+  const [challenge, ...rest] = (form.get("code") ?? "").split(".");
+  const granted = rest.pop() ?? "";
+  const subject = rest.pop() ?? "";
+  const domain = rest.join(".");
+  const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
+  const digest = base64Url(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
+  );
+  if (form.get("client_secret") !== secrets[client] || digest !== challenge) {
+    return Response.json({ error: "invalid_grant" }, { status: 400 });
+  }
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: client,
+    sub: subject,
+    hd: domain,
+    email: subject + "@" + domain,
+    email_verified: true,
+  };
+  googleAccounts.set(subject, { domain, email: claims.email, scope: atob(granted) });
+  return Response.json({
+    token_type: "Bearer",
+    access_token: "access." + subject,
+    refresh_token: "refresh." + subject,
+    expires_in: 3599,
+    id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
+    scope: atob(granted),
+  });
+};
+const graphEvents = (${graphEventsFake.toString()})();
+const stephenGraph = (${stephenGraphFake.toString()})();
+const stephenGoogle = (${stephenGoogleFake.toString()})();
+const driveSync = (${driveSyncFake.toString()})();
+const sampleSync = (${sampleSyncFake.toString()})();
+const graphSent = [];
+const graphLosing = new Map();
+const graphDrafts = new Map();
+const graphAttachments = new Map();
+const graphAttachmentReads = new Map();
+/** Whether Graph loses this write's answer (\`graphLoseUrl\`). */
+const losesAnswer = (mailbox) => {
+  const losing = graphLosing.get(mailbox) ?? 0;
+  if (losing === 0) {
+    return false;
+  }
+  graphLosing.set(mailbox, losing - 1);
+  return true;
+};
+const npm = (${npmRegistryFake.toString()})();
+const botFramework = (${botFrameworkKeysFake.toString()})();
+let botFrameworkKeys = [];
+let botFrameworkSharedKey = null;
+const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
+const webhookCalls = [];
+const webhookFailures = new Map();
+/** The webhook receiver's answer to \`request\`, kept for tests to read. */
+const webhookAnswer = async (request, url) => {
+  webhookCalls.push({
+    url: url.href,
+    method: request.method,
+    headers: Object.fromEntries(request.headers),
+    body: await request.text(),
+  });
+  const [, first = "", second = ""] = url.pathname.split("/");
+  if (first === "status") {
+    return new Response(null, { status: Number(second) });
+  }
+  if (first === "redirect") {
+    return new Response(null, {
+      status: 307,
+      headers: { location: "https://elsewhere.test/" },
+    });
+  }
+  if (first.startsWith("fail-")) {
+    const failed = webhookFailures.get(url.pathname) ?? 0;
+    if (failed < Number(first.slice("fail-".length))) {
+      webhookFailures.set(url.pathname, failed + 1);
+      return new Response(null, { status: 503 });
+    }
+  }
+  return new Response(null, { status: 200 });
+};
+/** The outside API, and the DNS answers for its names. */
+const outsideApi = (${outsideApiFake.toString()})(${JSON.stringify({
+  origin: outsideApiOrigin,
+  insideOrigin: outsideApiInsideOrigin,
+  slowMs: outsideApiSlowMs,
+})});
+const slackCalls = [];
+/** Slack's Web API, as far as the door's adapter calls it. */
+const slackAnswer = async (request, url) => {
+  const method = url.pathname.slice("/api/".length);
+  const text = await request.text();
+  const type = request.headers.get("content-type") ?? "";
+  const fields = type.includes("json")
+    ? JSON.parse(text)
+    : Object.fromEntries(new URLSearchParams(text));
+  slackCalls.push({
+    method,
+    fields,
+    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${slackApp.botToken}`)},
+  });
+  if (method === "auth.test") {
+    return Response.json({ ok: true, user_id: ${JSON.stringify(slackApp.botUserId)}, bot_id: "BSTEPHEN", team_id: "TACME" });
+  }
+  if (method === "chat.postMessage") {
+    return Response.json({ ok: true, channel: fields.channel, ts: String(Date.now() / 1000) });
+  }
+  return Response.json({ ok: true });
+};
+const directory = { granted: null, users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, groups: [], members: {}, groupFail: null, google: [], googleDeleted: [], googleFailAt: null, googleRefused: null, googleDeletedRefused: null };
+/** Google's Admin SDK users, as the directory's reads ask for them, a page at a time: its deleted ones with \`showDeleted\`. */
+const googleUsersList = (url) => {
+  // Every page refused, as Google refuses a token of someone who isn't an admin.
+  if (directory.googleRefused !== null) {
+    return Response.json({ error: { code: directory.googleRefused, message: "Not Authorized to access this resource/api" } }, { status: directory.googleRefused });
+  }
+  const top = Number(url.searchParams.get("maxResults") ?? "100");
+  const from = Number(url.searchParams.get("pageToken") ?? "0");
+  const deleted = url.searchParams.get("showDeleted") === "true";
+  // The deleted users alone refused, as a role that may list people but not them might be.
+  if (deleted && directory.googleDeletedRefused !== null) {
+    return Response.json({ error: { code: directory.googleDeletedRefused } }, { status: directory.googleDeletedRefused });
+  }
+  const users = deleted ? directory.googleDeleted : directory.google;
+  if (!deleted && directory.googleFailAt === from) {
+    return Response.json({ error: { code: 500 } }, { status: 500 });
+  }
+  const next = from + top;
+  return Response.json({
+    kind: "admin#directory#users",
+    users: users.slice(from, next),
+    ...(next < users.length ? { nextPageToken: String(next) } : {}),
+  });
+};
+/** Graph's groups, as the directory's group calls ask for them: a search by name, a group, its members a hundred to a page. */
+const groupsGraph = (url) => {
+  const parts = url.pathname.split("/");
+  if (url.pathname === "/v1.0/groups") {
+    const filter = url.searchParams.get("$filter") ?? "";
+    const prefix = "startswith(displayName,'";
+    const text = filter.startsWith(prefix) && filter.endsWith("')") ? filter.slice(prefix.length, -2).replaceAll("''", "'") : null;
+    return text === null
+      ? Response.json({ error: { code: "BadRequest" } }, { status: 400 })
+      : Response.json({ value: directory.groups.filter((group) => String(group.displayName).startsWith(text)) });
+  }
+  const id = parts[3]?.toLowerCase();
+  if (parts.length === 5 && parts[4] === "transitiveMembers") {
+    if (directory.groupFail === id) {
+      return Response.json({ error: { code: "generalException" } }, { status: directory.groupFailStatus ?? 500 });
+    }
+    const known = directory.groups.some((each) => each.id.toLowerCase() === id);
+    const members = directory.members[id] ?? (known ? [] : undefined);
+    if (members === undefined) {
+      return Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 });
+    }
+    const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+    const next = from + 100;
+    return Response.json({
+      value: members.slice(from, next),
+      ...(next < members.length
+        ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/groups/" + id + "/transitiveMembers?$skiptoken=" + next }
+        : {}),
+    });
+  }
+  if (parts.length === 4) {
+    const group = directory.groups.find((each) => each.id.toLowerCase() === id);
+    return group === undefined
+      ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+      : Response.json(group);
+  }
+  return undefined;
+};
+const hibob = { key: null, employees: [] };
+/** Graph's users, as the directory's reads ask for them, a page at a time. */
+const directoryGraph = (url) => {
+  const top = Number(url.searchParams.get("$top") ?? "100");
+  const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const next = from + top;
+  // The page a test has Graph fail, as a server error would.
+  if (directory.failAt === from) {
+    return Response.json({ error: { code: "generalException" } }, { status: 500 });
+  }
+  // The page whose next link a test has Graph point back at itself.
+  const after = directory.loopAt === from ? from : next;
+  return Response.json({
+    value: directory.users.slice(from, next),
+    ...(after < directory.users.length
+      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$top=" + top + "&$skiptoken=" + after }
+      : {}),
+  });
+};
+/** Graph's deleted users, as the directory's reads ask for them, a page at a time. */
+const deletedGraph = (url) => {
+  const top = Number(url.searchParams.get("$top") ?? "100");
+  const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const next = from + top;
+  if (directory.deletedFailAt === from) {
+    // A body a test chose, as it came: empty, or not JSON.
+    if (directory.deletedFailBody !== null) {
+      return new Response(directory.deletedFailBody, { status: directory.deletedFailStatus });
+    }
+    return Response.json({ error: { code: "generalException" } }, { status: directory.deletedFailStatus });
+  }
+  const link = directory.deletedNext ?? (next < directory.deleted.length
+    ? "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.user?$top=" + top + "&$skiptoken=" + next
+    : null);
+  return Response.json({
+    value: directory.deleted.slice(from, next).map(({ id, userType }) => ({ id, userType })),
+    ...(link === null ? {} : { "@odata.nextLink": link }),
+  });
+};
+const documents = { files: [] };
+/** The admin's OneDrive, as the documents' reads ask Graph for it, and SharePoint serves its files. */
+const documentsGraph = (url) => {
+  const item = (file) => ({
+    id: file.id,
+    name: file.name,
+    size: atob(file.base64).length,
+    lastModifiedDateTime: "2026-10-01T09:00:00Z",
+    file: { mimeType: "application/octet-stream" },
+  });
+  if (url.hostname === "acme-my.sharepoint.com" && url.pathname.startsWith("/download/")) {
+    const file = documents.files.find(({ id }) => "/download/" + id === url.pathname);
+    return file === undefined
+      ? new Response("Not found", { status: 404 })
+      : new Response(Uint8Array.from(atob(file.base64), (char) => char.charCodeAt(0)));
+  }
+  if (url.pathname === "/v1.0/sites" && url.searchParams.get("search") === "*") {
+    return Response.json({ value: [] });
+  }
+  if (url.pathname === "/v1.0/me/drive/root/children") {
+    return Response.json({ value: documents.files.map(item) });
+  }
+  const file = documents.files.find(({ id }) => url.pathname === "/v1.0/me/drive/items/" + id);
+  if (file !== undefined) {
+    return Response.json({
+      ...item(file),
+      "@microsoft.graph.downloadUrl": "https://acme-my.sharepoint.com/download/" + file.id + "?tempauth=signed",
+    });
+  }
+  return undefined;
+};
+const osv = (${osvFake.toString()})();
+const aiProviders = (${aiProvidersFake.toString()})();
+
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (aiProviders.handles(url)) {
+      return await aiProviders.answer(request, url);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(groupsControlUrl)}) {
+      const { member, groups, failing } = await request.json();
+      if (groups !== undefined) {
+        directGroups.set(member, groups);
+      }
+      if (failing === true) {
+        failingGroups.add(member);
+      } else if (failing === false) {
+        failingGroups.delete(member);
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/me/transitiveMemberOf") {
+      return graphMemberOf(request, url);
+    }
+    if (request.method === "GET" && url.href === "https://openidconnect.googleapis.com/v1/userinfo") {
+      // Google's userinfo endpoint: the token's account as it is now.
+      const subject = subjectOf(request);
+      const account = googleAccounts.get(subject);
+      if (account === undefined || account.email === null) {
+        return Response.json({ error: "invalid_token" }, { status: 401 });
+      }
+      return Response.json({ sub: subject, email: account.email, email_verified: true, hd: account.domain });
+    }
+    if (url.hostname === "cloudidentity.googleapis.com" && request.method === "GET" && url.pathname === "/v1/groups/-/memberships:searchDirectGroups") {
+      if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+        googleHold.reached = true;
+        while (googleHold?.held === true) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      return searchDirectGroups(request, url);
+    }
+    if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
+      return await composioApi(request, url);
+    }
+    if (url.hostname === "logos.composio.dev") {
+      return composioLogo(url);
+    }
+    if (url.hostname === "backend.composio.dev" || url.hostname === "mail-control.test") {
+      return await mailServer(request, url);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(directoryControlUrl)}) {
+      Object.assign(directory, await request.json());
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(hibobControlUrl)}) {
+      Object.assign(hibob, await request.json());
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "api.hibob.com" && request.method === "POST" && url.pathname === "/v1/people/search") {
+      const authorization = request.headers.get("authorization") ?? "";
+      if (hibob.key === null || authorization !== "Basic " + btoa(hibob.key)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      return Response.json({ employees: hibob.employees });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(documentsControlUrl)}) {
+      Object.assign(documents, await request.json());
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/users/") && url.pathname.split("/").length === 4 && url.searchParams.has("$expand")) {
+      const id = url.pathname.split("/").pop().toLowerCase();
+      const found = directory.users.find((user) => user.id.toLowerCase() === id);
+      return found === undefined
+        ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+        : Response.json(found);
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/groups")) {
+      const answered = groupsGraph(url);
+      if (answered !== undefined) {
+        return answered;
+      }
+    }
+    if (url.href === ${JSON.stringify(stephenGraphUrl)}) {
+      return await stephenGraph.control(request);
+    }
+    if (url.hostname === "graph.microsoft.com") {
+      const answered = await stephenGraph.answer(request, url);
+      if (answered !== undefined) {
+        return answered;
+      }
+    }
+    if ((url.hostname === "graph.microsoft.com" || url.hostname === "acme-my.sharepoint.com") && request.method === "GET") {
+      const answered = documentsGraph(url);
+      if (answered !== undefined) {
+        return answered;
+      }
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/users" && url.searchParams.has("$expand")) {
+      return directoryGraph(url);
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/directory/deletedItems/microsoft.graph.user") {
+      return deletedGraph(url);
+    }
+    if (url.hostname === "admin.googleapis.com" && request.method === "GET" && url.pathname === "/admin/directory/v1/users") {
+      return googleUsersList(url);
+    }
+    if (url.hostname === "graph.microsoft.com") {
+      // Graph's mail, as Microsoft 365's native actions use it: sending
+      // records the message; a mailbox's messages are none.
+      // The account's own profile, as connect reads its addresses: its
+      // primary address and an SMTP alias, \`also-<subject>@acme.test\`.
+      if (request.method === "GET" && url.pathname === "/v1.0/me") {
+        const subject = (request.headers.get("authorization") ?? "").replace("Bearer access.", "");
+        return Response.json({
+          mail: subject + "@acme.test",
+          proxyAddresses: ["SMTP:" + subject + "@acme.test", "smtp:also-" + subject + "@acme.test"],
+        });
+      }
+      const [, version, users, mailbox, ...rest] = decodeURIComponent(url.pathname).split("/");
+      const mailPath = version === "v1.0" && users === "users" && mailbox && rest.length === 1;
+      if (request.method === "POST" && mailPath && rest[0] === "sendMail") {
+        const { message } = await request.json();
+        graphSent.push({
+          mailbox,
+          subject: message.subject,
+          to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+          replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
+          headers: message.internetMessageHeaders ?? [],
+          // The files attached (\`attachments\`), as Graph was given them.
+          attachments: message.attachments ?? [],
+          // The tag a native connector puts on what it sends: its effect key.
+          effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
+        });
+        return losesAnswer(mailbox)
+          ? new Response("Bad Gateway", { status: 502 })
+          : new Response(null, { status: 202 });
+      }
+      if (request.method === "POST" && mailPath && rest[0] === "messages") {
+        graphDrafts.set(mailbox, (graphDrafts.get(mailbox) ?? 0) + 1);
+        if (losesAnswer(mailbox)) {
+          return new Response("Bad Gateway", { status: 502 });
+        }
+      }
+      if (request.method === "POST" && mailPath && rest[0] === "messages") {
+        // A draft, recorded as a message sent is, marked a draft.
+        const message = await request.json();
+        graphSent.push({
+          mailbox,
+          subject: message.subject,
+          to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+          replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
+          headers: message.internetMessageHeaders ?? [],
+          attachments: message.attachments ?? [],
+          // Tagged as a sent message is: every record has its effect key.
+          effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
+          draft: true,
+        });
+        return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });
+      }
+      if (request.method === "GET" && mailPath && rest[0] === "messages") {
+        return Response.json({ value: [] });
+      }
+      // A message's file attachment, as a test put it (\`graphAttachmentUrl\`):
+      // its fields alone when selected, its content too otherwise.
+      if (request.method === "GET" && version === "v1.0" && users === "users" && rest.length === 4 && rest[0] === "messages" && rest[2] === "attachments") {
+        const found = graphAttachments.get([mailbox, rest[1], rest[3]].join("/"));
+        if (!found) {
+          return Response.json({ error: { code: "ErrorItemNotFound" } }, { status: 404 });
+        }
+        const size = atob(found.contentBytes).length;
+        const fields = { "@odata.type": "#microsoft.graph.fileAttachment", id: found.id, name: found.name, contentType: found.contentType, size, isInline: false };
+        if (url.searchParams.has("$select")) {
+          return Response.json(fields);
+        }
+        const read = [mailbox, rest[1], rest[3]].join("/");
+        graphAttachmentReads.set(read, (graphAttachmentReads.get(read) ?? 0) + 1);
+        return Response.json({ ...fields, contentBytes: found.contentBytes });
+      }
+      return graphEvents.answer(request, url);
+    }
+    if (request.method === "GET" && url.origin + url.pathname === ${JSON.stringify(graphAttachmentReadsUrl)}) {
+      const read = [url.searchParams.get("mailbox"), url.searchParams.get("message"), url.searchParams.get("id")].join("/");
+      return Response.json({ reads: graphAttachmentReads.get(read) ?? 0 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphAttachmentUrl)}) {
+      const attachment = await request.json();
+      graphAttachments.set([attachment.mailbox, attachment.message, attachment.id].join("/"), attachment);
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(graphSentUrl)}) {
+      return Response.json(graphSent);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphLoseUrl)}) {
+      const { mailbox, writes } = await request.json();
+      graphLosing.set(mailbox, (graphLosing.get(mailbox) ?? 0) + writes);
+      return new Response(null, { status: 204 });
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(graphDraftsUrl)}) {
+      return Response.json({ drafts: graphDrafts.get(url.searchParams.get("mailbox")) ?? 0 });
+    }
+    if (url.hostname === "api.osv.dev") {
+      return await osv.answer(request);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(osvReportUrl)}) {
+      const { name, version, id } = await request.json();
+      osv.report(name, version, id);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(osvAnswerUrl)}) {
+      const { name, status } = await request.json();
+      osv.failFor(name, status === null ? undefined : () => new Response("Unavailable", { status }));
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "registry.npmjs.org") {
+      return await npm.answer(request);
+    }
+    if (url.hostname === "cloudflare-dns.com") {
+      // Any other name doesn't exist (NXDOMAIN).
+      return outsideApi.dns(url) ?? Response.json({ Status: 3 });
+    }
+    if (url.origin === ${JSON.stringify(outsideApiOrigin)}) {
+      return await outsideApi.answer(request, url);
+    }
+    if (url.href === ${JSON.stringify(httpApiReceivedUrl)}) {
+      return Response.json(outsideApi.calls);
+    }
+    if (url.origin === ${JSON.stringify(webhookReceiverOrigin)}) {
+      return await webhookAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(webhookReceivedUrl)}) {
+      return Response.json(webhookCalls);
+    }
+    if (url.hostname === "slack.com") {
+      return await slackAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(slackPostedUrl)}) {
+      return Response.json(slackCalls);
+    }
+    const fromMicrosoft = await botConnector.answer(request);
+    if (fromMicrosoft !== undefined) {
+      return fromMicrosoft;
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
+      const { members } = await request.json();
+      botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorEditsUrl)}) {
+      const { conversation, count } = await request.json();
+      botConnector.refuseEdits(conversation, count);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
+      const { conversation } = await request.json();
+      botConnector.uninstall(conversation);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorFailOnceUrl)}) {
+      const { conversation, holding } = await request.json();
+      botConnector.failOnce(conversation, holding);
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {
+      return Response.json({ posted: botConnector.posted, asked: botConnector.asked });
+    }
+    if (url.hostname === "login.botframework.com") {
+      return botFramework.answer(request);
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(driveSyncControlUrl)}) {
+      return await driveSync.control(request);
+    }
+    const fromDriveSync = driveSync.answer(request, url);
+    if (fromDriveSync !== undefined) {
+      return fromDriveSync;
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(sampleSyncControlUrl)}) {
+      return await sampleSync.control(request);
+    }
+    const fromSampleSync = sampleSync.answer(request, url);
+    if (fromSampleSync !== undefined) {
+      return fromSampleSync;
+    }
+    if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
+      return await stephenGoogle.control(request);
+    }
+    if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+      // Polls the flag: workerd refuses to wait on a promise another request made.
+      googleHold.reached = true;
+      while (googleHold?.held === true) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    const fromStephenGoogle = await stephenGoogle.answer(request, url);
+    if (fromStephenGoogle !== undefined) {
+      return fromStephenGoogle;
+    }
+    if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/revoke") {
+      // Google takes back the grant a disconnect revokes, as it does.
+      return new Response(null, { status: 200 });
+    }
+    if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/token") {
+      const answered =
+        (await googleConsent(request.clone())) ??
+        (await googleRefresh(request.clone()));
+      if (answered !== undefined) {
+        return answered;
+      }
+    }
+    if (url.href === ${JSON.stringify(googleHoldUrl)}) {
+      if (request.method === "GET") {
+        return Response.json({ reached: googleHold?.reached === true });
+      }
+      const { hold, prefix } = await request.json();
+      if (hold) {
+        googleHold = {
+          reached: false,
+          held: true,
+          prefix: prefix ?? "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+        };
+      } else if (googleHold !== null) {
+        googleHold.held = false;
+        googleHold = null;
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(googleAddressUrl)}) {
+      const { subject, email } = await request.json();
+      const account = googleAccounts.get(subject);
+      googleAccounts.set(subject, { ...account, domain: account?.domain ?? "acme.test", email });
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
+      // Added to the keys other test files published: files run at once,
+      // and each signs with keys of its own.
+      const { keys } = await request.json();
+      const kids = new Set(keys.map(({ kid }) => kid));
+      botFrameworkKeys = [...botFrameworkKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
+      botFramework.setKeys(botFrameworkKeys);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkSharedKeyUrl)}) {
+      if (botFrameworkSharedKey === null) {
+        const { key } = await request.json();
+        botFrameworkSharedKey = key;
+        const { kid, kty, n, e } = key;
+        botFrameworkKeys = [...botFrameworkKeys, { kid, kty, n, e, use: "sig", endorsements: ["msteams"] }];
+        botFramework.setKeys(botFrameworkKeys);
+      }
+      return Response.json({ key: botFrameworkSharedKey });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
+      const { status } = await request.json();
+      botFramework.override(
+        botFramework.keysPath,
+        status === null ? undefined : () => new Response("Unavailable", { status })
+      );
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(botFrameworkAskedUrl)}) {
+      return Response.json(botFramework.asked.map(({ path }) => path));
+    }
+    if (url.href === ${JSON.stringify(npmAskedUrl)}) {
+      return Response.json(npm.asked.map(({ path }) => path));
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(npmAdviseUrl)}) {
+      const { name, advisory } = await request.json();
+      npm.advise(name, advisory);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(npmPublishUrl)}) {
+      const published = await request.json();
+      await npm.publish(published);
+      return Response.json({
+        integrity: npm.integrityOf(published.name, published.version),
+      });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphControlUrl)}) {
+      const { mailbox, message } = await request.json();
+      graphEvents.receive(mailbox, message);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method !== "POST" || url.hostname !== "login.microsoftonline.com") {
+      return new Response("Not found", { status: 404 });
+    }
+    const form = new URLSearchParams(await request.text());
+    // The directory's app renewing its tokens, as Entra does: granted what
+    // \`{ granted }\` says (\`directoryControlUrl\`), in the tenant of the URL.
+    if (form.get("grant_type") === "refresh_token" && form.get("client_id") === ${JSON.stringify(directoryClient.id)}) {
+      if (form.get("client_secret") !== ${JSON.stringify(directoryClient.secret)}) {
+        return Response.json({ error: "invalid_client" }, { status: 401 });
+      }
+      const renewing = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+      const issuer = url.pathname.split("/")[1];
+      const renewed = {
+        iss: "https://login.microsoftonline.com/" + issuer + "/v2.0",
+        aud: ${JSON.stringify(directoryClient.id)},
+        tid: issuer,
+        oid: renewing,
+        preferred_username: renewing + "@acme.test",
+      };
+      return Response.json({
+        token_type: "Bearer",
+        access_token: "access." + renewing + "." + crypto.randomUUID(),
+        refresh_token: "refresh." + renewing,
+        expires_in: 3600,
+        id_token: [encoded({ alg: "RS256" }), encoded(renewed), "signature"].join("."),
+        scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
+      });
+    }
+    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
+    const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
+    const digest = base64Url(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
+    );
+    // The directory's or the documents' own app, or the one for every other connection.
+    const forDirectory = form.get("client_id") === ${JSON.stringify(directoryClient.id)};
+    const forDocuments = form.get("client_id") === ${JSON.stringify(documentsClient.id)};
+    const client = forDirectory
+      ? ${JSON.stringify(directoryClient)}
+      : forDocuments
+        ? ${JSON.stringify(documentsClient)}
+        : ${JSON.stringify(connectClient)};
+    if (form.get("client_secret") !== client.secret || digest !== challenge) {
+      return Response.json({ error: "invalid_grant" }, { status: 400 });
+    }
+    // An account whose sign-in name (its UPN) isn't the address it sends
+    // from, as a tenant's \`onmicrosoft\` UPNs are: \`alias-\` subjects.
+    const aliased = subject.startsWith("alias-");
+    const claims = {
+      iss: "https://login.microsoftonline.com/" + tenant + "/v2.0",
+      aud: client.id,
+      tid: tenant,
+      oid: subject,
+      preferred_username: subject + (aliased ? "@acme.onmicrosoft.test" : "@acme.test"),
+      ...(aliased ? { email: subject + "@acme.test" } : {}),
+    };
+    return Response.json({
+      token_type: "Bearer",
+      access_token: "access." + subject,
+      refresh_token: "refresh." + subject,
+      expires_in: 3600,
+      id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
+      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
+      ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
+      ...(granted === undefined ? {} : { scope: atob(granted) }),
+    });
+  },
+};
+`;

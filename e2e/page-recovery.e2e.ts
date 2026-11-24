@@ -1,0 +1,108 @@
+import { expect } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
+
+import { test } from "./csp.ts";
+import { peopleIn } from "./people.ts";
+
+// What a page does when the files it needs can't be fetched. After a new
+// release, the script files of a tab left open are gone: trying again
+// loads Grasp anew, on the new release. When not even the words can be
+// fetched, the start says so in English, with a way to try again.
+
+/** Whether the tab still runs the document it had: false once it loaded anew. */
+const sameDocument = async (page: Page): Promise<boolean> =>
+  await page.evaluate(() => document.documentElement.dataset.marked === "yes");
+
+/**
+ * How a file a release took away is answered: refused outright, or, as
+ * core answers any path it has no file for, with the app's index.html.
+ */
+const answers = {
+  refused: async (route: Route): Promise<void> => {
+    await route.abort();
+  },
+  "answered with index.html": async (route: Route): Promise<void> => {
+    const index = await route.fetch({
+      url: new URL("/", route.request().url()).href,
+    });
+    await route.fulfill({ response: index });
+  },
+};
+
+for (const [answer, gone] of Object.entries(answers)) {
+  test(`a page whose file is gone after a release, ${answer}, loads Grasp anew on Try again`, async ({
+    pageOf,
+  }) => {
+    const { member } = peopleIn("pageRecovery");
+    const page = await pageOf(member);
+    // What the app loads up front stays; a page's own file, fetched only
+    // when the page is opened, is gone, as after a new release.
+    const upFront = new Set<string>();
+    page.on("request", (request) => {
+      upFront.add(request.url());
+    });
+    await page.goto("/");
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+    page.removeAllListeners("request");
+    // The Brain's own file, its layout's: the router loads Grasp anew once
+    // for each file that fails, so one file is gone, as one page's would be.
+    const brainFiles = "**/assets/_shell.brain-*.js";
+    await page.route(brainFiles, async (route) => {
+      await (upFront.has(route.request().url())
+        ? route.continue()
+        : gone(route));
+    });
+
+    // The router loads Grasp anew once by itself; when the file is still
+    // missing after that, the page says why and how to go on. The first
+    // page can say so too, a moment before the router's reload replaces
+    // it, so the message counts only once that reload has loaded.
+    const reloaded = page.waitForEvent("load");
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Brain", exact: true })
+      .click();
+    await reloaded;
+    await expect(
+      page.getByText(
+        "Grasp was updated while this page was open. Try again to load the new version."
+      )
+    ).toBeVisible();
+    await page.evaluate(() => {
+      document.documentElement.dataset.marked = "yes";
+    });
+
+    // The new release's files are there: trying again loads Grasp anew.
+    await page.unroute(brainFiles);
+    await page.getByRole("button", { name: "Try again" }).click();
+    // A fresh load reads the brain before its navigation shows, as on any
+    // first open of it (brain.e2e.ts).
+    await expect(
+      page.getByRole("complementary", { name: "The brain" })
+    ).toBeVisible({ timeout: 15_000 });
+    expect(await sameDocument(page)).toBe(false);
+  });
+}
+
+test("a start without its words says so in English, and tries again", async ({
+  newContext,
+}) => {
+  const context = await newContext({ locale: "de-DE" });
+  const page = await context.newPage();
+  const words = "**/assets/messages-*.js";
+  await page.route(words, async (route) => {
+    await route.abort();
+  });
+  await page.goto("/sign-in");
+  await expect(
+    page.getByText("Grasp could not load. Check your connection and try again.")
+  ).toBeVisible();
+
+  await page.unroute(words);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(
+    page.getByText(
+      "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
+    )
+  ).toBeVisible();
+});

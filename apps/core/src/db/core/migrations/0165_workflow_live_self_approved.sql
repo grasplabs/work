@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_resource_lifecycles` ADD `live_self_approved` integer DEFAULT false NOT NULL;

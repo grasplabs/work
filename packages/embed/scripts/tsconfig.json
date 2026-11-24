@@ -1,0 +1,11 @@
+{
+  // The full-model check runs in Node, with the engine the Durable Object
+  // runs (../src/engine.ts); the package's Workers types stay out of it.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // WebAssembly, which Node has but its types don't declare.
+    "lib": ["es2024", "dom"],
+    "types": ["node"]
+  },
+  "include": ["*.ts"]
+}

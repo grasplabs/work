@@ -1,0 +1,820 @@
+import { signCapability } from "@grasp-os/shared/capability";
+import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
+import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { nativeConnector } from "../src/bundled-connectors.ts";
+import { connectionTokens } from "../src/db/schema.ts";
+import { rightsFor } from "../src/provider-rights.ts";
+import { providers as providerConfigs } from "../src/providers.ts";
+import { accessTokenFor } from "../src/tokens.ts";
+import { agentFor, callAs, chatOrigin, outcome } from "./connect.ts";
+import {
+  api,
+  connectionTo,
+  egressProps,
+  probe,
+  providers,
+  refused,
+  tools,
+} from "./connectors-harness.ts";
+import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
+import { nativeToolsOf } from "./native-tool-checks.ts";
+import { callTool as call, claimedAgo } from "./tool-calls.ts";
+
+// Native connectors run in isolates of their own, and reach their provider
+// only through connect's egress handler, which adds the connection's token.
+// The ways that could fail come first (threat model R1, R9, Q11, EG1 to
+// EG7): connector code reaching a host its manifest doesn't list, or a
+// method or path its action doesn't declare; reading the token, connect's
+// env or anything else of connect's; sending another connection's token;
+// following a redirect elsewhere; setting its own credentials; reading a
+// response too large to hold; keeping state from one call for the next.
+// The sample connector's `probe.*` tools make each attempt from inside the
+// isolate, as connector code gone wrong would.
+
+describe("a native connector", () => {
+  // The files the check of every tool's input is split over, by name (Vite
+  // lists them without loading them): a file deleted or renamed leaves
+  // tools unchecked, and this fails.
+  it("has every tool's input checked by the native-tools files, each tool once", () => {
+    const checked = Object.keys(
+      import.meta.glob("./native-tools-*-of-*.test.ts")
+    ).flatMap((file) =>
+      nativeToolsOf(file).map(
+        ({ connector, action }) => `${connector} ${action}`
+      )
+    );
+    expect(checked.toSorted()).toStrictEqual(
+      tools.map(({ connector, action }) => `${connector} ${action}`).toSorted()
+    );
+  });
+
+  it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
+    const connection = await connectionTo("sample");
+    const file = async () =>
+      await outcome(
+        call(
+          connection,
+          "items.file",
+          { mailbox: "invoices@acme.test", subject: "lost" },
+          { resource: "invoices@acme.test", idempotencyKey: "run-1:file" }
+        )
+      );
+    const lost = await file();
+    await claimedAgo(connection);
+    // Its recovery looks the effect up, and the lookup tries to write.
+    const recovered = await file();
+    expect({
+      lost,
+      recovered,
+      written: api.written,
+      writesSent: api.sent.filter(({ method }) => method === "POST").length,
+    }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      recovered: "connect.outcome_unknown",
+      // The first call's write; the lookup's never left.
+      written: 1,
+      writesSent: 1,
+    });
+  });
+
+  it("calls its provider through the egress handler, with the connection's token", async () => {
+    const connection = await connectionTo("sample");
+    const token = await accessTokenFor(env, connection.id);
+    const result = await call(connection, "items.list", {
+      mailbox: "invoices@acme.test",
+    });
+    expect(JSON.parse(result.output)).toStrictEqual({
+      items: [{ id: "invoices@acme.test/item-1", subject: "Invoice" }],
+    });
+    expect(result.provenance).toStrictEqual(["invoices@acme.test/item-1"]);
+    expect(api.sent).toMatchObject([
+      {
+        method: "GET",
+        host: sampleHost,
+        path: "/v1/mailboxes/invoices%40acme.test/items?top=10",
+        headers: { authorization: `Bearer ${token}` },
+      },
+    ]);
+  });
+
+  it("carries out a side effect once for its idempotency key", async () => {
+    const connection = await connectionTo("sample");
+    const send = async () =>
+      await call(
+        connection,
+        "items.send",
+        { mailbox: "invoices@acme.test", subject: "Paid" },
+        { idempotencyKey: "run-1:send" }
+      );
+    const first = await send();
+    await expect(send()).resolves.toStrictEqual(first);
+    expect(
+      api.sent.map(({ method, body }) => ({ method, body }))
+    ).toStrictEqual([{ method: "POST", body: '{"subject":"Paid"}' }]);
+  });
+
+  it("reads for a restricted context, and holds its side effects before any token is read", async () => {
+    const connection = await connectionTo("sample");
+    // Any read of this token now refreshes it at the provider.
+    await drizzle(env.DB)
+      .update(connectionTokens)
+      .set({ accessExpiresAt: new Date(Date.now() + 1000) })
+      .where(eq(connectionTokens.connectionId, connection.id));
+    const restricted = { restricted: true, origin: chatOrigin };
+    const agent = agentFor(connection.person.userId);
+    const mailbox = "invoices@acme.test";
+    const held = await Promise.all([
+      outcome(
+        callAs(
+          agent,
+          {
+            connectionId: connection.id,
+            action: "items.send",
+            input: { mailbox, subject: "Payroll" },
+            idempotencyKey: "run-1:send",
+          },
+          restricted
+        )
+      ),
+      outcome(
+        callAs(
+          agentFor(connection.person.userId, "agent-chat", "interactive"),
+          {
+            connectionId: connection.id,
+            action: "items.send",
+            input: { mailbox, subject: "Payroll" },
+            idempotencyKey: "chat-1:send",
+          },
+          restricted
+        )
+      ),
+    ]);
+    expect({
+      held,
+      refreshed: providers.tokenRequests("refresh_token"),
+      sent: api.sent,
+    }).toStrictEqual({
+      // A run's fails retryably; chat's comes back as held.
+      held: ["connect.held", "ok"],
+      refreshed: [],
+      sent: [],
+    });
+    // A read the connector declares still goes out.
+    const read = await callAs(
+      agent,
+      { connectionId: connection.id, action: "items.list", input: { mailbox } },
+      restricted
+    );
+    expect(JSON.parse(read.output)).toStrictEqual({
+      items: [{ id: `${mailbox}/item-1`, subject: "Invoice" }],
+    });
+  });
+
+  it("that says its provider rate limited it frees its key, so a retry writes once", async () => {
+    const connection = await connectionTo("sample");
+    const send = async () =>
+      await outcome(
+        call(
+          connection,
+          "items.send",
+          { mailbox: "invoices@acme.test", subject: "Paid" },
+          { idempotencyKey: "run-1:send" }
+        )
+      );
+    api.rateLimited = 1;
+    const outcomes = [await send(), await send(), await send()];
+    expect({ outcomes, written: api.written }).toStrictEqual({
+      // Retryable, then carried out, then the stored answer.
+      outcomes: ["connect.server_unavailable", "ok", "ok"],
+      written: 1,
+    });
+  });
+
+  it("that says a read failed for a passing cause lets it be retried", async () => {
+    const connection = await connectionTo("sample");
+    const list = async () =>
+      await outcome(
+        call(connection, "items.list", { mailbox: "invoices@acme.test" })
+      );
+    api.failingReads = 1;
+    const outcomes = [await list(), await list()];
+    expect(outcomes).toStrictEqual(["connect.server_unavailable", "ok"]);
+  });
+
+  it("answers a held call's outcome, read later, only to a capability for that call's resource", async () => {
+    const connection = await connectionTo("sample");
+    const chat = agentFor(
+      connection.person.userId,
+      "agent-chat",
+      "interactive"
+    );
+    const stated = {
+      connectionId: connection.id,
+      action: "items.send",
+      resource: "invoices@acme.test",
+    };
+    const { pending } = await callAs(
+      chat,
+      { ...stated, input: { mailbox: "invoices@acme.test", subject: "Paid" } },
+      { origin: chatOrigin }
+    );
+    const [held] = await exports.default.listPendingActions(
+      connection.person,
+      "grasp"
+    );
+    if (held === undefined || held.id !== pending?.id) {
+      throw new Error("Expected the held action");
+    }
+    const keyed = { ...stated, idempotencyKey: held.idempotencyKey };
+    await exports.default.confirmAction({
+      person: connection.person,
+      id: held.id,
+      inputHash: held.inputHash,
+      capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
+        ...keyed,
+        origin: chatOrigin,
+        decision: { kind: "confirm", pendingActionId: held.id },
+      }),
+    });
+    const ended = await exports.default.heldOutcome({
+      ...keyed,
+      capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
+        ...keyed,
+        origin: chatOrigin,
+      }),
+    });
+    expect(
+      ended.state === "done" ? JSON.parse(ended.result.output) : ended
+    ).toMatchObject({ subject: "Paid" });
+    // And a capability for the whole connection isn't one for this call.
+    const whole = { ...keyed, resource: undefined };
+    await expect(
+      outcome(
+        exports.default.heldOutcome({
+          ...whole,
+          capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
+            ...whole,
+            origin: chatOrigin,
+          }),
+        })
+      )
+    ).resolves.toBe("connect.pending_not_found");
+    expect(api.sent.map(({ method }) => method)).toStrictEqual(["POST"]);
+  });
+
+  it("is held to the resource its capability names", async () => {
+    const connection = await connectionTo("sample");
+    await expect(
+      call(
+        connection,
+        "items.list",
+        { mailbox: "invoices@acme.test" },
+        { resource: "invoices@acme.test" }
+      )
+    ).resolves.toMatchObject({ provenance: ["invoices@acme.test/item-1"] });
+    await expect(
+      outcome(
+        call(
+          connection,
+          "items.list",
+          { mailbox: "ceo@acme.test" },
+          { resource: "invoices@acme.test" }
+        )
+      )
+    ).resolves.toBe("connect.resource_out_of_scope");
+    expect(api.sent).toHaveLength(1);
+  });
+
+  it("loads in a few seconds at most, even on a slow machine", async () => {
+    const connection = await connectionTo("sample");
+    const started = Date.now();
+    await call(connection, "items.list", { mailbox: "invoices@acme.test" });
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("reads no token for a call it refuses or holds", async () => {
+    const connection = await connectionTo("sample");
+    const google = await connectionTo("sample", "google");
+    // Any read of these tokens now refreshes them at the provider.
+    await drizzle(env.DB)
+      .update(connectionTokens)
+      .set({ accessExpiresAt: new Date(Date.now() + 1000) });
+    const chat = agentFor(
+      connection.person.userId,
+      "agent-chat",
+      "interactive"
+    );
+    const refusals = await Promise.all([
+      outcome(
+        call(
+          connection,
+          "items.list",
+          { mailbox: "ceo@acme.test" },
+          { resource: "invoices@acme.test" }
+        )
+      ),
+      // Held for the person to confirm: nothing is sent yet.
+      outcome(
+        callAs(
+          chat,
+          {
+            connectionId: connection.id,
+            action: "items.send",
+            input: { mailbox: "invoices@acme.test", subject: "Paid" },
+            idempotencyKey: "chat-2:send",
+          },
+          { origin: chatOrigin }
+        )
+      ),
+      outcome(
+        call(connection, "items.send", {
+          mailbox: "invoices@acme.test",
+          subject: "Paid",
+        })
+      ),
+      outcome(call(connection, "items.delete", { mailbox: "a@acme.test" })),
+      outcome(call(google, "items.list", { mailbox: "a@acme.test" })),
+    ]);
+    expect(refusals).toStrictEqual([
+      "connect.resource_out_of_scope",
+      "ok",
+      "connect.idempotency_key_required",
+      "connect.never",
+      "connect.server_unavailable",
+    ]);
+    expect(providers.tokenRequests("refresh_token")).toStrictEqual([]);
+    // A call that passes reads (and so refreshes) the token.
+    await call(connection, "items.list", { mailbox: "invoices@acme.test" });
+    expect(providers.tokenRequests("refresh_token")).toHaveLength(1);
+  });
+
+  it("isn't loaded for a connector this release doesn't have", async () => {
+    const connection = await connectionTo("no-such-connector");
+    await expect(
+      outcome(call(connection, "items.list", { mailbox: "a@acme.test" }))
+    ).resolves.toBe("connect.server_unavailable");
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("never gets another provider's token", async () => {
+    // The sample connector is Microsoft's; this connection holds Google's.
+    const connection = await connectionTo("sample", "google");
+    await expect(
+      outcome(call(connection, "items.list", { mailbox: "a@acme.test" }))
+    ).resolves.toBe("connect.server_unavailable");
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("isn't loaded when a tool of its manifest doesn't say whom it reaches", async () => {
+    // A copy of the sample connector, but its items.list has no reach
+    // (test/global-setup.ts): none of its tools runs, that one or another.
+    const connection = await connectionTo("sample-unreached");
+    const outcomes = await Promise.all([
+      outcome(call(connection, "items.list", { mailbox: "a@acme.test" })),
+      outcome(
+        call(
+          connection,
+          "items.send",
+          { mailbox: "a@acme.test", subject: "Paid" },
+          { idempotencyKey: "run-1:send" }
+        )
+      ),
+    ]);
+    expect(outcomes).toStrictEqual([
+      "connect.server_unavailable",
+      "connect.server_unavailable",
+    ]);
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("isn't loaded for an action it doesn't declare", async () => {
+    const connection = await connectionTo("sample");
+    await expect(
+      outcome(call(connection, "Items.List", { mailbox: "a@acme.test" }))
+    ).resolves.toBe("connect.action_not_found");
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("is what each provider's connections run, with the scopes connect asks for when every class is on and a shared mailbox pointed at", () => {
+    for (const config of Object.values(providerConfigs)) {
+      const connector = nativeConnector(config.server);
+      expect(connector?.manifest.provider).toBe(config.id);
+      expect(
+        rightsFor(config.id, companyToolClasses, true) ?? config.scopes
+      ).toStrictEqual(
+        expect.arrayContaining([...(connector?.manifest.scopes ?? [])])
+      );
+    }
+  });
+
+  // Each tool's class, from whom its manifest says it reaches, is the
+  // table core reads (apps/core/src/native-tool-classes.gen.ts, made from
+  // these manifests and reviewed as it changes); core refuses a call of a
+  // class that is off for its person (tool-classes.ts).
+  it("of each suite asks its provider for rights of its own once a tool's class is on", () => {
+    const suiteTools = Object.values(providerConfigs).flatMap((config) =>
+      Object.entries(
+        nativeConnector(config.server)?.manifest.actions ?? {}
+      ).map(([action, declared]) => ({ config, action, declared }))
+    );
+    const withoutRights = suiteTools.flatMap(({ config, action, declared }) => {
+      const signIn = new Set(rightsFor(config.id, []));
+      const toolClass = toolClassOf(declared);
+      const asked = rightsFor(config.id, [toolClass]) ?? [];
+      return asked.some((right) => !signIn.has(right))
+        ? []
+        : [`${config.server} ${action} (${toolClass})`];
+    });
+    expect({ checked: suiteTools.length > 0, withoutRights }).toStrictEqual({
+      checked: true,
+      withoutRights: [],
+    });
+  });
+});
+
+const tokenFor = (mailbox: string) =>
+  api.sent
+    .filter(({ path }) => path.includes(encodeURIComponent(mailbox)))
+    .map(({ headers }) => headers.authorization);
+
+// Each call loads the connector into a fresh isolate, so a test's cost
+// grows with its calls: on a loaded CI runner a call took up to ten times
+// as long as locally, and the method and path test, with its 25 calls made
+// one after another, timed out at Vitest's default five seconds. Attempts
+// that don't depend on each other now go out together, so no test makes
+// more than four calls in a row. Nothing here polls or sleeps: the only
+// wait is connect's 30-second deadline on each call (`callTimeoutMs`),
+// which ends a call that hangs, and a hung call fails its test anyway.
+// Sixty seconds is room for a slow runner, not for a hang, as the core
+// tests that release Apps give theirs.
+describe("a connector's code", { timeout: 60_000 }, () => {
+  it("reaches no host its manifest doesn't list", async () => {
+    const connection = await connectionTo("sample");
+    const urls = [
+      "https://evil.test/v1/probe/ok",
+      `https://${sampleHost}.evil.test/v1/probe/ok`,
+      "https://sample.test/v1/probe/ok",
+      `http://${sampleHost}/v1/probe/ok`,
+      `https://${sampleHost}:8443/v1/probe/ok`,
+      "https://169.254.169.254/v1/probe/ok",
+      "https://127.0.0.1/v1/probe/ok",
+      "https://[::1]/v1/probe/ok",
+    ];
+    const attempts = await Promise.all(
+      urls.map(async (url) => await probe(connection, { url }))
+    );
+    expect(attempts).toMatchObject(urls.map(() => refused));
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("sends only the method and path its action declares", async () => {
+    const connection = await connectionTo("sample");
+    const attempts = [
+      { url: `https://${sampleHost}/v1/probe/ok`, method: "PUT" },
+      { url: `https://${sampleHost}/v1/probe/ok`, method: "DELETE" },
+      // Another action's route.
+      {
+        url: `https://${sampleHost}/v1/mailboxes/ceo%40acme.test/items`,
+        method: "POST",
+      },
+      { url: `https://${sampleHost}/v1/probe/ok/more` },
+      { url: `https://${sampleHost}/v1/probe/` },
+      { url: `https://${sampleHost}/V1/probe/ok` },
+      // Parameters that decode to more than one plain segment.
+      ...[
+        "..%2Fmailboxes",
+        "%2e%2e/mailboxes",
+        "..%5Cadmin",
+        "%252e%252e%252f",
+        "a%00b",
+        "a%0D%0Ab",
+        "..;",
+        "a;x=y",
+        "a%3Fb",
+        "a%23b",
+        "a%3Ab",
+        "ok:poke",
+        "batch",
+        "%24BATCH",
+      ].map((segment) => ({
+        url: `https://${sampleHost}/v1/probe/${segment}`,
+      })),
+      // A literal suffix is the declared one, as declared.
+      { url: `https://${sampleHost}/v1/probe/item-1:poke` },
+      { url: `https://${sampleHost}/v1/probe/item-1%3Apeek` },
+      { url: `https://${sampleHost}/v1/probe/:peek` },
+    ];
+    // What it declares goes out, with its query, alongside the attempts.
+    const declared = [
+      { url: `https://${sampleHost}/v1/probe/ok?page=2` },
+      { url: `https://${sampleHost}/v1/probe/item-1:peek` },
+    ];
+    const [refusals, sent] = await Promise.all([
+      Promise.all(
+        attempts.map(async (attempt) => await probe(connection, attempt))
+      ),
+      Promise.all(
+        declared.map(async (attempt) => await probe(connection, attempt))
+      ),
+    ]);
+    expect(refusals).toMatchObject(attempts.map(() => refused));
+    expect(sent[0]).toStrictEqual({ status: 200, bytes: 2, error: null });
+    // Only those two went out.
+    expect(api.sent.map(({ path }) => path).toSorted()).toStrictEqual(
+      ["/v1/probe/ok?page=2", "/v1/probe/item-1:peek"].toSorted()
+    );
+  });
+
+  it("reaches only the resource its capability names", async () => {
+    const connection = await connectionTo("sample");
+    const scoped = async (mailbox: string) =>
+      await probe(
+        connection,
+        {
+          mailbox: "invoices@acme.test",
+          url: `https://${sampleHost}/v1/mailboxes/${mailbox}/items`,
+        },
+        { resource: "invoices@acme.test" }
+      );
+    await expect(scoped("ceo%40acme.test")).resolves.toMatchObject(refused);
+    expect(api.sent).toStrictEqual([]);
+    await expect(scoped("invoices%40acme.test")).resolves.toMatchObject({
+      status: 200,
+    });
+    expect(api.sent).toHaveLength(1);
+  });
+
+  it("can't override the method its action declares", async () => {
+    const connection = await connectionTo("sample");
+    await probe(connection, {
+      url: `https://${sampleHost}/v1/probe/ok`,
+      method: "POST",
+      headers: [
+        ["x-http-method-override", "DELETE"],
+        ["x-http-method", "DELETE"],
+        ["x-method-override", "DELETE"],
+        ["te", "trailers"],
+      ],
+    });
+    expect(api.sent).toHaveLength(1);
+    for (const name of [
+      "x-http-method-override",
+      "x-http-method",
+      "x-method-override",
+      "te",
+    ]) {
+      expect(api.sent[0]?.headers).not.toHaveProperty(name);
+    }
+  });
+
+  it("opens no raw socket", async () => {
+    const warned: string[] = [];
+    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warned.push(JSON.stringify(args));
+    });
+    const connection = await connectionTo("sample");
+    const { output } = await call(connection, "probe.socket", {});
+    // `opened` may resolve first; the first write or read fails.
+    const { error } = z
+      .object({ error: z.string().nullable() })
+      .parse(JSON.parse(output));
+    expect(error).not.toBeNull();
+    expect(warned.join("\n")).toMatch(/egress\.refused.*socket/u);
+  });
+
+  it("keeps nothing in the Cache API", async () => {
+    const connection = await connectionTo("sample");
+    const { output } = await call(connection, "probe.cache", {});
+    expect(JSON.parse(output)).toMatchObject({ kept: false });
+  });
+
+  it("can't read the token, connect's env or anything else of connect's", async () => {
+    const connection = await connectionTo("sample");
+    const token = await accessTokenFor(env, connection.id);
+    const { output } = await call(connection, "probe.escape", {});
+    expect(JSON.parse(output)).toMatchObject({ env: [] });
+    expect(output).not.toContain(token);
+    expect(output).not.toContain("ConnectorEgress");
+    expect(output).not.toContain("CAPABILITY_SIGNING_KEY");
+    expect(output).not.toContain("TOKEN_ENCRYPTION_KEY");
+  });
+
+  it("can't set credentials or headers of its own in place of connect's", async () => {
+    const connection = await connectionTo("sample");
+    const token = await accessTokenFor(env, connection.id);
+    await probe(connection, {
+      url: `https://${sampleHost}/v1/probe/ok`,
+      headers: [
+        ["authorization", "Bearer the-connectors-own"],
+        ["proxy-authorization", "Basic c2VjcmV0"],
+        ["cookie", "session=stolen"],
+      ],
+    });
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]?.headers.authorization).toBe(`Bearer ${token}`);
+    expect(api.sent[0]?.headers).not.toHaveProperty("cookie");
+    expect(api.sent[0]?.headers).not.toHaveProperty("proxy-authorization");
+  });
+
+  it("can't smuggle a header into another", async () => {
+    const connection = await connectionTo("sample");
+    const attempt = await probe(connection, {
+      url: `https://${sampleHost}/v1/probe/ok`,
+      headers: [["x-note", "a\r\nauthorization: Bearer the-connectors-own"]],
+    });
+    expect(attempt.status).toBeNull();
+    expect(attempt.error).not.toBeNull();
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("sends each call's own connection's token, never another's", async () => {
+    const [anna, ben] = await Promise.all([
+      connectionTo("sample"),
+      connectionTo("sample"),
+    ]);
+    const tokens = await Promise.all(
+      [anna, ben].map(async ({ id }) => await accessTokenFor(env, id))
+    );
+    expect(tokens[0]).not.toBe(tokens[1]);
+    await Promise.all([
+      call(anna, "items.list", { mailbox: "anna@acme.test" }),
+      call(ben, "items.list", { mailbox: "ben@acme.test" }),
+      call(anna, "items.list", { mailbox: "anna@acme.test" }),
+      call(ben, "items.list", { mailbox: "ben@acme.test" }),
+    ]);
+    expect(tokenFor("anna@acme.test")).toStrictEqual([
+      `Bearer ${tokens[0]}`,
+      `Bearer ${tokens[0]}`,
+    ]);
+    expect(tokenFor("ben@acme.test")).toStrictEqual([
+      `Bearer ${tokens[1]}`,
+      `Bearer ${tokens[1]}`,
+    ]);
+  });
+
+  it("follows no redirect, to another host or its own", async () => {
+    const connection = await connectionTo("sample");
+    for (const path of ["redirect", "redirect-here"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+      await expect(
+        probe(connection, { url: `https://${sampleHost}/v1/probe/${path}` })
+      ).resolves.toMatchObject({ status: 502 });
+    }
+    expect(api.sent.map(({ host }) => host)).toStrictEqual([
+      sampleHost,
+      sampleHost,
+    ]);
+  });
+
+  it("follows a download's redirect to its route's storage hosts, once, with nothing of its request", async () => {
+    const connection = await connectionTo("sample");
+    const download = async (name: string): Promise<unknown> => {
+      const { output } = await call(connection, "probe.download", {
+        url: `https://${sampleHost}/v1/downloads/${name}`,
+        headers: [
+          ["x-note", "invoice-4200"],
+          ["authorization", "Bearer the-connectors-own"],
+          ["cookie", "session=stolen"],
+          ["range", "bytes=0-10"],
+        ],
+      });
+      const attempt: unknown = JSON.parse(output);
+      return attempt;
+    };
+    await expect(download("file")).resolves.toStrictEqual({
+      status: 200,
+      bytes: 4,
+      error: null,
+    });
+    // Any of the route's storage hosts.
+    await expect(download("others")).resolves.toMatchObject({ status: 200 });
+    // Another host, a storage host on another port or with credentials in
+    // its URL, and a second redirect: each withheld.
+    const withheld = await Promise.all(
+      ["elsewhere", "port", "userinfo", "again"].map(download)
+    );
+    expect(withheld).toMatchObject([
+      { status: 502 },
+      { status: 502 },
+      { status: 502 },
+      { status: 502 },
+    ]);
+    const followed = api.sent.filter(({ host }) => host !== sampleHost);
+    expect(
+      followed.map(({ host, path }) => `${host}${path}`).toSorted()
+    ).toStrictEqual(
+      [
+        `${storageHost}/file`,
+        "others.storage.test/file",
+        `${storageHost}/again`,
+      ].toSorted()
+    );
+    // Neither the token nor any header of the connector's went there.
+    expect(followed.map(({ headers }) => Object.keys(headers))).toStrictEqual([
+      [],
+      [],
+      [],
+    ]);
+  });
+
+  it("can't read a download past the size limit, after its redirect", async () => {
+    const connection = await connectionTo("sample");
+    const { output } = await call(connection, "probe.download", {
+      url: `https://${sampleHost}/v1/downloads/flood`,
+    });
+    expect(JSON.parse(output)).toMatchObject({ status: null, bytes: 0 });
+    expect(JSON.parse(output)).not.toMatchObject({ error: null });
+  });
+
+  it("can't read a response past the size limit", async () => {
+    const connection = await connectionTo("sample");
+    // Counted on the bytes that arrive, whether or not their length is
+    // declared up front.
+    for (const path of ["flood", "flood-declared"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+      const flooded = await probe(connection, {
+        url: `https://${sampleHost}/v1/probe/${path}`,
+      });
+      expect(flooded).toMatchObject({ status: null, bytes: 0 });
+      expect(flooded.error).not.toBeNull();
+    }
+    // A response with no body passes, whatever length it claims.
+    await expect(
+      probe(connection, { url: `https://${sampleHost}/v1/probe/empty` })
+    ).resolves.toMatchObject({ status: 204, bytes: 0 });
+  });
+
+  it("keeps nothing from one call for the next", async () => {
+    const connection = await connectionTo("sample");
+    const remember = async (value: string): Promise<unknown> => {
+      const { output } = await call(connection, "probe.remember", { value });
+      const remembered: unknown = JSON.parse(output);
+      return remembered;
+    };
+    await expect(remember("anna's data")).resolves.toStrictEqual({
+      previous: null,
+    });
+    await expect(remember("ben's data")).resolves.toStrictEqual({
+      previous: null,
+    });
+  });
+
+  it("gets its requests logged by host, method and declared path, never the token", async () => {
+    const logged: string[] = [];
+    for (const level of ["info", "warn", "error"] as const) {
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        logged.push(JSON.stringify(args));
+      });
+    }
+    const connection = await connectionTo("sample");
+    const token = await accessTokenFor(env, connection.id);
+    await call(connection, "items.list", { mailbox: "invoices@acme.test" });
+    // Data spelled into a host or method it made up stays out of the logs.
+    await probe(connection, {
+      url: "https://invoice-total-4200.evil.test/v1/probe/ok",
+    });
+    await probe(connection, {
+      url: `https://${sampleHost}/v1/probe/ok`,
+      method: "INVOICE-4200",
+    });
+    await call(connection, "probe.socket", {});
+    const lines = logged.join("\n");
+    expect(lines).toMatch(
+      /egress\.request.*callId.*api\.sample\.test.*\/v1\/mailboxes\/\{mailbox\}\/items/u
+    );
+    expect(lines).toMatch(/egress\.refused.*callId.*socket/u);
+    expect(lines).not.toContain(token);
+    expect(lines).not.toContain("invoice");
+  });
+});
+
+describe("the egress handler", () => {
+  const url = `https://${sampleHost}/v1/probe/ok`;
+
+  it("sends nothing for a caller without a whole call's props", async () => {
+    // As another Worker naming this entrypoint gets it: no call behind it.
+    for (const props of [
+      egressProps({ credential: { header: "authorization", value: "" } }),
+      egressProps({ hosts: [] }),
+      egressProps({ expiresAt: Number.NaN }),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+      const response = await exports.ConnectorEgress({ props }).fetch(url);
+      expect(response.status).toBe(403);
+    }
+    expect(api.sent).toStrictEqual([]);
+  });
+
+  it("closes when the call's time is up", async () => {
+    const egress = exports.ConnectorEgress({
+      props: egressProps({ expiresAt: Date.now() - 1 }),
+    });
+    await expect(egress.fetch(url)).resolves.toMatchObject({ status: 403 });
+    expect(api.sent).toStrictEqual([]);
+  });
+});

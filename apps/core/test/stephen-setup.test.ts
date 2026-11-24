@@ -1,0 +1,336 @@
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { KickoffReading } from "@grasp-os/shared/kickoff";
+import type { RosterInput } from "@grasp-os/shared/onboarding";
+import { stephenTermMaxLength } from "@grasp-os/shared/onboarding-staff";
+import type { StephenSetup } from "@grasp-os/shared/onboarding-staff";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
+import { adminKickoff } from "./admin-kickoff.ts";
+import { mockIdp } from "./idp.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
+
+// What only Grasp's staff set in the onboarding (GRA-320): how Stephen is
+// set up for this deployment, which every interview turn's context holds
+// with what the kickoff brought; and the agreements, each with its day,
+// whose last one in sends the links that wait. The ways it can fail,
+// tried here:
+//
+// - Stephen asking about what staff told him to leave alone, because the
+//   kickoff's older word on it is still in his context.
+// - Anyone but Grasp's admin changing the agreements or his setup: both
+//   are commands from the admin alone (admin-command.test.ts).
+// - A setup that isn't one: no language, one he doesn't speak, a line
+//   past its length.
+// - The words staff gave him in the audit log, which the company reads.
+// - Links waiting on the store's next alarm, up to an hour, once the
+//   agreements are in.
+
+const idp = mockIdp();
+
+/** What the kickoff brought: what to leave alone, the languages, a team. */
+const reading: KickoffReading = {
+  fields: {
+    limits: {
+      text: "De salarisadministratie blijft buiten beeld.",
+      quote: "Aan de salarisadministratie mag niemand komen",
+    },
+    languages: {
+      text: "Nederlands, en Engels voor IT.",
+      quote: "Nederlands, en Engels voor IT",
+    },
+    pain: {
+      text: "Klantgegevens overtypen tussen het CRM en de bankportalen.",
+      quote: "Het overtypen van klantgegevens",
+    },
+  },
+  ask: {},
+  teams: [{ name: "Hypotheekadvies", does: "Advies" }],
+};
+
+const kickoffIn = async (): Promise<void> => {
+  await onboardingStore(env).saveKickoff(
+    { transcript: "Het gesprek.", fileName: null, reading },
+    { type: "system" },
+    await onboardingStore(env).purgeMark()
+  );
+};
+
+/** Staff's own setup: only Dutch, the board's plans left alone, two words. */
+const staffs: StephenSetup = {
+  languages: ["nl"],
+  limits: ["De plannen van de directie"],
+  terms: ["Hypotheekadvies", "Zebulon CRM"],
+};
+
+describe("how Stephen is set up", () => {
+  it("is what the kickoff suggests until staff set it, and every turn's context holds it with what the kickoff brought", async () => {
+    await kickoffIn();
+    const suggested = await onboardingStore(env).stephen();
+    const before = await onboardingStore(env).interviewBrief();
+    expect({
+      setup: suggested.setup,
+      changed: suggested.changed,
+      kickoff: suggested.kickoff,
+      leavesAlone: before.includes(
+        "- De salarisadministratie blijft buiten beeld."
+      ),
+      languages: before.includes(
+        "## The languages you interview in\nEnglish, Dutch, German, French, Spanish"
+      ),
+      kickoffLanguages: before.includes("Nederlands, en Engels voor IT."),
+      pain: before.includes("Klantgegevens overtypen"),
+    }).toStrictEqual({
+      setup: {
+        languages: ["en", "nl", "de", "fr", "es"],
+        limits: ["De salarisadministratie blijft buiten beeld."],
+        terms: ["Hypotheekadvies"],
+      },
+      changed: false,
+      kickoff: {
+        languages: "Nederlands, en Engels voor IT.",
+        systems: null,
+      },
+      leavesAlone: true,
+      languages: true,
+      kickoffLanguages: true,
+      pain: true,
+    });
+  });
+
+  it("holds staff's setup from the next turn on, in place of the kickoff's word on languages and what to leave alone, and goes back to it", async () => {
+    await kickoffIn();
+    const store = onboardingStore(env);
+    await adminCommands().saveStephen(staffs);
+    const saved = await store.stephen();
+    const brief = await store.interviewBrief();
+    await adminCommands().saveStephen(null);
+    const reset = await store.stephen();
+    const after = await onboardingStore(env).interviewBrief();
+    expect({
+      setup: saved.setup,
+      changed: saved.changed,
+      languages: brief.includes("## The languages you interview in\nDutch\n"),
+      leavesAlone: brief.includes("- De plannen van de directie"),
+      words: brief.includes("Hypotheekadvies, Zebulon CRM"),
+      // The kickoff's own word on them would contradict staff's.
+      kickoffLimits: brief.includes("salarisadministratie"),
+      kickoffLanguages: brief.includes("Engels voor IT"),
+      // The rest of what it brought stays.
+      pain: brief.includes("Klantgegevens overtypen"),
+      reset: { changed: reset.changed, setup: reset.setup.languages.length },
+      backToKickoff: after.includes("salarisadministratie"),
+    }).toStrictEqual({
+      setup: staffs,
+      changed: true,
+      languages: true,
+      leavesAlone: true,
+      words: true,
+      kickoffLimits: false,
+      kickoffLanguages: false,
+      pain: true,
+      reset: { changed: false, setup: 5 },
+      backToKickoff: true,
+    });
+  });
+
+  it("keeps a long limit from the sponsor whole when staff change only a language", async () => {
+    await kickoffIn();
+    const store = onboardingStore(env);
+    const long = `Niets over de reorganisatie van de afdeling ${"Financiën, ".repeat(150)}einde.`;
+    await adminKickoff().answerKickoff("limits", long);
+    const { setup } = await store.stephen();
+    await adminCommands().saveStephen({ ...setup, languages: ["nl"] });
+    const saved = await store.stephen();
+    const brief = await onboardingStore(env).interviewBrief();
+    expect({
+      long: long.length > 1000,
+      kept: saved.setup.limits.includes(long),
+      inBrief: brief.includes(`- ${long}`),
+    }).toStrictEqual({ long: true, kept: true, inBrief: true });
+  });
+
+  it("holds before any kickoff is in", async () => {
+    await adminCommands().saveStephen(staffs);
+    const brief = await onboardingStore(env).interviewBrief();
+    expect(brief).toContain("Zebulon CRM");
+  });
+
+  it("is on record as staff's, without the words they gave him", async () => {
+    const events = await auditedDuring(async () => {
+      await adminCommands().saveStephen(staffs);
+      await adminCommands().saveStephen(null);
+    });
+    expect({
+      actions: events.map(({ action, actor }) => [action, actor.type]),
+      detail: events.find(({ action }) => action === "onboarding.stephen.set")
+        ?.detail,
+      words: JSON.stringify(events).includes("Zebulon"),
+    }).toStrictEqual({
+      actions: [
+        ["admin.command", "staff"],
+        ["onboarding.stephen.set", "staff"],
+        ["admin.command", "staff"],
+        ["onboarding.stephen.reset", "staff"],
+      ],
+      detail: { languages: "nl", limits: 1, terms: 2 },
+      words: false,
+    });
+  });
+
+  it("refuses what isn't a setup", async () => {
+    const tries: unknown[] = [
+      { ...staffs, languages: [] },
+      { ...staffs, languages: ["pt"] },
+      { ...staffs, languages: ["nl", "nl"] },
+      { ...staffs, terms: ["x".repeat(stephenTermMaxLength + 1)] },
+      { ...staffs, limits: [" "] },
+      { ...staffs, extra: true },
+    ];
+    const refused = await Promise.all(
+      tries.map(
+        async (setup) =>
+          await outcome(
+            // SAFETY: what a client could send, whatever its types say.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            adminCommands().saveStephen(setup as StephenSetup)
+          )
+      )
+    );
+    // A command the admin couldn't have made is refused whole.
+    expect(new Set(refused)).toStrictEqual(new Set(["request.forbidden"]));
+  });
+});
+
+/** One team, led by Lea, and Sam in it; and Ona in a team without a lead. */
+const roster: RosterInput = {
+  teams: [
+    { id: "sales", name: "Sales", lead: "lea" },
+    { id: "ops", name: "Ops", lead: null },
+  ],
+  people: [
+    { id: "lea", name: "Lea", team: "sales" },
+    { id: "sam", name: "Sam", team: "sales" },
+    { id: "ona", name: "Ona", team: "ops" },
+  ],
+};
+
+/** All three agreements in, each with its day. */
+const agreed = {
+  processing: true,
+  processingOn: "2026-10-01",
+  assessment: true,
+  assessmentOn: "2026-10-02",
+  council: "none" as const,
+  councilOn: "2026-10-03",
+};
+
+/** Whose links are out, as the admin reads them. */
+const linksOut = (snapshot: AdminSnapshot): string[] =>
+  snapshot.links
+    .filter(({ sentAt }) => sentAt !== null)
+    .map(({ person }) => person)
+    .toSorted();
+
+describe("the agreements, as staff put them in place from the admin", () => {
+  it("keep each one's day, and once the last is in the links that wait go out at once; the team is told then", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const commands = adminCommands();
+    await api.onboarding.saveRoster(roster);
+    await api.onboarding.savePlan({
+      start: new Date().toISOString().slice(0, 10),
+    });
+    await commands.setAgreements({
+      processing: true,
+      processingOn: "2026-10-01",
+      assessment: true,
+      assessmentOn: "2026-10-02",
+      council: "waiting",
+    });
+    const waiting = await adminSnapshot();
+    await commands.setAgreements(agreed);
+    const out = await adminSnapshot();
+    expect({
+      waiting: {
+        agreements: waiting.agreements,
+        agreed: waiting.agreed,
+        told: waiting.told,
+        out: linksOut(waiting),
+      },
+      out: {
+        agreements: out.agreements,
+        agreed: out.agreed,
+        told: out.told,
+        out: linksOut(out),
+      },
+    }).toStrictEqual({
+      waiting: {
+        agreements: {
+          processing: true,
+          processingOn: "2026-10-01",
+          assessment: true,
+          assessmentOn: "2026-10-02",
+          council: "waiting",
+        },
+        agreed: false,
+        told: false,
+        out: [],
+      },
+      out: {
+        agreements: agreed,
+        agreed: true,
+        told: true,
+        // The lead's and Ona's; Sam's waits for Lea.
+        out: ["lea", "ona"],
+      },
+    });
+  });
+
+  it("stay as they were once the team is told, even when everyone with a link leaves the roster, though saving them again unchanged still applies", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const commands = adminCommands();
+    await api.onboarding.saveRoster(roster);
+    await api.onboarding.savePlan({
+      start: new Date().toISOString().slice(0, 10),
+    });
+    await commands.setAgreements(agreed);
+    await api.onboarding.saveRoster({
+      teams: [{ id: "new", name: "New", lead: null }],
+      people: [{ id: "neo", name: "Neo", team: "new" }],
+    });
+    const left = await adminSnapshot();
+    const changed = await outcome(
+      commands.setAgreements({ ...agreed, council: "waiting" })
+    );
+    const again = await outcome(commands.setAgreements(agreed));
+    const { agreements } = await adminSnapshot();
+    expect({
+      told: left.told,
+      out: linksOut(left),
+      changed,
+      again,
+      agreements,
+    }).toStrictEqual({
+      told: true,
+      out: [],
+      changed: "onboarding.agreements_kept",
+      again: "ok",
+      agreements: agreed,
+    });
+  });
+
+  it("refuse a day that isn't one", async () => {
+    await expect(
+      outcome(
+        adminCommands().setAgreements({
+          processing: true,
+          processingOn: "1 October",
+          assessment: false,
+          council: "waiting",
+        })
+      )
+    ).resolves.toBe("request.forbidden");
+  });
+});

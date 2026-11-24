@@ -1,0 +1,58 @@
+import { errorFields, log } from "@grasp-os/shared/log";
+
+import { clock } from "./clock.ts";
+import { handleRequest } from "./entry.ts";
+import { receiveEmail } from "./workflows/inbound-email.ts";
+
+export { App } from "./app.ts";
+export { AppPreview } from "./app-preview.ts";
+export { DraftWatch } from "./draft-watch.ts";
+export { Clock } from "./clock.ts";
+export { AuditLog } from "./audit-log.ts";
+export { ChatApi } from "./agent-apis.ts";
+export { AppsApi } from "./agent-apps.ts";
+export { BuildApi } from "./agent-builds.ts";
+export { ConnectionsApi } from "./agent-connections.ts";
+export { BrainAgentApi } from "./agent-brain.ts";
+export { SkillsApi } from "./agent-skills.ts";
+export { WorkflowBuildApi } from "./agent-workflow-build.ts";
+export { WorkflowsApi } from "./agent-workflows.ts";
+export { Builtins } from "./builtins.ts";
+export { Onboarding } from "./onboarding/object.ts";
+export { DataStore } from "./data-store.ts";
+export { Embedder } from "./embedder.ts";
+export { AppTail } from "./server-logs.ts";
+export { ConnectionBinding } from "./bindings.ts";
+export { ActionInvocation } from "./action-invocation.ts";
+export { ChatState } from "@grasp-os/chat/state";
+export { ChatSession } from "./chat-session.ts";
+// The Brain's store, registered here: the one import of it in core
+// (src/brain-next.ts reaches it through its contract).
+export { BrainStore } from "./brain-store.ts";
+export { WorkflowRuns } from "./workflows/run-object.ts";
+export { Workspace } from "./workspace.ts";
+
+/** Arms the clock if nothing has, logging a failure by its kind only. */
+const armClock = async (env: Env): Promise<void> => {
+  try {
+    await clock(env).ensure();
+  } catch (error) {
+    log.error("clock.ensure_failed", errorFields(error));
+  }
+};
+
+export default {
+  fetch: handleRequest,
+  // Mail Email Routing sends to workflows' email triggers (see
+  // src/workflows/inbound-email.ts).
+  email: async (message, env, ctx) => {
+    // Mail may be all a quiet deployment gets: each message arms the clock
+    // if nothing has (src/clock.ts), in the background. A failure is
+    // logged; the next message, request or probe tries again.
+    ctx.waitUntil(armClock(env));
+    await receiveEmail(message, env);
+  },
+  // No `scheduled`: core's maintenance runs on the client's clock, its own
+  // alarm (src/clock.ts), since a Workers for Platforms user Worker can't
+  // have a clock.
+} satisfies ExportedHandler<Env>;

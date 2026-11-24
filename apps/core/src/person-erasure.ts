@@ -1,0 +1,1441 @@
+import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  appIdSchema,
+  identifierSchema,
+  storeIdSchema,
+} from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { memberErrors } from "@grasp-os/shared/members";
+import type {
+  Erasure,
+  ErasureArea,
+  ErasurePreview,
+  RemovedPeoplePage,
+} from "@grasp-os/shared/members";
+import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { z } from "zod";
+
+import { dropOwnAgentsOf } from "./agent-builder.ts";
+import { dropAgentWakesFor } from "./agent-wakes.ts";
+import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  activeMember,
+  isRemoved,
+  notRemoved,
+  organizationId,
+} from "./auth/auth.ts";
+import { directoryProviderId } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
+import { eraseGapAnswerer } from "./brain-gaps.ts";
+import {
+  erasePerson as eraseFromBrain,
+  erasePersonShared,
+  isBrainRestoring,
+  stillDeletingTooLong,
+} from "./brain-next.ts";
+import { endHandOversOf } from "./brain-sources.ts";
+import { personalWorkspaceId } from "./chats-rpc.ts";
+import {
+  accounts,
+  appWebhookDeliveries,
+  brainUploads,
+  erasedSubjects,
+  channelAccounts,
+  channelConversations,
+  channelLinks,
+  chatWorkflowOffers,
+  invitations,
+  memberRemovals,
+  notifications,
+  chatAudiences,
+  businessStores,
+  personErasureAreas,
+  personErasures,
+  sessions,
+  signInAddresses,
+  stephenRequestCards,
+  stephenRequests,
+  skillDecisions,
+  skillDeletions,
+  skillShares,
+  stephenSummaries,
+  stephenSummaryReaders,
+  teamMembers,
+  teamPins,
+  users,
+  workflowDecisionConfirmations,
+  apps as appRegistry,
+  brainSyncSources,
+  runChatSources,
+  runStateWriters,
+  verifications,
+  workflowState,
+} from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
+import { forgetDirectoryPeople } from "./directory-ties.ts";
+import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
+import {
+  emailHashOf,
+  emailKeyVersion,
+  erasedAddress,
+  normalizedEmail,
+  subjectHashOf,
+  subjectKeyVersion,
+  subjectsOf,
+} from "./erased-people.ts";
+import { dropHeldStarts } from "./held-starts.ts";
+import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
+import { onboardingStore } from "./onboarding/store.ts";
+import type { ErasureAreaName } from "./person-erasure-inventory.ts";
+import { forgetTokens, keptAccountKeysOf } from "./source-readers.ts";
+import { stopRunsFor } from "./workflows/resource-runs.ts";
+import { erasedChatPin } from "./workflows/run-evidence.ts";
+
+// Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
+//
+// - Only one of the client's own admins erases, never Grasp staff, the
+//   person or anyone else (Nick's D4), and never themselves. Only someone
+//   they removed already (members.ts): removing ends every session, keeps
+//   them out of every sign-in, revokes what acts for them and disconnects
+//   their personal connections, so erasing is a second, deliberate step on
+//   someone already out.
+// - Never the wrong person: the admin sees who it is first (`erasurePreview`)
+//   and confirms with their name exactly as it stands now, so a stale ID or
+//   a mix-up of two people is refused before anything changes.
+// - Their name and ID stay, everything else of theirs goes (Nick's D1:
+//   "user can be deleted but it should still show the name of the person,
+//   so its still traceable"): `users` keeps both and nothing else, so every
+//   company record that names them still does; the name the admin
+//   confirmed is frozen in `person_erasures`.
+// - They don't come back: their email goes, but a keyed hash of it stays
+//   (`emailHashOf`, erased-people.ts), which sign-in (auth.ts) and
+//   invitations (members.ts) check, as a removal keeps them out by their
+//   ID. So does a keyed hash of every subject their sign-in accounts
+//   named (`subjectsOf`): their Entra object id above all, which Teams
+//   names them by and the directory would make them a member again by
+//   (directory-members.ts), and their first sign-in checks too. The email
+//   keeps out the address, not the person: an admin releases one the
+//   company gives to someone else (`releaseAddress`), audited. Rotating the
+//   deployment's auth secret changes the hash's key, and re-admits everyone
+//   erased before it until that is handled (erased-people.ts).
+// - Never half done for good: each area of the erasure is a step of its own,
+//   all of it in one batch or none, marked complete in that batch. One that
+//   fails stays pending and the clock tries it again (`retryErasures`), so
+//   an erasure that stopped, however, is finished.
+// - Recorded once, by IDs only: asking again while it runs, or after,
+//   answers where it stands and records nothing more.
+
+/** An area of a person's erasure: what it erases, in one batch, once. */
+interface ErasureStep {
+  readonly area: ErasureAreaName;
+  /**
+   * Erases everything of `userId`'s in the area, and marks the area
+   * complete in the same batch (`completed`), or nothing of it; where the
+   * work is outside core's database (the Brain's), marks it complete by a
+   * statement of its own once that work answered it is done, and a call
+   * that fails marks nothing.
+   */
+  readonly erase: (env: Env, userId: string) => Promise<void>;
+  /** An area it runs only once complete: one still pending holds it, as a wait, nothing failed. */
+  readonly after?: ErasureAreaName;
+}
+
+/** Where one area of a person's erasure stands, as its schema stores it. */
+export type ErasureAreaState =
+  (typeof personErasureAreas.$inferSelect)["state"];
+
+/**
+ * Marks area `area` of `userId`'s erasure `state`, done one way or
+ * another, if `done` holds as the batch reaches it.
+ */
+const marked = (
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  area: ErasureAreaName,
+  state: Exclude<ErasureAreaState, "pending">,
+  done: SQL = sql`1`
+) =>
+  db
+    .update(personErasureAreas)
+    .set({ state, updatedAt: new Date() })
+    .where(
+      and(
+        eq(personErasureAreas.userId, userId),
+        eq(personErasureAreas.area, area),
+        done
+      )
+    );
+
+/**
+ * Marks area `area` of `userId`'s erasure complete, if `done` holds as the
+ * batch reaches it.
+ */
+const completed = (
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  area: ErasureAreaName,
+  done: SQL = sql`1`
+) => marked(db, userId, area, "complete", done);
+
+/** Where an erased person's email was: an address nothing can deliver to. */
+const erasedEmail = (userId: string): string =>
+  `erased-${userId}@erased.invalid`;
+
+/**
+ * Their identity: their email (the address `users` keeps becomes one that
+ * reaches nobody, and names nobody), whether it was verified, their
+ * picture, every sign-in account and every session, and a guest's
+ * sign-in code. Their name and ID stay.
+ * What each account named them by stays as a keyed hash, written in the
+ * batch that deletes the accounts, so there is never a moment when neither
+ * keeps them out. Only the accounts whose subjects were hashed go: one
+ * linked between the read and the batch stays, and so does the area,
+ * pending, until the clock's next try hashes and deletes it too.
+ * In the same batch, the tokens the Brain knows their accounts by on
+ * copied reader lists (source-readers.ts `forgetTokens`, GRA-1761): those
+ * they claimed, and those nobody claimed of what these accounts, their
+ * connections' accounts (as connect keeps them until this is done) and
+ * their address name them by. Every list naming them
+ * names a token nobody holds from then on.
+ */
+const identity: ErasureStep = {
+  area: "identity",
+  // Their address is what the Brain's erasure of what it derived about
+  // them goes by (`brainShared`): it stays until that is done, so a try of
+  // it again never runs without it.
+  after: "brain_shared",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [held, [user], signedInAs] = await db.batch([
+      db
+        .select({
+          id: accounts.id,
+          providerId: accounts.providerId,
+          accountId: accounts.accountId,
+          oid: accounts.oid,
+          verifiedEmail: accounts.verifiedEmail,
+        })
+        .from(accounts)
+        .where(eq(accounts.userId, userId)),
+      db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
+      db
+        .select({ address: signInAddresses.address })
+        .from(signInAddresses)
+        .where(eq(signInAddresses.userId, userId)),
+    ]);
+    // In this order, each before the read below: connect told their
+    // erasure began, so no connection of theirs is made from now on, a
+    // flow already under way included; then their connections stopped, as
+    // their removal does (it may have failed, and an erasure needs only
+    // the removal), so no renewal writes an address after the read. Then
+    // their accounts, disconnected or not, as connect still has them: its
+    // own erasure waits for this one (`connect`). A call that fails leaves
+    // this area pending, for the clock to try again.
+    await env.CONNECT.beginErasure({ ownerUserId: userId });
+    await env.CONNECT.disconnectPersonal({
+      person: null,
+      ownerUserIds: [userId],
+    });
+    const connected = await env.CONNECT.personalAccounts(userId);
+    const keptKeys = await keptAccountKeysOf(env, {
+      objectIds: [
+        ...held.flatMap(({ oid }) => (oid === null ? [] : [oid])),
+        ...connected.flatMap(({ provider, accountId }) =>
+          provider === "microsoft" ? [accountId] : []
+        ),
+      ],
+      addresses: [
+        ...held.flatMap(({ verifiedEmail }) =>
+          verifiedEmail === null ? [] : [verifiedEmail]
+        ),
+        // Every address their sign-ins and connections ever proved, not
+        // only the latest: each may name a token someone else could claim.
+        ...signedInAs.map(({ address }) => address),
+        ...connected.flatMap(({ verifiedEmail, pastVerifiedEmails }) => [
+          ...(verifiedEmail === null ? [] : [verifiedEmail]),
+          ...pastVerifiedEmails,
+        ]),
+        ...(user === undefined ? [] : [user.email]),
+      ],
+    });
+    const subjects = new Set(
+      held.flatMap((account) => subjectsOf(account, directoryProviderId))
+    );
+    const hashes = await Promise.all(
+      [...subjects].map(async (subject) => await subjectHashOf(env, subject))
+    );
+    // Their address as `users` has it still: their sign-in code's row goes
+    // before it does, in the same batch, so a retry after it finds none left.
+    const theirAddress = sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`;
+    await db.batch([
+      // A guest's sign-in code, keyed by their address (auth/guest-codes.ts).
+      db.delete(verifications).where(signInCodeOf(theirAddress)),
+      db
+        .update(users)
+        .set({
+          email: erasedEmail(userId),
+          emailVerified: false,
+          image: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId)),
+      ...hashes.map((subjectHash) =>
+        db
+          .insert(erasedSubjects)
+          .values({ subjectHash, keyVersion: subjectKeyVersion, userId })
+          .onConflictDoNothing()
+      ),
+      // The directory's rows of them (GRA-2056), by the IDs their accounts
+      // name: before the accounts go, in the same batch.
+      forgetDirectoryPeople(db, userId),
+      db.delete(accounts).where(
+        and(
+          eq(accounts.userId, userId),
+          inArray(
+            accounts.id,
+            held.map(({ id }) => id)
+          )
+        )
+      ),
+      forgetTokens(db, userId, keptKeys),
+      db.delete(signInAddresses).where(eq(signInAddresses.userId, userId)),
+      db.delete(sessions).where(eq(sessions.userId, userId)),
+      completed(
+        db,
+        userId,
+        "identity",
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${accounts} WHERE ${accounts.userId} = ${userId}
+        )`
+      ),
+    ]);
+  },
+};
+
+/**
+ * What core holds of them for the Brain beside their own store (the
+ * `brain_sources` area): their skill shares, who answered a gap if it was
+ * them (the answers stay, as the company's, said by no one). Knowledge
+ * itself is gone (GRA-1941): what its databases held of them went with
+ * them, deleted in the account.
+ * Complete only once each returned: a failure leaves the area pending,
+ * and the clock runs it again.
+ */
+const brain: ErasureStep = {
+  area: "brain",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ requestedBy: personErasures.requestedBy })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    // Their asks to share a skill, with the text a waiting one holds, and
+    // the names of the skills they deleted. A decision on an ask of theirs
+    // is the company's (or its team's), and keeps its text: the Brain follows it all the
+    // same (skill-shares.ts). Who decided anything goes too, if it was
+    // them: the decision stays, unnamed.
+    await db.batch([
+      db.delete(skillShares).where(eq(skillShares.requestedBy, userId)),
+      db.delete(skillDeletions).where(eq(skillDeletions.personId, userId)),
+      db
+        .update(skillShares)
+        .set({ decidedBy: null })
+        .where(eq(skillShares.decidedBy, userId)),
+      db
+        .update(skillDecisions)
+        .set({ decidedBy: null })
+        .where(eq(skillDecisions.decidedBy, userId)),
+    ]);
+    await eraseGapAnswerer(
+      env,
+      { type: "person", userId: erasure.requestedBy },
+      userId
+    );
+    await completed(db, userId, "brain");
+  },
+};
+
+/**
+ * What the Brain derived about them where others may read it, and what is
+ * in their own word there (brain-next.ts `erasePersonShared`), for Nick's
+ * decision of 16 November (GRA-1747): erasing a member removes what the
+ * Brain derived about them and keeps the company's documents, even where
+ * their text names them. The entity that is them is the one holding the
+ * address they signed in with, as `users` has it until `identity` erases
+ * it, which waits for this area: so this runs first, and a try of it
+ * again still has it. Complete once the Brain answered: recorded, hidden
+ * from every read and in its ledger; its tick deletes the rest. With it,
+ * the events of the steps they took (GRA-1763), deleted by their tag in
+ * each of the company's teams, in the same ledger entry.
+ */
+const brainShared: ErasureStep = {
+  area: "brain_shared",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [person] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, userId));
+    // No user row (none to erase by address): their word and their
+    // confirmations still go, by their ID.
+    await erasePersonShared(env, {
+      personId: userId,
+      email: person?.email ?? null,
+    });
+    await completed(db, userId, "brain_shared");
+  },
+};
+
+/**
+ * What still acts for them, and what of their decisions is
+ * theirs alone (GRA-1186). The runs they started are the company's
+ * records (Nick's D3): kept, naming them by their ID and name, their
+ * details removed only as run retention removes any run's. But nothing
+ * goes on running for someone erased: every unfinished run of theirs is
+ * stopped as a builder's is, audited, for the admin who asked. The area is
+ * complete once each one's stop was taken, never on a stop claimed by a
+ * pass that died before sending it; the engine ends it. A run that starts for
+ * them after (a trigger of an App they own, a schedule of theirs) does
+ * nothing: every step of every run checks first that the person it acts
+ * for is still a member (`requireActivePerson`, through sealed-run.ts's
+ * `requirePerson`), so it fails at its first step.
+ * Moving ownership of what they owned is an admin's. Then the one-use
+ * confirmations they were given to answer decisions go. The decisions
+ * they answered keep who did, as company history. And what their chats
+ * had read, pinned on the runs those chats started (workflow-starts.ts):
+ * the keys of what a workflow keeps those runs set go, and so do those of
+ * the runs that started from them (one hop, `runStateWriters`). Their pins
+ * go too, their ID with them, whatever the run's age. Each run is left an
+ * erased pin (`erasedChatPin`), which keeps it, and the runs that started
+ * from its state, refused for good.
+ */
+const runs: ErasureStep = {
+  area: "runs",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ requestedBy: personErasures.requestedBy })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const by = { userId: erasure.requestedBy, staff: false };
+    const stopped = await stopRunsFor(env, actorOf(by), userId);
+    if (stopped.unasked > 0) {
+      throw new Error("Runs of theirs are still to be asked to end");
+    }
+    // What their chats had read, pinned on the runs those chats started
+    // (`runChatSources`), as one batch (GRA-1996). First every key such a
+    // run set, and every key of a run that started from one (one hop, as a
+    // run's check reads them): erasure is final, so none is left to show
+    // again. Then each such run's erased pin, before their own pins go:
+    // without any, its check, and that of a run still going that started
+    // from its state, would pass as having read nothing.
+    const theirRuns = sql`(SELECT ${runChatSources.runId} FROM ${runChatSources}
+      WHERE ${runChatSources.personId} = ${userId})`;
+    await db.batch([
+      db
+        .delete(workflowDecisionConfirmations)
+        .where(eq(workflowDecisionConfirmations.userId, userId)),
+      db.delete(workflowState).where(
+        sql`${workflowState.runId} IN ${theirRuns}
+          OR ${workflowState.runId} IN (SELECT ${runStateWriters.runId}
+            FROM ${runStateWriters}
+            WHERE ${runStateWriters.writerRunId} IN ${theirRuns})`
+      ),
+      db
+        .insert(runChatSources)
+        .select(
+          sql`SELECT DISTINCT ${runChatSources.runId}, ${erasedChatPin.sourceId},
+              ${erasedChatPin.workspaceId}, ${erasedChatPin.chatId},
+              ${erasedChatPin.agentId}, ${erasedChatPin.personId}
+            FROM ${runChatSources} WHERE ${runChatSources.personId} = ${userId}`
+        )
+        .onConflictDoNothing(),
+      db.delete(runChatSources).where(eq(runChatSources.personId, userId)),
+      completed(db, userId, "runs"),
+    ]);
+  },
+};
+
+/**
+ * Their interview (GRA-1187), deleted as the onboarding deletes one on
+ * its person's own request (`deleteOnRequest`): what they said and agreed
+ * to, every drawing it was in, the Brain's records resting on it, and
+ * everything the voice said in it; and everything the voice said for them
+ * as an admin, on their onboarding. And their address, everywhere the
+ * onboarding keeps one (GRA-2111): erasure is final. Their entries on the
+ * list are found by the account their interview belongs to (GRA-1790),
+ * whatever the list says now, and by the address that was theirs, through
+ * its keyed hash; each stays, the company's (Nick's D5), without the
+ * address, its link closed for good (`eraseEntries`). Those addresses of
+ * theirs stay out of the list until an admin releases them, which waits
+ * for this area (`releaseAddress`, GRA-2189). Once an admin released the
+ * address, or under an older key, it is found by address no more.
+ */
+const interview: ErasureStep = {
+  area: "interview",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({
+        emailHash: personErasures.emailHash,
+        keyVersion: personErasures.emailKeyVersion,
+      })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const store = onboardingStore(env);
+    // What the voice said for them as an admin, on their onboarding, goes
+    // from its cache, whoever they were on the list (GRA-1897).
+    await store.forgetSpokenForAdmin(userId);
+    const hash =
+      erasure.keyVersion === emailKeyVersion ? erasure.emailHash : null;
+    const found = await store.eraseEntries(userId, hash);
+    // Whatever the Brain holds under their account, from any link, also
+    // one it no longer holds (a new start gave it to someone else), goes
+    // before this area is done: keyed by the account alone, so the link's
+    // next holder keeps theirs. Until it has, this throws and the erasure
+    // is tried again.
+    await eraseOnboardingAccount(env, userId);
+    // Their address released, or hashed under an older key: they can't be
+    // found on the list by it, and whatever entry has it is left.
+    // Recorded as skipped, never as done.
+    if (hash === null) {
+      await marked(db, userId, "interview", "skipped");
+      return;
+    }
+    if (found === 0) {
+      // Not on the list by their account or the address they signed in
+      // with. IDs only.
+      log.warn("member.erasure_interview_unmatched", { userId });
+    }
+    await completed(db, userId, "interview");
+  },
+};
+
+/**
+ * How they were reached, and what reached them (GRA-1182): their chat
+ * accounts on every platform, the sign-in links they used to link one
+ * (which carry their name there), their conversations with the agent,
+ * the workflow offers it made them, the invitations made to the address
+ * that was theirs, found by its keyed hash (`person_erasures`), so
+ * whichever area runs first, their notifications, and their teams.
+ * And what Stephen kept of what they asked him outside Grasp (labels, no
+ * words: channels/stephen-requests.ts), with where their weekly summary
+ * of it went.
+ * Removing them took out their chat accounts, notifications and teams
+ * already; this takes them out again, in case any came back since.
+ */
+const channels: ErasureStep = {
+  area: "channels",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({
+        emailHash: personErasures.emailHash,
+        keyVersion: personErasures.emailKeyVersion,
+      })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    // Under the key their hash was made with only: one made with an older
+    // key matches no address hashed now (erased-people.ts), so their
+    // invitations aren't found, and stay, until a rotation re-keys it.
+    // Their address is the one whose hash is theirs: each address hashed
+    // once, as invitations store it in any case.
+    let address: string | undefined;
+    if (erasure.keyVersion === emailKeyVersion) {
+      const invited = await db
+        .selectDistinct({ email: sql<string>`lower(${invitations.email})` })
+        .from(invitations);
+      for (const { email } of invited) {
+        // oxlint-disable-next-line no-await-in-loop -- one address at a time
+        if ((await emailHashOf(env, email)) === erasure.emailHash) {
+          address = email;
+          break;
+        }
+      }
+    }
+    // By the address itself, in one statement, however many invitations
+    // went to it. Only those made before the erasure was asked for: none
+    // could be made to it after (members.ts refuses an erased address)
+    // until an admin released it and someone else was invited under it,
+    // whose invitation stays.
+    const theirInvitations =
+      address === undefined
+        ? []
+        : [
+            db.delete(invitations).where(
+              and(
+                sql`lower(${invitations.email}) = ${address}`,
+                sql`${invitations.createdAt} <= (
+                  SELECT ${personErasures.requestedAt} FROM ${personErasures}
+                  WHERE ${personErasures.userId} = ${userId}
+                )`
+              )
+            ),
+          ];
+    await db.batch([
+      db.delete(channelAccounts).where(eq(channelAccounts.userId, userId)),
+      db.delete(channelLinks).where(eq(channelLinks.usedBy, userId)),
+      db
+        .delete(channelConversations)
+        .where(eq(channelConversations.userId, userId)),
+      db
+        .delete(chatWorkflowOffers)
+        .where(eq(chatWorkflowOffers.userId, userId)),
+      ...theirInvitations,
+      db.delete(notifications).where(eq(notifications.personId, userId)),
+      db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // What an admin pinned of their teams (directory-teams.ts), whatever
+      // their removal cleaned up before.
+      db.delete(teamPins).where(eq(teamPins.userId, userId)),
+      // The cards still to be pressed of their requests, then the requests.
+      db
+        .delete(stephenRequestCards)
+        .where(
+          inArray(
+            stephenRequestCards.requestId,
+            db
+              .select({ id: stephenRequests.id })
+              .from(stephenRequests)
+              .where(eq(stephenRequests.personId, userId))
+          )
+        ),
+      db.delete(stephenRequests).where(eq(stephenRequests.personId, userId)),
+      db
+        .delete(stephenSummaryReaders)
+        .where(eq(stephenSummaryReaders.personId, userId)),
+      db.delete(stephenSummaries).where(eq(stephenSummaries.personId, userId)),
+      completed(db, userId, "channels"),
+    ]);
+  },
+};
+
+/**
+ * Their personal connections, in connect, the only place tokens live
+ * (GRA-1183): disconnected again, each grant revoked at its provider, then
+ * emptied of who their accounts were and of what calls through them
+ * returned (connect's person-erasure.ts). Connect erases once, however
+ * often it is asked; the area is complete once it answered.
+ */
+const connect: ErasureStep = {
+  area: "connect",
+  // Their connections' accounts are what `identity` forgets the reader
+  // tokens of (source-readers.ts, GRA-1761): kept until it has.
+  after: "identity",
+  erase: async (env, userId) => {
+    await env.CONNECT.erasePersonal({ ownerUserId: userId });
+    const db = drizzle(env.DB);
+    // What native sync read through their connections from (brain-sync.ts):
+    // whose they were and the account's address, gone with the area, not
+    // only with each disconnect's drain.
+    await db.batch([
+      db.delete(brainSyncSources).where(eq(brainSyncSources.personId, userId)),
+      completed(db, userId, "connect"),
+    ]);
+  },
+};
+
+/**
+ * Their workspace (GRA-1181): the object that holds their chats, their
+ * messages, drafts and attachments, their projects and email settings,
+ * with what the Brain captured of their chats, any connection granted in
+ * them, and the stores their drafts' previews wrote to. It is
+ * theirs alone (`personalWorkspaceId`), and empties itself
+ * (`Workspace.erasePerson`); the area is complete once it did, and its
+ * chats' audiences are gone.
+ */
+const workspaceArea: ErasureStep = {
+  area: "workspace",
+  erase: async (env, userId) => {
+    await workspace(env, personalWorkspaceId(userId)).erasePerson(userId);
+    // The workflow starts their chats' agents asked them to confirm, with
+    // what each was asked to run with, in any workspace.
+    await dropHeldStarts(env, { personId: userId });
+    // The wake-ups that worked for them: no agent wakes for someone gone.
+    await dropAgentWakesFor(env, userId);
+    // Their own agents, with what each was given to answer from: nobody
+    // else ever saw or asked them.
+    await dropOwnAgentsOf(env, userId);
+    const db = drizzle(env.DB);
+    // Who was in their chats, kept for each chat's agent (knowledge/
+    // access.ts), goes with the chats. Shared chats elsewhere keep them in
+    // their audience: those are the company's.
+    await db.batch([
+      db
+        .delete(chatAudiences)
+        .where(eq(chatAudiences.workspaceId, personalWorkspaceId(userId))),
+      completed(db, userId, "workspace"),
+    ]);
+  },
+};
+
+/**
+ * What they left in the company's Apps that is theirs alone (GRA-1184):
+ * what App preferences kept of them in every App's store
+ * (`sdk_preferences`, which nothing writes since they were removed, until
+ * GRA-1550 drops it), what the forms they sent held in each
+ * store's outbox for its webhooks, and the deliveries of the
+ * forms they sent to the Apps' webhooks (app-webhooks.ts): one still
+ * waiting carries what they sent out of the company, so it goes unsent,
+ * and one settled names them by ID only, so it goes too. None is queued
+ * for them after this (`queueFormSent`). What the forms wrote is the
+ * App's, in its store. The Apps' records they own are
+ * the company's (`_ownerId` names them), and stay. Every store is asked,
+ * whether or not they were a member of its App now: a store's row is never
+ * deleted (a deleted store keeps it, `deleted_at` set), so every store
+ * there ever was is listed; one never set up holds nothing. So are the
+ * stores of every App's preview, its test data, shared by its builders
+ * (app-preview.ts): its records the App's, kept as an App's store keeps
+ * them, their preferences and the values of their changes theirs, gone.
+ */
+const apps: ErasureStep = {
+  area: "apps",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const stores = await db
+      .select({ id: businessStores.id })
+      .from(businessStores);
+    for (const { id } of stores) {
+      const storeId = storeIdSchema.parse(id);
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await inJurisdiction(env, env.DATA_STORES)
+        .getByName(storeId)
+        .forgetPerson(storeId, userId);
+    }
+    // A removed App's preview was discarded with it (app-removal.ts).
+    const previewed = await db
+      .select({ id: appRegistry.id })
+      .from(appRegistry)
+      .where(isNull(appRegistry.removedAt));
+    for (const { id } of previewed) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await appPreview(env, appIdSchema.parse(id)).forgetPerson(userId);
+    }
+    await db.batch([
+      db
+        .delete(appWebhookDeliveries)
+        .where(eq(appWebhookDeliveries.personId, userId)),
+      completed(db, userId, "apps"),
+    ]);
+  },
+};
+
+/**
+ * What the Brain keeps that only they may read (brain-next.ts
+ * `erasePerson`): whatever was added for them alone, their own
+ * instruction file included, every version; then core's record of
+ * their uploads for themselves alone. Its place among the areas doesn't matter, and nothing
+ * orders a retry's pending areas: nothing of theirs lands after it,
+ * whichever areas are still pending, as they were removed before they
+ * could be erased, producers hand over nothing for someone no longer a
+ * member, and a hand-over that began before is refused by the Brain as it
+ * records. Complete only once the Brain answered that it is all erased,
+ * which is once their own store recorded it was erased whole; one that fails or throws, or
+ * answers that their own store is still deleting, leaves the area pending
+ * for the clock, and asking the Brain again is safe.
+ */
+const brainSources: ErasureStep = {
+  area: "brain_sources",
+  erase: async (env, userId) => {
+    const outcome = await eraseFromBrain(env, {
+      personId: userId,
+      reason: "person_erased",
+    });
+    const db = drizzle(env.DB);
+    if (outcome === "erased") {
+      // Their hand-overs still open, which name them by id (a chat's
+      // turns), end as erased: none keeps their id after this.
+      await endHandOversOf(env, userId);
+      // Only once the Brain erased them: their uploads for themselves alone
+      // (brain-uploads.ts) name nothing the Brain still holds, and nobody
+      // else may delete them, so their rows go with the area's completion.
+      // What they uploaded for a team or everyone is the company's, and
+      // keeps naming them by ID.
+      await db.batch([
+        db
+          .delete(brainUploads)
+          .where(
+            and(
+              eq(brainUploads.uploadedBy, userId),
+              eq(brainUploads.readers, "me")
+            )
+          ),
+        completed(db, userId, "brain_sources"),
+      ]);
+      return;
+    }
+    // Their own store still deleting is the expected way for its first
+    // minutes: pending, for the clock, with nothing logged or counted as
+    // failed. Past the Brain's bound for it (`stillDeletingTooLong`,
+    // counted from when the erasure was asked for) it is stuck: counted as a
+    // failed attempt and logged (`runErasure`), once, so it stands out from
+    // a normal one. Once: while the area was last changed (a failed attempt
+    // counted, `runErasure`) before the erasure grew stuck, whatever failed
+    // earlier; that attempt changes it, after. A failure of another kind
+    // counted after the bound also ends it: that one was logged too.
+    const [state] = await db
+      .select({
+        requestedAt: personErasures.requestedAt,
+        changedAt: personErasureAreas.updatedAt,
+      })
+      .from(personErasures)
+      .innerJoin(
+        personErasureAreas,
+        and(
+          eq(personErasureAreas.userId, personErasures.userId),
+          eq(personErasureAreas.area, "brain_sources")
+        )
+      )
+      .where(eq(personErasures.userId, userId));
+    const stuck =
+      state !== undefined &&
+      stillDeletingTooLong(state.requestedAt) &&
+      !stillDeletingTooLong(state.requestedAt, state.changedAt);
+    if (stuck) {
+      throw new Error(
+        "Their own store has been still deleting for longer than its graces allow"
+      );
+    }
+  },
+};
+
+/**
+ * The erasure's areas, in the order they run. Each area's own leaf of
+ * GRA-903 adds its step here.
+ */
+const steps: readonly ErasureStep[] = [
+  brainShared,
+  identity,
+  channels,
+  connect,
+  workspaceArea,
+  apps,
+  interview,
+  runs,
+  brain,
+  brainSources,
+];
+
+/** Refuses anyone but one of the client's admins, as members.ts does. */
+const requireMemberAdmin = (by: Identity): void => {
+  if (by.staff || !isAdmin(by.role)) {
+    log.warn("member.refused", { actor: by.userId, reason: "role.forbidden" });
+    throw roleErrors.create("role.forbidden");
+  }
+};
+
+/** The person an admin names: an ID, never the admin themselves. */
+const targetOf = (by: Identity, userId: unknown): string => {
+  const parsed = identifierSchema.safeParse(userId);
+  if (!parsed.success) {
+    throw memberErrors.create("member.not_found");
+  }
+  if (parsed.data === by.userId) {
+    throw memberErrors.create("member.self");
+  }
+  return parsed.data;
+};
+
+/** `areas` in the order the erasure runs them; any it doesn't know last. */
+const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
+  const order = new Map<string, number>(
+    steps.map(({ area }, index) => [area, index])
+  );
+  return areas.toSorted(
+    (one, other) =>
+      (order.get(one.area) ?? steps.length) -
+      (order.get(other.area) ?? steps.length)
+  );
+};
+
+/**
+ * Where the erasure of `userId` from the Brain stands, as core records it,
+ * across its Brain areas: `brain` (what core holds of them for the
+ * Brain: skill shares, gap answers), `brain_sources` (the new
+ * Brain: pending until its call returned, which is only once their own
+ * store was erased whole, files included) and `brain_shared` (what the new
+ * Brain derived about them where others may read it). In the areas' own
+ * states (`ErasureAreaState`): `skipped` if any was recorded skipped (no
+ * step does today; the schema allows it), else `pending` while any is,
+ * else `complete`; null when no erasure of them was asked for. With it,
+ * when any area last changed: once `complete`, when the last of them
+ * completed. The areas alone, for Grasp's staff asking whether a person
+ * was erased (brain-report.ts): one statement, whoever is named, so a
+ * person never erased reads as one who never existed.
+ */
+export const brainErasureStateOf = async (
+  env: Env,
+  userId: string
+): Promise<{ state: ErasureAreaState; at: Date } | null> => {
+  const areas = await drizzle(env.DB)
+    .select({
+      state: personErasureAreas.state,
+      at: personErasureAreas.updatedAt,
+    })
+    .from(personErasureAreas)
+    .where(
+      and(
+        eq(personErasureAreas.userId, userId),
+        inArray(personErasureAreas.area, [
+          brain.area,
+          brainSources.area,
+          brainShared.area,
+        ])
+      )
+    );
+  const states = new Set(areas.map(({ state }) => state));
+  if (states.size === 0) {
+    return null;
+  }
+  const at = new Date(Math.max(...areas.map((area) => area.at.getTime())));
+  if (states.has("skipped")) {
+    return { state: "skipped", at };
+  }
+  return { state: states.has("pending") ? "pending" : "complete", at };
+};
+
+/** Where `userId`'s erasure stands, or null if none was asked for. */
+const erasureOf = async (env: Env, userId: string): Promise<Erasure | null> => {
+  const db = drizzle(env.DB);
+  const [erasure] = await db
+    .select({
+      requestedAt: personErasures.requestedAt,
+      completedAt: personErasures.completedAt,
+    })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  if (erasure === undefined) {
+    return null;
+  }
+  const areas = await db
+    .select({ area: personErasureAreas.area, state: personErasureAreas.state })
+    .from(personErasureAreas)
+    .where(eq(personErasureAreas.userId, userId));
+  return {
+    requestedAt: erasure.requestedAt.toISOString(),
+    completedAt: erasure.completedAt?.toISOString() ?? null,
+    areas: inStepOrder(areas),
+  };
+};
+
+/** The areas of the erasures of `userIds`, by the person erased. */
+const areasByPerson = async (
+  env: Env,
+  userIds: readonly string[]
+): Promise<Map<string, ErasureArea[]>> => {
+  if (userIds.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: personErasureAreas.userId,
+      area: personErasureAreas.area,
+      state: personErasureAreas.state,
+    })
+    .from(personErasureAreas)
+    // One bound value however many: D1 binds at most 100.
+    .where(inList(personErasureAreas.userId, userIds));
+  const byPerson = new Map<string, ErasureArea[]>();
+  for (const { userId, area, state } of rows) {
+    byPerson.set(userId, [...(byPerson.get(userId) ?? []), { area, state }]);
+  }
+  return byPerson;
+};
+
+/**
+ * Runs every area of `userId`'s erasure still pending, each on its own: one
+ * that fails stays pending, for the clock to try again. Once every area is
+ * complete the erasure is, recorded once as of who asked for it.
+ */
+const runErasure = async (env: Env, userId: string): Promise<void> => {
+  const db = drizzle(env.DB);
+  const pending = await db
+    .select({ area: personErasureAreas.area })
+    .from(personErasureAreas)
+    .where(
+      and(
+        eq(personErasureAreas.userId, userId),
+        eq(personErasureAreas.state, "pending")
+      )
+    );
+  // In the order the areas run (`steps`): their address goes last of what
+  // needs it (`brainShared`, then `identity`).
+  const due = new Set(pending.map(({ area }) => area));
+  // Pending still once this run tried them: what waits for one is held.
+  const unfinished = new Set<ErasureAreaName>();
+  for (const step of steps) {
+    if (!due.has(step.area)) {
+      continue;
+    }
+    const { area } = step;
+    if (step.after !== undefined && unfinished.has(step.after)) {
+      unfinished.add(area);
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one area at a time
+      await step.erase(env, userId);
+    } catch (error) {
+      unfinished.add(area);
+      // The Brain restores an export: its part waits for it, as it should
+      // (brain-next.ts `erasePersonShared`), and the clock asks again.
+      if (isBrainRestoring(error)) {
+        log.info("member.erasure_waiting", { area, until: "brain_restored" });
+        continue;
+      }
+      log.error("member.erasure_failed", { area, ...errorFields(error) });
+      // oxlint-disable-next-line no-await-in-loop -- one area at a time
+      await db
+        .update(personErasureAreas)
+        .set({
+          attempts: sql`${personErasureAreas.attempts} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(personErasureAreas.userId, userId),
+            eq(personErasureAreas.area, area)
+          )
+        );
+    }
+  }
+  const [erasure] = await db
+    .select({ requestedBy: personErasures.requestedBy })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  if (erasure === undefined) {
+    return;
+  }
+  const done: AuditEntry = {
+    actor: { type: "person", userId: erasure.requestedBy },
+    action: "member.erased",
+    target: { type: "member", id: userId },
+    detail: { userId },
+  };
+  await auditedBatch(env, db, [
+    db
+      .update(personErasures)
+      .set({ completedAt: new Date() })
+      .where(
+        and(
+          eq(personErasures.userId, userId),
+          isNull(personErasures.completedAt),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${personErasureAreas}
+            WHERE ${personErasureAreas.userId} = ${userId}
+              AND ${personErasureAreas.state} = 'pending'
+          )`
+        )
+      ),
+    outboxedIfChanged(db, done),
+  ]);
+};
+
+/** The person `userId` as `users` has them now. */
+const personOf = async (env: Env, userId: string) => {
+  const [person] = await drizzle(env.DB)
+    .select({ name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return person;
+};
+
+/** Whether `userId`'s old address is kept out, not released. */
+const addressKeptOut = async (env: Env, userId: string): Promise<boolean> => {
+  const [row] = await drizzle(env.DB)
+    .select({ hash: personErasures.emailHash })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  return row?.hash !== undefined && row.hash !== null;
+};
+
+/**
+ * Whether `typed` confirms erasing `person` (`userId`): their name exactly
+ * as it stands. A guest has no name (guest-members.ts), so their address
+ * confirms them, never kept: as `users` has it until their erasure is
+ * recorded, then by the keyed hash the erasure keeps of it
+ * (`emailHashOf`), since the erasure rewrites `users.email`, so asking
+ * again still answers where it stands. Once the address is released (no
+ * hash kept), nothing confirms a guest again; the clock still finishes
+ * their erasure.
+ */
+const confirms = async (
+  env: Env,
+  userId: string,
+  person: { name: string; email: string },
+  typed: unknown
+): Promise<boolean> => {
+  if (typeof typed !== "string") {
+    return false;
+  }
+  if (person.name !== "") {
+    return typed === person.name;
+  }
+  const [recorded] = await drizzle(env.DB)
+    .select({ hash: personErasures.emailHash })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  if (recorded === undefined) {
+    return typed === person.email;
+  }
+  return (
+    recorded.hash !== null &&
+    typed !== "" &&
+    // Exactly as it was shown: the hash would take any case or spacing.
+    typed === normalizedEmail(typed) &&
+    (await emailHashOf(env, typed)) === recorded.hash
+  );
+};
+
+/**
+ * What erasing `userId` would do, or where their erasure stands, for one of
+ * the client's admins.
+ */
+export const erasurePreview = async (
+  env: Env,
+  by: Identity,
+  userId: unknown
+): Promise<ErasurePreview> => {
+  requireMemberAdmin(by);
+  const target = targetOf(by, userId);
+  const person = await personOf(env, target);
+  if (person === undefined) {
+    throw memberErrors.create("member.not_found");
+  }
+  const erasure = await erasureOf(env, target);
+  return {
+    userId: target,
+    name: person.name,
+    email: erasure === null ? person.email : null,
+    removed: await isRemoved(env, target),
+    erasure,
+    areas: steps.map(({ area }) => area),
+    addressKeptOut: await addressKeptOut(env, target),
+  };
+};
+
+/**
+ * Erases the removed person `userId`, as one of the client's admins asked,
+ * confirming them by `name` exactly as it stands now (a guest, who has no
+ * name, by their address): records the erasure
+ * and each of its areas pending, once, while the admin still is one and the
+ * person is still removed, then runs it (`runErasure`). Asking again only
+ * runs what is still pending, and answers where it stands.
+ */
+export const erasePerson = async (
+  env: Env,
+  by: Identity,
+  userId: unknown,
+  name: unknown
+): Promise<Erasure> => {
+  requireMemberAdmin(by);
+  const target = targetOf(by, userId);
+  const person = await personOf(env, target);
+  if (person === undefined) {
+    throw memberErrors.create("member.not_found");
+  }
+  if (!(await isRemoved(env, target))) {
+    throw memberErrors.create("member.erase_not_removed");
+  }
+  if (!(await confirms(env, target, person, name))) {
+    throw memberErrors.create("member.erase_name_mismatch");
+  }
+  const db = drizzle(env.DB);
+  const now = new Date();
+  const emailHash = await emailHashOf(env, person.email);
+  const asked = sql`${activeMember(by.userId, ["admin"])}
+    AND NOT ${notRemoved(target)}
+    AND NOT EXISTS (
+      SELECT 1 FROM ${personErasures} WHERE ${personErasures.userId} = ${target}
+    )`;
+  const requested: AuditEntry = {
+    actor: actorOf(by),
+    action: "member.erasure.requested",
+    target: { type: "member", id: target },
+    detail: {
+      userId: target,
+    },
+  };
+  await auditedBatch(env, db, [
+    db
+      .insert(personErasures)
+      .select(
+        sql`SELECT ${target}, ${person.name}, ${emailHash}, ${emailKeyVersion}, ${by.userId}, ${now.getTime()}, NULL
+          WHERE ${asked}`
+      )
+      .onConflictDoNothing(),
+    outboxedIfChanged(db, requested),
+    ...steps.map(({ area }) =>
+      db
+        .insert(personErasureAreas)
+        .select(
+          sql`SELECT ${target}, ${area}, 'pending', 0, ${now.getTime()}
+            WHERE EXISTS (
+              SELECT 1 FROM ${personErasures}
+              WHERE ${personErasures.userId} = ${target}
+                AND ${personErasures.requestedAt} = ${now.getTime()}
+            )`
+        )
+        .onConflictDoNothing()
+    ),
+  ]);
+  const erasure = await erasureOf(env, target);
+  if (erasure === null) {
+    // Nothing went in: the admin stopped being one since their session
+    // was checked.
+    throw roleErrors.create("role.forbidden");
+  }
+  await runErasure(env, target);
+  return (await erasureOf(env, target)) ?? erasure;
+};
+
+/**
+ * That `userId`'s erasure has its `interview` area pending, not yet run
+ * or failed and waiting for the clock, as SQL: no release of an address
+ * of theirs while it is, as that area takes their addresses off the list.
+ */
+const erasingFromTheList = (userId: string) =>
+  and(
+    eq(personErasureAreas.userId, userId),
+    eq(personErasureAreas.area, "interview"),
+    eq(personErasureAreas.state, "pending")
+  );
+
+/**
+ * Lets in on the staff list an address core keeps no erasure under: one
+ * only the onboarding keeps out (another address of an erased person's,
+ * GRA-2165), or one whose release's store call failed after core's own.
+ * Not while the erasure it is kept out for has its step for the list
+ * pending, as `releaseAddress` holds for the address core keeps (that
+ * step can't be pending again once done). Only while `by` still is an
+ * admin, read now, after every wait: the store can't read core's database
+ * in its transaction, so one call remains between this read and the
+ * store's transaction, as one remains between the statement that releases
+ * in `releaseAddress` and its own call to the store. Kept out for nobody
+ * when asked, there is nothing to release and the store isn't asked
+ * again: an erasure that keeps it out after that answer is one this
+ * release doesn't cover, and its block stands. The store releases it only
+ * while it is still kept out for the person checked. Recorded by the
+ * store when it held the address. Whether it did.
+ */
+const releaseOnTheList = async (
+  env: Env,
+  by: Identity,
+  hash: string
+): Promise<boolean> => {
+  const store = onboardingStore(env);
+  const keptFor = await store.keptOutFor(hash);
+  if (keptFor === null) {
+    return false;
+  }
+  const db = drizzle(env.DB);
+  const [[admin], [erasing]] = await db.batch([
+    db
+      .select({ userId: users.id })
+      .from(users)
+      .where(and(eq(users.id, by.userId), activeMember(by.userId, ["admin"]))),
+    db
+      .select({ userId: personErasureAreas.userId })
+      .from(personErasureAreas)
+      .where(erasingFromTheList(keptFor)),
+  ]);
+  if (admin === undefined) {
+    throw roleErrors.create("role.forbidden");
+  }
+  if (erasing !== undefined) {
+    throw memberErrors.create("member.release_erasing");
+  }
+  return await store.releaseAddress(hash, keptFor, actorOf(by));
+};
+
+/**
+ * Lets the address `email` in again, as one of the client's admins asked:
+ * the company gave the address that was an erased person's to someone
+ * else. Only the hash goes, while the admin still is one, recorded with
+ * the erased person's ID only, never the address; then the onboarding's
+ * copy, kept released (GRA-2189), so the staff list takes the address
+ * again and an attempt of their erasure still under way writes nothing by
+ * it. Never while their erasure's `interview` area is pending, not yet run
+ * or failed and waiting for the clock, checked by the statement that
+ * releases: that area takes their addresses off the list, so a release is
+ * never what leaves one there. A release whose store call failed is
+ * finished by asking again. Answers whether an erased person's address it
+ * was.
+ */
+export const releaseAddress = async (
+  env: Env,
+  by: Identity,
+  email: unknown
+): Promise<{ released: boolean }> => {
+  requireMemberAdmin(by);
+  if (typeof email !== "string" || email.trim() === "") {
+    throw memberErrors.create("member.invite_email");
+  }
+  const db = drizzle(env.DB);
+  const hash = await emailHashOf(env, email);
+  const [erased] = await db
+    .select({ userId: personErasures.userId })
+    .from(personErasures)
+    .where(erasedAddress(hash));
+  if (erased === undefined) {
+    return { released: await releaseOnTheList(env, by, hash) };
+  }
+  const stepDone = sql`NOT EXISTS (
+    SELECT 1 FROM ${personErasureAreas}
+    WHERE ${personErasureAreas.userId} = ${erased.userId}
+      AND ${personErasureAreas.area} = 'interview'
+      AND ${personErasureAreas.state} = 'pending'
+  )`;
+  const [released] = await auditedBatch(env, db, [
+    db
+      .update(personErasures)
+      .set({ emailHash: null })
+      .where(
+        and(
+          eq(personErasures.userId, erased.userId),
+          erasedAddress(hash),
+          activeMember(by.userId, ["admin"]),
+          stepDone
+        )
+      )
+      .returning({ userId: personErasures.userId }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "member.address.released",
+      target: { type: "member", id: erased.userId },
+      detail: { userId: erased.userId },
+    }),
+  ]);
+  if (released.length === 0) {
+    const [pending] = await db
+      .select({ userId: personErasureAreas.userId })
+      .from(personErasureAreas)
+      .where(erasingFromTheList(erased.userId));
+    throw pending === undefined
+      ? roleErrors.create("role.forbidden")
+      : memberErrors.create("member.release_erasing");
+  }
+  await onboardingStore(env).releaseAddress(hash, erased.userId, null);
+  return { released: true };
+};
+
+/** The most people a page of `removedPeople` holds. */
+export const erasurePageSize = 100;
+
+const cursorSchema = z
+  .object({ at: z.iso.datetime(), userId: identifierSchema })
+  .optional();
+
+/**
+ * The page before `before` (by `at`, then the person's ID, both newest
+ * first), as SQL on `at` and `userId`: none for the latest page. A cursor
+ * that isn't one is `member.invalid`.
+ */
+const pageBefore = (
+  before: unknown,
+  at: SQLiteColumn,
+  userId: SQLiteColumn
+): SQL | undefined => {
+  const cursor = cursorSchema.safeParse(before);
+  if (!cursor.success) {
+    throw memberErrors.create("member.invalid");
+  }
+  return cursor.data === undefined
+    ? undefined
+    : sql`(${at}, ${userId}) < (${new Date(cursor.data.at).getTime()}, ${cursor.data.userId})`;
+};
+
+/**
+ * The people admins removed, most recently first, with where each one's
+ * erasure stands, for one of the client's admins: whom they may erase. The
+ * latest page, or the page before `before`.
+ */
+export const removedPeople = async (
+  env: Env,
+  by: Identity,
+  before?: unknown
+): Promise<RemovedPeoplePage> => {
+  requireMemberAdmin(by);
+  const after = pageBefore(
+    before,
+    memberRemovals.removedAt,
+    memberRemovals.userId
+  );
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: memberRemovals.userId,
+      name: users.name,
+      email: users.email,
+      removedAt: memberRemovals.removedAt,
+      requestedAt: personErasures.requestedAt,
+      completedAt: personErasures.completedAt,
+      emailHash: personErasures.emailHash,
+    })
+    .from(memberRemovals)
+    .innerJoin(users, eq(users.id, memberRemovals.userId))
+    .leftJoin(personErasures, eq(personErasures.userId, memberRemovals.userId))
+    .where(and(eq(memberRemovals.organizationId, organizationId), after))
+    .orderBy(desc(memberRemovals.removedAt), desc(memberRemovals.userId))
+    // One past the page: whether more follow.
+    .limit(erasurePageSize + 1);
+  const page = rows.slice(0, erasurePageSize);
+  const areas = await areasByPerson(
+    env,
+    page.flatMap((row) => (row.requestedAt === null ? [] : [row.userId]))
+  );
+  return {
+    people: page.map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      email: row.requestedAt === null ? row.email : null,
+      removedAt: row.removedAt.toISOString(),
+      erasure:
+        row.requestedAt === null
+          ? null
+          : {
+              requestedAt: row.requestedAt.toISOString(),
+              completedAt: row.completedAt?.toISOString() ?? null,
+              areas: inStepOrder(areas.get(row.userId) ?? []),
+            },
+      addressKeptOut: row.emailHash !== null,
+    })),
+    more: rows.length > erasurePageSize,
+  };
+};
+
+/**
+ * Runs every erasure not yet complete again, oldest first: what failed
+ * last time is tried once more, each person on their own.
+ */
+export const retryErasures = async (env: Env): Promise<void> => {
+  const pending = await drizzle(env.DB)
+    .select({ userId: personErasures.userId })
+    .from(personErasures)
+    .where(isNull(personErasures.completedAt))
+    .orderBy(asc(personErasures.requestedAt));
+  for (const { userId } of pending) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await runErasure(env, userId);
+    } catch (error) {
+      log.error("member.erasure_failed", errorFields(error));
+    }
+  }
+};

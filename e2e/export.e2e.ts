@@ -1,0 +1,195 @@
+import { readFile } from "node:fs/promises";
+
+import { expect } from "@playwright/test";
+import type { Download, Page } from "@playwright/test";
+
+import { test } from "./csp.ts";
+import { peopleIn } from "./people.ts";
+
+// Every export offers Markdown or PDF (export/export-menu.tsx, and the
+// open chat's menu, chat/chat-more.tsx): a brain note and a chat each
+// download as Markdown, and each prints as a page of their own, under
+// the app's Content Security Policy (the `test` here fails on any
+// violation).
+
+const pageRead = { timeout: 15_000 };
+
+/** Chooses `format` from the export menu named `label`. */
+const choose = async (
+  page: Page,
+  label: string,
+  format: "Markdown (.md)" | "PDF"
+): Promise<void> => {
+  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.getByRole("menuitem", { name: format }).click();
+};
+
+/** Chooses `format` from Download in the open chat's menu, in its header. */
+const downloadChat = async (
+  page: Page,
+  format: "Markdown (.md)" | "PDF"
+): Promise<void> => {
+  await page.getByRole("button", { name: "More for this chat" }).click();
+  // By the keyboard: the submenu also opens as the pointer rests on its
+  // item, so a click there may close it again, and the test would race.
+  await page.getByRole("menuitem", { name: "Download" }).focus();
+  await page.keyboard.press("ArrowRight");
+  const item = page.getByRole("menuitem", { name: format });
+  await item.focus();
+  await expect(item).toBeFocused();
+  await page.keyboard.press("Enter");
+};
+
+const textOf = async (download: Download): Promise<string> =>
+  await readFile(await download.path(), "utf-8");
+
+declare global {
+  interface Window {
+    /** How often a page to print asked for the print dialog, see below. */
+    printed?: number;
+    /** The text of each element of the last page to print, as it asked. */
+    printedTexts?: string[];
+  }
+}
+
+/**
+ * Counts the print dialogs asked for instead of opening them: what a
+ * browser does with `print()` (a dialog, or nothing at all headless) isn't
+ * the page's to test. The page's frame is of this origin, so its window
+ * can be reached from here.
+ */
+const countPrints = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    const own = Object.getOwnPropertyDescriptor(
+      HTMLIFrameElement.prototype,
+      "contentWindow"
+    );
+    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        const view: unknown = own?.get?.call(this);
+        const printing = this.contentDocument;
+        if (typeof view === "object" && view !== null && "print" in view) {
+          Object.assign(view, {
+            print: () => {
+              window.printed = (window.printed ?? 0) + 1;
+              // What it would print, read as it asks: the dialog would hold
+              // the page until it closes, which nothing here does.
+              window.printedTexts = [
+                ...(printing?.querySelectorAll("h1, p") ?? []),
+              ].map(
+                (element) =>
+                  `${element.tagName} ${element.textContent?.trim() ?? ""}`
+              );
+            },
+          });
+        }
+        return view;
+      },
+    });
+  });
+};
+
+/** The print dialog closing, as the browser says it does. */
+const closePrint = async (page: Page, title: string): Promise<void> => {
+  await page.evaluate((name) => {
+    document
+      .querySelector<HTMLIFrameElement>(`iframe[title="${name}"]`)
+      ?.contentWindow?.dispatchEvent(new Event("afterprint"));
+  }, title);
+};
+
+test("a brain note and a chat each export as Markdown and as a page to print", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("exports");
+  const page = await pageOf(admin);
+
+  // Every deployment's brain has its Vision page (brain.e2e.ts).
+  await page.goto("/brain/vision");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Vision page" })
+  ).toBeVisible(pageRead);
+  const note = page.waitForEvent("download");
+  await choose(page, "Export", "Markdown (.md)");
+  const file = await note;
+  expect(file.suggestedFilename()).toBe("vision-page.md");
+  const exported = await textOf(file);
+  expect(exported).toMatch(/^---\nid: "vision"\n/u);
+  expect(exported).toContain("\n# Vision page\n");
+
+  // The page to print: the Grasp mark, the title, then the text rendered,
+  // in a frame of this origin that keeps its policy, styled by the app's
+  // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
+  // headings in Newsreader (Markdown's serif headings), the text in Geist.
+  // The file's frontmatter is the file's alone: the page leaves it out.
+  await countPrints(page);
+  await choose(page, "Export", "PDF");
+  await expect
+    .poll(async () => await page.evaluate(() => window.printed))
+    .toBe(1);
+  const printed = page.frameLocator('iframe[title="Vision page"]');
+  const heading = printed.getByRole("heading", { name: "Vision page" });
+  await expect(heading).toHaveCount(1);
+  await expect(printed.locator("main")).not.toContainText('id: "vision"');
+  await expect
+    .poll(
+      async () =>
+        await heading.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return `${style.fontSize} ${style.fontFamily}`;
+        })
+    )
+    .toMatch(/^28px "Newsreader Variable"/u);
+  expect(
+    await printed
+      .getByRole("heading", { level: 2, name: "Timeline" })
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toMatch(/^"Newsreader Variable"/u);
+  expect(
+    await printed
+      .locator("main")
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toMatch(/^"Geist Variable"/u);
+  await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
+  // Once the dialog closes, the page to print goes.
+  await closePrint(page, "Vision page");
+  await expect(page.locator('iframe[title="Vision page"]')).toHaveCount(0);
+
+  // A chat: its title, and each question.
+  const tag = crypto.randomUUID().slice(0, 8);
+  const question = `How long is leave ${tag}?`;
+  await page.goto("/");
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send" }).click();
+  // It opens full screen in Grasp's chat, named once core has said its
+  // title, which the export is named after.
+  const messages = page
+    .getByRole("region", { name: question })
+    .getByRole("list", { name: "Messages" });
+  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const chat = page.waitForEvent("download");
+  await downloadChat(page, "Markdown (.md)");
+  const chatFile = await chat;
+  // Named after the chat, whose title is its first question here.
+  expect(chatFile.suggestedFilename()).toBe(`How-long-is-leave-${tag}.md`);
+  const markdown = await textOf(chatFile);
+  expect(markdown).toMatch(/^# /u);
+  expect(markdown).toContain(`**You:**\n\n${question}`);
+
+  await countPrints(page);
+  await downloadChat(page, "PDF");
+  await expect
+    .poll(async () => await page.evaluate(() => window.printed))
+    .toBe(1);
+  // Read as it asked to print: closing the chat's menu gives focus back to
+  // the page, which takes the page to print away (export-file.tsx), and a
+  // print dialog that doesn't hold the page, as here, can't stop that.
+  const printedTexts = await page.evaluate(() => window.printedTexts ?? []);
+  expect(printedTexts.filter((text) => text === `H1 ${question}`)).toHaveLength(
+    1
+  );
+  expect(
+    printedTexts.filter((text) => text.endsWith(` ${question}`))
+  ).toHaveLength(2);
+});

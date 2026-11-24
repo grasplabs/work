@@ -1,0 +1,1480 @@
+import { compilerVersion } from "@grasp-os/compiler";
+import { definitionText } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import {
+  acceptedUpdateSchema,
+  appErrors,
+  fromBlueprintSchema,
+} from "@grasp-os/shared/apps";
+import type {
+  AcceptedUpdate,
+  AppBlueprintsApi,
+  AppVersion,
+  Blueprint,
+  BlueprintUpdate,
+  CreatedFromBlueprint,
+  FromBlueprint,
+} from "@grasp-os/shared/apps";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditEntry } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, BlueprintId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { blueprintWorkflowSchema } from "@grasp-os/shared/permissions";
+import type { BlueprintWorkflow } from "@grasp-os/shared/permissions";
+import { canBuild, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { waitUntil } from "cloudflare:workers";
+import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+
+import type { BuiltinBlueprint } from "#blueprints";
+
+import { versionMadeCurrent } from "./access-revocations.ts";
+import { appsFoundBy, stillOpenTo } from "./app-access.ts";
+import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
+import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
+import {
+  appFor,
+  blueprintFiles,
+  changeEntry,
+  checkPaths,
+  carriedDefinitions,
+  deleteOtherBlueprintTrees,
+  diffFiles,
+  editableApp,
+  findVersion,
+  latestVersion,
+  readStored,
+  readTree,
+  sameVersion,
+  storeBlueprintTree,
+  storedVersion,
+  storeTree,
+  hasPages,
+  toApp,
+  toVersion,
+  versionTree,
+} from "./apps.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWithDetailWhere,
+  outboxedIfChanged,
+} from "./audit-outbox.ts";
+import type { Acting } from "./auth/identity.ts";
+import {
+  appOrigins,
+  apps,
+  appVersions,
+  appWorkflowBindings,
+  blueprints,
+  permissions,
+} from "./db/core/schema.ts";
+import {
+  declarableOf,
+  declaredRequests,
+  toPermission,
+  workflowStartRequests,
+} from "./permissions.ts";
+import { makeInProject } from "./projects.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
+import { withPerson } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
+import { ensureReleaseContract } from "./workflow-catalog.ts";
+import { workflowSteps } from "./workflow-publish.ts";
+import {
+  createWorkflowResource,
+  definitionProblems,
+  deleteWorkflowResource,
+  workflowFile,
+} from "./workflow-resources.ts";
+
+// Blueprints: code to create Apps from, each its own record. A builder of
+// an App marks one of its versions as a blueprint, which whoever has a
+// role in the App (app-access.ts) and builds (an admin or builder in the
+// organization) creates an App of their own from. The release ships
+// others, the built-ins (apps/core/blueprints/, builtins.ts), which
+// everyone who builds creates from, and which only the install changes.
+// Either way the new App is theirs, with a fresh ID, and core records
+// where it came from (`app_origins`: the blueprint, a marked one's
+// version, the tree it was copied from), which grants nothing. Its first
+// version is the blueprint's code, and it asks for what the blueprint
+// declares, each request waiting for an admin: a built-in's
+// `blueprint.json`, or what the App asked for or was given as the version
+// was marked, of the kinds that name the same thing for whoever creates
+// from it (`declarableOf` in permissions.ts). Its builders ask for the
+// rest themselves. Nothing else
+// comes with it: none of the App's data (its storage, its workflows'
+// state, its runs), settings (parameter values), members or error log.
+// A marked blueprint's code is its version's tree, which never changes.
+//
+// The copy doesn't inherit what its source may have read
+// (app-provenance.ts): it has no sources until an admin grants its
+// requests, so whoever it is shared with meanwhile passes the check.
+// Every file a builder stored in the code is copied as it is, taken to
+// hold no data: builders must not put data into code. What chats about
+// the App start with is its instruction file in the Brain, the source's
+// own, which is never copied (instruction-files.ts).
+//
+// A built-in may also ship independent workflows (`workflows`, from the
+// release's `blueprint.json`): each App created from it gets one of each,
+// bound to it under the workflow's alias. Neither installing a built-in
+// nor creating from it grants authority (GRA-402). Threat model, and how
+// each is closed:
+//
+// - Authority copied with the code: each workflow is created fresh, the
+//   creator's own, its ID minted here, and its first version published
+//   from the release's definition as the creator's own publication. It
+//   holds no approval: each catalog binding it declares (a model, a
+//   connector) serves nothing until an admin approves it for that very
+//   version (workflow-bindings.ts). The App's permission to start it is
+//   a request that waits for an admin, as any other. Nothing is copied
+//   from another App or workflow, and no approval, grant or run written.
+// - The definition naming another workflow: its namespace and name are
+//   the new workflow's own, set before it is published, and publication
+//   refuses text naming anything else (`workflow.identity_mismatch`);
+//   what it binds resolves as any publication of the creator's would.
+// - The App's binding as a grant: it pins the version and nothing more
+//   (app-workflow-bindings.ts), and lands in the batch that creates the
+//   App, so the App is never seen without it.
+// - A marked blueprint carrying its App's workflows: it ships none; a
+//   copy's builders bind the workflows they want themselves.
+// - Workflows made in bulk or without trace: each counts toward the
+//   creator's quota (`workflowResourcesPerPerson`), and is audited as
+//   any creation and publication; its name is the blueprint's and the
+//   alias's with a random suffix, so copies never collide.
+// - A failure halfway: every definition is checked as publication checks
+//   it before any workflow is made, so a definition that wouldn't publish
+//   makes none. The workflows are created and published before the App's
+//   batch; if one of them fails, or the batch is refused, those made are
+//   deleted (`discardShipped`), and one a deletion misses stays the
+//   creator's own, bound to nothing and allowed nothing. Either way each counts toward the creator's
+//   quota, which deleted workflows do too.
+//
+// A built-in changes with the release, and an App created from it may
+// take the change: an update, offered, never applied (`blueprintUpdate`).
+// It is the blueprint's newer code merged file by file over the App's
+// latest version, from the code the App last took (kept under the App,
+// `app_origins.code`): what only the blueprint changed comes along, what
+// only the App's builders changed stays theirs, and a file both changed
+// stays theirs, listed as a conflict. Nothing is written until a builder
+// accepts exactly the update they saw (`acceptBlueprintUpdate`): then it
+// is the App's next version, theirs, live only once a builder publishes
+// it as any version (app-publish.ts), with the same checks, approvals and
+// permissions as any. It ships no workflows and
+// asks for nothing: a copy's builders ask for what the newer code needs.
+// So a customer's edit is never overwritten, and an update grants
+// nothing it didn't before.
+//
+// Marking, unmarking, installing, creating and accepting an update are
+// audited, each in the same batch as its change. Grasp staff neither
+// mark, unmark, create from blueprints nor take their updates: which Apps
+// get copied, and what code they run, is the client's decision, and
+// creating asks for permissions, which staff never do for a client.
+
+type Row = typeof blueprints.$inferSelect;
+
+/**
+ * Refuses Grasp staff: which of a client's Apps others copy, and copying
+ * one (which asks for permissions), is the client's to decide.
+ */
+const requireNotStaff = (by: Pick<Acting, "staff">): void => {
+  if (by.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+};
+
+/** Random hex characters a shipped workflow's name ends with. */
+const workflowSuffixLength = 8;
+
+/** Longest workflow name (`workflowNameSchema`). */
+const workflowNameMax = 63;
+
+/**
+ * The name of the workflow a copy of blueprint `blueprint` gets for its
+ * workflow `alias`: both, and a random suffix, as no name is ever given
+ * to two workflows.
+ */
+const shippedWorkflowName = (blueprint: string, alias: string): string => {
+  const suffix = crypto
+    .randomUUID()
+    .replaceAll("-", "")
+    .slice(0, workflowSuffixLength);
+  const prefix = `${blueprint}-${alias}`.slice(
+    0,
+    workflowNameMax - workflowSuffixLength - 1
+  );
+  return `${prefix}-${suffix}`;
+};
+
+/** A workflow a copy got, created and published for it. */
+interface ShippedWorkflow {
+  alias: string;
+  binding: string;
+  workflowId: string;
+  version: number;
+}
+
+/**
+ * Deletes the workflows made for a copy that was refused, before or at
+ * its batch, which nothing binds and nothing may start: best-effort, as
+ * the creator may delete one left behind themselves. Each still counts toward their quota,
+ * as any deleted workflow does.
+ */
+const discardShipped = async (
+  env: Env,
+  by: Acting,
+  workflows: readonly Pick<ShippedWorkflow, "workflowId">[]
+): Promise<void> => {
+  for (const { workflowId } of workflows) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      await deleteWorkflowResource(env, by, workflowId);
+    } catch (error) {
+      log.warn("blueprints.workflow_discard_failed", {
+        workflowId,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/**
+ * Creates and publishes, for `by`, a workflow of their own of each one
+ * `shipped` lists (see above): created and published one at a time, as
+ * `by` would themselves.
+ */
+const createShippedWorkflows = async (
+  env: Env,
+  by: Acting & Identity,
+  blueprint: string,
+  shipped: readonly BlueprintWorkflow[]
+): Promise<ShippedWorkflow[]> => {
+  // A grasp-workflow/2 document names no workflow: each copy's is
+  // published as the release wrote it, under a name of its own.
+  const named = shipped.map(({ alias, binding, definition }) => ({
+    alias,
+    binding,
+    name: shippedWorkflowName(blueprint, alias),
+    definition,
+  }));
+  // Every definition checked as its publication will check it, before any
+  // workflow is made: a creation counts toward the creator's quota for
+  // good, deleted or not, so none is made for a definition that wouldn't
+  // publish.
+  for (const { definition } of named) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    const problems = await definitionProblems(
+      env,
+      undefined,
+      definition,
+      `blueprint:${blueprint}`
+    );
+    if (problems.length > 0) {
+      throw workflowResourceErrors.create("workflow.definition_invalid", {
+        // Each a code, a pointer and fixed text, as publication refuses it.
+        problems: problems.map((problem) => ({ ...problem })),
+      });
+    }
+  }
+  const created: ShippedWorkflow[] = [];
+  // Every workflow made so far, published or not: deleted if a later one
+  // fails, so a refused copy leaves none behind.
+  const made: { workflowId: string }[] = [];
+  try {
+    for (const { alias, binding, name, definition } of named) {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      const workflow = await createWorkflowResource(env, by, name);
+      made.push({ workflowId: workflow.id });
+      // Its first version, built and made live as a publish of its draft
+      // would (workflow-publish.ts), with no draft to empty.
+      // oxlint-disable-next-line no-await-in-loop -- after its creation
+      const version = await workflowSteps.build(env, by, workflow.id, {
+        draft: { base: null, changes: {}, definition: null, revision: 0 },
+        files: new Map([[workflowFile, definition]]),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- after it is built
+      await workflowSteps.activate(env, by, workflow.id, {
+        version,
+        basedOn: null,
+        action: "version.published",
+        alongside: async () => await Promise.resolve([]),
+      });
+      created.push({ alias, binding, workflowId: workflow.id, version });
+    }
+  } catch (error) {
+    await discardShipped(env, by, made);
+    throw error;
+  }
+  return created;
+};
+
+const toBlueprint = (row: Row): Blueprint => ({
+  id: blueprintIdSchema.parse(row.id),
+  name: row.name,
+  description: row.description,
+  app: row.appId === null ? null : appIdSchema.parse(row.appId),
+  version: row.version,
+  markedBy: row.markedBy,
+  markedAt: row.markedAt.toISOString(),
+  permissions: row.permissions,
+});
+
+/** The blueprint `id`, if there is one. */
+const blueprintRow = async (
+  env: Env,
+  id: BlueprintId
+): Promise<Row | undefined> =>
+  await drizzle(env.DB)
+    .select()
+    .from(blueprints)
+    .where(eq(blueprints.id, id))
+    .get();
+
+/**
+ * The blueprints `by` may see, newest first: those of the Apps they have
+ * a role in, and, if they build, the built-ins.
+ */
+export const listBlueprints = async (
+  env: Env,
+  by: Acting
+): Promise<Blueprint[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ blueprint: blueprints })
+    .from(blueprints)
+    .leftJoin(apps, eq(apps.id, blueprints.appId))
+    .where(
+      or(
+        canBuild(by.role) ? isNull(blueprints.appId) : undefined,
+        and(isNotNull(blueprints.appId), appsFoundBy(env, by))
+      )
+    )
+    .orderBy(desc(blueprints.markedAt), asc(blueprints.id));
+  return rows.map(({ blueprint }) => toBlueprint(blueprint));
+};
+
+/**
+ * Marks a version as a blueprint: its tree, its App's name and
+ * description, and what its App asks for or was given that each App
+ * created from it asks for too (`declarableOf`). Marking it again changes
+ * nothing.
+ */
+export const markBlueprint = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  version: unknown
+): Promise<Blueprint> => {
+  const found = await editableApp(env, by, app);
+  requireNotStaff(by);
+  const row = await findVersion(env, found.id, version);
+  // Without the workflow versions it binds: each App created from it
+  // binds workflows of its own (`BlueprintWorkflow`), never this App's.
+  const versionDefinition = await readStored(row);
+  const { workflowBindings: _bound, ...definition } =
+    versionDefinition.definition;
+  const db = drizzle(env.DB);
+  const marked = async () =>
+    await db
+      .select()
+      .from(blueprints)
+      .where(
+        and(eq(blueprints.appId, found.id), eq(blueprints.version, row.version))
+      )
+      .get();
+  const already = await marked();
+  if (already) {
+    return toBlueprint(already);
+  }
+  const id = blueprintIdSchema.parse(crypto.randomUUID());
+  // Its code is the version's tree, already stored under the App and never
+  // deleted: nothing is copied, so marking and unmarking leave nothing
+  // behind in storage.
+  await auditedBatch(env, db, [
+    db
+      .insert(blueprints)
+      .values({
+        id,
+        name: found.name,
+        description: found.description,
+        tree: row.tree,
+        definition: definitionText(definition),
+        appId: found.id,
+        version: row.version,
+        // Unused (schema.ts): what an admin grants is the access.
+        approved: false,
+        permissions: await declarableOf(env, found.id),
+        markedBy: by.userId,
+        markedAt: new Date(),
+      })
+      .onConflictDoNothing(),
+    outboxedIfChanged(
+      db,
+      changeEntry(by, "app.blueprint.marked", found.id, {
+        version: row.version,
+        blueprint: id,
+      })
+    ),
+  ]);
+  const stored = await marked();
+  // Unmarked since the batch above.
+  if (!stored) {
+    throw appErrors.create("app.conflict");
+  }
+  return toBlueprint(stored);
+};
+
+/**
+ * Stops offering a blueprint; unmarking one that isn't there changes
+ * nothing. Apps already created from it stay as they are. A built-in has
+ * no App to be a builder of: only the release changes it.
+ */
+export const unmarkBlueprint = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<void> => {
+  const parsed = blueprintIdSchema.safeParse(id);
+  const row = parsed.success ? await blueprintRow(env, parsed.data) : undefined;
+  if (!row) {
+    return;
+  }
+  if (row.appId === null) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const found = await editableApp(env, by, row.appId);
+  requireNotStaff(by);
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db.delete(blueprints).where(eq(blueprints.id, row.id)),
+    outboxedIfChanged(
+      db,
+      changeEntry(by, "app.blueprint.unmarked", found.id, {
+        version: row.version,
+        blueprint: row.id,
+      })
+    ),
+  ]);
+};
+
+/**
+ * The code of `blueprint`, read for a create: refused as gone when a
+ * removal (`removeBuiltinBlueprint`) deleted its row and its trees since
+ * the row was read, rather than failing on the missing tree.
+ */
+const readBlueprintCode = async (
+  env: Env,
+  blueprint: Row,
+  appId: AppId | null
+): Promise<Map<string, string>> => {
+  const id = blueprintIdSchema.parse(blueprint.id);
+  try {
+    return await blueprintFiles(env, { id, appId, tree: blueprint.tree });
+  } catch (error) {
+    if (!(await blueprintRow(env, id))) {
+      throw appErrors.create("app.blueprint_not_found");
+    }
+    throw error;
+  }
+};
+
+/**
+ * Creates an App of `by`'s own from the blueprint `id`: its code as the
+ * App's first version, and requests for what it
+ * declares. All of it lands in one batch, or none of it (the files,
+ * stored first, are only named once it lands), and only while the
+ * blueprint is still there and, for a marked one, `by` still has a role
+ * in its App.
+ *
+ * `by` passes that App's check once, before anything is read, what it
+ * read included (`appFor`). The batch's guard repeats the role, not what
+ * it read, which SQL can't express; nor does it need to: the copy holds
+ * only code (above) and requests that wait for an
+ * admin, declared as the version was marked, so an App that reads more
+ * after the check adds nothing to the copy.
+ */
+export const createFromBlueprint = async (
+  env: Env,
+  by: Acting & Identity,
+  id: unknown,
+  input: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
+): Promise<CreatedFromBlueprint> => {
+  requireBuilder(by);
+  requireNotStaff(by);
+  const parsed = blueprintIdSchema.safeParse(id);
+  const blueprint = parsed.success
+    ? await blueprintRow(env, parsed.data)
+    : undefined;
+  if (!blueprint) {
+    throw appErrors.create("app.blueprint_not_found");
+  }
+  const source =
+    blueprint.appId === null
+      ? undefined
+      : await appFor(env, by, blueprint.appId, "user");
+  const { name, description } = appErrors.parse(
+    "app.invalid",
+    fromBlueprintSchema,
+    input
+  );
+  const { definition, text: takenDefinition } = await readStored(blueprint);
+  const files = await readBlueprintCode(env, blueprint, source?.id ?? null);
+  // Its code as its definition generates it, as every version's is: what
+  // the blueprint holds already (its version's, or a built-in's, which
+  // its build checks).
+  withGeneratedCode(files, definition);
+  // The blueprint's code, kept under the copy (`app_origins.code`): what an
+  // update of the blueprint is merged over.
+  const takenCode = await versionTree(files);
+  const app = appIdSchema.parse(crypto.randomUUID());
+  // Its requests checked before anything is stored: one the blueprint may
+  // no longer declare refuses the copy with nothing left behind in R2.
+  const requests = declaredRequests(
+    by,
+    app,
+    blueprint.permissions,
+    blueprint.id
+  );
+  refuseAppWorkflows(files.keys());
+  // What the blueprint ships, as the release stored it: refused whole if
+  // any of it isn't, with nothing made.
+  const shipped = blueprintWorkflowSchema.array().parse(blueprint.workflows);
+  if (shipped.length > 0) {
+    // Admitted before anything is made for the copy, as again below.
+    await admit?.();
+  }
+  const workflows = await createShippedWorkflows(
+    env,
+    by,
+    blueprint.id,
+    shipped
+  );
+  // The copy's first version binds each workflow it got that its code
+  // declares, as a version binds one (`workflowBindings`): what its
+  // activation binds, and keeps bound (app-workflow-bindings.ts).
+  const declared = workflows.filter(({ alias }) =>
+    definition.permissions.some(
+      (held) => held.alias === alias && held["~permission"] === "workflows"
+    )
+  );
+  const bound: AppDefinition =
+    declared.length === 0
+      ? definition
+      : {
+          ...definition,
+          workflowBindings: declared
+            .map(({ alias, workflowId }) => ({ alias, workflowId }))
+            .toSorted((a, b) => (a.alias < b.alias ? -1 : 1)),
+        };
+  let tree: Awaited<ReturnType<typeof storedVersion>>;
+  try {
+    tree = await storedVersion(env, app, files, bound);
+    await storeTree(env, app, tree);
+    await storeTree(env, app, takenCode);
+  } catch (error) {
+    await discardShipped(env, by, workflows);
+    throw error;
+  }
+  const starts = workflowStartRequests(by, app, workflows, blueprint.id);
+
+  const now = new Date();
+  const appRow: AppRow = {
+    id: app,
+    name,
+    description,
+    ownerId: by.userId,
+    responsibleId: null,
+    audienceType: null,
+    audienceId: null,
+    process: null,
+    blueprint: blueprint.id,
+    // Not live, as any new App, until its builders publish it.
+    currentVersion: null,
+    liveLabel: null,
+    archivedAt: null,
+    archivedBy: null,
+    pendingVersion: null,
+    status: "draft",
+    statusChangedAt: null,
+    statusChangedBy: null,
+    createdAt: now,
+    link: null,
+    removedAt: null,
+    removedBy: null,
+  };
+  const versionRow: VersionRow = {
+    appId: app,
+    version: 1,
+    parent: null,
+    tree: tree.tree,
+    // The blueprint's code, which is the copy's whole.
+    code: takenCode.tree,
+    definition: tree.definition.text,
+    definitionHash: tree.definition.hash,
+    files: files.size,
+    authorId: by.userId,
+    // Unused (schema.ts).
+    message: "",
+    createdAt: now,
+    // Unused (schema.ts): what an admin grants is the access.
+    approved: null,
+    pages: hasPages(files),
+    proposedBy: null,
+    label: null,
+    status: null,
+    publishedManifestHash: null,
+  };
+  const db = drizzle(env.DB);
+  // The App, only while the blueprint is still there and, for a marked
+  // one, `by` still has a role in its App (`stillOpenTo`), selected from
+  // its row: unmarked or unshared since they were read above, nothing is
+  // inserted, the version's row can't name an App that isn't there, and
+  // the whole batch is refused.
+  // The insert names its columns, and drizzle refuses fields that aren't
+  // the table's, by name and in order.
+  const appFromBlueprint = db
+    .select({
+      id: sql<string>`${appRow.id}`.as("id"),
+      name: sql<string>`${appRow.name}`.as("name"),
+      description: sql<string>`${appRow.description}`.as("description"),
+      ownerId: sql<string>`${appRow.ownerId}`.as("owner_id"),
+      responsibleId: sql<string | null>`NULL`.as("responsible_id"),
+      audienceType: sql<"person" | "team" | null>`NULL`.as("audience_type"),
+      audienceId: sql<string | null>`NULL`.as("audience_id"),
+      process: sql<string | null>`NULL`.as("process"),
+      blueprint: sql<string | null>`${appRow.blueprint}`.as("blueprint"),
+      currentVersion: sql<number | null>`${appRow.currentVersion}`.as(
+        "current_version"
+      ),
+      liveLabel: sql<string | null>`NULL`.as("live_label"),
+      archivedAt: sql<Date | null>`NULL`.as("archived_at"),
+      archivedBy: sql<null>`NULL`.as("archived_by"),
+      pendingVersion: sql<number | null>`${appRow.pendingVersion}`.as(
+        "pending_version"
+      ),
+      status: sql<"draft">`${appRow.status}`.as("status"),
+      statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
+      statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
+      createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
+      link: sql<string | null>`NULL`.as("link"),
+      removedAt: sql<Date | null>`NULL`.as("removed_at"),
+      removedBy: sql<string | null>`NULL`.as("removed_by"),
+    })
+    .from(blueprints)
+    .where(
+      and(
+        eq(blueprints.id, blueprint.id),
+        source ? stillOpenTo(by, source.id) : undefined
+      )
+    );
+  const statements = [
+    db.insert(apps).select(appFromBlueprint),
+    // Where it came from, core's record (`app_origins`): only here, with
+    // the App, so no App has one it wasn't created with.
+    db.insert(appOrigins).values({
+      appId: app,
+      blueprintId: blueprint.id,
+      blueprintVersion: blueprint.version,
+      tree: blueprint.tree,
+      code: takenCode.tree,
+      // The blueprint's own, as taken: what an update merges over.
+      definition: takenDefinition,
+      createdAt: now,
+    }),
+    outboxed(
+      db,
+      changeEntry(by, "app.created", app, {
+        blueprint: blueprint.id,
+        fromApp: blueprint.appId,
+        fromVersion: blueprint.version,
+        fromTree: blueprint.tree,
+      })
+    ),
+    db.insert(appVersions).values(versionRow),
+    outboxed(
+      db,
+      changeEntry(by, "app.committed", app, {
+        version: 1,
+        parent: null,
+        tree: tree.tree,
+        definition: tree.definition.hash,
+        files: files.size,
+      })
+    ),
+    // One statement each: D1 binds at most 100 values to one.
+    ...requests.rows.map((row) => db.insert(permissions).values(row)),
+    ...requests.entries.map((entry) => outboxed(db, entry)),
+    // Each workflow the copy got, bound under its alias, and the request
+    // to start it, which waits for an admin.
+    ...workflows.flatMap(({ alias, workflowId, version }) => {
+      const binding = crypto.randomUUID();
+      return [
+        db.insert(appWorkflowBindings).values({
+          id: binding,
+          appId: app,
+          alias,
+          // Only while the workflow is live, as any binding: otherwise
+          // NULL, which fails the batch.
+          workflowResourceId: sql`(SELECT id FROM workflow_resources
+            WHERE id = ${workflowId} AND deleted_at IS NULL)`,
+          workflowResourceVersion: version,
+          status: "active",
+          boundBy: by.userId,
+          boundAt: now,
+          removedBy: null,
+          removedAt: null,
+        }),
+        outboxed(db, {
+          actor: by.actor ?? actorOf(by),
+          action: "workflow.app_binding.bound",
+          target: { type: "app", id: app },
+          detail: { binding, alias, workflowId, version },
+        }),
+      ];
+    }),
+    ...starts.rows.map((row) => db.insert(permissions).values(row)),
+    ...starts.entries.map((entry) => outboxed(db, entry)),
+  ] as const;
+  try {
+    // Admitted last, with nothing slow left before the write.
+    await admit?.();
+    await auditedBatch(env, db, statements);
+  } catch (error) {
+    await discardShipped(env, by, workflows);
+    if (!(await blueprintRow(env, blueprintIdSchema.parse(blueprint.id)))) {
+      throw appErrors.create("app.blueprint_not_found");
+    }
+    if (source) {
+      // Refused, as for any call, when they lost their role in the App.
+      await appFor(env, by, source.id, "user");
+    }
+    throw error;
+  }
+  return {
+    app: toApp(appRow),
+    version: toVersion(versionRow),
+    permissions: [...requests.rows, ...starts.rows].map(toPermission),
+  };
+};
+
+/**
+ * A merge's files and definition (see `BlueprintUpdate`), and the paths
+ * both changed.
+ */
+interface Merged {
+  files: Map<string, string>;
+  definition: AppDefinition;
+  conflicts: string[];
+  /** Whether both changed the definition, each otherwise. */
+  definitionConflict: boolean;
+}
+
+/** One side of a merge: its files, and its definition as stored. */
+interface MergeSide {
+  files: ReadonlyMap<string, string>;
+  definition: StoredDefinition;
+}
+
+/**
+ * Of a value `base` had, which `ours` and `theirs` may each have changed:
+ * theirs where ours didn't change it or changed it alike, else ours,
+ * which conflicts where theirs changed it too.
+ */
+const threeWay = <Value>(
+  was: Value,
+  mine: Value,
+  now: Value
+): { kept: Value; conflict: boolean } =>
+  mine === was || mine === now
+    ? { kept: now, conflict: false }
+    : { kept: mine, conflict: now !== was };
+
+/**
+ * `ours`' function IDs, each at a path `theirs` renamed from `base` (the
+ * ID `base` gives that path, at another path in `theirs`) renamed so in
+ * `ours` too, whatever ID `ours` gives it, where `ours` still has the
+ * path: a blueprint's rename reaches the copy as a rename. A built-in's
+ * hand-written definition gives no IDs, so its renames reach a copy as a
+ * function removed and another added, which a bound workflow's publish
+ * check refuses.
+ */
+const renamedAsTheirs = (
+  base: AppDefinition,
+  ours: AppDefinition,
+  theirs: AppDefinition
+): NonNullable<AppDefinition["functions"]> => {
+  const now = new Map(
+    (theirs.functions ?? []).map(({ id, name }) => [id, name])
+  );
+  const renamed = new Map(
+    (base.functions ?? []).flatMap(({ id, name }) => {
+      const to = now.get(id);
+      return to === undefined || to === name ? [] : [[name, to] as const];
+    })
+  );
+  return (ours.functions ?? []).map((fn) => {
+    const to = renamed.get(fn.name);
+    return to === undefined ? fn : { ...fn, name: to };
+  });
+};
+
+/**
+ * `theirs` (the blueprint's code and definition now) merged over `ours`
+ * (the App's latest version's) from `base` (what the App last took of the
+ * blueprint), file by file and the definition as a whole: what only one
+ * side changed comes from that side, and what both changed (to different
+ * content) stays as the App has it, listed as a conflict. The config
+ * and schema aren't merged: they are generated from the merged definition, as in
+ * every version; a definition both changed is a conflict of its own
+ * (`definitionConflict`), the code it generates alike or not.
+ */
+const mergeOver = (
+  base: MergeSide,
+  ours: MergeSide,
+  theirs: MergeSide
+): Merged => {
+  const files = new Map<string, string>();
+  const conflicts: string[] = [];
+  const paths = new Set([
+    ...base.files.keys(),
+    ...ours.files.keys(),
+    ...theirs.files.keys(),
+  ]);
+  for (const path of [...paths].toSorted()) {
+    if (generatedPaths.has(path)) {
+      continue;
+    }
+    const mine = ours.files.get(path);
+    const { kept, conflict } = threeWay(
+      base.files.get(path),
+      mine,
+      theirs.files.get(path)
+    );
+    if (conflict) {
+      conflicts.push(path);
+    }
+    if (kept !== undefined) {
+      files.set(path, kept);
+    }
+  }
+  // Compared by their text, one for equal definitions, without the IDs
+  // of the functions each side's code exports: a copy's own, given as it
+  // is committed, never a change of the definition. The version the
+  // update commits gives them again, carried from the copy's
+  // (apps.ts, `storedVersion`).
+  const texts = [base, ours, theirs].map(({ definition }) =>
+    definitionText({ ...definition.definition, functions: [] })
+  );
+  const { kept: keptText, conflict } = threeWay(texts[0], texts[1], texts[2]);
+  // The copy's function IDs, each renamed as the blueprint renamed it
+  // (the same ID under a new name) where the copy kept the name it took:
+  // the version the update commits gives them as its code exports them.
+  const { functions: _ids, ...chosen } =
+    keptText === texts[2]
+      ? theirs.definition.definition
+      : ours.definition.definition;
+  const functions = renamedAsTheirs(
+    base.definition.definition,
+    ours.definition.definition,
+    theirs.definition.definition
+  );
+  const kept = functions.length === 0 ? chosen : { ...chosen, functions };
+  // Its config and schema follow it: no file conflict of their own, a
+  // definition conflict being said as such, whether or not the code the
+  // two generate differs (stable IDs alone change none).
+  withGeneratedCode(files, kept);
+  return {
+    files,
+    definition: kept,
+    conflicts: conflicts.toSorted(),
+    definitionConflict: conflict,
+  };
+};
+
+/** An update of the built-in an App was created from, worked out now. */
+interface PendingUpdate {
+  app: AppId;
+  origin: typeof appOrigins.$inferSelect;
+  blueprint: Row;
+  latest: VersionRow;
+  ours: Map<string, string>;
+  /**
+   * The blueprint's code now, and its definition: the next base.
+   */
+  theirs: MergeSide;
+  merged: Merged;
+}
+
+/**
+ * The update of the built-in blueprint `app` was created from, for one of
+ * its builders: undefined when it was created from none, from a marked
+ * version (whose code never changes), or the blueprint is gone or at the
+ * code the App last took.
+ */
+const pendingUpdate = async (
+  env: Env,
+  by: Acting,
+  app: unknown
+): Promise<PendingUpdate | undefined> => {
+  const found = await appFor(env, by, app, "builder");
+  requireNotStaff(by);
+  const origin = await drizzle(env.DB)
+    .select()
+    .from(appOrigins)
+    .where(eq(appOrigins.appId, found.id))
+    .get();
+  const blueprint =
+    origin === undefined
+      ? undefined
+      : await blueprintRow(env, blueprintIdSchema.parse(origin.blueprintId));
+  const latest = await latestVersion(env, found.id);
+  if (
+    origin === undefined ||
+    blueprint === undefined ||
+    blueprint.appId !== null ||
+    (blueprint.tree === origin.tree &&
+      blueprint.definition === origin.definition) ||
+    latest === null
+  ) {
+    return undefined;
+  }
+  const latestRow = await findVersion(env, found.id, latest);
+  let blueprintNow: Map<string, string>;
+  try {
+    blueprintNow = await readBlueprintCode(env, blueprint, null);
+  } catch (error) {
+    // Removed since its row was read: no update to offer.
+    if (appErrors.codeOf(error) === "app.blueprint_not_found") {
+      return undefined;
+    }
+    throw error;
+  }
+  const [base, ours] = await Promise.all([
+    readTree(env, found.id, origin.code),
+    readTree(env, found.id, latestRow.tree),
+  ]);
+  const [baseDefinition, oursDefinition, theirsDefinition] = await Promise.all([
+    readStored(origin),
+    readStored(latestRow),
+    readStored(blueprint),
+  ]);
+  const theirSide = { files: blueprintNow, definition: theirsDefinition };
+  return {
+    app: found.id,
+    origin,
+    blueprint,
+    latest: latestRow,
+    ours,
+    theirs: theirSide,
+    merged: mergeOver(
+      { files: base, definition: baseDefinition },
+      { files: ours, definition: oursDefinition },
+      theirSide
+    ),
+  };
+};
+
+/**
+ * The newer code of the built-in blueprint `app` was created from, merged
+ * over its latest version (`BlueprintUpdate`), for one of its builders;
+ * null when there is none. Reads only: nothing changes until a builder
+ * accepts it (`acceptBlueprintUpdate`).
+ */
+export const blueprintUpdate = async (
+  env: Env,
+  by: Acting,
+  app: unknown
+): Promise<BlueprintUpdate | null> => {
+  const pending = await pendingUpdate(env, by, app);
+  if (pending === undefined) {
+    return null;
+  }
+  return {
+    blueprint: pending.blueprint.id,
+    from: pending.origin.tree,
+    to: pending.blueprint.tree,
+    definition: pending.theirs.definition.hash,
+    over: pending.latest.version,
+    // What Grasp generates is no change of the blueprint's.
+    changes: diffFiles(pending.ours, pending.merged.files).filter(
+      ({ path }) => !isGeneratedServerFile(path)
+    ),
+    conflicts: pending.merged.conflicts,
+    definitionConflict: pending.merged.definitionConflict,
+  };
+};
+
+/**
+ * Accepts the update a builder of `app` saw (`accepted`: the blueprint's
+ * code it goes to, and the version it merges over): its merged files
+ * committed as the App's next version, by them, and the App's origin
+ * moved on to the code it took, in one audited batch. Refused as
+ * `app.conflict` when what they saw no longer holds: the blueprint
+ * changed again, a version was committed meanwhile, or the update was
+ * accepted already. Nothing goes live: a builder publishes the version
+ * (`VersionsApi.rollback`, publish.ts), and it asks for nothing.
+ */
+/**
+ * Whether the update is still the one offered: the blueprint at the same
+ * code and definition (one of them alone can change), over the same
+ * version.
+ */
+const stillOffered = (
+  pending: {
+    blueprint: { tree: string };
+    theirs: MergeSide;
+    latest: { version: number };
+  },
+  accepted: { to: string; definition: string; over: number }
+): boolean =>
+  pending.blueprint.tree === accepted.to &&
+  pending.theirs.definition.hash === accepted.definition &&
+  pending.latest.version === accepted.over;
+
+export const acceptBlueprintUpdate = async (
+  env: Env,
+  by: Acting,
+  app: unknown,
+  input: unknown
+): Promise<AppVersion> => {
+  const accepted = appErrors.parse("app.invalid", acceptedUpdateSchema, input);
+  const pending = await pendingUpdate(env, by, app);
+  if (pending === undefined || !stillOffered(pending, accepted)) {
+    throw appErrors.create("app.conflict");
+  }
+  const { app: appId, origin, blueprint, latest, ours, theirs } = pending;
+  const { files, definition, conflicts, definitionConflict } = pending.merged;
+  checkPaths(
+    files.keys(),
+    new Set([...files.keys()].filter((path) => !ours.has(path)))
+  );
+  refuseAppWorkflows(files.keys());
+  const tree = await storedVersion(
+    env,
+    appId,
+    files,
+    definition,
+    await carriedDefinitions(env, appId, latest)
+  );
+  const base = await versionTree(theirs.files);
+  await storeTree(env, appId, base);
+  const changed = !sameVersion(tree, latest);
+  if (changed) {
+    await storeTree(env, appId, tree);
+  }
+  const db = drizzle(env.DB);
+  // The origin moves on only from the code and definition the builder's
+  // update was worked out from, to the blueprint's as they saw them, over
+  // the version they saw (it runs before this batch commits a version):
+  // otherwise NULL, which the columns `tree` and `code` refuse, and the
+  // whole batch with them. Written as an upsert whose insert is refused
+  // (its `blueprint_id` read from the origin, NULL without one): an
+  // origin a removal of the built-in deleted since
+  // (`removeBuiltinBlueprint`) refuses the batch too, so no version is
+  // committed for an App no longer offered the update.
+  const stillSeen = sql`${appOrigins.tree} = ${origin.tree}
+    AND ${appOrigins.definition} = ${origin.definition} AND EXISTS (
+    SELECT 1 FROM ${blueprints}
+    WHERE ${blueprints.id} = ${blueprint.id} AND ${blueprints.tree} = ${blueprint.tree}
+      AND ${blueprints.definition} = ${theirs.definition.text})
+    AND (SELECT max(${appVersions.version}) FROM ${appVersions}
+      WHERE ${appVersions.appId} = ${appId}) = ${latest.version}`;
+  const moved = {
+    tree: sql`CASE WHEN ${stillSeen} THEN ${blueprint.tree} ELSE NULL END`,
+    code: sql`CASE WHEN ${stillSeen} THEN ${base.tree} ELSE NULL END`,
+    definition: theirs.definition.text,
+    blueprintVersion: null,
+  };
+  const moveOrigin = db
+    .insert(appOrigins)
+    .values({
+      appId,
+      // The origin's own, NULL when it is gone: never a row of its own.
+      blueprintId: sql`(SELECT ${appOrigins.blueprintId} FROM ${appOrigins} WHERE ${appOrigins.appId} = ${appId})`,
+      tree: origin.tree,
+      code: origin.code,
+      createdAt: new Date(),
+    })
+    .onConflictDoUpdate({ target: appOrigins.appId, set: moved });
+  const updated = (version: number) =>
+    outboxed(
+      db,
+      changeEntry(by, "app.blueprint.updated", appId, {
+        blueprint: blueprint.id,
+        from: origin.tree,
+        to: blueprint.tree,
+        version,
+        conflicts: conflicts.length,
+        definitionConflict,
+      })
+    );
+  const row: VersionRow = {
+    appId,
+    version: latest.version + 1,
+    parent: latest.version,
+    tree: tree.tree,
+    code: tree.tree,
+    definition: tree.definition.text,
+    definitionHash: tree.definition.hash,
+    files: files.size,
+    authorId: by.userId,
+    // Unused (schema.ts).
+    message: "",
+    createdAt: new Date(),
+    approved: null,
+    pages: hasPages(files),
+    proposedBy: null,
+    label: null,
+    status: null,
+    publishedManifestHash: null,
+  };
+  // Nothing of the App's files changes when each of the blueprint's
+  // changes was the App's already, or conflicts: only its origin moves on.
+  const write = changed
+    ? ([
+        moveOrigin,
+        db.insert(appVersions).values(row),
+        outboxed(
+          db,
+          changeEntry(by, "app.committed", appId, {
+            version: row.version,
+            parent: row.parent,
+            tree: row.tree,
+            definition: row.definitionHash,
+            files: row.files,
+          })
+        ),
+        updated(row.version),
+      ] as const)
+    : ([moveOrigin, updated(latest.version)] as const);
+  try {
+    await auditedBatch(env, db, write);
+  } catch (error) {
+    const now = await pendingUpdate(env, by, appId);
+    if (now === undefined || !stillOffered(now, accepted)) {
+      throw appErrors.create("app.conflict");
+    }
+    throw error;
+  }
+  if (changed) {
+    // The pages open on the App hear of it, as of any commit: a chat's
+    // preview showing the App's latest version takes it.
+    waitUntil(versionMadeCurrent(env, appId));
+  }
+  return toVersion(changed ? row : latest);
+};
+
+/** An audit entry of the release's install: Grasp, with no person. */
+const installEntry = (
+  action: string,
+  blueprint: string,
+  detail: AuditEntry["detail"]
+): AuditEntry => ({
+  actor: { type: "system" },
+  action,
+  target: { type: "blueprint", id: blueprint },
+  detail,
+});
+
+/**
+ * Deletes the trees of the built-in `id`'s earlier releases, now that its
+ * row names `kept`: best-effort, since nothing reads them. One that isn't
+ * deleted is only logged, and deleted by the next install, which deletes
+ * every tree but the one its row names. Installs run one at a time (the
+ * `Builtins` singleton, builtins.ts), so none deletes a tree another is
+ * about to name. A person creating an App from the built-in just as its
+ * tree is replaced may see that create fail; trying again creates it from
+ * the new one.
+ */
+const deleteReplacedTrees = async (
+  env: Env,
+  id: BlueprintId,
+  kept: string
+): Promise<void> => {
+  try {
+    await deleteOtherBlueprintTrees(env, id, kept);
+  } catch (error) {
+    log.warn("builtins.tree_delete_failed", {
+      blueprint: id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Installs the release's built-in blueprint as a blueprint like any
+ * other, under its folder's name, which never changes: created if it
+ * isn't there, or changed if its name, description, code or what it
+ * declares each App created from it asks for differ from what's stored,
+ * in one audited batch, so installing it again writes nothing. The
+ * catalog contracts its workflows bind are published first, each only if
+ * its key isn't taken yet, and audited only then. Apps created
+ * from it earlier keep their code and their permissions. The trees of its
+ * earlier releases are deleted once its row names the new one.
+ *
+ * Two installs at once write the same row: the second changes nothing,
+ * and records nothing.
+ */
+export const installBuiltinBlueprint = async (
+  env: Env,
+  builtin: BuiltinBlueprint
+): Promise<void> => {
+  const id = blueprintIdSchema.parse(builtin.id);
+  const { name, description } = appErrors.parse(
+    "app.invalid",
+    fromBlueprintSchema,
+    { name: builtin.name, description: builtin.description }
+  );
+  const files = new Map(Object.entries(builtin.files));
+  const tree = await versionTree(files);
+  // Checked, and as a version stores it: its build checked it too.
+  const definition = await readStored(builtin);
+  const declared = [...builtin.permissions];
+  const shipped = blueprintWorkflowSchema.array().parse(builtin.workflows);
+  const stored = await blueprintRow(env, id);
+  const differs =
+    stored !== undefined &&
+    (stored.name !== name ||
+      stored.description !== description ||
+      stored.tree !== tree.tree ||
+      stored.definition !== definition.text ||
+      JSON.stringify(stored.permissions) !== JSON.stringify(declared) ||
+      JSON.stringify(stored.workflows) !== JSON.stringify(shipped));
+  if (stored === undefined || stored.tree !== tree.tree) {
+    await storeBlueprintTree(env, id, tree);
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const created =
+    stored === undefined
+      ? [
+          db
+            .insert(blueprints)
+            .values({
+              id,
+              name,
+              description,
+              tree: tree.tree,
+              definition: definition.text,
+              appId: null,
+              version: null,
+              approved: false,
+              permissions: declared,
+              workflows: shipped,
+              markedBy: null,
+              markedAt: now,
+            })
+            .onConflictDoNothing(),
+          outboxedIfChanged(
+            db,
+            installEntry("blueprint.installed", id, {
+              tree: tree.tree,
+              definition: definition.hash,
+              release: compilerVersion,
+            })
+          ),
+        ]
+      : [];
+  const changed = differs
+    ? [
+        db
+          .update(blueprints)
+          .set({
+            name,
+            description,
+            tree: tree.tree,
+            definition: definition.text,
+            permissions: declared,
+            workflows: shipped,
+            markedAt: now,
+          })
+          .where(
+            and(
+              eq(blueprints.id, id),
+              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.definition} IS NOT ${definition.text} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)})`
+            )
+          ),
+        outboxedIfChanged(
+          db,
+          installEntry("blueprint.changed", id, {
+            name,
+            // Content, not an identifier, so by its SHA-256, as the audit
+            // log keeps identifier-sized values only.
+            description: await sha256Hex(description),
+            tree: tree.tree,
+            definition: definition.hash,
+            release: compilerVersion,
+            // What copies ask for and get, by the SHA-256 of each as stored.
+            permissions: await sha256Hex(JSON.stringify(declared)),
+            workflows: await sha256Hex(JSON.stringify(shipped)),
+          })
+        ),
+      ]
+    : [];
+  // The contracts its workflows bind, before any copy publishes one: each
+  // published once, by the first install that ships it, and never changed.
+  for (const contract of builtin.contracts) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    await ensureReleaseContract(env, contract, { builtin: builtin.id });
+  }
+  const [first, ...rest] = [...created, ...changed];
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
+  }
+  await deleteReplacedTrees(env, id, tree.tree);
+};
+
+/**
+ * The built-ins an earlier release installed that `shipped` (the ids of
+ * the release's own) doesn't hold: those the release no longer ships.
+ */
+export const unshippedBuiltins = async (
+  env: Env,
+  shipped: readonly string[]
+): Promise<BlueprintId[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: blueprints.id })
+    .from(blueprints)
+    .where(isNull(blueprints.appId))
+    .orderBy(asc(blueprints.id));
+  return rows
+    .filter(({ id }) => !shipped.includes(id))
+    .map(({ id }) => blueprintIdSchema.parse(id));
+};
+
+/**
+ * Removes the built-in `id`, which the release no longer ships: in one
+ * audited batch its row, and the origin (`app_origins`) of every App
+ * created from it, which detaches them: they keep their code, their
+ * versions and their label (`apps.blueprint`), and are offered no update
+ * from it again. No later release ships another built-in under its id
+ * (`ids.json`, build-blueprints.ts), which also covers a deployment that
+ * skips this release and so never detaches them. The event counts the
+ * Apps detached. Then its trees. A row never names a
+ * tree that is gone, so a release that ships it again (a rollback) finds
+ * it whole; a failed batch leaves all of it for the next install to
+ * remove. A tree whose delete fails is only logged and stays in R2,
+ * holding the built-in's code as the release shipped it and no client
+ * data: nothing reads it once the row is gone. It goes only if a
+ * rollback installs the built-in again, whose install deletes every tree
+ * of the id but its own (`deleteReplacedTrees`); otherwise it stays, a
+ * few KB per failed delete. A create that
+ * races the removal is refused as for any blueprint that is gone
+ * (`createFromBlueprint`), and an update accepted as it lands as a
+ * conflict (`acceptBlueprintUpdate`). Removing one that is gone already
+ * writes nothing, and records nothing.
+ */
+export const removeBuiltinBlueprint = async (
+  env: Env,
+  id: BlueprintId
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  // A built-in's copies' origins: a marked blueprint's name its version.
+  const copies = and(
+    eq(appOrigins.blueprintId, id),
+    isNull(appOrigins.blueprintVersion)
+  );
+  await auditedBatch(env, db, [
+    db
+      .delete(blueprints)
+      .where(and(eq(blueprints.id, id), isNull(blueprints.appId))),
+    // Counted as the event is stored, before the origins go below.
+    outboxedEventWithDetailWhere(
+      db,
+      createAuditEvent(
+        installEntry("blueprint.removed", id, { release: compilerVersion }),
+        "core"
+      ),
+      { detached: sql`(SELECT count(*) FROM ${appOrigins} WHERE ${copies})` },
+      sql`changes() > 0`
+    ),
+    db.delete(appOrigins).where(copies),
+  ]);
+  try {
+    await deleteOtherBlueprintTrees(env, id);
+  } catch (error) {
+    log.warn("builtins.tree_delete_failed", {
+      blueprint: id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/** A signed-in person's `apps.blueprints`. */
+export class AppBlueprintsRpc
+  extends CoreRpcTarget
+  implements AppBlueprintsApi
+{
+  readonly #env: Env;
+  readonly #check: SessionCheck;
+
+  constructor(env: Env, check: SessionCheck) {
+    super();
+    this.#env = env;
+    this.#check = check;
+  }
+
+  async list(): Promise<Blueprint[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listBlueprints(this.#env, by)
+    );
+  }
+
+  async mark(app: string, version: number): Promise<Blueprint> {
+    return await withPerson(
+      this.#check,
+      async (by) => await markBlueprint(this.#env, by, app, version)
+    );
+  }
+
+  async unmark(blueprint: string): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await unmarkBlueprint(this.#env, by, blueprint);
+    });
+  }
+
+  async create(
+    blueprint: string,
+    input: FromBlueprint,
+    project?: string
+  ): Promise<CreatedFromBlueprint> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await makeInProject(
+          this.#env,
+          by,
+          project,
+          "app",
+          async () =>
+            await createFromBlueprint(this.#env, by, blueprint, input),
+          ({ app }) => app.id
+        )
+    );
+  }
+
+  async update(app: string): Promise<BlueprintUpdate | null> {
+    return await withPerson(
+      this.#check,
+      async (by) => await blueprintUpdate(this.#env, by, app)
+    );
+  }
+
+  async acceptUpdate(
+    app: string,
+    accepted: AcceptedUpdate
+  ): Promise<AppVersion> {
+    return await withPerson(
+      this.#check,
+      async (by) => await acceptBlueprintUpdate(this.#env, by, app, accepted)
+    );
+  }
+}

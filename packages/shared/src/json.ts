@@ -1,0 +1,148 @@
+/** A JSON value. Keys whose value is `undefined` are left out, as in JSON. */
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly Json[]
+  | { readonly [key: string]: Json | undefined };
+
+/** Whether `value` is an object and not an array: a record of its keys. */
+export function isRecord(
+  value: Json | undefined
+): value is Readonly<Record<string, Json | undefined>>;
+export function isRecord(value: unknown): value is Record<string, unknown>;
+export function isRecord(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether a value is a JSON object: its prototype is `Object`'s or none, so
+ * not an array, a class instance, a function or an RPC stub.
+ */
+export const isPlainObject = (
+  value: unknown
+): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+/**
+ * `value` with every object and array in it frozen, frozen ones included,
+ * since a frozen object can hold one that isn't; a shared or cyclic value
+ * is walked once.
+ */
+export const deepFreeze = <Value>(
+  value: Value,
+  seen = new WeakSet<object>()
+): Value => {
+  if (typeof value === "object" && value !== null && !seen.has(value)) {
+    seen.add(value);
+    Object.freeze(value);
+    for (const entry of Object.values(value)) {
+      deepFreeze(entry, seen);
+    }
+  }
+  return value;
+};
+
+/** `record` without its keys whose value is undefined, as JSON leaves them out. */
+export const definedFields = (
+  record: Readonly<Record<string, Json | undefined>>
+): Record<string, Json> =>
+  Object.fromEntries(
+    Object.entries(record).filter(
+      (entry): entry is [string, Json] => entry[1] !== undefined
+    )
+  );
+
+// `Array.isArray` doesn't narrow a readonly array type.
+const isJsonArray = (value: Json): value is readonly Json[] =>
+  Array.isArray(value);
+
+/**
+ * JSON with object keys sorted by UTF-16 code unit and no whitespace, so equal
+ * values always give the same text, whatever the locale. For values without
+ * special number forms this matches RFC 8785 (JCS), so anyone can recompute
+ * it. Keys whose value is `undefined` are left out, as `JSON.stringify` does.
+ */
+export const canonicalJson = (value: Json): string => {
+  if (isJsonArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const members: string[] = [];
+    // Keys are unique, so no two compare equal.
+    for (const [key, member] of Object.entries(value).toSorted(([a], [b]) =>
+      a < b ? -1 : 1
+    )) {
+      if (member !== undefined) {
+        members.push(`${JSON.stringify(key)}:${canonicalJson(member)}`);
+      }
+    }
+    return `{${members.join(",")}}`;
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new TypeError("JSON has no representation for this number");
+  }
+  // `undefined`, a function or a symbol, past the `Json` type: refused,
+  // as a number JSON can't hold is, never written as text that isn't JSON
+  // (`[,]`) or as a `null` the data never held. Only an object's
+  // `undefined` member is left out above, as an absent one.
+  const text: string | undefined = JSON.stringify(value);
+  if (text === undefined) {
+    throw new TypeError("JSON has no representation for this value");
+  }
+  return text;
+};
+
+/**
+ * The canonical text of `value`, which is JSON data (a manifest, a
+ * report, a verb map): its JSON form with every object's keys in order,
+ * so equal data has equal text.
+ */
+export const canonicalText = (value: unknown): string => {
+  // SAFETY: what JSON.parse answers is JSON.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
+  return canonicalJson(json);
+};
+
+/**
+ * A JSON Pointer (RFC 6901): `""` for the whole document, or `/` before
+ * each reference token, `~0` and `~1` the only escapes (for `~` and `/`).
+ * The grammar of section 3, nothing else: never an expression.
+ */
+export const jsonPointerPattern = /^(?:\/(?:[^~/]|~[01])*)*$/u;
+
+/**
+ * The value at JSON Pointer `pointer` in `document` (RFC 6901, section 4),
+ * or undefined where there is none: an object's own member by name, an
+ * array's element by its index in decimal without leading zeros.
+ */
+export const valueAtPointer = (
+  document: Json,
+  pointer: string
+): Json | undefined => {
+  if (!jsonPointerPattern.test(pointer)) {
+    return undefined;
+  }
+  let value: Json | undefined = document;
+  for (const raw of pointer.split("/").slice(1)) {
+    const token = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (value === undefined || value === null || typeof value !== "object") {
+      return undefined;
+    }
+    if (isJsonArray(value)) {
+      value = /^(?:0|[1-9]\d*)$/u.test(token)
+        ? value[Number(token)]
+        : undefined;
+    } else {
+      value = Object.hasOwn(value, token) ? value[token] : undefined;
+    }
+  }
+  return value;
+};

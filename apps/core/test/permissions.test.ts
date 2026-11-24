@@ -1,0 +1,998 @@
+import { signCapability } from "@grasp-os/shared/capability";
+import {
+  authoritySchema,
+  bindingNameSchema,
+  permissionObjectSchema,
+} from "@grasp-os/shared/permissions";
+import type {
+  Authority,
+  PermissionRequest,
+  PermissionStatus,
+  PermissionSubjectInput,
+} from "@grasp-os/shared/permissions";
+import type { Role } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import {
+  authorize,
+  grantPermission,
+  revokePermission,
+} from "../src/permissions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
+import { grantReviewed, outlook, reviewedOf } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { actingFor, connectionIn, envOf, reached } from "./contexts.ts";
+import { mockIdp } from "./idp.ts";
+import {
+  runMinuteTasks,
+  waitingInOutbox,
+  whileLogDown,
+} from "./maintenance.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
+
+// Apps and agents start with nothing: a person asks, an admin grants, and
+// every call is checked again on the server, down to connect, which only
+// acts on a capability core signed for exactly that call. These tests try
+// to get around each of those.
+
+const idp = mockIdp();
+
+/**
+ * A migration's statement that deletes rows: readD1Migrations keeps the
+ * comments before each statement.
+ */
+const deleteStatement = /^DELETE\b/mu;
+
+/** A signed-in person's permission API, on a connection of their own. */
+const permissionApi = async (role: Role) => await signedInApi(idp, role);
+
+type Api = Awaited<ReturnType<typeof permissionApi>>["api"];
+
+/** A new App in the registry, as a permission's subject. */
+const newApp = async (api: Api) => {
+  const { id } = await api.apps.create({ name: `App ${unique()}` });
+  return { type: "app" as const, appId: id };
+};
+
+/**
+ * What App code gets when it calls the connection stub `binding` from its
+ * env. These tests register no connection in connect, so
+ * "connect.connection_not_found" is a call that passed every check, core's
+ * and connect's capability check.
+ */
+const callStub = async (
+  bindings: Awaited<ReturnType<typeof envOf>>,
+  binding = "OUTLOOK",
+  action = "mail.list"
+): Promise<string> => {
+  const stub = connectionIn(bindings, binding);
+  return stub ? await outcome(stub.call(action, {})) : "no binding";
+};
+
+/** Builds the env as a workflow start or resume does, and calls `binding`. */
+const callThrough = async (
+  authority: Authority,
+  binding: string,
+  action = "mail.list"
+): Promise<string> => await callStub(await envOf(authority), binding, action);
+
+/** An agent's request on App `appId`: the one way a request names another App. */
+const onApp = (appId: string): PermissionRequest => ({
+  subject: { type: "agent", agentId: `agent-${unique()}` },
+  object: { type: "app", appId },
+  actions: ["read"],
+  binding: "INVOICES",
+});
+
+describe("permissions", () => {
+  it("allow nothing until an admin grants them", async () => {
+    const admin = await permissionApi("admin");
+    const builder = await permissionApi("builder");
+    const app = await newApp(builder.api);
+    const authority = actingFor(app, builder.userId);
+
+    const before = await callThrough(authority, "OUTLOOK");
+    const requested = await builder.api.permissions.request(outlook(app.appId));
+    const whileRequested = await Promise.all([
+      callThrough(authority, "OUTLOOK"),
+      outcome(
+        authorize(env, authority, requested.object, "mail.list", requested.id)
+      ),
+    ]);
+    expect({ before, status: requested.status, whileRequested }).toStrictEqual({
+      before: "no binding",
+      status: "requested",
+      whileRequested: ["no binding", "permission.denied"],
+    });
+
+    const granted = await grantReviewed(admin.api, requested.id);
+    expect(granted).toMatchObject({
+      status: "active",
+      grantedBy: admin.userId,
+    });
+    await expect(callThrough(authority, "OUTLOOK")).resolves.toBe(reached);
+  });
+
+  it("are granted and revoked by an admin, their own request included, and by nobody else", async () => {
+    const admin = await permissionApi("admin");
+    const builder = await permissionApi("builder");
+    const user = await permissionApi("user");
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core: staffCore } = await openRpc(staffSession);
+    const staff = staffCore.authenticate();
+    // Staff sign in as admins: refused for being staff, not for the role.
+    await expect(staff.whoami()).resolves.toMatchObject({
+      role: "admin",
+      staff: true,
+    });
+    const app = await newApp(admin.api);
+    const { id } = await admin.api.permissions.request(outlook(app.appId));
+    const grantAndRevoke = async (api: Api) =>
+      await Promise.all([
+        outcome(grantReviewed(api, id)),
+        outcome(api.permissions.revoke(id)),
+      ]);
+    const refused = {
+      builder: await grantAndRevoke(builder.api),
+      user: await grantAndRevoke(user.api),
+      staff: await grantAndRevoke(staff),
+      userAsks: await outcome(user.api.permissions.request(outlook(app.appId))),
+      userLists: await outcome(user.api.permissions.list()),
+      staffAsks: await outcome(
+        staff.permissions.request({ ...outlook(app.appId), binding: "STAFF" })
+      ),
+    };
+    const listed = await admin.api.permissions.list(app);
+    expect({
+      ...refused,
+      status: listed.map(({ status }) => status),
+    }).toStrictEqual({
+      builder: ["role.forbidden", "role.forbidden"],
+      user: ["role.forbidden", "role.forbidden"],
+      staff: ["role.forbidden", "role.forbidden"],
+      userAsks: "role.forbidden",
+      userLists: "role.forbidden",
+      staffAsks: "role.forbidden",
+      status: ["requested"],
+    });
+
+    const events = await auditedDuring(async () => {
+      await expect(grantReviewed(admin.api, id)).resolves.toMatchObject({
+        status: "active",
+        requestedBy: admin.userId,
+        grantedBy: admin.userId,
+      });
+      await expect(admin.api.permissions.revoke(id)).resolves.toMatchObject({
+        status: "revoked",
+        revokedBy: admin.userId,
+      });
+    });
+    expect(
+      events.map(({ actor, action, detail }) => ({
+        actor,
+        action,
+        requestedBy: detail?.requestedBy,
+      }))
+    ).toStrictEqual([
+      {
+        actor: { type: "person", userId: admin.userId },
+        action: "permission.granted",
+        requestedBy: admin.userId,
+      },
+      {
+        actor: { type: "person", userId: admin.userId },
+        action: "permission.revoked",
+        requestedBy: undefined,
+      },
+    ]);
+  });
+
+  it("are granted once, however many admins grant at once", async () => {
+    const builder = await permissionApi("builder");
+    const first = await permissionApi("admin");
+    const second = await permissionApi("admin");
+    const app = await newApp(builder.api);
+    const { id } = await builder.api.permissions.request(outlook(app.appId));
+    let outcomes: string[] = [];
+    const events = await auditedDuring(async () => {
+      outcomes = await Promise.all([
+        outcome(grantReviewed(first.api, id)),
+        outcome(grantReviewed(second.api, id)),
+      ]);
+    });
+    expect({
+      outcomes: outcomes.toSorted(),
+      events: events.map(({ action }) => action),
+    }).toStrictEqual({
+      outcomes: ["ok", "permission.not_requested"],
+      events: ["permission.granted"],
+    });
+  });
+
+  it("are neither granted nor revoked by an admin demoted after their session was checked", async () => {
+    const admin = await permissionApi("admin");
+    const builder = await permissionApi("builder");
+    const app = await newApp(builder.api);
+    const requested = await builder.api.permissions.request(outlook(app.appId));
+    const active = await builder.api.permissions.request(
+      outlook(app.appId, "ACTIVE")
+    );
+    await grantReviewed(admin.api, active.id);
+    // The identity the session check hands over while they are an admin.
+    // The check reads the role again on every call, so the only way in
+    // between it and the update is to call past it with that identity.
+    const checked = await admin.api.whoami();
+    await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
+      .bind(admin.userId)
+      .run();
+    let refused: string[] = [];
+    const events = await auditedDuring(async () => {
+      refused = [
+        await outcome(
+          grantPermission(
+            env,
+            checked,
+            requested.id,
+            await reviewedOf(builder.api, requested.id)
+          )
+        ),
+        await outcome(revokePermission(env, checked, active.id)),
+      ];
+    });
+    const listed = await builder.api.permissions.list(app);
+    expect({
+      refused,
+      events,
+      statuses: Object.fromEntries(
+        listed.map((permission) => [permission.id, permission.status])
+      ),
+    }).toStrictEqual({
+      refused: ["role.forbidden", "role.forbidden"],
+      events: [],
+      statuses: { [requested.id]: "requested", [active.id]: "active" },
+    });
+  });
+
+  it("stop working at the next call once revoked, in stubs already handed out", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const authority = actingFor(app, admin.userId);
+    const { id } = await admin.api.permissions.request(outlook(app.appId));
+    await grantReviewed(admin.api, id);
+
+    // A running App or workflow keeps the env it was given.
+    const held = await envOf(authority);
+    await expect(callStub(held)).resolves.toBe(reached);
+
+    const revoked = await admin.api.permissions.revoke(id);
+    expect(revoked).toMatchObject({
+      status: "revoked",
+      revokedBy: admin.userId,
+    });
+    await expect(callStub(held)).resolves.toBe("permission.denied");
+    // The next load or resume doesn't get it at all.
+    await expect(envOf(authority)).resolves.toStrictEqual({});
+    // And it can't be granted back to life.
+    await expect(outcome(grantReviewed(admin.api, id))).resolves.toBe(
+      "permission.not_requested"
+    );
+  });
+
+  it("stop their own stubs once revoked, even when another permission covers the same", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const authority = actingFor(app, admin.userId);
+    const grant = async (binding: string) => {
+      const { id } = await admin.api.permissions.request({
+        ...outlook(app.appId),
+        binding,
+      });
+      return await grantReviewed(admin.api, id);
+    };
+    const first = await grant("OUTLOOK");
+    await grant("OUTLOOK_TOO");
+    const held = await envOf(authority);
+
+    await admin.api.permissions.revoke(first.id);
+    await expect(
+      Promise.all([callStub(held), callThrough(authority, "OUTLOOK_TOO")])
+    ).resolves.toStrictEqual(["permission.denied", reached]);
+  });
+
+  it("take an App's authority only with the version of its code it runs", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const unversioned = {
+      subject: app,
+      onBehalfOf: admin.userId,
+      mode: "interactive",
+    };
+
+    expect({
+      unversioned: authoritySchema.safeParse(unversioned).success,
+      versioned: authoritySchema.safeParse({ ...unversioned, appVersion: 1 })
+        .success,
+    }).toStrictEqual({ unversioned: false, versioned: true });
+  });
+
+  it("are granted to an agent with no version reviewed, as it has none", async () => {
+    const admin = await permissionApi("admin");
+    const { id } = await admin.api.permissions.request({
+      ...outlook("unused"),
+      subject: { type: "agent", agentId: `agent-${crypto.randomUUID()}` },
+    });
+
+    await expect(
+      Promise.all([
+        outcome(admin.api.permissions.grant(id, { version: 1 })),
+        outcome(admin.api.permissions.grant(id, { version: null })),
+      ])
+    ).resolves.toStrictEqual(["permission.invalid", "ok"]);
+  });
+
+  it("belong to their subject alone: not another App, not an agent with the same ID", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const { id } = await admin.api.permissions.request(outlook(app.appId));
+    await grantReviewed(admin.api, id);
+    const others: PermissionSubjectInput[] = [
+      { type: "agent", agentId: app.appId },
+      await newApp(admin.api),
+    ];
+    const results = await Promise.all(
+      others.map(
+        async (other) =>
+          await callThrough(actingFor(other, admin.userId), "OUTLOOK")
+      )
+    );
+    expect(results).toStrictEqual(["no binding", "no binding"]);
+    const checks = await Promise.all(
+      others.map(
+        async (other) =>
+          await outcome(
+            authorize(
+              env,
+              actingFor(other, admin.userId),
+              permissionObjectSchema.parse(outlook(app.appId).object),
+              "mail.list",
+              id
+            )
+          )
+      )
+    );
+    expect(checks).toStrictEqual(["permission.denied", "permission.denied"]);
+  });
+
+  it("allow only their own actions, on their own resource", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const authority = actingFor(app, admin.userId);
+    const finance = {
+      type: "connection",
+      connectionId: "connection-shared-mail",
+      resource: "finance@acme.test",
+    } as const;
+    const { id } = await admin.api.permissions.request({
+      subject: app,
+      object: finance,
+      actions: ["mail.list"],
+      binding: "FINANCE_MAIL",
+    });
+    await grantReviewed(admin.api, id);
+
+    await expect(
+      Promise.all([
+        callThrough(authority, "FINANCE_MAIL"),
+        callThrough(authority, "FINANCE_MAIL", "mail.send"),
+        callThrough(authority, "FINANCE_MAIL", "mail.list; mail.send"),
+      ])
+    ).resolves.toStrictEqual([reached, "permission.denied", "connect.invalid"]);
+
+    const checks = await Promise.all(
+      [
+        finance,
+        { ...finance, resource: "ceo@acme.test" },
+        // One mailbox isn't the whole connection.
+        { type: "connection", connectionId: finance.connectionId },
+      ].map(
+        async (object) =>
+          await outcome(
+            authorize(
+              env,
+              authority,
+              permissionObjectSchema.parse(object),
+              "mail.list",
+              id
+            )
+          )
+      )
+    );
+    expect(checks).toStrictEqual([
+      "ok",
+      "permission.denied",
+      "permission.denied",
+    ]);
+  });
+
+  it("stop working when the person they act for leaves", async () => {
+    const admin = await permissionApi("admin");
+    const builder = await permissionApi("builder");
+    const app = await newApp(admin.api);
+    const { id } = await admin.api.permissions.request(outlook(app.appId));
+    await grantReviewed(admin.api, id);
+    const authority = actingFor(app, builder.userId);
+    const held = await envOf(authority);
+
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(builder.userId)
+      .run();
+    await expect(callStub(held)).resolves.toBe("permission.person_inactive");
+    await expect(outcome(envOf(authority))).resolves.toBe(
+      "permission.person_inactive"
+    );
+  });
+
+  it("build an env with a stub for each active grant, and nothing else", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const grant = async (request: PermissionRequest) => {
+      const { id } = await admin.api.permissions.request(request);
+      return await grantReviewed(admin.api, id);
+    };
+    await grant(outlook(app.appId));
+    await admin.api.permissions.request(outlook(app.appId, "ASKED"));
+    const gone = await grant(outlook(app.appId, "GONE"));
+    await admin.api.permissions.revoke(gone.id);
+    // A grant on a store, left from before each App's store was its own:
+    // no stub.
+    await env.DB.prepare(
+      `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+        actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+       VALUES (?, 'app', ?, 'store', ?, '["read"]', 'POLICIES', 'active', 'test', 0, 'test', 0)`
+    )
+      .bind(
+        crypto.randomUUID(),
+        app.appId,
+        await storeOfNewApp(env, await admin.api.whoami())
+      )
+      .run();
+    const other = await newApp(admin.api);
+    await grant(outlook(other.appId, "SOMEONE_ELSES"));
+
+    const bindings = await envOf(actingFor(app, admin.userId));
+    expect(Object.keys(bindings)).toStrictEqual(["OUTLOOK"]);
+  });
+
+  it("leave a name out of the env once the platform takes it, and keep the rest", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const grant = async (request: PermissionRequest) => {
+      const { id } = await admin.api.permissions.request(request);
+      return await grantReviewed(admin.api, id);
+    };
+    await grant(outlook(app.appId));
+    const taken = await grant(outlook(app.appId, "LATER_TAKEN"));
+    // A release that makes the name one of core's own, after it was granted.
+    await env.DB.prepare("UPDATE permissions SET binding = 'DB' WHERE id = ?")
+      .bind(taken.id)
+      .run();
+
+    const bindings = await envOf(actingFor(app, admin.userId));
+    expect({
+      names: Object.keys(bindings),
+      outlook: await callStub(bindings),
+    }).toStrictEqual({ names: ["OUTLOOK"], outlook: reached });
+  });
+
+  it("are refused when they would reach past a stub's names", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const requests: PermissionRequest[] = [
+      outlook(app.appId, "__proto__"),
+      outlook(app.appId, "constructor"),
+      outlook(app.appId, "outlook"),
+      // Core's own bindings.
+      outlook(app.appId, "DB"),
+      outlook(app.appId, "CONNECT"),
+      { ...outlook(app.appId), actions: [] },
+      { ...outlook(app.appId), actions: ["mail.list", "mail.list"] },
+      {
+        subject: app,
+        object: { type: "workflow", workflowId: "w" },
+        actions: ["write"],
+        binding: "W",
+      },
+    ];
+    const refused = await Promise.all(
+      requests.map(
+        async (request) => await outcome(admin.api.permissions.request(request))
+      )
+    );
+    expect(refused).toStrictEqual(requests.map(() => "permission.invalid"));
+  });
+
+  // Knowledge is gone (GRA-1735): no subject is granted a collection, to
+  // read or to write, however the request names one.
+  it("are refused for a Knowledge collection, for any subject", async () => {
+    const admin = await permissionApi("admin");
+    const flow = await admin.api.workflowResources.create(`notes-${unique()}`);
+    const subjects: PermissionSubjectInput[] = [
+      await newApp(admin.api),
+      { type: "workflow", workflowId: flow.id },
+      { type: "agent", agentId: `agent-${crypto.randomUUID()}` },
+    ];
+    const refused = await Promise.all(
+      subjects.flatMap((subject) =>
+        [["read"], ["read", "write"]].map(
+          async (actions) =>
+            await outcome(
+              admin.api.permissions.request(
+                // SAFETY: a request the type rules out, as a client could send it.
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+                {
+                  subject,
+                  object: { type: "collection", collectionId: "handbook" },
+                  actions,
+                  binding: "HANDBOOK",
+                } as never
+              )
+            )
+        )
+      )
+    );
+    const held = await env.DB.prepare(
+      "SELECT count(*) AS n FROM permissions WHERE object_type = 'collection' AND object_id = 'handbook'"
+    ).first<{ n: number }>();
+    expect([refused, held?.n]).toStrictEqual([
+      subjects.flatMap(() => ["permission.invalid", "permission.invalid"]),
+      0,
+    ]);
+  });
+
+  // An App's store is its own: nothing else holds a grant on it, and it
+  // holds none of its own, so no grant can carry its data to another App
+  // or workflow, nor anything into it but its own App's calls.
+  it("are refused for a store, as their subject or object, even to an admin who builds its App", async () => {
+    const admin = await permissionApi("admin");
+    const owner = await newApp(admin.api);
+    const other = await newApp(admin.api);
+    const store = await storeOfNewApp(env, await admin.api.whoami());
+    const flow = await admin.api.workflowResources.create(`notes-${unique()}`);
+    const onStore = (subject: unknown) => ({
+      subject,
+      object: { type: "store", storeId: store },
+      actions: ["notes.list"],
+      binding: "NOTES",
+    });
+    const requests: unknown[] = [
+      // Another App, a workflow and an App of the store's builder calling
+      // its public functions.
+      onStore(other),
+      onStore({ type: "workflow", workflowId: flow.id }),
+      onStore(owner),
+      // The store reaching a connection of its own.
+      { ...outlook(owner.appId), subject: { type: "store", storeId: store } },
+    ];
+    const refused = await Promise.all(
+      requests.map(
+        async (request) =>
+          await outcome(
+            // SAFETY: a request the type rules out, as a client could send it.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            admin.api.permissions.request(request as never)
+          )
+      )
+    );
+    const held = await env.DB.prepare(
+      "SELECT count(*) AS n FROM permissions WHERE subject_id = ? OR object_id = ?"
+    )
+      .bind(store, store)
+      .first<{ n: number }>();
+    expect([refused, held?.n]).toStrictEqual([
+      requests.map(() => "permission.invalid"),
+      0,
+    ]);
+  });
+
+  // Grants of a kind the platform removed (on a store, left from before
+  // each App's store was its own) stay until a later release removes them
+  // with their audit events: until then nothing lists or decides one, and
+  // nothing fails over one.
+  it.each([["a store", "store"]] as const)(
+    "leave a grant on %s, left from before, unlisted and undecided",
+    async (_kind, objectType) => {
+      const admin = await permissionApi("admin");
+      const app = await newApp(admin.api);
+      const object = await storeOfNewApp(env, await admin.api.whoami());
+      const left = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+          actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+         VALUES (?, 'app', ?, ?, ?, '["read"]', 'NOTES', 'requested', 'test', 0, NULL, NULL)`
+      )
+        .bind(left, app.appId, objectType, object)
+        .run();
+      const listed = await admin.api.permissions.list();
+      expect({
+        listed: listed.some(({ id }) => id === left),
+        granted: await outcome(
+          admin.api.permissions.grant(left, { version: 1 })
+        ),
+        revoked: await outcome(admin.api.permissions.revoke(left)),
+      }).toStrictEqual({
+        listed: false,
+        granted: "permission.not_found",
+        revoked: "permission.not_found",
+      });
+    }
+  );
+
+  // Hidden, a leftover grant would still hold its binding name, and nobody
+  // could revoke it to free the name: a request under that name revokes it
+  // in its own batch, audited with why.
+  it.each([["a store", "store"]] as const)(
+    "free a binding name a leftover grant on %s holds, revoking it audited",
+    async (_kind, objectType) => {
+      const admin = await permissionApi("admin");
+      const app = await newApp(admin.api);
+      const object = await storeOfNewApp(env, await admin.api.whoami());
+      const left = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+          actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+         VALUES (?, 'app', ?, ?, ?, '["read"]', 'OUTLOOK', 'active', 'test', 0, 'test', 0)`
+      )
+        .bind(left, app.appId, objectType, object)
+        .run();
+
+      const requested = await outcome(
+        admin.api.permissions.request(outlook(app.appId))
+      );
+      const row = await env.DB.prepare(
+        "SELECT status, revoked_by AS revokedBy FROM permissions WHERE id = ?"
+      )
+        .bind(left)
+        .first<{ status: string; revokedBy: string | null }>();
+      const events = await allEvents();
+      const revoked = events.filter(
+        ({ action, target }) =>
+          action === "permission.revoked" && target?.id === left
+      );
+      const { userId } = await admin.api.whoami();
+
+      expect({
+        requested,
+        row,
+        revoked: revoked.map(({ actor, detail }) => ({
+          actor,
+          reason: detail?.reason,
+          binding: detail?.binding,
+          objectType: detail?.objectType,
+          objectId: detail?.objectId,
+        })),
+      }).toStrictEqual({
+        requested: "ok",
+        row: { status: "revoked", revokedBy: userId },
+        revoked: [
+          {
+            actor: { type: "person", userId },
+            reason: "binding kind removed",
+            binding: "OUTLOOK",
+            // Which one it was, as a served kind's names its object.
+            objectType,
+            objectId: object,
+          },
+        ],
+      });
+    }
+  );
+
+  it("are refused for an App that isn't in the registry", async () => {
+    const admin = await permissionApi("admin");
+    const missing = { type: "app" as const, appId: `app-${unique()}` };
+    const other = await newApp(admin.api);
+    const refused = await Promise.all(
+      [outlook(missing.appId), onApp(missing.appId)].map(
+        async (request) => await outcome(admin.api.permissions.request(request))
+      )
+    );
+    // As for any App the person has no role in.
+    expect(refused).toStrictEqual(["app.not_found", "app.not_found"]);
+    await expect(
+      outcome(admin.api.permissions.request(onApp(other.appId)))
+    ).resolves.toBe("ok");
+  });
+
+  it("let only an agent ask for an App, to read or write its functions, and keep none of the v1 exports' grants", async () => {
+    const admin = await permissionApi("admin");
+    const [target, caller] = await Promise.all([
+      newApp(admin.api),
+      newApp(admin.api),
+    ]);
+    const asked = async (request: PermissionRequest) =>
+      await outcome(admin.api.permissions.request(request));
+    const agentWith = (actions: string[]): PermissionRequest => ({
+      ...onApp(target.appId),
+      actions,
+    });
+    const requested = {
+      read: await asked(agentWith(["read"])),
+      write: await asked(agentWith(["write"])),
+      // An export's name, as the v1 server let a permission name one.
+      exportName: await asked(agentWith(["listBooks"])),
+      byApp: await asked({
+        subject: caller,
+        object: { type: "app", appId: target.appId },
+        actions: ["read"],
+        binding: "INVOICES",
+      }),
+    };
+
+    // Grants from before the v1 server went, as the migration found them: an App's
+    // on another App's exports, an agent's by an export's name, and the
+    // ones it keeps, an agent's `read` and an App's connection.
+    const legacy = {
+      byApp: ["app", caller.appId, "app", target.appId, ["read"]],
+      exportName: ["agent", "agent-old", "app", target.appId, ["listBooks"]],
+      agentRead: ["agent", "agent-old", "app", target.appId, ["read"]],
+      connection: [
+        "app",
+        caller.appId,
+        "connection",
+        "connection-outlook",
+        ["mail.list"],
+      ],
+    } as const;
+    const ids = Object.fromEntries(
+      Object.keys(legacy).map((name) => [name, `perm-${unique()}`])
+    );
+    await env.DB.batch(
+      Object.entries(legacy).map(
+        ([name, [subject, subjectId, object, objectId, actions]]) =>
+          env.DB.prepare(
+            "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, personal) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, 0)"
+          ).bind(
+            ids[name],
+            subject,
+            subjectId,
+            object,
+            objectId,
+            JSON.stringify(actions),
+            // A binding name of each grant's own: one per subject.
+            name.toUpperCase(),
+            admin.userId,
+            Date.now()
+          )
+      )
+    );
+    // The migration's own cleanup: its deletes, as the migration ran them.
+    const migrations = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"));
+    const cleanup = migrations
+      .find(({ name }) => name.includes("_drop_v1_exports"))
+      ?.queries.filter((query) => deleteStatement.test(query));
+    if (cleanup === undefined || cleanup.length === 0) {
+      throw new Error("drop_v1_exports deletes no permissions");
+    }
+    await env.DB.batch(cleanup.map((query) => env.DB.prepare(query)));
+    const { results } = await env.DB.prepare(
+      `SELECT id FROM permissions WHERE id IN (${Object.values(ids)
+        .map(() => "?")
+        .join(", ")})`
+    )
+      .bind(...Object.values(ids))
+      .all<{ id: string }>();
+    const kept = Object.keys(ids).filter((name) =>
+      results.some(({ id }) => id === ids[name])
+    );
+
+    expect({ requested, kept: kept.toSorted() }).toStrictEqual({
+      requested: {
+        read: "ok",
+        write: "ok",
+        exportName: "permission.invalid",
+        byApp: "permission.invalid",
+      },
+      kept: ["agentRead", "connection"],
+    });
+  });
+
+  it("can't take the name of any of core's own bindings", () => {
+    // Test-only bindings aside, every name in core's env is the platform's.
+    const testOnly = new Set([
+      "CORE_MIGRATIONS",
+      "CONNECT_DB",
+      "CONNECT_MIGRATIONS",
+      "CONNECT_PROVIDERS",
+      // Tests set these for a while (env.d.ts), and a test running beside
+      // this one, or one that put back no value, leaves the name in env.
+      "SPEND_MONTH",
+    ]);
+    const own = Object.keys(env).filter((name) => !testOnly.has(name));
+    expect(
+      own.filter((name) => bindingNameSchema.safeParse(name).success)
+    ).toStrictEqual([]);
+  });
+
+  it("keep binding names unique while they're live", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const first = await admin.api.permissions.request(outlook(app.appId));
+    await expect(
+      outcome(admin.api.permissions.request(outlook(app.appId)))
+    ).resolves.toBe("permission.conflict");
+    await admin.api.permissions.revoke(first.id);
+    await expect(
+      outcome(admin.api.permissions.request(outlook(app.appId)))
+    ).resolves.toBe("ok");
+  });
+
+  it("are listed by status when asked, and refuse a status that isn't one", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const ask = async (binding: string) =>
+      await admin.api.permissions.request({ ...outlook(app.appId), binding });
+    await ask("ASKED");
+    const granted = await ask("GRANTED");
+    const revoked = await ask("REVOKED");
+    await admin.api.permissions.grant(granted.id, { version: null });
+    await admin.api.permissions.revoke(revoked.id);
+    const bindingsIn = async (status?: PermissionStatus) => {
+      const listed = await admin.api.permissions.list(app, status);
+      return new Set(listed.map(({ binding }) => binding));
+    };
+
+    expect({
+      all: await bindingsIn(),
+      requested: await bindingsIn("requested"),
+      active: await bindingsIn("active"),
+      revoked: await bindingsIn("revoked"),
+    }).toStrictEqual({
+      all: new Set(["ASKED", "GRANTED", "REVOKED"]),
+      requested: new Set(["ASKED"]),
+      active: new Set(["GRANTED"]),
+      revoked: new Set(["REVOKED"]),
+    });
+    await expect(
+      outcome(
+        // SAFETY: a status the type rules out, as a client could send it.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        admin.api.permissions.list(app, "pending" as never)
+      )
+    ).resolves.toBe("permission.invalid");
+  });
+
+  it("keep their audit event when the audit log is down, and append it later, once", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const { id } = await admin.api.permissions.request(outlook(app.appId));
+
+    const granted = await whileLogDown(async () => {
+      const result = await grantReviewed(admin.api, id);
+      // It waits in the outbox while the log is down.
+      await expect(
+        waitingInOutbox(env.DB, "permission.granted", id)
+      ).resolves.toBe(1);
+      return result;
+    });
+    await runMinuteTasks();
+    await runMinuteTasks();
+
+    const events = await allEvents();
+    expect({
+      status: granted.status,
+      logged: events.filter(
+        ({ action, target }) =>
+          action === "permission.granted" && target?.id === id
+      ).length,
+      waiting: await waitingInOutbox(env.DB, "permission.granted", id),
+    }).toStrictEqual({ status: "active", logged: 1, waiting: 0 });
+  });
+
+  it("are audited when requested, granted and revoked, by who did it", async () => {
+    const admin = await permissionApi("admin");
+    const builder = await permissionApi("builder");
+    const app = await newApp(builder.api);
+    let id = "";
+    const events = await auditedDuring(async () => {
+      ({ id } = await builder.api.permissions.request(outlook(app.appId)));
+      await grantReviewed(admin.api, id);
+      await admin.api.permissions.revoke(id);
+      // Revoking again changes nothing, so it records nothing.
+      await admin.api.permissions.revoke(id);
+    });
+    const target = { type: "permission", id };
+    const detail = {
+      subjectType: "app",
+      subjectId: app.appId,
+      objectType: "connection",
+      connectionId: "connection-outlook",
+      actions: "mail.list",
+      binding: "OUTLOOK",
+    };
+    expect(
+      events.map((event) => ({
+        actor: event.actor,
+        action: event.action,
+        target: event.target,
+        detail: event.detail,
+      }))
+    ).toStrictEqual([
+      {
+        actor: { type: "person", userId: builder.userId },
+        action: "permission.requested",
+        target,
+        detail,
+      },
+      {
+        actor: { type: "person", userId: admin.userId },
+        action: "permission.granted",
+        target,
+        detail: { ...detail, requestedBy: builder.userId },
+      },
+      {
+        actor: { type: "person", userId: admin.userId },
+        action: "permission.revoked",
+        target,
+        detail,
+      },
+    ]);
+  });
+});
+
+describe("connect, called over the service binding", () => {
+  it("refuses a call without a capability core signed for exactly it", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const authority = actingFor(app, "user-anna");
+    const call = {
+      connectionId: "connection-outlook",
+      action: "mail.list",
+      input: {},
+    };
+    const signed = {
+      ...call,
+      origin: {
+        permissionId: "permission-outlook",
+        context: app,
+      },
+    };
+    const forged = await signCapability(
+      "an-attackers-own-key-of-32-characters-or-more",
+      authority,
+      signed
+    );
+    const forRead = await signCapability(
+      env.CAPABILITY_SIGNING_KEY,
+      authority,
+      signed
+    );
+    const refused = await Promise.all([
+      outcome(env.CONNECT.call({ ...call, capability: "" })),
+      outcome(env.CONNECT.call({ ...call, capability: forged })),
+      outcome(
+        env.CONNECT.call({ ...call, action: "mail.send", capability: forRead })
+      ),
+    ]);
+    expect(refused).toStrictEqual([
+      "capability.invalid",
+      "capability.invalid",
+      "capability.invalid",
+    ]);
+    await expect(
+      outcome(env.CONNECT.call({ ...call, capability: forRead }))
+    ).resolves.toBe(reached);
+  });
+});

@@ -1,0 +1,35 @@
+// `@grasp-os/runtime/definition`: an App's definition (definition-types.ts), read,
+// changed by its operations, and the config and schema generated from it.
+// Only Grasp writes one: core's definition tools and builds, and the seed.
+// Apart from `host`, as oxc parses it (oxc-parse.ts), which nothing a page
+// or the sandbox loads needs.
+export { definitionManifest, readDefinition } from "./definition-app.ts";
+export {
+  canonicalDefinition,
+  definitionText,
+  isFunctionPath,
+} from "./definition-json.ts";
+export { emptyDefinition, generatedFiles } from "./definition-types.ts";
+export type {
+  AppDefinition,
+  DefinedField,
+  DefinedFunction,
+  DefinedRule,
+  DefinedTable,
+  DefinedWorkflowBinding,
+} from "./definition-types.ts";
+export type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
+export {
+  applyOperation,
+  tryOperation,
+  tryReadDefinition,
+  typeFrom,
+  withExportedFunctions,
+} from "./definition-operations.ts";
+export type { DefinitionOperation } from "./definition-operations.ts";
+export { definitionSources, validatorSource } from "./definition-source.ts";
+export {
+  generatedServerSources,
+  serverFunctionsIn,
+  undeclaredFunctions,
+} from "./server-syntax.ts";

@@ -1,0 +1,1685 @@
+import type { AuditDetailValue } from "@grasp-os/shared/audit";
+import {
+  connectErrors,
+  connectionCallbackPath,
+  connectionErrors,
+  connectionPersonSchema,
+  connectWithKeySchema,
+  disconnectPersonalSchema,
+  disconnectSchema,
+  finishConnectionSchema,
+  oauthFlowLifetimeMs,
+  oauthProviderSchema,
+  startConnectionSchema,
+} from "@grasp-os/shared/connect";
+import type {
+  ConnectionPerson,
+  ConnectionScope,
+  ConnectionSummary,
+  OrganizationConnection,
+} from "@grasp-os/shared/connect";
+import {
+  directoryErrors,
+  directoryProviderSchema,
+} from "@grasp-os/shared/directory";
+import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
+import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  relayRedirectUri,
+  relayedClientOf,
+} from "@grasp-os/shared/oauth-relay";
+import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import { and, desc, eq, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
+
+import { accountAddressesOf } from "./account-addresses.ts";
+import type { AccountAddresses } from "./account-addresses.ts";
+import { recordEventIf, recordEvents } from "./audit.ts";
+import {
+  abandonToolkitFlow,
+  composioAccountStates,
+  disconnectCleanup,
+  dropToolkitFlowsOf,
+  revokeAtComposio,
+  takeToolkitFlow,
+} from "./composio-connections.ts";
+import {
+  auditRefusal,
+  connectionEvent,
+  refuseStaff,
+} from "./connection-audit.ts";
+import {
+  allowedToolNames,
+  offeredToolNames,
+  pastAddressesAfter,
+  readToolNames,
+  toolResourcesOf,
+} from "./connections.ts";
+import {
+  connections,
+  connectionTokens,
+  httpConnections,
+  oauthFlows,
+  pendingActions,
+} from "./db/schema.ts";
+import { readDirectory } from "./directory.ts";
+import { erasureBegan, ownerErased } from "./erased-people.ts";
+import { httpSummaries } from "./http-connections.ts";
+import { exchangeCode } from "./oauth-client.ts";
+import type { TokenSet } from "./oauth-client.ts";
+import { oweRevoke } from "./owed-revokes.ts";
+import { dropPendingActions } from "./pending.ts";
+import { rightsFor } from "./provider-rights.ts";
+import { grantedAsAsked, providerFor, renewedAsGranted } from "./providers.ts";
+import type {
+  ApiKeyProviderConfig,
+  OAuthClientCredentials,
+  OAuthProviderConfig,
+  ProviderAccount,
+  ProviderConfig,
+} from "./providers.ts";
+import { revokeAtProvider } from "./revocations.ts";
+import {
+  apiKeyExpiresAt,
+  discardMint,
+  firstTokens,
+  grantedScopesOf,
+} from "./tokens.ts";
+import { resealBatchSize, vaultFor } from "./vault.ts";
+import type { Vault } from "./vault.ts";
+
+// Connecting an account: the OAuth 2.0 authorization code flow with PKCE,
+// for every provider in src/providers.ts, the suites and the apps alike;
+// or, for an app that takes one, an API key the person gives
+// (`connectWithKey`), checked with the app and then kept as tokens are.
+//
+// A person starts it from their browser, signed in to core, and the
+// provider sends the browser back to core's callback on the same origin,
+// straight or, for a Grasp-hosted client in relay mode, through the OAuth
+// relay (@grasp-os/shared/oauth-relay), where their session cookie comes
+// along (`SameSite=Lax` goes with a
+// top-level navigation). Core says who the person is on both requests, and
+// a flow only finishes for the person who started it. So a flow can't be
+// finished in anyone else's name: an attacker who gets a victim to finish
+// the attacker's flow (or to open a callback URL carrying the attacker's
+// code) is refused, because the victim's session isn't the flow's person,
+// and nothing is exchanged (threat model CN4). The `state` is 256 random
+// bits, single-use and valid for ten minutes; only its hash is stored. The
+// PKCE verifier never leaves connect, so the code alone, which core sees on
+// the callback, is useless (CN3).
+//
+// Connecting again is the same flow. A connection whose grant ran out
+// (`needs_reauth`) keeps its account, and a flow that comes back with that
+// account, finished by someone who could have connected it as it is, gives
+// it its new tokens: the same connection, so every permission on it stands.
+// Nothing names the connection to reconnect: the account the provider
+// vouches for does, so signing in to another account never reaches it.
+
+/**
+ * Whether `account` is the person's own: the account they sign in with at
+ * that provider (its Entra object ID or Google subject), or, where they
+ * sign in elsewhere, the one with their verified email. A personal
+ * connection is used only in its owner's own context (R5), so it must hold
+ * their own account, not a colleague's or a shared mailbox's.
+ */
+const isOwnAccount = (
+  person: ConnectionPerson,
+  provider: string,
+  account: ProviderAccount
+): boolean => {
+  const signIns = person.accounts.filter((each) => each.provider === provider);
+  if (signIns.length > 0) {
+    return signIns.some(({ subject }) => subject === account.id);
+  }
+  return account.email?.toLowerCase() === person.email.toLowerCase();
+};
+
+type ConnectionRow = typeof connections.$inferSelect;
+type FlowRow = typeof oauthFlows.$inferSelect;
+
+/** The live connection that already holds `accountId`, if any. */
+const connectionHolding = async (
+  env: Env,
+  provider: string,
+  accountId: string
+): Promise<ConnectionRow | undefined> =>
+  await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, provider),
+        eq(connections.accountId, accountId),
+        ne(connections.status, "disconnected")
+      )
+    )
+    .get();
+
+/**
+ * Whether finishing `flow` as `person` reconnects `held`, the connection
+ * holding the account the flow came back with: only one whose grant ran
+ * out, of the scope the flow asked for, and, if personal, the person's own.
+ * A shared one is any admin's to reconnect, as it is to disconnect; the
+ * caller checked the role.
+ */
+const reconnects = (
+  held: ConnectionRow,
+  flow: Target,
+  person: ConnectionPerson
+): boolean =>
+  held.status === "needs_reauth" &&
+  held.scope === flow.scope &&
+  (held.scope === "shared" || held.ownerUserId === person.userId);
+
+/**
+ * Whether finishing `flow` renews `held` in place: the organization's
+ * directory connection, still active, of the account the flow came back
+ * with (GRA-2171), which the provider vouched for in the flow's own
+ * tenant before this (`keepTokens`, `connection.wrong_account`). Connecting the directory
+ * again with the account it has is how an admin mends a read, and how a
+ * connection made before a scope was asked for (`Group.ReadBasic.All`)
+ * gains it; it keeps its ID, so nothing that names it changes. Any other
+ * connection of an account already held stays refused. The caller checked
+ * the role (an admin's, for a shared one) and the grant.
+ */
+const renewsInPlace = (
+  held: ConnectionRow,
+  flow: Pick<Target, "scope">,
+  provider: ProviderConfig
+): boolean =>
+  held.status === "active" &&
+  held.scope === "shared" &&
+  flow.scope === "shared" &&
+  provider.kind === "oauth" &&
+  directoryProviderSchema.safeParse(provider.id).success;
+
+/** Only admins connect or disconnect what the organization shares. */
+const mayManage = (person: ConnectionPerson, scope: ConnectionScope): boolean =>
+  scope === "personal" || isAdmin(person.role);
+
+interface Ready {
+  provider: OAuthProviderConfig;
+  client: OAuthClientCredentials;
+  vault: Vault;
+}
+
+/** The OAuth provider, with its client and the vault, or refused while unset. */
+const ready = async (env: Env, providerId: string): Promise<Ready> => {
+  const provider = providerFor(providerId);
+  const client = provider?.kind === "oauth" ? provider.client(env) : undefined;
+  const vault = await vaultFor(env);
+  if (
+    provider?.kind !== "oauth" ||
+    client === undefined ||
+    vault === undefined
+  ) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  return { provider, client, vault };
+};
+
+const pkceChallenge = async (verifier: string): Promise<string> =>
+  toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))
+    )
+  );
+
+const flowContext = (stateHash: string): string => `flow:${stateHash}`;
+
+/**
+ * `write`, refused as an attempt that is no longer valid when it failed
+ * because the person it is for is being erased (`column` NULL then).
+ */
+const refusingErased = async <T>(
+  write: Promise<T>,
+  column: string
+): Promise<T> => {
+  try {
+    return await write;
+  } catch (error) {
+    // The driver's error, or the one it wraps (drizzle names the query).
+    const cause: unknown = error instanceof Error ? error.cause : undefined;
+    const failed = [error, cause].some(
+      (each) =>
+        each instanceof Error &&
+        each.message.includes("NOT NULL") &&
+        each.message.includes(column)
+    );
+    if (failed) {
+      throw connectionErrors.create("connection.flow_invalid");
+    }
+    throw error;
+  }
+};
+
+/** Starts a flow: the provider URL to send the person's browser to. */
+export const startConnection = async (
+  env: Env,
+  request: unknown
+): Promise<{ url: string }> => {
+  const {
+    person,
+    provider: providerId,
+    scope,
+    origin,
+    callbackOrigin,
+    returnTo,
+    classes,
+    sharedMailbox,
+    ...rest
+  } = connectionErrors.parse(
+    "connection.invalid",
+    startConnectionSchema,
+    request
+  );
+  await refuseStaff(env, person, { provider: providerId, scope });
+  if (!mayManage(person, scope)) {
+    await auditRefusal(env, person, "connection.connect", {
+      provider: providerId,
+      scope,
+      outcome: "refused",
+      reason: "role.forbidden",
+    });
+    throw roleErrors.create("role.forbidden");
+  }
+  const { provider, client, vault } = await ready(env, providerId);
+  // The directory's and the documents' connections read
+  // for the organization: its own, never a person's.
+  if (provider.sharedOnly === true && scope !== "shared") {
+    throw connectionErrors.create("connection.invalid");
+  }
+  // A suite's flow is pinned to the organization's tenant; an app's has
+  // none, so it is always "" (`isTenant`).
+  const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
+  if (
+    !provider.isTenant(tenant) ||
+    new URL(origin).origin !== origin ||
+    // Only a stage's relay, for a client hosted in that same stage.
+    (callbackOrigin !== undefined &&
+      relayedClientOf(origin, callbackOrigin) === null)
+  ) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+
+  const state = randomToken();
+  const verifier = randomToken();
+  const stateHash = await sha256Hex(state);
+  // The flow keeps it, and its exchange names this same one (`finishConnection`).
+  const redirectUri =
+    callbackOrigin === undefined
+      ? new URL(connectionCallbackPath, origin).href
+      : relayRedirectUri(callbackOrigin, "connections");
+  await refusingErased(
+    drizzle(env.DB)
+      .insert(oauthFlows)
+      .values({
+        stateHash,
+        // NULL, which fails the insert, for someone whose erasure began: a
+        // start already under way leaves no flow of theirs behind it.
+        userId: sql`(SELECT ${person.userId} WHERE NOT ${erasureBegan(person.userId)})`,
+        provider: provider.id,
+        scope,
+        tenant,
+        redirectUri,
+        returnTo,
+        verifier: await vault.seal(verifier, flowContext(stateHash)),
+        expiresAt: new Date(Date.now() + oauthFlowLifetimeMs),
+      }),
+    "oauth_flows.user_id"
+  );
+
+  const url = new URL(provider.authorizationEndpoint(tenant));
+  const params = {
+    ...provider.authorizationParams(tenant),
+    response_type: "code",
+    client_id: client.id,
+    redirect_uri: redirectUri,
+    scope: (
+      (classes === undefined
+        ? undefined
+        : rightsFor(provider.id, classes, sharedMailbox === true)) ??
+      provider.scopes
+    ).join(provider.scopeSeparator),
+    state,
+    code_challenge: await pkceChallenge(verifier),
+    code_challenge_method: "S256",
+  };
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return { url: url.href };
+};
+
+/**
+ * How long a taken flow holds its row at most: its code exchanged, its
+ * account checked and read, what it got kept. Should its finish never end
+ * (the Worker stopped), an owed revoke waits no longer for it.
+ */
+const finishingForMs = 5 * 60 * 1000;
+
+/**
+ * Takes the flow `state` names: marked finishing before anything is
+ * checked, so it is spent whatever happens next, even when it isn't this
+ * person's. Its row is kept until `doneWith`, so an owed revoke of the
+ * grant it may come back with waits for it (revocations.ts): the tokens a
+ * consent just handed back are never revoked before they are kept.
+ */
+const takeFlow = async (env: Env, state: string) => {
+  const stateHash = await sha256Hex(state);
+  const [flow] = await drizzle(env.DB)
+    .update(oauthFlows)
+    .set({ finishingUntil: new Date(Date.now() + finishingForMs) })
+    .where(
+      and(
+        eq(oauthFlows.stateHash, stateHash),
+        isNull(oauthFlows.finishingUntil)
+      )
+    )
+    .returning();
+  return flow;
+};
+
+/** Deletes `flow`, taken, once its finish is done, however it went. */
+const doneWith = async (env: Env, flow: FlowRow): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(oauthFlows)
+    .where(eq(oauthFlows.stateHash, flow.stateHash));
+};
+
+/**
+ * Spends the flow `state` names, if it is one: a flow that came back but
+ * can't finish (no session, a malformed request) can't be finished later
+ * with the same code.
+ */
+export const abandonFlow = async (env: Env, state: unknown): Promise<void> => {
+  const parsed = finishConnectionSchema.shape.state.safeParse(state);
+  if (!parsed.success) {
+    return;
+  }
+  const flow = await takeFlow(env, parsed.data);
+  if (flow !== undefined) {
+    await doneWith(env, flow);
+    return;
+  }
+  const toolkitFlow = await takeToolkitFlow(env, await sha256Hex(parsed.data));
+  if (toolkitFlow !== undefined) {
+    await abandonToolkitFlow(env, toolkitFlow);
+  }
+};
+
+/**
+ * Drops tokens minted for a connection that won't be made, revoking them
+ * unless an active connection holds the same account: at Google, revoking
+ * any token of a grant revokes all of it. One that needs connecting again
+ * has no grant to lose, so what was minted for its account is revoked.
+ */
+const dropMint = async (
+  env: Env,
+  { provider, client }: Ready,
+  tokens: TokenSet,
+  accountId: string | undefined
+): Promise<void> => {
+  const held =
+    accountId === undefined
+      ? undefined
+      : await connectionHolding(env, provider.id, accountId);
+  if (held?.status !== "active") {
+    await discardMint(provider, client, tokens);
+  }
+};
+
+/** A new connection refused for an owner whose erasure began (`storeConnection`). */
+const isErasedOwner = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.includes("NOT NULL") &&
+  error.message.includes("connections.id");
+
+/** A second live connection to the same account (the unique index). */
+const isDuplicate = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.includes("UNIQUE") &&
+  error.message.includes("connections");
+
+/** What a connection keeps of its sign-in: tokens or a key, sealed. */
+type Kept = Parameters<typeof firstTokens>[2];
+
+/**
+ * The address a connection counts as confirmed when it is connected: the
+ * account's, as its provider's checked ID token gave it, for a provider
+ * that confirms addresses at each renewal (`confirmAddress`); none for any
+ * other.
+ */
+const confirmedAddressOf = (
+  provider: ProviderConfig,
+  account: ProviderAccount
+): string | null =>
+  provider.kind === "oauth" && provider.confirmAddress !== undefined
+    ? (account.email?.toLowerCase() ?? null)
+    : null;
+
+/** What a connection is connected for: its scope, and its tenant if pinned. */
+type Target = Pick<FlowRow, "scope" | "tenant">;
+
+/** A connection's tenant: none (`null`) for an app's (`""`). */
+const tenantOf = ({ tenant }: Target): string | null =>
+  tenant === "" ? null : tenant;
+
+interface Keeping {
+  provider: ProviderConfig;
+  vault: Vault;
+}
+
+/** Stores a new connection with its tokens and its event, all or nothing. */
+const storeConnection = async (
+  env: Env,
+  { provider, vault }: Keeping,
+  flow: Target,
+  person: ConnectionPerson,
+  account: ProviderAccount,
+  tokens: Kept,
+  addresses: AccountAddresses | undefined
+): Promise<string> => {
+  const connectionId = crypto.randomUUID();
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const writes: BatchItem<"sqlite">[] = [
+    db.insert(connections).values({
+      // NULL, which fails the batch, for a person whose erasure began: a
+      // flow of theirs still under way connects nothing after it.
+      id:
+        flow.scope === "personal"
+          ? sql`(SELECT ${connectionId} WHERE NOT ${erasureBegan(person.userId)})`
+          : connectionId,
+      provider: provider.id,
+      scope: flow.scope,
+      ownerUserId: flow.scope === "personal" ? person.userId : null,
+      status: "active",
+      serverKind: "native",
+      server: provider.server,
+      tenant: tenantOf(flow),
+      accountId: account.id,
+      accountName: account.name,
+      accountEmail: account.email?.toLowerCase() ?? null,
+      verifiedEmail: confirmedAddressOf(provider, account),
+      verifiedEmailAt:
+        confirmedAddressOf(provider, account) === null ? null : new Date(),
+      accountAddresses: addresses?.receives ?? null,
+      accountSenders: addresses?.sends ?? null,
+      connectedBy: person.userId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    db
+      .insert(connectionTokens)
+      .values(await firstTokens(vault, connectionId, tokens, now)),
+  ];
+  await recordEvents(
+    env,
+    [
+      connectionEvent(person, "connection.connect", connectionId, {
+        provider: provider.id,
+        scope: flow.scope,
+        outcome: "ok",
+      }),
+    ],
+    writes
+  );
+  return connectionId;
+};
+
+/** What a connection signed in to again takes of the sign-in. */
+const signedInAgain = (
+  provider: ProviderConfig,
+  flow: Target,
+  account: ProviderAccount,
+  addresses: AccountAddresses | undefined,
+  now: Date
+) => ({
+  tenant: tenantOf(flow),
+  accountName: account.name,
+  accountEmail: account.email?.toLowerCase() ?? null,
+  pastVerifiedEmails: pastAddressesAfter(confirmedAddressOf(provider, account)),
+  verifiedEmail: confirmedAddressOf(provider, account),
+  verifiedEmailAt: confirmedAddressOf(provider, account) === null ? null : now,
+  // A lookup that failed keeps what was read before.
+  ...(addresses === undefined
+    ? {}
+    : {
+        accountAddresses: addresses.receives,
+        accountSenders: addresses.sends,
+      }),
+  updatedAt: now,
+});
+
+/**
+ * Gives `held`, whose grant ran out, the tokens of a new one and makes it
+ * active again, in one write with its event. Only while it still needs
+ * them: of two reconnects at once one does it, and one that a disconnect
+ * got ahead of does nothing. Its ID if this call did, and `undefined` if
+ * it didn't or there was none to reconnect.
+ */
+const reconnect = async (
+  env: Env,
+  { provider, vault }: Keeping,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  account: ProviderAccount,
+  tokens: Kept,
+  addresses: AccountAddresses | undefined
+): Promise<string | undefined> => {
+  if (held === undefined) {
+    return undefined;
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const row = await firstTokens(vault, held.id, tokens, now);
+  const stillWaiting = sql`${connections.id} = ${held.id} AND ${connections.status} = 'needs_reauth' AND NOT ${ownerErased(held.id)}`;
+  const reconnected = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.reconnected", held.id, {
+      provider: provider.id,
+      scope: held.scope,
+      outcome: "ok",
+    }),
+    { from: connections, where: stillWaiting },
+    [
+      // Before the status changes: the same condition guards both.
+      db.insert(connectionTokens).select(
+        db
+          .select({
+            connectionId: sql<string>`${row.connectionId}`.as("connection_id"),
+            sealed: sql<string>`${row.sealed}`.as("sealed"),
+            accessExpiresAt: sql<Date>`${row.accessExpiresAt.getTime()}`.as(
+              "access_expires_at"
+            ),
+            generation: sql<number>`${row.generation}`.as("generation"),
+            refreshUntil: sql<null>`NULL`.as("refresh_until"),
+            grantedScopes: sql<string | null>`${row.grantedScopes}`.as(
+              "granted_scopes"
+            ),
+            updatedAt: sql<Date>`${now.getTime()}`.as("updated_at"),
+          })
+          .from(connections)
+          .where(stillWaiting)
+      ),
+      db
+        .update(connections)
+        .set({
+          status: "active",
+          ...signedInAgain(provider, flow, account, addresses, now),
+        })
+        .where(stillWaiting),
+    ]
+  );
+  return reconnected ? held.id : undefined;
+};
+
+/**
+ * Gives `held`, an active connection `renewsInPlace` names, the tokens of
+ * the sign-in just made, in one write with its event, only while it is
+ * still active. The tokens' generation starts at the time, past any the
+ * old ones reached, so a refresh of the old ones still under way can't
+ * write over them (`firstTokens`). Its ID if this call did, `undefined`
+ * if it was disconnected or marked for reconnecting meanwhile.
+ */
+const renewInPlace = async (
+  env: Env,
+  { provider, vault }: Keeping,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  account: ProviderAccount,
+  tokens: Kept,
+  addresses: AccountAddresses | undefined
+): Promise<string | undefined> => {
+  if (held === undefined || !renewsInPlace(held, flow, provider)) {
+    return undefined;
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const row = await firstTokens(vault, held.id, tokens, now);
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
+  const renewed = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.reconnected", held.id, {
+      provider: provider.id,
+      scope: held.scope,
+      outcome: "ok",
+    }),
+    { from: connections, where: stillActive },
+    [
+      db
+        .update(connectionTokens)
+        .set({
+          sealed: row.sealed,
+          accessExpiresAt: row.accessExpiresAt,
+          generation: row.generation,
+          refreshUntil: null,
+          grantedScopes: row.grantedScopes,
+          updatedAt: now,
+        })
+        .where(
+          sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      db
+        .update(connections)
+        .set(signedInAgain(provider, flow, account, addresses, now))
+        .where(stillActive),
+    ]
+  );
+  return renewed ? held.id : undefined;
+};
+
+/**
+ * Records a flow that didn't finish, naming the connection that holds the
+ * account it came back with, if one does.
+ */
+type Refuse = (
+  reason: string,
+  about?: { outcome?: "refused" | "failed"; connectionId?: string }
+) => Promise<void>;
+
+type RefusalReason =
+  | "connection.scopes_refused"
+  | "connection.wrong_account"
+  | "connection.not_own_account"
+  | "connection.already_connected"
+  | "connection.provider_refused"
+  | "connection.flow_invalid";
+
+/**
+ * Why a flow that came back with an account `held` holds is refused; none
+ * when it may have it: reconnected after its grant ran out (`reconnects`),
+ * or renewed in place (`renewsInPlace`) with a grant that holds all it
+ * held before. A narrower one is refused, and the working connection
+ * keeps its tokens (`drop` revokes nothing an active one holds).
+ */
+const heldRefusal = async (
+  env: Env,
+  provider: ProviderConfig,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  kept: Kept
+): Promise<RefusalReason | undefined> => {
+  if (held === undefined || reconnects(held, flow, person)) {
+    return undefined;
+  }
+  if (!renewsInPlace(held, flow, provider)) {
+    return "connection.already_connected";
+  }
+  const asHeld =
+    provider.kind === "oauth" &&
+    "accessToken" in kept &&
+    renewedAsGranted(provider, kept, await grantedScopesOf(env, held.id));
+  return asHeld ? undefined : "connection.scopes_refused";
+};
+
+/**
+ * Keeps what a sign-in got (tokens, or a key) for `account`, once it is
+ * known to be an account the person may connect: their own for a personal
+ * connection, and held by no other connection, unless by one the person
+ * may reconnect (`reconnects`), which gets it. The connection's ID.
+ * Whatever isn't kept is dropped (`drop`).
+ */
+const keepAccount = async (
+  env: Env,
+  setUp: Keeping,
+  flow: Target,
+  person: ConnectionPerson,
+  account: ProviderAccount,
+  kept: Kept,
+  /** Drops what was minted for the sign-in; none for a key. */
+  drop: ((accountId: string | undefined) => Promise<void>) | undefined,
+  refuse: Refuse
+): Promise<string> => {
+  const { provider } = setUp;
+  const held = await connectionHolding(env, provider.id, account.id);
+  const refusal = async (reason: RefusalReason): Promise<never> => {
+    // Even an account refused here may be one an active connection holds.
+    await drop?.(account.id);
+    await refuse(reason, { connectionId: held?.id });
+    throw connectionErrors.create(reason);
+  };
+  if (
+    flow.scope === "personal" &&
+    !isOwnAccount(person, provider.id, account)
+  ) {
+    return await refusal("connection.not_own_account");
+  }
+  const refused = await heldRefusal(env, provider, flow, person, held, kept);
+  if (refused !== undefined) {
+    return await refusal(refused);
+  }
+  // A suite's account's own addresses, read with the token just issued:
+  // core counts mail to and from them as the account's
+  // (account-addresses.ts). An app has none to read.
+  const suite = oauthProviderSchema.safeParse(provider.id);
+  const addresses =
+    suite.success && "accessToken" in kept
+      ? await accountAddressesOf(suite.data, kept.accessToken)
+      : undefined;
+  try {
+    // Stored as new when there is nothing to reconnect, or no longer:
+    // disconnected at the same moment, the account connects as new;
+    // reconnected by another flow, it is a duplicate.
+    return (
+      (await reconnect(
+        env,
+        setUp,
+        flow,
+        person,
+        held,
+        account,
+        kept,
+        addresses
+      )) ??
+      (await renewInPlace(
+        env,
+        setUp,
+        flow,
+        person,
+        held,
+        account,
+        kept,
+        addresses
+      )) ??
+      (await storeConnection(
+        env,
+        setUp,
+        flow,
+        person,
+        account,
+        kept,
+        addresses
+      ))
+    );
+  } catch (storeError) {
+    // Their erasure began as the flow finished: nothing of theirs is made
+    // again, and the tokens minted for it are dropped.
+    if (isErasedOwner(storeError)) {
+      await drop?.(account.id);
+      await refuse("connection.flow_invalid", { connectionId: held?.id });
+      throw connectionErrors.create("connection.flow_invalid");
+    }
+    // Connected at the same moment by another flow: the grant is theirs.
+    if (isDuplicate(storeError)) {
+      await refuse("connection.already_connected", {
+        connectionId: held?.id,
+      });
+      throw connectionErrors.create("connection.already_connected");
+    }
+    await drop?.(account.id);
+    throw storeError;
+  }
+};
+
+/**
+ * Keeps the tokens a flow came back with, once they are known to be for an
+ * account the person may connect: for a suite, in the organization's
+ * tenant; for an app, one the app's lookup names; and as `keepAccount`
+ * says. Tokens that aren't kept are dropped (`dropMint`).
+ */
+const keepTokens = async (
+  env: Env,
+  setUp: Ready,
+  flow: FlowRow,
+  person: ConnectionPerson,
+  tokens: TokenSet,
+  refuse: Refuse
+): Promise<string> => {
+  const { provider, client } = setUp;
+  const account = await provider.account(tokens, flow.tenant, client.id);
+  const drop = async (accountId: string | undefined): Promise<void> => {
+    await dropMint(env, setUp, tokens, accountId);
+  };
+  const refusal = async (reason: RefusalReason): Promise<never> => {
+    const accountId = account?.id ?? provider.subject?.(tokens);
+    // An app's tokens whose account its lookup didn't name could be a
+    // grant a live connection holds (an app may issue the same refresh
+    // token again, or revoke the whole grant with any one): kept from
+    // revoking, they lapse. A suite's ID token always names its subject.
+    if (accountId !== undefined || provider.pinned) {
+      await drop(accountId);
+    }
+    const held =
+      account === null || accountId === undefined
+        ? undefined
+        : await connectionHolding(env, provider.id, accountId);
+    await refuse(reason, { connectionId: held?.id });
+    throw connectionErrors.create(reason);
+  };
+  if (account === null) {
+    // A suite's account outside the tenant, or an app's lookup that
+    // named none.
+    return await refusal(
+      provider.pinned
+        ? "connection.wrong_account"
+        : "connection.provider_refused"
+    );
+  }
+  if (!grantedAsAsked(provider, tokens)) {
+    return await refusal("connection.scopes_refused");
+  }
+  const { refreshToken } = tokens;
+  if (refreshToken === undefined) {
+    // Without one the connection would die within the hour.
+    return await refusal("connection.provider_refused");
+  }
+  return await keepAccount(
+    env,
+    setUp,
+    flow,
+    person,
+    account,
+    {
+      accessToken: tokens.accessToken,
+      refreshToken,
+      expiresAt: tokens.expiresAt,
+      scope: tokens.scope,
+    },
+    drop,
+    refuse
+  );
+};
+
+/**
+ * Stops `connection`: revokes the grant where the provider can, then
+ * marks it disconnected and deletes the tokens, in one write with its
+ * event, then drops the actions held for it, which can no longer run. A
+ * revoke the provider wouldn't take is owed: a sealed copy of the tokens
+ * stays with it, for the cron trigger to revoke with (src/revocations.ts).
+ * Returns whether the provider revoked the grant, and whether this call
+ * stopped it (a concurrent one may have first).
+ *
+ * One read while it needed connecting again had no grant to revoke, so it
+ * is stopped only while it still needs that: if it was reconnected
+ * meanwhile, it is read again and stopped as the active connection it is
+ * now, with the new grant revoked, not only deleted.
+ */
+const stop = async (
+  env: Env,
+  person: ConnectionPerson | null,
+  connection: ConnectionRow,
+  detail: Record<string, AuditDetailValue> = {}
+): Promise<{ revoked: boolean; stopped: boolean }> => {
+  const db = drizzle(env.DB);
+  // A Composio connection is stopped first, with its cleanup recorded in
+  // the same transaction, and deleted at Composio only after: calls stop
+  // whatever becomes of that deletion, and the clock retries it
+  // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
+  const composio = connection.serverKind === "composio";
+  // An HTTP connection's credential is the API's own: nothing to revoke
+  // at a provider, it is only deleted, below.
+  const http = connection.serverKind === "http";
+  const cleanupId = crypto.randomUUID();
+  const revokeOutcome =
+    composio || http ? "nothing" : await revokeAtProvider(env, connection);
+  const revokedGrant = revokeOutcome === "revoked";
+  const owed = revokeOutcome === "failed";
+  // Recorded only by the disconnect that stops it, if two run at once.
+  const waiting = connection.status === "needs_reauth";
+  const stillConnected = waiting
+    ? sql`${connections.id} = ${connection.id} AND ${connections.status} = 'needs_reauth'`
+    : sql`${connections.id} = ${connection.id} AND ${connections.status} <> 'disconnected'`;
+  const stopped = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.disconnect", connection.id, {
+      ...detail,
+      provider: connection.provider,
+      scope: connection.scope,
+      outcome: "ok",
+      ...(composio
+        ? { tokenHolder: "composio" }
+        : { revoked: revokedGrant, ...(owed ? { revokePending: true } : {}) }),
+    }),
+    { from: connections, where: stillConnected },
+    [
+      ...(composio ? [disconnectCleanup(db, cleanupId, stillConnected)] : []),
+      db
+        .update(connections)
+        .set({
+          status: "disconnected",
+          // The groups its account is in: nothing counts a disconnected
+          // connection's, so none are kept (reader-groups.ts).
+          readerGroups: null,
+          readerGroupsAt: null,
+          readerGroupsTriedAt: null,
+          readerGroupsReading: null,
+          updatedAt: new Date(),
+        })
+        .where(stillConnected),
+      // After the status, by the call that stopped it: the revoke it owes,
+      // with a copy of the tokens to revoke with, before they go.
+      ...(owed
+        ? [
+            oweRevoke(
+              db,
+              connection.id,
+              "disconnected",
+              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+            ),
+          ]
+        : []),
+      // After the status: only a stopped connection's credential goes.
+      ...(http
+        ? [
+            db
+              .update(httpConnections)
+              .set({ sealed: null })
+              .where(
+                sql`${httpConnections.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+              ),
+          ]
+        : []),
+      // After the status: only a stopped connection's tokens go.
+      db
+        .delete(connectionTokens)
+        .where(
+          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+        ),
+    ]
+  );
+  const reconnected =
+    waiting && !stopped
+      ? await db
+          .select()
+          .from(connections)
+          .where(
+            and(
+              eq(connections.id, connection.id),
+              eq(connections.status, "active")
+            )
+          )
+          .get()
+      : undefined;
+  if (reconnected !== undefined) {
+    return await stop(env, person, reconnected, detail);
+  }
+  await dropPendingActions(
+    env,
+    eq(pendingActions.connectionId, connection.id),
+    "connection.disconnected",
+    person
+  );
+  const revoked =
+    composio && stopped
+      ? await revokeAtComposio(env, cleanupId, connection)
+      : revokedGrant;
+  return { revoked, stopped };
+};
+
+/** Why a new directory connection's first read failed: `undefined` when it read. */
+type ProbeFailure =
+  | "connection.directory_unreadable"
+  | "connection.directory_unchecked";
+
+/**
+ * Reads the first page of people through `connectionId`, as the daily read
+ * does: whether its account can read the directory. A refusal (Google's
+ * answer to an account that isn't its admin, `directory.not_admin`;
+ * Entra's 401 or 403, `directory.inactive`, on tokens just issued) is
+ * `connection.directory_unreadable`; anything else that failed (throttled,
+ * a server error, no answer) is `connection.directory_unchecked`.
+ */
+const probeFailure = async (
+  env: Env,
+  connectionId: string
+): Promise<ProbeFailure | undefined> => {
+  try {
+    await readDirectory(env, { connectionId, cursor: null });
+    return undefined;
+  } catch (error) {
+    const code = directoryErrors.codeOf(error);
+    return code === "directory.not_admin" || code === "directory.inactive"
+      ? "connection.directory_unreadable"
+      : "connection.directory_unchecked";
+  }
+};
+
+/** The IDs of `provider`'s connections not disconnected, now. */
+const liveConnectionIds = async (
+  env: Env,
+  provider: string
+): Promise<Set<string>> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, provider),
+        ne(connections.status, "disconnected")
+      )
+    );
+  return new Set(rows.map(({ id }) => id));
+};
+
+/**
+ * Stops the connections of a directory made before `connectionId`, just
+ * made (GRA-2171). The directory is read through one connection, and an
+ * admin who connects it again with another account (an administrator's
+ * instead of one that can't read it) must not leave the one it replaces
+ * holding live tokens that no screen shows and nobody can disconnect.
+ *
+ * Only once the new one has shown it reads: an admin who signs in with an
+ * account that can't (their own, not the directory's admin) would
+ * otherwise stop a working directory. A new connection whose first read
+ * is refused, or failed for the moment, is stopped itself (its own grant,
+ * another account's than any earlier connection's, is the one revoked),
+ * the earlier ones stay as they are, and the flow is refused with why.
+ *
+ * Only earlier ones: of two admins connecting at once, the later
+ * connection stands. A stop of an earlier one that fails is logged, not
+ * answered: the new connection is made, and the next one made stops what
+ * this one left.
+ */
+const replaceEarlierDirectories = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string,
+  refuse: Refuse
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const made = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  if (made === undefined) {
+    return;
+  }
+  const earlier = await db
+    .select()
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, made.provider),
+        ne(connections.id, connectionId),
+        ne(connections.status, "disconnected"),
+        lt(connections.createdAt, made.createdAt)
+      )
+    )
+    .all();
+  if (earlier.length === 0) {
+    return;
+  }
+  const failed = await probeFailure(env, connectionId);
+  if (failed !== undefined) {
+    await stop(env, person, made);
+    await refuse(failed, { connectionId });
+    throw connectionErrors.create(failed);
+  }
+  for (const connection of earlier) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one stop at a time, each with its revoke
+      await stop(env, person, connection, { replacedBy: connectionId });
+    } catch (error) {
+      log.warn("connection.replace_failed", {
+        connectionId: connection.id,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/** Finishes `flow`, taken, as `finishConnection` says. */
+const finishFlow = async (
+  env: Env,
+  person: ConnectionPerson,
+  flow: FlowRow | undefined,
+  code: string | undefined,
+  error: string | undefined
+): Promise<{ connectionId: string; returnTo: string }> => {
+  const refuse: Refuse = async (
+    reason,
+    { outcome = "refused", connectionId } = {}
+  ) => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.connect",
+      {
+        provider: flow?.provider ?? null,
+        scope: flow?.scope ?? null,
+        outcome,
+        reason,
+      },
+      connectionId
+    );
+  };
+  const live =
+    flow !== undefined &&
+    flow.expiresAt.getTime() > Date.now() &&
+    flow.userId === person.userId;
+  if (!live) {
+    await refuse("connection.flow_invalid");
+    throw connectionErrors.create("connection.flow_invalid");
+  }
+  await refuseStaff(env, person, {
+    provider: flow.provider,
+    scope: flow.scope,
+  });
+  // The role is read again: it may have changed since the flow started.
+  if (!mayManage(person, flow.scope)) {
+    await refuse("role.forbidden");
+    throw roleErrors.create("role.forbidden");
+  }
+  if (code === undefined || error !== undefined) {
+    await refuse("connection.provider_refused", { outcome: "failed" });
+    throw connectionErrors.create("connection.provider_refused");
+  }
+  const setUp = await ready(env, flow.provider);
+  const { provider, client, vault } = setUp;
+
+  let tokens: TokenSet;
+  try {
+    tokens = await exchangeCode(provider, client, flow.tenant, {
+      code,
+      redirectUri: flow.redirectUri,
+      verifier: await vault.open(flow.verifier, flowContext(flow.stateHash)),
+    });
+  } catch (exchangeError) {
+    log.warn("oauth.exchange_failed", {
+      provider: provider.id,
+      ...errorFields(exchangeError),
+    });
+    await refuse("connection.provider_refused", { outcome: "failed" });
+    throw connectionErrors.create("connection.provider_refused");
+  }
+
+  // A directory's connections before: one this flow makes new replaces
+  // the earlier ones; one it reconnects or renews in place replaces none.
+  const directory = directoryProviderSchema.safeParse(provider.id).success;
+  const before = directory
+    ? await liveConnectionIds(env, provider.id)
+    : new Set<string>();
+  const connectionId = await keepTokens(
+    env,
+    setUp,
+    flow,
+    person,
+    tokens,
+    refuse
+  );
+  if (directory && !before.has(connectionId)) {
+    await replaceEarlierDirectories(env, person, connectionId, refuse);
+  }
+  return { connectionId, returnTo: flow.returnTo };
+};
+
+/**
+ * Finishes a flow with the provider's answer, for the person who started
+ * it: exchanges the code, checks the account is in the organization's
+ * tenant, and stores the connection with its tokens, sealed. A connection
+ * that holds the account and needs connecting again gets the tokens
+ * instead, if the person may reconnect it (`keepTokens`).
+ */
+export const finishConnection = async (
+  env: Env,
+  request: unknown
+): Promise<{ connectionId: string; returnTo: string }> => {
+  const parsed = finishConnectionSchema.safeParse(request);
+  if (!parsed.success) {
+    const given: unknown =
+      typeof request === "object" && request !== null
+        ? Reflect.get(request, "state")
+        : undefined;
+    await abandonFlow(env, given);
+    throw connectionErrors.create("connection.invalid");
+  }
+  const { person, state, code, error } = parsed.data;
+  const flow = await takeFlow(env, state);
+  try {
+    return await finishFlow(env, person, flow, code, error);
+  } finally {
+    if (flow !== undefined) {
+      await doneWith(env, flow);
+    }
+  }
+};
+
+/**
+ * Gives a live key connection that holds `account` the new key `key`:
+ * a key the person rotated at the app, which an API key's connection
+ * otherwise can't take, since nothing tells connect the old one stopped
+ * working. Only one of `scope` that the person may manage (their own if
+ * personal; any admin's if shared, as checked before), so it keeps its ID
+ * and every permission on it. In one write with its event, and only
+ * while it is still active. Its ID if this call replaced the key.
+ */
+const replaceKey = async (
+  env: Env,
+  { provider, vault }: { provider: ApiKeyProviderConfig; vault: Vault },
+  scope: ConnectionScope,
+  person: ConnectionPerson,
+  account: ProviderAccount,
+  key: string
+): Promise<string | undefined> => {
+  const held = await connectionHolding(env, provider.id, account.id);
+  if (
+    held?.status !== "active" ||
+    held.scope !== scope ||
+    (scope === "personal" && held.ownerUserId !== person.userId)
+  ) {
+    return undefined;
+  }
+  const now = new Date();
+  const row = await firstTokens(
+    vault,
+    held.id,
+    { apiKey: key, expiresAt: apiKeyExpiresAt },
+    now
+  );
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
+  const db = drizzle(env.DB);
+  const replaced = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.reconnected", held.id, {
+      provider: provider.id,
+      scope: held.scope,
+      outcome: "ok",
+    }),
+    { from: connections, where: stillActive },
+    [
+      db
+        .update(connectionTokens)
+        .set({
+          sealed: row.sealed,
+          accessExpiresAt: row.accessExpiresAt,
+          generation: row.generation,
+          refreshUntil: null,
+          updatedAt: now,
+        })
+        .where(
+          sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      db
+        .update(connections)
+        .set({
+          accountName: account.name,
+          accountEmail: account.email?.toLowerCase() ?? null,
+          pastVerifiedEmails: pastAddressesAfter(
+            confirmedAddressOf(provider, account)
+          ),
+          verifiedEmail: confirmedAddressOf(provider, account),
+          verifiedEmailAt:
+            confirmedAddressOf(provider, account) === null ? null : new Date(),
+          updatedAt: now,
+        })
+        .where(stillActive),
+    ]
+  );
+  return replaced ? held.id : undefined;
+};
+
+/**
+ * Connects an app that signs in with an API key: the key the person gave,
+ * once the app's own lookup takes it and names its account, kept sealed
+ * as a connection's tokens are, under the same rules (`keepAccount`). The
+ * key is never logged, audited or answered; a key the app refuses is
+ * `connection.provider_refused`, and nothing is kept.
+ */
+export const connectWithKey = async (
+  env: Env,
+  request: unknown
+): Promise<{ connectionId: string }> => {
+  const {
+    person,
+    provider: providerId,
+    scope,
+    key,
+  } = connectionErrors.parse(
+    "connection.invalid",
+    connectWithKeySchema,
+    request
+  );
+  await refuseStaff(env, person, { provider: providerId, scope });
+  if (!mayManage(person, scope)) {
+    await auditRefusal(env, person, "connection.connect", {
+      provider: providerId,
+      scope,
+      outcome: "refused",
+      reason: "role.forbidden",
+    });
+    throw roleErrors.create("role.forbidden");
+  }
+  const provider = providerFor(providerId);
+  const vault = await vaultFor(env);
+  if (provider?.kind !== "api_key" || vault === undefined) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  // The HR platform's connection reads the whole company: the
+  // organization's, never a person's own.
+  if (provider.sharedOnly === true && scope !== "shared") {
+    throw connectionErrors.create("connection.invalid");
+  }
+  const refuse: Refuse = async (
+    reason,
+    { outcome = "refused", connectionId } = {}
+  ) => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.connect",
+      { provider: provider.id, scope, outcome, reason },
+      connectionId
+    );
+  };
+  const account = await provider.account(key);
+  if (account === null) {
+    await refuse("connection.provider_refused", { outcome: "failed" });
+    throw connectionErrors.create("connection.provider_refused");
+  }
+  const replaced = await replaceKey(
+    env,
+    { provider, vault },
+    scope,
+    person,
+    account,
+    key
+  );
+  if (replaced !== undefined) {
+    return { connectionId: replaced };
+  }
+  const connectionId = await keepAccount(
+    env,
+    { provider, vault } satisfies {
+      provider: ApiKeyProviderConfig;
+      vault: Vault;
+    },
+    { scope, tenant: "" },
+    person,
+    account,
+    { apiKey: key, expiresAt: apiKeyExpiresAt },
+    undefined,
+    refuse
+  );
+  return { connectionId };
+};
+
+/** The person's own connections and the shared ones, never disconnected ones. */
+export const listConnections = async (
+  env: Env,
+  request: unknown
+): Promise<ConnectionSummary[]> => {
+  const person = connectionErrors.parse(
+    "connection.invalid",
+    connectionPersonSchema,
+    request
+  );
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(
+      and(
+        ne(connections.status, "disconnected"),
+        or(
+          eq(connections.scope, "shared"),
+          eq(connections.ownerUserId, person.userId)
+        )
+      )
+    )
+    .orderBy(desc(connections.createdAt));
+  const http = await httpSummaries(
+    env,
+    rows.filter(({ serverKind }) => serverKind === "http").map(({ id }) => id)
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    source: row.serverKind,
+    provider: row.provider,
+    scope: row.scope,
+    status: row.status,
+    ownerUserId: row.ownerUserId,
+    connectedBy: row.connectedBy,
+    accountName: row.accountName,
+    createdAt: row.createdAt.toISOString(),
+    ...(row.serverKind === "composio" && {
+      ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
+      tools: allowedToolNames(row),
+      offeredTools: offeredToolNames(row),
+      readTools: readToolNames(row),
+      toolResources: toolResourcesOf(row),
+    }),
+    ...(http.has(row.id) && { http: http.get(row.id) }),
+  }));
+};
+
+/**
+ * Every connection that isn't disconnected, for core's staff-only admin
+ * snapshot (`ConnectApi.organizationConnections`), with Composio's word on
+ * each Composio account. What a staff member may read of each, and no
+ * more: never a token, the server's URL (a Composio one names the
+ * account), nor anything Composio knows it by; of a personal one, not
+ * whose it is or which account, only that someone connected their own.
+ */
+export const organizationConnections = async (
+  env: Env
+): Promise<OrganizationConnection[]> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(ne(connections.status, "disconnected"))
+    .orderBy(desc(connections.createdAt));
+  const composio = await composioAccountStates(
+    env,
+    rows.filter(({ serverKind }) => serverKind === "composio")
+  );
+  return rows.flatMap((row) => {
+    // Filtered above; the column's type doesn't know it.
+    if (row.status === "disconnected") {
+      return [];
+    }
+    const shared = row.scope === "shared";
+    const isComposio = row.serverKind === "composio";
+    return [
+      {
+        id: row.id,
+        source: row.serverKind,
+        provider: row.provider,
+        scope: row.scope,
+        status: row.status,
+        composio: isComposio ? (composio.get(row.id) ?? "unread") : null,
+        connectedBy: shared ? row.connectedBy : null,
+        accountName: shared ? row.accountName : null,
+        createdAt: row.createdAt.toISOString(),
+        tools: shared && isComposio ? allowedToolNames(row) : null,
+      },
+    ];
+  });
+};
+
+/**
+ * Disconnects: stops the connection (see `stop`). A personal connection
+ * only by its owner, a shared one only by an admin.
+ */
+export const disconnect = async (
+  env: Env,
+  request: unknown
+): Promise<{ revoked: boolean }> => {
+  const { person, connectionId } = connectionErrors.parse(
+    "connection.invalid",
+    disconnectSchema,
+    request
+  );
+  const db = drizzle(env.DB);
+  const connection = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  if (connection === undefined) {
+    throw connectErrors.create("connect.connection_not_found");
+  }
+  const refused = async (reason: string): Promise<void> => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.disconnect",
+      { provider: connection.provider, outcome: "refused", reason },
+      connectionId
+    );
+  };
+  if (
+    connection.scope === "personal" &&
+    connection.ownerUserId !== person.userId
+  ) {
+    await refused("connect.not_owner");
+    throw connectErrors.create("connect.not_owner");
+  }
+  if (!mayManage(person, connection.scope)) {
+    await refused("role.forbidden");
+    throw roleErrors.create("role.forbidden");
+  }
+  // Staff never approve an HTTP connection (`createHttpConnection`), so
+  // they never take one away either.
+  if (connection.serverKind === "http" && person.staff) {
+    await refused("connection.staff_not_allowed");
+    throw connectionErrors.create("connection.staff_not_allowed");
+  }
+  if (connection.status === "disconnected") {
+    // Already stopped, maybe by a call that failed before it dropped the
+    // held actions: dropped now.
+    await dropPendingActions(
+      env,
+      eq(pendingActions.connectionId, connection.id),
+      "connection.disconnected",
+      person
+    );
+    return { revoked: false };
+  }
+  const { revoked } = await stop(env, person, connection);
+  return { revoked };
+};
+
+/**
+ * Disconnects every personal connection of the people `ownerUserIds`, each
+ * as `disconnect` does, spends the OAuth flows they still have open, so
+ * none of them finishes into a new connection, and drops every action held
+ * for them. For the admin who removed
+ * them, or for core itself (`person` null), which retries until a call
+ * completes; core calls it only for people it removed. Staff are
+ * refused, as they are for connecting. A flow already past its spending
+ * when this runs can still finish; core's retry catches that connection.
+ * Returns how many connections this call stopped.
+ */
+export const disconnectPersonal = async (
+  env: Env,
+  request: unknown
+): Promise<{ disconnected: number }> => {
+  const { person, ownerUserIds } = connectionErrors.parse(
+    "connection.invalid",
+    disconnectPersonalSchema,
+    request
+  );
+  if (person !== null && (person.staff || !isAdmin(person.role))) {
+    await auditRefusal(env, person, "connection.disconnect", {
+      outcome: "refused",
+      reason: "role.forbidden",
+    });
+    throw roleErrors.create("role.forbidden");
+  }
+  if (ownerUserIds.length === 0) {
+    return { disconnected: 0 };
+  }
+  const db = drizzle(env.DB);
+  // The IDs as one JSON parameter: D1 binds at most 100 to a statement,
+  // and a full list of owners is that many on its own.
+  const owners = sql`(SELECT value FROM json_each(${JSON.stringify(ownerUserIds)}))`;
+  await db.delete(oauthFlows).where(sql`${oauthFlows.userId} IN ${owners}`);
+  await dropToolkitFlowsOf(env, ownerUserIds);
+  const owned = await db
+    .select()
+    .from(connections)
+    .where(
+      and(
+        eq(connections.scope, "personal"),
+        sql`${connections.ownerUserId} IN ${owners}`,
+        ne(connections.status, "disconnected")
+      )
+    );
+  let disconnected = 0;
+  // One at a time: each revokes at its provider, and the first failure
+  // stops the rest, for a later try to pick up.
+  for (const connection of owned) {
+    // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+    const { stopped } = await stop(env, person, connection, {
+      ownerUserId: connection.ownerUserId,
+    });
+    disconnected += stopped ? 1 : 0;
+  }
+  // Nobody can confirm what waits for them any more, on any connection.
+  // After their connections, so this never keeps one of those live; core
+  // retries the whole call until it completes.
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.onBehalfOf} IN ${owners}`,
+    "person.removed",
+    person
+  );
+  return { disconnected };
+};
+
+/**
+ * Seals the verifiers of flows under way again with the current key, after
+ * a rotation, as `resealTokens` does for tokens: a flow started just before
+ * still finishes once the previous key is gone. The clock calls it.
+ */
+export const resealFlows = async (env: Env): Promise<void> => {
+  const vault = await vaultFor(env);
+  if (vault?.sealedWithPrevious === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const flows = await db
+    .select()
+    .from(oauthFlows)
+    .where(like(oauthFlows.verifier, vault.sealedWithPrevious))
+    .limit(resealBatchSize);
+  for (const flow of flows) {
+    const context = flowContext(flow.stateHash);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      const verifier = await vault.open(flow.verifier, context);
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      const sealed = await vault.seal(verifier, context);
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      await db
+        .update(oauthFlows)
+        .set({ verifier: sealed })
+        .where(
+          and(
+            eq(oauthFlows.stateHash, flow.stateHash),
+            eq(oauthFlows.verifier, flow.verifier)
+          )
+        );
+    } catch (error) {
+      // Changed at rest: it can never finish, so it goes rather than hold
+      // up the rest.
+      log.error("vault.open_failed", errorFields(error));
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      await db
+        .delete(oauthFlows)
+        .where(eq(oauthFlows.stateHash, flow.stateHash));
+    }
+  }
+};
+
+/** Deletes OAuth flows nobody finished in time. The clock calls it. */
+export const purgeExpiredFlows = async (env: Env): Promise<void> => {
+  const now = new Date();
+  await drizzle(env.DB)
+    .delete(oauthFlows)
+    .where(
+      and(
+        lte(oauthFlows.expiresAt, now),
+        or(
+          isNull(oauthFlows.finishingUntil),
+          lte(oauthFlows.finishingUntil, now)
+        )
+      )
+    );
+};

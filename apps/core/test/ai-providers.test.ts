@@ -1,0 +1,1953 @@
+/**
+ * The organization's own AI providers, end to end: an admin adds a key
+ * through core's `/rpc`, connect seals it, and core's model gateway
+ * reaches the provider's own API through connect, which adds the key.
+ * The providers are the outside systems here, faked behind connect's
+ * fetch (test/ai-providers-fake.ts); core, connect, the usage record and
+ * the audit log are real.
+ *
+ * The ways it can fail come first (threat model in src/ai-providers.ts,
+ * src/model-transport-connect.ts and connect's src/ai-providers.ts): a key
+ * that lands in core's database, its logs, the audit log or an answer; a
+ * key sent to any host but its provider's, or in more than one header; a
+ * custom endpoint on a private, metadata or plain-HTTP address; a call
+ * with no provider connected. Then the conformance every provider's route
+ * passes, and what the organization's admins do with their keys.
+ */
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import {
+  aiCredentialPlaceholder,
+  aiProviderErrors,
+  featuredModels,
+  graspAi,
+} from "@grasp-os/shared/ai-providers";
+import type {
+  AiSource,
+  OrganizationProviderId,
+} from "@grasp-os/shared/ai-providers";
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
+import { z } from "zod";
+
+import { usableModels } from "../src/ai-model-choice.ts";
+import { modelUsage } from "../src/db/core/schema.ts";
+import { graspAiMonth, monthSpend, spendMonth } from "../src/model-spend.ts";
+import { usageRecorded } from "../src/model-usage.ts";
+import { modelFailureOf, models, modelSettings } from "../src/models.ts";
+import type { ModelCall } from "../src/models.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
+import {
+  aiProvidersControlUrl,
+  compatibleHost,
+  releaseUrl,
+} from "./ai-providers-fake.ts";
+import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
+import { allEvents } from "./audit-events.ts";
+import { platformAnthropicKey } from "./connect-providers.ts";
+import { mockIdp } from "./idp.ts";
+import { holdAlarm } from "./interview-link.ts";
+import { teamsMade } from "./members-teams.ts";
+import type { Answer } from "./model-provider.ts";
+import { recordedUsage, usageRows } from "./model-usage.ts";
+import { agree, fact, mapped, team } from "./onboarding-team.ts";
+import { streamParts, streamText } from "./provider-streams.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
+import { connectDb, testBinding } from "./test-env.ts";
+
+const idp = mockIdp();
+
+const isFetcher = (value: unknown): value is Fetcher =>
+  typeof value === "object" && value !== null && "fetch" in value;
+
+/** The Worker standing in for the internet behind connect. */
+const internet = (): Fetcher => {
+  const binding = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(binding)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  return binding;
+};
+
+/** Plans how the providers answer the requests that carry `key`, in order. */
+const plan = async (key: string, replies: PlannedReply[]): Promise<void> => {
+  await internet().fetch(aiProvidersControlUrl, {
+    method: "POST",
+    body: JSON.stringify({ key, replies }),
+  });
+};
+
+/** Every request a provider got whose headers or body carry `text`. */
+const carrying = async (text: string): Promise<ProviderRequest[]> => {
+  const response = await internet().fetch(
+    `${aiProvidersControlUrl}?anywhere=${encodeURIComponent(text)}`
+  );
+  return await response.json();
+};
+
+/**
+ * `promise`, whether it has settled yet, and `done`, which settles with it
+ * and never rejects: awaited once the test finished, its failure is never
+ * left unhandled, whatever ended the test.
+ */
+const watched = <T>(promise: Promise<T>) => {
+  const state = { settled: false };
+  const settling = async (): Promise<T> => {
+    try {
+      return await promise;
+    } finally {
+      state.settled = true;
+    }
+  };
+  const settled = settling();
+  return {
+    promise: settled,
+    done: outcome(settled),
+    settled: () => state.settled,
+  };
+};
+
+/**
+ * Once the beginning of the held answer to `key`'s request was sent on,
+ * with `call` still waiting for the rest; failed at once, with what it
+ * ended with, should `call` end first.
+ */
+const answerBegun = async (
+  key: string,
+  call: { promise: Promise<unknown>; settled: () => boolean }
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      if (call.settled()) {
+        return;
+      }
+      const [request] = await carrying(key);
+      expect(request?.begun).toBeTruthy();
+    },
+    { timeout: 10_000, interval: 20 }
+  );
+  if (call.settled()) {
+    // Its own error, should it have failed, rather than the wait's.
+    const ended = await call.promise;
+    throw new Error(
+      `The call ended before its answer began: ${JSON.stringify(ended)}`
+    );
+  }
+};
+
+/** Once `key`'s one request was dropped by its sender. */
+const providerRequestDropped = async (key: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const requests = await carrying(key);
+      expect(requests).toMatchObject([{ dropped: true }]);
+    },
+    { timeout: 5000, interval: 50 }
+  );
+};
+
+/** Lets a reply held by `name` go on (`PlannedReply`). */
+const release = async (name: string): Promise<void> => {
+  await internet().fetch(releaseUrl, {
+    method: "POST",
+    body: JSON.stringify({ release: name }),
+  });
+};
+
+/** A key no other test uses, so what carries it is this test's. */
+const newKey = (): string => `test-byok-${crypto.randomUUID()}`;
+
+/** An answer as `api`'s stream sends it. */
+const answered = (
+  api: Parameters<typeof streamText>[0],
+  text: string,
+  usage: Partial<Answer> = {}
+): PlannedReply => ({
+  sse: streamText(api, {
+    text,
+    inputTokens: 1000,
+    outputTokens: 100,
+    ...usage,
+  }),
+});
+
+/** A person no other test uses, so their audit events are this test's. */
+const newPerson = () =>
+  ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
+
+/** The audit events whose actor is `userId`, once `count` have arrived. */
+const auditedFor = async (
+  userId: string,
+  count: number
+): Promise<AuditEvent[]> => {
+  const mine = async () => {
+    const events = await allEvents();
+    return events.filter(
+      ({ actor }) => "userId" in actor && actor.userId === userId
+    );
+  };
+  await vi.waitFor(
+    async () => {
+      const found = await mine();
+      expect(found.length).toBeGreaterThanOrEqual(count);
+    },
+    { timeout: 10_000, interval: 50 }
+  );
+  return await mine();
+};
+
+/** The App the calls work in, made once for the file. */
+let madeWork: ModelCall<undefined>["work"] | undefined;
+
+/** This test's admin, who sets the providers up: a session per test. */
+let signedInAdmin: Awaited<ReturnType<typeof signedInApi>> | undefined;
+
+/** This test's admin, and the App the calls work in. */
+const admin = async () => {
+  signedInAdmin ??= await signedInApi(idp, "admin");
+  if (madeWork === undefined) {
+    const { id } = await signedInAdmin.api.apps.create({ name: "Providers" });
+    const appId = appIdSchema.parse(id);
+    madeWork = {
+      authority: {
+        subject: { type: "app", appId },
+        onBehalfOf: signedInAdmin.userId,
+        mode: "interactive",
+        appVersion: 1,
+      },
+      context: { type: "app", appId },
+    };
+  }
+  return { admin: signedInAdmin, work: madeWork };
+};
+
+/** One call through the gateway, as an App's for `trigger`. */
+const callOf = async (
+  model: string,
+  fields: Partial<ModelCall<undefined>> = {}
+): Promise<ModelCall<undefined>> => {
+  const { work } = await admin();
+  return {
+    model,
+    input: "Say hello.",
+    purpose: "chat.turn",
+    trigger: newPerson(),
+    work,
+    ...fields,
+  };
+};
+
+/** Where each provider's route goes, and how it takes its key. */
+interface ProviderCase {
+  provider: OrganizationProviderId;
+  model: string;
+  api: Parameters<typeof streamText>[0];
+  host: string;
+  path: string;
+  header: "x-api-key" | "authorization";
+  region: string;
+  baseUrl?: string;
+}
+
+const anthropicCase: ProviderCase = {
+  provider: "anthropic",
+  model: "anthropic/claude-sonnet-4-5",
+  api: "anthropic-messages",
+  host: "api.anthropic.com",
+  // Anthropic's SDK asks its beta Messages API.
+  path: "/v1/messages?beta=true",
+  header: "x-api-key",
+  region: "us",
+};
+
+const openaiCase: ProviderCase = {
+  provider: "openai",
+  model: "openai/gpt-5.4",
+  api: "openai-responses",
+  host: "api.openai.com",
+  path: "/v1/responses",
+  header: "authorization",
+  region: "us",
+};
+
+const compatibleCase: ProviderCase = {
+  provider: "openai-compatible",
+  model: "openai-compatible/llama-3.3-70b",
+  api: "openai-completions",
+  host: compatibleHost,
+  path: "/v1/chat/completions",
+  header: "authorization",
+  region: "custom",
+  baseUrl: `https://${compatibleHost}/v1`,
+};
+
+const providerCases: ProviderCase[] = [
+  anthropicCase,
+  openaiCase,
+  {
+    provider: "mistral",
+    model: "mistral/mistral-large-latest",
+    api: "openai-completions",
+    host: "api.mistral.ai",
+    path: "/v1/chat/completions",
+    header: "authorization",
+    region: "eu",
+  },
+  {
+    provider: "openrouter",
+    model: "openrouter/openai/gpt-5.4",
+    api: "openai-completions",
+    host: "openrouter.ai",
+    path: "/api/v1/chat/completions",
+    header: "authorization",
+    region: "us",
+  },
+  compatibleCase,
+];
+
+/** Connects `each`'s provider with `key`, as an admin adds it. */
+const added = async (each: ProviderCase, key: string): Promise<void> => {
+  const { admin: by } = await admin();
+  if (each.provider === "openai-compatible") {
+    await by.api.aiProviders.add({
+      provider: "openai-compatible",
+      key,
+      baseUrl: each.baseUrl ?? "",
+    });
+    return;
+  }
+  await by.api.aiProviders.add({ provider: each.provider, key });
+};
+
+/** Connects `each`'s provider with a new key, and makes its model the default. */
+const connected = async (
+  each: ProviderCase,
+  fallbacks: string[] = []
+): Promise<string> => {
+  const key = newKey();
+  await added(each, key);
+  const { admin: by } = await admin();
+  await by.api.aiProviders.setModels({ defaultModel: each.model, fallbacks });
+  return key;
+};
+
+/**
+ * Where `key` went: the hosts it reached, the headers it was in, whether
+ * a body carried it, and whether core's placeholder reached a provider.
+ */
+const placesOf = async (key: string) => {
+  const carried = await carrying(key);
+  const placeholder = await carrying(aiCredentialPlaceholder);
+  return {
+    requests: carried.length > 0,
+    hosts: [...new Set(carried.map(({ host }) => host))],
+    headers: [
+      ...new Set(
+        carried.flatMap(({ headers }) =>
+          Object.entries(headers)
+            .filter(([, value]) => value.includes(key))
+            .map(([name]) => name)
+        )
+      ),
+    ],
+    inBody: carried.some(({ body }) => body.includes(key)),
+    placeholder: placeholder.length > 0,
+  };
+};
+
+/** Where a key should go: to `host`, in `header` alone, and nowhere else. */
+const onlyAt = ({ host, header }: Pick<ProviderCase, "host" | "header">) => ({
+  requests: true,
+  hosts: [host],
+  headers: [header],
+  inBody: false,
+  placeholder: false,
+});
+
+/** The rows of every table in core's database, as text. */
+const coreDatabaseText = async (): Promise<string> => {
+  const tables = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE '%_fts%'"
+  ).all<{ name: string }>();
+  const rows = await Promise.all(
+    tables.results.map(
+      async ({ name }) => await env.DB.prepare(`SELECT * FROM "${name}"`).all()
+    )
+  );
+  return JSON.stringify(rows.map(({ results }) => results));
+};
+
+/** Whether `later` is after `earlier`, both times read. */
+const after = (later: number | null, earlier: number | null): boolean =>
+  later !== null && earlier !== null && later > earlier;
+
+/** Sets up an organization that defaults to OpenAI and falls back to Claude. */
+const fallingBack = async (): Promise<{ openai: string; claude: string }> => {
+  const openai = await connected(openaiCase);
+  const claude = newKey();
+  await added(anthropicCase, claude);
+  const { admin: by } = await admin();
+  await by.api.aiProviders.setModels({
+    defaultModel: openaiCase.model,
+    fallbacks: [anthropicCase.model],
+  });
+  return { openai, claude };
+};
+
+describe("AI providers", { timeout: 60_000 }, () => {
+  beforeEach(async () => {
+    signedInAdmin = undefined;
+    // Each test starts with no provider connected and no model chosen.
+    await connectDb().prepare("DELETE FROM ai_provider_keys").run();
+    await env.DB.prepare(
+      "DELETE FROM org_settings WHERE kind IN ('ai_models', 'ai_source')"
+    ).run();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe("an organization's own keys", () => {
+    it("keeps a key only in connect, sealed, and never logs, stores or answers it in core", async () => {
+      const spies = [
+        vi.spyOn(console, "log"),
+        vi.spyOn(console, "warn"),
+        vi.spyOn(console, "error"),
+      ];
+      const key = newKey();
+      const { admin: by } = await admin();
+
+      const saved = await by.api.aiProviders.add({ provider: "openai", key });
+      await by.api.aiProviders.setModels({ defaultModel: openaiCase.model });
+      await plan(key, [answered("openai-responses", "Hello.")]);
+      await models(env).call(await callOf(openaiCase.model));
+      const listing = await by.api.aiProviders.list();
+      const sealed = await connectDb()
+        .prepare("SELECT * FROM ai_provider_keys")
+        .all();
+
+      expect(listing.providers).toMatchObject([
+        { provider: "openai", mask: `…${key.slice(-4)}` },
+      ]);
+      expect(sealed.results).toHaveLength(1);
+      // Nowhere: not what core answered, not connect's database, not
+      // core's, not the audit log, not core's logs.
+      const everywhere = JSON.stringify([
+        saved,
+        listing,
+        sealed.results,
+        await coreDatabaseText(),
+        await allEvents(),
+        spies.map((spy) => spy.mock.calls),
+      ]);
+      expect(everywhere).not.toContain(key);
+    });
+
+    it("refuses a custom endpoint on a private, internal, metadata or plain-HTTP address, and keeps nothing", async () => {
+      const { admin: by } = await admin();
+      const refused = await Promise.all(
+        [
+          "http://llm.acme-ai.test/v1",
+          "https://169.254.169.254/latest",
+          "https://metadata.google.internal/v1",
+          "https://10.0.0.8/v1",
+          "https://127.0.0.1/v1",
+          "https://localhost/v1",
+          "https://models.internal/v1",
+          "https://[::1]/v1",
+          "https://127.0.0.1.nip.io/v1",
+          "https://169-254-169-254.acme-ai.test/v1",
+          "https://llm.acme-ai.test:8443/v1",
+          `https://${["user", "pass"].join(":")}@llm.acme-ai.test/v1`,
+        ].map(
+          async (baseUrl) =>
+            await outcome(
+              by.api.aiProviders.add({
+                provider: "openai-compatible",
+                key: newKey(),
+                baseUrl,
+              })
+            )
+        )
+      );
+      const { providers } = await by.api.aiProviders.list();
+
+      expect(new Set(refused)).toStrictEqual(
+        new Set(["ai_provider.endpoint_refused"])
+      );
+      expect(providers).toStrictEqual([]);
+    });
+
+    it("sends a custom endpoint's key only to the base URL it was added with, asking its model by its own name", async () => {
+      const key = await connected(compatibleCase);
+      await plan(key, [answered("openai-completions", "Hello from Llama.")]);
+
+      const answer = await models(env).call(await callOf(compatibleCase.model));
+
+      expect(answer.text).toBe("Hello from Llama.");
+      const [request] = await carrying(key);
+      const asked: unknown = JSON.parse(request?.body ?? "{}");
+      expect({ path: request?.path, asked }).toMatchObject({
+        path: "/v1/chat/completions",
+        asked: { model: "llama-3.3-70b" },
+      });
+      await expect(placesOf(key)).resolves.toStrictEqual(
+        onlyAt(compatibleCase)
+      );
+    });
+
+    it("fails every call as having no provider while none is connected, and while none of its models is chosen", async () => {
+      const noProvider = await outcome(
+        models(env).call(await callOf(openaiCase.model))
+      );
+      await added(openaiCase, newKey());
+      const noModel = await outcome(
+        models(env).call(await callOf(openaiCase.model))
+      );
+
+      expect({ noProvider, noModel }).toStrictEqual({
+        noProvider: "model.no_provider",
+        noModel: "model.no_provider",
+      });
+    });
+
+    it("refuses a model the organization didn't choose once it connected a provider, and one of a provider it didn't connect", async () => {
+      await connected(openaiCase);
+
+      const unchosen = await outcome(
+        models(env).call(await callOf("openai/gpt-5-mini"))
+      );
+      const unconnected = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+
+      expect({ unchosen, unconnected }).toStrictEqual({
+        unchosen: "model.not_allowed",
+        unconnected: "model.not_allowed",
+      });
+    });
+
+    it("drops a removed provider's models from the choice for good, its default none until an admin chooses another", async () => {
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setModels({
+        defaultModel: anthropicCase.model,
+        fallbacks: [openaiCase.model],
+      });
+
+      const choiceNow = async () => {
+        const { choice } = await by.api.aiProviders.list();
+        return choice;
+      };
+      await by.api.aiProviders.remove("openai");
+      const fallbackGone = await choiceNow();
+      await by.api.aiProviders.remove("anthropic");
+      const defaultGone = await choiceNow();
+      // Connected again, neither comes back: the choice was changed, not
+      // only read without them.
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      const reconnected = await choiceNow();
+      await by.api.aiProviders.setModels({
+        defaultModel: openaiCase.model,
+        fallbacks: [],
+      });
+
+      expect({ fallbackGone, defaultGone, reconnected }).toStrictEqual({
+        fallbackGone: { defaultModel: anthropicCase.model, fallbacks: [] },
+        defaultGone: { defaultModel: null, fallbacks: [] },
+        reconnected: { defaultModel: null, fallbacks: [] },
+      });
+      await expect(choiceNow()).resolves.toStrictEqual({
+        defaultModel: openaiCase.model,
+        fallbacks: [],
+      });
+    });
+
+    it("prunes a removed provider's models from a choice another admin saved meanwhile, never overwriting it", async () => {
+      const mistralCase = providerCases.find(
+        ({ provider }) => provider === "mistral"
+      );
+      if (mistralCase === undefined) {
+        throw new TypeError("Expected Mistral's case");
+      }
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      await added(mistralCase, newKey());
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setModels({
+        defaultModel: openaiCase.model,
+        fallbacks: [anthropicCase.model],
+      });
+      const other = await signedInApi(idp, "admin");
+      const saved = {
+        defaultModel: anthropicCase.model,
+        fallbacks: [mistralCase.model],
+      };
+      // The other admin saves after the removal read the choice and
+      // before it wrote: as it asks connect which providers are left.
+      const real = env.CONNECT;
+      let between = true;
+      env.CONNECT = new Proxy(real, {
+        get: (target, name) => {
+          if (name === "aiProviderRoutes") {
+            return async () => {
+              if (between) {
+                between = false;
+                await other.api.aiProviders.setModels(saved);
+              }
+              return await real.aiProviderRoutes();
+            };
+          }
+          // Any other method as connect has it: an RPC stub binds nothing.
+          const method: unknown = Reflect.get(target, name);
+          if (typeof method !== "function") {
+            return method;
+          }
+          return async (...args: unknown[]): Promise<unknown> =>
+            await Reflect.apply(method, target, args);
+        },
+      });
+      try {
+        await by.api.aiProviders.remove("openai");
+      } finally {
+        env.CONNECT = real;
+      }
+
+      const { choice } = await by.api.aiProviders.list();
+      expect({ interleaved: !between, choice }).toStrictEqual({
+        interleaved: true,
+        choice: saved,
+      });
+    });
+
+    it("adds, tests, uses, replaces and removes a key", async () => {
+      const { admin: by } = await admin();
+      const first = newKey();
+      const second = newKey();
+      await plan(first, [
+        answered("anthropic-messages", "OK"),
+        answered("anthropic-messages", "Hello."),
+      ]);
+      await plan(second, [answered("anthropic-messages", "Hello again.")]);
+
+      await by.api.aiProviders.add({ provider: "anthropic", key: first });
+      const tested = await by.api.aiProviders.test("anthropic");
+      await by.api.aiProviders.setModels({ defaultModel: anthropicCase.model });
+      const used = await models(env).call(await callOf(anthropicCase.model));
+      await by.api.aiProviders.add({ provider: "anthropic", key: second });
+      const replaced = await models(env).call(
+        await callOf(anthropicCase.model)
+      );
+      const { providers } = await by.api.aiProviders.list();
+      await by.api.aiProviders.remove("anthropic");
+      const removed = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const kept = await connectDb()
+        .prepare("SELECT * FROM ai_provider_keys")
+        .all();
+
+      expect(tested).toStrictEqual({
+        ok: true,
+        model: "anthropic/claude-haiku-4-5",
+      });
+      expect([used.text, replaced.text, removed]).toStrictEqual([
+        "Hello.",
+        "Hello again.",
+        "model.no_provider",
+      ]);
+      expect(providers[0]?.status?.lastOkAt).toBeTypeOf("number");
+      const [withFirst, withSecond] = await Promise.all([
+        carrying(first),
+        carrying(second),
+      ]);
+      expect({
+        first: withFirst.length,
+        second: withSecond.length,
+        kept: kept.results.length,
+      }).toStrictEqual({ first: 2, second: 1, kept: 0 });
+    });
+
+    it("audits each change in the admin's name, and the test as a call through the gateway, never with the key", async () => {
+      const { admin: by } = await admin();
+      const key = newKey();
+      await plan(key, [answered("anthropic-messages", "OK")]);
+
+      await by.api.aiProviders.add({ provider: "anthropic", key });
+      await by.api.aiProviders.test("anthropic");
+      await by.api.aiProviders.setModels({ defaultModel: anthropicCase.model });
+      await by.api.aiProviders.add({ provider: "anthropic", key: newKey() });
+      await by.api.aiProviders.remove("anthropic");
+
+      const events = await auditedFor(by.userId, 7);
+      // Connect records a key's changes in its own outbox, core the rest
+      // in its: the log has them all, each in its own outbox's order. The
+      // removal took its model out of the choice too: a change of its own.
+      expect(
+        events
+          .filter(({ action }) => action.startsWith("ai_provider."))
+          .map(({ action, source }) => `${source} ${action}`)
+          .toSorted()
+      ).toStrictEqual([
+        "connect ai_provider.added",
+        "connect ai_provider.removed",
+        "connect ai_provider.replaced",
+        "core ai_provider.models_set",
+        "core ai_provider.models_set",
+        "core ai_provider.tested",
+      ]);
+      expect(
+        events
+          .filter(({ source }) => source === "connect")
+          .map(({ action }) => action)
+      ).toStrictEqual([
+        "ai_provider.added",
+        "ai_provider.replaced",
+        "ai_provider.removed",
+      ]);
+      expect(
+        events.find(({ action }) => action === "model.call")
+      ).toMatchObject({
+        model: { provider: "anthropic", model: "claude-haiku-4-5" },
+        detail: {
+          purpose: "ai_provider.test",
+          transport: "connect",
+          credential: "organization",
+          platform: "provider_test",
+        },
+      });
+      expect(JSON.stringify(events)).not.toContain(key);
+    });
+
+    it("offers each connected provider's models to choose from, and takes any of them as the default", async () => {
+      const { admin: by } = await admin();
+      await added(openaiCase, newKey());
+      await added(compatibleCase, newKey());
+
+      const { providers } = await by.api.aiProviders.list();
+      const offered = Object.fromEntries(
+        providers.map(({ provider, models: each }) => [provider, each])
+      );
+      const openai = offered.openai ?? [];
+      const last = openai.at(-1)?.model ?? "";
+      await by.api.aiProviders.setModels({
+        defaultModel: last,
+        fallbacks: [openaiCase.model],
+      });
+      const { choice } = await by.api.aiProviders.list();
+
+      expect(openai.map(({ model }) => model)).toContain(openaiCase.model);
+      expect(
+        openai.filter(
+          ({ model, name }) => !model.startsWith("openai/") || name === ""
+        )
+      ).toStrictEqual([]);
+      // A custom endpoint's models are named by the organization.
+      expect(offered["openai-compatible"]).toStrictEqual([]);
+      expect(choice).toStrictEqual({
+        defaultModel: last,
+        fallbacks: last === openaiCase.model ? [] : [openaiCase.model],
+      });
+    });
+
+    it("offers every provider's models before it is connected, the ones most choose among them", async () => {
+      const { admin: by } = await admin();
+
+      const { providers, offered } = await by.api.aiProviders.list();
+      const catalog = new Map<string, string[]>(
+        offered.map(({ provider, models: each }) => [
+          provider,
+          each.map(({ model }) => model),
+        ])
+      );
+
+      expect(providers).toStrictEqual([]);
+      // A custom endpoint's models are named by the organization.
+      expect(catalog.get("openai-compatible")).toStrictEqual([]);
+      // Every model an admin is offered first is one the gateway can call.
+      expect(
+        Object.entries(featuredModels).flatMap(([provider, featured]) =>
+          featured.filter(
+            (model) => !(catalog.get(provider) ?? []).includes(model)
+          )
+        )
+      ).toStrictEqual([]);
+    });
+
+    it("lets only the organization's admins read its providers, and its own admins change them", async () => {
+      const member = await signedInApi(idp, "user");
+
+      const adding = await outcome(
+        member.api.aiProviders.add({ provider: "openai", key: newKey() })
+      );
+      const listed = await outcome(member.api.aiProviders.list());
+
+      expect({ added: adding, listed }).toStrictEqual({
+        added: "role.forbidden",
+        listed: "role.forbidden",
+      });
+    });
+
+    it("refuses a key change from an admin demoted since their session was checked", async () => {
+      const key = newKey();
+      const { admin: by } = await admin();
+      await by.api.aiProviders.add({ provider: "openai", key });
+      await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
+        .bind(by.userId)
+        .run();
+
+      const adding = await outcome(
+        by.api.aiProviders.add({ provider: "anthropic", key: newKey() })
+      );
+      const removing = await outcome(by.api.aiProviders.remove("openai"));
+      const kept = await connectDb()
+        .prepare("SELECT provider FROM ai_provider_keys")
+        .all<{ provider: string }>();
+
+      expect({ adding, removing }).toStrictEqual({
+        adding: "role.forbidden",
+        removing: "role.forbidden",
+      });
+      expect(kept.results.map(({ provider }) => provider)).toStrictEqual([
+        "openai",
+      ]);
+    });
+
+    it("answers a save the database refuses as a failure that quotes nothing of what was written", async () => {
+      const spies = [
+        vi.spyOn(console, "log"),
+        vi.spyOn(console, "warn"),
+        vi.spyOn(console, "error"),
+      ];
+      const key = newKey();
+      const marker = "QUOTED:";
+      const { admin: by } = await admin();
+      // A database error quotes its query's values: here the sealed key
+      // and its mask, behind the marker.
+      await connectDb()
+        .prepare(
+          `CREATE TRIGGER quoting_refusal BEFORE INSERT ON ai_provider_keys BEGIN SELECT RAISE(ABORT, '${marker}' || NEW.sealed || ' ' || NEW.mask); END`
+        )
+        .run();
+      let failure: unknown;
+      try {
+        await by.api.aiProviders.add({ provider: "openai", key });
+      } catch (error) {
+        failure = error;
+      } finally {
+        await connectDb().prepare("DROP TRIGGER quoting_refusal").run();
+      }
+
+      expect(aiProviderErrors.codeOf(failure)).toBe("ai_provider.failed");
+      const everywhere = JSON.stringify([
+        String(failure),
+        failure instanceof Error ? failure.message : null,
+        spies.map((spy) => spy.mock.calls),
+        await coreDatabaseText(),
+      ]);
+      // The key, or its mask as written (`…` and its last four): four hex
+      // characters alone turn up in the database's own text by chance.
+      expect(everywhere).not.toContain(marker);
+      expect(everywhere).not.toContain(key);
+      expect(everywhere).not.toContain(`…${key.slice(-4)}`);
+    });
+
+    it("refuses Grasp staff the providers, and audits each ask, naming nothing they hold", async () => {
+      const key = newKey();
+      const { admin: by } = await admin();
+      await by.api.aiProviders.add({ provider: "openai", key });
+      const { core } = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
+      );
+      const staff = core.authenticate();
+      const { userId } = await staff.whoami();
+
+      const listing = await outcome(staff.aiProviders.list());
+      const adding = await outcome(
+        staff.aiProviders.add({ provider: "anthropic", key: newKey() })
+      );
+
+      expect({ listing, adding }).toStrictEqual({
+        listing: "role.forbidden",
+        adding: "role.forbidden",
+      });
+      const audited = await auditedFor(userId, 2);
+      const views = audited.filter(({ action }) => action === "staff.accessed");
+      expect(views.map(({ detail }) => detail.surface)).toStrictEqual(
+        expect.arrayContaining(["aiProviders.list", "aiProviders.add"])
+      );
+      expect(JSON.stringify(views)).not.toContain(key);
+      expect(JSON.stringify(views)).not.toContain(`…${key.slice(-4)}`);
+    });
+  });
+
+  describe("Grasp's own work for the organization", () => {
+    it("reads who does the work someone says isn't theirs with the organization's default model", async () => {
+      await holdAlarm();
+      const store = onboardingStore(env);
+      // The team's map is drawn before the organization connects its own
+      // provider, as an onboarding that began on Grasp's models.
+      const ids = await team(["lea", "max", "mia", "mo", "pim"]);
+      await mapped(ids);
+      const works = await store.teamWorks(ids.team);
+      const tickets = works.find(({ name }) => name === "handling new tickets");
+      const rota = works.find(({ name }) => name === "planning the rota");
+      if (tickets === undefined || rota === undefined) {
+        throw new Error("Expected the team's map");
+      }
+      await agree(ids.max, [
+        fact("x1", "who", "Pim handles the new tickets, not Max."),
+        fact("x2", "work", "Max plans the rota with Lea."),
+      ]);
+      const key = await connected(openaiCase);
+      await plan(key, [
+        answered(
+          openaiCase.api,
+          JSON.stringify({ does: rota.id, person: ids.pim })
+        ),
+      ]);
+
+      await store.drawNext();
+
+      const drawn = await store.teamWorks(ids.team);
+      const sent = await carrying(key);
+      expect({
+        models: sent.map(
+          ({ body }) =>
+            z.object({ model: z.string() }).parse(JSON.parse(body)).model
+        ),
+        ticketsByPim: drawn
+          .find(({ id }) => id === tickets.id)
+          ?.doers.includes(ids.pim),
+      }).toStrictEqual({ models: ["gpt-5.4"], ticketsByPim: true });
+    });
+
+    it("arranges the company's teams into regions with the organization's default model", async () => {
+      const key = await connected(openaiCase);
+      const { admin: by } = await admin();
+      // Arranged here, as the store's alarm would, never by itself.
+      await holdAlarm();
+      const tag = unique();
+      await by.api.onboarding.saveRoster(
+        await teamsMade({
+          teams: [
+            { id: `sales-${tag}`, name: "Sales", lead: null },
+            { id: `support-${tag}`, name: "Support", lead: null },
+          ],
+          people: [
+            {
+              id: `ann-${tag}`,
+              name: "Ann Example",
+              team: `sales-${tag}`,
+              title: "Account manager",
+            },
+          ],
+        })
+      );
+      const sales = `sales-${tag}`;
+      const support = `support-${tag}`;
+      await plan(key, [
+        answered(
+          openaiCase.api,
+          JSON.stringify({
+            groups: [{ name: "Customers", teamIds: [sales, support] }],
+          })
+        ),
+      ]);
+
+      await onboardingStore(env).arrangeNext();
+
+      const { teamGroups } = await by.api.brain.read();
+      const sent = await carrying(key);
+      expect({
+        models: sent.map(
+          ({ body }) =>
+            z.object({ model: z.string() }).parse(JSON.parse(body)).model
+        ),
+        arranged: teamGroups
+          .filter(({ name }) => name === "Customers")
+          .map(({ teamIds }) => teamIds.toSorted()),
+      }).toStrictEqual({
+        models: ["gpt-5.4"],
+        arranged: [[sales, support].toSorted()],
+      });
+    });
+  });
+
+  describe("falling back", () => {
+    it("tries the next model when a provider refuses a call before anything was billed, says which answered, and audits it", async () => {
+      const keys = await fallingBack();
+      // Refused for its credentials: OpenAI takes nothing on.
+      await plan(keys.openai, [{ status: 401 }]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+      const trigger = newPerson();
+
+      const answer = await models(env).call(
+        await callOf(openaiCase.model, { trigger })
+      );
+
+      expect({ text: answer.text, model: answer.model }).toStrictEqual({
+        text: "From Claude.",
+        model: anthropicCase.model,
+      });
+      const events = await auditedFor(trigger.userId, 3);
+      expect(
+        events.map(({ action, model, detail }) => ({
+          action,
+          provider: model?.provider ?? null,
+          outcome: detail.outcome ?? null,
+          why: detail.why ?? null,
+        }))
+      ).toStrictEqual([
+        {
+          action: "model.call",
+          provider: "openai",
+          outcome: "failed",
+          why: null,
+        },
+        {
+          action: "model.fallback",
+          provider: null,
+          outcome: null,
+          why: "auth",
+        },
+        {
+          action: "model.call",
+          provider: "anthropic",
+          outcome: "answered",
+          why: null,
+        },
+      ]);
+    });
+
+    it("never falls back once a provider failed a call it may have billed", async () => {
+      const keys = await fallingBack();
+      await plan(keys.openai, [{ status: 503 }]);
+
+      const failed = await outcome(
+        models(env).call(await callOf(openaiCase.model))
+      );
+
+      expect(failed).toBe("model.provider_unavailable");
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+    });
+
+    it("never falls back once an earlier request of the call was billed: a paid answer that missed its schema, then a refusal", async () => {
+      const keys = await fallingBack();
+      // The first answer is paid for but isn't the JSON asked for; asked
+      // again, the provider refuses the call's credentials.
+      await plan(keys.openai, [
+        answered("openai-responses", "Not JSON."),
+        { status: 401 },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", '{"ok":true}')]);
+      const trigger = newPerson();
+
+      const failed = await outcome(
+        models(env).call({
+          ...(await callOf(openaiCase.model, { trigger })),
+          schema: z.object({ ok: z.boolean() }),
+        })
+      );
+
+      // The key stopped working, said so: never another model's answer.
+      expect(failed).toBe("model.provider_key_failed");
+      await expect(carrying(keys.openai)).resolves.toHaveLength(2);
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+      const events = await auditedFor(trigger.userId, 2);
+      expect(events.map(({ action }) => action)).toStrictEqual([
+        "model.call",
+        "model.call",
+      ]);
+    });
+
+    it("never falls back for a call through an App's model binding, which goes to its approved model only", async () => {
+      const keys = await fallingBack();
+      await plan(keys.openai, [
+        { status: 429, headers: { "retry-after": "600" } },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+      const fields = await callOf(openaiCase.model);
+      const { work } = fields;
+      if (
+        work === undefined ||
+        !("context" in work) ||
+        work.context.type !== "app"
+      ) {
+        throw new Error("Expected an App's work");
+      }
+
+      const failed = await outcome(
+        models(env).call({
+          ...fields,
+          binding: { app: work.context.appId, alias: "writer" },
+          // The provider's wait outlasts it: never asked again either.
+          timeoutMs: 5000,
+        })
+      );
+
+      expect(failed).toBe("model.rate_limited");
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+    });
+
+    it("never falls back for a call that allows one provider request only, as a workflow step does", async () => {
+      const keys = await fallingBack();
+      await plan(keys.openai, [
+        { status: 429, headers: { "retry-after": "1" } },
+        { status: 429, headers: { "retry-after": "1" } },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+
+      const failed = await outcome(
+        models(env).call({
+          ...(await callOf(openaiCase.model)),
+          providerRetries: false,
+        })
+      );
+
+      expect(failed).toBe("model.rate_limited");
+      await expect(carrying(keys.openai)).resolves.toHaveLength(1);
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+    });
+
+    it("falls back when the default's account has no credit left, as OpenAI refuses it with a 429, asking it once", async () => {
+      const keys = await fallingBack();
+      // Out of credit, not a rate limit: waiting its retry-after gets
+      // nothing but the same refusal.
+      await plan(keys.openai, [
+        {
+          status: 429,
+          headers: { "retry-after": "1" },
+          body: {
+            error: {
+              message: "You exceeded your current quota.",
+              type: "insufficient_quota",
+              code: "insufficient_quota",
+            },
+          },
+        },
+        { status: 429, headers: { "retry-after": "1" } },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+      const trigger = newPerson();
+
+      const answer = await models(env).call(
+        await callOf(openaiCase.model, { trigger })
+      );
+
+      expect(answer.text).toBe("From Claude.");
+      await expect(carrying(keys.openai)).resolves.toHaveLength(1);
+      const events = await auditedFor(trigger.userId, 3);
+      expect(
+        events.find(({ action }) => action === "model.fallback")?.detail
+      ).toMatchObject({ why: "quota", status: 429 });
+    });
+
+    it("falls back in an agent's loop too, before anything streamed", async () => {
+      const keys = await fallingBack();
+      await plan(keys.openai, [{ status: 403 }]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+      const { input: _input, ...session } = await callOf(openaiCase.model);
+
+      const agent = await models(env).agent(session);
+      const answer = await agent
+        .stream(
+          agent.model,
+          normalizeContext({
+            messages: [
+              { role: "user", content: "Hello.", timestamp: Date.now() },
+            ],
+          })
+        )
+        .result();
+
+      expect({
+        stopReason: answer.stopReason,
+        content: answer.content,
+      }).toMatchObject({
+        stopReason: "stop",
+        content: [{ type: "text", text: "From Claude." }],
+      });
+    });
+  });
+
+  describe("a key that stopped working", () => {
+    it("says what the provider showed, by HTTP class, when there is no backup model, in a call and in an agent's loop", async () => {
+      const key = await connected(anthropicCase);
+      await plan(key, [
+        // Anthropic's refusal for an account with no credit left.
+        {
+          status: 400,
+          body: {
+            type: "error",
+            error: {
+              type: "invalid_request_error",
+              message:
+                "Your credit balance is too low to access the Anthropic API.",
+            },
+          },
+        },
+        {
+          status: 402,
+          body: { type: "error", error: { type: "billing_error" } },
+        },
+        { status: 503 },
+        { status: 403 },
+      ]);
+
+      const outOfCredit = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const billing = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const down = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const { input: _input, ...session } = await callOf(anthropicCase.model);
+      const agent = await models(env).agent(session);
+      const looped = await agent
+        .stream(
+          agent.model,
+          normalizeContext({
+            messages: [
+              { role: "user", content: "Hello.", timestamp: Date.now() },
+            ],
+          })
+        )
+        .result();
+      const asked = await carrying(key);
+
+      expect({
+        outOfCredit,
+        billing,
+        down,
+        looped: modelFailureOf(looped.errorMessage),
+        // Each sent once, never waited out and asked again.
+        asked: asked.length,
+      }).toStrictEqual({
+        outOfCredit: "model.rate_limited",
+        billing: "model.rate_limited",
+        down: "model.provider_unavailable",
+        looped: "model.provider_key_failed",
+        asked: 4,
+      });
+    });
+
+    it("reads as failing since its first failure after the last call that worked, until the key is replaced or a call works", async () => {
+      const key = await connected(anthropicCase);
+      await plan(key, [
+        answered("anthropic-messages", "Fine."),
+        { status: 401 },
+        { status: 401 },
+      ]);
+      const { admin: by } = await admin();
+      const unread = {
+        failingSince: null,
+        failingClass: null,
+        lastFailedAt: null,
+        lastFailure: null,
+      };
+      const statusNow = async () => {
+        const { providers } = await by.api.aiProviders.list();
+        return providers[0]?.status ?? unread;
+      };
+
+      await models(env).call(await callOf(anthropicCase.model));
+      const working = await statusNow();
+      const beforeFailing = Date.now();
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const firstFailure = await statusNow();
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const stillFailing = await statusNow();
+      // The admin replaces the key: what the old one's refusals said ends.
+      await added(anthropicCase, key);
+      const replaced = await statusNow();
+      await plan(key, [{ status: 401 }]);
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const failingAgain = await statusNow();
+      // The provider stops answering: a run of failures of another kind,
+      // since its own first one.
+      await plan(key, [{ status: 503 }]);
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const down = await statusNow();
+      await plan(key, [answered("anthropic-messages", "Fine again.")]);
+      await models(env).call(await callOf(anthropicCase.model));
+      const workingAgain = await statusNow();
+
+      expect({
+        working: working.failingSince,
+        since: after(firstFailure.failingSince, beforeFailing - 1),
+        kept: stillFailing.failingSince === firstFailure.failingSince,
+        later: after(stillFailing.lastFailedAt, stillFailing.failingSince),
+        how: stillFailing.lastFailure,
+        shows: stillFailing.failingClass,
+        replaced: replaced.failingSince,
+        failingAgain: after(
+          failingAgain.failingSince,
+          stillFailing.lastFailedAt
+        ),
+        down: {
+          shows: down.failingClass,
+          since: after(down.failingSince, failingAgain.failingSince),
+        },
+        workingAgain: workingAgain.failingSince,
+      }).toStrictEqual({
+        working: null,
+        since: true,
+        kept: true,
+        later: true,
+        how: "auth",
+        shows: "refused",
+        replaced: null,
+        failingAgain: true,
+        down: { shows: "not_answering", since: true },
+        workingAgain: null,
+      });
+    });
+
+    it("reads as not answering once an answer breaks off or its deadline passes with it still out, whatever the request is charged", async () => {
+      const key = await connected(anthropicCase);
+      const whole = answered("anthropic-messages", "Fine.");
+      const sse = "sse" in whole ? whole.sse : "";
+      await plan(key, [
+        whole,
+        // The answer begins, and stops partway.
+        { sse: sse.slice(0, Math.floor(sse.length / 2)) },
+        answered("anthropic-messages", "Fine again."),
+        { hang: true },
+      ]);
+      const { admin: by } = await admin();
+      const showsNow = async () => {
+        const { providers } = await by.api.aiProviders.list();
+        return providers[0]?.status?.failingClass ?? null;
+      };
+
+      await models(env).call(await callOf(anthropicCase.model));
+      const broke = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const afterBreak = await showsNow();
+      await models(env).call(await callOf(anthropicCase.model));
+      const late = await outcome(
+        models(env).call(await callOf(anthropicCase.model, { timeoutMs: 500 }))
+      );
+      const afterTimeout = await showsNow();
+
+      expect({ broke, afterBreak, late, afterTimeout }).toStrictEqual({
+        broke: "model.provider_unavailable",
+        afterBreak: "not_answering",
+        late: "model.provider_unavailable",
+        afterTimeout: "not_answering",
+      });
+    });
+  });
+
+  describe("Grasp's own keys, for platform features", () => {
+    it("tells the organization's admins which provider handles each of Grasp's own features, and where it runs", async () => {
+      const { admin: by } = await admin();
+
+      const listing = await by.api.aiProviders.list();
+
+      // Always at their providers' EU hosts: Grasp's to keep there.
+      expect(
+        listing.platform.map(
+          ({ feature, provider }) => `${feature}: ${provider.whereItRuns}`
+        )
+      ).toStrictEqual([
+        "transcription: OpenAI, European Union",
+        "speech: KugelAudio, European Union",
+      ]);
+    });
+  });
+
+  // Grasp's AI: the organization's own calls on Grasp's key, which Grasp
+  // pays the provider for. The ways it can go wrong, tried first:
+  //
+  // - Grasp's key used for an organization that never chose it: because
+  //   it has no provider of its own, or its own key stopped working.
+  // - Grasp's key used for any model but Grasp's one, or the
+  //   organization's own key used in its place once it chose Grasp's AI.
+  // - Someone but one of its own admins choosing it: a member, or Grasp's
+  //   staff, who would be choosing what Grasp is paid for.
+  // - Its use not told apart from Grasp's own features, or missing from
+  //   what the organization spent.
+  // - An organization spending without bound on Grasp's key: past its
+  //   month's limit a call must not reach the provider.
+  describe("Grasp's AI, on Grasp's key", () => {
+    /** Whose usage the limit's tests record, so it is theirs to clear. */
+    const graspSpender = "grasp-ai-limit-test";
+
+    afterEach(async () => {
+      await drizzle(env.DB)
+        .delete(modelUsage)
+        .where(eq(modelUsage.personId, graspSpender));
+    });
+
+    /** How many requests carried Grasp's Anthropic key so far. */
+    const onGraspKey = async (): Promise<number> => {
+      const carried = await carrying(platformAnthropicKey);
+      return carried.length;
+    };
+
+    it("is never used until one of the organization's own admins chooses it: not with no provider of its own, nor when its own key is refused", async () => {
+      const { admin: by } = await admin();
+      const before = await onGraspKey();
+
+      const listing = await by.api.aiProviders.list();
+      const noProvider = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+      // Its own Anthropic key, which Anthropic refuses.
+      const key = newKey();
+      await added(anthropicCase, key);
+      await by.api.aiProviders.setModels({ defaultModel: graspAi.model });
+      await plan(key, [{ status: 401 }]);
+      const refusedKey = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+
+      expect({
+        source: listing.source,
+        offered: listing.grasp,
+        noProvider,
+        refusedKey,
+        onGraspKey: (await onGraspKey()) - before,
+      }).toStrictEqual({
+        source: "own",
+        offered: {
+          available: true,
+          model: { model: graspAi.model, name: "Claude Sonnet 5.5" },
+          whereItRuns: "Anthropic, United States",
+          month: {
+            spentUsd: 0,
+            limitUsd: graspAi.monthlyLimitUsd,
+            reached: false,
+          },
+        },
+        noProvider: "model.no_provider",
+        refusedKey: "model.provider_key_failed",
+        onGraspKey: 0,
+      });
+    });
+
+    it("tells a call on Grasp's key whose request the provider refused from one whose provider failed", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      await plan(platformAnthropicKey, [
+        {
+          status: 400,
+          body: {
+            type: "error",
+            error: { type: "invalid_request_error", message: "Refused." },
+          },
+        },
+        { status: 503 },
+      ]);
+
+      const refused = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+      const down = await outcome(models(env).call(await callOf(graspAi.model)));
+
+      expect({ refused, down }).toStrictEqual({
+        refused: "model.request_refused",
+        down: "model.failed",
+      });
+    });
+
+    it("runs the organization's calls on Grasp's one model with Grasp's key, recorded as its own use of Grasp's AI", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "Hello, Ada."),
+      ]);
+      const trigger = newPerson();
+      const before = await monthSpend(env, spendMonth(env));
+
+      const answer = await models(env).call(
+        await callOf(graspAi.model, { trigger })
+      );
+
+      const [event] = await auditedFor(trigger.userId, 1);
+      const rows = await recordedUsage(spendMonth(env), 1, {
+        credential: "platform",
+        personId: trigger.userId,
+      });
+      const spent = await monthSpend(env, spendMonth(env));
+      const { models: usable } = await modelSettings(env);
+      const listing = await by.api.aiProviders.list();
+      expect({
+        text: answer.text,
+        usable,
+        source: listing.source,
+        // What it spent counts as the organization's, on its spend overview.
+        counted: spent.total > before.total,
+      }).toStrictEqual({
+        text: "Hello, Ada.",
+        usable: [graspAi.model],
+        source: "grasp",
+        counted: true,
+      });
+      await expect(placesOf(platformAnthropicKey)).resolves.toStrictEqual(
+        onlyAt(anthropicCase)
+      );
+      expect(event?.detail).toMatchObject({
+        outcome: "answered",
+        credential: "platform",
+        region: "us",
+      });
+      expect(rows).toMatchObject([
+        {
+          model: graspAi.model,
+          credential: "platform",
+          feature: "organization",
+          inputTokens: 1000,
+          outputTokens: 100,
+        },
+      ]);
+    });
+
+    it("refuses every model but Grasp's one on Grasp's AI, and never uses the organization's own key in its place", async () => {
+      const own = await connected(openaiCase);
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      const before = await onGraspKey();
+
+      const ownModel = await outcome(
+        models(env).call(await callOf(openaiCase.model))
+      );
+      const otherClaude = await outcome(
+        models(env).call(await callOf("anthropic/claude-opus-5-5"))
+      );
+      const ownKeyUsed = await carrying(own);
+
+      expect({
+        ownModel,
+        otherClaude,
+        ownKeyUsed: ownKeyUsed.length,
+        onGraspKey: (await onGraspKey()) - before,
+      }).toStrictEqual({
+        ownModel: "model.not_allowed",
+        otherClaude: "model.not_allowed",
+        ownKeyUsed: 0,
+        onGraspKey: 0,
+      });
+    });
+
+    it("goes back to the organization's own key when an admin chooses it again", async () => {
+      const own = await connected(openaiCase);
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      await by.api.aiProviders.setSource("own");
+      await plan(own, [answered(openaiCase.api, "Hello again.")]);
+      const before = await onGraspKey();
+
+      const answer = await models(env).call(await callOf(openaiCase.model));
+      const onGrasp = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+
+      expect({
+        text: answer.text,
+        onGrasp,
+        onGraspKey: (await onGraspKey()) - before,
+      }).toStrictEqual({
+        text: "Hello again.",
+        onGrasp: "model.not_allowed",
+        onGraspKey: 0,
+      });
+      await expect(placesOf(own)).resolves.toStrictEqual(onlyAt(openaiCase));
+    });
+
+    it("is chosen only by the organization's own admins, never a member or Grasp's staff, and on record in the admin's name", async () => {
+      const { admin: by } = await admin();
+      const member = await signedInApi(idp, "user");
+      const { core } = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
+      );
+      const staff = core.authenticate();
+
+      const byMember = await outcome(member.api.aiProviders.setSource("grasp"));
+      const byStaff = await outcome(staff.aiProviders.setSource("grasp"));
+      const unknown = await outcome(
+        // What the page's own types would never send.
+        by.api.aiProviders.setSource(z.custom<AiSource>().parse("anyone"))
+      );
+      const kept = await by.api.aiProviders.list();
+      await by.api.aiProviders.setSource("grasp");
+      // The same choice again changes nothing, and records nothing.
+      await by.api.aiProviders.setSource("grasp");
+
+      const audited = await auditedFor(by.userId, 1);
+      expect({
+        byMember,
+        byStaff,
+        unknown,
+        kept: kept.source,
+        set: audited
+          .filter(({ action }) => action === "ai_provider.source_set")
+          .map(({ detail }) => detail),
+      }).toStrictEqual({
+        byMember: "role.forbidden",
+        byStaff: "role.forbidden",
+        unknown: "ai_provider.invalid",
+        kept: "own",
+        set: [{ source: "grasp" }],
+      });
+    });
+
+    /** Records that the organization's use of Grasp's AI came to `usd` more this month, as an answered call does. */
+    const spentOnGraspAi = async (usd: number): Promise<void> => {
+      await drizzle(env.DB)
+        .insert(modelUsage)
+        .values({
+          id: crypto.randomUUID(),
+          period: spendMonth(env),
+          personId: graspSpender,
+          triggerType: "person",
+          model: graspAi.model,
+          credential: "platform",
+          feature: "organization",
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          cost: usd,
+          estimated: false,
+          createdAt: new Date(),
+        });
+    };
+
+    it("answers until the month's use of Grasp's AI reaches its limit, then refuses every call without reaching the provider, and never limits the organization's own key", async () => {
+      const own = await connected(openaiCase);
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      // A cent under the limit: the next call still goes out.
+      await spentOnGraspAi(graspAi.monthlyLimitUsd - 0.01);
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "Still here."),
+      ]);
+      const under = await models(env).call(await callOf(graspAi.model));
+      const beforeLimit = await by.api.aiProviders.list();
+
+      await spentOnGraspAi(0.01);
+      const before = await onGraspKey();
+      const trigger = newPerson();
+      const atLimit = await outcome(
+        models(env).call(await callOf(graspAi.model, { trigger }))
+      );
+      const again = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+      const listing = await by.api.aiProviders.list();
+      const [refused] = await auditedFor(trigger.userId, 1);
+
+      // On its own key again, its calls answer as before.
+      await by.api.aiProviders.setSource("own");
+      await plan(own, [answered(openaiCase.api, "On our own key.")]);
+      const ownKey = await models(env).call(await callOf(openaiCase.model));
+
+      expect({
+        under: under.text,
+        beforeLimit: beforeLimit.grasp.month.reached,
+        atLimit,
+        again,
+        reachedProvider: (await onGraspKey()) - before,
+        month: {
+          limitUsd: listing.grasp.month.limitUsd,
+          reached: listing.grasp.month.reached,
+        },
+        audited: [refused?.action, refused?.detail.reason],
+        ownKey: ownKey.text,
+      }).toStrictEqual({
+        under: "Still here.",
+        beforeLimit: false,
+        atLimit: "model.grasp_limit_reached",
+        again: "model.grasp_limit_reached",
+        reachedProvider: 0,
+        month: { limitUsd: graspAi.monthlyLimitUsd, reached: true },
+        audited: ["model.refused", "model.grasp_limit_reached"],
+        ownKey: "On our own key.",
+      });
+    });
+
+    it("refuses the call right after the one whose answer took the month's use to its limit", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      // So close under the limit that what one answer costs reaches it,
+      // counting what this month's answered calls cost already.
+      const { spentUsd } = await graspAiMonth(env, spendMonth(env));
+      await spentOnGraspAi(graspAi.monthlyLimitUsd - spentUsd - 1e-9);
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "The last one."),
+      ]);
+      const last = await models(env).call(await callOf(graspAi.model));
+      const next = await outcome(models(env).call(await callOf(graspAi.model)));
+      expect({ last: last.text, next }).toStrictEqual({
+        last: "The last one.",
+        next: "model.grasp_limit_reached",
+      });
+    });
+
+    it("has no model to use where the deployment has no key of Grasp's for it, never the organization's own instead", () => {
+      const choice = { defaultModel: openaiCase.model, fallbacks: [] };
+      const own = { provider: "openai" as const, baseUrl: null };
+      expect({
+        noKey: usableModels(
+          { organization: [own], platform: ["openai"] },
+          choice,
+          "grasp"
+        ),
+        keyed: usableModels(
+          { organization: [own], platform: ["anthropic"] },
+          choice,
+          "grasp"
+        ),
+        own: usableModels(
+          { organization: [own], platform: ["anthropic"] },
+          choice,
+          "own"
+        ),
+      }).toStrictEqual({
+        noKey: [],
+        keyed: [graspAi.model],
+        own: [openaiCase.model],
+      });
+    });
+  });
+
+  describe.each(providerCases)("the route to $provider", (each) => {
+    it("streams an answer, sending the key once, to the provider's own host only", async () => {
+      const key = await connected(each);
+      await plan(key, [answered(each.api, "Hello, Ada.")]);
+
+      const answer = await models(env).call(await callOf(each.model));
+
+      expect(answer).toMatchObject({
+        text: "Hello, Ada.",
+        usage: { inputTokens: 1000, outputTokens: 100 },
+      });
+      const [request] = await carrying(key);
+      expect(request?.path).toBe(each.path);
+      await expect(placesOf(key)).resolves.toStrictEqual(onlyAt(each));
+    });
+
+    it("waits out an answer that pauses mid-stream, and records its usage, cost and route in the audit log and its usage", async () => {
+      const key = await connected(each);
+      const parts = streamParts(each.api, {
+        text: "Hello, Ada.",
+        inputTokens: 1000,
+        outputTokens: 100,
+        pause: { at: 5, until: Promise.resolve() },
+      });
+      // Split at its pause: nothing else would pause it.
+      expect(parts).toHaveLength(2);
+      const [begun = "", rest = ""] = parts;
+      const paused = crypto.randomUUID();
+      await plan(key, [{ hold: begun, resume: { release: paused, rest } }]);
+      const trigger = newPerson();
+
+      // Read whole, with nothing told of its text as it streams.
+      const call = watched(
+        models(env).call(await callOf(each.model, { trigger }))
+      );
+      // Let go of the held answer however the test ends, and wait for it:
+      // after the test's own error, never in its place.
+      onTestFinished(async () => {
+        await release(paused);
+        await call.done;
+      });
+      await answerBegun(key, call);
+      await release(paused);
+
+      const answer = await call.promise;
+      const [event] = await auditedFor(trigger.userId, 1);
+      // Written in the background after its audit event: once it is, all
+      // there is.
+      await usageRecorded();
+      const rows = await usageRows(spendMonth(env), {
+        personId: trigger.userId,
+      });
+      expect({
+        text: answer.text,
+        priced: answer.cost > 0,
+      }).toStrictEqual({
+        text: "Hello, Ada.",
+        // At its list prices; a custom endpoint's model has none.
+        priced: each.provider !== "openai-compatible",
+      });
+      expect(event).toMatchObject({
+        action: "model.call",
+        model: {
+          provider: each.provider,
+          inputTokens: 1000,
+          outputTokens: 100,
+        },
+        cost: { amount: answer.cost },
+        detail: {
+          outcome: "answered",
+          transport: "connect",
+          region: each.region,
+          credential: "organization",
+        },
+      });
+      expect(rows).toMatchObject([
+        {
+          model: each.model,
+          credential: "organization",
+          inputTokens: 1000,
+          outputTokens: 100,
+          cost: answer.cost,
+        },
+      ]);
+    });
+
+    it("stops a request its caller cancels mid-answer as it waits for the answer whole", async () => {
+      const key = await connected(each);
+      const begun = streamText(each.api, {
+        text: "Hello",
+        inputTokens: 1000,
+        outputTokens: 100,
+        cut: 3,
+      });
+      await plan(key, [{ hold: begun }]);
+      const cancel = new AbortController();
+      const trigger = newPerson();
+
+      const call = watched(
+        outcome(
+          models(env).call(
+            await callOf(each.model, { trigger, signal: cancel.signal })
+          )
+        )
+      );
+      // Cancelled however the test ends, and waited for.
+      onTestFinished(async () => {
+        cancel.abort();
+        await call.done;
+      });
+      await answerBegun(key, call);
+      cancel.abort();
+
+      await expect(call.promise).resolves.toBe("model.failed");
+      const [event] = await auditedFor(trigger.userId, 1);
+      expect(event?.detail).toMatchObject({
+        outcome: "failed",
+        errorType: "cancelled",
+        status: 200,
+      });
+      await providerRequestDropped(key);
+    });
+
+    it("stops the provider's request when its caller cancels before the answer began", async () => {
+      const key = await connected(each);
+      await plan(key, [{ hang: true }]);
+      const cancel = new AbortController();
+
+      const call = outcome(
+        models(env).call(await callOf(each.model, { signal: cancel.signal }))
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(carrying(key)).resolves.toHaveLength(1);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      cancel.abort();
+
+      await expect(call).resolves.toBe("model.failed");
+      // Long before the call's deadline, which connect would stop it at.
+      await vi.waitFor(
+        async () => {
+          const [request] = await carrying(key);
+          expect(request?.dropped).toBeTruthy();
+        },
+        { timeout: 5000, interval: 50 }
+      );
+    });
+
+    it("fails a request that takes longer than its timeout, saying the provider isn't answering", async () => {
+      const key = await connected(each);
+      await plan(key, [{ hang: true }]);
+      const trigger = newPerson();
+
+      const late = await outcome(
+        models(env).call(await callOf(each.model, { trigger, timeoutMs: 500 }))
+      );
+
+      expect(late).toBe("model.provider_unavailable");
+      const [event] = await auditedFor(trigger.userId, 1);
+      expect(event?.detail).toMatchObject({
+        outcome: "failed",
+        errorType: "timeout",
+      });
+    });
+
+    it("waits out a rate limit it can within its deadline, and is refused for one it can't", async () => {
+      const key = await connected(each);
+      await plan(key, [
+        { status: 429, headers: { "retry-after": "1" } },
+        answered(each.api, "After the wait."),
+        { status: 429, headers: { "retry-after": "3600" } },
+      ]);
+
+      const waited = await models(env).call(await callOf(each.model));
+      // Its wait, held to core's most (a minute), ends past its deadline.
+      const refused = await outcome(
+        models(env).call(await callOf(each.model, { timeoutMs: 10_000 }))
+      );
+
+      expect([waited.text, refused]).toStrictEqual([
+        "After the wait.",
+        "model.rate_limited",
+      ]);
+      await expect(carrying(key)).resolves.toHaveLength(3);
+    });
+
+    it("fails a call whose key the provider refuses, without asking again, and says so in its status", async () => {
+      const key = await connected(each);
+      await plan(key, [{ status: 401 }]);
+      const trigger = newPerson();
+
+      const refused = await outcome(
+        models(env).call(await callOf(each.model, { trigger }))
+      );
+      const asked = await carrying(key);
+      const { admin: by } = await admin();
+      const { providers } = await by.api.aiProviders.list();
+
+      expect([refused, asked.length]).toStrictEqual([
+        "model.provider_key_failed",
+        1,
+      ]);
+      const [event] = await auditedFor(trigger.userId, 1);
+      expect(event?.detail).toMatchObject({ outcome: "failed", status: 401 });
+      expect(providers[0]?.status).toMatchObject({
+        lastFailure: "auth",
+        lastStatus: 401,
+      });
+    });
+  });
+});

@@ -1,0 +1,1 @@
+ALTER TABLE `app_resource_bindings` ADD `budget` text;

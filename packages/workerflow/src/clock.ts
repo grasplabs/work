@@ -1,0 +1,367 @@
+import { DurableObject } from "cloudflare:workers";
+
+// A Worker's clock (spec 43.5): one Durable Object per client deployment
+// that runs the Worker's maintenance, repair and admission tasks on its own
+// alarm, so they run without a platform cron (Workers for Platforms user
+// Workers can't have one). Each task has its own durable state: the period
+// slot it last ran for, whether it is running and since when, and how it
+// last ended. So one that fails, hangs or is slow holds up no other, a
+// duplicate or late alarm runs nothing twice, and an activation that dies
+// part way, evicted or crashed, is picked up by the watchdog alarm it armed
+// before it started anything.
+//
+// A task that outlives its lease (`clockLeaseMs`) is taken for dead and
+// may be started again while it still runs: every task must tolerate two
+// runs of itself at once, as they had to when crons could overlap: each
+// claims what it works on, or writes conditionally.
+//
+// Nothing arms the clock but its own alarm and `ensure`: a deployment's
+// first request or mail, its provisioning probe, and (for connect's) core's
+// clock every minute call it, so the clock never depends on already
+// running.
+//
+// Nothing of a task's own work is here: a Worker gives the clock its tasks
+// (`ClockObject.clockTasks`) and how a failure is reported.
+
+const minuteMs = 60_000;
+
+/** How often each kind of task is due. */
+export const clockPeriods = {
+  minute: minuteMs,
+  quarterHour: 15 * minuteMs,
+} as const;
+
+export type ClockPeriod = keyof typeof clockPeriods;
+
+/** One task a clock runs once per slot of its period. */
+export interface ClockTask<E> {
+  name: string;
+  period: ClockPeriod;
+  run: (env: E, at: Date) => Promise<unknown>;
+}
+
+/** How a Worker reports a task that failed, or whose outcome couldn't be recorded. */
+export type ClockReport = (
+  event: "clock.task_failed" | "clock.settle_failed",
+  task: string,
+  error: unknown
+) => void;
+
+/**
+ * How long a task that started counts as running: an alarm in that
+ * time leaves it to the activation that started it. After it, that
+ * activation is taken for dead, and the task runs again.
+ */
+export const clockLeaseMs = 10 * minuteMs;
+
+/** What the clock records of a task. */
+export interface ClockTaskState {
+  name: string;
+  /** The slot of its period it last started for; -1 before it ever did. */
+  lastSlot: number;
+  runs: number;
+  /** How its latest run ended; null while it hasn't. */
+  outcome: "ok" | "failed" | null;
+  /** Its failures in a row. */
+  failures: number;
+  /** When its running activation started it; null when none runs it. */
+  runningSince: number | null;
+}
+
+/** A clock as a probe finds it: whether its alarm is armed, and the tasks it runs, by name. */
+export interface ClockRegistration {
+  armed: boolean;
+  tasks: string[];
+}
+
+interface Row extends Record<string, SqlStorageValue> {
+  name: string;
+  last_slot: number;
+  runs: number;
+  outcome: "ok" | "failed" | null;
+  failures: number;
+  running_since: number | null;
+}
+
+const clockSlotOffsetMs = 1000;
+
+const slotOf = (period: ClockPeriod, at: number): number =>
+  Math.floor(at / clockPeriods[period]);
+
+/**
+ * When the alarm runs `period`'s slot after `slot`: a second into it, so a
+ * clock that's a little early or late still lands in the slot it's for.
+ */
+const dueAt = (period: ClockPeriod, slot: number): number =>
+  (slot + 1) * clockPeriods[period] + clockSlotOffsetMs;
+
+/**
+ * Starts `tasks` on `env` for time `at`, each on its own, and returns at
+ * once: `settle` is called as each ends, kept alive by `waitUntil`. The
+ * alarm doesn't wait for them, so a slow one delays no other task's next
+ * slot: it keeps its lease, and the alarms after it leave it be until it
+ * settles or its lease is over.
+ */
+const startClaimed = <E>(
+  env: E,
+  tasks: readonly ClockTask<E>[],
+  at: number,
+  settle: (name: string, failed: boolean) => unknown,
+  report: ClockReport,
+  waitUntil: (promise: Promise<unknown>) => void
+): void => {
+  for (const task of tasks) {
+    const run = async (): Promise<void> => {
+      let failed = false;
+      try {
+        await task.run(env, new Date(at));
+      } catch (error) {
+        failed = true;
+        report("clock.task_failed", task.name, error);
+      }
+      try {
+        await settle(task.name, failed);
+      } catch (error) {
+        report("clock.settle_failed", task.name, error);
+      }
+    };
+    waitUntil(run());
+  }
+};
+
+/** A Worker's clock (see the header comment): it extends this with its tasks. */
+export abstract class ClockObject<E> extends DurableObject<E> {
+  /** Every task, in the order each period starts them. */
+  protected abstract readonly clockTasks: readonly ClockTask<E>[];
+
+  /** How the alarm's runs report a failure. */
+  protected abstract report: ClockReport;
+
+  constructor(ctx: DurableObjectState, env: E) {
+    super(ctx, env);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS clock_tasks (
+      name TEXT PRIMARY KEY,
+      last_slot INTEGER NOT NULL DEFAULT -1,
+      runs INTEGER NOT NULL DEFAULT 0,
+      outcome TEXT,
+      failures INTEGER NOT NULL DEFAULT 0,
+      running_since INTEGER
+    )`);
+  }
+
+  /**
+   * Arms the alarm if nothing is armed, for the nearest slot a task is due
+   * for: a new clock, or one whose alarm something cleared, catches up with
+   * what's due straight away. An armed alarm is left as it is, so asking
+   * often moves nothing.
+   */
+  async ensure(): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.#rearm();
+    }
+  }
+
+  /**
+   * Arms the alarm as `ensure` does, then reports what a deploy's probe
+   * checks: whether an alarm is armed, and the tasks this clock runs.
+   */
+  async ensureRegistered(): Promise<ClockRegistration> {
+    await this.ensure();
+    return {
+      armed: (await this.ctx.storage.getAlarm()) !== null,
+      tasks: this.clockTasks.map(({ name }) => name),
+    };
+  }
+
+  /**
+   * Starts every task whose period moved to a slot it hasn't run for, and
+   * no live activation runs, each on its own, then arms the next slot. The
+   * watchdog is armed first: an activation that dies, evicted or crashed,
+   * before it arms the next slot is followed by another once its lease is
+   * over, and that one runs what's due then.
+   */
+  override async alarm(): Promise<void> {
+    const now = Date.now();
+    await this.ctx.storage.setAlarm(now + clockLeaseMs);
+    try {
+      const state = this.#states();
+      const claimed = this.#claim(
+        this.clockTasks.filter(
+          (task) =>
+            slotOf(task.period, now) > (state.get(task.name)?.lastSlot ?? -1)
+        ),
+        now,
+        now
+      );
+      startClaimed(
+        this.env,
+        claimed,
+        now,
+        (name, failed) => {
+          this.#settle(name, now, failed);
+        },
+        this.report,
+        (promise) => {
+          this.ctx.waitUntil(promise);
+        }
+      );
+    } finally {
+      // Armed for the next slot before any task ends: the claimed ones
+      // hold their leases, so it doesn't run them again meanwhile.
+      await this.#rearm();
+    }
+  }
+
+  /** Arms the alarm for the nearest slot a task is due for. */
+  async #rearm(): Promise<void> {
+    await this.ctx.storage.setAlarm(this.#nextAlarm(Date.now()));
+  }
+
+  /** What the clock records of each task, for diagnostics and tests. */
+  tasks(): ClockTaskState[] {
+    return [...this.#states().values()];
+  }
+
+  #states(): Map<string, ClockTaskState> {
+    const rows = this.ctx.storage.sql
+      .exec<Row>("SELECT * FROM clock_tasks")
+      .toArray();
+    return new Map(
+      rows.map((row) => [
+        row.name,
+        {
+          name: row.name,
+          lastSlot: row.last_slot,
+          runs: row.runs,
+          outcome: row.outcome,
+          failures: row.failures,
+          runningSince: row.running_since,
+        },
+      ])
+    );
+  }
+
+  /**
+   * Claims each of `tasks` this activation may run, in one transaction:
+   * not one another live activation runs.
+   */
+  #claim(
+    tasks: readonly ClockTask<E>[],
+    at: number,
+    now: number
+  ): ClockTask<E>[] {
+    return this.ctx.storage.transactionSync(() =>
+      tasks.filter((task) => {
+        const [row] = this.ctx.storage.sql
+          .exec<Pick<Row, "running_since">>(
+            "SELECT running_since FROM clock_tasks WHERE name = ?",
+            task.name
+          )
+          .toArray();
+        const running = row?.running_since ?? null;
+        if (running !== null && now - running < clockLeaseMs) {
+          return false;
+        }
+        this.ctx.storage.sql.exec(
+          `INSERT INTO clock_tasks (name, last_slot, running_since) VALUES (?, ?, ?)
+           ON CONFLICT (name) DO UPDATE SET last_slot = max(last_slot, excluded.last_slot), running_since = excluded.running_since`,
+          task.name,
+          slotOf(task.period, at),
+          now
+        );
+        return true;
+      })
+    );
+  }
+
+  /** Records how a run of `name` claimed at `started` ended, unless a later claim took it over. */
+  #settle(name: string, started: number, failed: boolean): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE clock_tasks SET running_since = NULL, runs = runs + 1, outcome = ?,
+         failures = CASE WHEN ? THEN failures + 1 ELSE 0 END
+       WHERE name = ? AND running_since = ?`,
+      failed ? "failed" : "ok",
+      failed ? 1 : 0,
+      name,
+      started
+    );
+  }
+
+  /**
+   * When the alarm should next run: the nearest slot any task is due for,
+   * a second from now at the earliest. A task still running past the slot
+   * it's due for is due once its run's lease is over.
+   */
+  #nextAlarm(now: number): number {
+    const state = this.#states();
+    const due = this.clockTasks.map((task) => {
+      const known = state.get(task.name);
+      const next = dueAt(
+        task.period,
+        known?.lastSlot ?? slotOf(task.period, now) - 1
+      );
+      // One still running past the slot it's due for is left to its run
+      // until its lease is over: not before then, or the alarm would come
+      // every second. One running its current slot is due for the next.
+      const running = known?.runningSince ?? null;
+      return running !== null && now - running < clockLeaseMs && next <= now
+        ? running + clockLeaseMs
+        : next;
+    });
+    return Math.max(now + clockSlotOffsetMs, Math.min(...due));
+  }
+}
+
+/**
+ * Arms a clock once per isolate, in the background: the repair path that
+ * starts it on a deployment's first request, and again after anything
+ * cleared its alarm. A failure goes to `failed` and is tried again by the
+ * next request.
+ */
+export const clockStarter = <E>(
+  clockOf: (env: E) => { ensure: () => Promise<void> },
+  failed: (error: unknown) => void
+) => {
+  const isolate = { started: false };
+  return (env: E, ctx: Pick<ExecutionContext, "waitUntil">): void => {
+    if (isolate.started) {
+      return;
+    }
+    isolate.started = true;
+    const start = async (): Promise<void> => {
+      try {
+        await clockOf(env).ensure();
+      } catch (error) {
+        isolate.started = false;
+        failed(error);
+      }
+    };
+    ctx.waitUntil(start());
+  };
+};
+
+/**
+ * Runs every task of `period` once on `env` for time `at`, outside any
+ * clock, and waits for them all: what a test runs to see a period's tasks
+ * do their work on an env of its own. A task's failure goes to `report`,
+ * as the clock's alarm reports it, and stops no other.
+ */
+export const runClockTasks = async <E>(
+  env: E,
+  tasks: readonly ClockTask<E>[],
+  period: ClockPeriod,
+  at: number,
+  report: ClockReport
+): Promise<void> => {
+  await Promise.all(
+    tasks
+      .filter((task) => task.period === period)
+      .map(async (task) => {
+        try {
+          await task.run(env, new Date(at));
+        } catch (error) {
+          report("clock.task_failed", task.name, error);
+        }
+      })
+  );
+};

@@ -1,0 +1,19 @@
+{
+  "name": "@grasp-os/connector-google-workspace",
+  "private": true,
+  "description": "Native Google Workspace connector, loaded by connect into its own isolate",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./google": "./src/google.ts",
+    "./mime": "./src/mime.ts"
+  },
+  "dependencies": {
+    "@grasp-os/connector-kit": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

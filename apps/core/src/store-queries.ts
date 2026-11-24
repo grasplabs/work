@@ -1,0 +1,2493 @@
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import {
+  allowsNull,
+  indexBase,
+  relationOf,
+  schemaFromDescriptor,
+} from "@grasp-os/runtime/host";
+import type {
+  IndexBase,
+  ManifestTable,
+  SchemaManifest,
+} from "@grasp-os/runtime/host";
+import { isRecord } from "@grasp-os/shared/json";
+import { pageLimits } from "@grasp-os/shared/pages";
+import {
+  queryMaxScannedBytes,
+  queryMaxScannedEntries,
+} from "@grasp-os/shared/store-limits";
+import type { ReadScope } from "@grasp-os/shared/store-queries";
+import { searchTerms } from "@grasp-os/shared/store-reads";
+import type {
+  GetRequest,
+  GroupTerminal,
+  QueryRequest,
+} from "@grasp-os/shared/store-reads";
+import { dataErrors, storedFieldsSchema } from "@grasp-os/shared/stores";
+
+import { answerSize, pageCut } from "./page-splits.ts";
+import {
+  fieldExpression,
+  filterSql,
+  jsonExpression,
+  numberExpression,
+  isManagedField,
+  nullSentinel,
+  rangeSql,
+  tableIdLiteral,
+} from "./store-expressions.ts";
+import type { FieldTypes, Fragment } from "./store-expressions.ts";
+import { defaultIndexName } from "./store-indexes.ts";
+import type { PhysicalIndex } from "./store-indexes.ts";
+import { ruleSql } from "./store-rules.ts";
+import { requireSearchable, searchMatch } from "./store-search.ts";
+import type { PhysicalSearch } from "./store-search.ts";
+
+// How a business store answers a read (store-host.ts): a record by ID, or
+// a query's descriptor (runtime/src/database-reader.ts), executed against the store's
+// own SQLite through the index it names, under the access the caller's
+// pinned schema declares. Everything here runs synchronously inside the
+// store's object, so one read sees one state of the store.
+//
+// Threat model (who reads: App code, through core, which resolves the
+// caller and hands the store a `ReadScope`; the descriptor itself is
+// whatever App code built, and is trusted for nothing):
+//
+// - A caller reads records it may not see, through any terminal: the
+//   table's read mode comes from the store's own record of the pinned
+//   schema (`sdk_schemas`), never from the request. `none` refuses;
+//   `appMembers` and `appBuilders` refuse a caller core didn't find to be
+//   one (`data.access_denied`); `owner` adds `owner_id = principal` to the
+//   one SQL statement every terminal runs, so counts, aggregates, `unique`
+//   and pages are computed over the caller's records only, and the owner
+//   leads the index, so other owners' records are never scanned either.
+//   Nothing is filtered after the fact.
+// - A caller reads rows a table's row rules keep from them (store-rules.ts
+//   has their own threat model), through any path: the rules' condition
+//   (`ReadTable.rows`, from the pinned schema and core's scope) joins the
+//   owner predicate in the WHERE clause of every statement a read runs,
+//   `get`, a query's every terminal and page, a cursor's anchor, a
+//   search, a group and the related records `with` loads alike. A row it
+//   excludes never reaches JavaScript: it isn't counted, summed, grouped,
+//   ranked into a page or answered as a related record (it is null, as a
+//   missing one is), and it doesn't count against the scan bound either,
+//   so `data.scan_limit` tells nothing of how many rows the caller can't
+//   see. The rules aren't in the index, so SQLite steps over those rows
+//   inside the statement: the cost of a sparse view is time, bounded by
+//   the store's size, never what the caller learns.
+// - A record ID discloses another table's or owner's record: `get` looks a
+//   record up by its table and ID, under the same owner predicate, and
+//   answers null for a record that is missing, in another table or not
+//   the caller's alike; `expectedRevision` is checked only on a record the
+//   caller may see.
+// - A descriptor smuggles SQL, or names what it shouldn't: tables,
+//   indexes and fields are resolved through the pinned manifest, so a
+//   name it lacks is refused before any SQL is built; table IDs and index
+//   names come from the store's catalog and its planner; field names
+//   reach SQL only through the shared emitter, as identifiers inside JSON
+//   paths; every value is a bound parameter.
+// - A query scans without bound: every query reads through the index it
+//   names (`INDEXED BY`, so SQLite fails rather than scans when the index
+//   can't serve it), within the range checked against that index, and
+//   examines at most `queryMaxScannedEntries` entries and
+//   `queryMaxScannedBytes` of documents (`data.scan_limit`, never a
+//   partial answer). `collect` fails past 100 records rather than
+//   truncating. A descriptor's own size is bounded at the boundary (its
+//   filter's depth, nodes and lists, and 64 bound values in all), so its
+//   statement stays within SQLite's expression and parameter limits.
+// - A condition drops a record through SQL NULL: conditions are emitted
+//   two-valued (store-expressions.ts), so `NOT` keeps records whose field
+//   is null or left out, and comparisons never reach them.
+// - A consumer reads fields its schema doesn't know, or misses one it
+//   relies on: documents are projected to the table's fields (spec 32.7),
+//   and every record holds each field its schema gives a default (a write
+//   is validated with it filled in, and a schema that adds one fills it in
+//   on the records already there as it is applied, store-host.ts
+//   `applySchema`), so a read shows what is stored and never makes a
+//   default up.
+// - A caller reads a schema the store doesn't hold, or claims a role: the
+//   schema hash and roles are core's (`ReadScope`), and any hash but the
+//   store's schema in force is refused (`migration.not_current`).
+//
+// What this module trusts, and who answers for it:
+//
+// - `ReadScope` (principal, roles, schema hash, consumer) is taken as
+//   given: only core holds the store's binding, and core must build the
+//   scope for each invocation from its own records, never from what App
+//   code sends. That is a hard requirement on the function boundary
+//   (GRA-244).
+// - An older schema's access is the access a read under its hash gets: a
+//   table tightened from `appMembers` to `owner` in a newer schema is
+//   still read by members under the older hash. So the hash must be the
+//   consumer's own pinned manifest's (GRA-244), and a hash a newer
+//   access mode superseded must be retired once no consumer is pinned to
+//   it (GRA-1480); this store keeps every hash it was handed until then.
+
+/** A store's record of one schema: what reads pinned to it are checked by. */
+export interface PinnedSchema {
+  readonly manifest: SchemaManifest;
+  /** Each table's ID in this store, by name. */
+  readonly tableIds: Readonly<Record<string, string>>;
+  /** The physical index of each declared index, by table and name. */
+  readonly indexes: ReadonlyMap<string, ReadonlyMap<string, PhysicalIndex>>;
+  /** The full-text index of each table that declares one, by table. */
+  readonly searches: ReadonlyMap<string, PhysicalSearch>;
+}
+
+/** A record as a read returns it: managed fields, then declared ones. */
+export type ReadDocument = Record<string, unknown>;
+
+/** The managed fields a read compares, with their base types. */
+const managedBases: Readonly<Record<string, IndexBase>> = {
+  _id: "string",
+  _ownerId: "string",
+  _createdAt: "number",
+  _updatedAt: "number",
+};
+
+const invalid = (issue: string): Error =>
+  dataErrors.create("data.invalid_query", { issues: [issue] });
+
+/**
+ * A table of the pinned schema, whether it is read by owner only, and the
+ * condition its read rules set on a row for the caller.
+ */
+export interface ReadTable {
+  readonly name: string;
+  readonly tableId: string;
+  readonly declared: ManifestTable;
+  readonly ownerScoped: boolean;
+  /**
+   * The rows the caller may read, as a condition on `sdk_records`'s
+   * columns (`ruleSql`): undefined when the table's read rules (if it has
+   * any) admit every row of it to them.
+   */
+  readonly rows: Fragment | undefined;
+}
+
+/** `table`'s owner predicate and row condition, as WHERE terms. */
+const scopeTerms = (table: ReadTable, scope: ReadScope): Fragment[] => [
+  ...(table.ownerScoped
+    ? [{ sql: "owner_id = ?", params: [scope.principal] }]
+    : []),
+  ...(table.rows === undefined ? [] : [table.rows]),
+];
+
+/** `table`'s owner predicate and row condition, as `AND`ed onto a WHERE. */
+const scopeClause = (table: ReadTable, scope: ReadScope): Fragment => {
+  const terms = scopeTerms(table, scope);
+  return {
+    sql: terms.map(({ sql }) => ` AND ${sql}`).join(""),
+    params: terms.flatMap(({ params }) => params),
+  };
+};
+
+/**
+ * Table `name` of the pinned schema, if the caller may read it: refused
+ * when the schema has no such table (`data.unknown_table`) or the caller
+ * isn't who its read mode admits (`data.access_denied`).
+ */
+export const readableTable = (
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  name: string
+): ReadTable => {
+  const declared = Object.hasOwn(pinned.manifest.tables, name)
+    ? pinned.manifest.tables[name]
+    : undefined;
+  const tableId = Object.hasOwn(pinned.tableIds, name)
+    ? pinned.tableIds[name]
+    : undefined;
+  if (declared === undefined || tableId === undefined) {
+    throw dataErrors.create("data.unknown_table", { table: name });
+  }
+  // A test's own transaction reads every record (`unrestricted`).
+  if (scope.unrestricted === true) {
+    return { name, tableId, declared, ownerScoped: false, rows: undefined };
+  }
+  const mode = declared.access.read;
+  const admitted =
+    mode === "owner" ||
+    (mode === "appMembers" && (scope.appMember || scope.appBuilder)) ||
+    (mode === "appBuilders" && scope.appBuilder);
+  if (!admitted) {
+    throw dataErrors.create("data.access_denied", { table: name });
+  }
+  return {
+    name,
+    tableId,
+    declared,
+    ownerScoped: mode === "owner",
+    rows: ruleSql(declared.rules?.read, scope),
+  };
+};
+
+/** The types of `table`'s fields, as the emitter checks conditions by. */
+const typesOf = (table: ReadTable): FieldTypes => {
+  const declared = (field: string) =>
+    Object.hasOwn(table.declared.fields, field)
+      ? table.declared.fields[field]
+      : undefined;
+  return {
+    base: (field) => {
+      if (isManagedField(field)) {
+        return managedBases[field];
+      }
+      const descriptor = declared(field);
+      return descriptor === undefined ? undefined : indexBase(descriptor);
+    },
+    nullable: (field) => {
+      const descriptor = isManagedField(field) ? undefined : declared(field);
+      return descriptor !== undefined && allowsNull(descriptor);
+    },
+  };
+};
+
+/** What a query reads through: its index, range terms and order. */
+export interface Access {
+  readonly index: string;
+  /** The range's terms, after the table and owner predicates. */
+  readonly where: Fragment;
+  /**
+   * The fields it is ordered by, past those its range holds equal, the
+   * record ID (`_id`) last.
+   */
+  readonly orderFields: readonly string[];
+}
+
+/**
+ * How `query` reads `table`: through its declared index, within a range
+ * that holds its first fields equal and bounds the next (its shape was
+ * checked at the boundary; here, that its fields are the index's, in
+ * order), or through the default order when it names none, and then no
+ * range.
+ */
+const accessOf = (
+  pinned: PinnedSchema,
+  table: ReadTable,
+  query: QueryRequest
+): Access => {
+  if (query.index === null) {
+    if (query.range.length > 0) {
+      throw invalid("A range bounds a declared index; this query names none");
+    }
+    return {
+      index: defaultIndexName(table.ownerScoped),
+      where: { sql: "", params: [] },
+      orderFields: ["_createdAt", "_id"],
+    };
+  }
+  const index = pinned.indexes.get(table.name)?.get(query.index);
+  if (index === undefined) {
+    throw dataErrors.create("data.unknown_index", {
+      table: table.name,
+      index: query.index,
+    });
+  }
+  const types = typesOf(table);
+  const equal = query.range.filter(({ op }) => op === "eq");
+  const bounded = query.range.slice(equal.length);
+  const terms: Fragment[] = [];
+  for (const [position, bound] of equal.entries()) {
+    if (bound.field !== index.fields[position]) {
+      throw invalid("An index range bounds the index's fields in order");
+    }
+    terms.push(rangeSql(types, bound.field, [bound]));
+  }
+  const [first] = bounded;
+  if (first !== undefined) {
+    if (first.field !== index.fields[equal.length]) {
+      throw invalid("An index range bounds the index's fields in order");
+    }
+    terms.push(rangeSql(types, first.field, bounded));
+  }
+  return {
+    index: index.name,
+    where: {
+      sql: terms.map(({ sql }) => sql).join(" AND "),
+      params: terms.flatMap(({ params }) => params),
+    },
+    orderFields: [...index.fields.slice(equal.length), "_id"],
+  };
+};
+
+/**
+ * What a read reads records through: SQLite's statements, and nothing
+ * else of the store, so the host can tell whether a read ever ran one.
+ */
+export type RecordSql = Pick<SqlStorage, "exec">;
+
+/**
+ * What a read reads records through. Every statement it runs names the
+ * table it reads (`on`), so the host knows each table the read looked at
+ * before the statement runs, whatever it then answers or however it
+ * fails; a table a read only names (one its `with` would load from, when
+ * no record named one) is never read, and never told. How many records
+ * of a table it answers is told besides (`answered`): every record that
+ * leaves the store as a document, a related one included, and every
+ * record a count, an aggregate or a group is computed over
+ * (`disclosed`). The host audits those of a sensitive table
+ * (store-host.ts, `#readIn`).
+ */
+export interface ReadSql {
+  /** The statements of the read that read `table`. */
+  readonly on: (table: string) => RecordSql;
+  readonly answered: (table: string, records: number) => void;
+}
+
+/** A record's row, as a read selects it. */
+export interface ReadRow extends Record<string, SqlStorageValue> {
+  record_id: string;
+  owner_id: string;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Each union member's validator, made once per descriptor. */
+const validators = new WeakMap<
+  ValueDescriptor,
+  ReturnType<typeof schemaFromDescriptor>
+>();
+
+/**
+ * `value` as `descriptor` takes it, as the SDK checks it, its nested
+ * defaults filled in as a write stores it; undefined when it doesn't fit.
+ */
+export const fitted = (
+  descriptor: ValueDescriptor,
+  value: unknown
+): { readonly value: unknown } | undefined => {
+  let schema = validators.get(descriptor);
+  if (schema === undefined) {
+    schema = schemaFromDescriptor(JSON.stringify(descriptor));
+    validators.set(descriptor, schema);
+  }
+  const checked = schema["~standard"].validate(value);
+  return checked instanceof Promise || checked.issues !== undefined
+    ? undefined
+    : { value: checked.value };
+};
+
+/** Whether `value` is valid under `descriptor`, as the SDK checks it. */
+export const validates = (
+  descriptor: ValueDescriptor,
+  value: unknown
+): boolean => fitted(descriptor, value) !== undefined;
+
+/** The keys each object-valued semantic kind holds (spec 32.1). */
+const semanticKeys: Readonly<
+  Partial<Record<ValueDescriptor["kind"], readonly string[]>>
+> = {
+  file: ["id"],
+  money: ["minorUnits", "currency"],
+  schedule: ["cron", "timeZone"],
+};
+
+/** A stored value no member of its pinned type can be shown as. */
+const unprojectable = (): Error =>
+  dataErrors.create("data.incompatible_record");
+
+/** How a value is projected to a descriptor (`projected`). */
+type Projection = (value: unknown, descriptor: ValueDescriptor) => unknown;
+
+/**
+ * An object's value as `fields` declare it: their keys only, each
+ * projected (a key declared without a descriptor, as a semantic kind's
+ * are, kept as stored). A key the value lacks stays missing, defaulted or
+ * not: a default is filled in when a value is written (input validation,
+ * and the store, for fields a published schema added,
+ * store-host.ts `applySchema`), never made up while reading (spec 17.1).
+ */
+const projectedObject = (
+  value: unknown,
+  fields: Readonly<Record<string, ValueDescriptor | undefined>>,
+  project: Projection
+): unknown => {
+  if (Array.isArray(value)) {
+    throw unprojectable();
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  const shown: Record<string, unknown> = {};
+  for (const [field, declared] of Object.entries(fields)) {
+    if (Object.hasOwn(value, field)) {
+      shown[field] =
+        declared === undefined ? value[field] : project(value[field], declared);
+    }
+  }
+  return shown;
+};
+
+/**
+ * A union's value as one of `members` has it: the member the stored value
+ * itself is valid under, as the validator picks it (the first that
+ * validates, whatever its kind, nested unions included), so a smaller
+ * member never drops fields of the one it was written as; failing that
+ * (it holds keys a later schema added), the first member whose projection
+ * is valid; failing that, `data.incompatible_record`, never the value as
+ * stored.
+ */
+const projectedUnion = (
+  value: unknown,
+  members: readonly ValueDescriptor[],
+  project: Projection
+): unknown => {
+  const fitting = members.find((member) => validates(member, value));
+  if (fitting !== undefined) {
+    return project(value, fitting);
+  }
+  for (const member of members) {
+    let projection: unknown;
+    try {
+      projection = project(value, member);
+    } catch {
+      continue;
+    }
+    if (validates(member, projection)) {
+      return projection;
+    }
+  }
+  throw unprojectable();
+};
+
+/**
+ * `value` as `descriptor` (a pinned schema's) has it, at every depth:
+ * objects keep only the keys they declare and hold, and so do the
+ * object-valued semantic kinds;
+ * records, arrays and unions project what they hold. Keys a later schema
+ * stored are left out, however deep (spec 32.7). A value that holds an
+ * object or a list where its type holds neither, or that no member of a
+ * union can be shown as, fails (`data.incompatible_record`) rather than
+ * show what the pinned schema doesn't declare.
+ */
+const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
+  if (value === null) {
+    return null;
+  }
+  const kept = semanticKeys[descriptor.kind];
+  if (descriptor.kind === "object" || kept !== undefined) {
+    return projectedObject(
+      value,
+      descriptor.kind === "object"
+        ? descriptor.fields
+        : Object.fromEntries((kept ?? []).map((key) => [key, undefined])),
+      projected
+    );
+  }
+  if (descriptor.kind === "record") {
+    if (!isRecord(value)) {
+      throw unprojectable();
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        projected(item, descriptor.value),
+      ])
+    );
+  }
+  if (descriptor.kind === "array") {
+    if (!Array.isArray(value)) {
+      throw unprojectable();
+    }
+    return value.map((item: unknown) => projected(item, descriptor.item));
+  }
+  if (descriptor.kind === "union") {
+    return projectedUnion(value, descriptor.members, projected);
+  }
+  if (isRecord(value) || Array.isArray(value)) {
+    throw unprojectable();
+  }
+  return value;
+};
+
+/** `stored` fields as the declared `fields` have them (`projected`). */
+const projectedFields = (
+  stored: Readonly<Record<string, unknown>>,
+  fields: Readonly<Record<string, ValueDescriptor>>
+): Record<string, unknown> => {
+  const projection = projected(stored, {
+    descriptorVersion: 1,
+    presence: "required",
+    nullable: false,
+    kind: "object",
+    fields,
+  });
+  return isRecord(projection) ? projection : {};
+};
+
+/**
+ * A stored record as the pinned table has it: its managed fields, then
+ * its declared fields, projected at every depth (`projected`).
+ */
+const documentOf = (
+  table: ReadTable,
+  row: ReadRow,
+  valueJson: string
+): ReadDocument => ({
+  _id: row.record_id,
+  _ownerId: row.owner_id,
+  _createdAt: row.created_at,
+  _updatedAt: row.updated_at,
+  ...projectedFields(
+    storedFieldsSchema.parse(JSON.parse(valueJson)),
+    table.declared.fields
+  ),
+});
+
+/** What the scan has seen, against its bounds. */
+export interface Scan {
+  entries: number;
+  bytes: number;
+}
+
+/** Counts one entry (and its document's bytes) against the scan's bounds. */
+const scanned = (scan: Scan, bytes: number): void => {
+  scan.entries += 1;
+  scan.bytes += bytes;
+  if (
+    scan.entries > queryMaxScannedEntries ||
+    scan.bytes > queryMaxScannedBytes
+  ) {
+    throw dataErrors.create("data.scan_limit", { scanned: scan.entries - 1 });
+  }
+};
+
+/**
+ * Answers `request`, a record by ID, for `scope` from `pinned`: the record
+ * as the pinned table has it, or null when there is none the caller may
+ * see.
+ */
+export const readRecord = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  request: GetRequest
+): ReadDocument | null => {
+  const table = readableTable(pinned, scope, request.table);
+  const scoped = scopeClause(table, scope);
+  const [row] = sql
+    .on(table.name)
+    .exec<ReadRow & { value_json: string }>(
+      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json FROM sdk_records WHERE table_id = ? AND record_id = ?${scoped.sql}`,
+      table.tableId,
+      request.id,
+      ...scoped.params
+    )
+    .toArray();
+  if (row === undefined) {
+    return null;
+  }
+  sql.answered(table.name, 1);
+  return documentOf(table, row, row.value_json);
+};
+
+/**
+ * One page, as `paginate` answers it: the last without a cursor, any
+ * other with one (spec 9.2's page envelope).
+ */
+export type PageAnswer = (
+  | { items: ReadDocument[]; nextCursor: null; hasMore: false }
+  | { items: ReadDocument[]; nextCursor: string; hasMore: true }
+) & {
+  /**
+   * Where to split a page given an end that grew past a bound (`readPage`,
+   * page-splits.ts): the answer holds every record up to that place, and
+   * may hold those after it.
+   */
+  splitCursor?: string;
+};
+
+/** What a terminal answers. */
+export type QueryAnswer =
+  | ReadDocument[]
+  | ReadDocument
+  | PageAnswer
+  | GroupAnswer[]
+  | number
+  | null;
+
+/** A query's one statement, ready to run: SQL, parameters and its table. */
+interface Plan {
+  readonly table: ReadTable;
+  readonly statement: string;
+  readonly params: readonly (string | number | null)[];
+  /** Whether rows carry a `matched` column the filter computed. */
+  readonly filtered: boolean;
+}
+
+/**
+ * Where a page starts after its cursor's anchor: terms that are top-level
+ * conjuncts of the WHERE clause (an index range SQLite seeks to), and how
+ * many of the leading order fields they hold equal, which the ORDER BY
+ * leaves out, as SQLite only reads an expression index in order when it
+ * does.
+ */
+export interface Seek {
+  readonly terms: readonly Fragment[];
+  readonly fixed: number;
+}
+
+/** What a plan selects, besides a record's managed fields. */
+export interface PlanOptions {
+  /** Whether the terminal needs documents. */
+  readonly documents: boolean;
+  /** The declared field an aggregate reads, as `agg`. */
+  readonly aggregate?: string;
+  /** Whether to select the order fields' values, as `o0`, `o1`, …. */
+  readonly anchors?: boolean;
+  readonly seek?: Seek;
+  /** Declared fields whose JSON a group's key reads, as `g0`, `g1`, …. */
+  readonly groups?: readonly string[];
+  /** Declared numeric fields a group aggregates, as `n0`, `n1`, …. */
+  readonly numbers?: readonly string[];
+}
+
+/**
+ * The one statement `query` runs on `table` for `scope`: through the
+ * index it names (`INDEXED BY`), the table, the owner when the table is
+ * read by owner only and the index range in its WHERE, the filter as a
+ * computed column, ordered along the index and limited to one entry past
+ * the scan bound. Documents reach JavaScript only when the terminal needs
+ * them; their size is counted whenever SQLite reads them.
+ */
+export const planQuery = (
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  {
+    documents,
+    aggregate,
+    anchors = false,
+    seek,
+    groups = [],
+    numbers = [],
+  }: PlanOptions
+): Plan => {
+  const access = accessOf(pinned, table, query);
+  const filter =
+    query.filter === null ? null : filterSql(typesOf(table), query.filter);
+  const direction = query.order === "desc" ? "DESC" : "ASC";
+  const computed = [
+    ...(filter === null ? [] : [`${filter.sql} AS matched`]),
+    ...(aggregate === undefined
+      ? []
+      : [`${numberExpression(aggregate)} AS agg`]),
+    ...groups.map(
+      (field, position) => `${jsonExpression(field)} AS g${position}`
+    ),
+    ...numbers.map(
+      (field, position) => `${numberExpression(field)} AS n${position}`
+    ),
+  ];
+  // Whatever reads a document counts its bytes.
+  const reads = documents || computed.length > 0;
+  const columns = [
+    "record_id",
+    "owner_id",
+    "revision",
+    "created_at",
+    "updated_at",
+    ...(documents ? ["value_json"] : []),
+    ...(reads ? ["length(CAST(value_json AS BLOB)) AS bytes"] : []),
+    ...computed,
+    ...(anchors
+      ? access.orderFields.map(
+          (field, position) => `${fieldExpression(field)} AS o${position}`
+        )
+      : []),
+  ];
+  const seekTerms = seek?.terms ?? [];
+  const scoped = scopeTerms(table, scope);
+  const where = [
+    `table_id = ${tableIdLiteral(table.tableId)}`,
+    ...[...scoped, access.where, ...seekTerms]
+      .map(({ sql }) => sql)
+      .filter((term) => term !== ""),
+  ];
+  const order = access.orderFields
+    .slice(seek?.fixed ?? 0)
+    .map((field) => `${fieldExpression(field)} ${direction}`);
+  return {
+    table,
+    statement: `SELECT ${columns.join(", ")} FROM sdk_records INDEXED BY ${access.index} WHERE ${where.join(" AND ")} ORDER BY ${order.join(", ")} LIMIT ${queryMaxScannedEntries + 1}`,
+    params: [
+      ...(filter?.params ?? []),
+      ...scoped.flatMap(({ params }) => params),
+      ...access.where.params,
+      ...seekTerms.flatMap(({ params }) => params),
+    ],
+    filtered: filter !== null,
+  };
+};
+
+/**
+ * A page's end, as the rows of its statements are read (`matchesOf`):
+ * whether a row comes after it, and whether one did.
+ */
+export interface EndBound {
+  readonly past: (row: ReadRow) => boolean;
+  reached: boolean;
+  /** The last row read short of the end, whatever the filter made of it. */
+  lastRow: ReadRow | undefined;
+  /**
+   * Whether the page stopped at the scan bound short of its end, after
+   * `lastRow`: it answers what it read, and says to split there.
+   */
+  exhausted: boolean;
+  /**
+   * How many shares of the scan bound the read takes: one for its own
+   * records, one more for each relation `with` loads for them. Related
+   * records load record by record within what is left (`relatedWithin`),
+   * so this only leaves room for them: without it, a read taking the
+   * whole bound would answer one record and split after it.
+   */
+  shares: number;
+}
+
+/** A row a plan matched, with its document when the plan read it. */
+export interface Match {
+  readonly row: ReadRow;
+  readonly valueJson: string | undefined;
+}
+
+/**
+ * The rows `plan` matches, in order, as they are read: each entry counted
+ * against the scan's bounds as it is read, so whoever stops early reads
+ * no further, and whoever reads past a bound gets `data.scan_limit`.
+ */
+export const matchesOf = (
+  sql: ReadSql,
+  plan: Plan,
+  shared?: Scan,
+  end?: EndBound
+): IterableIterator<Match, undefined> => {
+  // A scan of its own unless the caller's spans several statements.
+  const scan: Scan = shared ?? { entries: 0, bytes: 0 };
+  const cursor = sql
+    .on(plan.table.name)
+    .exec<ReadRow & { value_json?: string; bytes?: number; matched?: number }>(
+      plan.statement,
+      ...plan.params
+    );
+  const rows = cursor[Symbol.iterator]();
+  const iterator: IterableIterator<Match, undefined> = {
+    next: () => {
+      for (let read = rows.next(); read.done !== true; read = rows.next()) {
+        const row = read.value;
+        // A page's end, checked on every row read, whether or not it
+        // passes the filter: a page never scans on past its end.
+        if (end?.past(row) === true) {
+          end.reached = true;
+          return { done: true, value: undefined };
+        }
+        // A page with an end that reaches the scan bound stops short of
+        // it, after the last row it read, rather than fail for good: the
+        // page's records grew past what one read may examine.
+        if (
+          end?.lastRow !== undefined &&
+          (scan.entries + 1 > queryMaxScannedEntries / end.shares ||
+            scan.bytes + (row.bytes ?? 0) > queryMaxScannedBytes / end.shares)
+        ) {
+          end.exhausted = true;
+          return { done: true, value: undefined };
+        }
+        scanned(scan, row.bytes ?? 0);
+        if (end !== undefined) {
+          end.lastRow = row;
+        }
+        if (!plan.filtered || row.matched === 1) {
+          return { done: false, value: { row, valueJson: row.value_json } };
+        }
+      }
+      return { done: true, value: undefined };
+    },
+    [Symbol.iterator]: () => iterator,
+  };
+  return iterator;
+};
+
+/** The first `limit` matches' documents, at most. */
+export const documentsOf = (
+  table: ReadTable,
+  matches: Iterator<Match>,
+  limit: number
+): ReadDocument[] => {
+  const documents: ReadDocument[] = [];
+  while (documents.length < limit) {
+    const next = matches.next();
+    if (next.done === true) {
+      break;
+    }
+    const { row, valueJson } = next.value;
+    if (valueJson === undefined) {
+      throw new Error("A plan for documents read none");
+    }
+    documents.push(documentOf(table, row, valueJson));
+  }
+  return documents;
+};
+
+/**
+ * The sum, least or greatest value of the aggregated field over every
+ * match, as SQLite read it (`agg`): values that are numbers only, never
+ * null (the sentinel) or a field left out. A result that isn't finite
+ * (a sum past the largest number) is refused, never answered.
+ */
+const aggregateOf = (
+  operation: "sum" | "min" | "max",
+  matches: Iterable<Match>
+): number | null => {
+  let sum = 0;
+  let least: number | null = null;
+  let greatest: number | null = null;
+  for (const { row } of matches) {
+    const value = row.agg;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      sum += value;
+      least = least === null ? value : Math.min(least, value);
+      greatest = greatest === null ? value : Math.max(greatest, value);
+    }
+  }
+  let result: number | null = sum;
+  if (operation !== "sum") {
+    result = operation === "min" ? least : greatest;
+  }
+  if (result !== null && !Number.isFinite(result)) {
+    throw dataErrors.create("data.aggregate_overflow");
+  }
+  return result;
+};
+
+/**
+ * `matches`, each told to `sql` as a record of `table` the read answered
+ * as it is read: a count, an aggregate or a group reads through its
+ * matches and tells what they hold (an exact value under a narrow filter,
+ * a field's distinct values) as much as the records themselves would.
+ */
+const disclosed = (
+  sql: ReadSql,
+  table: ReadTable,
+  matches: Iterator<Match>
+): IterableIterator<Match, undefined> => {
+  const iterator: IterableIterator<Match, undefined> = {
+    next: () => {
+      const next = matches.next();
+      if (next.done === true) {
+        return { done: true, value: undefined };
+      }
+      sql.answered(table.name, 1);
+      return next;
+    },
+    [Symbol.iterator]: () => iterator,
+  };
+  return iterator;
+};
+
+/** How many matches there are. */
+const countOf = (matches: Iterable<Match>): number => {
+  let count = 0;
+  for (const _match of matches) {
+    count += 1;
+  }
+  return count;
+};
+
+/**
+ * An order field's value at a page's anchor: left out (`[]`), an explicit
+ * null (`[null]`) or a value, as the field's expression gives it.
+ */
+export type AnchorValue = [] | [null] | [string | number];
+
+/**
+ * Where a page ends, for the next to start after: the last record's ID
+ * and, when they fit in a cursor, its order fields' values. Without them,
+ * the next page looks the record up again; a search's never has them.
+ */
+export interface Anchor {
+  readonly id: string;
+  readonly values?: readonly AnchorValue[];
+}
+
+/** One page: its records, whether more follow, and its last record's anchor. */
+export interface PageRead {
+  readonly items: ReadDocument[];
+  readonly hasMore: boolean;
+  readonly last: Anchor | undefined;
+  /** Where to split it, for a page with an end grown past twice its size. */
+  readonly split?: Anchor;
+}
+
+/** An order field's value as SQLite read it, as an anchor holds it. */
+const anchorValueOf = (value: SqlStorageValue | undefined): AnchorValue => {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (value === Number.NEGATIVE_INFINITY) {
+    return [null];
+  }
+  if (typeof value === "number" || typeof value === "string") {
+    return [value];
+  }
+  throw new Error("An order field read as bytes");
+};
+
+/** `expression` equal to an anchor's value, as SQLite reads the index. */
+const sameAs = (expression: string, value: AnchorValue): Fragment => {
+  if (value.length === 0) {
+    return { sql: `${expression} IS NULL`, params: [] };
+  }
+  const [held] = value;
+  return held === null
+    ? { sql: `${expression} = ${nullSentinel}`, params: [] }
+    : { sql: `${expression} = ?`, params: [held] };
+};
+
+/**
+ * What comes strictly after an anchor's value of one order field, in the
+ * index's order, as terms SQLite seeks by, each with how many more
+ * fields it holds equal. SQLite sorts NULL (a field left out) first, then
+ * the null sentinel, then values, so ascending, after a field left out
+ * comes anything not NULL; descending, after a value come lesser values
+ * (the sentinel among them), then NULL, in two steps.
+ */
+const afterOf = (
+  field: string,
+  value: AnchorValue,
+  direction: "asc" | "desc"
+): { term: Fragment; fixes: number }[] => {
+  const expression = fieldExpression(field);
+  // A managed field is a column that is never NULL: no step for a field
+  // left out.
+  const leftOut = isManagedField(field)
+    ? []
+    : [{ term: { sql: `${expression} IS NULL`, params: [] }, fixes: 1 }];
+  if (value.length === 0) {
+    // Ascending, every held value comes after, and `>=` the sentinel is
+    // an index range over exactly those (never a walk over the field's
+    // left-out entries); descending, nothing does.
+    return direction === "asc"
+      ? [
+          {
+            term: { sql: `${expression} >= ${nullSentinel}`, params: [] },
+            fixes: 0,
+          },
+        ]
+      : [];
+  }
+  const [held] = value;
+  if (held === null) {
+    return direction === "asc"
+      ? [
+          {
+            term: { sql: `${expression} > ${nullSentinel}`, params: [] },
+            fixes: 0,
+          },
+        ]
+      : leftOut;
+  }
+  return direction === "asc"
+    ? [{ term: { sql: `${expression} > ?`, params: [held] }, fixes: 0 }]
+    : [
+        { term: { sql: `${expression} < ?`, params: [held] }, fixes: 0 },
+        ...leftOut,
+      ];
+};
+
+/**
+ * The seeks that read, in order, every entry after `anchor`: first those
+ * equal to it in every order field with a later record ID, then, field by
+ * field from the last, those equal in the fields before it and after it
+ * in this one. Each seek is one index range, so a page costs what it
+ * reads, however deep it is.
+ */
+const seeksAfter = (
+  orderFields: readonly string[],
+  values: readonly AnchorValue[],
+  id: string,
+  direction: "asc" | "desc"
+): Seek[] => {
+  const fields = orderFields.slice(0, -1);
+  if (values.length !== fields.length) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  const equal = (count: number): Fragment[] =>
+    fields
+      .slice(0, count)
+      .map((field, position) =>
+        sameAs(fieldExpression(field), values[position] ?? [])
+      );
+  const seeks: Seek[] = [
+    {
+      terms: [
+        ...equal(fields.length),
+        {
+          sql: `record_id ${direction === "asc" ? ">" : "<"} ?`,
+          params: [id],
+        },
+      ],
+      fixed: fields.length,
+    },
+  ];
+  for (let position = fields.length - 1; position >= 0; position -= 1) {
+    const field = fields[position] ?? "_id";
+    for (const { term, fixes } of afterOf(
+      field,
+      values[position] ?? [],
+      direction
+    )) {
+      seeks.push({
+        terms: [...equal(position), term],
+        fixed: position + fixes,
+      });
+    }
+  }
+  return seeks;
+};
+
+/**
+ * The order fields' values of record `id` as the caller may see it, for a
+ * cursor that carried only the ID; `data.cursor_expired` when the record
+ * is gone.
+ */
+const anchorValuesOf = (
+  sql: RecordSql,
+  table: ReadTable,
+  scope: ReadScope,
+  orderFields: readonly string[],
+  id: string
+): AnchorValue[] => {
+  const fields = orderFields.slice(0, -1);
+  const columns = fields.map(
+    (field, position) => `${fieldExpression(field)} AS o${position}`
+  );
+  const scoped = scopeClause(table, scope);
+  const [row] = sql
+    .exec(
+      `SELECT ${["record_id", ...columns].join(", ")} FROM sdk_records WHERE table_id = ? AND record_id = ?${scoped.sql}`,
+      table.tableId,
+      id,
+      ...scoped.params
+    )
+    .toArray();
+  if (row === undefined) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  return fields.map((_field, position) => anchorValueOf(row[`o${position}`]));
+};
+
+/**
+ * The statements a page of `query` runs after `anchor` (or from the start),
+ * in order: one per seek, each an index range of its own.
+ */
+export const pagePlans = (
+  sql: RecordSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  query: QueryRequest,
+  anchor: Anchor | null
+): Plan[] => {
+  const table = readableTable(pinned, scope, query.table);
+  const { orderFields } = accessOf(pinned, table, query);
+  // A cursor that carries only the record ID has its anchor read first, so
+  // a page that then fails with `data.index_required` has read a record,
+  // carries its table's generation (store-host.ts) and may rerun under
+  // commits. Accepted: only a damaged store lacks its indexes.
+  const seeks: (Seek | undefined)[] =
+    anchor === null
+      ? [undefined]
+      : seeksAfter(
+          orderFields,
+          anchor.values ??
+            anchorValuesOf(sql, table, scope, orderFields, anchor.id),
+          anchor.id,
+          query.order
+        );
+  return seeks.map((seek) =>
+    planQuery(pinned, scope, table, query, {
+      documents: true,
+      anchors: true,
+      seek,
+    })
+  );
+};
+
+/** Counts `bytes` more of documents read against the scan's bound. */
+const scannedBytes = (scan: Scan, bytes: number): void => {
+  scan.bytes += bytes;
+  if (scan.bytes > queryMaxScannedBytes) {
+    throw dataErrors.create("data.scan_limit", { scanned: scan.entries });
+  }
+};
+
+// Related records (`with`): each record a read returns carries, under
+// `_with`, the records its `v.id` fields (or lists of them) name. They
+// are read in one statement per field, by primary key, under the access
+// the caller has to the table they belong to, as `get` reads one: a table
+// the caller can't read at all is withheld (`{ _withheld: true }`) for
+// every record, and a record of it the caller may not see (another
+// owner's, one its read rules keep from them, or gone) is null, never told
+// apart from one that doesn't exist.
+// Every ID looked up counts as an entry against the read's scan bound,
+// and every related document's bytes against its byte bound, together
+// with what the read itself examined.
+
+/** What a related record the caller can't read shows instead. */
+const withheld = Object.freeze({ _withheld: true as const });
+
+/** The terminals that return records: the only ones `with` applies to. */
+const recordTerminals: ReadonlySet<string> = new Set([
+  "take",
+  "first",
+  "unique",
+  "collect",
+  "paginate",
+]);
+
+/** Field `field` of `table` as a relation, or `data.invalid_query`. */
+const relationIn = (
+  table: ReadTable,
+  field: string
+): { readonly table: string; readonly many: boolean } => {
+  const descriptor = Object.hasOwn(table.declared.fields, field)
+    ? table.declared.fields[field]
+    : undefined;
+  const relation =
+    descriptor === undefined ? undefined : relationOf(descriptor);
+  if (relation === undefined) {
+    throw invalid(
+      `\`${field}\` isn't a field of table \`${table.name}\` that holds record IDs`
+    );
+  }
+  return relation;
+};
+
+/** Whether `scope` may read table `name` of the pinned schema. */
+const mayRead = (
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  name: string
+): boolean => {
+  try {
+    readableTable(pinned, scope, name);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The tables `query` reads besides its own: those its relations name, as
+ * the pinned schema declares them, and only those `scope` may read. A
+ * table it can't read is withheld, so its generation, which moves with
+ * every write to it, is never handed out either: a live query following
+ * it would tell its activity. A relation that isn't one is left for the
+ * read to refuse.
+ */
+export const relatedTables = (
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  query: QueryRequest
+): string[] => {
+  const declared = Object.hasOwn(pinned.manifest.tables, query.table)
+    ? pinned.manifest.tables[query.table]
+    : undefined;
+  const names = new Set<string>();
+  for (const field of query.with ?? []) {
+    const descriptor =
+      declared !== undefined && Object.hasOwn(declared.fields, field)
+        ? declared.fields[field]
+        : undefined;
+    const relation =
+      descriptor === undefined ? undefined : relationOf(descriptor);
+    if (relation !== undefined && mayRead(pinned, scope, relation.table)) {
+      names.add(relation.table);
+    }
+  }
+  return [...names];
+};
+
+/** The record IDs a document's field holds: one, a list, or none. */
+const idsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string")
+    : [];
+};
+
+/** The rows `recordsOf` reads: a record with its document and its bytes. */
+type RelatedRow = ReadRow & { value_json: string; bytes: number };
+
+/**
+ * The rows of `target`'s records with IDs `ids` the caller may see: one
+ * statement, by primary key, under the owner predicate of an owner-only
+ * table, read as it is iterated.
+ */
+const recordsOf = (
+  sql: ReadSql,
+  scope: ReadScope,
+  target: ReadTable,
+  ids: readonly string[]
+): Iterable<RelatedRow> => {
+  const scoped = scopeClause(target, scope);
+  return sql
+    .on(target.name)
+    .exec<RelatedRow>(
+      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
+      target.tableId,
+      JSON.stringify(ids),
+      ...scoped.params
+    );
+};
+
+/**
+ * The records of `target` with IDs `ids` the caller may see, by ID, each
+ * ID and document counted against the read's scan bound (`scan`).
+ */
+const recordsById = (
+  sql: ReadSql,
+  scope: ReadScope,
+  target: ReadTable,
+  ids: ReadonlySet<string>,
+  scan: Scan
+): Map<string, ReadDocument> => {
+  const found = new Map<string, ReadDocument>();
+  if (ids.size === 0) {
+    return found;
+  }
+  for (const _id of ids) {
+    scanned(scan, 0);
+  }
+  for (const row of recordsOf(sql, scope, target, [...ids])) {
+    scannedBytes(scan, row.bytes);
+    found.set(row.record_id, documentOf(target, row, row.value_json));
+  }
+  sql.answered(target.name, found.size);
+  return found;
+};
+
+/**
+ * A relation `with` loads: the field holding the IDs, whether it holds a
+ * list of them, and the table they name, undefined when the caller can't
+ * read it.
+ */
+interface Relation {
+  readonly field: string;
+  readonly many: boolean;
+  readonly target: ReadTable | undefined;
+}
+
+/** The relations of `fields` of `table`, under `scope`'s access. */
+const relationsOf = (
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  fields: readonly string[]
+): Relation[] =>
+  fields.map((field) => {
+    const relation = relationIn(table, field);
+    try {
+      return {
+        field,
+        many: relation.many,
+        target: readableTable(pinned, scope, relation.table),
+      };
+    } catch (error) {
+      if (dataErrors.codeOf(error) !== "data.access_denied") {
+        throw error;
+      }
+      return { field, many: relation.many, target: undefined };
+    }
+  });
+
+/** Loads the records of `target` with IDs `ids` the caller may see, by ID. */
+type RecordsLoad = (
+  target: ReadTable,
+  ids: ReadonlySet<string>
+) => ReadonlyMap<string, ReadDocument>;
+
+/**
+ * Adds to each of `documents` the related records of `relations` under
+ * `_with`, as the header above says, loading them through `load`.
+ */
+const attachRelated = (
+  documents: readonly ReadDocument[],
+  relations: readonly Relation[],
+  load: RecordsLoad
+): void => {
+  if (relations.length === 0 || documents.length === 0) {
+    return;
+  }
+  const related = documents.map((): Record<string, unknown> => ({}));
+  for (const { field, many, target } of relations) {
+    if (target === undefined) {
+      for (const shown of related) {
+        shown[field] = withheld;
+      }
+      continue;
+    }
+    const found = load(
+      target,
+      new Set(documents.flatMap((document) => idsIn(document[field])))
+    );
+    for (const [position, document] of documents.entries()) {
+      const value = document[field];
+      const shown = related[position] ?? {};
+      if (many) {
+        shown[field] = Array.isArray(value)
+          ? value.map((id: unknown) =>
+              typeof id === "string" ? (found.get(id) ?? null) : null
+            )
+          : null;
+      } else {
+        shown[field] =
+          typeof value === "string" ? (found.get(value) ?? null) : null;
+      }
+    }
+  }
+  for (const [position, document] of documents.entries()) {
+    document._with = related[position] ?? {};
+  }
+};
+
+/**
+ * Adds to each of `documents` (records of `table`) the related records of
+ * `fields` under `_with`, as the header above says: in one statement per
+ * field, refused past the read's scan bound.
+ */
+const withRelated = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  documents: readonly ReadDocument[],
+  fields: readonly string[],
+  scan: Scan
+): void => {
+  attachRelated(
+    documents,
+    relationsOf(pinned, scope, table, fields),
+    (target, ids) => recordsById(sql, scope, target, ids, scan)
+  );
+};
+
+/** A record's related records would pass what is left of a page's bounds. */
+class PastBoundError extends Error {
+  override name = "PastBoundError";
+}
+
+/**
+ * The records of `target` with IDs `ids` the caller may see, by ID, read
+ * once each across a page (`loaded`, by ID, null for one it may not see):
+ * the IDs not read yet, then their documents, counted against the read's
+ * scan bound (`scan`) as they are read. Past it, `PastBoundError`, or the
+ * read's own `data.scan_limit` for a page's first record (`first`), which
+ * no split makes any smaller.
+ */
+const recordsWithin = (
+  sql: ReadSql,
+  scope: ReadScope,
+  target: ReadTable,
+  ids: ReadonlySet<string>,
+  {
+    scan,
+    loaded,
+    first,
+  }: {
+    scan: Scan;
+    loaded: Map<string, ReadDocument | null>;
+    first: boolean;
+  }
+): Map<string, ReadDocument> => {
+  const missing = [...ids].filter((id) => !loaded.has(id));
+  if (missing.length > 0) {
+    if (!first && scan.entries + missing.length > queryMaxScannedEntries) {
+      throw new PastBoundError();
+    }
+    for (const id of missing) {
+      scanned(scan, 0);
+      loaded.set(id, null);
+    }
+    let answered = 0;
+    for (const row of recordsOf(sql, scope, target, missing)) {
+      // Only one record's own related records, loaded before the answer
+      // bound is checked, can reach this: before them, it stops the page.
+      if (!first && scan.bytes + row.bytes > queryMaxScannedBytes) {
+        throw new PastBoundError();
+      }
+      scannedBytes(scan, row.bytes);
+      loaded.set(row.record_id, documentOf(target, row, row.value_json));
+      answered += 1;
+    }
+    sql.answered(target.name, answered);
+  }
+  const found = new Map<string, ReadDocument>();
+  for (const id of ids) {
+    const document = loaded.get(id);
+    if (document !== undefined && document !== null) {
+      found.set(id, document);
+    }
+  }
+  return found;
+};
+
+/**
+ * Adds the related records of `fields` to an ended page's `documents`,
+ * record by record in its order, against what is left of the read's scan
+ * bound (`scan`) and what one answer may carry, with each record's own
+ * bytes (`ownSizes`): how many of them carry theirs. It stops at the
+ * first record whose related records wouldn't fit, which the page splits
+ * before, as a read stopped at its scan bound splits. However many IDs a
+ * record holds, or however large the records they name, a page never
+ * fails for them, but for its first record's alone.
+ */
+const relatedWithin = (
+  sql: ReadSql,
+  {
+    pinned,
+    scope,
+    table,
+  }: {
+    pinned: PinnedSchema;
+    scope: ReadScope;
+    table: ReadTable;
+  },
+  documents: readonly ReadDocument[],
+  fields: readonly string[],
+  { scan, ownSizes }: { scan: Scan; ownSizes: readonly number[] }
+): number => {
+  const relations = relationsOf(pinned, scope, table, fields);
+  if (relations.length === 0) {
+    return documents.length;
+  }
+  const loaded = new Map<string, Map<string, ReadDocument | null>>();
+  let answer = 0;
+  for (const [position, document] of documents.entries()) {
+    const first = position === 0;
+    try {
+      attachRelated([document], relations, (target, ids) => {
+        const ofTarget =
+          loaded.get(target.tableId) ?? new Map<string, ReadDocument | null>();
+        loaded.set(target.tableId, ofTarget);
+        return recordsWithin(sql, scope, target, ids, {
+          scan,
+          loaded: ofTarget,
+          first,
+        });
+      });
+    } catch (error) {
+      if (error instanceof PastBoundError) {
+        return position;
+      }
+      throw error;
+    }
+    answer += (ownSizes[position] ?? 0) + answerSize(document._with);
+    if (!first && answer > pageLimits.answerBytes) {
+      return position;
+    }
+  }
+  return documents.length;
+};
+
+/** Refuses `with` on a terminal that returns no records. */
+const requireRecordTerminal = (query: QueryRequest): void => {
+  if (query.with !== undefined && !recordTerminals.has(query.terminal.kind)) {
+    throw invalid(
+      "`with` loads related records for a terminal that returns records"
+    );
+  }
+};
+
+/** Two strings in code point order, as their UTF-8 bytes compare. */
+const compareCodePoints = (left: string, right: string): number => {
+  const leftPoints = left[Symbol.iterator]();
+  const rightPoints = right[Symbol.iterator]();
+  let one = leftPoints.next();
+  let other = rightPoints.next();
+  while (one.done !== true && other.done !== true) {
+    const difference =
+      (one.value.codePointAt(0) ?? 0) - (other.value.codePointAt(0) ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+    one = leftPoints.next();
+    other = rightPoints.next();
+  }
+  return Number(one.done !== true) - Number(other.done !== true);
+};
+
+// Searches: a table's search index (store-search.ts), read in order of
+// relevance (FTS5's BM25, lower is better), the record ID breaking ties,
+// joined to the records themselves under the caller's access and filter.
+// What the index matches is counted first, within the scan bound, so no
+// search ranks more than that; then every record read counts against it
+// as any query's does. A page's cursor anchors at its last record's ID,
+// and the next page starts after that record's relevance, read again
+// (`searchSeekOf`) as it is now: relevance moves as the table changes, so
+// a record changed between pages may move past or into a later page, as
+// a page of any query may.
+
+/** The search index `query` reads, or `data.invalid_query`. */
+const searchOf = (
+  pinned: PinnedSchema,
+  table: ReadTable,
+  query: QueryRequest
+): PhysicalSearch => {
+  if (query.index !== null || query.range.length > 0 || query.order !== "asc") {
+    throw invalid(
+      "A search reads its table's search index in order of relevance: it names no index, range or order"
+    );
+  }
+  const search = pinned.searches.get(table.name);
+  if (search === undefined) {
+    throw invalid(`Table \`${table.name}\` has no search index`);
+  }
+  return search;
+};
+
+/** Where a search's page starts: after its anchor's relevance and ID. */
+interface SearchSeek {
+  readonly score: number;
+  readonly id: string;
+}
+
+/**
+ * Whether a search's row (its relevance as `score`) comes after `seek` in
+ * the search's order: relevance, then record ID, as `searchPlan` orders.
+ */
+const searchPast = (
+  row: { readonly score?: SqlStorageValue; readonly record_id: string },
+  seek: SearchSeek
+): boolean => {
+  const score = typeof row.score === "number" ? row.score : Number.NaN;
+  return (
+    score > seek.score ||
+    (score === seek.score && compareCodePoints(row.record_id, seek.id) > 0)
+  );
+};
+
+/**
+ * A search's anchor as a seek: its record's relevance read again, under
+ * the caller's access, since a relevance weighs rows they can't see and
+ * so never leaves the store in a cursor (store-cursors.ts).
+ * `data.cursor_expired` when the record is gone, no longer matches, or
+ * isn't the caller's to read, alike.
+ */
+const searchSeekOf = (
+  sql: RecordSql,
+  scope: ReadScope,
+  table: ReadTable,
+  search: PhysicalSearch,
+  match: string,
+  anchor: Anchor | null
+): SearchSeek | undefined => {
+  if (anchor === null) {
+    return undefined;
+  }
+  const scoped = scopeClause(table, scope);
+  const [row] = sql
+    .exec(
+      `SELECT hit.score AS score FROM (SELECT rowid AS doc, bm25(${search.name}) AS score FROM ${search.name} WHERE ${search.name} MATCH ?) AS hit JOIN sdk_search_docs ON sdk_search_docs.doc = hit.doc JOIN sdk_records ON sdk_records.table_id = sdk_search_docs.doc_table AND sdk_records.record_id = sdk_search_docs.doc_record WHERE sdk_records.table_id = ? AND record_id = ?${scoped.sql}`,
+      match,
+      table.tableId,
+      anchor.id,
+      ...scoped.params
+    )
+    .toArray();
+  const score = row?.score;
+  if (typeof score !== "number") {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  return { score, id: anchor.id };
+};
+
+/**
+ * The one statement a search of `table` runs for `scope`: the index's
+ * matches of `match`, each with its relevance, joined to their records
+ * under the owner predicate, the filter as a computed column, in order of
+ * relevance and then record ID, after `seek` when a page has one.
+ */
+const searchPlan = (
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  search: PhysicalSearch,
+  match: string,
+  seek: SearchSeek | undefined
+): Plan => {
+  const filter =
+    query.filter === null ? null : filterSql(typesOf(table), query.filter);
+  const columns = [
+    "record_id",
+    "owner_id",
+    "revision",
+    "created_at",
+    "updated_at",
+    "value_json",
+    "length(CAST(value_json AS BLOB)) AS bytes",
+    // Its relevance, for a page's end to be compared with (`searchPast`).
+    "hit.score AS score",
+    ...(filter === null ? [] : [`${filter.sql} AS matched`]),
+  ];
+  const scoped = scopeTerms(table, scope);
+  const where = [
+    `sdk_records.table_id = ${tableIdLiteral(table.tableId)}`,
+    ...scoped.map(({ sql }) => sql),
+    ...(seek === undefined
+      ? []
+      : ["(hit.score > ? OR (hit.score = ? AND record_id > ?))"]),
+  ];
+  return {
+    table,
+    statement: `SELECT ${columns.join(", ")} FROM (SELECT rowid AS doc, bm25(${search.name}) AS score FROM ${search.name} WHERE ${search.name} MATCH ?) AS hit JOIN sdk_search_docs ON sdk_search_docs.doc = hit.doc JOIN sdk_records ON sdk_records.table_id = sdk_search_docs.doc_table AND sdk_records.record_id = sdk_search_docs.doc_record WHERE ${where.join(" AND ")} ORDER BY hit.score, record_id LIMIT ${queryMaxScannedEntries + 1}`,
+    params: [
+      ...(filter?.params ?? []),
+      match,
+      ...scoped.flatMap(({ params }) => params),
+      ...(seek === undefined ? [] : [seek.score, seek.score, seek.id]),
+    ],
+    filtered: filter !== null,
+  };
+};
+
+/**
+ * The matches of a search, in order, after a page's anchor (`after`):
+ * none, and nothing read, when its text holds no word to look for. A
+ * page's `end` must still be one of them, as its anchor must
+ * (`data.cursor_expired` otherwise), rather than the page reading on to
+ * the scan bound looking for it.
+ */
+const searchMatches = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  { after, end }: { after: Anchor | null; end: Anchor | null },
+  scan: Scan
+): { matches: Iterator<Match>; bound: EndBound | undefined } => {
+  const search = searchOf(pinned, table, query);
+  const terms = searchTerms(query.search ?? "");
+  if (terms.length === 0) {
+    return { matches: [][Symbol.iterator](), bound: undefined };
+  }
+  const match = searchMatch(search, terms, scope.principal, table.ownerScoped);
+  // Counted among the rows the caller may read, when rules or the owner
+  // choose them: a count of every match would tell how often a word
+  // stands in rows they can't see. The owner too, as the index may not
+  // narrow to them: a version pinned to a search index installed before
+  // its table became the owner's (store-host.ts, `underContractRules`).
+  const scoped = scopeTerms(table, scope);
+  requireSearchable(
+    sql.on(table.name),
+    search,
+    match,
+    scoped.length === 0
+      ? undefined
+      : {
+          sql: scoped.map((term) => `(${term.sql})`).join(" AND "),
+          params: scoped.flatMap(({ params }) => params),
+        }
+  );
+  const seek = searchSeekOf(
+    sql.on(table.name),
+    scope,
+    table,
+    search,
+    match,
+    after
+  );
+  const until = searchSeekOf(
+    sql.on(table.name),
+    scope,
+    table,
+    search,
+    match,
+    end
+  );
+  // An end that now ranks at or before the page's start: the page it
+  // ended is gone, so the list starts again.
+  if (
+    seek !== undefined &&
+    until !== undefined &&
+    !searchPast({ score: until.score, record_id: until.id }, seek)
+  ) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  const bound: EndBound | undefined =
+    until === undefined
+      ? undefined
+      : {
+          past: (row) => searchPast(row, until),
+          reached: false,
+          lastRow: undefined,
+          exhausted: false,
+          shares: 1 + (query.with?.length ?? 0),
+        };
+  return {
+    matches: matchesOf(
+      sql,
+      searchPlan(scope, table, query, search, match, seek),
+      scan,
+      bound
+    ),
+    bound,
+  };
+};
+
+// Grouped aggregates (`group`): every record the query reads, within its
+// scan bound, counted into the group of its `by` fields' values, with the
+// sum, average, least and greatest of the numbers its aggregated fields
+// hold (never null, a field left out, a boolean or text). Groups are kept
+// as they appear, as many as the records the read examines within its
+// scan bound make, and answered in order of key, as SQLite orders values: left out, null, booleans,
+// numbers, then text.
+
+/** One group, as a grouped read answers it. */
+export interface GroupAnswer {
+  readonly key: Record<string, unknown>;
+  readonly count: number;
+  readonly sum: Record<string, number>;
+  readonly avg: Record<string, number | null>;
+  readonly min: Record<string, number | null>;
+  readonly max: Record<string, number | null>;
+}
+
+/** A group being counted. */
+interface GroupTally {
+  readonly parts: readonly (string | null)[];
+  count: number;
+  readonly sums: number[];
+  readonly counts: number[];
+  readonly least: (number | null)[];
+  readonly greatest: (number | null)[];
+}
+
+/** Where a key's JSON text sorts: left out, null, booleans, numbers, text. */
+const keyRank = (part: string | null): number => {
+  if (part === null) {
+    return 0;
+  }
+  if (part === "null") {
+    return 1;
+  }
+  if (part === "false" || part === "true") {
+    return 2;
+  }
+  return part.startsWith('"') ? 4 : 3;
+};
+
+/**
+ * Two strings in Unicode code point order, as SQLite orders text (by its
+ * UTF-8 bytes): not by UTF-16 code units, which put a character past
+ * U+FFFF (a surrogate pair) before U+E000 to U+FFFF.
+ */
+const byCodePoint = (left: string, right: string): number => {
+  const others = right[Symbol.iterator]();
+  for (const character of left) {
+    const other = others.next();
+    if (other.done === true) {
+      return 1;
+    }
+    const difference =
+      (character.codePointAt(0) ?? 0) - (other.value.codePointAt(0) ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return others.next().done === true ? 0 : -1;
+};
+
+/** Two keys' JSON texts, in order. */
+const compareParts = (
+  left: readonly (string | null)[],
+  right: readonly (string | null)[]
+): number => {
+  for (const [position, part] of left.entries()) {
+    const other = right[position] ?? null;
+    const rank = keyRank(part) - keyRank(other);
+    if (rank !== 0) {
+      return rank;
+    }
+    if (part === null || other === null || part === other) {
+      continue;
+    }
+    const value: unknown = JSON.parse(part);
+    const otherValue: unknown = JSON.parse(other);
+    if (typeof value === "number" && typeof otherValue === "number") {
+      return value - otherValue;
+    }
+    // Booleans and strings compare as SQLite does: false first, text by
+    // code point.
+    const order = byCodePoint(String(value), String(otherValue));
+    if (order !== 0) {
+      return order;
+    }
+  }
+  return 0;
+};
+
+/** The fields a group reads, checked against the pinned table. */
+const checkedGroup = (table: ReadTable, terminal: GroupTerminal): string[] => {
+  const types = typesOf(table);
+  for (const field of terminal.by) {
+    if (isManagedField(field) || types.base(field) === undefined) {
+      throw invalid(
+        `\`${field}\` isn't a declared scalar field of table \`${table.name}\``
+      );
+    }
+  }
+  const numbers = [
+    ...new Set([
+      ...terminal.sum,
+      ...terminal.avg,
+      ...terminal.min,
+      ...terminal.max,
+    ]),
+  ];
+  for (const field of numbers) {
+    if (isManagedField(field) || types.base(field) !== "number") {
+      throw invalid(
+        `\`${field}\` isn't a declared numeric field of table \`${table.name}\``
+      );
+    }
+  }
+  return numbers;
+};
+
+/** The groups of `matches` (each row with `g…` and `n…`), in key order. */
+const groupsOf = (
+  terminal: GroupTerminal,
+  numbers: readonly string[],
+  matches: Iterable<Match>
+): GroupAnswer[] => {
+  const tallies = new Map<string, GroupTally>();
+  for (const { row } of matches) {
+    const parts = terminal.by.map((_field, position) => {
+      const part = row[`g${position}`];
+      return typeof part === "string" ? part : null;
+    });
+    const id = JSON.stringify(parts);
+    let tally = tallies.get(id);
+    if (tally === undefined) {
+      tally = {
+        parts,
+        count: 0,
+        sums: numbers.map(() => 0),
+        counts: numbers.map(() => 0),
+        least: numbers.map(() => null),
+        greatest: numbers.map(() => null),
+      };
+      tallies.set(id, tally);
+    }
+    tally.count += 1;
+    for (const [position] of numbers.entries()) {
+      const value = row[`n${position}`];
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        continue;
+      }
+      tally.sums[position] = (tally.sums[position] ?? 0) + value;
+      tally.counts[position] = (tally.counts[position] ?? 0) + 1;
+      const least = tally.least[position] ?? null;
+      const greatest = tally.greatest[position] ?? null;
+      tally.least[position] = least === null ? value : Math.min(least, value);
+      tally.greatest[position] =
+        greatest === null ? value : Math.max(greatest, value);
+    }
+  }
+  const at = (field: string): number => numbers.indexOf(field);
+  return [...tallies.values()]
+    .toSorted((left, right) => compareParts(left.parts, right.parts))
+    .map((tally) => {
+      const key: Record<string, unknown> = {};
+      for (const [position, field] of terminal.by.entries()) {
+        const part = tally.parts[position] ?? null;
+        if (part !== null) {
+          key[field] = JSON.parse(part);
+        }
+      }
+      const sum = Object.fromEntries(
+        terminal.sum.map((field) => [field, tally.sums[at(field)] ?? 0])
+      );
+      if (Object.values(sum).some((value) => !Number.isFinite(value))) {
+        throw dataErrors.create("data.aggregate_overflow");
+      }
+      const avg = Object.fromEntries(
+        terminal.avg.map((field) => {
+          const count = tally.counts[at(field)] ?? 0;
+          const total = tally.sums[at(field)] ?? 0;
+          if (count > 0 && !Number.isFinite(total)) {
+            throw dataErrors.create("data.aggregate_overflow");
+          }
+          return [field, count === 0 ? null : total / count];
+        })
+      );
+      return {
+        key,
+        count: tally.count,
+        sum,
+        avg,
+        min: Object.fromEntries(
+          terminal.min.map((field) => [field, tally.least[at(field)] ?? null])
+        ),
+        max: Object.fromEntries(
+          terminal.max.map((field) => [
+            field,
+            tally.greatest[at(field)] ?? null,
+          ])
+        ),
+      };
+    });
+};
+
+/** At most `limit` matches, as documents of `table`, with their relations. */
+const withDocuments = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  matches: Iterator<Match>,
+  limit: number,
+  scan: Scan
+): ReadDocument[] => {
+  const documents = documentsOf(table, matches, limit);
+  sql.answered(table.name, documents.length);
+  withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
+  return documents;
+};
+
+/**
+ * The matches of a page's `plans` in order, one statement after another,
+ * each run only once the one before is read to its end.
+ *
+ * @yields {Match} Each match, in the query's order.
+ */
+const chainedMatches = function* chainedMatches(
+  sql: ReadSql,
+  plans: readonly Plan[],
+  scan: Scan,
+  end?: EndBound
+): Generator<Match, void, undefined> {
+  for (const plan of plans) {
+    if (end?.reached === true) {
+      return;
+    }
+    yield* matchesOf(sql, plan, scan, end);
+  }
+};
+
+/** Where an order field's value sorts among SQLite's kinds of value. */
+const anchorRank = (value: AnchorValue): number => {
+  if (value.length === 0) {
+    return 0;
+  }
+  const [held] = value;
+  if (held === null) {
+    return 1;
+  }
+  return typeof held === "number" ? 2 : 3;
+};
+
+/**
+ * The order of two values of one order field as SQLite's index orders
+ * them: a field left out (NULL), then the null sentinel (the least
+ * number), then numbers, then text in code point order, which is the
+ * order of its UTF-8 bytes (SQLite's BINARY collation).
+ */
+const compareAnchorValues = (left: AnchorValue, right: AnchorValue): number => {
+  const byRank = anchorRank(left) - anchorRank(right);
+  if (byRank !== 0) {
+    return byRank;
+  }
+  const [first] = left;
+  const [second] = right;
+  if (typeof first === "number" && typeof second === "number") {
+    return first - second;
+  }
+  if (typeof first === "string" && typeof second === "string") {
+    return compareCodePoints(first, second);
+  }
+  return 0;
+};
+
+/** The bytes of a row's document, as SQLite read them. */
+const bytesOf = (row: ReadRow | undefined): number =>
+  typeof row?.bytes === "number" ? row.bytes : 0;
+
+/**
+ * How a page with an end is answered (page-splits.ts): a page grows as
+ * records move into it, so past a bound it says where to split it,
+ * keeping a live list's pages near their size and within an answer (as
+ * Convex's `splitCursor`), and answers only its first records once it is
+ * past what one answer may carry or its read stopped short of its end
+ * (`stopped`, after `lastRow`). Each record's bytes count with those of
+ * the related records it carries (`items`' `_with`), once loaded.
+ */
+const pageSplit = (
+  found: readonly Match[],
+  items: readonly ReadDocument[],
+  { stopped, lastRow }: { stopped: boolean; lastRow: ReadRow | undefined },
+  pageSize: number
+): { keep: number; after: ReadRow | undefined } | undefined => {
+  const sizes = items.map(
+    (item, position) =>
+      bytesOf(found[position]?.row) +
+      (item._with === undefined ? 0 : answerSize(item._with))
+  );
+  const { keep, split } = pageCut(sizes, pageSize, stopped);
+  if (split === undefined) {
+    return keep < items.length ? { keep, after: undefined } : undefined;
+  }
+  return {
+    keep,
+    after: split === "stopped" ? lastRow : found[split]?.row,
+  };
+};
+
+/**
+ * Whether place `key` comes after `end` in the query's order: their order
+ * fields' values compared one by one, then their record IDs, as
+ * `seeksAfter` seeks.
+ */
+const isPast = (
+  key: Required<Anchor>,
+  end: Required<Anchor>,
+  direction: "asc" | "desc"
+): boolean => {
+  let order = 0;
+  for (const [position, value] of end.values.entries()) {
+    order = compareAnchorValues(key.values[position] ?? [], value);
+    if (order !== 0) {
+      break;
+    }
+  }
+  if (order === 0) {
+    order = compareCodePoints(key.id, end.id);
+  }
+  return direction === "asc" ? order > 0 : order < 0;
+};
+
+/** The place of `match`, a row read with its order fields' values. */
+const placeOf = (row: ReadRow, fields: number): Required<Anchor> => ({
+  id: row.record_id,
+  values: Array.from({ length: fields }, (_field, position) =>
+    anchorValueOf(row[`o${position}`])
+  ),
+});
+
+/**
+ * The anchor of `row`, a page's place: its ID, with its order fields'
+ * values (`fields` of them) for a query's page; its ID alone for a
+ * search's (`fields` undefined).
+ */
+const anchorOfRow = (
+  row: ReadRow | undefined,
+  fields: number | undefined
+): Anchor | undefined => {
+  if (row === undefined) {
+    return undefined;
+  }
+  return fields === undefined
+    ? { id: row.record_id }
+    : { id: row.record_id, values: placeOf(row, fields).values };
+};
+
+/**
+ * A page as `readPage` answers it, from the matches it read (`found`)
+ * and their documents (`read`): cut as `pageSplit` says for a page with
+ * an end (`bound`), with its last record's anchor and where to split it.
+ */
+const answeredPage = (
+  found: readonly Match[],
+  read: ReadDocument[],
+  bound: EndBound | undefined,
+  {
+    pageSize,
+    more,
+    anchorFields,
+    related,
+  }: {
+    pageSize: number;
+    more: boolean;
+    anchorFields: number | undefined;
+    /**
+     * Loads the related records of the documents kept (`with`), given
+     * their own bytes: how many of them carry theirs, those after them
+     * left for the page's second half.
+     */
+    related: (documents: ReadDocument[], ownSizes: number[]) => number;
+  }
+): PageRead => {
+  // Cut on its own records first, so related records load only for the
+  // records it answers; then again with them, should they stop short of
+  // its records or push it past an answer.
+  const own =
+    bound === undefined
+      ? undefined
+      : pageSplit(
+          found,
+          read,
+          { stopped: bound.exhausted, lastRow: bound.lastRow },
+          pageSize
+        );
+  const ownKept = own === undefined ? read : read.slice(0, own.keep);
+  const fit = related(
+    ownKept,
+    ownKept.map((_document, position) => bytesOf(found[position]?.row))
+  );
+  // Short of every record kept, it stopped as a read stops at its scan
+  // bound: split after the last record whose related records fit.
+  const short = fit < ownKept.length;
+  const kept = short ? ownKept.slice(0, fit) : ownKept;
+  const full =
+    bound === undefined || kept.length === 0
+      ? undefined
+      : pageSplit(
+          found,
+          kept,
+          { stopped: short, lastRow: found[fit - 1]?.row },
+          pageSize
+        );
+  const recut =
+    full !== undefined && (short || full.keep < kept.length) ? full : undefined;
+  const items = recut === undefined ? kept : kept.slice(0, recut.keep);
+  const split = anchorOfRow(
+    recut?.after ?? own?.after ?? full?.after,
+    anchorFields
+  );
+  return {
+    items,
+    hasMore: more || split !== undefined,
+    last: anchorOfRow(found[items.length - 1]?.row, anchorFields),
+    ...(split === undefined ? {} : { split }),
+  };
+};
+
+/**
+ * One page of `query` (a `paginate` terminal) for `scope` from `pinned`,
+ * after `anchor` or from the start: at most `pageSize` records in order,
+ * one more read to know whether more follow, and the last record's anchor
+ * for the next page's cursor. With `end`, the page holds every record up
+ * to and including that anchor's place instead, however many: a live
+ * list's loaded page keeps its bounds as records move in and out of it,
+ * and the page after it starts where it ends. Keyset paging: a record
+ * changed between pages may move past or into a later page, as spec 9.2
+ * allows; the bounds of every other terminal apply across all of a page's
+ * seeks, and to each page on its own, so pages go on through a table of
+ * any size. A search's page is ordered by relevance (`searchMatches`).
+ */
+export const readPage = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  query: QueryRequest,
+  anchor: Anchor | null,
+  end: Anchor | null
+): PageRead => {
+  const { terminal } = query;
+  if (terminal.kind !== "paginate") {
+    throw new Error("Not a page");
+  }
+  const table = readableTable(pinned, scope, query.table);
+  const scan: Scan = { entries: 0, bytes: 0 };
+  // Without an end, one record past the page tells whether more follow.
+  const limit = end === null ? terminal.pageSize : Number.POSITIVE_INFINITY;
+  const found: Match[] = [];
+  // Whether a record past the page's end was read.
+  let more = false;
+  let anchorFields: number | undefined;
+  // The page's matches in order, and its end as they are read.
+  let matches: Iterator<Match>;
+  let bound: EndBound | undefined;
+  if (query.search === undefined) {
+    const { orderFields } = accessOf(pinned, table, query);
+    anchorFields = orderFields.length - 1;
+    // A cursor that carries only its record's ID has its values looked up
+    // under the caller's access (`data.cursor_expired` once it went).
+    const placed = (cursor: Anchor | null): Required<Anchor> | undefined =>
+      cursor === null
+        ? undefined
+        : {
+            id: cursor.id,
+            values:
+              cursor.values ??
+              anchorValuesOf(
+                sql.on(table.name),
+                table,
+                scope,
+                orderFields,
+                cursor.id
+              ),
+          };
+    const start = placed(anchor);
+    const endKey = placed(end);
+    // An end at or before the page's start (its record moved there): the
+    // page it ended is gone, so the list starts again.
+    if (
+      start !== undefined &&
+      endKey !== undefined &&
+      !isPast(endKey, start, query.order)
+    ) {
+      throw dataErrors.create("data.cursor_expired");
+    }
+    const plans = pagePlans(
+      sql.on(table.name),
+      pinned,
+      scope,
+      query,
+      start ?? null
+    );
+    const fields = anchorFields;
+    bound =
+      endKey === undefined
+        ? undefined
+        : {
+            past: (row) => isPast(placeOf(row, fields), endKey, query.order),
+            reached: false,
+            lastRow: undefined,
+            exhausted: false,
+            shares: 1 + (query.with?.length ?? 0),
+          };
+    matches = chainedMatches(sql, plans, scan, bound);
+  } else {
+    // A search's anchor is its record's ID alone (`searchSeekOf`), and so
+    // is its end: the page ends at that record's relevance as it is now,
+    // the first row past it the next page's, whether or not the record
+    // itself still passes the filter.
+    anchorFields = undefined;
+    ({ matches, bound } = searchMatches(
+      sql,
+      pinned,
+      scope,
+      table,
+      query,
+      { after: anchor, end },
+      scan
+    ));
+  }
+  for (let next = matches.next(); next.done !== true; next = matches.next()) {
+    if (found.length >= limit) {
+      more = true;
+      break;
+    }
+    found.push(next.value);
+  }
+  // A row past the page's end was read, or the page stopped short of it:
+  // more follow.
+  more ||= bound?.reached === true || bound?.exhausted === true;
+  const read = found.map(({ row, valueJson }) =>
+    documentOf(table, row, valueJson ?? "{}")
+  );
+  const page = answeredPage(found, read, bound, {
+    pageSize: terminal.pageSize,
+    more,
+    anchorFields,
+    related: (documents, ownSizes) => {
+      if (bound === undefined) {
+        withRelated(
+          sql,
+          pinned,
+          scope,
+          table,
+          documents,
+          query.with ?? [],
+          scan
+        );
+        return documents.length;
+      }
+      return relatedWithin(
+        sql,
+        { pinned, scope, table },
+        documents,
+        query.with ?? [],
+        { scan, ownSizes }
+      );
+    },
+  });
+  sql.answered(table.name, page.items.length);
+  return page;
+};
+
+/** Answers a search's terminal other than a page (`runQuery`). */
+const runSearch = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest
+): QueryAnswer => {
+  const { terminal } = query;
+  const scan: Scan = { entries: 0, bytes: 0 };
+  const matches = (): Iterator<Match> =>
+    searchMatches(
+      sql,
+      pinned,
+      scope,
+      table,
+      query,
+      { after: null, end: null },
+      scan
+    ).matches;
+  const read = (limit: number): ReadDocument[] =>
+    withDocuments(sql, pinned, scope, table, query, matches(), limit, scan);
+  switch (terminal.kind) {
+    case "take": {
+      return terminal.count === 0 ? [] : read(terminal.count);
+    }
+    case "first": {
+      return read(1)[0] ?? null;
+    }
+    case "collect": {
+      // Every match: the scan bound refuses more than a read may examine.
+      return read(Number.POSITIVE_INFINITY);
+    }
+    case "count": {
+      let count = 0;
+      const iterator = disclosed(sql, table, matches());
+      for (
+        let next = iterator.next();
+        next.done !== true;
+        next = iterator.next()
+      ) {
+        count += 1;
+      }
+      return count;
+    }
+    case "paginate": {
+      // Pages carry cursors, which the host signs (`StoreHost.read`).
+      throw new Error("A page is read with `readPage`");
+    }
+    case "unique":
+    case "aggregate":
+    case "group": {
+      throw invalid(
+        "A search answers `take`, `first`, `collect`, `count` or `paginate`"
+      );
+    }
+    default: {
+      return terminal satisfies never;
+    }
+  }
+};
+
+/**
+ * Answers `query` for `scope` from `pinned`: one statement through the
+ * index the query names (or its table's search index), under the caller's
+ * access, bounded as the threat model above says, with the related
+ * records of its `with`. A page is read with `readPage`.
+ */
+export const runQuery = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  query: QueryRequest
+): QueryAnswer => {
+  const table = readableTable(pinned, scope, query.table);
+  requireRecordTerminal(query);
+  if (query.search !== undefined) {
+    return runSearch(sql, pinned, scope, table, query);
+  }
+  const { terminal } = query;
+  const counting =
+    terminal.kind === "count" ||
+    (terminal.kind === "aggregate" && terminal.operation === "count");
+  const scan: Scan = { entries: 0, bytes: 0 };
+  const plan = (): Plan =>
+    planQuery(pinned, scope, table, query, { documents: !counting });
+  const read = (planned: Plan, limit: number): ReadDocument[] =>
+    withDocuments(
+      sql,
+      pinned,
+      scope,
+      table,
+      query,
+      matchesOf(sql, planned, scan),
+      limit,
+      scan
+    );
+  switch (terminal.kind) {
+    case "take": {
+      // Planned even for none, so a query that isn't valid is refused.
+      const planned = plan();
+      return terminal.count === 0 ? [] : read(planned, terminal.count);
+    }
+    case "first": {
+      return read(plan(), 1)[0] ?? null;
+    }
+    case "unique": {
+      const found = read(plan(), 2);
+      if (found.length > 1) {
+        throw dataErrors.create("data.not_unique", { table: table.name });
+      }
+      return found[0] ?? null;
+    }
+    case "collect": {
+      // Every match: the scan bound refuses more than a read may examine.
+      return read(plan(), Number.POSITIVE_INFINITY);
+    }
+    case "count": {
+      return countOf(disclosed(sql, table, matchesOf(sql, plan(), scan)));
+    }
+    case "aggregate": {
+      if (terminal.operation === "count") {
+        return countOf(disclosed(sql, table, matchesOf(sql, plan(), scan)));
+      }
+      // Declared numeric fields only (spec 9.2), never a managed one.
+      if (
+        isManagedField(terminal.field) ||
+        typesOf(table).base(terminal.field) !== "number"
+      ) {
+        throw invalid(
+          `\`${terminal.field}\` isn't a declared numeric field of table \`${table.name}\``
+        );
+      }
+      return aggregateOf(
+        terminal.operation,
+        disclosed(
+          sql,
+          table,
+          matchesOf(
+            sql,
+            planQuery(pinned, scope, table, query, {
+              documents: false,
+              aggregate: terminal.field,
+            }),
+            scan
+          )
+        )
+      );
+    }
+    case "group": {
+      const numbers = checkedGroup(table, terminal);
+      return groupsOf(
+        terminal,
+        numbers,
+        disclosed(
+          sql,
+          table,
+          matchesOf(
+            sql,
+            planQuery(pinned, scope, table, query, {
+              documents: false,
+              groups: terminal.by,
+              numbers,
+            }),
+            scan
+          )
+        )
+      );
+    }
+    case "paginate": {
+      // Pages carry cursors, which the host signs (`StoreHost.read`).
+      throw new Error("A page is read with `readPage`");
+    }
+    default: {
+      return terminal satisfies never;
+    }
+  }
+};

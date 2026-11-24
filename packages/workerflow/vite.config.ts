@@ -1,0 +1,45 @@
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
+import { defaultExclude, defineProject } from "vite-plus";
+
+// Run objects are Durable Objects, so their tests run in workerd, through
+// the object's real boundary. The process-death tests run plain workerd
+// from Node instead (vite.process.config.ts), and the conformance matrix
+// runs beside the reference engine (vite.conformance.config.ts).
+export default defineProject({
+  test: {
+    // Fails the suite when it isn't running in workerd.
+    setupFiles: ["../../scripts/assert-workerd.ts"],
+    exclude: [...defaultExclude, "test/process/**", "test/conformance.test.ts"],
+    // Sleeps and waits in the tests last seconds by design, so no margin
+    // depends on how fast the machine is; the polls fail at 10 s first.
+    testTimeout: 20_000,
+    // Logs go straight to workerd's output, not to Vitest: a run object
+    // warns from its alarm, another request than the test's, which the
+    // pool holds until the file next sends something, and the file could
+    // wait for it forever (see apps/admin/vite.test.config.ts).
+    disableConsoleIntercept: true,
+  },
+  plugins: [
+    cloudflareTest({
+      main: "./test/worker.ts",
+      miniflare: {
+        compatibilityDate: "2026-09-15",
+        // AsyncLocalStorage, which tells a step call's attempt apart; hosts
+        // need it too (`nodejs_als`, or `nodejs_compat`, which includes it).
+        compatibilityFlags: ["nodejs_als"],
+        durableObjects: {
+          RUNS: { className: "TestRuns", useSQLite: true },
+          BUDGETED_RUNS: { className: "BudgetedRuns", useSQLite: true },
+          MISCONFIGURED: { className: "MisconfiguredRuns", useSQLite: true },
+          SHORT_TOMBSTONES: {
+            className: "ShortTombstoneRuns",
+            useSQLite: true,
+          },
+          MISWAITED: { className: "MiswaitedRuns", useSQLite: true },
+
+          MISTIMED: { className: "MistimedRuns", useSQLite: true },
+        },
+      },
+    }),
+  ],
+});
