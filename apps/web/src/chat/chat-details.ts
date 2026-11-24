@@ -56,14 +56,16 @@ export const readChatNames = async (
 /**
  * The open chat's summary, read as it opens and again once a turn ends
  * (its agent may have named it); none before, or where core can't say.
- * `retitle` shows a new name the person gave it at once.
+ * `retitle` shows a new name the person gave chat `chatId` at once, only
+ * while that chat is the one read: a rename answered after the person
+ * moved to another chat never names that one.
  */
 export const useChatSummary = (
   chatId: string | undefined,
   running: boolean
 ): {
   summary: ChatSummary | undefined;
-  retitle: (title: string) => void;
+  retitle: (chatId: string, title: string) => void;
 } => {
   const core = useCore();
   const [read, setRead] = useState<ChatSummary>();
@@ -93,10 +95,8 @@ export const useChatSummary = (
   const summary = read?.id === chatId ? read : undefined;
   return {
     summary,
-    retitle: (title) => {
-      if (summary !== undefined) {
-        setRead({ ...summary, title });
-      }
+    retitle: (renamed, title) => {
+      setRead((now) => (now?.id === renamed ? { ...now, title } : now));
     },
   };
 };
