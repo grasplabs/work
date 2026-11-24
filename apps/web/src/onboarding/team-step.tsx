@@ -28,7 +28,8 @@ import { planDraft } from "./visit.ts";
 // morning; everyone else once their lead talked. Not ready yet, the admin
 // can do it later: the setup ends here for now, and Settings, Onboarding
 // keeps it as an open to-do. Letting Grasp's mail through is the review
-// step's, which comes next.
+// step's, which comes next. Without a staff list there is no day to plan
+// yet: the letter alone, and Grasp's staff plan the day with the admin.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
@@ -41,13 +42,6 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: space[3],
-  },
-  end: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: space[3],
-    width: "100%",
   },
 });
 
@@ -132,16 +126,26 @@ export const TeamStep = ({
       void onward();
     }
   };
+  // No staff list yet: core plans no day without one. The message still goes; Grasp's staff plan
+  // the day with the admin once the teams are set up.
+  const planned = view.roster !== null;
   return (
     <CalmStep
-      body={t`People respond better when they know why I’m reaching out. Send them this message yourself, then pick the day I start.`}
-      centred
+      body={
+        planned
+          ? t`People respond better when they know why I’m reaching out. Send them this message yourself, then pick the day I start.`
+          : t`People respond better when they know why I’m reaching out. Send them this message yourself. Grasp’s staff plan the day I start with you.`
+      }
       end={
-        <div {...stylex.props(styles.end)}>
+        <>
           <Button
-            disabled={!holds}
+            disabled={planned && !holds}
             onClick={() => {
-              void send();
+              if (planned) {
+                void send();
+              } else {
+                void onward();
+              }
             }}
             size="lg"
             status={busy || refreshing ? "loading" : "idle"}
@@ -159,7 +163,7 @@ export const TeamStep = ({
               {t`Do this later`}
             </Button>
           ) : null}
-        </div>
+        </>
       }
       title={t`Before I reach out, let your team know`}
     >
@@ -176,23 +180,25 @@ export const TeamStep = ({
             <CopyButton size="lg" value={message} variant="outline">
               {t`Copy the message`}
             </CopyButton>
-            <Postmark day={choice.day} />
+            {planned ? <Postmark day={choice.day} /> : null}
           </div>
         </div>
-        <SendPlanForm
-          choice={choice}
-          onChange={choose}
-          onWrong={(field, now) => {
-            setWrong((before) => ({ ...before, [field]: now }));
-          }}
-          summary={
-            <output aria-live="polite">
-              <Text as="span">{next}</Text>
-            </output>
-          }
-          teams={teams}
-          today={today}
-        />
+        {planned ? (
+          <SendPlanForm
+            choice={choice}
+            onChange={choose}
+            onWrong={(field, now) => {
+              setWrong((before) => ({ ...before, [field]: now }));
+            }}
+            summary={
+              <output aria-live="polite">
+                <Text as="span">{next}</Text>
+              </output>
+            }
+            teams={teams}
+            today={today}
+          />
+        ) : null}
         <ErrorText>{failure}</ErrorText>
       </div>
     </CalmStep>

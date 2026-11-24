@@ -8,6 +8,8 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 
+import { AgentFigure } from "../agents/figure/agent-figure.tsx";
+import { stephensLook } from "../agents/figure/look.ts";
 import { ErrorText } from "../error-text.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -200,17 +202,6 @@ const Differences = ({
   );
 };
 
-/** The way on, on the column's middle under the centred words, on the last two steps. */
-const ending = stylex.create({
-  end: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: space[3],
-    width: "100%",
-  },
-});
-
 /**
  * What only the admin can settle, each with a way to settle it. Nothing
  * moves on by itself: they read what they settled, and go on once nothing
@@ -229,20 +220,17 @@ const Review = (props: StepProps) => {
   return (
     <CalmStep
       body={t`I’ve handled everything else.`}
-      centred
       end={
         open === 0 ? (
-          <div {...stylex.props(ending.end)}>
-            <Button
-              onClick={() => {
-                void props.onward();
-              }}
-              size="lg"
-            >
-              {t`Continue`}
-              <Icon icon={ArrowRightIcon} />
-            </Button>
-          </div>
+          <Button
+            onClick={() => {
+              void props.onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+            <Icon icon={ArrowRightIcon} />
+          </Button>
         ) : null
       }
       title={plural(open, {
@@ -316,24 +304,21 @@ const Open = ({ data, onward }: StepProps) => {
   return (
     <CalmStep
       body={[said, ready, opens].filter((each) => each !== "").join(" ")}
-      centred
       end={
         open ? (
-          <div {...stylex.props(ending.end)}>
-            <Button
-              onClick={(event) => {
-                // He says it as he does it, then hands them over to the platform.
-                speak(t`Here’s your Grasp.`);
-                void handOver(event.currentTarget, onward);
-              }}
-              size="lg"
-            >
-              {t`Open Grasp`}
-              <Icon icon={ArrowRightIcon} />
-            </Button>
-          </div>
+          <Button
+            onClick={(event) => {
+              // He says it as he does it, then hands them over to the platform.
+              speak(t`Here’s your Grasp.`);
+              void handOver(event.currentTarget, onward);
+            }}
+            size="lg"
+          >
+            {t`Open Grasp`}
+          </Button>
         ) : null
       }
+      figure={<AgentFigure look={stephensLook} size="xl" state="done" />}
       title={t`Thank you, ${admin}`}
     />
   );

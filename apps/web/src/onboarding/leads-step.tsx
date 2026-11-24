@@ -33,7 +33,8 @@ import { SupportLink } from "./support-link.tsx";
 import { orgConfirmed, orgDraft } from "./visit.ts";
 
 // The leads: first which HR platform the company uses, a row each, pressed
-// to choose it, until the admin said; then the organization as Stephen
+// to choose it, until the admin said; then, without a staff list, that
+// Grasp's staff set the teams up with them; else the organization as Stephen
 // will interview it, on one card: a row a team, who leads it, chosen from
 // the team's own people, and whether it takes part. What the staff list
 // guessed, the admin puts right here, or takes from the HR platform
@@ -44,14 +45,6 @@ const PHONE = "@media (max-width: 40rem)";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
-  // The way on stands on the column's middle, under the centred words.
-  end: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: space[3],
-    width: "100%",
-  },
   rows: { margin: 0, padding: 0, listStyle: "none" },
   // A team a row: its name, who leads it, and whether it takes part; on a phone the name above the two.
   row: {
@@ -100,44 +93,41 @@ const HrPlatformChoice = ({
   return (
     <CalmStep
       body={body}
-      centred
       end={
-        <div {...stylex.props(styles.end)}>
-          {chosen ? (
-            <>
-              <Button onClick={onDone} size="lg">
-                {t`Continue`}
-                <Icon icon={ArrowRightIcon} />
-              </Button>
-              <Button
-                onClick={() => {
-                  void choose(null);
-                }}
-                size="lg"
-                variant="outline"
-              >
-                {t`Use another platform`}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                onClick={() => {
-                  void (async () => {
-                    if (await save({ ...choices, hr: { kind: "none" } })) {
-                      onDone();
-                    }
-                  })();
-                }}
-                size="lg"
-                variant="outline"
-              >
-                {t`We don’t use an HR platform`}
-              </Button>
-              <SupportLink page="hr">{t`More about this connection`}</SupportLink>
-            </>
-          )}
-        </div>
+        chosen ? (
+          <>
+            <Button onClick={onDone} size="lg">
+              {t`Continue`}
+              <Icon icon={ArrowRightIcon} />
+            </Button>
+            <Button
+              onClick={() => {
+                void choose(null);
+              }}
+              size="lg"
+              variant="outline"
+            >
+              {t`Use another platform`}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              onClick={() => {
+                void (async () => {
+                  if (await save({ ...choices, hr: { kind: "none" } })) {
+                    onDone();
+                  }
+                })();
+              }}
+              size="lg"
+              variant="outline"
+            >
+              {t`We don’t use an HR platform`}
+            </Button>
+            <SupportLink page="hr">{t`More about this connection`}</SupportLink>
+          </>
+        )
       }
       title={t`Which HR platform do you use?`}
     >
@@ -246,31 +236,28 @@ const ConfirmOrg = ({
   return (
     <CalmStep
       body={t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`}
-      centred
       end={
-        <div {...stylex.props(styles.end)}>
-          {saved ? (
-            <Button
-              onClick={() => {
-                void onward();
-              }}
-              size="lg"
-            >
-              {t`Continue`}
-              <Icon icon={ArrowRightIcon} />
-            </Button>
-          ) : (
-            <Button
-              onClick={() => {
-                void confirm();
-              }}
-              size="lg"
-              status={busy || refreshing ? "loading" : "idle"}
-            >
-              {t`This is right`}
-            </Button>
-          )}
-        </div>
+        saved ? (
+          <Button
+            onClick={() => {
+              void onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+            <Icon icon={ArrowRightIcon} />
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              void confirm();
+            }}
+            size="lg"
+            status={busy || refreshing ? "loading" : "idle"}
+          >
+            {t`This is right`}
+          </Button>
+        )
       }
       title={t`Is this your organization?`}
     >
@@ -353,24 +340,35 @@ export const LeadsStep = (props: StepProps) => {
       />
     );
   }
+  // No staff list: the company step was skipped, and Grasp's staff go through the teams with the
+  // admin in their conversations. Nothing to check here yet; a list shared after all brings the rows.
   if (roster === null) {
     return (
       <CalmStep
-        body={t`First I need your staff list.`}
-        centred
+        body={t`Without a staff list I don’t know your teams yet. Grasp’s staff go through them with you, and then I talk to each lead first.`}
         end={
-          <div {...stylex.props(styles.end)}>
+          <>
+            <Button
+              onClick={() => {
+                void props.onward();
+              }}
+              size="lg"
+            >
+              {t`Continue`}
+              <Icon icon={ArrowRightIcon} />
+            </Button>
             <Button
               onClick={() => {
                 props.go("company");
               }}
               size="lg"
+              variant="outline"
             >
-              {t`Share your staff list`}
+              {t`Share a staff list`}
             </Button>
-          </div>
+          </>
         }
-        title={t`Is this your organization?`}
+        title={t`We’ll set up your teams together`}
       />
     );
   }

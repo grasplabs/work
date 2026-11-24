@@ -296,6 +296,28 @@ describe("where the interviews stand", () => {
   });
 });
 
+describe("a setup without a staff list", () => {
+  it("leaves the teams to Grasp's staff, and lets the admin go on or share a list after all", () => {
+    const leads = said("leads", {
+      choices: { ...noChoices, hr: { kind: "none" } },
+    });
+    expect({
+      said: leads.includes("Grasp’s staff go through them with you"),
+      on: leads.includes("Continue"),
+      list: leads.includes("Share a staff list"),
+    }).toStrictEqual({ said: true, on: true, list: true });
+  });
+
+  it("asks for the message alone on the team step: Grasp's staff plan the day", () => {
+    const team = said("team", {});
+    expect({
+      plans: team.includes("Grasp’s staff plan the day I start with you."),
+      day: team.includes("Tomorrow"),
+      sent: team.includes("I sent it"),
+    }).toStrictEqual({ plans: true, day: false, sent: true });
+  });
+});
+
 describe("what needs the admin", () => {
   it("counts letting Grasp's mail through, and lets them go on once it's done", () => {
     const open = said("review", {});

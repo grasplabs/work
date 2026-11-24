@@ -6655,10 +6655,6 @@ msgstr "Datensatz nach ID suchen"
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Sie finden Stephen unter „Apps“ in Ihrem Slack-Workspace."
 
-#: src/onboarding/leads-step.tsx
-msgid "First I need your staff list."
-msgstr "Zuerst brauche ich Ihre Mitarbeiterliste."
-
 #: src/interview/words.ts
 msgid "First, the steps."
 msgstr "Zuerst die Schritte."
@@ -11682,6 +11678,10 @@ msgstr "Personen außerhalb deiner Organisation, eingeladen zu dem, was mit ihne
 msgid "People respond better when they know why I’m reaching out. Send them this message yourself, then pick the day I start."
 msgstr "Menschen reagieren besser, wenn sie wissen, warum ich mich melde. Schick ihnen diese Nachricht selbst und wähle dann den Tag, an dem ich anfange."
 
+#: src/onboarding/team-step.tsx
+msgid "People respond better when they know why I’m reaching out. Send them this message yourself. Grasp’s staff plan the day I start with you."
+msgstr "Menschen reagieren besser, wenn sie wissen, warum ich mich melde. Schick ihnen diese Nachricht selbst. Das Team von Grasp plant mit dir den Tag, an dem ich anfange."
+
 #: src/routes/_shell.settings.workspace.tsx
 msgid "People sign in with an address in these domains, through your organization’s account."
 msgstr "Man meldet sich mit einer Adresse in diesen Domains an, über das Konto Ihrer Organisation."
@@ -13724,6 +13724,10 @@ msgstr "{name} mit {team} teilen?"
 msgid "Share {name} with the company?"
 msgstr "{name} mit dem Unternehmen teilen?"
 
+#: src/onboarding/leads-step.tsx
+msgid "Share a staff list"
+msgstr "Eine Mitarbeiterliste teilen"
+
 #: src/onboarding/company-step.tsx
 msgid "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
 msgstr "Teilen Sie eine Mitarbeiterliste als CSV- oder Excel-Datei, eine Zeile pro Person. Keine Liste zur Hand? Überspringen Sie diesen Schritt, wir klären das gemeinsam mit Ihnen."
@@ -13769,10 +13773,6 @@ msgstr "Mit dem Unternehmen teilen"
 #: src/frame/setting-up.tsx
 msgid "Share with your team"
 msgstr "Mit Ihrem Team teilen"
-
-#: src/onboarding/leads-step.tsx
-msgid "Share your staff list"
-msgstr "Mitarbeiterliste teilen"
 
 #: src/brain/memories-page.tsx
 msgid "Share…"
@@ -17348,6 +17348,10 @@ msgstr "Wir erinnern dich morgen früh um {time}. Nichts wurde aufgezeichnet."
 msgid "We’ll send a reminder with this same link. It stays open until {closes}."
 msgstr "Wir schicken dir eine Erinnerung mit genau diesem Link. Er bleibt bis {closes} offen."
 
+#: src/onboarding/leads-step.tsx
+msgid "We’ll set up your teams together"
+msgstr "Wir richten deine Teams gemeinsam ein"
+
 #: src/onboarding/campaign/campaign-words.ts
 msgid "We’ve started."
 msgstr "Wir haben begonnen."
@@ -18223,6 +18227,10 @@ msgstr "Ohne Namen"
 #: src/inbox/report-view.tsx
 msgid "Without a person"
 msgstr "Ohne eine Person"
+
+#: src/onboarding/leads-step.tsx
+msgid "Without a staff list I don’t know your teams yet. Grasp’s staff go through them with you, and then I talk to each lead first."
+msgstr "Ohne Mitarbeiterliste kenne ich deine Teams noch nicht. Das Team von Grasp geht sie mit dir durch, und dann spreche ich zuerst mit jeder Teamleitung."
 
 #: src/activity/audit-words.ts
 msgid "Woke a waiting run whose wake hadn't got through"
