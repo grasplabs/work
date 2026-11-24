@@ -87,8 +87,9 @@ const styles = stylex.create({
     minHeight: 0,
     marginInline: "auto",
   },
-  // Full screen, the conversation and the box read as one column in the middle.
-  fullscreen: { maxWidth: "48rem" },
+  // Full screen, the conversation and the box read as one column in the
+  // middle, a step under the head, as #2503's chat page.
+  fullscreen: { maxWidth: "48rem", paddingBlockStart: space["2"] },
   // There the box is as far in as the thread's words, and as wide (#2503).
   footerFullscreen: { paddingInline: space["8"] },
   boxFullscreen: { maxWidth: "100%" },

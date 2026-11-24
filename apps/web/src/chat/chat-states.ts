@@ -1,12 +1,10 @@
-import type { ChainOfThoughtStepStatus } from "@grasp-os/ui/components/chain-of-thought";
 import type { MessageStatus } from "@grasp-os/ui/components/message";
-import type { ToolState } from "@grasp-os/ui/components/tool";
 
 // What the chat's stream reports, in the words Damsko's chat parts take.
 // Core streams a turn as its replies, their tool calls and code steps,
 // and each step's result (`ChatMessage`, `ChatPartial`); Damsko's parts
 // speak the AI SDK's vocabulary without depending on it: a Message's
-// status, a Tool's state, a step of a Chain of thought. Every product
+// status, a step's, the box's. Every product
 // state is mapped here, once, so the thread never decides it twice.
 
 /** Where one answer of the agent's stands, as the thread knows it. */
@@ -92,36 +90,6 @@ export const stepStatusOf = ({
 /** A finished step reads in the past tense: done, or failed and recovered. */
 export const stepFinished = (status: StepStatus): boolean =>
   status === "done" || status === "retried";
-
-/**
- * A step as a Tool's state. A step retried is the call that came back
- * (`output-available`); one stopped never came back, which the AI SDK has
- * no state for: an error, its words saying it was stopped.
- */
-export const toolStates: Readonly<Record<StepStatus, ToolState>> = {
-  writing: "input-streaming",
-  running: "input-available",
-  done: "output-available",
-  retried: "output-available",
-  failed: "output-error",
-  stopped: "output-error",
-};
-
-/**
- * A step as a line of a Chain of thought. A step stopped before it
- * finished never completed and never failed: it stays `pending`, its
- * description saying it was stopped.
- */
-export const chainStatuses: Readonly<
-  Record<StepStatus, ChainOfThoughtStepStatus>
-> = {
-  writing: "active",
-  running: "active",
-  done: "complete",
-  retried: "complete",
-  failed: "error",
-  stopped: "pending",
-};
 
 /** Where the box to ask in stands, as Damsko's PromptInput takes it. */
 export type PromptStatus = "ready" | "submitted" | "streaming" | "error";

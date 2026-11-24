@@ -131,6 +131,10 @@ msgstr "{app}: Lauf von {workflowId}"
 msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# App} other {# Apps}}"
 
+#: src/chat/chat-window.tsx
+msgid "{archivedCount, plural, one {# chat} other {# chats}}"
+msgstr "{archivedCount, plural, one {# Chat} other {# Chats}}"
+
 #: src/settings/stephen-card.tsx
 msgid "{asked} asked"
 msgstr "{asked} haben gefragt"
@@ -408,10 +412,6 @@ msgstr "{count, plural, one {# Regel} other {# Regeln}}"
 msgid "{count, plural, one {# run} other {# runs}}"
 msgstr "{count, plural, one {# Lauf} other {# Läufe}}"
 
-#: src/chat/thread.tsx
-msgid "{count, plural, one {# step} other {# steps}}"
-msgstr "{count, plural, one {# Schritt} other {# Schritte}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# Team, mit seinen Rollen} other {# Teams, mit ihren Rollen}}"
@@ -469,7 +469,7 @@ msgid "{count, plural, one {Back to the question} other {Back to the # questions
 msgstr "{count, plural, one {Zurück zur Frage} other {Zurück zu den # Fragen}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Changed # file} other {Changed # files}}"
+msgid "{count, plural, one {changed # file} other {changed # files}}"
 msgstr "{count, plural, one {# Datei geändert} other {# Dateien geändert}}"
 
 #: src/activity/pending.tsx
@@ -489,11 +489,11 @@ msgid "{count, plural, one {It started without # kept value: the run that kept i
 msgstr "{count, plural, one {Er startete ohne # behaltenen Wert: Der Lauf, der ihn behalten hat, hat etwas gelesen, das nicht mehr zu lesen ist.} other {Er startete ohne # behaltene Werte: Die Läufe, die sie behalten haben, haben etwas gelesen, das nicht mehr zu lesen ist.}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Ran # tool} other {Ran # tools}}"
-msgstr "{count, plural, one {# Werkzeug genutzt} other {# Werkzeuge genutzt}}"
+msgid "{count, plural, one {ran # tool} other {ran # tools}}"
+msgstr "{count, plural, one {# Werkzeug ausgeführt} other {# Werkzeuge ausgeführt}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Read # file} other {Read # files}}"
+msgid "{count, plural, one {read # file} other {read # files}}"
 msgstr "{count, plural, one {# Datei gelesen} other {# Dateien gelesen}}"
 
 #: src/brain/thinking/use-thinking.ts
@@ -501,8 +501,8 @@ msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Lese # Workflow} other {Lese # Workflows}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Searched once} other {Searched # times}}"
-msgstr "{count, plural, one {Einmal gesucht} other {# Mal gesucht}}"
+msgid "{count, plural, one {searched once} other {searched # times}}"
+msgstr "{count, plural, one {einmal gesucht} other {# Mal gesucht}}"
 
 #: src/frame/ui-words.tsx
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
@@ -2534,6 +2534,7 @@ msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alle"
 
+#: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "All chats"
 msgstr "Alle Chats"
@@ -3497,10 +3498,6 @@ msgstr "Zurück zu {destination}"
 msgid "Back to reference {number}"
 msgstr "Zurück zu Verweis {number}"
 
-#: src/chat/chat-window.tsx
-msgid "Back to your chats"
-msgstr "Zurück zu Ihren Chats"
-
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
 msgstr "Zurück zu Ihrer Version"
@@ -4119,7 +4116,6 @@ msgstr "Diagramm"
 
 #: src/agents/agents-overview.tsx
 #: src/chat/chat-panel.tsx
-#: src/chat/chat-start.tsx
 #: src/frame/app-sidebar.tsx
 msgid "Chat"
 msgstr "Chat"
@@ -4156,7 +4152,6 @@ msgstr "Name des Chats"
 msgid "Chat with {name}"
 msgstr "Mit {name} chatten"
 
-#: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/frame/app-sidebar.tsx
 msgid "Chats"
@@ -4889,22 +4884,6 @@ msgstr "Aus {label} ins Brain kopieren"
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table"
-msgstr "Tabelle kopieren"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table as CSV"
-msgstr "Tabelle als CSV kopieren"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table as Markdown"
-msgstr "Tabelle als Markdown kopieren"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table as TSV"
-msgstr "Tabelle als TSV kopieren"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -5748,18 +5727,6 @@ msgstr "{name} herunterladen"
 #: src/workflows/version-source.tsx
 msgid "Download {path}"
 msgstr "{path} herunterladen"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Download table"
-msgstr "Tabelle herunterladen"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Download table as CSV"
-msgstr "Tabelle als CSV herunterladen"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Download table as Markdown"
-msgstr "Tabelle als Markdown herunterladen"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -7989,6 +7956,7 @@ msgctxt "a model's tokens"
 msgid "Input"
 msgstr "Eingabe"
 
+#: src/chat/answer-steps.tsx
 #: src/frame/ui-words.tsx
 msgctxt "what a tool was given"
 msgid "Input"
@@ -10120,6 +10088,10 @@ msgstr "Keine Stackframes"
 msgid "No stakeholder named yet"
 msgstr "Noch kein Stakeholder benannt"
 
+#: src/chat/thread.tsx
+msgid "No steps yet"
+msgstr "Noch keine Schritte"
+
 #: src/apps/app-data.tsx
 msgid "No tables"
 msgstr "Keine Tabellen"
@@ -10358,7 +10330,6 @@ msgstr "Noch nicht von der Geschäftsleitung bestätigt"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
-#: src/chat/answer-table-actions.tsx
 #: src/frame/ui-words.tsx
 msgid "Not copied"
 msgstr "Nicht kopiert"
@@ -12754,7 +12725,6 @@ msgstr "Verantwortung"
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/apps-overview.tsx
-#: src/chat/chat-window.tsx
 #: src/drafts/draft-history.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
@@ -12791,6 +12761,11 @@ msgctxt "inbox item kind"
 msgid "Result"
 msgstr "Ergebnis"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a tool gave back"
+msgid "Result"
+msgstr "Ergebnis"
+
 #: src/brain/brain.ts
 msgid "Result: not measured yet"
 msgstr "Ergebnis: noch nicht gemessen"
@@ -12819,7 +12794,7 @@ msgstr "{name} für {team} außer Dienst stellen?"
 msgid "Retire {name}?"
 msgstr "{name} außer Dienst stellen?"
 
-#: src/chat/thread.tsx
+#: src/chat/answer-steps.tsx
 msgid "Retried"
 msgstr "Erneut versucht"
 
@@ -13932,6 +13907,7 @@ msgstr "Im Protokoll zeigen"
 msgid "Show its definition"
 msgstr "Seine Definition anzeigen"
 
+#: src/chat/answer-steps.tsx
 #: src/chat/held-writes.tsx
 #: src/frame/ui-words.tsx
 msgid "Show less"
@@ -13940,6 +13916,7 @@ msgstr "Weniger anzeigen"
 #: src/brain/learned-section.tsx
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
+#: src/chat/answer-steps.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -13960,7 +13937,7 @@ msgstr "Ältere Ereignisse anzeigen"
 msgid "Show older versions"
 msgstr "Ältere Versionen anzeigen"
 
-#: src/chat/chat-bar.tsx
+#: src/chat/chat-toggle.tsx
 msgid "Show or hide the chat"
 msgstr "Chat ein- oder ausblenden"
 
@@ -14653,7 +14630,7 @@ msgstr "Lauf stoppen"
 msgid "Stop this run?"
 msgstr "Diesen Lauf stoppen?"
 
-#: src/chat/thread.tsx
+#: src/chat/answer-steps.tsx
 #: src/inbox/items.ts
 #: src/workflows/workflow-triggers.tsx
 msgid "Stopped"
@@ -14667,10 +14644,6 @@ msgstr "Gestoppt"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Einen Zeitplan gestoppt, der wiederholt fehlschlug"
-
-#: src/chat/thread.tsx
-msgid "Stopped before it finished"
-msgstr "Angehalten, bevor es fertig war"
 
 #: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
@@ -14757,11 +14730,6 @@ msgstr "Tabelle"
 msgctxt "a table in a text"
 msgid "Table"
 msgstr "Tabelle"
-
-#. placeholder {0}: index + 1
-#: src/chat/answer-table-actions.tsx
-msgid "Table {0}"
-msgstr "Tabelle {0}"
 
 #: src/apps/app-data-model.tsx
 msgid "Tables"
@@ -16690,6 +16658,10 @@ msgstr "Tippen Sie, was fehlt, oder Ja"
 msgid "Type your answer"
 msgstr "Tippen Sie Ihre Antwort"
 
+#: src/chat/chat-window.tsx
+msgid "Unarchive"
+msgstr "Aus dem Archiv holen"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Unconfirmed change"
@@ -17447,7 +17419,7 @@ msgstr "Was im Weg steht"
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
 msgstr "Was Grasp automatisieren oder verbessern könnte, danach, wie Ihre Teams ihre Arbeit beschreiben und wie fünf oder mehr Personen eines Teams sie tatsächlich erledigen, das Größte zuerst. Eine ausgeblendete kommt zurück, sobald sich ihre Grundlage ändert."
 
-#: src/chat/thread.tsx
+#: src/chat/answer-steps.tsx
 msgid "What Grasp did"
 msgstr "Was Grasp getan hat"
 
@@ -18118,6 +18090,7 @@ msgstr "Wem es gehört"
 msgid "Why"
 msgstr "Warum"
 
+#: src/chat/answer-steps.tsx
 #: src/workflows/run-detail.tsx
 msgid "Why it failed"
 msgstr "Warum er fehlschlug"
