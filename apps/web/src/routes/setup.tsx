@@ -42,6 +42,13 @@ import { loadCoreStatus } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import {
+  CampaignFrame,
+  isConcept,
+} from "../onboarding/campaign/campaign-page.tsx";
+import type { Concept } from "../onboarding/campaign/campaign-page.tsx";
+import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
+import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
 import { motion } from "../onboarding/motion.ts";
 import { useReveal } from "../onboarding/reveal-state.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
@@ -582,6 +589,15 @@ const Setup = () => {
   );
 };
 
+/** Concepts only: the campaign page in one of three concepts, from fixtures, in place of the listening step. */
+const SetupOrConcept = () => {
+  const { step, concept, state } = Route.useSearch();
+  if (step === "listening" && concept !== undefined) {
+    return <CampaignFrame concept={concept} state={state ?? "day3"} />;
+  }
+  return <Setup />;
+};
+
 /**
  * The organization's name, for the message to the team; none when it has
  * none or core can't say, which leaves the rest of the onboarding as it is.
@@ -642,8 +658,15 @@ export const Route = createFileRoute("/setup")({
   // `connection`: a connection's flow, started on a step, came back to it.
   validateSearch: (
     search: Record<string, unknown>
-  ): { step?: SetupStep; connection?: string } => ({
+  ): {
+    step?: SetupStep;
+    connection?: string;
+    concept?: Concept;
+    state?: CampaignState;
+  } => ({
     ...(isStep(search.step) && { step: search.step }),
+    ...(isConcept(search.concept) && { concept: search.concept }),
+    ...(isCampaignState(search.state) && { state: search.state }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
     }),
@@ -731,5 +754,5 @@ export const Route = createFileRoute("/setup")({
         flow,
       };
     }),
-  component: Setup,
+  component: SetupOrConcept,
 });
