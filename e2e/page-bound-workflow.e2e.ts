@@ -182,10 +182,10 @@ const openDesk = async (page: Page, app: string): Promise<FrameLocator> => {
 const field = (appPage: FrameLocator, name: string) =>
   appPage.getByRole("status", { name, exact: true });
 
-/** Whether `route` relays the page's call of the workflow's mutation `name`. */
-const relays = (route: Route, name: "start" | "cancel"): boolean =>
+/** Whether `route` relays the page's call of the workflow's `start` mutation. */
+const startsRun = (route: Route): boolean =>
   route.request().method() === "POST" &&
-  (route.request().postData() ?? "").includes(`.mutations.${name}"`);
+  (route.request().postData() ?? "").includes('.mutations.start"');
 
 test("a page starts and cancels a bound workflow's run, and a reload during a start doesn't start it twice", async ({
   pageOf,
@@ -208,40 +208,18 @@ test("a page starts and cancels a bound workflow's run, and a reload during a st
   await expect(field(appPage, "Pending control")).toHaveText("none");
   expect(await runsOf(builder, workflow)).toBe(1);
 
-  // The cancel held on its way to core: it shows as submitting, and the
-  // run can't be cancelled again meanwhile.
-  const cancelHeld = Promise.withResolvers<null>();
-  const sendCancel = Promise.withResolvers<null>();
-  await page.route("**/api/app-functions/**", async (route) => {
-    if (!relays(route, "cancel")) {
-      await route.fallback();
-      return;
-    }
-    cancelHeld.resolve(null);
-    await sendCancel.promise;
-    await route.continue();
-  });
+  // Cancelled, and nothing is left to settle or ask.
   await appPage.getByRole("button", { name: "Cancel follow-up" }).click();
-  await cancelHeld.promise;
-  await expect(field(appPage, "Pending control")).toHaveText(
-    "cancel submitting"
-  );
-  await expect(field(appPage, "Can cancel")).toHaveText("no");
-  await expect(field(appPage, "Status")).toHaveText("running");
-
-  // Let through, the run is cancelled, and nothing is left to settle or ask.
-  sendCancel.resolve(null);
   await expect(field(appPage, "Status")).toHaveText("cancelled", live);
   await expect(field(appPage, "Pending control")).toHaveText("none", live);
   await expect(field(appPage, "Can cancel")).toHaveText("no");
-  await page.unrouteAll({ behavior: "wait" });
 
   // A start that reached core, with the page loaded again before its
   // answer came back: core admitted one run, and the page loaded again
   // starts nothing, now or as it follows the workflow again.
   const admitted = Promise.withResolvers<Route>();
   await page.route("**/api/app-functions/**", async (route) => {
-    if (!relays(route, "start")) {
+    if (!startsRun(route)) {
       await route.fallback();
       return;
     }

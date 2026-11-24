@@ -8,8 +8,7 @@ import { playwright } from "vite-plus/test/browser-playwright";
 // Chromium's headless shell as the journeys use: what is accessible needs
 // real rendering, focus, layout and the theme's styles. Every component's
 // demo and every example, once each, apart from the stack the journeys
-// start: they read nothing from core. Core's Content Security Policy over
-// the kit's pages is held on the stack (e2e/catalog.e2e.ts).
+// start: they read nothing from core.
 export default defineProject({
   plugins: [
     react(),

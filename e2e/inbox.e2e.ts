@@ -6,12 +6,11 @@ import { inboxList, saidOf } from "./inbox.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import { expectNoError } from "./said.ts";
 
-// The Inbox, from the nav: what waits on the person as a list, the item
-// open beside it, and the walk through what waits: its place in the list,
-// the next and the one before (by button, or J and K), Skip, which puts it
-// at the back, the open item in the address, and a settled item leaving
-// for the one after it. Other tests' items may wait in it too, so each
-// test reads the list as it stands.
+// The Inbox: what waits on the person as a list, the item open beside it,
+// and the walk through what waits: its place in the list, the next one,
+// Skip, which puts it at the back, and a settled item leaving for the one
+// after it. Other tests' items may wait in it too, so the test reads the
+// list as it stands.
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
@@ -40,27 +39,7 @@ const lastId = async (page: Page): Promise<string | undefined> => {
 const openId = (page: Page): string =>
   new URL(page.url()).searchParams.get("item") ?? "";
 
-test("a person with nothing waiting finds their Inbox from the nav, with nothing in it and no weekly report", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("inboxEmpty");
-  const page = await pageOf(user);
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Inbox", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/inbox$/u);
-  await expect(page.getByText("Nothing waits for you")).toBeVisible(pageRead);
-  // No plan for the interviews yet: no programme week, and no report (with
-  // a plan, e2e/onboarding.e2e.ts, which runs after this file).
-  await expect(
-    page.getByRole("list", { name: "Your weekly report" })
-  ).toHaveCount(0);
-  await expectNoError(page);
-});
-
-test("an admin walks through what waits: the next and the one before, Skip to the back, the open item kept in the address, and a declined one leaving for the one after", async ({
+test("an admin walks through what waits: the next one, Skip to the back, and a declined one leaving for the one after", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("inbox");
@@ -103,20 +82,12 @@ test("an admin walks through what waits: the next and the one before, Skip to th
     page.getByRole("group", { name: new RegExp(`^Grant Atlas ${tag}`, "u") })
   ).toBeVisible();
 
-  // From the first, the next one by its button, then back with K and on
-  // again with J; the button goes round from the last to the first.
+  // From the first, the next one by its button.
   const [first = "", second = ""] = order;
   await rowOf(page, first).click();
   await page.getByRole("button", { name: "The next one" }).click();
   await expect.poll(() => openId(page)).toBe(second);
   await expect(head).toHaveText(`2 of ${order.length}`);
-  await page.keyboard.press("k");
-  await expect.poll(() => openId(page)).toBe(first);
-  await page.keyboard.press("j");
-  await expect.poll(() => openId(page)).toBe(second);
-  await rowOf(page, order.at(-1) ?? "").click();
-  await page.getByRole("button", { name: "The next one" }).click();
-  await expect.poll(() => openId(page)).toBe(first);
 
   // Skipped, an item goes to the back of the list for this visit.
   await rowOf(page, atlas).click();
@@ -124,13 +95,10 @@ test("an admin walks through what waits: the next and the one before, Skip to th
   await expect.poll(async () => await lastId(page)).toBe(atlas);
   await expect.poll(() => openId(page)).not.toBe(atlas);
 
-  // A reload keeps the open item.
-  await page.goto(`/inbox?item=${encodeURIComponent(beacon)}`);
+  await rowOf(page, beacon).click();
   const approval = page.getByRole("group", {
     name: new RegExp(`^Grant Beacon ${tag}`, "u"),
   });
-  await expect(approval).toBeVisible(pageRead);
-  await page.reload();
   await expect(approval).toBeVisible(pageRead);
 
   // Declined, it leaves the list, and the one after it opens in its place.

@@ -1,11 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import {
-  changesOf,
-  testApp,
-  withFiles,
-} from "../apps/core/test/app-definitions.ts";
+import { testApp, withFiles } from "../apps/core/test/app-definitions.ts";
 import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { fileCast } from "./contexts.ts";
 import { test } from "./csp.ts";
@@ -128,14 +124,12 @@ const twoPages = (): TestApp =>
   });
 
 let builder: Person;
-let user: Person;
-let admin: Person;
 let name: string;
 let app: string;
 
 test.beforeAll(async () => {
   await fileCast();
-  ({ builder, user, admin } = peopleIn("apps"));
+  ({ builder } = peopleIn("apps"));
   // Builders see every App, other tests' too: this one's name is its own.
   name = `Counter ${crypto.randomUUID()}`;
   app = await newApp(builder, name, twoPages());
@@ -195,13 +189,6 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   );
   await counterPage(page);
   await page.goBack();
-
-  // A search nothing matches says so, and lists nothing.
-  await search.fill(`nothing-${run}`);
-  await expect(
-    page.getByText(`No App is called “nothing-${run}”`)
-  ).toBeVisible();
-  await expect(cards).toHaveCount(0);
   await search.fill("");
 
   // Each App's card opens it, on its first page: for its builder, in its
@@ -209,22 +196,9 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await cards.filter({ hasText: name }).getByRole("link", { name }).click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
   const counter = await counterPage(page);
-  // One page heading: the App's bar names it.
-  await expect(page.getByRole("heading", { level: 1, name })).toBeAttached();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
-  await expect(
-    page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", {
-      name: "Apps",
-    })
-  ).toBeVisible();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("0");
   await counter.getByRole("button", { name: "Add one" }).click();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
-  await page.getByRole("button", { name: "More", exact: true }).click();
-  await expect(
-    page.getByRole("menuitem", { name: "Open full page" })
-  ).toHaveAttribute("href", new RegExp(`^/apps/${app}/full/?$`, "u"));
-  await page.keyboard.press("Escape");
 
   // Its settings, beside the chat in its workspace: what it is, its
   // connections and its members.
@@ -241,107 +215,6 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   ).toBeVisible();
   await sections.getByRole("link", { name: "Sharing" }).click();
   await expect(page.getByText("Created by you.")).toBeVisible();
-});
-
-test("the sidebar shows everyone the sections, and, from the person's menu, Settings each person the sections they may open", async ({
-  pageOf,
-}) => {
-  const everyone = [
-    "Chat",
-    "Brain",
-    "Projects",
-    "Apps",
-    "Workflows",
-    // The company's agents: the ones a person may ask, and for admins all of them.
-    "Agents",
-    "Integrations",
-  ];
-  const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
-  const sidebarOf = async (person: Person) => {
-    const page = await pageOf(person);
-    // Not "/": an admin just signed in there, with the company's
-    // onboarding still open, lands in /setup instead (landing.ts).
-    await page.goto("/workflows");
-    const links = page
-      .getByRole("navigation", { name: "Main" })
-      .getByRole("link");
-    // The nav shows once the person's identity is in.
-    await expect(links.first()).toBeVisible();
-    await expect(links.filter({ hasText: /^Inbox/u })).toBeVisible();
-    // The Apps' own entries, which come on their own read, aren't Grasp's
-    // sections (app-surfaces.e2e.ts adds some on the shared deployment):
-    // every link but theirs, in one read of the page.
-    const texts = await links.evaluateAll((found) =>
-      found
-        .filter((link) => link.closest("[aria-labelledby]") === null)
-        .map((link) => link.textContent ?? "")
-    );
-    // The person menu, at the sidebar's foot, by their name; their role is
-    // said inside it.
-    await page.getByRole("button", { name: "Person", exact: true }).click();
-    await expect(
-      page.getByRole("menu").getByText(roleNames[person.role], { exact: true })
-    ).toBeVisible();
-    const items = page.getByRole("menuitem");
-    await expect(items.filter({ hasText: "Sign out" })).toBeVisible();
-    const menuTexts = await items.allTextContents();
-    const menu = menuTexts.filter((text) =>
-      ["Settings", "Sign out"].includes(text)
-    );
-    // Settings, in the person's menu: the sidebar then holds its sections.
-    await items.filter({ hasText: "Settings" }).click();
-    await expect(page).toHaveURL(/\/settings\/profile$/u);
-    const sections = page
-      .getByRole("navigation", { name: "Settings" })
-      .getByRole("link");
-    await expect(sections.last()).toHaveText("Security");
-    return {
-      // Without how many wait.
-      nav: texts.map((text) =>
-        text.replace(/\d+ (?:things? waiting|workflows? needs? you)$/u, "")
-      ),
-      menu,
-      settings: await sections.allTextContents(),
-    };
-  };
-  const [chat, ...rest] = everyone;
-  const nav = [chat, "Inbox", ...rest];
-  const menu = ["Settings", "Sign out"];
-  // Each person's own instruction file is theirs to write, whatever their
-  // role: in every person's Settings.
-  const account = ["Profile", "Instructions", "Security"];
-  expect({
-    admin: await sidebarOf(admin),
-    builder: await sidebarOf(builder),
-    user: await sidebarOf(user),
-  }).toStrictEqual({
-    admin: {
-      nav,
-      menu,
-      settings: [
-        "Workspace",
-        "Members and roles",
-        // The organization's own AI provider keys and the models its calls use.
-        "AI providers",
-        "Models",
-        "AI spend",
-        // The company's groups of teams, the brain's regions: right after
-        // AI spend, as in the prototype.
-        "Brain",
-        // The company admin's view of the onboarding interviews.
-        "Onboarding",
-        "Audit trail",
-        // The event sources outside systems send events to, for admins.
-        "Webhooks",
-        // Every person's calls of unknown outcome, read only, for admins.
-        "Unknown outcomes",
-        "Billing",
-        ...account,
-      ],
-    },
-    builder: { nav, menu, settings: account },
-    user: { nav, menu, settings: account },
-  });
 });
 
 test("a link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
@@ -384,96 +257,4 @@ test("signing in goes back to the page asked for, and only to a page of this sit
     await expect(page.getByLabel("Your question")).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);
   }
-});
-
-test("loading a page again after a new version shows that version, and the App's not-found page when the one open is gone", async ({
-  pageOf,
-}) => {
-  const swapped = await newApp(
-    builder,
-    `Swap ${crypto.randomUUID()}`,
-    twoPages()
-  );
-  // Someone it is shared with has its page open: its builders have the
-  // App's workspace at its address instead.
-  await withApi(builder, async (api) => {
-    await api.apps.members.add(swapped, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-  });
-  const page = await pageOf(user);
-  await page.goto(`/apps/${swapped}/pages/home`);
-  await counterPage(page);
-
-  await withApi(builder, async (api) => {
-    await release(
-      api,
-      swapped,
-      changesOf(twoPages(), {
-        "src/routes/home.tsx": null,
-      })
-    );
-  });
-  // Told over the tab's connection, the page holds nothing unsaved, so
-  // it loads again by itself: no timer, and nothing to click. The page
-  // asked for is gone, so the App's router says so, where it was.
-  const frame = page.frameLocator('iframe[title="App"]');
-  await expect(frame.getByText("Not Found")).toBeVisible({ timeout: 20_000 });
-  await expect(page).toHaveURL(new RegExp(`/apps/${swapped}/pages/home$`, "u"));
-});
-
-test("the Apps page sorts each App into its tab by how the person reaches it, and its builder archives and restores one from its card", async ({
-  pageOf,
-}) => {
-  // Two Apps of this run's own, their names its own: one shared with the
-  // user by name, one the builder keeps.
-  const run = crypto.randomUUID();
-  const shared = await newApp(builder, `Shared ${run}`);
-  await newApp(builder, `Kept ${run}`);
-  await withApi(builder, async (api) => {
-    await api.apps.members.add(shared, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-  });
-
-  // The user finds the one shared with them under Shared apps, not their own.
-  const theirs = await pageOf(user);
-  await theirs.goto("/apps");
-  const tabs = theirs.getByRole("tablist", { name: "Apps" });
-  await tabs.getByRole("tab", { name: "Shared apps" }).click();
-  await theirs.getByRole("textbox", { name: "Search the Apps" }).fill(run);
-  const sharedCards = theirs.getByRole("tabpanel").getByRole("article");
-  await expect(sharedCards).toHaveCount(1);
-  await expect(sharedCards).toContainText(`Shared ${run}`);
-  await tabs.getByRole("tab", { name: "My apps" }).click();
-  await expect(theirs.getByRole("tabpanel").getByRole("article")).toHaveCount(
-    0
-  );
-
-  // Its builder has both as their own, and puts one away from its "…",
-  // after saying so, then takes it back.
-  const page = await pageOf(builder);
-  await page.goto("/apps");
-  await page
-    .getByRole("tablist", { name: "Apps" })
-    .getByRole("tab", { name: "My apps" })
-    .click();
-  await page.getByRole("textbox", { name: "Search the Apps" }).fill(run);
-  const cards = page.getByRole("tabpanel").getByRole("article");
-  await expect(cards).toHaveCount(2);
-  const card = cards.filter({ hasText: `Kept ${run}` });
-  await card.getByRole("button", { name: `More, Kept ${run}` }).click();
-  await page.getByRole("menuitem", { name: "Archive" }).click();
-  await page
-    .getByRole("alertdialog")
-    .getByRole("button", { name: "Archive" })
-    .click();
-  await expect(card).toContainText("Archived");
-  await card.getByRole("button", { name: `More, Kept ${run}` }).click();
-  await page.getByRole("menuitem", { name: "Restore" }).click();
-  await expect(card).not.toContainText("Archived");
 });

@@ -31,13 +31,11 @@ import { TraceLine, TraceTitle } from "../src/components/trace.tsx";
 // keyboard and close with Escape, and a dark theme. The list is the kit's
 // demos and examples, which test/catalog.test.ts holds to the components
 // directory, so a component added to the kit is checked without touching
-// this file. Core's Content Security Policy over the gallery's pages is
-// held on the e2e stack (e2e/catalog.e2e.ts).
+// this file.
 
 /**
  * The theme's dark side, through its `dark` class. Following the system's
- * colour scheme into that class is the frontend's apps/web/public/theme.js,
- * which e2e/kit.e2e.ts checks.
+ * colour scheme into that class is the frontend's apps/web/public/theme.js.
  */
 const setDark = (dark: boolean): void => {
   document.documentElement.classList.toggle("dark", dark);

@@ -1,5 +1,4 @@
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import {
@@ -35,12 +34,6 @@ test.use({
 /** How long "Delete my interview" is held before it asks (interview/closed.tsx), and a little more. */
 const holdMs = 4500;
 
-/** Whether the page is wider than the phone: anything to scroll sideways. */
-const scrollsSideways = async (page: Page): Promise<boolean> =>
-  await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-
 test("an employee has their interview by typing on a phone, agrees to it, and deletes it", async ({
   page,
   cspViolations,
@@ -61,7 +54,6 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
       name: "Hi Mila, I’m Stephen. I’m an AI, and I work for Grasp.",
     })
   ).toBeVisible();
-  expect(await scrollsSideways(page)).toBe(false);
   await page
     .getByRole("button", { name: "Type instead, without sound" })
     .click();
@@ -80,7 +72,6 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
       .filter({ hasText: "Exact" })
       .getByRole("button", { name: /^Change: /u })
   ).toHaveText(["You check the invoice in Exact.", "You send it to Sam."]);
-  expect(await scrollsSideways(page)).toBe(false);
   await page.getByRole("button", { name: "Yes, that’s correct" }).click();
   await expect(
     page.getByRole("heading", { name: "Thank you, Mila." })

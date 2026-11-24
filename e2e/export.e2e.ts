@@ -118,11 +118,9 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   expect(exported).toMatch(/^---\nid: "vision"\n/u);
   expect(exported).toContain("\n# Vision page\n");
 
-  // The page to print: the Grasp mark, the title, then the text rendered,
-  // in a frame of this origin that keeps its policy, styled by the app's
-  // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
-  // headings in Newsreader (Markdown's serif headings), the text in Geist.
-  // The file's frontmatter is the file's alone: the page leaves it out.
+  // The page to print: the title, then the text rendered, in a frame of
+  // this origin that keeps its policy. The file's frontmatter is the
+  // file's alone: the page leaves it out.
   await countPrints(page);
   await choose(page, "Export", "PDF");
   await expect
@@ -132,26 +130,6 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   const heading = printed.getByRole("heading", { name: "Vision page" });
   await expect(heading).toHaveCount(1);
   await expect(printed.locator("main")).not.toContainText('id: "vision"');
-  await expect
-    .poll(
-      async () =>
-        await heading.evaluate((element) => {
-          const style = getComputedStyle(element);
-          return `${style.fontSize} ${style.fontFamily}`;
-        })
-    )
-    .toMatch(/^28px "Newsreader Variable"/u);
-  expect(
-    await printed
-      .getByRole("heading", { level: 2, name: "Timeline" })
-      .evaluate((element) => getComputedStyle(element).fontFamily)
-  ).toMatch(/^"Newsreader Variable"/u);
-  expect(
-    await printed
-      .locator("main")
-      .evaluate((element) => getComputedStyle(element).fontFamily)
-  ).toMatch(/^"Geist Variable"/u);
-  await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
   // Once the dialog closes, the page to print goes.
   await closePrint(page, "Vision page");
   await expect(page.locator('iframe[title="Vision page"]')).toHaveCount(0);

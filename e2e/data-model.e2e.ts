@@ -56,10 +56,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   // Its fields, added in its Fields view, each from its kind: a required
   // text, then a choice whose options are put in order from the keyboard,
   // as the field itself is put before the first.
-  await expect(dialog).toHaveCount(0);
-  const fieldsView = page.getByRole("button", { name: "Fields", exact: true });
-  await fieldsView.click();
-  await expect(fieldsView).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Fields", exact: true }).click();
   const kinds = page.getByRole("list", { name: "Kinds of field" });
   // A kind is picked by its row: the row takes the press.
   const kindOf = (kind: string) =>

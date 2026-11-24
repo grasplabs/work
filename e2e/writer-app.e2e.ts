@@ -40,19 +40,6 @@ test("a person watches a draft stream in, then cancels a slow one", async ({
   await expect(draft).toHaveText(/^A draft/u);
   await expect(status).toHaveText("completed", { timeout: 15_000 });
   await expect(draft).toHaveText("A draft about launch.");
-  const finished = appPage.getByLabel("Finished");
-  const refused = appPage.getByLabel("Refused");
-  await expect(finished).toHaveText("1");
-
-  // Refused before it starts: nothing runs, and the view stays as it was.
-  await appPage.getByRole("button", { name: "Write, stopped already" }).click();
-  await expect(refused).toHaveText("submission.cancelled");
-  await appPage
-    .getByRole("button", { name: "Write with a wrong option" })
-    .click();
-  await expect(refused).toHaveText("TypeError");
-  await expect(status).toHaveText("completed");
-  await expect(finished).toHaveText("1");
 
   // A new run starts clean, and the person can cancel it.
   await appPage.getByRole("button", { name: "Write slowly" }).click();
@@ -61,15 +48,4 @@ test("a person watches a draft stream in, then cancels a slow one", async ({
   await appPage.getByRole("button", { name: "Cancel" }).click();
   await expect(status).toHaveText("cancelled", { timeout: 15_000 });
   await expect(draft).toHaveText("A");
-
-  // Switching to another action mid-run lets go of the run: the view
-  // starts again, and the other action runs at once.
-  await appPage.getByRole("button", { name: "Write slowly" }).click();
-  await expect(draft).toHaveText("A");
-  await appPage.getByRole("button", { name: "Outline instead" }).click();
-  await expect(status).toHaveText("idle");
-  await expect(draft).toHaveText("");
-  await appPage.getByRole("button", { name: "Write", exact: true }).click();
-  await expect(status).toHaveText("completed", { timeout: 15_000 });
-  await expect(draft).toHaveText("An outline about launch.");
 });

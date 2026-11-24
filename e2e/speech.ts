@@ -278,7 +278,7 @@ const wayOnMs = 30_000;
  * out of reach (November 2026). Sound the browser plays runs on its own
  * clock, so a line heard still takes its time.
  */
-export const readUntil = async (
+const readUntil = async (
   page: Page,
   ready: () => Promise<void>,
   withinMs: number
