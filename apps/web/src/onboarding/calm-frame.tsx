@@ -100,21 +100,23 @@ const styles = stylex.create({
   },
   step: { display: "grid", gap: space[10] },
   // A page with little on it: Stephen over the title, all of it on the column's middle.
-  endCentred: { justifyContent: "center" },
   stepCentred: { justifyItems: "center", textAlign: "center", gap: space[8] },
   head: { display: "grid", gap: space[4] },
   // A welcome: its title and line on the column's middle, what it asks below at full width.
   headCentred: { justifyItems: "center", textAlign: "center" },
-  // A step's way on stands at the column's end edge, always: its main button furthest along, the
-  // lesser ways before it (the step names them main first, so the row runs from the end).
+  // A step's way on stands on the column's middle, under its centred words (Ruben: "just center
+  // Continue… the rhythm here doesn't match"): its main button last in the row, a lesser one before it;
+  // the step names them main first, so the row runs from the end.
   end: {
     display: "flex",
     flexDirection: "row-reverse",
     flexWrap: "wrap",
     alignItems: "center",
-    justifyContent: "flex-start",
+    justifyContent: "center",
     gap: space[3],
   },
+  // A third way, a link, on its own line under the buttons, never beside them.
+  also: { display: "flex", justifyContent: "center" },
 });
 
 /**
@@ -367,7 +369,10 @@ export const CalmStep = ({
   centred = true,
   children,
   end,
+  also,
 }: {
+  /** A third way (a `link`), on its own line under the buttons. */
+  also?: ReactNode;
   /** The title and its line on the column's middle (every step's, Ruben: "every step"); what the step asks stays full width. */
   centred?: boolean;
   /** Stephen over the title, on a page with little else; then it all stands centred. */
@@ -393,14 +398,10 @@ export const CalmStep = ({
       </div>
       {children}
       {end === undefined || end === null ? null : (
-        <div
-          {...stylex.props(
-            styles.end,
-            figure !== undefined && styles.endCentred
-          )}
-        >
-          {end}
-        </div>
+        <div {...stylex.props(styles.end)}>{end}</div>
+      )}
+      {also === undefined || also === null ? null : (
+        <div {...stylex.props(styles.also)}>{also}</div>
       )}
     </section>
   );
