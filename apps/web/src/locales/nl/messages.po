@@ -706,8 +706,8 @@ msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
 #: src/onboarding/documents-step.tsx
-msgid "{kinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
-msgstr "{kinds}, en alles wat uitlegt hoe jullie werken. Deel wat je hebt. Concepten zijn ook goed."
+msgid "{kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person."
+msgstr ""
 
 #: src/frame/ui-words.tsx
 msgid "{kinds}, up to {maxSize}"
@@ -8804,10 +8804,6 @@ msgstr "Voor nu weggaan"
 msgid "Leave out"
 msgstr "Weglaten"
 
-#: src/onboarding/documents-step.tsx
-msgid "Leave out personnel files and anything about one person."
-msgstr "Laat personeelsdossiers en alles over één persoon weg."
-
 #: src/pages/leave-confirm-dialog.tsx
 msgid "Leave this page?"
 msgstr "Deze pagina verlaten?"
@@ -11844,8 +11840,8 @@ msgid "Play it again"
 msgstr "Nog een keer afspelen"
 
 #: src/onboarding/documents-step.tsx
-msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
-msgstr "Beleid, procedures, werkinstructies. Deel wat je hebt. Concepten zijn ook prima."
+msgid "Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person."
+msgstr ""
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -12078,7 +12074,6 @@ msgid "Reaches"
 msgstr "Bereikt"
 
 #: src/activity/type-labels.ts
-#: src/onboarding/documents-step.tsx
 msgid "Read"
 msgstr "Lezen"
 
@@ -16594,6 +16589,14 @@ msgstr "Zoek opnieuw"
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Turn my voice off"
+msgstr "Zet mijn stem uit"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Turn my voice on"
+msgstr "Zet mijn stem aan"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"

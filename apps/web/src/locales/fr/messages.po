@@ -706,8 +706,8 @@ msgid "{kind}: {contractId}"
 msgstr "{kind} : {contractId}"
 
 #: src/onboarding/documents-step.tsx
-msgid "{kinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
-msgstr "{kinds}, et tout ce qui explique votre façon de travailler. Partagez ce que vous avez. Les brouillons conviennent aussi."
+msgid "{kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person."
+msgstr ""
 
 #: src/frame/ui-words.tsx
 msgid "{kinds}, up to {maxSize}"
@@ -8804,10 +8804,6 @@ msgstr "Quitter pour l’instant"
 msgid "Leave out"
 msgstr "Ignorer"
 
-#: src/onboarding/documents-step.tsx
-msgid "Leave out personnel files and anything about one person."
-msgstr "Laissez de côté les dossiers du personnel et tout ce qui concerne une seule personne."
-
 #: src/pages/leave-confirm-dialog.tsx
 msgid "Leave this page?"
 msgstr "Quitter cette page ?"
@@ -11844,8 +11840,8 @@ msgid "Play it again"
 msgstr "Réécouter"
 
 #: src/onboarding/documents-step.tsx
-msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
-msgstr "Politiques, procédures, instructions de travail. Partagez ce que vous avez. Les brouillons conviennent aussi."
+msgid "Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person."
+msgstr ""
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -12078,7 +12074,6 @@ msgid "Reaches"
 msgstr "Accède à"
 
 #: src/activity/type-labels.ts
-#: src/onboarding/documents-step.tsx
 msgid "Read"
 msgstr "Lecture"
 
@@ -16594,6 +16589,14 @@ msgstr "Relancer la recherche"
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Nouvel essai…"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Turn my voice off"
+msgstr "Couper ma voix"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Turn my voice on"
+msgstr "Activer ma voix"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"

@@ -1,3 +1,4 @@
+import { voiceLevel } from "../../voice/voice.ts";
 import { readTones } from "../campaign/pixels.ts";
 import { drawMarks } from "./marks.ts";
 import { FRAGMENT, VERTEX } from "./shader.ts";
@@ -237,7 +238,14 @@ const draw = (layer: Layer, colours: Colours) => {
     rest.w * width,
     rest.h * height
   );
-  gl.uniform3f(u("u_mood"), pose?.seed ?? 0, pose?.tempo ?? 1, rest.strength);
+  // While he speaks, his light swells with his voice: he is heard and seen at once.
+  const speaking = 1 + voiceLevel() * 1.4;
+  gl.uniform3f(
+    u("u_mood"),
+    pose?.seed ?? 0,
+    pose?.tempo ?? 1,
+    rest.strength * speaking
+  );
   gl.uniform3f(u("u_pointer"), pointer.x, pointer.y, pointer.on);
   const holds = Array.from({ length: HOLDS }, (_, slot) => him.holds[slot]);
   gl.uniform4fv(
