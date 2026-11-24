@@ -313,7 +313,10 @@ export interface AlertDialogFooterProps extends PartProps {
   children: ReactNode;
 }
 
-/** The answers, at the end of the line. On a phone they share its width. */
+/**
+ * The answers, at the end of the line. A Button directly in it that names no size is small, as
+ * the answers are, so they stand one height. On a phone they share its width.
+ */
 export const AlertDialogFooter = ({
   children,
   style,

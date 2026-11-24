@@ -18,14 +18,17 @@ import {
   Alert02Icon,
   AlertCircleIcon,
   Analytics01Icon,
+  AppWindowIcon as HugeAppWindowIcon,
   Archive02Icon,
   ArrowDown01Icon,
   ArrowDown02Icon,
   ArrowExpand01Icon,
   ArrowLeft01Icon,
   ArrowLeft02Icon,
+  ArrowLeftRightIcon as HugeArrowLeftRightIcon,
   ArrowRight01Icon,
   ArrowRight02Icon,
+  ArrowShrink01Icon,
   ArrowUp01Icon,
   ArrowUp02Icon,
   ArrowUpDownIcon as HugeArrowUpDownIcon,
@@ -34,6 +37,7 @@ import {
   AudioWave01Icon,
   BubbleChatIcon,
   Building03Icon,
+  CableIcon as HugeCableIcon,
   Calendar03Icon,
   Cancel01Icon,
   ChartDecreaseIcon,
@@ -47,6 +51,7 @@ import {
   Coins01Icon,
   ComputerIcon,
   ComputerTerminal01Icon,
+  ContrastIcon as HugeContrastIcon,
   Copy01Icon,
   Cursor02Icon,
   DashboardSquare01Icon,
@@ -59,6 +64,7 @@ import {
   File01Icon,
   FileCodeIcon as HugeFileCodeIcon,
   FileEditIcon,
+  FitToScreenIcon,
   FloorPlanIcon as HugeFloorPlanIcon,
   Folder01Icon,
   FolderKanbanIcon as HugeFolderKanbanIcon,
@@ -69,14 +75,17 @@ import {
   GoForward10SecIcon,
   GridViewIcon,
   HashtagIcon,
+  HelpCircleIcon,
   Home01Icon,
   Idea01Icon,
   Image01Icon,
   InboxIcon as HugeInboxIcon,
   InformationCircleIcon,
   InputTextIcon,
+  Invoice01Icon,
   Key01Icon,
   LabsIcon,
+  LaptopIcon as HugeLaptopIcon,
   LeftToRightListBulletIcon,
   LeftToRightListDashIcon,
   Link04Icon,
@@ -100,7 +109,10 @@ import {
   RefreshIcon,
   RepeatIcon as HugeRepeatIcon,
   Rocket01Icon,
+  ScaleIcon as HugeScaleIcon,
   Search01Icon,
+  SearchAddIcon,
+  SearchMinusIcon,
   Sent02Icon,
   ServerStack01Icon,
   Settings01Icon,
@@ -110,13 +122,16 @@ import {
   SidebarLeftIcon,
   SidebarRightIcon,
   SlidersHorizontalIcon as HugeSlidersHorizontalIcon,
+  SmartPhone01Icon,
   SourceCodeIcon,
   SparklesIcon as HugeSparklesIcon,
+  SplitIcon as HugeSplitIcon,
   SquareLock02Icon,
   StarIcon as HugeStarIcon,
   StopIcon,
   Sun03Icon,
   TableIcon as HugeTableIcon,
+  Tablet01Icon,
   Tag01Icon,
   Task01Icon,
   TextAlignCenterIcon as HugeTextAlignCenterIcon,
@@ -143,6 +158,7 @@ import {
   VolumeMute01Icon,
   WorkflowSquare03Icon,
   Wrench01Icon,
+  ZapIcon as HugeZapIcon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import * as stylex from "@stylexjs/stylex";
@@ -199,8 +215,10 @@ const styles = stylex.create({
   },
   filled: { stroke: "none" },
   solid: { fill: "currentColor" },
+  // Turned with `scale`, the property UI SDK turns a list item's icon with ([data-mirror] in right to
+  // left): both set the one value, so an icon in a menu or a list turns once, never twice.
   mirror: {
-    transform: { default: null, ":dir(rtl)": "scaleX(-1)" },
+    scale: { default: null, ":dir(rtl)": "-1 1" },
   },
 });
 
@@ -293,6 +311,8 @@ export const Icon = ({ icon, label, style }: IconProps) => {
 
 // ---- The house set, by shape -----------------------------------------------------------------------
 
+/** One app, as a window. AppWindowIcon. */
+export const AppWindowIcon: IconData = HugeAppWindowIcon;
 /** Put away, out of the list: Archive. Archive02Icon. */
 export const ArchiveIcon: IconData = Archive02Icon;
 /** A column sorted from high to low. ArrowDown02Icon. */
@@ -301,6 +321,8 @@ export const ArrowDownIcon: IconData = ArrowDown02Icon;
 export const ArrowLeftIcon: IconData =
   /* @__PURE__ */
   pointing(ArrowLeft02Icon);
+/** Switch to another: an account, an organisation. ArrowLeftRightIcon. */
+export const ArrowLeftRightIcon: IconData = HugeArrowLeftRightIcon;
 /** Go on to the next step. ArrowRight02Icon: an arrow with a stem, never a chevron. */
 export const ArrowRightIcon: IconData =
   /* @__PURE__ */
@@ -323,6 +345,8 @@ export const BoldIcon: IconData = TextBoldIcon;
 export const BrainIcon: IconData = AiBrain01Icon;
 /** A company or an organisation. Building03Icon. */
 export const BuildingIcon: IconData = Building03Icon;
+/** A connection, as a cable: integrations. CableIcon. */
+export const CableIcon: IconData = HugeCableIcon;
 /** Opens a calendar to choose a date. Calendar03Icon. */
 export const CalendarIcon: IconData = Calendar03Icon;
 /** Reports and figures. Analytics01Icon. */
@@ -349,6 +373,8 @@ export const ChevronsUpDownIcon: IconData = UnfoldMoreIcon;
 export const CircleAlertIcon: IconData = AlertCircleIcon;
 /** It went well: done, ready. CheckmarkCircle02Icon. */
 export const CircleCheckIcon: IconData = CheckmarkCircle02Icon;
+/** A question, or help: what the person is asked, or where to get help. HelpCircleIcon. */
+export const CircleHelpIcon: IconData = HelpCircleIcon;
 /** A step still to come. CircleIcon. */
 export const CircleIcon: IconData = HugeCircleIcon;
 /** A step left out. MinusSignCircleIcon. */
@@ -363,6 +389,8 @@ export const ClockIcon: IconData = Clock01Icon;
 export const CodeIcon: IconData = SourceCodeIcon;
 /** Money: revenue, spend, a price. Coins01Icon. */
 export const CoinsIcon: IconData = Coins01Icon;
+/** Light and dark: the theme. ContrastIcon. */
+export const ContrastIcon: IconData = HugeContrastIcon;
 /** Copy to the clipboard. Copy01Icon. */
 export const CopyIcon: IconData = Copy01Icon;
 /** A source of records: a table, a database. Database01Icon. */
@@ -383,6 +411,8 @@ export const FileDocIcon: IconData = Doc01Icon;
 export const FileCodeIcon: IconData = HugeFileCodeIcon;
 /** A file. File01Icon. */
 export const FileIcon: IconData = File01Icon;
+/** A record: a deal, a ticket, an invoice. Invoice01Icon. */
+export const FileInvoiceIcon: IconData = Invoice01Icon;
 /** A PDF file. Pdf01Icon. */
 export const FilePdfIcon: IconData = Pdf01Icon;
 /** A file changed. FileEditIcon. */
@@ -419,6 +449,8 @@ export const InfoIcon: IconData = InformationCircleIcon;
 export const ItalicIcon: IconData = TextItalicIcon;
 /** A key: an AI provider's key, an API key, a secret. Key01Icon. */
 export const KeyIcon: IconData = Key01Icon;
+/** A desktop's width: shown as on a laptop or a desktop. LaptopIcon. */
+export const LaptopIcon: IconData = HugeLaptopIcon;
 /** Apps, as panels on a page. DashboardSquare01Icon. */
 export const LayoutDashboardIcon: IconData = DashboardSquare01Icon;
 /** Show as a grid. GridViewIcon. */
@@ -459,6 +491,8 @@ export const MessageSquareFilledIcon: IconData =
 export const MessageSquareIcon: IconData = Message01Icon;
 /** Speak instead of typing. Mic01Icon. */
 export const MicIcon: IconData = Mic01Icon;
+/** Back to its own size: leave full screen, Maximize2Icon's pair. ArrowShrink01Icon. */
+export const Minimize2Icon: IconData = ArrowShrink01Icon;
 /** Some, not all: a checkbox whose group is partly checked. MinusSignIcon. */
 export const MinusIcon: IconData = MinusSignIcon;
 /** Follow the system's light or dark. ComputerIcon. */
@@ -508,6 +542,10 @@ export const RefreshCwIcon: IconData = RefreshIcon;
 export const RepeatIcon: IconData = HugeRepeatIcon;
 /** Launch: a first run, a release, a plan put to work. Rocket01Icon. */
 export const RocketIcon: IconData = Rocket01Icon;
+/** Weighed: a rule, a policy, a fair comparison. ScaleIcon. */
+export const ScaleIcon: IconData = HugeScaleIcon;
+/** Fit to the view: a canvas or a picture zoomed back to show it whole. FitToScreenIcon. */
+export const ScanIcon: IconData = FitToScreenIcon;
 /** Search. Search01Icon. */
 export const SearchIcon: IconData = Search01Icon;
 /** Send a message or an invite. Sent02Icon. */
@@ -526,8 +564,12 @@ export const SheetIcon: IconData = HugeSheetIcon;
 export const ShieldAlertIcon: IconData = HugeShieldAlertIcon;
 /** A thread's or a message's settings. SlidersHorizontalIcon. */
 export const SlidersHorizontalIcon: IconData = HugeSlidersHorizontalIcon;
+/** A phone's width: shown as on a phone. SmartPhone01Icon. */
+export const SmartphoneIcon: IconData = SmartPhone01Icon;
 /** Made or suggested by the agent. SparklesIcon. */
 export const SparklesIcon: IconData = HugeSparklesIcon;
+/** Split into two: a view, a flow laid side by side. SplitIcon. */
+export const SplitIcon: IconData = HugeSplitIcon;
 /** A column of yes or no. CheckmarkSquare02Icon. */
 export const SquareCheckIcon: IconData = CheckmarkSquare02Icon;
 /** Stop what is running, such as an answer being written. StopIcon. */
@@ -540,6 +582,8 @@ export const StickyNoteIcon: IconData = Note01Icon;
 export const SunIcon: IconData = Sun03Icon;
 /** A table of data: a head row over rows. TableIcon. */
 export const TableIcon: IconData = HugeTableIcon;
+/** A tablet's width: shown as on a tablet. Tablet01Icon. */
+export const TabletIcon: IconData = Tablet01Icon;
 /** A column of tags. Tag01Icon. */
 export const TagIcon: IconData = Tag01Icon;
 /** A shell: a command run and what it printed. ComputerTerminal01Icon. */
@@ -608,6 +652,12 @@ export const WorkflowIcon: IconData = WorkflowSquare03Icon;
 export const WrenchIcon: IconData = Wrench01Icon;
 /** Failed, or close. Cancel01Icon. */
 export const XIcon: IconData = Cancel01Icon;
+/** Quick, or a power: a shortcut, a skill. ZapIcon. */
+export const ZapIcon: IconData = HugeZapIcon;
+/** Zoom in. SearchAddIcon. */
+export const ZoomInIcon: IconData = SearchAddIcon;
+/** Zoom out. SearchMinusIcon. */
+export const ZoomOutIcon: IconData = SearchMinusIcon;
 
 /** The mark a file wears for its media type (`image/png`), where it shows no picture. */
 export const fileMark = (type: string | undefined): IconData => {

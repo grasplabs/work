@@ -51,7 +51,6 @@ import {
 } from "../lib/icons";
 import { focusRingText } from "../lib/styles";
 import {
-  colors,
   duration,
   font,
   media,
@@ -61,6 +60,7 @@ import {
 } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars, ringInsetMarker } from "../lib/vars.stylex";
+import { breadcrumbVars } from "./breadcrumb.stylex";
 import { Button } from "./button";
 import {
   DropdownMenu,
@@ -201,7 +201,7 @@ const styles = stylex.create({
     fontFamily: font.sans,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
-    color: colors.mutedForeground,
+    color: breadcrumbVars.mutedForeground,
     whiteSpace: "nowrap",
   },
   // The page's name gives way first, down to a few letters; the links only once it has. Flex
@@ -228,8 +228,8 @@ const styles = stylex.create({
     display: "flex",
     minWidth: 0,
     color: {
-      default: colors.mutedForeground,
-      ":hover": { default: null, [media.hover]: colors.foreground },
+      default: breadcrumbVars.mutedForeground,
+      ":hover": { default: null, [media.hover]: breadcrumbVars.foreground },
     },
     textDecoration: "none",
     paddingInline: ROOM,
@@ -275,8 +275,8 @@ const styles = stylex.create({
   // the page's ink and weight, though it is not the page you are on.
   end: {
     color: {
-      default: colors.mutedForeground,
-      ":is(li:last-child > *)": colors.foreground,
+      default: breadcrumbVars.mutedForeground,
+      ":is(li:last-child > *)": breadcrumbVars.foreground,
     },
     fontWeight: { default: null, ":is(li:last-child > *)": font.weightMedium },
   },
@@ -286,7 +286,7 @@ const styles = stylex.create({
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: colors.foreground,
+    color: breadcrumbVars.foreground,
     fontWeight: font.weightMedium,
     borderRadius: radius.sm,
     cornerShape: radius.shape,
@@ -297,7 +297,8 @@ const styles = stylex.create({
     [iconVars.stroke]: size.iconStroke,
     display: "inline-flex",
     flexShrink: 0,
-    color: colors.subtleForeground,
+    marginInline: breadcrumbVars.separatorInset,
+    color: breadcrumbVars.subtleForeground,
   },
   separatorAuto: {
     display: { default: "inline-flex", [PHONE]: "none" },
@@ -313,7 +314,7 @@ const styles = stylex.create({
     [iconVars.stroke]: size.iconStroke,
     flexShrink: 0,
     alignItems: "center",
-    color: colors.subtleForeground,
+    color: breadcrumbVars.subtleForeground,
     marginInlineStart: `calc(-9 / 24 * ${size.iconSm})`,
     marginInlineEnd: space["1"],
   },

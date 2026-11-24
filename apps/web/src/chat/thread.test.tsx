@@ -864,11 +864,19 @@ describe(ChatThread, () => {
       end,
       at,
     });
-    /** What the stopped answer shows: its words, and each Stopped under them. */
+    /**
+     * What the stopped answer shows: its words, and each Stopped shown. Damsko
+     * draws Stopped on the actions' row when the answer has actions, and hides
+     * the one under its words then (by CSS, which this DOM does not apply).
+     */
     const shown = () => ({
       status: answer()?.dataset.status,
       notes: [
-        ...(answer()?.querySelectorAll('[data-slot="message-stopped"]') ?? []),
+        ...(answer()?.querySelectorAll(
+          answer()?.querySelector('[data-slot="message-actions"]')
+            ? '[data-slot="message-actions"] [data-slot="message-stopped"]'
+            : '[data-slot="message-stopped"]'
+        ) ?? []),
       ].map((note) => note.textContent),
       words: [
         ...(answer()?.querySelectorAll('[data-slot="message-response"]') ?? []),
