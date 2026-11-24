@@ -6675,14 +6675,6 @@ msgstr "Find a record by its ID"
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Find Stephen under Apps in your Slack workspace."
 
-#: src/onboarding/calm-frame.tsx
-msgid "Finish setup"
-msgstr "Finish setup"
-
-#: src/onboarding/calm-frame.tsx
-msgid "Finish this step first"
-msgstr "Finish this step first"
-
 #: src/onboarding/leads-step.tsx
 msgid "First I need your staff list."
 msgstr "First I need your staff list."

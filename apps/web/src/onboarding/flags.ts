@@ -2,8 +2,7 @@ import type { Locale } from "../i18n.ts";
 
 // Five flags, drawn as pixels: each a shape that says which of its three
 // colours stands at a point on the flag (0 to 1 across, 0 to 1 down). Drawn
-// by hand, no icon pack. The shape is data, not a function, so the card's
-// canvas and Stephen's field (a shader) draw the same flag from it. English
+// by hand, no icon pack. English
 // is the United Kingdom's flag: the clients are European, and in Europe a
 // language picker shows English by the Union Jack far more often than by
 // the Stars and Stripes.
@@ -57,7 +56,7 @@ const third = (at: number, split: readonly [number, number]): number => {
 
 const thirds = [1 / 3, 2 / 3] as const;
 
-/** Which of a flag's colours stands at a point on it. The field's shader says the same in GLSL. */
+/** Which of a flag's colours stands at a point on it. */
 export const colourAt = (shape: FlagShape, u: number, v: number): number => {
   if (shape.kind === "union") {
     return unionJack(u, v);

@@ -1,21 +1,13 @@
 import { Text } from "@grasp-os/ui/components/text";
 import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { focusRing } from "@grasp-os/ui/lib/styles";
-import {
-  colors,
-  duration,
-  media,
-  radius,
-  size,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
-import { useField } from "./field/stephen-field.tsx";
 import { FlagPicture } from "./flag-picture.tsx";
 
 // The language, chosen from five cards, one a language, each named in its
@@ -28,8 +20,8 @@ import { FlagPicture } from "./flag-picture.tsx";
 // the language's own name is the card's name. A component of the setup's
 // own, not an Item: the card's corner clips its picture, which an Item
 // can't hold without a layer inside it. Under the pointer or the keyboard's
-// focus, Stephen comes to the card: his light gathers round it and comes in
-// over its edge, and its flag starts to wave.
+// focus, Stephen comes to the card (as to anything pressable) and its flag
+// starts to wave.
 
 /** Under a pointer that can hover, as Damsko's own parts write it. */
 const HOVER = "@media (hover: hover)";
@@ -63,12 +55,7 @@ const styles = stylex.create({
       ":active": colors.controlActive,
     },
     boxShadow: size.borderStrong,
-    // Stephen's line: the card's own ring, so it follows its corner exactly; his dither lies outside it.
-    transitionProperty: "box-shadow",
-    transitionDuration: { default: duration.ui, [media.reducedMotion]: "0s" },
-    transitionTimingFunction: duration.ease,
   },
-  lit: { boxShadow: `0 0 0 2px ${colors.mint}` },
   current: { backgroundColor: colors.accentActive },
   name: {
     position: "relative",
@@ -88,19 +75,13 @@ export const LanguageCards = ({
 }: {
   /** The language in use, when they come back to the step; never on a first visit. */
   chosen: Locale | null;
-  /** Told which, and the card that was pressed: where Stephen carries the page on from. */
-  onPick: (locale: Locale, card: Element) => void;
+  onPick: (locale: Locale) => void;
 }) => {
   const { t } = useLingui();
-  const field = useField();
+  // Which card's flag waves: the one under the pointer or the keyboard's focus. Stephen comes
+  // to it by himself, as to anything pressable (field/stephen-field.tsx).
   const [lit, setLit] = useState<Locale | null>(null);
-  const come = (code: Locale, card: Element) => {
-    setLit(code);
-    field.attend(card);
-  };
-  const go = (code: Locale, card: Element) => {
-    field.release(card);
-    // Only the card he is on goes dark: he may already be on the next one.
+  const go = (code: Locale) => {
     setLit((current) => (current === code ? null : current));
   };
   return (
@@ -109,25 +90,24 @@ export const LanguageCards = ({
         <li key={code}>
           <button
             {...(chosen === code && { "aria-current": true })}
-            onBlur={(event) => {
-              go(code, event.currentTarget);
+            onBlur={() => {
+              go(code);
             }}
-            onClick={(event) => {
-              onPick(code, event.currentTarget);
+            onClick={() => {
+              onPick(code);
             }}
-            onFocus={(event) => {
-              come(code, event.currentTarget);
+            onFocus={() => {
+              setLit(code);
             }}
-            onPointerEnter={(event) => {
-              come(code, event.currentTarget);
+            onPointerEnter={() => {
+              setLit(code);
             }}
-            onPointerLeave={(event) => {
-              go(code, event.currentTarget);
+            onPointerLeave={() => {
+              go(code);
             }}
             type="button"
             {...stylex.props(
               styles.card,
-              lit === code && styles.lit,
               chosen === code && styles.current,
               focusRing
             )}
