@@ -57,18 +57,29 @@ const rows = [
     lastRun: null,
   }),
   row("Ledger", { runs: null, lastRun: null }),
+  row("Claims", {
+    phase: "building",
+    blocked: { kind: "schedule", why: "refused" },
+  }),
 ];
 
 const triggers: TriggersByWorkflow = new Map([
   [
     "wf-archive",
     [
+      { kind: "webhook", address: null, nextAt: null, blocked: "waiting" },
       { kind: "email", address: "archive", nextAt: null, blocked: null },
+      { kind: "email", address: "returns", nextAt: null, blocked: null },
+    ],
+  ],
+  [
+    "wf-claims",
+    [
       {
         kind: "schedule",
         address: null,
-        nextAt: "2026-11-23T08:00:00.000Z",
-        blocked: null,
+        nextAt: "2030-01-07T08:00:00.000Z",
+        blocked: "refused",
       },
     ],
   ],
@@ -168,6 +179,7 @@ describe("the Workflows page's table", () => {
       "Waiting for an admin to allow its email trigger",
       "Not live yet",
       "On, not used yet",
+      "Its trigger can't start it",
     ]);
   });
 
@@ -197,6 +209,7 @@ describe("the Workflows page's table", () => {
       "When an admin allows it",
       "",
       "By hand",
+      "",
     ]);
   });
 

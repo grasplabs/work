@@ -585,12 +585,15 @@ msgstr "{each, plural, one {# hour a week} other {# hours a week}}"
 msgid "{event}, at {account}"
 msgstr "{event}, at {account}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{failed, plural, one {# failed} other {# failed}}"
+msgstr "{failed, plural, one {# failed} other {# failed}}"
+
 #: src/inbox/items.ts
 msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
 msgstr "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
 
 #: src/projects/project-view.tsx
-#: src/workflows/workflow-rows.tsx
 msgid "{failed} failed"
 msgstr "{failed} failed"
 
@@ -862,6 +865,10 @@ msgstr "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 #: src/frame/part-words.tsx
 msgid "{minutes} min"
 msgstr "{minutes} min"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{more, plural, one {{words}, and # more} other {{words}, and # more}}"
+msgstr "{more, plural, one {{words}, and # more} other {{words}, and # more}}"
 
 #: src/drafts/draft-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
@@ -1329,16 +1336,16 @@ msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgstr "{rows, plural, one {# row to import.} other {# rows to import.}}"
 
 #: src/workflows/workflow-rows.tsx
-msgid "{runs} done"
-msgstr "{runs} done"
+msgid "{runs, plural, one {# done} other {# done}}"
+msgstr "{runs, plural, one {# done} other {# done}}"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{runs, plural, one {# of yours done} other {# of yours done}}"
+msgstr "{runs, plural, one {# of yours done} other {# of yours done}}"
 
 #: src/projects/project-view.tsx
 msgid "{runs} done this week"
 msgstr "{runs} done this week"
-
-#: src/workflows/workflow-rows.tsx
-msgid "{runs} of yours done"
-msgstr "{runs} of yours done"
 
 #: src/projects/project-view.tsx
 msgid "{runs} of yours done this week"
@@ -1634,6 +1641,10 @@ msgstr "{waiting, plural, one {# person new on your list gets a link once you co
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{waiting, plural, one {# waiting for a decision} other {# waiting for a decision}}"
+msgstr "{waiting, plural, one {# waiting for a decision} other {# waiting for a decision}}"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
@@ -1645,10 +1656,6 @@ msgstr "{waiting, plural, one {It uses # new kind of access. An admin approves t
 #: src/projects/project-view.tsx
 msgid "{waiting} waiting"
 msgstr "{waiting} waiting"
-
-#: src/workflows/workflow-rows.tsx
-msgid "{waiting} waiting for a decision"
-msgstr "{waiting} waiting for a decision"
 
 #: src/connections/integrations-band.tsx
 msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
@@ -1713,10 +1720,6 @@ msgstr "{who}, reading back."
 #: src/interview/talk.tsx
 msgid "{who}, thinking."
 msgstr "{who}, thinking."
-
-#: src/workflows/workflow-rows.tsx
-msgid "{words}, and {more} more"
-msgstr "{words}, and {more} more"
 
 #: src/frame/part-words.tsx
 msgid "{words}?"
@@ -21772,6 +21775,10 @@ msgstr "You have no recent runs whose input is still kept, so there was nothing 
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "You have no skills of your own yet."
+
+#: src/workflows/workflow-rows.tsx
+msgid "You haven't run it yet"
+msgstr "You haven't run it yet"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/workflow-page.tsx

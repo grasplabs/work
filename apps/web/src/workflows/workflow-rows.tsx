@@ -1,12 +1,11 @@
 import type { TriggerKind } from "@grasp-os/shared/workflow-triggers";
 import type { I18n, MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { formatNumber } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import type { BadgeTone } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -107,7 +106,8 @@ const daysFromToday = (date: Date): number =>
 const whenOf = (at: string, i18n: I18n): string => {
   const date = new Date(at);
   const time = new Intl.DateTimeFormat(i18n.locale, {
-    timeStyle: "short",
+    hour: "numeric",
+    minute: "2-digit",
   }).format(date);
   const days = daysFromToday(date);
   if (days === 0) {
@@ -123,7 +123,9 @@ const whenOf = (at: string, i18n: I18n): string => {
     weekday: "short",
     day: "numeric",
     month: "short",
-    hour: "2-digit",
+    year:
+      date.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+    hour: "numeric",
     minute: "2-digit",
   }).format(date);
 };
@@ -142,10 +144,11 @@ const triggerWords = (trigger: RowTrigger, i18n: I18n): string => {
 };
 
 /**
- * What starts a workflow next (its Next column): its resume while paused,
- * an admin while its trigger waits for one, else its first trigger, or
- * someone by hand when it has none. Undefined before a version is live,
- * and while its triggers aren't read (core lists a user only their own).
+ * What starts a workflow next (its Next column): an admin while its
+ * trigger waits for one, its resume while paused, else the trigger that
+ * can start it soonest, or someone by hand when it has none. Undefined
+ * before a version is live, while its triggers aren't read (core lists a
+ * user only their own), and when none of them can ever start it.
  */
 const nextOf = (
   row: OverviewRow,
@@ -153,6 +156,9 @@ const nextOf = (
   admin: boolean,
   i18n: I18n
 ): string | undefined => {
+  if (row.blocked?.why === "refused") {
+    return undefined;
+  }
   if (row.paused) {
     return i18n._(msg`When resumed`);
   }
@@ -164,15 +170,27 @@ const nextOf = (
       ? i18n._(msg`When you allow it`)
       : i18n._(msg`When an admin allows it`);
   }
-  const [first] = triggers;
+  const starting = triggers.filter(({ blocked }) => blocked === null);
+  // The schedule due first; a trigger without a time (an email) only
+  // where no schedule has one.
+  const [first] = starting.toSorted((one, other) =>
+    (one.nextAt ?? "~").localeCompare(other.nextAt ?? "~")
+  );
   if (first === undefined) {
     return i18n._(
       msg({ message: "By hand", context: "what starts a workflow" })
     );
   }
   const words = triggerWords(first, i18n);
-  const more = formatNumber(triggers.length - 1);
-  return triggers.length > 1 ? i18n._(msg`${words}, and ${more} more`) : words;
+  const more = starting.length - 1;
+  return more > 0
+    ? i18n._(
+        msg`${plural(more, {
+          one: `${words}, and # more`,
+          other: `${words}, and # more`,
+        })}`
+      )
+    : words;
 };
 
 /** A workflow's facts, worded once for its row and its card alike. */
@@ -203,18 +221,32 @@ const useFacts = (
       context: "how a workflow stands: live, never run",
     });
   }
-  const runs = formatNumber(row.runs ?? 0);
-  const waiting = formatNumber(row.waiting);
-  const failed = formatNumber(row.failed);
+  const runs = row.runs ?? 0;
+  const { waiting, failed } = row;
   // A user of it sees their own runs alone, so its figures are theirs.
   const own = row.role === "user";
+  let last = row.lastRun === null ? t`No runs yet` : whenOf(row.lastRun, i18n);
+  if (own && row.lastRun === null) {
+    last = t`You haven't run it yet`;
+  }
   return {
     state,
     now,
-    asks: row.waiting > 0 ? t`${waiting} waiting for a decision` : undefined,
-    runs: own ? t`${runs} of yours done` : t`${runs} done`,
-    failed: row.failed > 0 ? t`${failed} failed` : undefined,
-    last: row.lastRun === null ? t`No runs yet` : whenOf(row.lastRun, i18n),
+    asks:
+      waiting > 0
+        ? plural(waiting, {
+            one: "# waiting for a decision",
+            other: "# waiting for a decision",
+          })
+        : undefined,
+    runs: own
+      ? plural(runs, { one: "# of yours done", other: "# of yours done" })
+      : plural(runs, { one: "# done", other: "# done" }),
+    failed:
+      failed > 0
+        ? plural(failed, { one: "# failed", other: "# failed" })
+        : undefined,
+    last,
     next: nextOf(row, triggers, admin, i18n),
   };
 };

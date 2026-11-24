@@ -585,12 +585,15 @@ msgstr "{each, plural, one {# uur per week} other {# uur per week}}"
 msgid "{event}, at {account}"
 msgstr "{event}, bij {account}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{failed, plural, one {# failed} other {# failed}}"
+msgstr "{failed, plural, one {# mislukt} other {# mislukt}}"
+
 #: src/inbox/items.ts
 msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
 msgstr "{failed, plural, one {Een e-mail heeft iemand niet bereikt} other {# e-mails hebben hun ontvangers niet bereikt}}"
 
 #: src/projects/project-view.tsx
-#: src/workflows/workflow-rows.tsx
 msgid "{failed} failed"
 msgstr "{failed} mislukt"
 
@@ -862,6 +865,10 @@ msgstr "{minutes, plural, one {# min geleden opgeslagen} other {# min geleden op
 #: src/frame/part-words.tsx
 msgid "{minutes} min"
 msgstr "{minutes} min"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{more, plural, one {{words}, and # more} other {{words}, and # more}}"
+msgstr "{more, plural, one {{words}, en nog #} other {{words}, en nog #}}"
 
 #: src/drafts/draft-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
@@ -1329,16 +1336,16 @@ msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgstr "{rows, plural, one {# rij om te importeren.} other {# rijen om te importeren.}}"
 
 #: src/workflows/workflow-rows.tsx
-msgid "{runs} done"
-msgstr "{runs} klaar"
+msgid "{runs, plural, one {# done} other {# done}}"
+msgstr "{runs, plural, one {# klaar} other {# klaar}}"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{runs, plural, one {# of yours done} other {# of yours done}}"
+msgstr "{runs, plural, one {# van jou klaar} other {# van jou klaar}}"
 
 #: src/projects/project-view.tsx
 msgid "{runs} done this week"
 msgstr "{runs} klaar deze week"
-
-#: src/workflows/workflow-rows.tsx
-msgid "{runs} of yours done"
-msgstr "{runs} van jou klaar"
 
 #: src/projects/project-view.tsx
 msgid "{runs} of yours done this week"
@@ -1634,6 +1641,10 @@ msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodr
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{waiting, plural, one {# waiting for a decision} other {# waiting for a decision}}"
+msgstr "{waiting, plural, one {# wacht op een besluit} other {# wachten op een besluit}}"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows hebben je nodig}}"
@@ -1645,10 +1656,6 @@ msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder
 #: src/projects/project-view.tsx
 msgid "{waiting} waiting"
 msgstr "{waiting} wachten"
-
-#: src/workflows/workflow-rows.tsx
-msgid "{waiting} waiting for a decision"
-msgstr "{waiting} wachten op een besluit"
 
 #: src/connections/integrations-band.tsx
 msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
@@ -1713,10 +1720,6 @@ msgstr "{who} leest terug."
 #: src/interview/talk.tsx
 msgid "{who}, thinking."
 msgstr "{who} denkt na."
-
-#: src/workflows/workflow-rows.tsx
-msgid "{words}, and {more} more"
-msgstr "{words}, en nog {more}"
 
 #: src/frame/part-words.tsx
 msgid "{words}?"
@@ -11463,7 +11466,7 @@ msgstr "Heeft {name} gekoppeld nodig"
 #: src/workflows/workflow-rows.tsx
 msgctxt "how a workflow stands"
 msgid "Needs a fix"
-msgstr "Moet gerepareerd"
+msgstr "Moet gerepareerd worden"
 
 #: src/connections/integration-item.tsx
 msgid "Needs an app Grasp hasn't registered"
@@ -21772,6 +21775,10 @@ msgstr "Je hebt geen recente runs waarvan de invoer nog bewaard is, dus er was n
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Je hebt nog geen eigen skills."
+
+#: src/workflows/workflow-rows.tsx
+msgid "You haven't run it yet"
+msgstr "Je hebt hem nog niet gedraaid"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/workflow-page.tsx
