@@ -708,4 +708,48 @@ describe("the team step's first day, on the device's clock", () => {
       });
     }
   );
+
+  // As the admin's journey types it (e2e/admin-journey.e2e.ts): a person in
+  // the UK types the page's today, day first. Taken at every hour of the
+  // 24th, the merge queue's 03:08 among them, wherever the device is: the
+  // field's first day and the day typed are both the UTC day.
+  const hours = [
+    "UTC",
+    "Europe/London",
+    "America/Los_Angeles",
+    "Pacific/Auckland",
+  ].flatMap((where) =>
+    Array.from({ length: 24 }, (_, hour) => ({
+      zone: where,
+      at: `2026-11-24T${String(hour).padStart(2, "0")}:08:00Z`,
+    }))
+  );
+
+  it.each(hours)(
+    "in $zone at $at, takes today typed as in the UK",
+    async (clock) => {
+      process.env.TZ = clock.zone;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(clock.at));
+      const on = todayInUtc();
+      const { saved } = await shown("en", ["en-GB"], { on });
+      const [year, month, date] = on.split("-");
+      await typeDay(`${date}/${month}/${year}`);
+      const said = nextSaid();
+      await send();
+      expect({
+        on,
+        error: error(),
+        marked: field("Another day").getAttribute("aria-invalid"),
+        said: said.includes("on 24 Nov at 9:00"),
+        saved: saved.map((plan) => plan.start),
+      }).toStrictEqual({
+        on: "2026-11-24",
+        error: undefined,
+        marked: null,
+        said: true,
+        saved: ["2026-11-24"],
+      });
+    }
+  );
 });
