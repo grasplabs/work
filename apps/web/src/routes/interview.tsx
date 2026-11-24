@@ -344,13 +344,24 @@ const conceptKeys = [
   "still",
   "lang",
   "transcript",
-];
+] as const;
+
+/** The concept switches, by name, as the address writes them. */
+interface ConceptKeys {
+  concept?: unknown;
+  stage?: unknown;
+  at?: unknown;
+  left?: unknown;
+  still?: unknown;
+  lang?: unknown;
+  transcript?: unknown;
+}
 
 export const Route = createFileRoute("/interview")({
   validateSearch: (
     search: Record<string, unknown>
-  ): { error?: string } & Record<string, unknown> => {
-    const kept: Record<string, unknown> = {};
+  ): { error?: string } & ConceptKeys => {
+    const kept: ConceptKeys = {};
     for (const key of conceptKeys) {
       if (search[key] !== undefined) {
         kept[key] = search[key];
