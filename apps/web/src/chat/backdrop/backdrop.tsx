@@ -1,8 +1,10 @@
 import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
+import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import type { DitherKind } from "./dither.ts";
 import { nothingDrawn } from "./drawing.ts";
 import type { DrawOptions, Drawing } from "./drawing.ts";
 
@@ -50,16 +52,30 @@ const styles = stylex.create({
     outlineStyle: "none",
     outlineColor: colors.mintDeep,
   },
+  // A dither (#2503's, as New agent stands on it): each cell a crisp
+  // square, in mint, faint, strongest in the far corners and thinning, in
+  // strength, all the way in, so it has no edge to stop at.
+  dithered: {
+    color: `color-mix(in oklch, ${colors.brandMint} 28%, transparent)`,
+    imageRendering: "pixelated",
+    maskImage:
+      "radial-gradient(150% 135% at 50% 110%, rgb(0 0 0 / 0.05) 0%, rgb(0 0 0 / 0.07) 40%, rgb(0 0 0 / 0.22) 62%, rgb(0 0 0 / 0.6) 80%, black 96%)",
+  },
 });
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
-/** Starts the sand on `element`, loading it first; nothing, if it fails to load. */
+/** Starts the sand, or the dither, on `element`, loading it first; nothing, if it fails to load. */
 const startQuietly = async (
   element: HTMLCanvasElement,
-  options: DrawOptions
+  options: DrawOptions,
+  dither: DitherKind | undefined
 ): Promise<Drawing> => {
   try {
+    if (dither !== undefined) {
+      const { startDither } = await import("./dither.ts");
+      return startDither(element, dither, options);
+    }
     const { startSand } = await import("./sand.ts");
     return await startSand(element, options);
   } catch {
@@ -74,7 +90,8 @@ const startQuietly = async (
  */
 const watch = (
   element: HTMLCanvasElement,
-  clear: RefObject<HTMLElement | null>
+  clear: RefObject<HTMLElement | null>,
+  dither: DitherKind | undefined
 ): (() => void) => {
   const options: DrawOptions = {
     clear: () => clear.current?.getBoundingClientRect(),
@@ -89,7 +106,7 @@ const watch = (
   };
   const load = async (): Promise<void> => {
     loading = true;
-    const started = await startQuietly(element, options);
+    const started = await startQuietly(element, options, dither);
     if (gone) {
       started.stop();
       return;
@@ -122,20 +139,32 @@ const watch = (
 export const Backdrop = ({
   children,
   clear,
+  dither,
+  style,
 }: {
   children: ReactNode;
   /** The column of words on it: the sand fades out round it, so the words read. */
   clear: RefObject<HTMLElement | null>;
+  /** A dither drawn in place of the sand (#2503's, in mint). */
+  dither?: DitherKind;
+  /** Layout only: under a page's bar, the room left (`minHeight: 0`) rather than the page's whole height. */
+  style?: LayoutStyle;
 }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const element = canvas.current;
-    return element === null ? undefined : watch(element, clear);
-  }, [clear]);
+    return element === null ? undefined : watch(element, clear, dither);
+  }, [clear, dither]);
   return (
-    <div data-slot="backdrop" {...stylex.props(styles.box)}>
+    <div data-slot="backdrop" {...stylex.props(styles.box, style)}>
       <div aria-hidden="true" {...stylex.props(styles.foot)}>
-        <canvas ref={canvas} {...stylex.props(styles.canvas)} />
+        <canvas
+          ref={canvas}
+          {...stylex.props(
+            styles.canvas,
+            dither !== undefined && styles.dithered
+          )}
+        />
       </div>
       {children}
     </div>

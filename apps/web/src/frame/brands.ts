@@ -220,6 +220,12 @@ export const BrandTeams: IconData =
     { d: "M3 8.25h7V10H7.4v6.25H5.6V10H3z", fill: "#FFFFFF", knockout: true },
   ]);
 
+/** The mark of each chat platform Stephen can be added to that the product has one for, by its id. */
+export const placeMarks: Readonly<Record<string, IconData>> = {
+  slack: BrandSlack,
+  teams: BrandTeams,
+};
+
 /** The mark of each of Grasp's own connectors, by its id, and the name its company goes by. */
 export const brands = {
   microsoft: { logo: BrandMicrosoft, name: "Microsoft" },
