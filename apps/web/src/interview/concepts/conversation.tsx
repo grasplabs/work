@@ -30,7 +30,6 @@ import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import { shownAs, useSaid, wordsOf } from "../spoken.tsx";
 import { usedWords, wrapUpSeconds } from "./clock.ts";
 import { Countdown } from "./countdown.tsx";
-import type { CountdownLook } from "./countdown.tsx";
 import {
   copy,
   fixture,
@@ -43,6 +42,7 @@ import {
   wrapUp,
 } from "./fixture.ts";
 import type { ClockPlace } from "./frame.tsx";
+import { StreamedLine, useFeed } from "./streamed.tsx";
 
 // CONCEPT ONLY: the conversation, as every concept reaches it: Damsko’s
 // Chat (the thread, Stephen’s turns at the start, the person’s at the end
@@ -64,10 +64,7 @@ const besideQuery = "@media (width >= 80rem)";
 // waiting in the subtle grey; once the line is said, every word rests in ink.
 const lit = stylex.create({
   word: {
-    transitionProperty: {
-      default: "color, opacity",
-      [media.reducedMotion]: "none",
-    },
+    transitionProperty: { default: "color", [media.reducedMotion]: "none" },
     transitionDuration: duration.ui,
     transitionTimingFunction: duration.ease,
   },
@@ -75,9 +72,6 @@ const lit = stylex.create({
   said: { color: colors.foreground },
   saying: { color: colors.accent },
   waiting: { color: colors.subtleForeground },
-  // Streamed: a word not yet said keeps its room, so the line never reflows; it fades in as it comes.
-  unseen: { opacity: { default: 0, [media.reducedMotion]: 1 } },
-  seen: { opacity: 1, color: colors.foreground },
 });
 
 const styles = stylex.create({
@@ -562,16 +556,18 @@ const Composer = ({
   );
 };
 
-/** A line of Stephen's, its words lighting up while he says it. */
-const LitLine = ({
+/** A typed line of Stephen's, streaming in word by word as the model sends it (streamed.tsx). */
+const TypedLine = ({ text, speaking }: { text: string; speaking: boolean }) => (
+  <StreamedLine streaming={speaking} text={useFeed(text, speaking)} />
+);
+
+/** A spoken line of Stephen's, its words lighting up while he says it. */
+const SpokenLine = ({
   text,
   speaking,
-  stream = false,
 }: {
   text: string;
   speaking: boolean;
-  /** Typed or silent: unsaid words keep their room unseen and fade in as they arrive. */
-  stream?: boolean;
 }) => {
   const said = useSaid({ line: text, saying: text.length, from: 0, speaking });
   return (
@@ -586,14 +582,7 @@ const LitLine = ({
           look = "saying";
         }
         return (
-          <span
-            key={start}
-            {...stylex.props(
-              lit.word,
-              lit[look],
-              stream && (look === "waiting" ? lit.unseen : lit.seen)
-            )}
-          >
+          <span key={start} {...stylex.props(lit.word, lit[look])}>
             {word}
           </span>
         );
@@ -601,6 +590,23 @@ const LitLine = ({
     </>
   );
 };
+
+/** A line of Stephen's: lighting up with his voice, or, typed or silent, streaming in. */
+const LitLine = ({
+  text,
+  speaking,
+  stream = false,
+}: {
+  text: string;
+  speaking: boolean;
+  /** Typed or silent: the words stream in as the model sends them. */
+  stream?: boolean;
+}) =>
+  stream ? (
+    <TypedLine speaking={speaking} text={text} />
+  ) : (
+    <SpokenLine speaking={speaking} text={text} />
+  );
 
 /**
  * A and B: the conversation as a stage, as the interview is today: one
@@ -613,13 +619,11 @@ const Stage = ({
   talk,
   left,
   clock,
-  countLook,
   onReadBack,
 }: {
   talk: Talk;
   left: number;
   clock: ClockPlace;
-  countLook: CountdownLook;
   onReadBack: () => void;
 }) => {
   const now = talk.turns.findLast((turn) => turn.from === "stephen");
@@ -633,12 +637,7 @@ const Stage = ({
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
         <div {...stylex.props(styles.over)}>
-          <Text as="span" color="muted" size="sm">
-            {fixture.interviewer}
-          </Text>
-          {clock === "title" ? (
-            <Countdown left={left} look={countLook} />
-          ) : null}
+          {clock === "title" ? <Countdown left={left} /> : null}
         </div>
         {now?.lead === undefined ||
         (talk.doing === "listening" && talk.interim !== "") ? null : (
@@ -696,7 +695,6 @@ export const Conversation = ({
   left,
   clock,
   look,
-  countLook,
   transcript = false,
   onReadBack,
 }: {
@@ -705,8 +703,6 @@ export const Conversation = ({
   left: number;
   clock: ClockPlace;
   look: "stage" | "thread";
-  /** The countdown's look over the question (A): small, large or minutes only. */
-  countLook: CountdownLook;
   /** The transcript is open: beside the stage, or in its place on a phone. */
   transcript?: boolean;
   onReadBack: () => void;
@@ -748,7 +744,6 @@ export const Conversation = ({
         >
           <Stage
             clock={clock}
-            countLook={countLook}
             left={left}
             onReadBack={onReadBack}
             talk={talk}

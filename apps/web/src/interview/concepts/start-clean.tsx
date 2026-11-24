@@ -5,6 +5,7 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import { Heading } from "@grasp-os/ui/components/heading";
+import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
@@ -62,17 +63,15 @@ const styles = stylex.create({
     gap: space["4"],
     width: "100%",
   },
-  // Each of the title's two lines a line of its own.
-  titleLine: { display: "block" },
+  // On a laptop each of the title's two lines is a line of its own; on a phone the title wraps
+  // balanced on its own (a forced break made three ragged lines at 390).
+  titleLine: { display: { default: "inline", [media.lg]: "block" } },
   // The one button: the whole width on a phone, its own width on a wider window.
   agree: { width: { default: "100%", [media.sm]: "auto" } },
   // Each promise a plain line of its own, in the panel's words.
   line: { display: "block" },
-  // The fold-out as wide as its words, on the centre axis with the rest. Damsko's `fitContent`
-  // trigger reports a width about 16px short of its label and chevron, so a box shrunk to it
-  // wraps the label (fixed on Damsko's feat/onboarding-parts, not pushed); until then it stands
-  // at least this wide.
-  fit: { width: "auto", minWidth: "15rem", alignSelf: "center" },
+  // The fold-out as wide as its words, on the centre axis with the rest.
+  fit: { width: "fit-content" },
   // The two quiet ways out, side by side at the foot, apart.
   foot: {
     display: "flex",
@@ -109,8 +108,9 @@ export const ConsentClean = ({
       <Heading level={1} size="xl">
         {altTitle
           ? copy.start.titleAlt
-          : copy.start.titleLines.map((line) => (
+          : copy.start.titleLines.map((line, at) => (
               <span key={line} {...stylex.props(styles.titleLine)}>
+                {at === 0 ? "" : " "}
                 {line.replace("{name}", name)}
               </span>
             ))}
@@ -119,7 +119,9 @@ export const ConsentClean = ({
         <Text size="lg">{copy.start.whoShort}</Text>
         {body === "b" ? (
           <Collapsible fitContent style={styles.fit}>
-            <CollapsibleTrigger>{copy.start.more}</CollapsibleTrigger>
+            <CollapsibleTrigger size="lg" weight="normal">
+              {copy.start.more}
+            </CollapsibleTrigger>
             <CollapsibleContent>
               {copy.start.promises.map((promise) => (
                 <span key={promise} {...stylex.props(styles.line)}>
@@ -135,12 +137,21 @@ export const ConsentClean = ({
       </Button>
     </div>
     <div {...stylex.props(styles.foot)}>
-      <Button onClick={onNotNow} size="lg" variant="link">
-        {copy.start.later}
-      </Button>
-      <Button onClick={onRatherNot} size="lg" variant="link">
-        {copy.start.decline}
-      </Button>
+      {/* The links in the body's own size: Damsko's Link takes the sentence's size and colour. */}
+      <Text as="span" size="lg">
+        <Link asChild>
+          <button onClick={onNotNow} type="button">
+            {copy.start.later}
+          </button>
+        </Link>
+      </Text>
+      <Text as="span" size="lg">
+        <Link asChild>
+          <button onClick={onRatherNot} type="button">
+            {copy.start.decline}
+          </button>
+        </Link>
+      </Text>
     </div>
   </div>
 );

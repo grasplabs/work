@@ -348,7 +348,6 @@ const conceptKeys = [
   "band",
   "title",
   "layout",
-  "count",
   "body",
   "name",
   "later",
@@ -367,7 +366,6 @@ interface ConceptKeys {
   band?: unknown;
   title?: unknown;
   layout?: unknown;
-  count?: unknown;
   body?: unknown;
   name?: unknown;
   later?: unknown;
