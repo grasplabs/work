@@ -108,7 +108,7 @@ test("an admin walks through what waits: the next and the one before, Skip to th
   const at = order.indexOf(atlas);
   await expect(head).toHaveText(`${at + 1} of ${order.length}`);
   await expect(
-    page.getByRole("group", { name: new RegExp(`^Grant Atlas ${tag}`, "u") })
+    page.getByRole("region", { name: new RegExp(`^Grant Atlas ${tag}`, "u") })
   ).toBeVisible();
 
   // From the first, the next one by its button, then back with K and on
@@ -134,7 +134,7 @@ test("an admin walks through what waits: the next and the one before, Skip to th
 
   // A reload keeps the open item.
   await page.goto(`/inbox?item=${encodeURIComponent(beacon)}`);
-  const approval = page.getByRole("group", {
+  const approval = page.getByRole("region", {
     name: new RegExp(`^Grant Beacon ${tag}`, "u"),
   });
   await expect(approval).toBeVisible(pageRead);
@@ -149,7 +149,7 @@ test("an admin walks through what waits: the next and the one before, Skip to th
   await expect(rowOf(page, beacon)).toHaveCount(0);
   await expect(approval).toHaveCount(0);
   await expect(
-    page.getByRole("complementary").getByRole("group").first()
+    page.getByRole("complementary").getByRole("region").first()
   ).toBeVisible();
   await expectNoError(page);
 });
