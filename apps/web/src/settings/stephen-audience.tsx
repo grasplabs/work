@@ -55,9 +55,11 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: space["2"],
     minWidth: 0,
-    // Its own width in a narrow row, beside the setting's name: the old
-    // setting row held its control in a box of the control's width.
-    maxWidth: "100%",
+    width: "100%",
+    // Its own width where a narrow row lays its name and control side by
+    // side (a flex row, FieldGroup `fit`), as the old setting row held its
+    // control; the whole control column elsewhere (a sheet's rows).
+    flexBasis: "content",
   },
   fill: { width: "100%" },
   teams: {

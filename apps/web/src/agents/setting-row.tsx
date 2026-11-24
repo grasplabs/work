@@ -8,12 +8,12 @@ import {
   useFieldControl,
 } from "@grasp-os/ui/components/field";
 import type { FieldControlProps } from "@grasp-os/ui/components/field";
-import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { WithInfo } from "../frame/info-tip.tsx";
+import { InfoTip } from "../frame/info-tip.tsx";
 
 // One setting as a row of its card, as #2503's agents and Stephen's
 // settings draw it (the old library's setting row): its name, a short
@@ -23,6 +23,22 @@ import { WithInfo } from "../frame/info-tip.tsx";
 // is the product's (frame/info-tip.tsx).
 
 const styles = stylex.create({
+  // The name and its info mark on one line, as #2503's setting row: a long
+  // name wraps beside the mark, never above it. The mark stays outside the
+  // label, so the control's name is the setting's alone.
+  named: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[1],
+    width: "fit-content",
+    minWidth: 0,
+  },
+  // The mark in a box one line tall: its button may be taller, the row never is.
+  mark: {
+    display: "inline-flex",
+    alignItems: "center",
+    height: font.textSmLine,
+  },
   // A fact's value where the rows' controls stand, in the text's colour.
   value: {
     display: "flex",
@@ -52,6 +68,19 @@ const Control = ({
   });
 };
 
+/** A setting's name with its info mark beside it. */
+const Named = ({ name, info }: { name: ReactNode; info: ReactNode }) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.named)}>
+      {name}
+      <span {...stylex.props(styles.mark)}>
+        <InfoTip label={t`More about this setting`}>{info}</InfoTip>
+      </span>
+    </div>
+  );
+};
+
 export const SettingRow = ({
   label,
   help,
@@ -70,7 +99,6 @@ export const SettingRow = ({
   /** The control; as a function, handed the id its name labels. */
   children: ReactNode | ((field: Wiring) => ReactNode);
 }) => {
-  const { t } = useLingui();
   const name = <FieldLabel>{label}</FieldLabel>;
   return (
     <Field
@@ -78,13 +106,7 @@ export const SettingRow = ({
       {...(error === undefined ? {} : { "data-invalid": true })}
     >
       <FieldContent>
-        {info === undefined ? (
-          name
-        ) : (
-          <WithInfo info={info} label={t`More about this setting`}>
-            {name}
-          </WithInfo>
-        )}
+        {info === undefined ? name : <Named info={info} name={name} />}
         {help === undefined ? null : (
           <FieldDescription>{help}</FieldDescription>
         )}
@@ -111,18 +133,11 @@ export const FactRow = ({
   info?: ReactNode;
   children: ReactNode;
 }) => {
-  const { t } = useLingui();
   const name = <FieldTitle>{label}</FieldTitle>;
   return (
     <Field orientation="responsive">
       <FieldContent>
-        {info === undefined ? (
-          name
-        ) : (
-          <WithInfo info={info} label={t`More about this setting`}>
-            {name}
-          </WithInfo>
-        )}
+        {info === undefined ? name : <Named info={info} name={name} />}
         {help === undefined ? null : (
           <FieldDescription>{help}</FieldDescription>
         )}
