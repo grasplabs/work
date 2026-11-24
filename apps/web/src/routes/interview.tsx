@@ -349,6 +349,8 @@ const conceptKeys = [
   "title",
   "layout",
   "count",
+  "body",
+  "name",
 ] as const;
 
 /** The concept switches, by name, as the address writes them. */
@@ -365,6 +367,8 @@ interface ConceptKeys {
   title?: unknown;
   layout?: unknown;
   count?: unknown;
+  body?: unknown;
+  name?: unknown;
 }
 
 export const Route = createFileRoute("/interview")({

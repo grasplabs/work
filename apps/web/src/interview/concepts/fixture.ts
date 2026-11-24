@@ -60,6 +60,12 @@ export const copy = {
   start: {
     title: filled("Hi {name}, got a few minutes to talk about your work?"),
     titleAlt: "Tell us how your work really goes",
+    /** The title on exactly two lines (Ruben, 24 November), `{name}` still to fill. */
+    titleLines: ["Hi {name}, got a few minutes", "to talk about your work?"],
+    /** The one short paragraph (Ruben: "it just feels too long"). */
+    whoShort: filled(
+      "{sponsorFirst} asked everyone at {company} to have a short chat with Stephen, our AI interviewer. It takes {minutes} minutes at most."
+    ),
     who: filled(
       "{sponsorFirst} asked everyone at {company} to have a short chat with Stephen, our AI interviewer. We want to understand how your work actually goes and where things get stuck. It takes {minutes} minutes at most."
     ),
