@@ -471,10 +471,8 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   expect(asked).toContain('"effort":"max"');
   expect(asked).toContain('"model":"anthropic/claude-sonnet-4-6"');
 
-  // Kept for the person in this browser: back on the page, the chat closed.
-  await chat.getByRole("button", { name: "Close" }).click();
-  await expect(chat).toBeHidden();
-  await page.reload();
+  // Kept for the person in this browser: back on Chat's start, loaded anew.
+  await page.goto("/");
   await expect(control).toHaveAccessibleName(
     "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
