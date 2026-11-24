@@ -63,6 +63,7 @@ const Welcome = ({ data, onward }: StepProps) => {
   return (
     <CalmStep
       body={t`I’ll set up Grasp with you, one step at a time. Which language would you like?`}
+      centred
       title={admin === "" ? t`Hi, I’m Stephen` : t`Hi ${admin}, I’m Stephen`}
     >
       <div {...stylex.props(styles.stack)}>

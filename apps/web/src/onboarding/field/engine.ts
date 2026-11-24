@@ -53,10 +53,8 @@ const UNIFORMS = [
   "u_rest",
   "u_mood",
   "u_pointer",
-  "u_attend",
-  "u_attendOn",
-  "u_attendKind",
-  "u_attendRadius",
+  "u_holds[0]",
+  "u_holdLooks[0]",
   "u_phase",
   "u_from",
   "u_toward",
@@ -244,6 +242,23 @@ const flagShape = (picture: Picture): Rgb => {
   return picture.shape.kind === "upright" ? [1, 1 / 3, 2 / 3] : [2, 0, 0];
 };
 
+/** One thing he holds: its light builds up while he is on it and fades there once he leaves. */
+interface Hold {
+  element: Element;
+  box: Box;
+  /** How much of his light is there, 0 to 1. */
+  on: number;
+  /** He is on it now. */
+  held: boolean;
+  /** Behind words (a faint light) rather than round a thing to press (a line). */
+  behind: boolean;
+  /** Its corner, read from the page: his line follows it. */
+  radius: number;
+}
+
+/** How many things he lights at once: the one he is on, and those still fading. */
+const HOLDS = 4;
+
 /** Everything about him that outlives a canvas: a screen drawn anew finds him as he was. */
 interface Him {
   pose: Pose | null;
@@ -258,13 +273,8 @@ interface Him {
     on: number;
     there: boolean;
   };
-  attention: {
-    element: Element | null;
-    box: Box;
-    on: number;
-    behind: boolean;
-    radius: number;
-  };
+  /** What he holds now and what he still lets go of: each its own light, in its own place. */
+  holds: Hold[];
   carry: Carry | null;
   /** Told while he covers the page: nothing under him can be pressed then. */
   onCovering: ((covering: boolean) => void) | null;
@@ -275,13 +285,7 @@ const him: Him = {
   rest: { x: 0.5, y: 0, w: 0.8, h: 0.4, strength: 0 },
   clock: 0,
   pointer: { x: 0, y: 0, tx: 0, ty: 0, on: 0, there: false },
-  attention: {
-    element: null,
-    box: [0, 0, 0, 0],
-    on: 0,
-    behind: false,
-    radius: 0,
-  },
+  holds: [],
   carry: null,
   onCovering: null,
 };
@@ -313,7 +317,7 @@ const fronts = (now: number): Rgb => {
 
 const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
   const { gl, at, canvas } = layer;
-  const { pose, rest, pointer, attention, carry } = him;
+  const { pose, rest, pointer, carry } = him;
   const u = (name: Uniform) => at.get(name) ?? null;
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -335,10 +339,19 @@ const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
   );
   gl.uniform3f(u("u_mood"), pose?.seed ?? 0, pose?.tempo ?? 1, rest.strength);
   gl.uniform3f(u("u_pointer"), pointer.x, pointer.y, pointer.on);
-  gl.uniform4f(u("u_attend"), ...attention.box);
-  gl.uniform1f(u("u_attendOn"), attention.on);
-  gl.uniform1f(u("u_attendKind"), attention.behind ? 1 : 0);
-  gl.uniform1f(u("u_attendRadius"), attention.radius);
+  const holds = Array.from({ length: HOLDS }, (_, slot) => him.holds[slot]);
+  gl.uniform4fv(
+    u("u_holds[0]"),
+    holds.flatMap((hold) => hold?.box ?? [0, 0, 0, 0])
+  );
+  gl.uniform3fv(
+    u("u_holdLooks[0]"),
+    holds.flatMap((hold) =>
+      hold === undefined
+        ? [0, 0, 0]
+        : [hold.on, hold.behind ? 1 : 0, hold.radius]
+    )
+  );
   gl.uniform1f(u("u_phase"), carry?.phase ?? 0);
   gl.uniform4f(u("u_from"), ...(carry?.from ?? [0, 0, 0, 0]));
   gl.uniform4f(u("u_toward"), ...(carry?.toward ?? [0, 0, 0, 0]));
@@ -357,7 +370,7 @@ const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
 
 /** Him a moment later: on his way to his pose, behind the pointer, round what he attends to. */
 const settle = (elapsed: number) => {
-  const { pose, rest, pointer, attention } = him;
+  const { pose, rest, pointer } = him;
   if (pose !== null) {
     rest.x = toward(rest.x, pose.at[0], elapsed, 260);
     rest.y = toward(rest.y, pose.at[1], elapsed, 260);
@@ -368,35 +381,27 @@ const settle = (elapsed: number) => {
   pointer.x = toward(pointer.x, pointer.tx, elapsed, 110);
   pointer.y = toward(pointer.y, pointer.ty, elapsed, 110);
   pointer.on = toward(pointer.on, pointer.there ? 1 : 0, elapsed, 180);
-  const { element } = attention;
-  const held = element !== null && element.isConnected;
-  if (held) {
-    const box = boxOf(element);
-    // From nothing he is there at once; from one thing to the next he glides.
-    const arrived = attention.on < 0.05;
-    const glide = (from: number, to: number) =>
-      arrived ? to : toward(from, to, elapsed, 70);
-    const [x, y, width, height] = attention.box;
-    attention.box = [
-      glide(x, box[0]),
-      glide(y, box[1]),
-      glide(width, box[2]),
-      glide(height, box[3]),
-    ];
+  // Each thing he holds stays where it is; his light builds up there, or fades there.
+  for (const hold of him.holds) {
+    if (hold.element.isConnected) {
+      hold.box = boxOf(hold.element);
+    }
+    const on = hold.held && hold.element.isConnected;
+    hold.on = toward(hold.on, on ? 1 : 0, elapsed, on ? 130 : 210);
   }
-  attention.on = toward(attention.on, held ? 1 : 0, elapsed, held ? 90 : 160);
+  him.holds = him.holds.filter((hold) => hold.held || hold.on > 0.004);
 };
 
 /** Him at rest where this screen has him, nothing gathered: what reduced motion shows. */
 const rested = () => {
-  const { pose, rest, pointer, attention } = him;
+  const { pose, rest, pointer } = him;
   if (pose !== null) {
     [rest.x, rest.y] = pose.at;
     [rest.w, rest.h] = pose.reach;
     rest.strength = pose.strength;
   }
   pointer.on = 0;
-  attention.on = 0;
+  him.holds = [];
 };
 
 /**
@@ -534,16 +539,50 @@ export const poseField = (pose: Pose) => {
   him.pose = pose;
 };
 
+/** He takes hold of an element (and lets go of the one before, which fades where it is). */
+const hold = (element: Element | null, behind: boolean) => {
+  for (const each of him.holds) {
+    each.held = false;
+  }
+  if (element === null) {
+    return;
+  }
+  const kept = him.holds.find((each) => each.element === element);
+  if (kept !== undefined) {
+    kept.held = true;
+    return;
+  }
+  // His line follows the element's own corner, read from the page.
+  const corner = Number(
+    getComputedStyle(element).borderTopLeftRadius.replace("px", "")
+  );
+  him.holds.push({
+    element,
+    box: boxOf(element),
+    on: 0,
+    held: true,
+    behind,
+    radius: behind || !Number.isFinite(corner) ? 0 : corner,
+  });
+  // The faintest that is fading makes room: never more than he can draw.
+  while (him.holds.length > HOLDS) {
+    const [faintest] = him.holds
+      .filter((each) => !each.held)
+      .toSorted((a, b) => a.on - b.on);
+    him.holds = him.holds.filter((each) => each !== faintest);
+  }
+};
+
 /** He gathers round an element, a thing to press; `null` lets go. */
 export const attendField = (element: Element | null) => {
-  him.attention.element = element;
-  if (element !== null) {
-    him.attention.behind = false;
-    // His line follows the element's own corner, read from the page.
-    const corner = Number(
-      getComputedStyle(element).borderTopLeftRadius.replace("px", "")
-    );
-    him.attention.radius = Number.isFinite(corner) ? corner : 0;
+  hold(element, false);
+};
+
+/** He lets go of this element, if he is on it; one he has moved on to keeps its light. */
+export const releaseField = (element: Element) => {
+  const held = him.holds.find((each) => each.element === element);
+  if (held !== undefined) {
+    held.held = false;
   }
 };
 
@@ -590,17 +629,15 @@ export const carryField = async (
     carry.phase = 3;
     carry.since = performance.now();
     // He stays behind the new title a moment, a faint light, then lets go.
-    him.attention.element = title;
-    him.attention.behind = true;
-    him.attention.radius = 0;
-    him.attention.on = 0;
+    hold(title, true);
     await wait(DRAIN_MS);
     him.carry = null;
     him.onCovering?.(false);
     void (async () => {
       await wait(LINGER_MS);
-      if (him.attention.element === title) {
-        him.attention.element = null;
+      const lingering = him.holds.find((each) => each.element === title);
+      if (lingering !== undefined) {
+        lingering.held = false;
       }
     })();
   }

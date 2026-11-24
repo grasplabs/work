@@ -3,7 +3,13 @@ import * as stylex from "@stylexjs/stylex";
 import { createContext, use, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { attachField, attendField, carryField, poseField } from "./engine.ts";
+import {
+  attachField,
+  attendField,
+  carryField,
+  poseField,
+  releaseField,
+} from "./engine.ts";
 import type { Picture, Pose } from "./engine.ts";
 
 // Stephen in the setup: never a figure, always the light behind the page.
@@ -36,8 +42,10 @@ const styles = stylex.create({
 });
 
 export interface Field {
-  /** He gathers round an element; `null` lets go. */
+  /** He gathers round an element; `null` lets go of all. */
   attend: (element: Element | null) => void;
+  /** He lets go of this element, if he is still on it. */
+  release: (element: Element) => void;
   /**
    * He carries the page on from the element that was pressed, showing a
    * picture first where he took one from it (a flag), and the page turns
@@ -51,12 +59,19 @@ export interface Field {
 }
 
 /** Stephen himself: one for the whole app, whatever screen draws him. */
-const field: Field = { attend: attendField, carry: carryField };
+const field: Field = {
+  attend: attendField,
+  release: releaseField,
+  carry: carryField,
+};
 
 /** No field round this part of the page: nothing gathers, and a carry is only the page turning. */
 const noField: Field = {
   attend: () => {
     // Nobody to gather.
+  },
+  release: () => {
+    // Nobody to let go.
   },
   carry: async (_from, _picture, turn) => {
     await turn();

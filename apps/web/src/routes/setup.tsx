@@ -257,6 +257,7 @@ const Setup = () => {
   return (
     <CalmFrame
       along={along}
+      userId={identity.userId}
       centred={step === "open"}
       language={step !== "welcome"}
       pose={poses[step]}

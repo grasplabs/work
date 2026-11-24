@@ -2952,6 +2952,7 @@ msgid "App spend"
 msgstr "Uitgaven per app"
 
 #: src/frame/person-menu.tsx
+#: src/onboarding/calm-frame.tsx
 msgid "Appearance"
 msgstr "Weergave"
 

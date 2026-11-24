@@ -20,6 +20,7 @@ const lookAgainMs = 30_000;
 const WaitingPage = () => {
   const { t } = useLingui();
   const router = useRouter();
+  const { identity } = Route.useRouteContext();
   useEffect(() => {
     // The route's own check runs again, and sends them on once it may.
     const id = window.setInterval(() => {
@@ -30,7 +31,7 @@ const WaitingPage = () => {
     };
   }, [router]);
   return (
-    <CalmFrame centred>
+    <CalmFrame centred userId={identity.userId}>
       <CalmStep
         figure={<AgentFigure look={stephensLook} size="xl" state="asleep" />}
         body={t`Your admins are setting up Grasp. This page opens it for you once they’re done.`}
@@ -44,8 +45,12 @@ export const Route = createFileRoute("/waiting")({
   // Only for someone held here: anyone else goes where they would anyway.
   beforeLoad: async ({ context: { core } }) => {
     const { identity } = await shellStatus(core);
+    if (identity === undefined) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/", replace: true });
+    }
     const held =
-      identity === undefined || identity.staff || identity.guest === true
+      identity.staff || identity.guest === true
         ? null
         : heldWhileOnboarding({
             path: "/waiting",
@@ -56,6 +61,7 @@ export const Route = createFileRoute("/waiting")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: held ?? "/", replace: true });
     }
+    return { identity };
   },
   component: WaitingPage,
 });
