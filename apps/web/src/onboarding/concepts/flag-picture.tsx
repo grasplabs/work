@@ -17,7 +17,7 @@ import type { BrandStop } from "./flags.ts";
 // `flat` draws it small and crisp, no wave, no shade. `cover` lays it over
 // the whole card it stands in: dense at the right edge, its cells thinning
 // out by the same dither toward the left, so the language's name stands
-// clear; the card's own corner, read from the page, clips it. Drawn once;
+// clear; the card's own corner, read from the page, clips it smoothly. Drawn once;
 // nothing moves.
 
 const styles = stylex.create({
@@ -73,26 +73,21 @@ const clearOfName = 150;
 
 /**
  * How much of the flag stands `at` pixels across a card `width` wide: none
- * beside the name, all of it near the far edge, eased between.
+ * beside the name, all of it from where the flag itself begins (`whole`),
+ * so every band of a flag whose bands stand side by side shows whole;
+ * eased between.
  */
-const presence = (at: number, width: number): number => {
-  const start = Math.min(width * 0.45, clearOfName);
-  const end = width * 0.85;
+const fadeStart = (width: number): number =>
+  Math.min(width * 0.45, clearOfName);
+
+/** How far the fade runs at least, in CSS pixels. */
+const fadeLeast = 48;
+
+const presence = (at: number, width: number, whole: number): number => {
+  const start = fadeStart(width);
+  const end = Math.max(start + fadeLeast, Math.min(width * 0.85, whole));
   const t = Math.min(1, Math.max(0, (at - start) / (end - start)));
   return t * t * (3 - 2 * t);
-};
-
-/** Whether a cell lies inside the card's rounded corners, `radius` in cells. */
-const inside = (
-  x: number,
-  y: number,
-  columns: number,
-  rows: number,
-  radius: number
-): boolean => {
-  const dx = Math.max(radius - x - 0.5, x + 0.5 - (columns - radius), 0);
-  const dy = Math.max(radius - y - 0.5, y + 0.5 - (rows - radius), 0);
-  return dx * dx + dy * dy <= radius * radius;
 };
 
 export const FlagPicture = ({
@@ -135,9 +130,20 @@ export const FlagPicture = ({
           : Number(
               getComputedStyle(card).borderTopRightRadius.replace("px", "")
             );
-      const radius = cover && Number.isFinite(corner) ? corner / size : 0;
+      // The card's own corner clips the picture, smoothly, as the card's edge does.
+      context.save();
+      if (cover && Number.isFinite(corner)) {
+        context.beginPath();
+        context.roundRect(0, 0, width, height, corner);
+        context.clip();
+      }
+      // A flag whose bands stand side by side begins only after the fade, so its first band shows whole.
+      const room =
+        flag.vertical === true
+          ? columns - Math.ceil((fadeStart(width) + fadeLeast) / size)
+          : columns;
       const flagColumns = cover
-        ? Math.min(columns, Math.round(rows * 1.8))
+        ? Math.min(room, Math.round(rows * flag.aspect))
         : columns;
       const flagStart = columns - flagColumns;
       const colourOf = (band: number, shaded: boolean): string => {
@@ -153,12 +159,19 @@ export const FlagPicture = ({
         for (let x = 0; x < columns; x += 1) {
           if (
             cover &&
-            (!inside(x, y, columns, rows, radius) ||
-              bayerAt(x + 2, y + 1) >= presence((x + 0.5) * size, width))
+            bayerAt(x + 2, y + 1) >=
+              presence(
+                (x + 0.5) * size,
+                width,
+                flag.vertical === true ? flagStart * size : width
+              )
           ) {
             continue;
           }
-          const u = Math.max(0, (x - flagStart + 0.5) / flagColumns);
+          const along = (x - flagStart + 0.5) / flagColumns;
+          // Under the fade, toward the name: the flag's own edge, or its first colour alone.
+          const under = along < 0 && flag.under === "field";
+          const u = Math.max(0, along);
           // Waving: the flag rises and falls once across, its light with it.
           const phase = u * Math.PI * 2.4 + 0.5;
           const lift = flat ? 0 : Math.sin(phase) * 0.05;
@@ -169,10 +182,11 @@ export const FlagPicture = ({
               0.35 * Math.cos(phase) -
               0.15 * ((x + y) / (columns + rows));
           const shaded = bayerAt(x, y) > light;
-          context.fillStyle = colourOf(flag.at(u, v), shaded);
+          context.fillStyle = colourOf(under ? 0 : flag.at(u, v), shaded);
           context.fillRect(x * size, y * size, size, size);
         }
       }
+      context.restore();
     };
     paint();
     // Light and dark change the brand's stops: drawn again.
