@@ -14,7 +14,11 @@ import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
-import type { MemberRole, SubjectMembersApi } from "./subject-members.ts";
+import type {
+  MemberRole,
+  SubjectMember,
+  SubjectMembersApi,
+} from "./subject-members.ts";
 
 // An App's code is a tree of text files, versioned as a whole. Builders
 // and their chats' agents write into the App's one shared draft; a builder
@@ -591,6 +595,18 @@ export interface ViewedApp extends App {
   role: MemberRole;
 }
 
+/** Whom an App is shared with, and inviting a guest to it. */
+export interface AppMembersApi extends SubjectMembersApi {
+  /**
+   * Invites `email`, an address that belongs to nobody yet, as a guest
+   * (`members.inviteGuest`'s refusals), and shares `app` with them as its
+   * user, mailing them that it was. Refused with `app.guest_sources`,
+   * inviting nobody, when the App holds a source. An address that is a
+   * guest's already is shared with that guest.
+   */
+  inviteGuest: (app: string, email: string) => Promise<SubjectMember>;
+}
+
 export interface AppsApi {
   create: (app: NewApp) => Promise<App>;
   /** The Apps the person has a role in, oldest first, each with that role. */
@@ -696,7 +712,7 @@ export interface AppsApi {
     preview?: boolean
   ) => Promise<DataModelChange>;
   readonly releases: AppReleasesApi;
-  readonly members: SubjectMembersApi;
+  readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
   readonly webhooks: AppWebhooksApi;

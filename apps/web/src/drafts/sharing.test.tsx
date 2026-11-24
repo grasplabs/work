@@ -2,6 +2,7 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { memberErrors } from "@grasp-os/shared/members";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {
   NewSubjectMember,
@@ -112,6 +113,24 @@ const fakeMembers = (
       ];
       return added;
     },
+    inviteGuest: async (
+      _app: string,
+      email: string
+    ): Promise<SubjectMember> => {
+      await Promise.resolve();
+      asked.push(["inviteGuest", email]);
+      const added: SubjectMember = {
+        type: "person",
+        id: `user-${email}`,
+        name: email,
+        role: "user",
+        addedBy: "user-owner",
+        addedAt: "2026-10-30T09:00:00.000Z",
+        guest: true,
+      };
+      kept = [...kept, added];
+      return added;
+    },
     remove: async (_app: string, member: SubjectMemberRef): Promise<void> => {
       await Promise.resolve();
       asked.push(["remove", member.type, member.id]);
@@ -215,6 +234,20 @@ const pickOption = async (text: string): Promise<void> => {
       each.textContent?.includes(text)
     )
   );
+};
+
+/** Types `value` into the open Share list's search, as typing reaches React. */
+const typeSearch = async (value: string): Promise<void> => {
+  const input = document.querySelector("[cmdk-input]");
+  if (!(input instanceof HTMLInputElement)) {
+    throw new TypeError("Nothing to type in");
+  }
+  await act(async () => {
+    Reflect.set(HTMLInputElement.prototype, "value", value, input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
 };
 
 /** Who the table lists, as shown. */
@@ -365,6 +398,65 @@ describe("Sharing an App or a workflow", () => {
       listed: ["GilGuest"],
       refused: true,
     });
+  });
+
+  it("invites an address nobody offered goes by as a guest of an App, at once, and says plainly why one is refused", async () => {
+    const { session, asked } = fakeMembers([], {
+      people: [
+        { id: "user-gus", name: "gus@partner.test", guest: true },
+        { id: "user-bo", name: "Bo" },
+      ],
+      teams: [],
+      projects: [],
+    });
+    await shown(session, app("builder"));
+
+    await press(button("Share"));
+    await typeSearch("Gus@Partner.test");
+    const forAGuest = offered();
+    await typeSearch("not an address");
+    const forText = offered();
+    await typeSearch(" Nora@Partner.test ");
+    const forNew = offered();
+    await pickOption("Invite nora@partner.test as a guest");
+    const shared = listed();
+
+    const refused = memberErrors.create("member.guest_refused");
+    session.apps.members.inviteGuest = async (): Promise<SubjectMember> => {
+      await Promise.resolve();
+      throw refused;
+    };
+    await press(button("Share"));
+    await typeSearch("ann@acme.test");
+    await pickOption("Invite ann@acme.test as a guest");
+
+    expect({
+      forAGuest,
+      forText,
+      forNew,
+      asked,
+      shared,
+      after: listed(),
+      refused: document.body.textContent?.includes(refused.message),
+    }).toStrictEqual({
+      forAGuest: ["gus@partner.test"],
+      forText: [],
+      forNew: ["Invite nora@partner.test as a guest"],
+      asked: [["inviteGuest", "nora@partner.test"]],
+      shared: ["nora@partner.testGuest"],
+      after: ["nora@partner.testGuest"],
+      refused: true,
+    });
+  });
+
+  it("offers a workflow no guest to invite", async () => {
+    const { session } = fakeMembers();
+    await shown(session, app("builder"), "workflow");
+
+    await press(button("Share"));
+    await typeSearch("nora@partner.test");
+
+    expect(offered()).toStrictEqual([]);
   });
 
   it("lets a builder unshare it, only once they confirm", async () => {

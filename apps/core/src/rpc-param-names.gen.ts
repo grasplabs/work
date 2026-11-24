@@ -41,6 +41,7 @@ export const rpcParamNames: ParamNames = {
   "AppMembersRpc": {
     "add": ["app","member"],
     "candidates": ["app"],
+    "inviteGuest": ["app","email"],
     "list": ["app"],
     "remove": ["app","member"],
   },

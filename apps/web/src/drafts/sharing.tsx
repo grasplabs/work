@@ -180,6 +180,17 @@ const ShareMembers = ({
       }, onChanged);
     });
   };
+  // An App only: someone outside the company, by an address that belongs
+  // to nobody yet, invited as a guest and shared it as its user at once.
+  const invite = async (address: string): Promise<void> => {
+    await run(async (session) => {
+      await changeThenRefresh(async () => {
+        await session.apps.members.inviteGuest(subject.id, address);
+      }, onChanged);
+      // Read again when the list opens next: they are a guest now.
+      setCandidates(undefined);
+    });
+  };
   const offered =
     candidates === undefined
       ? undefined
@@ -203,6 +214,13 @@ const ShareMembers = ({
         onOpen={() => {
           void read();
         }}
+        onInvite={
+          subject.kind === "app"
+            ? (address) => {
+                void invite(address);
+              }
+            : undefined
+        }
         onPick={(member, role) => {
           void share(member, role);
         }}
