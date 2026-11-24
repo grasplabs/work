@@ -2,8 +2,6 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { AgentFigure } from "../agents/figure/agent-figure.tsx";
-import { stephensLook } from "../agents/figure/look.ts";
 import { shellStatus } from "../core-connection.ts";
 import { heldWhileOnboarding, onboardingIsBehind } from "../landing.ts";
 import { CalmFrame, CalmStep } from "../onboarding/calm-frame.tsx";
@@ -12,7 +10,8 @@ import { CalmFrame, CalmStep } from "../onboarding/calm-frame.tsx";
 // (landing.ts), in the setup's calm frame: nothing of the platform opens
 // until the onboarding is behind the company, and nothing here is theirs
 // to do. The page looks again by itself, and takes them in once it is
-// ready; the frame's way out signs them out.
+// ready; the frame's way out signs them out. Stephen is the field behind
+// it, as on every setup page, never a figure.
 
 /** How often the page asks whether the onboarding is behind the company. */
 const lookAgainMs = 30_000;
@@ -33,7 +32,6 @@ const WaitingPage = () => {
   return (
     <CalmFrame centred userId={identity.userId}>
       <CalmStep
-        figure={<AgentFigure look={stephensLook} size="xl" state="asleep" />}
         body={t`Your admins are setting up Grasp. This page opens it for you once they’re done.`}
         title={t`I’m almost ready for you`}
       />
