@@ -1,34 +1,21 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
 import { Text } from "@grasp-os/ui/components/text";
-import { GlobeIcon, Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
+import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
 import { signOut } from "../../core-connection.ts";
-import { LanguageButton } from "../../frame/language-button.tsx";
 import { chooseLocale, isLocale, localeNames } from "../../i18n.ts";
 import type { Locale } from "../../i18n.ts";
 import { useCore } from "../../use-core.ts";
@@ -36,11 +23,11 @@ import { useNarrow } from "../use-narrow.ts";
 
 // The frame of the setup's concepts: one bar on top with the mark, where
 // the admin is in words (one of three chapters, and about how many
-// minutes are left), the language and the way out;
-// the step below in one column that scrolls with the page. Leaving asks
-// first and signs out: the admin can't use Grasp before the setup is done,
-// so a way "home" only led back here. Everything done so far is kept, and
-// signing in again goes on where they stopped.
+// minutes are left), the sound, the language and the way out;
+// the step below in one column that scrolls with the page. Leaving signs
+// out: the admin can't use Grasp before the setup is done, so a way "home"
+// only led back here. Everything done so far is kept, and signing in again
+// goes on where they stopped.
 
 const styles = stylex.create({
   window: {
@@ -177,112 +164,69 @@ const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name }] : []
 );
 
-/** The language: today's button, and on a phone its globe alone, so the bar keeps one line. */
+/** The language, after the welcome: a Select of the five, each in its own words. */
 const Language = () => {
   const { t, i18n } = useLingui();
-  const narrow = useNarrow();
   const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  const name = localeNames[locale];
-  if (!narrow) {
-    return <LanguageButton side="bottom" />;
-  }
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={t`Language: ${name}`}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Icon icon={GlobeIcon} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="bottom">
-        <DropdownMenuRadioGroup
-          onValueChange={(value: unknown) => {
-            if (isLocale(value)) {
-              void chooseLocale(value);
-            }
-          }}
-          value={locale}
-        >
-          {languages.map((each) => (
-            <DropdownMenuRadioItem
-              closeOnSelect
-              key={each.code}
-              label={each.name}
-              value={each.code}
-            >
-              <span lang={each.code}>{each.name}</span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Select
+      items={languages.map(({ code, name }) => ({ value: code, label: name }))}
+      onValueChange={(value) => {
+        if (isLocale(value)) {
+          void chooseLocale(value);
+        }
+      }}
+      value={locale}
+    >
+      <SelectTrigger aria-label={t`Language`} size="sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent />
+    </Select>
   );
 };
 
-/** Leaving: asked first, then signed out, everything kept. */
+/**
+ * Leaving: nothing is lost, as core keeps every step once it is
+ * finished, so it asks nothing. It signs out; signing in again goes on
+ * where they stopped. Where signing out didn't work, they stay.
+ */
 const Leave = () => {
   const { t } = useLingui();
   const core = useCore();
   const narrow = useNarrow();
-  const [asking, setAsking] = useState(false);
-  // Signed out, the app takes them to sign in again; where it didn't work, they stay.
   const leave = async () => {
     try {
       await signOut(core);
     } catch {
-      setAsking(false);
+      // Still signed in: the page stays as it was.
     }
   };
+  if (narrow) {
+    return (
+      <Button
+        aria-label={t`Leave for now`}
+        onClick={() => {
+          void leave();
+        }}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <Icon icon={LogOutIcon} />
+      </Button>
+    );
+  }
   return (
-    <>
-      {narrow ? (
-        <Button
-          aria-label={t`Leave setup`}
-          onClick={() => {
-            setAsking(true);
-          }}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Icon icon={LogOutIcon} />
-        </Button>
-      ) : (
-        <Button
-          onClick={() => {
-            setAsking(true);
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          <Icon icon={LogOutIcon} />
-          {t`Leave`}
-        </Button>
-      )}
-      <AlertDialog onOpenChange={setAsking} open={asking}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t`Leave the setup for now?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t`Everything you did is saved. Sign in again and you go on where you stopped.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t`Stay`}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void leave();
-              }}
-              variant="outline"
-            >
-              {t`Sign out`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <Button
+      onClick={() => {
+        void leave();
+      }}
+      size="sm"
+      variant="ghost"
+    >
+      <Icon icon={LogOutIcon} />
+      {t`Leave for now`}
+    </Button>
   );
 };
 

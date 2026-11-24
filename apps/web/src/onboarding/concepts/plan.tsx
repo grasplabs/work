@@ -3,7 +3,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  CardMedia,
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
@@ -29,11 +28,9 @@ import {
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-
-import { Meadow } from "./meadow.tsx";
 
 // "Here's the plan", brief (concepts only): first the admin's own
 // campaign as a timeline, then one small, neutral example of a question
@@ -41,12 +38,6 @@ import { Meadow } from "./meadow.tsx";
 // today: core has no campaign yet.
 
 const styles = stylex.create({
-  // The meadow's room: it fills a positioned box.
-  meadow: {
-    position: "relative",
-    width: "100%",
-    height: { default: "12rem", [media.maxSm]: "9rem" },
-  },
   stack: { display: "grid", gap: space[6], width: "100%" },
   example: { display: "grid", gap: space[3] },
 });
@@ -219,22 +210,7 @@ export const ExampleAnswer = ({ interviewer }: { interviewer: string }) => {
   );
 };
 
-/**
- * The campaign as one picture: Damsko's meadow, one seed, a first flower,
- * then the whole field, as the interviews go from the first people to
- * everyone. `still` draws it whole, once.
- */
-export const CampaignPicture = ({ still = false }: { still?: boolean }) => (
-  <Card padding="none">
-    <CardMedia>
-      <div {...stylex.props(styles.meadow)}>
-        <Meadow still={still} words={false} />
-      </div>
-    </CardMedia>
-  </Card>
-);
-
-/** The plan: their campaign, as a picture and a timeline, then the example. */
+/** The plan: their campaign as a timeline, then the example. */
 export const PlanBody = ({
   today,
   interviewer,
@@ -243,7 +219,6 @@ export const PlanBody = ({
   interviewer: string;
 }) => (
   <div {...stylex.props(styles.stack)}>
-    <CampaignPicture />
     <CampaignTimeline today={today} />
     <ExampleAnswer interviewer={interviewer} />
   </div>
