@@ -1,5 +1,6 @@
 import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -7,8 +8,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 
-import { AgentFigure } from "../agents/figure/agent-figure.tsx";
-import { stephensLook } from "../agents/figure/look.ts";
 import { ErrorText } from "../error-text.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -201,6 +200,17 @@ const Differences = ({
   );
 };
 
+/** The way on, on the column's middle under the centred words, on the last two steps. */
+const ending = stylex.create({
+  end: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[3],
+    width: "100%",
+  },
+});
+
 /**
  * What only the admin can settle, each with a way to settle it. Nothing
  * moves on by itself: they read what they settled, and go on once nothing
@@ -219,16 +229,20 @@ const Review = (props: StepProps) => {
   return (
     <CalmStep
       body={t`I’ve handled everything else.`}
+      centred
       end={
         open === 0 ? (
-          <Button
-            onClick={() => {
-              void props.onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-          </Button>
+          <div {...stylex.props(ending.end)}>
+            <Button
+              onClick={() => {
+                void props.onward();
+              }}
+              size="lg"
+            >
+              {t`Continue`}
+              <Icon icon={ArrowRightIcon} />
+            </Button>
+          </div>
         ) : null
       }
       title={plural(open, {
@@ -302,21 +316,24 @@ const Open = ({ data, onward }: StepProps) => {
   return (
     <CalmStep
       body={[said, ready, opens].filter((each) => each !== "").join(" ")}
+      centred
       end={
         open ? (
-          <Button
-            onClick={(event) => {
-              // He says it as he does it, then hands them over to the platform.
-              speak(t`Here’s your Grasp.`);
-              void handOver(event.currentTarget, onward);
-            }}
-            size="lg"
-          >
-            {t`Open Grasp`}
-          </Button>
+          <div {...stylex.props(ending.end)}>
+            <Button
+              onClick={(event) => {
+                // He says it as he does it, then hands them over to the platform.
+                speak(t`Here’s your Grasp.`);
+                void handOver(event.currentTarget, onward);
+              }}
+              size="lg"
+            >
+              {t`Open Grasp`}
+              <Icon icon={ArrowRightIcon} />
+            </Button>
+          </div>
         ) : null
       }
-      figure={<AgentFigure look={stephensLook} size="xl" state="done" />}
       title={t`Thank you, ${admin}`}
     />
   );

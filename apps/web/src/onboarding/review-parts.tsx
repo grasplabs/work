@@ -26,6 +26,7 @@ import type { StepProps } from "./step-parts.ts";
 
 const styles = stylex.create({
   item: { display: "grid", gap: space[4] },
+  note: { textAlign: "center" },
   choices: { display: "flex", flexWrap: "wrap", gap: space[3] },
   // The sentence, and "Change" a little apart on its baseline, so it reads as the action.
   settled: {
@@ -78,7 +79,7 @@ const ReviewItem = ({
   return (
     <Card padding="lg">
       <div {...stylex.props(styles.item)}>
-        <Text size="lg">{`${title} ${context}`}</Text>
+        <Text>{`${title} ${context}`}</Text>
         {chosen === null ? children : null}
         {chosen === null ? (
           <div {...stylex.props(styles.choices)}>
@@ -97,7 +98,7 @@ const ReviewItem = ({
           </div>
         ) : (
           <div {...stylex.props(styles.settled)}>
-            <Text size="lg">{t`Settled: ${choice}`}</Text>
+            <Text>{t`Settled: ${choice}`}</Text>
             <Button onClick={onReopen} size="lg" variant="link">
               {t({ message: "Change", context: "change how it was settled" })}
             </Button>
@@ -108,9 +109,11 @@ const ReviewItem = ({
   );
 };
 
-/** A fact the admin can only read, as one quiet line: no way to settle it. */
+/** A fact the admin can only read, as one quiet line under the step's centred words: no way to settle it. */
 const Note = ({ title, context }: { title: string; context: string }) => (
-  <Text size="lg">{`${title} ${context}`}</Text>
+  <div {...stylex.props(styles.note)}>
+    <Text>{`${title} ${context}`}</Text>
+  </div>
 );
 
 /** The ways to settle a difference. */
@@ -158,10 +161,10 @@ export const DifferenceItem = ({
     >
       <ol {...stylex.props(styles.list)}>
         <li>
-          <Text size="lg">{t`The first way: ${way}`}</Text>
+          <Text>{t`The first way: ${way}`}</Text>
         </li>
         <li>
-          <Text size="lg">{t`The second way: ${other}`}</Text>
+          <Text>{t`The second way: ${other}`}</Text>
         </li>
       </ol>
     </ReviewItem>
@@ -173,7 +176,7 @@ const Steps = ({ steps }: { steps: string[] }) => (
   <ol {...stylex.props(styles.list)}>
     {steps.map((step) => (
       <li key={step}>
-        <Text size="lg">{step}</Text>
+        <Text>{step}</Text>
       </li>
     ))}
   </ol>
