@@ -1,12 +1,8 @@
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
 import type { Project } from "@grasp-os/shared/projects";
-import type { ReactElement, ReactNode } from "react";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { SiteHeader } from "./site-header.tsx";
@@ -19,6 +15,65 @@ import type { Crumb } from "./site-header.tsx";
 // and the page's one lime action; under it, the thing itself, with
 // Grasp's chat about it docked beside (chat/chat-subject.ts). An App with
 // no page yet asks one question in its main area (`ItemStart`).
+
+// The shell's width, which its bar's parts give way to, narrowest last.
+// Named "bar" for the Tailwind queries of what pages put in it (`@max-5xl/bar`).
+const BAR = "@container bar";
+
+const styles = stylex.create({
+  shell: {
+    containerName: "bar",
+    containerType: "inline-size",
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  thing: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  // Where it stands gives way to its actions where the bar is narrow.
+  state: {
+    display: { default: "inline-flex", [`${BAR} (width < 48rem)`]: "none" },
+  },
+  // Named for a screen reader, which the trail shows as its last step.
+  unseen: {
+    position: "absolute",
+    width: size.hairline,
+    height: size.hairline,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+  start: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    backgroundColor: colors.muted,
+  },
+  startMiddle: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
+    paddingInline: space[6],
+    paddingBlock: space[12],
+  },
+  startColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[6],
+    width: "100%",
+    maxWidth: "42rem",
+    paddingBlockEnd: space[10],
+  },
+  question: { textAlign: "center" },
+});
 
 /** The project an item was started from, carried along in its address (`?project=`). */
 export type ItemProject = Pick<Project, "id" | "name">;
@@ -63,92 +118,36 @@ export const backCrumb = (
 export const ItemBar = ({
   back,
   name,
+  crumbs,
+  headed = false,
   state,
   actions,
 }: {
   back: Crumb;
   name: string;
+  /** The trail, where it goes past the item's name (a view of it): back, then the item, by default. */
+  crumbs?: readonly Crumb[];
+  /** Whether the page heads itself with its name: the bar's own heading then gives way. */
+  headed?: boolean;
   /** Where it stands: Draft, Live and its label, or its version. */
   state?: ReactNode;
-  /** Its views, Share, then the page's one lime action, in that order. */
+  /** Share, then the page's one lime action, in that order. */
   actions?: ReactNode;
 }) => (
   <>
     {/* The page's heading, which the trail shows as its last step. */}
-    <h1 className="sr-only">{name}</h1>
+    {headed ? null : <h1 {...stylex.props(styles.unseen)}>{name}</h1>}
     <SiteHeader
       actions={actions}
-      crumbs={[back, { label: name }]}
+      crumbs={crumbs ?? [back, { label: name }]}
       // Where it stands gives way to its actions where the bar is narrow.
       trailing={
         state === undefined ? undefined : (
-          <span className="@max-3xl/bar:hidden">{state}</span>
+          <span {...stylex.props(styles.state)}>{state}</span>
         )
       }
     />
   </>
-);
-
-/** A switch in the bar, as its views or Draft | Live: links, each an address of its own. */
-export const ItemSwitch = ({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) => (
-  <nav
-    aria-label={label}
-    className="bg-muted flex flex-none gap-0.5 rounded-lg p-0.5"
-  >
-    {children}
-  </nav>
-);
-
-/** What dresses a switch's link as one of its buttons, and marks the one the page is at. */
-export interface SwitchLinkLook {
-  className: string;
-  "aria-current": "page" | undefined;
-}
-
-/**
- * One of a switch's links (`renderLink`, a router's `<Link>` given its
- * look):
- * its icon and label, raised while it is where the page is. A link, so
- * announced as one, only dressed as a button. Where the bar is narrow
- * (`@max-6xl/bar`) it is its icon alone, its label its tooltip: the views
- * give way first, so the item's name and its main action keep their words.
- */
-export const ItemSwitchLink = ({
-  current,
-  label,
-  icon,
-  renderLink,
-  children,
-}: {
-  current: boolean;
-  label: string;
-  icon: ReactNode;
-  renderLink: (look: SwitchLinkLook) => ReactElement;
-  /** Anything after the label, as a count. */
-  children?: ReactNode;
-}) => (
-  <Tooltip>
-    <TooltipTrigger
-      render={renderLink({
-        className: buttonVariants({
-          size: "sm",
-          variant: current ? "outline" : "ghost",
-        }),
-        "aria-current": current ? "page" : undefined,
-      })}
-    >
-      {icon}
-      <span className="@max-6xl/bar:sr-only">{label}</span>
-      {children}
-    </TooltipTrigger>
-    <TooltipContent>{label}</TooltipContent>
-  </Tooltip>
 );
 
 /** The shell: its bar, then the thing itself filling the rest. */
@@ -159,14 +158,14 @@ export const ItemShell = ({
   bar: ReactNode;
   children: ReactNode;
 }) => (
-  // Its views go to icons first where it is narrow (`@max-6xl/bar`),
-  // beside the docked chat, then a workflow's Run and Share
-  // (`@max-5xl/bar`); where it stands gives way after them
-  // (`@max-3xl/bar`). The page's main action keeps its words, and the
+  // Where it is narrow, beside the docked chat, a workflow's Run and Share
+  // go to their icons first (`@max-5xl/bar`); where it stands gives way
+  // after them (`@max-3xl/bar`). Its views keep their words (Grasp UI's
+  // tabs never stand as icons alone), the page's main action too, and the
   // item's name gives way last.
-  <div className="@container/bar flex min-h-0 flex-1 flex-col text-sm">
+  <div {...stylex.props(styles.shell)}>
     {bar}
-    <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    <div {...stylex.props(styles.thing)}>{children}</div>
   </div>
 );
 
@@ -183,17 +182,14 @@ export const ItemStart = ({
   composer: ReactNode;
   children?: ReactNode;
 }) => (
-  <section
-    aria-labelledby="item-start"
-    className="bg-muted flex min-h-0 flex-1 flex-col overflow-y-auto"
-  >
-    <div className="flex min-h-full items-center justify-center px-6 py-12">
-      <div className="flex w-full max-w-2xl flex-col gap-6 pb-10">
-        <PageHeaderTitle
-          className="text-center"
-          id="item-start"
-          render={<h2>{question}</h2>}
-        />
+  <section aria-labelledby="item-start" {...stylex.props(styles.start)}>
+    <div {...stylex.props(styles.startMiddle)}>
+      <div {...stylex.props(styles.startColumn)}>
+        <div {...stylex.props(styles.question)}>
+          <Heading id="item-start" level={2} size="lg">
+            {question}
+          </Heading>
+        </div>
         {composer}
         {children}
       </div>

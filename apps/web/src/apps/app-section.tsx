@@ -5,7 +5,6 @@ import {
   DatabaseIcon,
   LinkIcon,
   SettingsIcon,
-  ShareIcon,
   SlidersHorizontalIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -15,6 +14,7 @@ import { Link, useMatch, useNavigate } from "@tanstack/react-router";
 
 import {
   AppWindowIcon,
+  CableIcon,
   LaptopIcon,
   SmartphoneIcon,
   TabletIcon,
@@ -52,8 +52,8 @@ const sectionIcons: Readonly<Record<AppSettingsSection, IconData>> = {
   general: SettingsIcon,
   sharing: UsersIcon,
   history: ClockIcon,
-  connections: LinkIcon,
-  webhooks: ShareIcon,
+  connections: CableIcon,
+  webhooks: LinkIcon,
   options: SlidersHorizontalIcon,
 };
 

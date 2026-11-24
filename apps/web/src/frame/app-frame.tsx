@@ -184,10 +184,10 @@ export const AppFrame = ({
   return (
     // Damsko's Toaster (below) is the app's one place for toasts: a page
     // mounts none of its own and calls Damsko's `toast`. The kit's stays
-    // only for the four files that still call the kit's `toast.add`
-    // (copy.ts, chat/chat-more.tsx, drafts/share-with-team.tsx,
-    // brain/memories-page.tsx), each toast in the one region of the API it
-    // was given to; it goes with the last of them. The kit's tooltips are
+    // only for the three files that still call the kit's `toast.add`
+    // (copy.ts, chat/chat-more.tsx, brain/memories-page.tsx), each toast
+    // in the one region of the API it was given to; it goes with the last
+    // of them. The kit's tooltips are
     // for the pages still on the kit.
     <KitToaster>
       <KitTooltipProvider>

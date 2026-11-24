@@ -1105,19 +1105,22 @@ export const AppSettings = ({
   const section = asked ?? "general";
   return (
     <div {...stylex.props(styles.settings)}>
-      <TabsNav aria-label={t`Settings sections`} variant="line">
-        {sections.map((each) => (
-          <SectionLink
-            app={app.id}
-            current={each === section}
-            key={each}
-            section={each}
-            within={within}
-          >
-            {i18n._(sectionLabels[each])}
-          </SectionLink>
-        ))}
-      </TabsNav>
+      {/* In the workspace the sections are the sidebar's rows (app-section.tsx). */}
+      {within === "page" ? (
+        <TabsNav aria-label={t`Settings sections`} variant="line">
+          {sections.map((each) => (
+            <SectionLink
+              app={app.id}
+              current={each === section}
+              key={each}
+              section={each}
+              within={within}
+            >
+              {i18n._(sectionLabels[each])}
+            </SectionLink>
+          ))}
+        </TabsNav>
+      ) : null}
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
           <SectionBody

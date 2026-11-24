@@ -315,6 +315,17 @@ export const useGlobalChat = (): GlobalChat => {
 };
 
 /**
+ * Where the chat stands on this page: the chat's own, about the page's
+ * subject too; the page's alone outside the chat's provider (a page that
+ * couldn't load).
+ */
+export const useShownPresence = (): ChatPresence => {
+  const chat = use(GlobalChatContext);
+  const presence = useChatPresence();
+  return chat?.presence ?? presence;
+};
+
+/**
  * Has Grasp's chat be about `subject`, called `name`, while the calling
  * page is open: that subject's chat, in its slot (chat-subject.ts); the
  * person's own again after. None for a page about something the person

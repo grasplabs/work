@@ -466,8 +466,18 @@ describe(AppSettings, () => {
     await opened(fake, "page", "sharing");
     const before = document.body.textContent.includes("Ann");
 
-    // Sharing is the drafts' own (drafts/sharing.tsx), as it stands on main.
-    await press("Stop sharing with Ann");
+    // Taking Ann off, from the role at her row's end, asks first.
+    await press("Access for Ann");
+    const remove = [...document.querySelectorAll("[role=option]")].find(
+      (each) => each.textContent.trim() === "Remove"
+    );
+    await act(async () => {
+      if (remove instanceof HTMLElement) {
+        remove.click();
+      }
+      await Promise.resolve();
+    });
+    await settled();
     await press("Stop sharing");
 
     expect({

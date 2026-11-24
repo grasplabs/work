@@ -1,3 +1,9 @@
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import type { AppRelease, FileDiff } from "@grasp-os/shared/apps";
+import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
+import { failureText } from "@grasp-os/shared/errors";
+import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject } from "@grasp-os/shared/subject";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -7,63 +13,66 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
   ItemGroup,
+  ItemSeparator,
   ItemTitle,
-} from "@grasp-os/app-kit/components/item";
+} from "@grasp-os/ui/components/item";
+import { Section, SectionHeader } from "@grasp-os/ui/components/section-header";
 import {
   Sheet,
+  SheetBody,
   SheetContent,
   SheetHeader,
   SheetTitle,
-} from "@grasp-os/app-kit/components/sheet";
-import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppRelease, FileDiff } from "@grasp-os/shared/apps";
-import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
-import { failureText } from "@grasp-os/shared/errors";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { Subject } from "@grasp-os/shared/subject";
-import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/sheet";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   EllipsisIcon,
   EyeIcon,
-  GitCompareArrowsIcon,
-  HistoryIcon,
-  RotateCcwIcon,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+  GitCompareIcon,
+  Icon,
+  RedoIcon,
+  UndoIcon,
+} from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { i18n } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useRouter } from "@tanstack/react-router";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { FileChanges } from "../apps/draft-changes.tsx";
 import {
   ReleaseBadges,
   ReleaseDialog,
-  useReleaseActions,
+  ReleaseMenuItems,
 } from "../apps/release-controls.tsx";
 import type { ReleaseAction } from "../apps/release-controls.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { readPeople } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList, formatSince } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { decidesRequests } from "../inbox/waiting.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -86,19 +95,29 @@ import { hasChanges, useDraft } from "./use-draft.ts";
 // (release-controls.tsx). Restoring and discarding name the draft's
 // revision the person saw too. Apps and workflows have the one history.
 
+const styles = stylex.create({
+  history: { display: "grid", gap: space[8] },
+  list: { display: "grid", gap: space[3] },
+  // Show older versions as wide as its words, under the list.
+  older: { justifySelf: "start" },
+});
+
 /** One more page of versions: core lists at most 100 at a time. */
 const pageSize = 100;
 
 /** Most files a checkpoint's line names before it counts the rest. */
 const namedFiles = 3;
 
-/** What a version is called: its label, or, never live, that it wasn't. */
+/**
+ * What people call a version once it was live: an App's by its label, a
+ * workflow's as everywhere else on its page ("v3"); null while never live.
+ */
+const labelOf = ({ label, kind, version }: Version): string | null =>
+  label === null || kind !== "workflow" ? label : i18n._(msg`v${version}`);
+
+/** What a version is called: `labelOf`, or, never live, that it wasn't. */
 const VersionName = ({ version }: { version: Version }) =>
-  version.label === null ? (
-    <Trans>Not shared yet</Trans>
-  ) : (
-    <span className="font-mono">{version.label}</span>
-  );
+  labelOf(version) ?? <Trans>Not shared yet</Trans>;
 
 /**
  * The version `version` was made from, to compare it with: an App's
@@ -161,60 +180,48 @@ export const ConfirmChange = ({
   asked: Asked | undefined;
   onConfirm: (asked: Asked) => void;
   onCancel: () => void;
-}) => (
-  <AlertDialog
-    onOpenChange={(open) => {
-      if (!open) {
-        onCancel();
-      }
-    }}
-    open={asked !== undefined}
-  >
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          {asked?.kind === "discard" ? (
-            <Trans>Undo the changes only you see?</Trans>
-          ) : (
-            <Trans>Restore this earlier state?</Trans>
-          )}
-        </AlertDialogTitle>
-        <AlertDialogDescription>
-          {asked?.kind === "discard" ? (
-            <Trans>
-              They go, for everyone who builds it. Its history in Settings keeps
-              them, so you can bring them back.
-            </Trans>
-          ) : (
-            <Trans>
-              Your changes go back to how they were then, for everyone who
-              builds it. What came after stays in its history.
-            </Trans>
-          )}
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction
-          onClick={() => {
-            if (asked !== undefined) {
-              onConfirm(asked);
-            }
-          }}
-          variant={asked?.kind === "discard" ? "destructive" : "default"}
-        >
-          {asked?.kind === "discard" ? (
-            <Trans>Undo changes</Trans>
-          ) : (
-            <Trans>Restore</Trans>
-          )}
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-);
+}) => {
+  const { t } = useLingui();
+  const discards = asked?.kind === "discard";
+  return (
+    <AlertDialog
+      onOpenChange={(open) => {
+        if (!open) {
+          onCancel();
+        }
+      }}
+      open={asked !== undefined}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {discards
+              ? t`Undo the changes only you see?`
+              : t`Restore this earlier state?`}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {discards
+              ? t`They go, for everyone who builds it. Its history in Settings keeps them, so you can bring them back.`
+              : t`Your changes go back to how they were then, for everyone who builds it. What came after stays in its history.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel />
+          <AlertDialogAction
+            onClick={() => {
+              if (asked !== undefined) {
+                onConfirm(asked);
+              }
+            }}
+            variant={discards ? "destructive" : "default"}
+          >
+            {discards ? t`Undo changes` : t`Restore`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
 
 /** Who made a checkpoint, and how, as its line says it. */
 const CheckpointTitle = ({
@@ -300,20 +307,7 @@ const useCheckpoints = (
   return read?.key === key ? read.read : undefined;
 };
 
-/** See it: an App's checkpoint, read-only in its workspace. */
-const SeeCheckpoint = ({ app, number }: { app: string; number: number }) => (
-  <Link
-    className={buttonVariants({ size: "sm", variant: "ghost" })}
-    params={{ app }}
-    search={{ point: number }}
-    to="/apps/$app"
-  >
-    <EyeIcon data-icon="inline-start" />
-    <Trans>See it</Trans>
-  </Link>
-);
-
-/** One checkpoint: who, when and what; restored from here. */
+/** One checkpoint: who, when and what; restored (an App's, seen) from here. */
 const CheckpointItem = ({
   subject,
   checkpoint,
@@ -328,40 +322,57 @@ const CheckpointItem = ({
   latest: boolean;
   busy: boolean;
   onRestore: () => void;
-}) => (
-  <Item render={<li />} size="sm" variant="row">
-    <ItemContent>
-      <ItemTitle>
-        <CheckpointTitle checkpoint={checkpoint} name={name} />
-        {latest ? (
-          <Badge variant="secondary">
-            <Trans>Now</Trans>
-          </Badge>
-        ) : null}
-      </ItemTitle>
-      <ItemDescription>
-        <time dateTime={checkpoint.createdAt}>
-          {formatSince(checkpoint.createdAt)}
-        </time>
+}) => {
+  const { t } = useLingui();
+  return (
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>
+          <CheckpointTitle checkpoint={checkpoint} name={name} />
+        </ItemTitle>
+        <ItemDescription>
+          <time dateTime={checkpoint.createdAt}>
+            {formatSince(checkpoint.createdAt)}
+          </time>
+        </ItemDescription>
         {checkpoint.touched.length === 0 ? null : (
-          <span className="block truncate font-mono text-xs">
+          <Text as="span" color="muted" size="xs" truncate>
             {touchedText(checkpoint.touched)}
-          </span>
+          </Text>
         )}
-      </ItemDescription>
-    </ItemContent>
-    {latest ? null : (
+      </ItemContent>
       <ItemActions>
-        {subject.kind === "app" ? (
-          <SeeCheckpoint app={subject.id} number={checkpoint.number} />
-        ) : null}
-        <Button disabled={busy} onClick={onRestore} size="sm" variant="outline">
-          <Trans>Restore</Trans>
-        </Button>
+        {latest ? (
+          <Badge>{t`Now`}</Badge>
+        ) : (
+          <>
+            {subject.kind === "app" ? (
+              <Button asChild size="sm" variant="ghost">
+                <Link
+                  params={{ app: subject.id }}
+                  search={{ point: checkpoint.number }}
+                  to="/apps/$app"
+                >
+                  <Icon icon={EyeIcon} />
+                  {t`See it`}
+                </Link>
+              </Button>
+            ) : null}
+            <Button
+              disabled={busy}
+              onClick={onRestore}
+              size="sm"
+              variant="outline"
+            >
+              <Icon icon={UndoIcon} />
+              {t`Restore`}
+            </Button>
+          </>
+        )}
       </ItemActions>
-    )}
-  </Item>
-);
+    </Item>
+  );
+};
 
 /**
  * The draft's unpublished changes, its checkpoints, and discarding it;
@@ -393,58 +404,58 @@ const DraftCheckpoints = ({
     return null;
   }
   return (
-    <section
-      aria-labelledby="draft-unpublished"
-      className="flex flex-col gap-3"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-base font-medium" id="draft-unpublished">
-          {changing ? (
-            <Trans>Changes only you see</Trans>
-          ) : (
-            <Trans>Undone changes</Trans>
-          )}
-        </h3>
-        <span className="flex-1" />
-        {changing ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setAsked({ kind: "discard" });
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Undo changes</Trans>
-          </Button>
-        ) : null}
-      </div>
+    <Section aria-labelledby="draft-unpublished">
+      <SectionHeader
+        actions={
+          changing ? (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setAsked({ kind: "discard" });
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <Icon icon={UndoIcon} />
+              {t`Undo changes`}
+            </Button>
+          ) : null
+        }
+        headingLevel={3}
+        id="draft-unpublished"
+        size="sm"
+        title={changing ? t`Changes only you see` : t`Undone changes`}
+      />
       <ErrorText>{failure}</ErrorText>
       {read === undefined ? <LoadingLines lines={2} /> : null}
       {read === "failed" ? (
         <ErrorText>{t`The history of your changes couldn't be read. Try again in a moment.`}</ErrorText>
       ) : null}
       {checkpoints.length === 0 ? null : (
-        <ItemGroup render={<ol />} variant="card">
-          {checkpoints.map((checkpoint) => (
-            <CheckpointItem
-              busy={busy}
-              checkpoint={checkpoint}
-              key={checkpoint.number}
-              latest={checkpoint.number === newest?.number}
-              name={
-                typeof read === "object"
-                  ? (read.people.get(checkpoint.personId) ??
-                    checkpoint.personId)
-                  : checkpoint.personId
-              }
-              onRestore={() => {
-                setAsked({ kind: "restore", number: checkpoint.number });
-              }}
-              subject={subject}
-            />
-          ))}
-        </ItemGroup>
+        <Card padding="none">
+          <ItemGroup>
+            {checkpoints.map((checkpoint, at) => (
+              <Fragment key={checkpoint.number}>
+                {at === 0 ? null : <ItemSeparator />}
+                <CheckpointItem
+                  busy={busy}
+                  checkpoint={checkpoint}
+                  latest={checkpoint.number === newest?.number}
+                  name={
+                    typeof read === "object"
+                      ? (read.people.get(checkpoint.personId) ??
+                        checkpoint.personId)
+                      : checkpoint.personId
+                  }
+                  onRestore={() => {
+                    setAsked({ kind: "restore", number: checkpoint.number });
+                  }}
+                  subject={subject}
+                />
+              </Fragment>
+            ))}
+          </ItemGroup>
+        </Card>
       )}
       <ConfirmChange
         asked={asked}
@@ -456,7 +467,7 @@ const DraftCheckpoints = ({
           void change(confirmed);
         }}
       />
-    </section>
+    </Section>
   );
 };
 
@@ -506,27 +517,10 @@ const MoveTitle = ({
 };
 
 /**
- * What a move does: an App's pages and workflows run on it; a workflow's
- * triggers start it, while runs going keep their version.
+ * The confirmation of a move: what it does (an App's pages and workflows
+ * run on it; a workflow's triggers start it, while runs going keep their
+ * version), and what it drops.
  */
-const MoveText = ({ kind }: { kind: Subject["kind"] }) => {
-  if (kind === "workflow") {
-    return (
-      <Trans>
-        Its triggers start it from now on; runs already going keep their
-        version. Grasp checks it first.
-      </Trans>
-    );
-  }
-  return (
-    <Trans>
-      Its pages and workflows run on it from now on. Grasp checks and builds it
-      first.
-    </Trans>
-  );
-};
-
-/** The confirmation of a move: what it does, and what it drops. */
 const MoveDialog = ({
   kind,
   move,
@@ -538,7 +532,8 @@ const MoveDialog = ({
   onConfirm: (move: AskedMove) => void;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const label = move?.version.label ?? null;
+  const { t } = useLingui();
+  const label = move === null ? null : labelOf(move.version);
   return (
     <AlertDialog onOpenChange={onOpenChange} open={move !== null}>
       <AlertDialogContent>
@@ -549,21 +544,16 @@ const MoveDialog = ({
           <AlertDialogDescription>
             {move?.discards === true ? (
               <>
-                <strong>
-                  <Trans>
-                    The changes only you see are dropped, and you go on from
-                    this version.
-                  </Trans>
-                </strong>{" "}
+                <strong>{t`The changes only you see are dropped, and you go on from this version.`}</strong>{" "}
               </>
             ) : null}
-            <MoveText kind={kind} />
+            {kind === "workflow"
+              ? t`Its triggers start it from now on; runs already going keep their version. Grasp checks it first.`
+              : t`Its pages and workflows run on it from now on. Grasp checks and builds it first.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>
-            <Trans>Cancel</Trans>
-          </AlertDialogCancel>
+          <AlertDialogCancel />
           <AlertDialogAction
             onClick={() => {
               if (move !== null) {
@@ -572,11 +562,7 @@ const MoveDialog = ({
             }}
             variant={move?.discards === true ? "destructive" : "default"}
           >
-            {move?.rollback === true ? (
-              <Trans>Go back</Trans>
-            ) : (
-              <Trans>Give it to your team</Trans>
-            )}
+            {move?.rollback === true ? t`Go back` : t`Give it to your team`}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -594,9 +580,10 @@ const VersionChanges = ({
   version: Version;
   onClose: () => void;
 }) => {
-  const { t } = useLingui();
   const core = useCore();
   const [read, setRead] = useState<Loaded<FileDiff[]>>();
+  // Counts the tries, so Try again reads it again.
+  const [tried, setTried] = useState(0);
   const { kind, id } = subject;
   const parent = parentOf(version);
   useEffect(() => {
@@ -626,7 +613,8 @@ const VersionChanges = ({
     return () => {
       left.abort();
     };
-  }, [core, kind, id, parent, version.version]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [core, kind, id, parent, version.version, tried]);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -636,7 +624,7 @@ const VersionChanges = ({
       }}
       open
     >
-      <SheetContent closeLabel={t`Close`} size="wide">
+      <SheetContent size="lg">
         <SheetHeader>
           <SheetTitle>
             <Trans>
@@ -644,46 +632,23 @@ const VersionChanges = ({
             </Trans>
           </SheetTitle>
         </SheetHeader>
-        <div className="overflow-y-auto px-4 pb-4">
+        <SheetBody>
           {read === undefined ? <LoadingLines lines={4} /> : null}
           {read !== undefined && read.state !== "ready" ? (
-            <NotLoaded page={read} />
+            <NotLoadedState
+              again={() => {
+                setTried(tried + 1);
+              }}
+              heading="h3"
+              page={read}
+            />
           ) : null}
           {read?.state === "ready" ? <FileChanges files={read.data} /> : null}
-        </div>
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );
 };
-
-/** See this version: an App's, read-only in its workspace. */
-const SeeVersion = ({ app, version }: { app: string; version: number }) => (
-  <DropdownMenuItem
-    render={<Link params={{ app }} search={{ version }} to="/apps/$app" />}
-  >
-    <EyeIcon />
-    <Trans>See this version</Trans>
-  </DropdownMenuItem>
-);
-
-/** A release's actions in its version's menu, for an admin. */
-const ReleaseItems = ({
-  release,
-  onAsk,
-}: {
-  release: AppRelease;
-  onAsk: (action: ReleaseAction) => void;
-}) =>
-  useReleaseActions(release).map(({ label, action }) => (
-    <DropdownMenuItem
-      key={label}
-      onClick={() => {
-        onAsk(action);
-      }}
-    >
-      {label}
-    </DropdownMenuItem>
-  ));
 
 /** A version's menu: its changes, its preview, rolling back, its release. */
 const VersionMenu = ({
@@ -713,53 +678,56 @@ const VersionMenu = ({
   const moves =
     builds && version.version !== live && (release?.revokedAt ?? null) === null;
   const rollback = live !== null && version.version < live;
-  const { label } = version;
+  const label = labelOf(version);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        disabled={disabled}
-        render={
-          <Button
-            aria-label={
-              label === null
-                ? t`Actions for the version not shared yet`
-                : t`Actions for ${label}`
-            }
-            size="icon-sm"
-            variant="ghost"
-          />
-        }
-      >
-        <EllipsisIcon />
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={
+            label === null
+              ? t`Actions for the version not shared yet`
+              : t`Actions for ${label}`
+          }
+          disabled={disabled}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Icon icon={EllipsisIcon} />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {parentOf(version) === null ? null : (
-          <DropdownMenuItem onClick={onShowChanges}>
-            <GitCompareArrowsIcon />
-            <Trans>View changes</Trans>
+          <DropdownMenuItem icon={GitCompareIcon} onSelect={onShowChanges}>
+            {t`View changes`}
           </DropdownMenuItem>
         )}
         {builds && subject.kind === "app" ? (
-          <SeeVersion app={subject.id} version={version.version} />
+          <DropdownMenuItem asChild icon={EyeIcon}>
+            <Link
+              params={{ app: subject.id }}
+              search={{ version: version.version }}
+              to="/apps/$app"
+            >
+              {t`See this version`}
+            </Link>
+          </DropdownMenuItem>
         ) : null}
         {moves ? (
           <DropdownMenuItem
-            onClick={() => {
+            icon={rollback ? UndoIcon : RedoIcon}
+            onSelect={() => {
               onMove({ version, rollback });
             }}
           >
-            <RotateCcwIcon />
-            {rollback ? (
-              <Trans>Go back to this version</Trans>
-            ) : (
-              <Trans>Give your team this version</Trans>
-            )}
+            {rollback
+              ? t`Go back to this version`
+              : t`Give your team this version`}
           </DropdownMenuItem>
         ) : null}
         {release === undefined ? null : (
           <>
             <DropdownMenuSeparator />
-            <ReleaseItems onAsk={onAsk} release={release} />
+            <ReleaseMenuItems onAsk={onAsk} release={release} />
           </>
         )}
       </DropdownMenuContent>
@@ -785,21 +753,16 @@ const VersionItem = ({
   details: ReactNode;
   menu: ReactNode;
 }) => {
+  const { t } = useLingui();
   const since = formatSince(version.createdAt);
   return (
-    <Item render={<li />} variant="row">
+    <Item>
       <ItemContent>
         <ItemTitle>
           <VersionName version={version} />
-          {live ? (
-            <Badge variant="passed">
-              <Trans>Your team has this one</Trans>
-            </Badge>
-          ) : null}
-          {release === undefined ? null : <ReleaseBadges release={release} />}
         </ItemTitle>
         {details}
-        <span className="text-muted-foreground text-xs">
+        <Text as="span" color="subtle" size="xs">
           {/* A version never live (the first of an App made from a
             blueprint) was made, not published. */}
           {version.label === null ? (
@@ -811,9 +774,15 @@ const VersionItem = ({
               {by} shared it <time dateTime={version.createdAt}>{since}</time>
             </Trans>
           )}
-        </span>
+        </Text>
       </ItemContent>
-      <ItemActions>{menu}</ItemActions>
+      <ItemActions>
+        {live ? (
+          <Badge variant="success">{t`Your team has this one`}</Badge>
+        ) : null}
+        {release === undefined ? null : <ReleaseBadges release={release} />}
+        {menu}
+      </ItemActions>
     </Item>
   );
 };
@@ -912,55 +881,59 @@ const VersionsView = ({
   };
   if (versions.length === 0) {
     return (
-      <p className="text-muted-foreground">
-        <Trans>
-          Nothing shared yet: the first time you share it shows here.
-        </Trans>
-      </p>
+      <Text color="muted">
+        {t`Nothing shared yet: the first time you share it shows here.`}
+      </Text>
     );
   }
   return (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.list)}>
       <ErrorText>{failure}</ErrorText>
-      <ItemGroup render={<ol />} variant="card">
-        {versions.map((each) => (
-          <VersionItem
-            by={
-              each.author === identity.userId
-                ? t`You`
-                : (people.get(each.author) ?? each.author)
-            }
-            details={renderDetails?.(each)}
-            key={each.version}
-            live={each.version === live}
-            menu={
-              acts ? (
-                <VersionMenu
-                  builds={builds}
-                  disabled={busy}
-                  live={live}
-                  onAsk={setAsked}
-                  onMove={askMove}
-                  onShowChanges={() => {
-                    setShowing(each);
-                  }}
-                  release={releases.get(each.version)}
-                  subject={subject}
-                  version={each}
-                />
-              ) : null
-            }
-            release={releases.get(each.version)}
-            version={each}
-          />
+      <ItemGroup>
+        {versions.map((each, at) => (
+          <Fragment key={each.version}>
+            {at === 0 ? null : <ItemSeparator />}
+            <VersionItem
+              by={
+                each.author === identity.userId
+                  ? t`You`
+                  : (people.get(each.author) ?? each.author)
+              }
+              details={renderDetails?.(each)}
+              live={each.version === live}
+              menu={
+                acts ? (
+                  <VersionMenu
+                    builds={builds}
+                    disabled={busy}
+                    live={live}
+                    onAsk={setAsked}
+                    onMove={askMove}
+                    onShowChanges={() => {
+                      setShowing(each);
+                    }}
+                    release={releases.get(each.version)}
+                    subject={subject}
+                    version={each}
+                  />
+                ) : null
+              }
+              release={releases.get(each.version)}
+              version={each}
+            />
+          </Fragment>
         ))}
       </ItemGroup>
       {next === null ? null : (
-        <div>
-          <Button disabled={more} onClick={onMore} size="sm" variant="outline">
-            <Trans>Show older versions</Trans>
-          </Button>
-        </div>
+        <Button
+          disabled={more}
+          onClick={onMore}
+          size="sm"
+          style={styles.older}
+          variant="outline"
+        >
+          {t`Show older versions`}
+        </Button>
       )}
       <MoveDialog
         kind={subject.kind}
@@ -1033,6 +1006,8 @@ const Published = (of: VersionsOf) => {
   // The releases' reads, a page at a time, kept to show one that failed.
   const [releaseReads, setReleaseReads] = useState<Loaded<AppRelease[]>[]>([]);
   const [reading, setReading] = useState(false);
+  // Counts the tries, so Try again reads the newest page again.
+  const [tried, setTried] = useState(0);
   // The newest page's read, aborted as the next starts: an older page read
   // under it is dropped then, as it continues pages that are gone.
   const newest = useRef<AbortController | null>(null);
@@ -1082,8 +1057,8 @@ const Published = (of: VersionsOf) => {
     return () => {
       left.abort();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `live` says when to read again
-  }, [admin, kind, id, core, live]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `live` and `tried` say when to read again
+  }, [admin, kind, id, core, live, tried]);
   const [first] = pages;
   if (first === undefined) {
     return <LoadingLines lines={3} />;
@@ -1092,7 +1067,15 @@ const Published = (of: VersionsOf) => {
     (page) => page.state !== "ready"
   );
   if (failed !== undefined) {
-    return <NotLoaded page={failed} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setTried(tried + 1);
+        }}
+        heading="h3"
+        page={failed}
+      />
+    );
   }
   const versions = pages.flatMap((page) =>
     page.state === "ready" ? page.data : []
@@ -1149,18 +1132,22 @@ const Published = (of: VersionsOf) => {
  * History, an App's or a workflow's: the changes only its builders see,
  * for them, while it has any, then its published versions.
  */
-export const DraftHistory = (of: VersionsOf) => (
-  <div className="flex flex-col gap-8">
-    {of.builds ? <Unpublished subject={of.subject} /> : null}
-    <section aria-labelledby="draft-published" className="flex flex-col gap-3">
-      <h3
-        className="flex items-center gap-2 text-base font-medium"
-        id="draft-published"
-      >
-        <HistoryIcon aria-hidden className="size-4" />
-        <Trans>Versions</Trans>
-      </h3>
-      <Published {...of} />
-    </section>
-  </div>
-);
+export const DraftHistory = (of: VersionsOf) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.history)}>
+      {of.builds ? <Unpublished subject={of.subject} /> : null}
+      <Section aria-labelledby="draft-published">
+        <SectionHeader
+          headingLevel={3}
+          id="draft-published"
+          size="sm"
+          title={t`Versions`}
+        />
+        <Card padding="none">
+          <Published {...of} />
+        </Card>
+      </Section>
+    </div>
+  );
+};

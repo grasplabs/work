@@ -111,11 +111,13 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   // the App's own working version, and its schema generated from the
   // table just made.
   await expect(
-    page.getByRole("button", { name: "Share with your team" })
+    page.getByRole("button", { name: "Publish", exact: true })
   ).toBeEnabled(read);
+  // The App itself, by its name over the workspace's rows.
   await page
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "App" })
+    .getByRole("complementary", { name: "Sidebar" })
+    .getByRole("heading")
+    .getByRole("link")
     .click();
   await expect(
     page.getByRole("region", { name: /, your version$/u })
