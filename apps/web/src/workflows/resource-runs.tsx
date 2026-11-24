@@ -1,3 +1,4 @@
+import { workflowRunsListed } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { DataTable } from "@grasp-os/ui/components/data-table";
 import type { DataTableColumn } from "@grasp-os/ui/components/data-table";
@@ -11,24 +12,22 @@ import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { formatDateTime } from "../format.ts";
-import type { Names } from "./activity-bar.tsx";
-import {
-  RunBeside,
-  RunStatusBadge,
-  useAddressedRun,
-  useStartedBy,
-} from "./run-detail.tsx";
+import { useCore } from "../use-core.ts";
+import type { Names } from "./activity-words.ts";
+import { listRuns } from "./reads.ts";
+import { RunStatusBadge, useStartedBy } from "./run-detail.tsx";
 import { WaitingForAiProvider } from "./runs.tsx";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
 // as core lists them for the reader: every run for its builders, their own
-// for its users (`workflowResources.runs`). Each opens beside the list
-// (run-detail.tsx) with what it returned or why it failed, read on the
-// run itself under its own rule for who sees it; its steps stay for the
-// workflow's builders, who read its definitions (Traces).
+// for its users (`workflowResources.runs`). A run its engine holds for a
+// decision says so, with the way to answer it, as the Runs log does: core
+// says which decision only there (`workflows.runs`). Each row opens the
+// run's own page (run-page.tsx).
 
 const styles = stylex.create({
   // Its status over what it waits for, at the row's end.
@@ -38,43 +37,27 @@ const styles = stylex.create({
     alignItems: "flex-end",
     gap: space["1"],
   },
+  table: { display: "grid", rowGap: space["2"] },
+  // Decide, under its status, over the row's press area so it stays its
+  // own. Not the column's `control`: that holds one line, and this cell
+  // holds two.
+  above: { position: "relative", zIndex: 1 },
 });
 
 /**
- * When a run started, as a link to it opened beside the list: a run open
- * there has an address of its own (`?run=`), kept with the project it came
- * from.
+ * No runs yet, where a list of them would stand; for a reader who sees
+ * only their own (`own`), that none of theirs are.
  */
-const RunLink = ({
-  workflow,
-  run,
-}: {
-  workflow: string;
-  run: WorkflowResourceRun;
-}) => (
-  <TextLink asChild variant="plain">
-    <Link
-      params={{ workflow }}
-      replace
-      search={(held) => ({
-        project: held.project,
-        view: "runs",
-        run: run.id,
-      })}
-      to="/workflows/$workflow"
-    >
-      {formatDateTime(run.createdAt)}
-    </Link>
-  </TextLink>
-);
-
-/** No runs yet, where a list of them would stand. */
-const NoRuns = () => {
+const NoRuns = ({ own }: { own: boolean }) => {
   const { t } = useLingui();
   return (
     <Empty>
       <EmptyHeader>
-        <EmptyDescription>{t`No runs yet.`}</EmptyDescription>
+        <EmptyDescription>
+          {own
+            ? t`You haven't run it yet. Only your own runs show here.`
+            : t`No runs yet.`}
+        </EmptyDescription>
       </EmptyHeader>
     </Empty>
   );
@@ -83,24 +66,103 @@ const NoRuns = () => {
 /** How many runs a page of a workflow's runs holds. */
 const runsPageSize = 20;
 
-/** Its status as a Badge, and what it waits for while its AI provider fails. */
-const RunStatus = ({ run }: { run: WorkflowResourceRun }) => (
-  <span {...stylex.props(styles.status)}>
-    <RunStatusBadge status={run.status} />
-    {run.aiProvider === undefined ? null : (
-      <Text as="span" color="muted" size="xs">
-        <WaitingForAiProvider wait={run.aiProvider} />
-      </Text>
-    )}
-  </span>
-);
+/** Waiting runs' open decisions the reader may answer, by the run's ID. */
+type Decisions = ReadonlyMap<string, string>;
+
+const noDecisions: Decisions = new Map();
+
+/**
+ * The decisions `runs` of `workflow` wait for that the reader may answer,
+ * read while any of them hasn't ended, and again as that changes: the
+ * Runs log's waiting runs, which name them. None where that read fails.
+ */
+const useDecisions = (
+  workflow: string,
+  runs: readonly WorkflowResourceRun[]
+): Decisions => {
+  const core = useCore();
+  // Read again whenever which runs are going changes: one may have ended.
+  const going = runs
+    .filter(({ endedAt }) => endedAt === null)
+    .map(({ id }) => id)
+    .join(" ");
+  const [decisions, setDecisions] = useState<Decisions>(noDecisions);
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      try {
+        const page = await core.withSession(
+          async (session) => await listRuns(session, { status: "waiting" })
+        );
+        if (!left) {
+          setDecisions(
+            new Map(
+              page.runs.flatMap(({ id, workflowId, decision }) =>
+                workflowId === workflow && decision !== undefined
+                  ? [[id, decision] as const]
+                  : []
+              )
+            )
+          );
+        }
+      } catch {
+        // The runs say they wait, without the way to the decision.
+      }
+    };
+    if (going !== "") {
+      void read();
+    }
+    return () => {
+      left = true;
+    };
+  }, [core, going, workflow]);
+  return going === "" ? noDecisions : decisions;
+};
+
+/**
+ * Its status as a Badge: a held run with a decision the reader may answer
+ * waits for that decision, with Decide beside it, standing over the row's
+ * press area; and what it waits for while its AI provider fails.
+ */
+const RunStatus = ({
+  run,
+  decision,
+}: {
+  run: WorkflowResourceRun;
+  decision: string | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <span {...stylex.props(styles.status)}>
+      <RunStatusBadge
+        status={decision === undefined ? run.status : "waiting"}
+      />
+      {decision === undefined ? null : (
+        <span {...stylex.props(styles.above)}>
+          <TextLink asChild variant="plain">
+            <Link params={{ decision }} to="/decisions/$decision">
+              {t`Decide`}
+            </Link>
+          </TextLink>
+        </span>
+      )}
+      {run.aiProvider === undefined ? null : (
+        <Text as="span" color="muted" size="xs">
+          <WaitingForAiProvider wait={run.aiProvider} />
+        </Text>
+      )}
+    </span>
+  );
+};
 
 /** A workflow's runs' columns, under their headers' words. */
 const runColumns = (words: {
-  workflow: string;
+  decisions: Decisions;
   startedBy: (principal: WorkflowResourceRun["principal"]) => string;
   started: string;
   version: string;
+  /** A version as people call it everywhere: "v3". */
+  versionOf: (version: number) => string;
   by: string;
   ended: string;
   status: string;
@@ -109,9 +171,14 @@ const runColumns = (words: {
     id: "started",
     header: words.started,
     value: (run) => run.createdAt,
-    cell: (run) => <RunLink run={run} workflow={words.workflow} />,
+    cell: (run) => formatDateTime(run.createdAt),
   },
-  { id: "version", header: words.version, value: (run) => run.version },
+  {
+    id: "version",
+    header: words.version,
+    value: (run) => run.version,
+    cell: (run) => words.versionOf(run.version),
+  },
   {
     id: "by",
     header: words.by,
@@ -127,87 +194,77 @@ const runColumns = (words: {
     id: "status",
     header: words.status,
     value: (run) => run.status,
-    cell: (run) => <RunStatus run={run} />,
+    cell: (run) => (
+      <RunStatus
+        decision={
+          run.endedAt === null ? words.decisions.get(run.id) : undefined
+        }
+        run={run}
+      />
+    ),
     align: "end",
   },
 ];
 
 /**
- * A workflow's runs, newest first, on Damsko's Data table as the
+ * A workflow's runs, newest first, on the library's Data table as the
  * tables pattern has it: when it started names the row; its version, who
- * started it and when it ended; its status at the row's end. When it
- * started is the link that opens it beside the list.
+ * started it and when it ended; its status at the row's end. The whole
+ * row opens its page.
  */
 export const WorkflowRunsTable = ({
   workflow,
   runs,
   names,
+  own = false,
 }: {
   workflow: string;
   runs: WorkflowResourceRun[];
   names: Names;
+  /** Whether core lists the reader's own runs alone: they use it, not build it. */
+  own?: boolean;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const startedBy = useStartedBy(names);
+  const decisions = useDecisions(workflow, runs);
   if (runs.length === 0) {
-    return <NoRuns />;
+    return <NoRuns own={own} />;
   }
   const columns = runColumns({
-    workflow,
+    decisions,
     startedBy,
     started: t`Started`,
     version: t`Version`,
+    versionOf: (version) => t`v${version}`,
     by: t`Started by`,
     ended: t`Ended`,
     status: t`Status`,
   });
+  const newest = workflowRunsListed;
   return (
-    <DataTable
-      aria-label={t`Runs`}
-      columns={columns}
-      density="compact"
-      getRowId={(run) => run.id}
-      pageSize={runsPageSize}
-      rows={runs}
-      unit={{ one: t`run`, other: t`runs` }}
-    />
-  );
-};
-
-export const ResourceRuns = ({
-  workflow,
-  runs,
-  names,
-  admin,
-  openRun,
-  onCloseRun,
-}: {
-  workflow: string;
-  /** The run the address asks to open, by its ID. */
-  openRun?: string | undefined;
-  /** Clears the run from the address once it is closed. */
-  onCloseRun?: () => void;
-  runs: WorkflowResourceRun[];
-  names: Names;
-  /** Whether the reader is one of the organization's admins. */
-  admin: boolean;
-}) => {
-  const close = (): void => {
-    onCloseRun?.();
-  };
-  // The run the address names: one of the table's, or Run's "Open the run".
-  const { opened, notFound, onDismiss } = useAddressedRun(runs, openRun, close);
-  return (
-    <RunBeside
-      admin={admin}
-      names={names}
-      notFound={notFound}
-      onClose={close}
-      onDismissNotFound={onDismiss}
-      opened={opened}
-      workflow={workflow}
-    >
-      <WorkflowRunsTable names={names} runs={runs} workflow={workflow} />
-    </RunBeside>
+    <div {...stylex.props(styles.table)}>
+      <DataTable
+        aria-label={t`Runs`}
+        columns={columns}
+        density="compact"
+        getRowId={(run) => run.id}
+        onRowClick={(run) => {
+          void navigate({
+            to: "/workflows/$workflow/runs/$run",
+            params: { workflow, run: run.id },
+          });
+        }}
+        pageSize={runsPageSize}
+        rows={runs}
+        unit={{ one: t`run`, other: t`runs` }}
+      />
+      {/* Core lists the newest runs only: the count above them is of those. */}
+      {runs.length >= newest ? (
+        <Text color="muted" size="sm">
+          {t`Only the newest ${newest} runs show here.`}
+        </Text>
+      ) : null}
+    </div>
   );
 };

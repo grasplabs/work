@@ -8,7 +8,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { ChatToggle } from "../chat/chat-bar.tsx";
+import { ChatToggle } from "../chat/chat-toggle.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
@@ -184,11 +184,10 @@ export const AppFrame = ({
   return (
     // Damsko's Toaster (below) is the app's one place for toasts: a page
     // mounts none of its own and calls Damsko's `toast`. The kit's stays
-    // only for the three files that still call the kit's `toast.add`
-    // (copy.ts, chat/chat-more.tsx, brain/memories-page.tsx), each toast
-    // in the one region of the API it was given to; it goes with the last
-    // of them. The kit's tooltips are
-    // for the pages still on the kit.
+    // only for the two files that still call the kit's `toast.add`
+    // (copy.ts, brain/memories-page.tsx), each toast in the one region of
+    // the API it was given to; it goes with the last of them. The kit's
+    // tooltips are for the pages still on the kit.
     <KitToaster>
       <KitTooltipProvider>
         <SidebarProvider storageKey={sidebarKey}>

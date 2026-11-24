@@ -34,8 +34,9 @@ import {
   PlusIcon,
   RefreshCwIcon,
   TrashIcon,
+  UndoIcon,
 } from "@grasp-os/ui/lib/icons";
-import type { MessageDescriptor } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
@@ -136,7 +137,9 @@ const useSaidSearch = () => {
 /**
  * Reads the person's chats from core, the archived ones or the rest, again
  * on each `read`: the latest read only, so an answer that comes late for
- * an earlier one is dropped, and kept with which list it is.
+ * an earlier one is dropped, and kept with which list it is. With the
+ * rest, how many they archived, as #2503 counts them for the Archived row,
+ * read beside the list and never holding it up.
  */
 const useListed = () => {
   const core = useCore();
@@ -144,11 +147,29 @@ const useListed = () => {
     archived: boolean;
     chats: ChatSummary[];
   }>();
+  const [archivedCount, setArchivedCount] = useState(0);
   const [failure, setFailure] = useState<string>();
   const latest = useRef(0);
+  const count = (asked: number): void => {
+    void (async () => {
+      try {
+        const put = await core.withSession(
+          async (session) => await session.chats.list({ archived: true })
+        );
+        if (asked === latest.current) {
+          setArchivedCount(put.length);
+        }
+      } catch {
+        // Uncounted, the Archived row waits for the next read.
+      }
+    })();
+  };
   const read = (archived: boolean): void => {
     latest.current += 1;
     const asked = latest.current;
+    if (!archived) {
+      count(asked);
+    }
     void (async () => {
       try {
         const chats = await core.withSession(
@@ -157,6 +178,9 @@ const useListed = () => {
         if (asked === latest.current) {
           setListed({ archived, chats });
           setFailure(undefined);
+          if (archived) {
+            setArchivedCount(chats.length);
+          }
         }
       } catch (error) {
         if (asked === latest.current) {
@@ -165,7 +189,7 @@ const useListed = () => {
       }
     })();
   };
-  return { listed, failure, read };
+  return { listed, archivedCount, failure, read };
 };
 
 /**
@@ -299,37 +323,60 @@ const RowEnd = ({ chat, now }: { chat: ChatSummary; now: Date }) => {
   );
 };
 
-/** What a row offers on its arrow: rename it, archive or restore it, delete it. */
+/** What a row offers on its arrow: rename it, archive it, delete it; to an archived one, less. */
 const useRowActions = (archived: boolean): CommandItemData["actions"] => {
   const { t } = useLingui();
-  return [
-    { value: "rename", label: t`Rename`, icon: PencilIcon },
-    archived
-      ? { value: "unarchive", label: t`Restore`, icon: ArchiveIcon }
-      : { value: "archive", label: t`Archive`, icon: ArchiveIcon },
-    {
-      value: "delete",
-      label: t`Delete`,
-      icon: TrashIcon,
-      variant: "destructive",
-    },
-  ];
+  const remove = {
+    value: "delete",
+    label: t`Delete`,
+    icon: TrashIcon,
+    variant: "destructive" as const,
+  };
+  return archived
+    ? [{ value: "unarchive", label: t`Unarchive`, icon: UndoIcon }, remove]
+    : [
+        { value: "rename", label: t`Rename`, icon: PencilIcon },
+        { value: "archive", label: t`Archive`, icon: ArchiveIcon },
+        remove,
+      ];
 };
 
 /**
+ * The chats as rows: at rest in groups by when they were last used; a
+ * search's as it found them, as #2503 lists them.
+ */
+const groupsOf = (
+  chats: readonly ChatSummary[],
+  searching: boolean,
+  now: Date,
+  rowOf: (chat: ChatSummary) => CommandItemData,
+  i18n: I18n
+): CommandItems =>
+  searching
+    ? chats.map(rowOf)
+    : groupChats(chats, now).map(({ period, chats: inPeriod }) => ({
+        type: "group" as const,
+        label: i18n._(periodLabel[period]),
+        items: inPeriod.map(rowOf),
+      }));
+
+/**
  * The list's items: New chat first where it offers one, the chats by
- * when they were last used, Archived last; in the archived list the way
- * back first; a search that failed, the one row that tries it again.
+ * when they were last used, Archived last with how many, where there are;
+ * in the archived list the way back first; a search that failed, the one
+ * row that tries it again.
  */
 const useListItems = ({
   groups,
   archived,
+  archivedCount,
   searching,
   offersNew,
   searchFailure,
 }: {
   groups: CommandItems;
   archived: boolean;
+  archivedCount: number;
   searching: boolean;
   offersNew: boolean;
   searchFailure: string | undefined;
@@ -347,7 +394,7 @@ const useListItems = ({
   }
   if (archived) {
     return [
-      { value: "back", label: t`Back to your chats`, icon: ArrowLeftIcon },
+      { value: "back", label: t`All chats`, icon: ArrowLeftIcon },
       ...groups,
     ];
   }
@@ -357,11 +404,16 @@ const useListItems = ({
       ? [{ value: "new", label: t`New chat`, icon: PlusIcon }]
       : []),
     ...groups,
-    ...(searching
+    ...(searching || archivedCount === 0
       ? []
       : [
           { type: "separator" as const },
-          { value: "archived", label: t`Archived`, icon: ArchiveIcon },
+          {
+            value: "archived",
+            label: t`Archived`,
+            icon: ArchiveIcon,
+            description: t`${plural(archivedCount, { one: "# chat", other: "# chats" })}`,
+          },
         ]),
   ];
 };
@@ -450,17 +502,12 @@ const useChatItems = ({
     end: <RowEnd chat={chat} now={now} />,
     actions,
   });
-  const groups = groupChats(
-    shownChats({ chats, query, found: answered }),
-    now
-  ).map(({ period, chats: inPeriod }) => ({
-    type: "group" as const,
-    label: i18n._(periodLabel[period]),
-    items: inPeriod.map(rowOf),
-  }));
+  const inList = shownChats({ chats, query, found: answered });
+  const groups = groupsOf(inList, searching, now, rowOf, i18n);
   const items = useListItems({
     groups,
     archived,
+    archivedCount: listing.archivedCount,
     searching,
     offersNew: onNew !== undefined,
     searchFailure: searching ? said.failure : undefined,

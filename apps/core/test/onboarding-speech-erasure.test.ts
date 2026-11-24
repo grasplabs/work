@@ -8,9 +8,9 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, storedKeyOf } from "../src/speech-cache.ts";
-import { speechModel } from "../src/speech.ts";
+import { speechModelOf } from "../src/speech.ts";
 import { adminCommands } from "./admin-command.ts";
-import { platformKugelAudioKey } from "./connect-providers.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, openedFor } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -28,7 +28,7 @@ import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 // Stephen speaks lands while the voice works on the next. The store
 // noted the line's key as it was asked; the erasure takes the note, and
 // the line, kept once the voice answers, is taken out again then. The
-// voice (KugelAudio, behind connect) is the outside system: its answer is
+// voice (Mistral, behind connect) is the outside system: its answer is
 // held until each erasure has landed.
 
 const idp = mockIdp();
@@ -47,7 +47,7 @@ const sayingWhile = async (
   erase: () => Promise<unknown>
 ): Promise<{ status: number; reached: number }> => {
   const held = `voice-${unique()}`;
-  await plan(platformKugelAudioKey, [{ release: held }]);
+  await plan(platformMistralKey, [{ release: held }]);
   const saying = ask();
   await expect
     .poll(async () => await carrying(text), { timeout: 10_000 })
@@ -353,8 +353,9 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
           env,
           {
             text,
+            spoken: text,
             voice: platformAi.speech.voices.stephen,
-            model: speechModel,
+            model: speechModelOf(),
             language: "en",
           },
           JSON.stringify({ audio: "AAAA", mime: "audio/wav", words: [] })
@@ -387,8 +388,9 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
         env,
         {
           text,
+          spoken: text,
           voice: platformAi.speech.voices.stephen,
-          model: speechModel,
+          model: speechModelOf(),
           language: "en",
         },
         JSON.stringify({ audio: "AAAA", mime: "audio/wav", words: [] })
@@ -456,8 +458,9 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
           env,
           {
             text,
+            spoken: text,
             voice: platformAi.speech.voices.stephen,
-            model: speechModel,
+            model: speechModelOf(),
             language: "en",
           },
           answer

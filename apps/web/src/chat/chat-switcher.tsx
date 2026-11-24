@@ -1,6 +1,4 @@
 import { Button } from "@grasp-os/ui/components/button";
-import { Icon, MessageSquareIcon } from "@grasp-os/ui/lib/icons";
-import { useLingui } from "@lingui/react/macro";
 import {
   createContext,
   lazy,
@@ -12,10 +10,10 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
-import { isShortcut, shortcutLabel } from "../shortcuts.ts";
+import { isShortcut } from "../shortcuts.ts";
 
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
-// anywhere, and the icon a page's header may show. The window itself, with
+// anywhere, and the sidebar's search. The window itself, with
 // its command list, loads the first time it opens.
 
 const ChatWindow = lazy(async () => {
@@ -56,7 +54,7 @@ const OpenChats = createContext<(open: boolean) => void>(() => {
 
 /**
  * The frame's chats window, on every page: ⌘K or Ctrl K opens it (and
- * closes it again), as does a page's {@link ChatSwitcherButton}.
+ * closes it again), as does the sidebar's search.
  */
 export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
@@ -95,20 +93,3 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
 
 /** Opens (or closes) the frame's chats window, as ⌘K does. */
 export const useChatsWindow = (): ((open: boolean) => void) => use(OpenChats);
-
-/** The quiet icon in a page's header that opens the chats window. */
-export const ChatSwitcherButton = () => {
-  const { t } = useLingui();
-  const setOpen = use(OpenChats);
-  return (
-    <HeaderIcon
-      label={t`Chats`}
-      onClick={() => {
-        setOpen(true);
-      }}
-      shortcut={shortcutLabel(chatsKey)}
-    >
-      <Icon icon={MessageSquareIcon} />
-    </HeaderIcon>
-  );
-};

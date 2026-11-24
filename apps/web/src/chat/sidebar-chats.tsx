@@ -1,5 +1,6 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { chatTitleSchema } from "@grasp-os/shared/chat";
+import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
   ArchiveIcon,
@@ -12,11 +13,12 @@ import { useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import type { RowAction, SidebarRow } from "../frame/sidebar.tsx";
+import type { RowAction, SidebarMore, SidebarRow } from "../frame/sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { setActiveChat, useActiveChat } from "./active-chat.ts";
 import { useOpenChat } from "./chat-presence.ts";
+import { useChatsWindow } from "./chat-switcher.tsx";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The person's recent chats in the sidebar, as the reference's (#2503's
@@ -108,23 +110,35 @@ const useRowChanges = () => {
 /**
  * The sidebar's recent chats, as rows: each opens its chat beside the
  * page, by its title alone, marked while it is the open chat, with its menu
- * and renamed in place; and the question a delete asks first. None when
- * the person has none, or `enabled` is false.
+ * and renamed in place; All chats after them, the chats window; and the
+ * question a delete asks first. No rows when the person has none, or
+ * `enabled` is false.
  */
 export const useRecentChats = ({
   enabled,
 }: {
   enabled: boolean;
-}): { rows: SidebarRow[]; dialog: ReactNode } => {
+}): { rows: SidebarRow[]; more: SidebarMore; dialog: ReactNode } => {
   const { t } = useLingui();
   const chats = useChats(enabled);
   const activeId = useActiveChat();
   const openHere = useOpenChat();
+  const openChats = useChatsWindow();
+  const { setOpenMobile } = useSidebar();
   const changes = useRowChanges();
   const [deleting, setDeleting] = useState<ChatSummary>();
+  // Neither navigates, so the phone's sheet would stay over them: it goes first.
   const open = (chat: ChatSummary) => {
+    setOpenMobile(false);
     setActiveChat(chat.id);
     openHere();
+  };
+  const more: SidebarMore = {
+    label: t`All chats`,
+    onClick: () => {
+      setOpenMobile(false);
+      openChats(true);
+    },
   };
   const actions: RowAction[] = [
     { value: "open", label: t`Open`, icon: ArrowRightIcon },
@@ -177,5 +191,5 @@ export const useRecentChats = ({
         open
       />
     );
-  return { rows, dialog };
+  return { rows, more, dialog };
 };

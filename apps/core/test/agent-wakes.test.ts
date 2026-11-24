@@ -1,3 +1,4 @@
+import type { AgentAudience } from "@grasp-os/shared/agents";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -7,7 +8,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { codeResults, codeStep, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { fakeProvider } from "./model-provider.ts";
+import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import {
   openRpc,
   outcome,
@@ -22,7 +23,9 @@ import {
 // a member, or for an agent the company doesn't have; a schedule that
 // fires every minute; one time firing twice; a paused or deleted wake-up,
 // or a paused agent's, firing; an agent that doesn't reach its person
-// waking for them; a woken turn changing something.
+// waking for them, one for its maker alone included; one for its maker
+// waking for them otherwise than one for everyone would once they lose
+// their role, are suspended or removed; a woken turn changing something.
 
 const idp = mockIdp();
 
@@ -72,6 +75,17 @@ const settledChats = async (person: Awaited<ReturnType<typeof signedInApi>>) =>
     },
     { timeout: 10_000, interval: 50 }
   );
+
+/**
+ * How a maker's wake-ups fared, as `fared` there has them: theirs on the
+ * agent for them alone as on the one for everyone, and never one for
+ * someone else on theirs.
+ */
+const asOurs = (lastOutcome: string) => ({
+  mine: lastOutcome,
+  ours: lastOutcome,
+  someoneElse: "agent.not_for_you",
+});
 
 describe("an agent's wake-ups", setUpTime, () => {
   beforeEach(async () => {
@@ -269,6 +283,79 @@ describe("an agent's wake-ups", setUpTime, () => {
     await wakes.setAgentReach(claire.id, true, { who: "everyone" });
     await startDueAgentWakes(env, new Date(dueOf(made).getTime() + dayMs));
     await expect(settledChats(person)).resolves.toHaveLength(1);
+  });
+
+  it("wake an agent for its maker alone for them only, and as one for everyone once they lose their role, are suspended or removed", async () => {
+    const { admin, person, wakes } = await setUp();
+    await answeringProvider(() => says("Nothing."));
+    /** How each of a maker's agents' wake-ups for them fared after `lose`, and one for someone else. */
+    const fared = async (
+      name: string,
+      lose: (userId: string) => Promise<unknown>
+    ) => {
+      const made = await signedInApi(idp, "admin");
+      const agentWith = async (audience: AgentAudience) => {
+        const agent = await made.api.connections.makeAgent({
+          name: `${name} ${audience.who}`,
+          face: "claire",
+          job: "Chases unpaid invoices.",
+          modelRole: null,
+        });
+        await made.api.connections.setAgentReach(agent.id, true, audience);
+        return agent;
+      };
+      const mine = await agentWith({ who: "maker" });
+      const ours = await agentWith({ who: "everyone" });
+      const [forMine, forOurs, forSomeoneElse] = await Promise.all([
+        wakes.makeAgentWake(mine.id, said(made.userId)),
+        wakes.makeAgentWake(ours.id, said(made.userId)),
+        wakes.makeAgentWake(mine.id, said(person.userId)),
+      ]);
+      await lose(made.userId);
+      await startDueAgentWakes(env, dueOf(forMine));
+      // The turns it started end here, never in a later test.
+      const chats = workspace(env, personalWorkspaceId(made.userId));
+      await vi.waitFor(
+        async () => {
+          const all = await chats.chats(made.userId);
+          expect(all.every(({ running }) => !running)).toBeTruthy();
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      const [mineKept, oursKept, elseKept] = await Promise.all([
+        keptOf(wakes, forMine.id, mine.id),
+        keptOf(wakes, forOurs.id, ours.id),
+        keptOf(wakes, forSomeoneElse.id, mine.id),
+      ]);
+      return {
+        mine: mineKept?.lastOutcome,
+        ours: oursKept?.lastOutcome,
+        someoneElse: elseKept?.lastOutcome,
+      };
+    };
+
+    const outcomes = {
+      kept: await fared("Kept", async () => {}),
+      demoted: await fared("Demoted", async (userId) => {
+        await admin.api.members.setRole(userId, "user");
+      }),
+      suspended: await fared("Suspended", async (userId) => {
+        await env.DB.prepare(
+          "UPDATE members SET suspended_at = ?, suspended_by = 'directory' WHERE user_id = ?"
+        )
+          .bind(Date.now(), userId)
+          .run();
+      }),
+      removed: await fared("Removed", async (userId) => {
+        await admin.api.members.remove(userId);
+      }),
+    };
+    expect(outcomes).toStrictEqual({
+      kept: asOurs("started"),
+      demoted: asOurs("started"),
+      suspended: asOurs("permission.person_inactive"),
+      removed: asOurs("permission.person_inactive"),
+    });
   });
 
   it("wake the agent to a turn that only reads", async () => {

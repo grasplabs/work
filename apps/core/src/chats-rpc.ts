@@ -69,7 +69,7 @@ import { createFromBlueprint } from "./app-blueprints.ts";
 import { appKind, createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
-import { readChatFile } from "./chat-files.ts";
+import { readChatFile, readChatPicture } from "./chat-files.ts";
 import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
 import { chatWork, chatsWorkedOn, keepMadeInChat } from "./drafts.ts";
@@ -409,7 +409,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * A new chat, with the agent `agentId` (`chatAgentOf`), or the company's
    * first; from "Make something" (`make`), keeping what it came to make,
    * for a builder, and the project, for a builder of it, checked now:
-   * Build it makes things there.
+   * Build it makes things there. One to set up an agent only for the
+   * company's own admins, who alone make one.
    */
   async create(
     title: string,
@@ -437,7 +438,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (repeated !== undefined) {
         return summaryOfMade(repeated);
       }
-      if (making !== undefined) {
+      // An agent's setup is for the company's own admins, as making one is
+      // (`makeAgent`): refused as the chat starts, never after its
+      // questions. Grasp staff never set one up.
+      if (making?.data.kind === "agent") {
+        requireCompanyAdmin(person);
+      } else if (making !== undefined) {
         requireBuilder(person);
         if (making.data.project !== undefined) {
           requireNotStaff(person);
@@ -588,12 +594,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   /**
    * Reads the file's text (chat-files.ts), outside the person's Workspace
-   * object, then attaches it to their chat there, audited.
+   * object, or takes it whole when its bytes are a picture, then attaches
+   * it to their chat there, audited.
    */
   async attachFile(chatId: string, file: ChatFileInput): Promise<ChatFile> {
     return await withPerson(this.#check, async (person) => {
       const id = chatIdOf(chatId);
-      const read = await readChatFile(this.#env, file);
+      const read =
+        readChatPicture(file) ?? (await readChatFile(this.#env, file));
       return await this.#chatsOf(person.userId).attachFile(
         id,
         person.userId,

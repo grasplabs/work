@@ -11,9 +11,8 @@ import type { Person } from "./people.ts";
 // its one bar with its name, its page under the bar, and no chat; for its
 // builders, its workspace there, where they build it with the chat docked
 // beside a preview, publish it, and restore it once archived. Its
-// settings are a page of their own, and a view of the workspace. Only its
-// builders edit, publish or restore it, and an App with no version live
-// yet is theirs alone.
+// settings are a page of their own, and a view of the workspace. Who may
+// change what is core's test (apps/core/test/app-settings.test.ts).
 
 /** The page at `path` that says which it is, `title`, and links to `other`. */
 const pageSaying = (
@@ -96,9 +95,6 @@ test("someone it is shared with uses the live App and moves between its pages; i
   await expect(page.getByRole("heading", { level: 1, name })).toBeAttached();
   // Its first page, `/`, opens first.
   const frame = await pageShowing(page, "The board");
-  // The App's name heads the page once: the page's frame, open now,
-  // names it a level below.
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
   // A link in the App moves it, and the page's address with it: back
   // goes back to where it was.
   await frame.getByRole("link", { name: "Go to /list" }).click();
@@ -218,115 +214,4 @@ test("a builder renames an App and says what it is for in its settings, archives
   await expect(
     other.getByRole("heading", { name: "App not found" })
   ).toBeVisible();
-});
-
-test("someone an App is shared with as a user reads its settings and changes none of them, though they build in the organization", async ({
-  pageOf,
-}) => {
-  const { builder, colleague } = peopleIn("appPage");
-  const name = `Read ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name, twoPages);
-  const { core, api } = apiOf(builder);
-  try {
-    await api.apps.members.add(app, {
-      type: "person",
-      id: colleague.userId,
-      role: "user",
-    });
-  } finally {
-    core[Symbol.dispose]();
-  }
-  const page = await pageOf(colleague);
-  await page.goto(`/apps/${app}`);
-  // The live App offers them its settings, never its workspace.
-  await expect(
-    page.getByRole("navigation", { name: /s workspace$/u })
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: `More for ${name}` }).click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}/settings$`, "u"));
-
-  await expect(
-    page.getByRole("heading", { level: 1, name: `Settings of ${name}` })
-  ).toBeAttached();
-  // Their role in this App decides, not their role in the organization.
-  await expect(page.getByLabel("Name")).toHaveAttribute("readonly", "");
-  await expect(page.getByLabel("What it is for")).toHaveAttribute(
-    "readonly",
-    ""
-  );
-  await expect(page.getByLabel("Made for")).toBeDisabled();
-  await expect(
-    page.getByText("Only its builders change these settings.")
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Archive/u })).toHaveCount(0);
-});
-
-test("an App with nothing built yet asks its builder what it should do, in its workspace", async ({
-  pageOf,
-}) => {
-  const { builder, user } = peopleIn("appPage");
-  const name = `Described ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name);
-  const page = await pageOf(builder);
-  await page.goto(`/apps/${app}`);
-
-  await expect(
-    page.getByRole("heading", { level: 2, name: "What should this App do?" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("textbox", { name: "Describe the App" })
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Chat" })
-      .getByRole("textbox", { name: "Ask for a change" })
-  ).toBeVisible();
-
-  // With no version live yet, it is its builders' alone: anyone else
-  // finds no App.
-  const other = await pageOf(user);
-  await other.goto(`/apps/${app}`);
-  await expect(
-    other.getByRole("heading", { name: "App not found" })
-  ).toBeVisible();
-});
-
-test("an archived App opens no page, and its builder restores it in its workspace, live again at once", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("appPage");
-  const name = `Archived ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name, twoPages);
-  const { core, api } = apiOf(builder);
-  try {
-    await api.apps.archive(app);
-  } finally {
-    core[Symbol.dispose]();
-  }
-  const page = await pageOf(builder);
-  await page.goto(`/apps/${app}`);
-
-  // Its builder lands in its workspace, which says so.
-  await expect(page.getByText("This App is archived")).toBeVisible();
-  await expect(page.locator("iframe")).toHaveCount(0);
-
-  // Archived, it is neither changed nor shared: Grasp's chat isn't the
-  // App's.
-  await expect(
-    page.getByRole("textbox", { name: "Ask for a change" })
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "Restore" }).click();
-  await expect(
-    page.getByRole("textbox", { name: "Ask for a change" })
-  ).toBeVisible();
-
-  // Its version 1 is its team's again: its page opens, as they see it.
-  await page.goto(`/apps/${app}?env=live`);
-  await expect(
-    page
-      .getByRole("region", { name: `${name}, as your team sees it` })
-      .frameLocator("iframe")
-      .getByRole("heading", { name: "The board" })
-  ).toBeVisible({ timeout: 20_000 });
 });

@@ -122,7 +122,8 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   await expect(
     page.getByRole("region", { name: /, your version$/u })
   ).toBeVisible(read);
-  await page.getByRole("link", { name: "Code" }).click();
+  // The App's own views, not the sidebar's rows for them.
+  await page.getByRole("main").getByRole("link", { name: "Code" }).click();
   await page
     .getByRole("tree", { name: "Files" })
     .getByRole("treeitem", { name: "schema.ts" })

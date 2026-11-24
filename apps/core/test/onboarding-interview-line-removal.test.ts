@@ -18,7 +18,7 @@ import { z } from "zod";
 
 import { closesOn } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { platformKugelAudioKey } from "./connect-providers.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   accountOf,
@@ -796,7 +796,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     const [said] = progress.lines;
     const text = said?.text ?? "";
     const held = `voice-${unique()}`;
-    await plan(platformKugelAudioKey, [{ release: held }]);
+    await plan(platformMistralKey, [{ release: held }]);
 
     // The voice is asked for the line, and holds its answer.
     const speaking = speak({ text, language: "en", link });

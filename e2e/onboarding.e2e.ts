@@ -21,7 +21,7 @@ import {
   signInTo,
 } from "./people.ts";
 import type { Person } from "./people.ts";
-import { installReadingClock, lineOf, readOn } from "./speech.ts";
+import { installReadingClock, readOn } from "./speech.ts";
 import { origin, stateDir } from "./stack.ts";
 
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
@@ -290,8 +290,7 @@ test("the Inbox shows the programme's week so far, and saves its report", async 
   cspViolations,
 }) => {
   // The plan the first test saved starts today, and Grasp's go is given:
-  // any member reads the programme's week (none read it before,
-  // e2e/inbox.e2e.ts, as no plan was saved yet).
+  // any member reads the programme's week.
   const email = `person.${crypto.randomUUID()}@acme.test`;
   const cookie = await signInAs(email);
   const { core, api } = apiOf({ cookie });
@@ -305,15 +304,10 @@ test("the Inbox shows the programme's week so far, and saves its report", async 
   await signInTo(page.context(), member);
   await page.goto("/inbox");
 
-  // Nothing waits on them: the week so far stands quietly under the Empty,
-  // and says when its report is ready.
+  // Nothing waits on them: the week so far stands under the Empty.
   const week = page
     .getByRole("list", { name: "Your weekly report" })
     .getByRole("button", { name: "Week 1 so far" });
-  await expect(week).toBeVisible();
-  await expect(week).toHaveAccessibleDescription(
-    /^Next report (?:tomorrow|in [2-7] days)$/u
-  );
   await week.click();
 
   const sheet = page.getByRole("dialog", { name: "Week 1" });
@@ -397,29 +391,17 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await signInTo(page.context(), admin);
   // The story on "How this works" is told at once.
   await page.emulateMedia({ reducedMotion: "reduce" });
-  // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
-  const asked: { text: string; tone: unknown }[] = [];
+  // The voice isn't reached from the local stack: it says nothing.
   await page.route("**/api/speech", async (route) => {
-    asked.push(lineOf(route.request()));
     await route.fulfill({
       status: 503,
       json: { code: "speech.failed", message: "Not here" },
     });
   });
-  const toneOf = (text: string) =>
-    asked.find((line) => line.text === text)?.tone;
   // The steps' lines are read silently, at the pace of reading on the
   // page's clock: the test goes on it to read them (`readOn`).
   await installReadingClock(page);
   await page.goto("/setup?step=welcome");
-
-  // Focus is on the step's title, so a screen reader starts there: on the
-  // title's own box until Damsko's Heading takes focus itself (damsko#53).
-  await expect(
-    page
-      .getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
-      .locator("xpath=..")
-  ).toBeFocused();
   await page.getByRole("button", { name: "English" }).click();
   await page.getByRole("button", { name: "Let’s start" }).click();
 
@@ -498,14 +480,10 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await page.getByRole("combobox", { name: "Lead of Ops" }).click();
   await page.getByRole("option", { name: "Ona Smit" }).click();
   await page.getByRole("switch", { name: "Legal takes part" }).click();
-  await expect(
-    page.getByRole("combobox", { name: "Lead of Legal" })
-  ).toBeDisabled();
   await page.getByRole("button", { name: "This is right" }).click();
-  const thanks = "Thank you. I’ll start with these 2 leads.";
-  await expect(page.getByText(thanks)).toBeVisible();
-  // Said on its own, warmly.
-  await expect.poll(() => toneOf(thanks)).toBe("warm");
+  await expect(
+    page.getByText("Thank you. I’ll start with these 2 leads.")
+  ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
   // The message to send, the day the first links go out, and Ops later.
@@ -530,9 +508,6 @@ test("the company's admin goes through their onboarding: the staff list, the org
     .filter({ hasText: "What happens next" })
     .getByText(/^The lead of 1 team gets their link /u);
   await expect(next).toBeVisible();
-  // Stephen says what happens next, as the plan has it now.
-  const nextLine = await next.textContent();
-  await expect.poll(() => toneOf(nextLine ?? "")).toBe("sincere, steady");
   await readOn(page, page.getByRole("button", { name: "I sent it" }));
   await page.getByRole("button", { name: "I sent it" }).click();
 

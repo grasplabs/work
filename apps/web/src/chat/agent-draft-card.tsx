@@ -1,5 +1,8 @@
-import type { AgentDraftMade, AgentDrafted } from "@grasp-os/shared/agents";
-import type { ToolClassAudience } from "@grasp-os/shared/connect";
+import type {
+  AgentAudience,
+  AgentDraftMade,
+  AgentDrafted,
+} from "@grasp-os/shared/agents";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -75,13 +78,16 @@ export const AppNames = ({
 export const AudienceWords = ({
   audience,
 }: {
-  audience: ToolClassAudience | undefined;
+  audience: AgentAudience | undefined;
 }) => {
   if (audience === undefined || audience.who === "nobody") {
     return <Trans>Nobody yet: you say who on its page</Trans>;
   }
   if (audience.who === "everyone") {
     return <Trans>Everyone in the company</Trans>;
+  }
+  if (audience.who === "maker") {
+    return <Trans>Only whoever made it</Trans>;
   }
   return <TeamsWords teams={audience.teams} />;
 };

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { ChatFileInput, ChatFileType } from "./chat.ts";
 import { companyToolClasses, toolClassAudienceSchema } from "./connect.ts";
-import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
+import type { CompanyToolClass } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
 import {
@@ -103,12 +103,24 @@ export type AgentInput = z.input<typeof agentInputSchema>;
 /** As core reads it: every part said. */
 export type AgentSaid = z.output<typeof agentInputSchema>;
 
+/**
+ * Who may ask one of the company's agents: as a class of tools may be on
+ * for (nobody, everyone, some teams), or its maker alone (`maker`, the
+ * person `Agent.madeBy` names), for an agent an admin made for
+ * themselves. Never the first agent's, which nobody made.
+ */
+export const agentAudienceSchema = z.discriminatedUnion("who", [
+  ...toolClassAudienceSchema.options,
+  z.strictObject({ who: z.literal("maker") }),
+]);
+export type AgentAudience = z.infer<typeof agentAudienceSchema>;
+
 /** Whom an agent reaches and for whom it has each class, as core keeps it. */
 export interface AgentSettings {
   /** Whether it answers people at all. */
   on: boolean;
   /** Who may reach it. */
-  audience: ToolClassAudience;
+  audience: AgentAudience;
   /** Every class the company turns on or off, as this agent has it. */
   classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
 }
@@ -325,11 +337,15 @@ export interface AgentsApi {
    * agent's, which Settings › Stephen has.
    */
   agentSettings: (agentId: string) => Promise<AgentSettings>;
-  /** Turns an agent on or off for people, and says who may reach it. */
+  /**
+   * Turns an agent on or off for people, and says who may reach it. Its
+   * maker alone (`{ who: "maker" }`) is refused for the first agent,
+   * which nobody made.
+   */
   setAgentReach: (
     agentId: string,
     on: boolean,
-    audience: ToolClassAudience
+    audience: AgentAudience
   ) => Promise<void>;
   /** Says for whom an agent has a class: as the company has it, or fewer. */
   setAgentToolClass: (
@@ -414,7 +430,7 @@ export const agentDraftSchema = z
         message: `At most ${instructionsMaxLength} characters, counting each &, < and > as its escape`,
       }),
     whose: z.enum(["company", "own"]),
-    audience: toolClassAudienceSchema.optional(),
+    audience: agentAudienceSchema.optional(),
     classes: z
       .array(z.enum(companyToolClasses))
       .max(companyToolClasses.length)
@@ -497,7 +513,7 @@ export const agentChangeDraftSchema = z
       .optional(),
     addApps: draftAppsSchema.optional(),
     removeApps: draftAppsSchema.optional(),
-    audience: toolClassAudienceSchema.optional(),
+    audience: agentAudienceSchema.optional(),
     turnOn: z
       .array(z.enum(companyToolClasses))
       .max(companyToolClasses.length)
