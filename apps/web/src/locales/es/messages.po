@@ -1657,10 +1657,6 @@ msgstr "{waiting, plural, one {Usa # nuevo tipo de acceso. Un administrador lo a
 msgid "{waiting} waiting"
 msgstr "{waiting} en espera"
 
-#: src/connections/integrations-band.tsx
-msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
-msgstr "{waits, plural, one {# app espera a un administrador} other {# apps esperan a un administrador}}"
-
 #: src/chat/held-writes.tsx
 msgid "{what} didn't go through."
 msgstr "{what} no se llevó a cabo."
@@ -2860,6 +2856,10 @@ msgctxt "what an opportunity could become"
 msgid "An App"
 msgstr "Una App"
 
+#: src/connections/http-connections.tsx
+msgid "An app that isn't listed"
+msgstr "Una app que no aparece en la lista"
+
 #: src/apps/app-start.tsx
 msgid "An App that… (what it shows, and for whom)"
 msgstr "Una App que… (qué muestra y para quién)"
@@ -4035,6 +4035,15 @@ msgstr "Recuperó una oportunidad descartada"
 msgid "Brought changes from a connected system into the Brain"
 msgstr "Llevó al Brain los cambios de un sistema conectado"
 
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "every app to connect"
+msgid "Browse"
+msgstr "Explorar"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Browse apps"
+msgstr "Explorar apps"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Brussels"
@@ -5142,6 +5151,7 @@ msgstr "Coincide"
 
 #: src/agents/agent-apps-card.tsx
 #: src/chat/plan-card.tsx
+#: src/connections/app-actions.tsx
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/frame/part-words.tsx
@@ -5206,9 +5216,13 @@ msgstr "Conectar otra cuenta"
 msgid "Connect first: {systems}."
 msgstr "Conecta primero: {systems}."
 
-#: src/connections/integrations-band.tsx
-msgid "Connect the apps your work runs on"
-msgstr "Conecta las apps con las que trabajas"
+#: src/connections/http-connections.tsx
+msgid "Connect its API by address. Apps and workflows call it only with a permission."
+msgstr "Conecta su API por su dirección. Las apps y los flujos de trabajo solo la llaman con un permiso."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connect the apps your work runs on, and Grasp can work in them."
+msgstr "Conecta las apps con las que trabajas y Grasp podrá trabajar en ellas."
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
@@ -8494,10 +8508,6 @@ msgstr "Grasp ya no recuerda esto."
 msgid "Grasp opens for everyone soon. If you have an interview link, it is in your email."
 msgstr "Grasp se abrirá pronto para todos. Si tienes un enlace de entrevista, está en tu correo."
 
-#: src/connections/integrations-band.tsx
-msgid "Grasp reaches only what you connect."
-msgstr "Grasp solo accede a lo que conectas."
-
 #: src/settings/directory-reads.tsx
 msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
 msgstr "Grasp lee tu directorio una vez al día y mantiene los miembros, sus equipos y sus suspensiones tal como indica."
@@ -11752,6 +11762,10 @@ msgstr "Ninguna aplicación se llama «{asked}»"
 #: src/agents/setup/apps-step.tsx
 msgid "No apps added yet."
 msgstr "Aún no has añadido aplicaciones."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "No apps connected yet"
+msgstr "Aún no hay apps conectadas"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "No apps match your search"
@@ -22114,6 +22128,11 @@ msgstr "Tus palabras"
 #: src/agents/agents-overview.tsx
 msgid "Yours"
 msgstr "Tuyos"
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "this company's own apps"
+msgid "Yours"
+msgstr "Tus apps"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Yours alone: only you ask it"

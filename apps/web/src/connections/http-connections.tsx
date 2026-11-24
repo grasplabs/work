@@ -526,6 +526,30 @@ export const HttpConnectionItem = ({
  * and for admins the way to add one at its head. Nothing for anyone else
  * while there are none.
  */
+/**
+ * Adding an outside API: a slim row at the end of Browse, the way around
+ * the catalog (Ruben, 23 Nov 2026: "https connections does not need to be
+ * this big bar"). Admins only.
+ */
+export const AnyOtherApi = ({ identity }: { identity: Identity }) => {
+  const { t } = useLingui();
+  if (!isMemberAdmin(identity)) {
+    return null;
+  }
+  return (
+    <Item size="sm" variant="outline">
+      <ItemMedia icon={Web} />
+      <ItemContent>
+        <ItemTitle>{t`An app that isn't listed`}</ItemTitle>
+        <ItemDescription>{t`Connect its API by address. Apps and workflows call it only with a permission.`}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <AddHttpConnection />
+      </ItemActions>
+    </Item>
+  );
+};
+
 export const HttpConnections = ({
   connections,
   identity,
@@ -544,7 +568,8 @@ export const HttpConnections = ({
     connections === undefined
       ? []
       : httpConnectionsMatching(connections, search);
-  if (!manages && shown.length === 0) {
+  // Adding one is at the end of Browse (AnyOtherApi): no empty card here.
+  if (shown.length === 0) {
     return null;
   }
   return (

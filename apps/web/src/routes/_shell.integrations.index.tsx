@@ -19,13 +19,13 @@ import { connectionErrorMessage } from "../connection-errors.ts";
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { groupLabel } from "../connections/groups.ts";
 import {
+  AnyOtherApi,
   HttpConnections,
   httpConnectionsMatching,
 } from "../connections/http-connections.tsx";
 import { IntegrationPanel } from "../connections/integration-panel.tsx";
 import { IntegrationTile } from "../connections/integration-tile.tsx";
 import type { OpenApp } from "../connections/integration-tile.tsx";
-import { IntegrationsBand } from "../connections/integrations-band.tsx";
 import { knownOf, loadIntegrations } from "../connections/integrations-data.ts";
 import { IntegrationsSkeleton } from "../connections/integrations-skeleton.tsx";
 import { integrationsOf, sectionsOf } from "../connections/integrations.ts";
@@ -62,26 +62,31 @@ import {
 } from "../grasp/input-group/index.ts";
 import { ItemGrid } from "../grasp/item/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Tabs,
+  TabsList,
+  TabsContent,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// Integrations: what Grasp can reach. A slim band says it at a glance,
-// with the connected apps' marks at its end (integrations-band.tsx), then
-// the apps to connect first, each saying why (recommended-apps.tsx; Ruben's
-// direction B, 20 Nov 2026). Every app is a small tile with its own mark
-// (Ruben, 19 Nov 2026: tiles, not rows, so many apps fit): what is
-// connected, then each kind of app, a few of each, leaving out the
-// recommended ones. The kinds themselves stand in the
-// sidebar (integrations-sidebar.tsx), each opening that kind whole here
-// (`?group=`); the search beside "Request app" narrows every app. An app
-// opens in a panel over the page (`?app=`), which never squeezes the
-// tiles, and its own page holds everything rarely changed. Tiles, panel
-// and page are the library's app parts (Grasp UI's app-integration
-// block), drawn from one App each (connections/app-of.tsx). Outside APIs
-// an admin approved, the apps people asked for and what an admin still
-// has to revoke by hand follow. Core's callback sends a flow that failed
-// back here with `connectionError=<code>`, and one that worked with
+// Integrations: what Grasp can reach, in two tabs (Ruben, 23 Nov 2026).
+// Yours: what is connected, then the apps to connect first, each saying
+// why (recommended-apps.tsx), then the outside APIs an admin approved and
+// the apps people asked for that the catalog doesn't list. Browse
+// (`?tab=browse`): each kind of app, a few of each, the kinds themselves
+// in the sidebar (integrations-sidebar.tsx), each opening that kind whole
+// (`?group=`); at its end, an outside API added by address. The search
+// beside "Request app" narrows every app, connected or not, in Browse.
+// Every app is a small tile with its own mark (Ruben, 19 Nov 2026: tiles,
+// not rows, so many apps fit). An app opens in a panel over the page
+// (`?app=`), which never squeezes the tiles, and its own page holds
+// everything rarely changed. Tiles, panel and page are the library's app
+// parts (Grasp UI's app-integration block), drawn from one App each
+// (connections/app-of.tsx). Core's callback sends a flow that failed back
+// here with `connectionError=<code>`, and one that worked with
 // `connection=<id>`.
 
 /** What the address holds. */
@@ -94,6 +99,8 @@ interface IntegrationsSearch {
   connectionError?: string;
   /** A connection a flow just made, when core sent it back here. */
   connection?: string;
+  /** The catalog to browse, in place of this company's own apps. */
+  tab?: "browse";
 }
 
 /** How many of a kind's apps show before "Show all", where every kind shows. */
@@ -298,13 +305,10 @@ const Drawn = ({
 /** Every kind of app, a few of each, with the rest of a kind a press away. */
 const Kinds = ({
   others,
-  recommended,
   open,
   onOpen,
 }: {
   others: readonly Integration[];
-  /** The recommended apps' keys: they stand in their own run above. */
-  recommended: ReadonlySet<string>;
   open: string | undefined;
   onOpen: OpenApp;
 }) => {
@@ -312,9 +316,7 @@ const Kinds = ({
   const { t, i18n } = useLingui();
   return catalogGroups.map((group) => {
     const ofKind = others.filter((integration) => integration.group === group);
-    const shown = ofKind
-      .filter((integration) => !recommended.has(integration.key))
-      .slice(0, perKind);
+    const shown = ofKind.slice(0, perKind);
     if (shown.length === 0) {
       return null;
     }
@@ -360,14 +362,12 @@ const Kinds = ({
  */
 const Others = ({
   others,
-  recommended,
   group,
   q,
   open,
   onOpen,
 }: {
   others: readonly Integration[];
-  recommended: ReadonlySet<string>;
   group: CatalogGroup | undefined;
   q: string | undefined;
   open: string | undefined;
@@ -378,14 +378,7 @@ const Others = ({
     return null;
   }
   if (q === undefined && group === undefined) {
-    return (
-      <Kinds
-        onOpen={onOpen}
-        open={open}
-        others={others}
-        recommended={recommended}
-      />
-    );
+    return <Kinds onOpen={onOpen} open={open} others={others} />;
   }
   const title =
     group === undefined
@@ -486,33 +479,57 @@ const Notices = ({
 };
 
 /**
- * Below the apps: outside APIs an admin approved and the apps people asked
- * for. While someone searches, only the outside APIs the search finds.
+ * The end of Yours: the outside APIs an admin approved, and the apps
+ * people asked for that the catalog doesn't list.
  */
 const Extras = ({
   identity,
+  integrations,
   listed,
-  q,
   requests,
 }: {
   identity: Identity;
+  integrations: readonly Integration[];
   listed: Parameters<typeof httpConnectionsMatching>[0] | undefined;
-  q: string | undefined;
   requests: Parameters<typeof RequestedApps>[0]["requests"];
-}) => {
-  if (
-    q !== undefined &&
-    httpConnectionsMatching(listed ?? [], q).length === 0
-  ) {
-    return null;
-  }
+}) => (
+  <>
+    <HttpConnections
+      connections={listed}
+      identity={identity}
+      search={undefined}
+    />
+    <RequestedApps
+      integrations={integrations}
+      requests={requests}
+      search={undefined}
+    />
+  </>
+);
+
+/** How many apps are connected, needing someone or not. */
+const connectedCount = (sections: IntegrationSections): number =>
+  sections.lapsed.length + sections.connected.length + sections.unused.length;
+
+/** Yours with nothing connected and nothing to recommend: Browse is where to start. */
+const NothingYet = () => {
+  const { t } = useLingui();
   return (
-    <>
-      <HttpConnections connections={listed} identity={identity} search={q} />
-      {q === undefined ? (
-        <RequestedApps requests={requests} search={q} />
-      ) : null}
-    </>
+    <Empty shape="cards" size="md">
+      <EmptyHeader>
+        <EmptyMedia picture="search" />
+        <EmptyTitle>{t`No apps connected yet`}</EmptyTitle>
+        <EmptyDescription>{t`Connect the apps your work runs on, and Grasp can work in them.`}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button
+          render={<Link search={{ tab: "browse" }} to="/integrations" />}
+          variant="quiet"
+        >
+          {t`Browse apps`}
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 };
 
@@ -551,12 +568,10 @@ const shownOf = (
     );
     return { others, shown: others.length };
   }
-  const connected =
-    first.lapsed.length + first.connected.length + first.unused.length;
   return {
     others: first.others,
     shown:
-      connected +
+      connectedCount(first) +
       first.others.length +
       httpConnectionsMatching(listed, q).length,
   };
@@ -572,7 +587,7 @@ const Integrations = () => {
   const { catalog, connections, known, requests, toRevoke, uses } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { q, group, app, connectionError, connection } = Route.useSearch();
+  const { q, group, app, connectionError, connection, tab } = Route.useSearch();
   const { t, i18n } = useLingui();
   const listed = connections.state === "ready" ? connections.data : undefined;
   const integrations = integrationsOf(
@@ -595,9 +610,9 @@ const Integrations = () => {
       search: (last) => ({ ...last, app: key }),
     });
   };
-  // The overview itself: no kind chosen and nothing searched.
-  const overview = group === undefined && q === undefined;
-  const recommended = overview ? recommendedOf(integrations, known) : [];
+  // Browse: the catalog, chosen as a tab, or by a kind or a search.
+  const browsing = tab === "browse" || group !== undefined || q !== undefined;
+  const recommended = recommendedOf(integrations, known);
   const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
   const crumbs = crumbsOf(t`Integrations`, kind);
   // The apps and the connections are the page: without either, it failed
@@ -647,72 +662,109 @@ const Integrations = () => {
             ? ""
             : t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`}
         </output>
-        <div {...stylex.props(styles.lists)}>
-          {overview ? (
-            <IntegrationsBand identity={identity} integrations={integrations} />
-          ) : null}
-          <RecommendedApps
-            identity={identity}
-            onOpen={onOpen}
-            open={app}
-            recommended={recommended}
-          />
-          {group === undefined ? (
-            <Await
-              fallback={
+        <Tabs
+          onValueChange={(value) => {
+            void navigate({
+              search: (last) => ({
+                ...last,
+                tab: value === "browse" ? "browse" : undefined,
+                group: undefined,
+                q: undefined,
+              }),
+            });
+          }}
+          value={browsing ? "browse" : "yours"}
+        >
+          <TabsList aria-label={t`Integrations`}>
+            <TabsTrigger value="yours">
+              {t({ message: "Yours", context: "this company's own apps" })}
+            </TabsTrigger>
+            <TabsTrigger value="browse">
+              {t({ message: "Browse", context: "every app to connect" })}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="yours">
+            <div {...stylex.props(styles.lists)}>
+              <Await
+                fallback={
+                  <Connected
+                    onOpen={onOpen}
+                    open={app}
+                    sections={first}
+                    uses={undefined}
+                  />
+                }
+                promise={uses}
+              >
+                {(read) => {
+                  const used = read.state === "ready" ? read.data : undefined;
+                  return (
+                    <Connected
+                      onOpen={onOpen}
+                      open={app}
+                      sections={sectionsOf(
+                        integrations,
+                        { show: "all" },
+                        q,
+                        used
+                      )}
+                      uses={used}
+                    />
+                  );
+                }}
+              </Await>
+              <RecommendedApps
+                identity={identity}
+                onOpen={onOpen}
+                open={app}
+                recommended={recommended}
+              />
+              {connectedCount(first) === 0 && recommended.length === 0 ? (
+                <NothingYet />
+              ) : null}
+              <Extras
+                identity={identity}
+                integrations={integrations}
+                listed={listed}
+                requests={requests}
+              />
+            </div>
+          </TabsContent>
+          <TabsContent value="browse">
+            <div {...stylex.props(styles.lists)}>
+              {q === undefined ? null : (
                 <Connected
                   onOpen={onOpen}
                   open={app}
                   sections={first}
                   uses={undefined}
                 />
-              }
-              promise={uses}
-            >
-              {(read) => {
-                const used = read.state === "ready" ? read.data : undefined;
-                return (
-                  <Connected
-                    onOpen={onOpen}
-                    open={app}
-                    sections={sectionsOf(
-                      integrations,
-                      { show: "all" },
-                      q,
-                      used
-                    )}
-                    uses={used}
-                  />
-                );
-              }}
-            </Await>
-          ) : null}
-          <Others
-            group={group}
-            onOpen={onOpen}
-            open={app}
-            others={others}
-            q={q}
-            recommended={
-              new Set(recommended.map(({ integration }) => integration.key))
-            }
-          />
-          {shown === 0 ? (
-            <NothingFound
-              onRequest={() => {
-                setRequesting(true);
-              }}
-            />
-          ) : null}
-          {group === undefined ? (
-            <Extras
-              identity={identity}
-              listed={listed}
-              q={q}
-              requests={requests}
-            />
-          ) : null}
-        </div>
+              )}
+              <Others
+                group={group}
+                onOpen={onOpen}
+                open={app}
+                others={others}
+                q={q}
+              />
+              {q === undefined ? null : (
+                <HttpConnections
+                  connections={listed}
+                  identity={identity}
+                  search={q}
+                />
+              )}
+              {shown === 0 ? (
+                <NothingFound
+                  onRequest={() => {
+                    setRequesting(true);
+                  }}
+                />
+              ) : null}
+              <AnyOtherApi identity={identity} />
+            </div>
+          </TabsContent>
+        </Tabs>
       </Page>
       {opened === undefined ? null : (
         <IntegrationPanel
@@ -746,6 +798,7 @@ export const Route = createFileRoute("/_shell/integrations/")({
     app: textOf(search.app),
     connectionError: textOf(search.connectionError),
     connection: textOf(search.connection),
+    tab: search.tab === "browse" ? "browse" : undefined,
   }),
   // No `shouldReload`: the router reads the page again as it is entered,
   // when another admin may have connected, and not when only the search

@@ -113,7 +113,11 @@ const opened = async (): Promise<AppRequestInput[]> => {
             }}
             open
           />
-          <RequestedApps requests={requests} search={undefined} />
+          <RequestedApps
+            integrations={[]}
+            requests={requests}
+            search={undefined}
+          />
         </>
       );
     },

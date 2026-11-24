@@ -21,6 +21,7 @@ import { InspectorPanel } from "../../inspector-panel";
 import type { InspectorSection } from "../../inspector-panel";
 import { RowList, RowListItem } from "../../row-list";
 import { Sheet, SheetContent, SheetTitle } from "../../sheet";
+import { Skeleton } from "../../skeleton";
 import { grasp } from "../../tokens/tokens.stylex";
 import { useWords } from "../../words/words";
 import type { App } from "./model";
@@ -53,6 +54,14 @@ const styles = stylex.create({
     borderBlockEndStyle: "solid",
     borderBlockEndColor: grasp.line,
   },
+  // While the tools are read: the bar's line, then a line for each group, at the panel's inset.
+  waiting: {
+    display: "grid",
+    gap: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+    paddingBlock: grasp.space2,
+  },
+  waitingRow: { width: "60%" },
 });
 
 /** Every prop an AppPanel takes. */
@@ -64,6 +73,11 @@ export interface AppPanelProps extends AppActions {
   from?: HTMLElement | null;
   /** The app's own page: Settings, and All tools. */
   settingsHref: string;
+  /**
+   * Its tools are still being read: What Grasp may do holds their place with waiting lines.
+   * @default false
+   */
+  toolsLoading?: boolean;
   /** This instance's own words, over the catalogue's, key by key. */
   words?: Partial<AppIntegrationWords>;
 }
@@ -71,11 +85,22 @@ export interface AppPanelProps extends AppActions {
 /** Most groups the panel names: the rest are on the app's page. */
 const SHOWN_GROUPS = 3;
 
+/** What Grasp may do while the tools are read: the bar's line and a line for each of the SHOWN_GROUPS. */
+const toolsWaiting = (
+  <div aria-hidden {...stylex.props(styles.waiting)}>
+    <Skeleton text="sm" />
+    <Skeleton text="sm" layout={styles.waitingRow} />
+    <Skeleton text="sm" layout={styles.waitingRow} />
+    <Skeleton text="sm" layout={styles.waitingRow} />
+  </div>
+);
+
 /** The panel's sections: its account, what it can do, and what uses it. */
 const sectionsOf = (
   app: App,
   settingsHref: string,
-  words: AppIntegrationWords
+  words: AppIntegrationWords,
+  toolsLoading: boolean
 ): InspectorSection[] => {
   const tools = app.tools ?? [];
   const sections: InspectorSection[] = [];
@@ -98,6 +123,9 @@ const sectionsOf = (
         },
       ],
     });
+  }
+  if (tools.length === 0 && toolsLoading) {
+    sections.push({ id: "can", label: words.mayDo, content: toolsWaiting });
   }
   if (tools.length > 0) {
     // The groups with the most allowed first; before it is connected, the largest.
@@ -175,6 +203,7 @@ export const AppPanel = ({
   onOpenChange,
   from,
   settingsHref,
+  toolsLoading = false,
   words: given,
   ...actions
 }: AppPanelProps) => {
@@ -243,7 +272,7 @@ export const AppPanel = ({
               </>
             }
             onClose={close}
-            sections={sectionsOf(app, settingsHref, words)}
+            sections={sectionsOf(app, settingsHref, words, toolsLoading)}
             words={{ close: words.close }}
           />
         </div>

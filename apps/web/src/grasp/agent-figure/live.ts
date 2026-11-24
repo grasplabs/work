@@ -377,7 +377,13 @@ const AURA_PITCH = 3;
  */
 export const mountAura = (
   canvas: HTMLCanvasElement,
-  options: { colours: readonly string[]; seed: number; bright: number }
+  options: {
+    colours: readonly string[];
+    seed: number;
+    bright: number;
+    /** The light rises from the box's end corner, where a card's figure stands, not its middle. */
+    corner?: boolean;
+  }
 ): {
   recolour: (colours: readonly string[]) => void;
   brighten: (bright: number) => void;
@@ -405,11 +411,15 @@ export const mountAura = (
     const column = cell % columns;
     const row = Math.floor(cell / columns);
     const chance = hash(column * 1.31, row * 2.17);
+    const near = behind[cell] ?? 0;
+    // From a corner, points of light come only where its light reaches, never over the words.
+    const reach = options.corner === true ? Math.min(1, near * 2.5) : 1;
     const twinkle =
       chance > 0.985
-        ? 0.5 + 0.5 * Math.sin(seconds * (0.6 + chance * 1.4) + chance * 40)
+        ? reach *
+          (0.5 + 0.5 * Math.sin(seconds * (0.6 + chance * 1.4) + chance * 40))
         : 0;
-    const light = bright * (0.62 * (behind[cell] ?? 0) + 0.9 * twinkle);
+    const light = bright * (0.62 * near + 0.9 * twinkle);
     return Math.max(
       0,
       Math.min(3, Math.floor(light * 3 + thresholdAt(column, row) - 0.5))
@@ -420,13 +430,23 @@ export const mountAura = (
     twinkling = [];
     levels = new Uint8Array(columns * rows);
     const aspect = columns / Math.max(1, rows);
+    // Where the light rises: the middle, or the block end's inline end corner (the left one when
+    // the text runs right to left).
+    const fromCorner = options.corner === true;
+    const end = getComputedStyle(canvas).direction === "rtl" ? -1 : 1;
+    const origin = fromCorner ? { x: end, y: 1 } : { x: 0, y: 0 };
+    // From a corner it falls off faster, so the card's top, where its words stand, stays dark.
+    const spread = fromCorner ? 0.4 : 0.55;
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < columns; column += 1) {
         const x = ((column + 0.5) / columns) * 2 - 1;
         const y = ((row + 0.5) / rows) * 2 - 1;
         // A soft light behind where the figure stands.
-        const dx = x * aspect * 0.62;
-        behind[row * columns + column] = Math.exp(-(dx * dx + y * y) / 0.55);
+        const dx = (x - origin.x) * aspect * 0.62;
+        const dy = (y - origin.y) * (fromCorner ? 0.62 : 1);
+        behind[row * columns + column] = Math.exp(
+          -(dx * dx + dy * dy) / spread
+        );
         // A few points of light, each coming and going at its own pace.
         if (hash(column * 1.31, row * 2.17) > 0.985) {
           twinkling.push(row * columns + column);

@@ -17,10 +17,11 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { HttpConnections } from "./http-connections.tsx";
+import { AnyOtherApi, HttpConnections } from "./http-connections.tsx";
 
-// The Integrations page's HTTP connections (http-connections.tsx), against
-// core's `connections` as the page reaches it, faked: only an admin who
+// The Integrations page's HTTP connections (http-connections.tsx): the
+// card of those approved, and the row at the end of Browse that adds one,
+// against core's `connections` as the page reaches it, faked: only an admin who
 // isn't Grasp staff is offered the form and Revoke; what they type is
 // exactly what core is asked to approve; the credential is never shown
 // back, nor kept in the form; revoking asks first. Core and connect decide
@@ -132,11 +133,14 @@ const shown = async (
   const Page = () => {
     const read: ListedConnection[] | null = useLoaderData({ strict: false });
     return (
-      <HttpConnections
-        connections={read ?? undefined}
-        identity={viewer}
-        search={undefined}
-      />
+      <>
+        <HttpConnections
+          connections={read ?? undefined}
+          identity={viewer}
+          search={undefined}
+        />
+        <AnyOtherApi identity={viewer} />
+      </>
     );
   };
   const router = createRouter({
@@ -249,7 +253,8 @@ describe(HttpConnections, () => {
     }
 
     expect(seen).toStrictEqual({
-      admin: ["Add", "Revoke"],
+      // The card's Add, its Revoke, and the row's Add.
+      admin: ["Add", "Revoke", "Add"],
       staff: [],
       builder: [],
       user: [],

@@ -14,6 +14,8 @@ import {
 } from "../grasp/item/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { IntegrationsSection } from "./integrations-section.tsx";
+import { plain } from "./integrations.ts";
+import type { Integration } from "./integrations.ts";
 import { ProviderMark } from "./provider-mark.tsx";
 
 // The apps people asked Grasp to add, until Grasp adds them, as in the
@@ -52,16 +54,22 @@ const RequestedRow = ({ request }: { request: AppRequest }) => {
 const RequestedList = ({
   requests,
   search,
+  listed,
 }: {
   requests: Loaded<AppRequest[]>;
   search: string | undefined;
+  listed: ReadonlySet<string>;
 }) => {
   const { t } = useLingui();
   const needle = (search ?? "").trim().toLocaleLowerCase();
+  // An app the catalog lists can be connected now: Recommended names it,
+  // with how many asked, so it isn't waiting on Grasp here.
   const shown =
     requests.state === "ready"
-      ? requests.data.filter(({ name }) =>
-          name.toLocaleLowerCase().includes(needle)
+      ? requests.data.filter(
+          ({ name }) =>
+            !listed.has(plain(name)) &&
+            name.toLocaleLowerCase().includes(needle)
         )
       : [];
   return (
@@ -83,12 +91,24 @@ const RequestedList = ({
 export const RequestedApps = ({
   requests,
   search,
+  integrations,
 }: {
   /** Read on its own, so the catalog never waits for it. */
   requests: Promise<Loaded<AppRequest[]>>;
   search: string | undefined;
-}) => (
-  <Await fallback={null} promise={requests}>
-    {(loaded) => <RequestedList requests={loaded} search={search} />}
-  </Await>
-);
+  /** The catalog's apps: one asked for that it lists isn't waiting on Grasp. */
+  integrations: readonly Integration[];
+}) => {
+  const listed = new Set(
+    integrations
+      .filter((integration) => integration.listed)
+      .map(({ name }) => plain(name))
+  );
+  return (
+    <Await fallback={null} promise={requests}>
+      {(loaded) => (
+        <RequestedList listed={listed} requests={loaded} search={search} />
+      )}
+    </Await>
+  );
+};

@@ -69,7 +69,8 @@ const tools: CatalogTool[] = [
 const entry = (
   source: "native" | "composio",
   id: string,
-  name: string
+  name: string,
+  auth: OfferedCatalog["entries"][number]["auth"] = "managed"
 ): OfferedCatalog["entries"][number] => ({
   source,
   id,
@@ -79,7 +80,7 @@ const entry = (
   logo: null,
   description: `${name}, in a sentence.`,
   group: "Other",
-  auth: "managed",
+  auth,
   offered: true,
 });
 
@@ -157,6 +158,8 @@ const opened = async (
     [
       entry("composio", "hubspot", "HubSpot"),
       entry("native", "microsoft", "Microsoft 365"),
+      // Composio has no sign-in app of its own for it.
+      entry("composio", "workday", "Workday", "own"),
     ],
     connections
   ).find((each) => each.id === id);
@@ -355,17 +358,62 @@ describe("an app's panel", () => {
     });
   });
 
-  it("gives members and Grasp's staff nothing to connect a toolkit with", async () => {
-    await opened("hubspot", [], person({ role: "user" }));
-    const member = buttons("Connect").length;
-    act(() => {
-      root?.unmount();
-    });
-    document.body.innerHTML = "";
-    await opened("hubspot", [], person({ staff: true }));
-    const staff = buttons("Connect").length;
+  it("gives no Connect to whoever can't connect a toolkit, saying why in its place", async () => {
+    /** The panel of `id` as `identity` sees it: its Connects, and whether it says `why`. */
+    const seen = async (id: string, identity: Identity, why: string) => {
+      await opened(id, [], identity);
+      const shown = {
+        connects: buttons("Connect").length,
+        why: document.body.textContent.includes(why),
+      };
+      act(() => {
+        root?.unmount();
+      });
+      document.body.innerHTML = "";
+      return shown;
+    };
 
-    expect({ member, staff }).toStrictEqual({ member: 0, staff: 0 });
+    expect({
+      member: await seen(
+        "hubspot",
+        person({ role: "user" }),
+        "An admin connects this for everyone."
+      ),
+      staff: await seen(
+        "hubspot",
+        person({ staff: true }),
+        "Grasp staff can't connect accounts"
+      ),
+      ownSignInApp: await seen(
+        "workday",
+        person(),
+        "needs your organization's own sign-in app"
+      ),
+    }).toStrictEqual({
+      member: { connects: 0, why: true },
+      staff: { connects: 0, why: true },
+      ownSignInApp: { connects: 0, why: true },
+    });
+  });
+
+  it("holds an admin's Connect, not pressable, until the toolkit's tools are read", async () => {
+    const { promise: read, resolve } = Promise.withResolvers<CatalogTool[]>();
+    await opened("hubspot", [], person(), {
+      catalogTools: async () => await read,
+    });
+    const waiting = buttons("Connect").map((each) =>
+      each.hasAttribute("disabled")
+    );
+    await act(async () => {
+      resolve(tools);
+      await read;
+    });
+    await settled();
+
+    expect({
+      waiting,
+      read: buttons("Connect").map((each) => each.hasAttribute("disabled")),
+    }).toStrictEqual({ waiting: [true], read: [false] });
   });
 
   it("offers signing in again to a lapsed native connection under Manage", async () => {

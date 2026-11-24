@@ -9,8 +9,8 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { useAppActions, useMenuDisconnect } from "./app-actions.tsx";
 import { useAppOf, useSettled } from "./app-of.tsx";
-import { waitsForAdmin } from "./connect-dialog.tsx";
 import { FollowLinks } from "./follow-links.tsx";
+import { useWhyNoConnect } from "./integration-facts.ts";
 import type { Integration } from "./integrations.ts";
 import type { ConnectionUses } from "./workflows-using.tsx";
 
@@ -94,6 +94,11 @@ export const IntegrationPanel = ({
     accountRows: false,
   });
   const disconnect = useMenuDisconnect(integration, identity);
+  // Where this person can't connect it, the head says why in Connect's
+  // place, as the app's page does: an admin connects it, it isn't offered,
+  // or it needs the organization's own sign-in app.
+  const whyNoConnectOf = useWhyNoConnect();
+  const why = whyNoConnectOf(integration, identity);
   return (
     <FollowLinks>
       <AppPanel
@@ -106,9 +111,11 @@ export const IntegrationPanel = ({
         }}
         open
         settingsHref={`/integrations/${integration.key}`}
+        toolsLoading={read !== undefined && tools === undefined}
         {...actions}
         {...disconnect.actions}
-        member={waitsForAdmin(integration, identity)}
+        member={why !== undefined}
+        {...(why === undefined ? {} : { words: { adminConnects: why } })}
       />
       {dialogs}
       {disconnect.dialog}
