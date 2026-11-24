@@ -1,6 +1,9 @@
 import type { AgentDraftMade, AgentDrafted } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
@@ -83,19 +86,53 @@ export const AudienceWords = ({
   return <TeamsWords teams={audience.teams} />;
 };
 
-/** One line of the card: what it says, and of what. */
-export const Line = ({
-  label,
+const styles = stylex.create({
+  // Kept as written, its lines too: a long one scrolls in its own room.
+  long: {
+    display: "block",
+    maxHeight: "16rem",
+    overflowY: "auto",
+    whiteSpace: "pre-wrap",
+  },
+  shorter: { maxHeight: "8rem" },
+});
+
+/** Words the model wrote, as it wrote them: all of it, as it will be kept; a long one scrolls. */
+export const Long = ({
   children,
+  short = false,
 }: {
-  label: string;
   children: ReactNode;
+  /** Half the room, for what stands over something longer. */
+  short?: boolean;
 }) => (
-  <div className="flex flex-col gap-0.5">
-    <dt className="text-muted-foreground text-xs">{label}</dt>
-    <dd className="text-sm">{children}</dd>
-  </div>
+  <span {...stylex.props(styles.long, short && styles.shorter)}>
+    {children}
+  </span>
 );
+
+/** When an agent works on its own, as the card says it: its schedule, zone and what it opens with. */
+export const ScheduleWords = ({
+  schedule,
+}: {
+  schedule: NonNullable<AgentDrafted["schedule"]>;
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {schedule.cron}
+      {" · "}
+      {schedule.timeZone ?? t`the company's time zone`}
+      {" · "}
+      {schedule.opening}
+    </>
+  );
+};
+
+/** The card's lines, those it has. */
+export const linesOf = (
+  lines: readonly (KeyValueItem | false)[]
+): KeyValueItem[] => lines.filter((line) => line !== false);
 
 /** The drafted agent as a card, with `actions` while it waits. */
 export const AgentDraftCard = ({
@@ -127,52 +164,55 @@ export const AgentDraftCard = ({
       label={t`An agent to make: ${name}`}
       title={name}
     >
-      <dl className="flex flex-col gap-3">
-        {job === "" ? null : <Line label={t`What it is for`}>{job}</Line>}
-        <Line label={t`Whose it is`}>
-          {company ? (
-            <Trans>One of the company&apos;s agents</Trans>
-          ) : (
-            <Trans>Yours alone: only you ask it</Trans>
-          )}
-        </Line>
-        {company ? (
-          <Line label={t`Who may ask it`}>
-            <AudienceWords audience={draft.audience} />
-          </Line>
-        ) : null}
-        <Line label={t`Apps it uses`}>
-          {apps.length === 0 ? (
-            <Trans>Any app its kinds of work allow</Trans>
-          ) : (
-            <AppNames apps={apps} />
-          )}
-        </Line>
-        {company ? (
-          <Line label={t`What it may do`}>
-            {classes.length === 0 ? (
-              <Trans>Nothing yet: you turn it on on its page</Trans>
+      <KeyValueList
+        items={linesOf([
+          job !== "" && { id: "job", label: t`What it is for`, value: job },
+          {
+            id: "whose",
+            label: t`Whose it is`,
+            value: company ? (
+              <Trans>One of the company&apos;s agents</Trans>
             ) : (
-              classes.map((each) => i18n._(classNames[each])).join(", ")
-            )}
-          </Line>
-        ) : null}
-        {schedule === undefined ? null : (
-          <Line label={t`When it works on its own`}>
-            <span className="font-mono text-xs">{schedule.cron}</span>
-            {" · "}
-            {schedule.timeZone ?? t`the company's time zone`}
-            {" · "}
-            {schedule.opening}
-          </Line>
-        )}
-        <Line label={t`Its instructions`}>
-          {/* All of it, as it will be kept: long ones scroll. */}
-          <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
-            {instructions}
-          </span>
-        </Line>
-      </dl>
+              <Trans>Yours alone: only you ask it</Trans>
+            ),
+          },
+          company && {
+            id: "audience",
+            label: t`Who may ask it`,
+            value: <AudienceWords audience={draft.audience} />,
+          },
+          {
+            id: "apps",
+            label: t`Apps it uses`,
+            value:
+              apps.length === 0 ? (
+                <Trans>Any app its kinds of work allow</Trans>
+              ) : (
+                <AppNames apps={apps} />
+              ),
+          },
+          company && {
+            id: "classes",
+            label: t`What it may do`,
+            value:
+              classes.length === 0 ? (
+                <Trans>Nothing yet: you turn it on on its page</Trans>
+              ) : (
+                classes.map((each) => i18n._(classNames[each])).join(", ")
+              ),
+          },
+          schedule !== undefined && {
+            id: "schedule",
+            label: t`When it works on its own`,
+            value: <ScheduleWords schedule={schedule} />,
+          },
+          {
+            id: "instructions",
+            label: t`Its instructions`,
+            value: <Long>{instructions}</Long>,
+          },
+        ])}
+      />
     </MakeCard>
   );
 };

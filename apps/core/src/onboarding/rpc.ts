@@ -114,7 +114,9 @@ import { summaryOf } from "./summary.ts";
 // against the shared schemas before the store sees it. Its programme
 // (when it began, and where it stands) is for everyone signed in, for the
 // weekly report: the plan's first week and the stage, and nothing of the plan
-// or the roster past them. Who works where can also come from the
+// or the roster past them. With it go the suites the kickoff says the
+// company works in, which tell every member why a connection is
+// recommended, and nothing else the kickoff said (GRA-2302). Who works where can also come from the
 // organization's directory, connected here and read for the admin's
 // browser to make the roster of (directory.ts); documents from where
 // they live, picked in the admin's browser (document-places.ts); and who
@@ -173,6 +175,8 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         inProgramme: inProgramme(week),
         nextReport: nextReport(start, today),
         reportWindow: reportWindow(start, today),
+        // The suites alone: the kickoff's places and words stay the admin's.
+        suites: [...view.context.suites],
       };
     });
   }

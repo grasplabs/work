@@ -136,9 +136,10 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // It makes this chat the App's, beside the draft it builds, and the
     // address lets it go.
     await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
-    const chatName = page.getByRole("button", {
-      name: `Chat name: Build ${tag}`,
-    });
+    // The chat's name at its head, renamed where it stands.
+    const chatName = page
+      .getByRole("region", { name: "Chat" })
+      .getByRole("button", { name: `Build ${tag}`, exact: true });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
     // Shared with nobody yet: Share with your team is on.

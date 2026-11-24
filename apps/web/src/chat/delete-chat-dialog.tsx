@@ -1,18 +1,20 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
 import type { ChatSummary } from "@grasp-os/shared/chat";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
 import { Trans } from "@lingui/react/macro";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChat } from "./active-chat.ts";
+import { FailureLine } from "./failure-line.tsx";
 
 // Deleting a chat, from its row in the list of chats or from the menu in
 // the open chat's header: the same question first, either way.
@@ -50,32 +52,36 @@ export const DeleteChatDialog = ({
     }
   };
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
             <Trans>Delete “{title}”?</Trans>
-          </DialogTitle>
-        </DialogHeader>
-        <p className="text-sm">
-          <Trans>
-            Its messages are deleted for good, and every change its agent holds
-            for you is rejected. What the agent did stays in the audit log.
-          </Trans>
-        </p>
-        <ErrorText>{failure}</ErrorText>
-        <DialogFooter showCloseButton>
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            <Trans>
+              Its messages are deleted for good, and every change its agent
+              holds for you is rejected. What the agent did stays in the audit
+              log.
+            </Trans>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <FailureLine>{failure}</FailureLine>
+        <AlertDialogFooter>
+          <AlertDialogCancel>
+            <Trans>Cancel</Trans>
+          </AlertDialogCancel>
+          {/* Not a closing answer: the dialog stays to say why it failed. */}
           <Button
             disabled={busy}
-            onClick={() => {
-              void remove();
-            }}
+            onClick={remove}
+            size="sm"
             variant="destructive"
           >
             <Trans>Delete</Trans>
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };

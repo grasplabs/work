@@ -1,5 +1,6 @@
 import type { KickoffInput } from "@grasp-os/shared/kickoff";
 import { modelErrors } from "@grasp-os/shared/models";
+import { guestRole } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -9,7 +10,13 @@ import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor, testModel } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedInApi,
+  signedInWithRole,
+} from "./sign-in.ts";
 
 // The kickoff (GRA-318): staff bring in Grasp's first conversation with
 // the sponsor, it is read through the model gateway for what Stephen needs,
@@ -338,6 +345,85 @@ describe("the kickoff", { timeout: 60_000 }, () => {
           },
         },
       },
+    });
+  });
+
+  it("tells every member the suites the company named and nothing else it said, and a guest nothing", async () => {
+    const staff = adminKickoff();
+    const { api: admin } = await signedInApi(idp, "admin");
+    const { api: member } = await signedInApi(idp, "user");
+    const guest = await signedInWithRole(idp, "user");
+    await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
+      .bind(guestRole, guest.userId)
+      .run();
+    const { core: guestCore } = await openRpc(guest.session);
+    await answering(
+      [
+        answer({
+          ...reading,
+          onboarding: [
+            {
+              locale: "en",
+              business: "",
+              documents: ["mortgage files"],
+              example: {
+                role: "Mortgage advice",
+                question: "Where does the time go on a mortgage file?",
+                answer: "Retyping client details into the bank portals.",
+                time: "About an hour per file.",
+              },
+            },
+          ],
+        }),
+      ],
+      async () => await staff.saveKickoff(pasted(dutch))
+    );
+    await staff.answerKickoff(
+      "systems",
+      "Google Workspace, with our procedures in Notion."
+    );
+    await admin.onboarding.saveRoster({
+      teams: [{ id: "sales", name: "Sales", lead: "lea" }],
+      people: [
+        { id: "lea", name: "Lea", email: "lea@acme.test", team: "sales" },
+      ],
+    });
+    await admin.onboarding.savePlan({
+      start: new Date().toISOString().slice(0, 10),
+      days: 14,
+    });
+    const { context } = await admin.onboarding.view();
+    const programme = await member.onboarding.programme();
+    const read = JSON.stringify(programme);
+    expect({
+      // What the admin's context holds, so the member's read had it to leak.
+      context: [
+        context.suites,
+        context.sources,
+        context.words.en?.documents,
+        context.words.en?.example?.answer,
+      ],
+      suites: programme?.suites,
+      // The place the company named, and Stephen's words about its work.
+      place: read.includes("notion"),
+      words: read.includes("mortgage") || read.includes("Retyping"),
+      // The sponsor's own answer, and the transcript.
+      said: read.includes("procedures") || read.includes("Salesforce"),
+      whole: await outcome(member.onboarding.view()),
+      guest: await outcome(guestCore.authenticate().onboarding.programme()),
+    }).toStrictEqual({
+      context: [
+        ["google"],
+        ["notion"],
+        ["mortgage files"],
+        "Retyping client details into the bank portals.",
+      ],
+      suites: ["google"],
+      place: false,
+      words: false,
+      said: false,
+      whole: "role.forbidden",
+      guest: "auth.unauthenticated",
     });
   });
 

@@ -30,11 +30,61 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t({ message: "Failed", context: "a menu item whose work failed" }),
       loading: t`Working`,
     },
+    alert: {
+      close: t`Dismiss`,
+    },
+    alertDialog: {
+      cancel: t`Cancel`,
+    },
+    attachment: {
+      remove: (name) => t`Remove ${name}`,
+    },
+    chainOfThought: {
+      name: t`Steps`,
+    },
+    codeBlock: {
+      collapse: t`Show less`,
+      expand: t`Show more`,
+      moreLines: (count) =>
+        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
+      plainText: t({ message: "Text", context: "a code block's language" }),
+      streaming: t({
+        message: "Writing",
+        context: "a code block being written",
+      }),
+    },
+    dialog: {
+      close: t`Close`,
+    },
+    dropdownMenu: {
+      expand: t`More actions`,
+    },
+    empty: {
+      error: t`This did not load`,
+    },
     holdButton: {
       ask: (words) => t`${words}?`,
       cancel: t`Cancel`,
       confirm: t`Confirm`,
       holdTo: (words) => t`Press and hold: ${words}`,
+    },
+    inlineEdit: {
+      edit: t({ message: "Edit", context: "edit a value in place" }),
+      error: t`Could not save`,
+      saved: (value) => t`Changed to ${value}`,
+    },
+    link: {
+      external: t`opens in a new tab`,
+    },
+    markdown: {
+      back: (number) => t`Back to reference ${number}`,
+      done: t({ message: "Done", context: "a task ticked in a list" }),
+      footnote: (number) => t`Footnote ${number}`,
+      notDone: t({
+        message: "Not done",
+        context: "a task not ticked in a list",
+      }),
+      table: t`Table`,
     },
     message: {
       actions: t`Message actions`,
@@ -54,6 +104,22 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Loading the conversation`,
       scrollToEnd: t`Jump to latest`,
       scrollToStart: t`Jump to start`,
+    },
+    modelSelector: {
+      empty: t`No models found`,
+      search: t`Search models`,
+      trigger: t({ message: "Model", context: "the model an answer uses" }),
+      triggerWith: (trigger, model) => t`${trigger}: ${model}`,
+      makers: t`Makers`,
+      favorites: t`Favourites`,
+      noFavorites: t`No favourites yet`,
+      effort: t({ message: "Thinking", context: "how hard a model thinks" }),
+      addFavorite: (model) => t`Add ${model} to favourites`,
+      removeFavorite: (model) => t`Remove ${model} from favourites`,
+      added: (model) => t`${model} added to favourites`,
+      removed: (model) => t`${model} removed from favourites`,
+      chosen: (model) => t`${model} chosen`,
+      favoriteKeys: t`At the end of the search, the arrow toward the line's end stars or unstars the highlighted model`,
     },
     promptInput: {
       add: t`Add to message`,
@@ -105,8 +171,8 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         settling: t`Writing it down`,
       },
       stop: t({ message: "Stop", context: "stop an answer" }),
-      submit: t`Send`,
-      succeeded: t`Done`,
+      submit: t({ message: "Send", context: "send a message" }),
+      succeeded: t({ message: "Done", context: "a message sent" }),
       // Closing a spoken conversation gives the text back.
       voice: {
         close: t`Type instead`,
@@ -115,8 +181,79 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         speaking: t({ message: "Speaking", context: "the other voice's turn" }),
       },
     },
+    questionnaire: {
+      error: t`Could not send the answer`,
+      next: t({ message: "Next", context: "the next question" }),
+      other: t`In my own words`,
+      previous: t({ message: "Previous", context: "the question before" }),
+      progress: (current, total) => t`Question ${current} of ${total}`,
+      progressLabel: t`Progress`,
+      step: (current, total) => t`${current} of ${total}`,
+      recommended: t`Recommended`,
+      required: t`Answer this question to go on`,
+      skip: t({ message: "Skip", context: "skip a question" }),
+      submit: t`Send answer`,
+    },
+    reasoning: {
+      done: t({ message: "Thought", context: "the model thought first" }),
+      thinking: t`Thinking`,
+      thought: (seconds) =>
+        t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
+    },
     sheet: {
       close: t`Close`,
+    },
+    sources: {
+      count: (count) =>
+        count === 0
+          ? t`No sources`
+          : t`${plural(count, { one: "# source", other: "# sources" })}`,
+      gone: t`Could not be opened`,
+      heading: t`Sources`,
+      locked: t`You cannot open this`,
+      newTab: t`(opens in a new tab)`,
+    },
+    tool: {
+      error: t({ message: "Error", context: "what a tool call failed with" }),
+      input: t({ message: "Input", context: "what went into a tool call" }),
+      output: t({ message: "Output", context: "what a tool call gave back" }),
+      states: {
+        "input-streaming": t({
+          message: "Pending",
+          context: "a tool call's state",
+        }),
+        "input-available": t({
+          message: "Running",
+          context: "a tool call's state",
+        }),
+        "approval-requested": t({
+          message: "Awaiting approval",
+          context: "a tool call's state",
+        }),
+        "approval-responded": t({
+          message: "Responded",
+          context: "a tool call's state",
+        }),
+        "output-available": t({
+          message: "Completed",
+          context: "a tool call's state",
+        }),
+        "output-error": t({
+          message: "Error",
+          context: "a tool call's state",
+        }),
+        "output-denied": t({
+          message: "Denied",
+          context: "a tool call's state",
+        }),
+      },
+    },
+    trace: {
+      states: {
+        running: t({ message: "Working", context: "a step's state" }),
+        error: t({ message: "Failed", context: "a step's state" }),
+        pending: t({ message: "Waiting", context: "a step's state" }),
+      },
     },
     action: {
       agentAsks: t`Does something that needs your yes`,
@@ -124,9 +261,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Could not finish`,
       loading: t`Working`,
       success: t`Done`,
-    },
-    alertDialog: {
-      cancel: t`Cancel`,
     },
     breadcrumb: {
       ellipsis: t`Show hidden levels`,
@@ -147,9 +281,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       triggerWith: (trigger, chosen) => t`${trigger}, ${chosen}`,
       thisMonth: t`This month`,
       today: t`Today`,
-    },
-    dialog: {
-      close: t`Close`,
     },
     input: {
       hidePassword: t`Hide password`,
@@ -173,7 +304,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t`Could not save`,
     },
     // The parts the Apps pages use (apps/), from here on.
-    alert: { close: t`Dismiss` },
     avatar: {
       groupCount: (count) => t`+${count}`,
       // The names shown and how many more, joined as the language joins a list.
@@ -200,14 +330,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         context: "a badge that can be taken off",
       }),
       removeNamed: (words) => t`Remove ${words}`,
-    },
-    codeBlock: {
-      collapse: t`Show less`,
-      expand: t`Show more`,
-      moreLines: (count) =>
-        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
-      plainText: t({ message: "Text", context: "code with no language" }),
-      streaming: t`Writing`,
     },
     combobox: {
       empty: t`No results`,
@@ -327,8 +449,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         other: t({ message: "rows", context: "a table's rows, counted" }),
       },
     },
-    dropdownMenu: { expand: t`More actions` },
-    empty: { error: t`This did not load` },
     field: {
       statusError: t`Could not save. Your choice is kept.`,
       statusLoading: t`Saving`,

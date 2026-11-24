@@ -1,142 +1,86 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@grasp-os/app-kit/components/command";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+import { chatTitleSchema } from "@grasp-os/shared/chat";
 import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
 import { hasEvery } from "@grasp-os/shared/chat-search";
 import { failureText } from "@grasp-os/shared/errors";
+import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandHighlight,
+  CommandInput,
+  CommandList,
+} from "@grasp-os/ui/components/command";
+import type {
+  CommandItemData,
+  CommandItems,
+} from "@grasp-os/ui/components/command";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ArchiveIcon,
+  ArrowLeftIcon,
+  PencilIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  TrashIcon,
+} from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { setActiveChat, useActiveChat } from "./active-chat.ts";
 import { groupChats, whenShort } from "./chat-history.ts";
 import type { ChatPeriod } from "./chat-history.ts";
-import {
-  ChatMenu,
-  chatTitleMaxLength,
-  RenameField,
-  useChatChanges,
-} from "./chat-menus.tsx";
 import { useOpenChat } from "./chat-presence.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
+import { FailureLine } from "./failure-line.tsx";
 
-// The person's chats in one window, one quiet icon and ⌘K away, in place
-// of a list beside the chat (grasplabs/prototype
-// `components/chat/chat-switcher.tsx`). The window is the frame's, on
-// every page (`ChatSwitcherProvider` in chat-switcher.tsx, mounted in the
-// shell, which loads this file the first time it opens): ⌘K opens it
-// anywhere, and a page's header may show the icon that does too
-// (`ChatSwitcherButton`). It reads the chats as it opens, and again after
-// a change made in it: a new chat on top, then the chats by when they
-// were last used, each with when that was. A search on top narrows them
-// to the chats with every word in their title or what was said in them:
-// by title at once, then by what was said as core finds it
-// (`chats.search`), a chat found that way showing where. The keys move
-// through the chats and Enter opens one; a row's three dots, where it is
-// pointed at, rename it or delete it.
+// The person's chats in one window, ⌘K away on every page and loaded the
+// first time it opens (`ChatSwitcherProvider` in chat-switcher.tsx), as
+// Damsko's Command dialog and its chats window pattern make it: "New chat"
+// first, then the chats by when they were last used, each with its time at
+// the end (or the working mark while its agent answers), the open one
+// marked as current, its actions on the row's arrow: Rename, Archive or
+// Restore, Delete; "Archived" last, which lists the archived chats. Typing
+// narrows the chats by their titles at once and asks core what was said
+// (`chats.search`), whose chats show where the words were, marked.
+// Renaming takes the window's place with a dialog of its own; as it goes,
+// by Escape, Cancel or once renamed, the window comes back on the list it
+// was in with the chat's row highlighted.
+//
+// Delete still asks first: core deletes a chat for good, with nothing to
+// bring it back, so an Undo after it could not keep its word.
+
+/** How long typing rests before core is asked what was said. */
+const searchRestMs = 200;
 
 const periodLabel: Record<ChatPeriod, MessageDescriptor> = {
   today: msg({ message: "Today", context: "chats from today" }),
   week: msg({ message: "Last 7 days", context: "chats from the past week" }),
   earlier: msg({ message: "Earlier", context: "older chats" }),
-};
-
-/** How long typing rests before core is asked what was said. */
-const searchRestMs = 200;
-
-/**
- * One chat: its title, and on the right when it was last used; found by
- * what was said in it, where it was said under the title. Its three dots take the time's place where
- * it is pointed at.
- */
-const ChatRow = ({
-  chat,
-  hit,
-  active,
-  now,
-  onOpen,
-  onChanged,
-  onDelete,
-}: {
-  chat: ChatSummary;
-  hit: ChatSearchHit | undefined;
-  active: boolean;
-  now: Date;
-  onOpen: () => void;
-  /** It was renamed: the window reads the chats again. */
-  onChanged: () => void;
-  onDelete: () => void;
-}) => {
-  const { t, i18n } = useLingui();
-  const [renaming, setRenaming] = useState(false);
-  const { failure, rename } = useChatChanges(chat);
-  const when = whenShort(chat.lastAt, now, i18n.locale);
-  const said = hit?.said ?? null;
-  if (renaming) {
-    return (
-      <div className="px-2 py-1">
-        <RenameField
-          label={t`Chat name`}
-          maxLength={chatTitleMaxLength}
-          onDone={(name) => {
-            setRenaming(false);
-            void (async () => {
-              await rename(name);
-              onChanged();
-            })();
-          }}
-          value={chat.title}
-        />
-      </div>
-    );
-  }
-  return (
-    <div className="group/row relative">
-      <CommandItem check={false} onSelect={onOpen} value={chat.id}>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 py-0.5">
-          <span className="flex items-baseline gap-3">
-            <span
-              className={cn("min-w-0 flex-1 truncate", active && "font-medium")}
-            >
-              {chat.title}
-            </span>
-            <span className="text-muted-foreground flex-none text-xs tabular-nums group-hover/row:invisible group-has-data-popup-open/row:invisible pointer-coarse:invisible">
-              <time dateTime={chat.lastAt}>{when}</time>
-            </span>
-          </span>
-          {said === null ? null : (
-            <span className="text-muted-foreground truncate text-xs">
-              {said.before}
-              <mark className="text-foreground bg-transparent font-medium">
-                {said.found}
-              </mark>
-              {said.after}
-            </span>
-          )}
-        </span>
-      </CommandItem>
-      <ChatMenu
-        chat={chat}
-        onDelete={onDelete}
-        onRename={() => {
-          setRenaming(true);
-        }}
-      />
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
 };
 
 /** What core found for a search: the query it was asked, and the chats. */
@@ -189,21 +133,35 @@ const useSaidSearch = () => {
   return { found, failure, search };
 };
 
-/** Reads the person's chats from core as the window opens, again on each `read`. */
+/**
+ * Reads the person's chats from core, the archived ones or the rest, again
+ * on each `read`: the latest read only, so an answer that comes late for
+ * an earlier one is dropped, and kept with which list it is.
+ */
 const useListed = () => {
   const core = useCore();
-  const [listed, setListed] = useState<ChatSummary[]>();
+  const [listed, setListed] = useState<{
+    archived: boolean;
+    chats: ChatSummary[];
+  }>();
   const [failure, setFailure] = useState<string>();
-  const read = (): void => {
+  const latest = useRef(0);
+  const read = (archived: boolean): void => {
+    latest.current += 1;
+    const asked = latest.current;
     void (async () => {
       try {
         const chats = await core.withSession(
-          async (session) => await session.chats.list()
+          async (session) => await session.chats.list({ archived })
         );
-        setListed(chats);
-        setFailure(undefined);
+        if (asked === latest.current) {
+          setListed({ archived, chats });
+          setFailure(undefined);
+        }
       } catch (error) {
-        setFailure(failureText(error));
+        if (asked === latest.current) {
+          setFailure(failureText(error));
+        }
       }
     })();
   };
@@ -211,7 +169,7 @@ const useListed = () => {
 };
 
 /**
- * The chats the window lists: all of them, and with a search, those whose
+ * The chats the list shows: all of them, and with a search, those whose
  * title holds every word until core has answered it; then what core
  * `found`, each chat as `chats` has it, so a rename made since shows.
  */
@@ -234,124 +192,336 @@ const shownChats = ({
   return found.hits.flatMap(({ chat }) => byId.get(chat.id) ?? []);
 };
 
+/** Where what was said in a chat holds the search's words, the words marked. */
+const saidOf = (hit: ChatSearchHit | undefined): ReactNode => {
+  const said = hit?.said ?? null;
+  return said === null ? undefined : (
+    <>
+      {said.before}
+      <CommandHighlight>{said.found}</CommandHighlight>
+      {said.after}
+    </>
+  );
+};
+
 /**
- * The person's chats: a search on top, a new chat where it offers one
- * (`onNew`), then the chats by when they were last used, each to open,
- * rename or delete. Read each time it is `shown`, so it shows what changed
- * elsewhere. In the chats window and the Recents on Chat's own page.
+ * Renames a chat, in a dialog of its own: Rename (or Enter in the field)
+ * works with the dialog open and closes it once core has the name; while
+ * it works, the dialog holds.
  */
-export const ChatList = ({
+const RenameChatDialog = ({
+  chat,
+  onDone,
+}: {
+  chat: ChatSummary;
+  onDone: () => void;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const formId = useId();
+  const { busy, failure, run } = useCoreAction();
+  const [name, setName] = useState(chat.title);
+  const trimmed = name.trim();
+  const valid = chatTitleSchema.safeParse(trimmed).success;
+  const rename = async (): Promise<void> => {
+    const renamed = await run(async (session) => {
+      await session.chats.rename(chat.id, trimmed);
+      return true;
+    });
+    if (renamed === true) {
+      await router.invalidate();
+      onDone();
+    }
+  };
+  return (
+    <Dialog
+      onOpenChange={(open, details) => {
+        if (busy) {
+          details.cancel();
+        } else if (!open) {
+          onDone();
+        }
+      }}
+      open
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>Rename chat</Trans>
+          </DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (valid && trimmed !== chat.title) {
+                void rename();
+              }
+            }}
+          >
+            <Field name="chat-name">
+              <FieldLabel>{t`Chat name`}</FieldLabel>
+              <Input onValueChange={setName} value={name} />
+            </Field>
+          </form>
+          <FailureLine>{failure}</FailureLine>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Trans>Cancel</Trans>
+          </DialogClose>
+          <Button
+            disabled={!valid || trimmed === chat.title || busy}
+            form={formId}
+            size="sm"
+            type="submit"
+          >
+            <Trans>Rename</Trans>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** A row's end: the working mark while its agent answers, else when it was last used. */
+const RowEnd = ({ chat, now }: { chat: ChatSummary; now: Date }) => {
+  const { i18n } = useLingui();
+  return chat.running ? (
+    <AgentIndicator />
+  ) : (
+    <Text as="span" color="muted" size="xs">
+      <time dateTime={chat.lastAt}>
+        {whenShort(chat.lastAt, now, i18n.locale)}
+      </time>
+    </Text>
+  );
+};
+
+/** What a row offers on its arrow: rename it, archive or restore it, delete it. */
+const useRowActions = (archived: boolean): CommandItemData["actions"] => {
+  const { t } = useLingui();
+  return [
+    { value: "rename", label: t`Rename`, icon: PencilIcon },
+    archived
+      ? { value: "unarchive", label: t`Restore`, icon: ArchiveIcon }
+      : { value: "archive", label: t`Archive`, icon: ArchiveIcon },
+    {
+      value: "delete",
+      label: t`Delete`,
+      icon: TrashIcon,
+      variant: "destructive",
+    },
+  ];
+};
+
+/**
+ * The list's items: New chat first where it offers one, the chats by
+ * when they were last used, Archived last; in the archived list the way
+ * back first; a search that failed, the one row that tries it again.
+ */
+const useListItems = ({
+  groups,
+  archived,
+  searching,
+  offersNew,
+  searchFailure,
+}: {
+  groups: CommandItems;
+  archived: boolean;
+  searching: boolean;
+  offersNew: boolean;
+  searchFailure: string | undefined;
+}): CommandItems => {
+  const { t } = useLingui();
+  if (searchFailure !== undefined) {
+    return [
+      {
+        value: "retry-search",
+        label: t`Try the search again`,
+        icon: RefreshCwIcon,
+        description: searchFailure,
+      },
+    ];
+  }
+  if (archived) {
+    return [
+      { value: "back", label: t`Back to your chats`, icon: ArrowLeftIcon },
+      ...groups,
+    ];
+  }
+  // A search lists chats alone: what it found, or the words that it found none.
+  return [
+    ...(offersNew && !searching
+      ? [{ value: "new", label: t`New chat`, icon: PlusIcon }]
+      : []),
+    ...groups,
+    ...(searching
+      ? []
+      : [
+          { type: "separator" as const },
+          { value: "archived", label: t`Archived`, icon: ArchiveIcon },
+        ]),
+  ];
+};
+
+/** What a chat's row offers on its arrow. */
+type RowAction = "rename" | "archive" | "unarchive" | "delete";
+
+const isRowAction = (value: string): value is RowAction =>
+  value === "rename" ||
+  value === "archive" ||
+  value === "unarchive" ||
+  value === "delete";
+
+/**
+ * The person's chats as a Command's items, with what its search, its rows
+ * and their actions do, for the window. Read each time it is `shown`, so
+ * it shows what changed elsewhere.
+ */
+const useChatItems = ({
   shown,
   onOpen,
   onNew,
-  fill = false,
+  onDialog,
+  onRenamed,
 }: {
   shown: boolean;
   onOpen: (chatId: string) => void;
+  /** Where the list offers a new chat. */
   onNew?: () => void;
-  /** Fills a window of fixed height, rather than sizing to the chats. */
-  fill?: boolean;
+  /**
+   * Before a row's dialog opens (Rename, Delete): the window it stands in
+   * closes, so no dialog opens over another.
+   */
+  onDialog: () => void;
+  /** Once the Rename dialog has gone, for the chat it renamed: the window comes back to its row. */
+  onRenamed: (chatId: string) => void;
 }) => {
   const { t, i18n } = useLingui();
+  const router = useRouter();
   const activeId = useActiveChat();
   const [search, setSearch] = useState("");
+  const [archived, setArchived] = useState(false);
   const [deleting, setDeleting] = useState<ChatSummary>();
+  const [renaming, setRenaming] = useState<ChatSummary>();
+  // Back from Rename: the window shows again on the list it was in.
+  const [renamed, setRenamed] = useState(false);
   const said = useSaidSearch();
   const listing = useListed();
+  const { failure, run } = useCoreAction();
   const [readWhenShown, setReadWhenShown] = useState(false);
   // Read again each time it shows, so it shows what changed elsewhere.
   if (shown !== readWhenShown) {
     setReadWhenShown(shown);
     if (shown) {
       setSearch("");
+      if (!renamed) {
+        setArchived(false);
+      }
+      setRenamed(false);
     }
   }
-  const read = useEffectEvent(() => {
-    listing.read();
+  const read = useEffectEvent((which: boolean) => {
+    listing.read(which);
   });
   useEffect(() => {
     if (shown) {
-      read();
+      read(archived);
     }
-  }, [shown]);
+  }, [shown, archived]);
 
-  const chats = listing.listed ?? [];
+  // Only the list asked for: the other's rows would take this one's actions.
+  const listed =
+    listing.listed?.archived === archived ? listing.listed.chats : undefined;
+  const chats = listed ?? [];
   const query = search.trim();
   const searching = query !== "";
   const answered = said.found?.query === query ? said.found : undefined;
   const hits = new Map((answered?.hits ?? []).map((hit) => [hit.chat.id, hit]));
   const now = new Date();
-  const groups = groupChats(shownChats({ chats, query, found: answered }), now);
-  return (
+  const actions = useRowActions(archived);
+  const rowOf = (chat: ChatSummary): CommandItemData => ({
+    value: chat.id,
+    label: chat.title,
+    description: saidOf(hits.get(chat.id)),
+    current: chat.id === activeId,
+    end: <RowEnd chat={chat} now={now} />,
+    actions,
+  });
+  const groups = groupChats(
+    shownChats({ chats, query, found: answered }),
+    now
+  ).map(({ period, chats: inPeriod }) => ({
+    type: "group" as const,
+    label: i18n._(periodLabel[period]),
+    items: inPeriod.map(rowOf),
+  }));
+  const items = useListItems({
+    groups,
+    archived,
+    searching,
+    offersNew: onNew !== undefined,
+    searchFailure: searching ? said.failure : undefined,
+  });
+  const onAction = (value: string): false | undefined => {
+    if (value === "retry-search") {
+      said.search(search);
+      return false;
+    }
+    if (value === "archived" || value === "back") {
+      setArchived(value === "archived");
+      setSearch("");
+      return false;
+    }
+    if (value === "new") {
+      onNew?.();
+      return undefined;
+    }
+    onOpen(value);
+    return undefined;
+  };
+  const onItemAction = async (value: string, action: string) => {
+    const chat = chats.find(({ id }) => id === value);
+    if (chat === undefined || !isRowAction(action)) {
+      return;
+    }
+    if (action === "rename" || action === "delete") {
+      onDialog();
+      (action === "rename" ? setRenaming : setDeleting)(chat);
+    } else {
+      const done = await run(async (session) => {
+        await (action === "archive"
+          ? session.chats.archive(chat.id)
+          : session.chats.unarchive(chat.id));
+        return true;
+      });
+      if (done === true) {
+        listing.read(archived);
+        await router.invalidate();
+      }
+    }
+  };
+  const command = {
+    items,
+    onAction,
+    onItemAction,
+    inputValue: search,
+    onInputValueChange: (value: string) => {
+      setSearch(value);
+      said.search(value);
+    },
+    // Core's answer is the list: Command filters only by what it shows.
+    filter: false,
+    loading: listed === undefined,
+  };
+  let empty = searching ? t`No chat has that.` : t`No chats here yet.`;
+  if (archived) {
+    empty = t`No archived chats.`;
+  }
+  const dialogs = (
     <>
-      <Command
-        // cmdk names its search by a label of its own: this one.
-        label={t`Search chats`}
-        loop
-        shouldFilter={false}
-      >
-        <CommandInput
-          aria-label={t`Search chats`}
-          onValueChange={(value) => {
-            setSearch(value);
-            said.search(value);
-          }}
-          placeholder={t`Search chats`}
-          size={fill ? "lg" : "default"}
-          value={search}
-        />
-        <div
-          className={
-            fill ? "flex h-112 min-h-0 flex-col" : "flex min-h-0 flex-col"
-          }
-        >
-          {onNew === undefined ? null : (
-            <div className="flex border-b p-2">
-              <Button onClick={onNew} size="sm" variant="outline">
-                <PlusIcon data-icon="inline-start" />
-                <Trans>New chat</Trans>
-              </Button>
-            </div>
-          )}
-          <ErrorText>{listing.failure ?? said.failure}</ErrorText>
-          <CommandList fill={fill}>
-            {listing.listed === undefined ? null : (
-              <CommandEmpty>
-                {searching ? (
-                  <Trans>No chat has that.</Trans>
-                ) : (
-                  <Trans>No chats here yet.</Trans>
-                )}
-              </CommandEmpty>
-            )}
-            {groups.map((group) => (
-              <CommandGroup
-                heading={i18n._(periodLabel[group.period])}
-                key={group.period}
-              >
-                {group.chats.map((chat) => (
-                  <ChatRow
-                    active={chat.id === activeId}
-                    chat={chat}
-                    hit={hits.get(chat.id)}
-                    key={chat.id}
-                    now={now}
-                    onChanged={() => {
-                      listing.read();
-                    }}
-                    onDelete={() => {
-                      setDeleting(chat);
-                    }}
-                    onOpen={() => {
-                      onOpen(chat.id);
-                    }}
-                  />
-                ))}
-              </CommandGroup>
-            ))}
-          </CommandList>
-        </div>
-      </Command>
       {deleting === undefined ? null : (
         <DeleteChatDialog
           active={deleting.id === activeId}
@@ -359,14 +529,39 @@ export const ChatList = ({
           onOpenChange={(next) => {
             if (!next) {
               setDeleting(undefined);
-              listing.read();
+              listing.read(archived);
             }
           }}
           open
         />
       )}
+      {renaming === undefined ? null : (
+        <RenameChatDialog
+          chat={renaming}
+          onDone={() => {
+            setRenaming(undefined);
+            setRenamed(true);
+            onRenamed(renaming.id);
+          }}
+        />
+      )}
     </>
   );
+  // How many only once the list has come: until then, no count.
+  let label = t`Search chats`;
+  if (archived && listed === undefined) {
+    label = t`Archived chats`;
+  } else if (archived) {
+    const count = chats.length;
+    label = t`${plural(count, { one: "# archived chat", other: "# archived chats" })}`;
+  }
+  return {
+    command,
+    empty,
+    failure: listing.failure ?? failure,
+    dialogs,
+    label,
+  };
 };
 
 /**
@@ -382,6 +577,56 @@ export const useSelectChat = () => {
   };
 };
 
+/** How many frames the window may take to list a chat it comes back to. */
+const rowWaitFrames = 120;
+
+/**
+ * Highlights chat `chatId`'s row once the window lists it, as the arrows
+ * would: Damsko's CommandDialog takes no row to highlight (its Command
+ * highlights the first), so the search field is given an arrow down a
+ * frame at a time until it is that row. Then `done`.
+ */
+const useBackToRow = (
+  chatId: string | undefined,
+  listed: boolean,
+  done: () => void
+) => {
+  useEffect(() => {
+    if (chatId === undefined || !listed) {
+      return () => {
+        // Nothing to come back to yet.
+      };
+    }
+    let frame = 0;
+    let frames = 0;
+    const step = (): void => {
+      frames += 1;
+      const row = document.querySelector<HTMLElement>(
+        `[data-command-value="${CSS.escape(chatId)}"]`
+      );
+      const field = row
+        ?.closest('[role="dialog"]')
+        ?.querySelector<HTMLElement>('[role="combobox"]');
+      if (row?.dataset.highlighted !== undefined || frames > rowWaitFrames) {
+        done();
+        return;
+      }
+      field?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [chatId, listed, done]);
+};
+
 /** The window and what it shows, while it is open. */
 export const ChatWindow = ({
   open,
@@ -392,26 +637,46 @@ export const ChatWindow = ({
 }) => {
   const { t } = useLingui();
   const selectChat = useSelectChat();
+  // The chat a Rename dialog was for, while the window comes back to it.
+  const [backTo, setBackTo] = useState<string>();
+  const { command, empty, failure, dialogs, label } = useChatItems({
+    shown: open,
+    onNew: () => {
+      onOpenChange(false);
+      selectChat();
+    },
+    onOpen: (chatId) => {
+      onOpenChange(false);
+      selectChat(chatId);
+    },
+    onDialog: () => {
+      onOpenChange(false);
+    },
+    onRenamed: (chatId) => {
+      setBackTo(chatId);
+      onOpenChange(true);
+    },
+  });
+  const backDone = useCallback(() => {
+    setBackTo(undefined);
+  }, []);
+  useBackToRow(open ? backTo : undefined, !command.loading, backDone);
   return (
-    <CommandDialog
-      className="top-1/8 sm:max-w-3xl"
-      description={t`Search your chats, and open one.`}
-      onOpenChange={onOpenChange}
-      open={open}
-      title={t`Chats`}
-    >
-      <ChatList
-        fill
-        onNew={() => {
-          onOpenChange(false);
-          selectChat();
-        }}
-        onOpen={(chatId) => {
-          onOpenChange(false);
-          selectChat(chatId);
-        }}
-        shown={open}
-      />
-    </CommandDialog>
+    <>
+      <CommandDialog
+        {...command}
+        aria-label={t`Chats`}
+        onOpenChange={onOpenChange}
+        open={open}
+        shortcut={null}
+        trigger={null}
+      >
+        <CommandInput aria-label={label} placeholder={label} />
+        <FailureLine>{failure}</FailureLine>
+        <CommandEmpty>{empty}</CommandEmpty>
+        <CommandList />
+      </CommandDialog>
+      {dialogs}
+    </>
   );
 };
