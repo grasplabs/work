@@ -120,17 +120,56 @@ const shown = async (
   return asked;
 };
 
+/**
+ * A button's words, as shown: a Damsko Button that says how its press went
+ * stacks its words over the words for each state, in one cell, the words
+ * first; the others are what it keeps for its width.
+ */
+const shownWords = (each: Element): string =>
+  (
+    each.querySelector(
+      "[data-slot=button-content] > span:first-child:not(:only-child)"
+    ) ?? each
+  ).textContent.trim();
+
 /** The button whose text is `text`. */
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
-/** The buttons whose text is `text`. */
-const buttonsNamed = (text: string): HTMLButtonElement[] =>
-  [...document.querySelectorAll("button")].filter(
-    (each) => each.textContent.trim() === text
-  );
+/** The buttons that open a person's choices, one a field, in order. */
+const choiceButtons = (): HTMLButtonElement[] => [
+  ...document.querySelectorAll<HTMLButtonElement>(
+    '[data-slot="combobox"] button[aria-label="Show the choices"]'
+  ),
+];
+
+/** Empties the words of the `at`th person field, as a person deletes them. */
+const empty = async (at: number): Promise<void> => {
+  const field = document.querySelectorAll<HTMLInputElement>(
+    '[data-slot="combobox"] input'
+  )[at];
+  await act(async () => {
+    if (field !== undefined) {
+      Reflect.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set?.call(field, "");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await settled();
+  });
+};
+
+/** The headings of the open list's groups, in order. */
+const groupHeadings = (): string[] =>
+  [...document.querySelectorAll('[role="group"]')].map((group) => {
+    const by = group.getAttribute("aria-labelledby");
+    return by === null
+      ? ""
+      : (document.querySelector(`#${by}`)?.textContent.trim() ?? "");
+  });
 
 /** Clicks `element`, and lets what it does settle. */
 const click = async (
@@ -153,10 +192,21 @@ const press = async (text: string): Promise<void> => {
   });
 };
 
+/** A label's words, without the mark a required field's label carries. */
+const wordsOf = (label: HTMLLabelElement): string =>
+  [...label.childNodes]
+    .filter(
+      (node) =>
+        !(node instanceof HTMLElement && node.dataset.slot === "required-mark")
+    )
+    .map((node) => node.textContent)
+    .join("")
+    .trim();
+
 /** Types `value` into the field labelled `label`. */
 const type = async (label: string, value: string): Promise<void> => {
   const labelled = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent.trim() === label
+    (each) => wordsOf(each) === label
   );
   const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     `#${CSS.escape(labelled?.htmlFor ?? "")}`
@@ -200,7 +250,7 @@ describe("starting a workflow by hand", () => {
 
   it("starts an independent workflow at core's version with exactly the input its form makes, after a field it can't send", async () => {
     const asked = await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       form
     );
     await press("Run");
@@ -231,9 +281,9 @@ describe("starting a workflow by hand", () => {
     });
   });
 
-  it("has a person picked, never typed, for a field that takes one: a person, a team or a role", async () => {
+  it("has a person picked from a search, never typed, for a field that takes one: a person, a team or a role", async () => {
     const asked = await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       {
         version: 3,
         args: {
@@ -252,38 +302,37 @@ describe("starting a workflow by hand", () => {
       }
     );
     await press("Run");
-    const typed = document.querySelector("input");
     await press("Start the run");
     const unpicked = {
       asked: asked.length,
       said: said().includes("Fill this in."),
     };
-    const [approver, watcher] = buttonsNamed("Choose…");
+    const [approver, watcher] = choiceButtons();
     await click(approver);
     const offered = [...document.querySelectorAll('[role="option"]')].map(
       (each) => each.textContent.trim()
     );
+    const headings = groupHeadings();
     await choose("Everyone with the Admin role");
-    await press("Admin");
+    await click(approver);
     await choose("Ada Lovelace");
-    // An optional one picked by mistake is cleared again.
+    // An optional one picked by mistake is cleared again by emptying its
+    // words.
     await click(watcher);
     await choose("Finance");
-    await click(
-      document.querySelector<HTMLButtonElement>('[aria-label="Clear watcher"]')
-    );
+    await empty(1);
     await press("Start the run");
 
-    expect({ typed, unpicked, offered, asked }).toStrictEqual({
-      typed: null,
+    expect({ unpicked, offered, headings, asked }).toStrictEqual({
       unpicked: { asked: 0, said: true },
       offered: [
-        "ALAda Lovelace",
+        "Ada Lovelace",
         "Finance",
         "Everyone with the Admin role",
         "Everyone with the Builder role",
         "Everyone with the User role",
       ],
+      headings: ["People", "Teams", "Roles"],
       asked: [
         {
           workflow: "workflow-1",
@@ -295,8 +344,8 @@ describe("starting a workflow by hand", () => {
     });
   });
 
-  it("names the person picked apart from someone of the same name", async () => {
-    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+  it("names the person picked apart from someone of the same name, with no Teams heading where the organization has no teams", async () => {
+    await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: 3,
       args: {
         type: "object",
@@ -315,14 +364,22 @@ describe("starting a workflow by hand", () => {
       },
     });
     await press("Run");
-    await click(button("Choose…"));
-    await choose("ID …222222");
+    await click(choiceButtons()[0]);
+    const headings = groupHeadings();
+    await choose("Ada Lovelace (ID …222222)");
 
-    expect(button("Ada Lovelace (ID …222222)")).toBeDefined();
+    expect({
+      headings,
+      value:
+        document.querySelector<HTMLInputElement>('[role="combobox"]')?.value,
+    }).toStrictEqual({
+      headings: ["People", "Roles"],
+      value: "Ada Lovelace (ID …222222)",
+    });
   });
 
   it("offers no Run for a workflow core gives no version to start", async () => {
-    await shown(() => <StartIndependentRun workflow="workflow-1" />, {
+    await shown(() => <StartIndependentRun live={1} workflow="workflow-1" />, {
       version: null,
       args: null,
       people: null,
@@ -333,7 +390,7 @@ describe("starting a workflow by hand", () => {
 
   it("says why it can't offer Run when core can't say how the workflow starts", async () => {
     await shown(
-      () => <StartIndependentRun workflow="workflow-1" />,
+      () => <StartIndependentRun live={1} workflow="workflow-1" />,
       workflowResourceErrors.create("workflow.resource_unavailable")
     );
 
@@ -350,6 +407,7 @@ describe("starting a workflow by hand", () => {
     await shown(
       () => (
         <StartIndependentRun
+          live={1}
           onFiles={() => {
             shownFiles.push("files");
           }}

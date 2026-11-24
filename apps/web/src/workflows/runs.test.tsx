@@ -37,6 +37,38 @@ const runOf = (id: string, fields: Partial<ListedRun>): ListedRun => ({
   ...fields,
 });
 
+/** Shows the log of `runs`, the workflows `workflows` known. */
+const shown = async (
+  log: Pick<Parameters<typeof RunsLog>[0], "runs" | "workflows">
+): Promise<void> => {
+  const rootRoute = createRootRoute({
+    component: () => <RunsLog me="user-ada" more={false} {...log} />,
+  });
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory(),
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    );
+    await router.load();
+  });
+};
+
+/** The words of the log's links to their workflows. */
+const workflowLinks = (): string[] =>
+  [...document.querySelectorAll("a")]
+    .filter(
+      (link) => link.getAttribute("href")?.startsWith("/workflows/") === true
+    )
+    .map((link) => link.textContent.trim());
+
 describe("the runs log", () => {
   afterEach(() => {
     act(() => {
@@ -47,32 +79,11 @@ describe("the runs log", () => {
   });
 
   it("leads from an independent workflow's run to the decision it waits for, where the reader may answer it", async () => {
-    const rootRoute = createRootRoute({
-      component: () => (
-        <RunsLog
-          me="user-ada"
-          more={false}
-          runs={[
-            runOf("run-waiting", { decision: "decision-7" }),
-            runOf("run-going", {}),
-          ]}
-        />
-      ),
-    });
-    const router = createRouter({
-      routeTree: rootRoute,
-      history: createMemoryHistory(),
-    });
-    const host = document.createElement("div");
-    document.body.append(host);
-    await act(async () => {
-      root = createRoot(host);
-      root.render(
-        <I18nProvider i18n={i18n}>
-          <RouterProvider router={router} />
-        </I18nProvider>
-      );
-      await router.load();
+    await shown({
+      runs: [
+        runOf("run-waiting", { decision: "decision-7" }),
+        runOf("run-going", {}),
+      ],
     });
 
     expect(
@@ -80,5 +91,25 @@ describe("the runs log", () => {
         .filter((link) => link.textContent.trim() === "Decide")
         .map((link) => link.getAttribute("href"))
     ).toStrictEqual(["/decisions/decision-7"]);
+  });
+
+  it("names each run's workflow as Workflows does, by its title, where the page knows it, and by core's name where not", async () => {
+    await shown({
+      runs: [
+        runOf("run-titled", {}),
+        runOf("run-unknown", {
+          workflowId: workflowResourceIdSchema.parse("workflow-other"),
+          name: "review-56c5a0d9",
+        }),
+      ],
+      workflows: new Map([
+        ["workflow-quotes", { label: "Quote approval", process: null }],
+      ]),
+    });
+
+    expect(workflowLinks()).toStrictEqual([
+      "Quote approval",
+      "review-56c5a0d9",
+    ]);
   });
 });

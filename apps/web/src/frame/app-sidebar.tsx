@@ -6,6 +6,7 @@ import {
   SidebarGroup,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
@@ -13,7 +14,7 @@ import {
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BotIcon,
@@ -23,6 +24,7 @@ import {
   MessagesSquareIcon,
   SearchIcon,
   SettingsIcon,
+  WorkflowIcon,
 } from "lucide-react";
 import { useEffect } from "react";
 import type { ComponentType, SVGProps } from "react";
@@ -31,7 +33,7 @@ import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { InboxNavItem } from "../inbox/nav-item.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
-import { WorkflowsItem } from "../workflows/nav-item.tsx";
+import { useWorkflowsWaiting } from "../workflows/nav-item.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
 import { PersonMenu } from "./person-menu.tsx";
 import { SidebarBrand } from "./sidebar-brand.tsx";
@@ -82,6 +84,42 @@ const SectionItem = ({ section }: { section: Section }) => {
       >
         <Icon />
         <span>{i18n._(label)}</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+};
+
+/** Workflows, with how many workflows need the person (workflows/nav-item.tsx). */
+const WorkflowsItem = () => {
+  const { t } = useLingui();
+  const matchRoute = useMatchRoute();
+  const waiting = useWorkflowsWaiting();
+  const shown = waiting !== undefined && waiting > 0;
+  const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={inWorkflows}
+        render={<Link to="/workflows" />}
+        tooltip={t`Workflows`}
+      >
+        <WorkflowIcon />
+        <span>
+          <Trans>Workflows</Trans>
+        </span>
+        {/* Inside the link, so its name says how many need the person. */}
+        {shown ? (
+          <SidebarMenuBadge placement="inside">
+            <span aria-hidden="true">{waiting}</span>
+            <span className="sr-only">
+              <Plural
+                one="# workflow needs you"
+                other="# workflows need you"
+                value={waiting}
+              />
+            </span>
+          </SidebarMenuBadge>
+        ) : null}
       </SidebarMenuButton>
     </SidebarMenuItem>
   );

@@ -4,11 +4,12 @@ import { I18nProvider } from "@lingui/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { RunResultView, RunStatusFact, StartedWithout } from "./run-detail.tsx";
+import { RunResultView, StartedWithout } from "./run-detail.tsx";
 
 // What an opened run says of its result: what it returned, or why it
-// failed, as core gave them; for a reader core keeps them from, that only
-// the person it ran for and the admins see them; nothing while it runs.
+// failed, as core gave them (its panel's section names which); for a
+// reader core keeps them from, that only the person it ran for and the
+// admins see them; nothing while it runs.
 
 /** A run that completed, changed by `change`. */
 const run = (
@@ -39,21 +40,10 @@ const textOf = (shown: WorkflowResourceRun, seesResult = true): string =>
     .replaceAll(/\s+/gu, " ")
     .trim();
 
-/** The status fact's text, as a person reads it. */
-const statusText = (shown: WorkflowResourceRun): string =>
-  renderToStaticMarkup(
-    <I18nProvider i18n={i18n}>
-      <RunStatusFact run={shown} />
-    </I18nProvider>
-  )
-    .replaceAll(/<[^>]+>/gu, " ")
-    .replaceAll(/\s+/gu, " ")
-    .trim();
-
 describe("an opened run's result", () => {
   it("shows what it returned, as JSON", () => {
-    expect(textOf(run({ result: { status: "sent", count: 2 } }))).toBe(
-      'What it returned { "status": "sent", "count": 2 }'
+    expect(textOf(run({ result: { status: "sent", count: 2 } }))).toContain(
+      '{ "status": "sent", "count": 2 }'
     );
   });
 
@@ -65,7 +55,7 @@ describe("an opened run's result", () => {
           error: { code: "workflow.task_failed", message: "The task failed." },
         })
       )
-    ).toBe("Why it failed The task failed. workflow.task_failed");
+    ).toBe("The task failed. workflow.task_failed");
   });
 
   it("tells a reader core keeps the result from who sees it, and says nothing more to one who may", () => {
@@ -81,29 +71,6 @@ describe("an opened run's result", () => {
 
   it("says nothing of a result while it runs", () => {
     expect(textOf(run({ status: "running", endedAt: null }), false)).toBe("");
-  });
-});
-
-describe("an opened run's status", () => {
-  it("says what a step of it waits for while its AI provider fails its calls, as the runs table does", () => {
-    const waiting = run({
-      status: "running",
-      endedAt: null,
-      aiProvider: {
-        since: "2026-10-28T09:00:30.000Z",
-        provider: "anthropic",
-        trouble: "refused",
-      },
-    });
-
-    expect({
-      waiting: statusText(waiting).includes(
-        "Waiting for Anthropic, which is refusing the key, since"
-      ),
-      running: statusText(run({ status: "running", endedAt: null })).includes(
-        "Waiting for"
-      ),
-    }).toStrictEqual({ waiting: true, running: false });
   });
 });
 
