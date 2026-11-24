@@ -1,3 +1,4 @@
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -7,12 +8,13 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { PauseIcon, PlayIcon } from "lucide-react";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Icon, PauseIcon, PlayIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { StatusBadge } from "../drafts/status-badge.tsx";
@@ -36,6 +38,11 @@ import { useGrace } from "../use-grace.ts";
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
 
+const styles = stylex.create({
+  row: { display: "flex", alignItems: "center", gap: space["2"] },
+  countdown: { display: "flex", alignItems: "center", gap: space["3"] },
+});
+
 /** Where the workflow stands, as its bar says it. */
 export const WorkflowStatus = ({
   live,
@@ -47,14 +54,16 @@ export const WorkflowStatus = ({
   paused: boolean;
   /** Whom it is shared with, by name; none while they are read. */
   who: readonly string[] | undefined;
-}) =>
-  paused ? (
-    <Badge variant="attention">
-      <Trans context="a workflow someone paused">Paused</Trans>
+}) => {
+  const { t } = useLingui();
+  return paused ? (
+    <Badge dot variant="warning">
+      {t({ message: "Paused", context: "a workflow someone paused" })}
     </Badge>
   ) : (
     <StatusBadge live={live} who={who} />
   );
+};
 
 /** "Pauses in 4 s", with Undo beside it, while a pause may be taken back. */
 const PauseCountdown = ({
@@ -63,20 +72,19 @@ const PauseCountdown = ({
 }: {
   left: number;
   onUndo: () => void;
-}) => (
-  <span aria-live="polite" className="flex items-center gap-3 font-medium">
-    <span className="text-muted-foreground flex items-center gap-2 tabular-nums">
-      <span
-        aria-hidden="true"
-        className="bg-status-attention size-1.5 rounded-full motion-safe:animate-pulse"
-      />
-      <Trans>Pauses in {left} s</Trans>
+}) => {
+  const { t } = useLingui();
+  return (
+    <span aria-live="polite" {...stylex.props(styles.countdown)}>
+      <Badge dot variant="warning">
+        {t`Pauses in ${left} s`}
+      </Badge>
+      <Button onClick={onUndo} size="sm" variant="outline">
+        {t({ message: "Undo", context: "take a pause back before it happens" })}
+      </Button>
     </span>
-    <Button onClick={onUndo} size="sm" variant="outline">
-      <Trans context="take a pause back before it happens">Undo</Trans>
-    </Button>
-  </span>
-);
+  );
+};
 
 /** Asks before pausing, and says what a pause stops and what it doesn't. */
 const PauseQuestion = ({
@@ -97,19 +105,12 @@ const PauseQuestion = ({
         <AlertDialogHeader>
           <AlertDialogTitle>{t`Pause ${name}?`}</AlertDialogTitle>
           <AlertDialogDescription>
-            <Trans>
-              Nothing new starts until you resume it: a start is refused while
-              it is paused. Runs already going carry on to their end.
-            </Trans>
+            {t`Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>
-            <Trans>Keep it running</Trans>
-          </AlertDialogCancel>
-          <AlertDialogAction onClick={onPause}>
-            <Trans>Pause it</Trans>
-          </AlertDialogAction>
+          <AlertDialogCancel>{t`Keep it running`}</AlertDialogCancel>
+          <AlertDialogAction onClick={onPause}>{t`Pause it`}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -134,6 +135,7 @@ export const PauseControl = ({
   paused: boolean;
   onChange: (changed: WorkflowResource) => void;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const [asking, setAsking] = useState(false);
@@ -175,7 +177,7 @@ export const PauseControl = ({
     return null;
   }
   return (
-    <span className="flex items-center gap-2">
+    <span {...stylex.props(styles.row)}>
       <ErrorText>{failure}</ErrorText>
       {paused ? (
         <Button
@@ -184,10 +186,10 @@ export const PauseControl = ({
             void change("resume");
           }}
           size="sm"
-          variant="outline"
+          variant="ghost"
         >
-          <PlayIcon data-icon="inline-start" />
-          <Trans>Resume</Trans>
+          <Icon icon={PlayIcon} />
+          {t`Resume`}
         </Button>
       ) : (
         <Button
@@ -196,10 +198,10 @@ export const PauseControl = ({
             setAsking(true);
           }}
           size="sm"
-          variant="outline"
+          variant="ghost"
         >
-          <PauseIcon data-icon="inline-start" />
-          <Trans>Pause</Trans>
+          <Icon icon={PauseIcon} />
+          {t`Pause`}
         </Button>
       )}
       <PauseQuestion

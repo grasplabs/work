@@ -102,11 +102,23 @@ const shown = async (
   return { asked, at: () => router.state.location.pathname };
 };
 
+/**
+ * A button's words, as shown: a Damsko Button that says how its press went
+ * stacks its words over the words for each state, in one cell, the words
+ * first; the others are what it keeps for its width.
+ */
+const shownWords = (each: Element): string =>
+  (
+    each.querySelector(
+      "[data-slot=button-content] > span:first-child:not(:only-child)"
+    ) ?? each
+  ).textContent.trim();
+
 /** Presses the button whose text is `text` (the last one: a dialog's own comes last). */
 const press = async (text: string): Promise<void> => {
   await act(async () => {
     [...document.querySelectorAll("button")]
-      .findLast((each) => each.textContent.trim() === text)
+      .findLast((each) => shownWords(each) === text)
       ?.click();
     await settled();
   });
