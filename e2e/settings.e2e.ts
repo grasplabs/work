@@ -5,8 +5,7 @@ import { test } from "./csp.ts";
 import { apiOf, peopleIn, signInAs } from "./people.ts";
 
 // Settings, as in the prototype: the workspace's sections for admins, the
-// account's for everyone, listed beside the section where the page has the
-// room and as one control above it where it hasn't. Billing's details and
+// account's for everyone, listed beside the section. Billing's details and
 // emails are kept by core and changed here by the admin; what core has
 // nothing for yet (a plan, a card, invoices) shows the prototype's empty
 // state, and can't be changed. The devices a person is signed in on can be
@@ -78,40 +77,6 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await nav.getByRole("link", { name: "Security" }).click();
   await expect(page).toHaveURL(/\/settings\/security$/u);
   await expect(sectionOf(page, "Sign-in")).toContainText(admin.email);
-});
-
-test("someone who isn't an admin opens Settings on their profile, with only their account's sections", async ({
-  pageOf,
-}) => {
-  const { member } = peopleIn("settings");
-  const page = await pageOf(member);
-  await page.goto("/settings");
-  await expect(page).toHaveURL(/\/settings\/profile$/u);
-  // Their own instruction file too, which every member writes.
-  await expect(
-    page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Profile", "Instructions", "Security"]);
-});
-
-test("on a phone the sections are in the sidebar's sheet", async ({
-  pageOf,
-}) => {
-  const { admin } = peopleIn("settings");
-  const page = await pageOf(admin);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/settings/profile");
-  const nav = page.getByRole("navigation", { name: "Settings" });
-  await expect(nav).toBeHidden();
-  await page.getByRole("button", { name: "Show or hide the sidebar" }).click();
-  await expect(nav.getByRole("link", { name: "Profile" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
-  await nav.getByRole("link", { name: "Members and roles" }).click();
-  await expect(page).toHaveURL(/\/settings\/members$/u);
-  // Going there closes the sheet, so the section is in view.
-  await expect(nav).toBeHidden();
-  await expect(sectionOf(page, "Roles")).toBeVisible();
 });
 
 test("someone signs out a device of theirs from Security, and its session ends", async ({

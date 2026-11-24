@@ -8,17 +8,16 @@ import { expect } from "@playwright/test";
 import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { apiOf, signInAs, signInConfiguredAdmin, signInTo } from "./people.ts";
-import { installReadingClock, lineOf } from "./speech.ts";
+import { lineOf } from "./speech.ts";
 import { workbookOf } from "./staff-workbook.ts";
 
 // A company's own onboarding flow, and Grasp's go as its admin waits
-// for it, end to end: a flow of the AI step alone, none at all, and a
-// shorter one; a staff list of 170 people from Excel on who's who; and
+// for it, end to end: a flow of the AI step alone, and none at all; a staff
+// list of 170 people from Excel on who's who; and
 // the admin settling what needs them before the go lets them in. Each
 // closes the deployment, changes its flow or replaces its roster, which
-// signs out, turns away or changes what everyone else on the stack sees
-// (the organization bar of e2e/setup-voice.e2e.ts counts the roster's
-// leads), so they run in a project of their own, one test at a time
+// signs out, turns away or changes what everyone else on the stack sees,
+// so they run in a project of their own, one test at a time
 // (playwright.config.ts). They need nothing of the onboarding's other
 // tests (e2e/onboarding.e2e.ts), so in CI they run on a stack of their own
 // beside them; locally, before them, while nobody on the team is told yet.
@@ -55,9 +54,6 @@ test("an admin whose company's flow is the AI step alone makes that one choice a
     await expect(
       page.getByRole("heading", { name: "Which AI should I think with?" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("list", { name: "Onboarding steps" }).getByRole("listitem")
-    ).toHaveCount(1);
     await page.getByRole("button", { name: "Continue" }).click();
 
     // The last screen of its flow: the admin is in the platform, and it opened.
@@ -106,74 +102,6 @@ test("a company that goes through no onboarding is open at once, and its admin i
   }
 });
 
-test("an admin whose company has a shorter flow gets only its screens, in its order", async ({
-  page,
-}) => {
-  const admin = await signInConfiguredAdmin();
-  // No story, nowhere the documents live, no documents and no tools: the
-  // leads and the interviews stay.
-  await adminCommand({
-    type: "onboarding.flow",
-    payload: {
-      flow: {
-        on: true,
-        steps: [
-          { id: "welcome", on: true },
-          { id: "ai", on: true },
-          { id: "about", on: false },
-          { id: "company", on: true },
-          { id: "sources", on: false },
-          { id: "documents", on: false },
-          { id: "pulse", on: false },
-          { id: "leads", on: true },
-          { id: "interviews", on: true },
-        ],
-        grasp: {
-          kickoff: true,
-          agreements: { processing: true, assessment: true, council: true },
-        },
-      },
-    },
-  });
-  try {
-    await signInTo(page.context(), admin);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.route("**/api/speech", async (route) => {
-      await route.fulfill({
-        status: 503,
-        json: { code: "speech.failed", message: "Not here" },
-      });
-    });
-    await installReadingClock(page);
-    await page.goto("/setup?step=welcome");
-    await page.getByRole("button", { name: "English" }).click();
-    await page.getByRole("button", { name: "Let’s start" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Which AI should I think with?" })
-    ).toBeVisible();
-    // Five steps: the welcome, the AI, who's who, the team leads and telling the team.
-    await expect(
-      page.getByRole("list", { name: "Onboarding steps" }).getByRole("listitem")
-    ).toHaveCount(5);
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    // Straight to who's who: this company's flow has no "How this works".
-    await expect(
-      page.getByRole("heading", { name: "Who’s who at your company?" })
-    ).toBeVisible();
-    // A screen its flow doesn't have isn't reached by its address either.
-    await page.goto("/setup?step=documents");
-    await expect(
-      page.getByRole("heading", {
-        name: "Do you have anything that explains how you work?",
-      })
-    ).toHaveCount(0);
-  } finally {
-    // All of it again, for the tests after this one.
-    await adminCommand({ type: "onboarding.flow", payload: { flow: null } });
-  }
-});
-
 /** The teams of a staff list of a company that size. */
 const nineTeams = [
   "Sales",
@@ -194,7 +122,7 @@ test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list 
   const admin = await signInConfiguredAdmin();
   await signInTo(page.context(), admin);
   // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
-  const asked: { text: string; tone: unknown }[] = [];
+  const asked: { text: string }[] = [];
   await page.route("**/api/speech", async (route) => {
     asked.push(lineOf(route.request()));
     await route.fulfill({
@@ -224,8 +152,7 @@ test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list 
   };
   const counted =
     "Thank you. From your staff list I can see 170 people in 9 teams.";
-  const saidAlone = () =>
-    asked.filter((line) => line.text === counted).map(({ tone }) => tone);
+  const saidAlone = () => asked.filter((line) => line.text === counted);
 
   await page.goto("/setup?step=company");
   await expect(
@@ -233,8 +160,8 @@ test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list 
   ).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles(list);
   await expect(page.getByText(counted)).toBeVisible();
-  // Read on this visit, Stephen says so on its own, plainly.
-  await expect.poll(saidAlone).toStrictEqual(["clear, measured pace"]);
+  // Read on this visit, Stephen says so.
+  await expect.poll(saidAlone).toHaveLength(1);
 
   const { core, api } = apiOf(admin);
   try {

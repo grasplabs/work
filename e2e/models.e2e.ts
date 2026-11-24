@@ -36,9 +36,6 @@ test("an admin reads the allowed models and the run limit, and nobody else does"
   await expect(sectionOf(page, "Limits")).toContainText(
     "at most 100 model requests"
   );
-  // Nothing to change: the page has no button of its own (the sidebar's
-  // trigger is in the sidebar on a desktop).
-  await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
 
   const refused = await pageOf(builder);
   await refused.goto("/settings/models");

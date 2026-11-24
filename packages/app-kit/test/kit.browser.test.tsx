@@ -36,8 +36,7 @@ import { TraceLine, TraceTitle } from "../src/components/trace.tsx";
 
 /**
  * The theme's dark side, through its `dark` class. Following the system's
- * colour scheme into that class is the frontend's apps/web/public/theme.js,
- * which e2e/kit.e2e.ts checks.
+ * colour scheme into that class is the frontend's apps/web/public/theme.js.
  */
 const setDark = (dark: boolean): void => {
   document.documentElement.classList.toggle("dark", dark);

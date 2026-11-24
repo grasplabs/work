@@ -1076,7 +1076,6 @@ export const fakeCloudflareApi = (token: string) => {
     const core: CoreState = {
       name: clientId,
       adminReaders: [],
-      coreAsked: [],
       kickoffAsks: [],
       commands: [],
       brainAsks: [],
@@ -1244,7 +1243,6 @@ export const fakeCloudflareApi = (token: string) => {
     { account, live }: { account: AccountState; live: VersionState }
   ): Promise<Response> => {
     const core = coreOf(clientOf(live));
-    core.coreAsked.push(url.pathname);
     if (core.redirectsTo !== undefined) {
       if (request.redirect === "manual") {
         // Its body unread: a redirect that's followed sends it on.
