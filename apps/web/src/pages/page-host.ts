@@ -23,7 +23,7 @@ import { RpcStub } from "capnweb";
 
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
 import { wait as pauseFor, reconnectDelay } from "../core.ts";
-import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 import { frameActs } from "./frame-acts.ts";
 import {
   inTime,

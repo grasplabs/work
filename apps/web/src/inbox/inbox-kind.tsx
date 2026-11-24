@@ -1,34 +1,28 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
 import {
   BellIcon,
-  CalendarOffIcon,
+  CalendarIcon,
   CircleCheckIcon,
-  CircleHelpIcon,
-  GitCompareArrowsIcon,
+  GitCompareIcon,
   GlobeIcon,
-  KeyRoundIcon,
-  LockKeyholeIcon,
-  MailWarningIcon,
-  PencilLineIcon,
+  ListChecksIcon,
+  LockIcon,
+  MailIcon,
+  MessageCircleIcon,
+  PencilIcon,
   PlayIcon,
-  ScaleIcon,
-  BookOpenIcon,
-  ShieldAlertIcon,
   SparklesIcon,
-  SplitIcon,
+  TriangleAlertIcon,
+  UserSparklesIcon,
   WorkflowIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
 
-import { AppLogo } from "../connections/app-logo.tsx";
-import type { InboxItem, InboxKind } from "./items.ts";
+import type { InboxKind } from "./items.ts";
 
-// The marks of the inbox's items, as the prototype draws them
-// (`components/inbox-kind.tsx`): what each kind is called, its icon, a
-// square for what an item is about, and its kind as a small label.
+// The marks of the inbox's items: what each kind is called, and its icon
+// from Damsko's set.
 
 /** What each kind of item that waits on a person is called, in the inbox. */
 export const kindLabel: Record<InboxKind, MessageDescriptor> = {
@@ -46,15 +40,15 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Two answers",
     context: "inbox item kind: two sources disagree",
   }),
-  openQuestion: msg({ message: "Open question", context: "inbox item kind" }),
+  openQuestion: msg({ message: "Asked of you", context: "inbox item kind" }),
   unknownAiTool: msg({ message: "AI tool", context: "inbox item kind" }),
   signInAgain: msg({ message: "Connection", context: "inbox item kind" }),
   externalDomain: msg({ message: "Domain", context: "inbox item kind" }),
   heldWrite: msg({ message: "Change", context: "inbox item kind" }),
   heldStart: msg({ message: "Workflow start", context: "inbox item kind" }),
   unknownOutcome: msg({
-    message: "Did it happen?",
-    context: "inbox item kind: a change whose answer was lost",
+    message: "Unconfirmed change",
+    context: "inbox item kind",
   }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
   stoppedSchedule: msg({
@@ -90,56 +84,31 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
-export const kindIcon: Record<InboxKind, LucideIcon> = {
+/**
+ * Each kind's icon from Damsko's set, for the list's rows. Where the set
+ * has no exact one (a question mark, a key, a scale, a shield), the
+ * nearest that says the same.
+ */
+export const kindMark: Record<InboxKind, IconData> = {
   checkDrawing: WorkflowIcon,
-  checkProposal: GitCompareArrowsIcon,
-  approveChange: PencilLineIcon,
+  checkProposal: GitCompareIcon,
+  approveChange: PencilIcon,
   confirmResult: CircleCheckIcon,
-  conflict: SplitIcon,
-  openQuestion: CircleHelpIcon,
-  unknownAiTool: SparklesIcon,
-  signInAgain: KeyRoundIcon,
+  conflict: GitCompareIcon,
+  openQuestion: MessageCircleIcon,
+  unknownAiTool: UserSparklesIcon,
+  signInAgain: LockIcon,
   externalDomain: GlobeIcon,
-  heldWrite: PencilLineIcon,
+  heldWrite: PencilIcon,
   heldStart: PlayIcon,
-  unknownOutcome: CircleHelpIcon,
-  permissionRequest: LockKeyholeIcon,
-  stoppedSchedule: CalendarOffIcon,
-  workflowChanged: GitCompareArrowsIcon,
-  packageNotice: ShieldAlertIcon,
-  stoppedEvents: MailWarningIcon,
+  unknownOutcome: MessageCircleIcon,
+  permissionRequest: LockIcon,
+  stoppedSchedule: CalendarIcon,
+  workflowChanged: GitCompareIcon,
+  packageNotice: TriangleAlertIcon,
+  stoppedEvents: MailIcon,
   appMessage: BellIcon,
-  bindingApproval: LockKeyholeIcon,
-  skillShare: BookOpenIcon,
-  decision: ScaleIcon,
-};
-
-/** The icon of an item's kind, as a square. */
-const KindMark = ({ icon: Icon }: { icon: LucideIcon }) => (
-  <span
-    aria-hidden="true"
-    className="bg-card text-muted-foreground flex size-8 flex-none items-center justify-center rounded-md border"
-  >
-    <Icon className="size-4" />
-  </span>
-);
-
-/** What an item is about, as a square: the app's tile, or the icon of its kind. */
-export const ItemMark = ({ item }: { item: InboxItem }) =>
-  item.logo === undefined ? (
-    <KindMark icon={kindIcon[item.kind]} />
-  ) : (
-    <AppLogo name={item.logo.name} size="sm" />
-  );
-
-/** The kind of an item, as a small label with its icon. */
-export const KindPill = ({ kind }: { kind: InboxKind }) => {
-  const { i18n } = useLingui();
-  const Icon = kindIcon[kind];
-  return (
-    <Badge className="flex-none" variant="outline">
-      <Icon data-icon="inline-start" />
-      {i18n._(kindLabel[kind])}
-    </Badge>
-  );
+  bindingApproval: LockIcon,
+  skillShare: SparklesIcon,
+  decision: ListChecksIcon,
 };

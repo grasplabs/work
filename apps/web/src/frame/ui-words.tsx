@@ -34,6 +34,18 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     chainOfThought: {
       name: t`Steps`,
     },
+    chart: {
+      described: (label, summary) => t`${label}. ${summary}`,
+      flow: (source, target) => t`${source} → ${target}`,
+      flowLabel: ({ source, target, value, share }) =>
+        t`${source} to ${target}: ${value}, ${share}`,
+      part: (name, value, share) => t`${name}: ${value}, ${share}`,
+      partShare: (name, share) => t`${name} · ${share}`,
+      point: (name, value) => t`${name}: ${value}`,
+      pointAt: (label, points) => [label, ...points].join(", "),
+      shareOf: (share, source) => t`${share} of ${source}`,
+      step: (name, value) => (name === "" ? value : t`${name} ${value}`),
+    },
     command: {
       dialogPlaceholder: t`Type a command or search`,
       dialogTrigger: t({ message: "Search", context: "open the search" }),
@@ -46,6 +58,14 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     dropdownMenu: {
       expand: t`More actions`,
+    },
+    confirmation: {
+      approved: t`Approved`,
+      declined: t`Declined`,
+      failed: t({
+        message: "Failed",
+        context: "an answer that did not go through",
+      }),
     },
     empty: {
       error: t`This did not load`,
@@ -236,6 +256,9 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
           context: "a tool call's state",
         }),
       },
+    },
+    tabs: {
+      close: (name) => t`Close ${name}`,
     },
     action: {
       agentAsks: t`Does something that needs your yes`,
