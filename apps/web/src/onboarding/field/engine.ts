@@ -1,4 +1,5 @@
 import { readTones } from "../campaign/pixels.ts";
+import { drawMarks } from "./marks.ts";
 import { FRAGMENT, VERTEX } from "./shader.ts";
 
 // What drives Stephen's field (shader.ts): the canvas's size, the page's
@@ -138,7 +139,8 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
   const paper = rgb(tones.paper);
   const dark = ground[0] + ground[1] + ground[2] < 1.5;
   return {
-    // At rest he is close to the page's own ground; only where he gathers does he light up.
+    // At rest he is close to the page's own ground; only where he gathers does he light up. On a
+    // light page the palest greens would vanish into it: there he is mint, deepening toward pine.
     amb: dark
       ? [
           mix(ground, pine, 0.3),
@@ -147,10 +149,10 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
           mix(pine, mint, 0.85),
         ]
       : [
-          mix(ground, sea, 0.32),
-          mix(ground, sea, 0.7),
-          mix(sea, mint, 0.45),
-          mint,
+          mix(ground, mint, 0.34),
+          mix(ground, mint, 0.6),
+          mix(mint, pine, 0.18),
+          mix(mint, pine, 0.42),
         ],
     palette: [night, ink, pine, mint, sea, lime, paper],
   };
@@ -270,7 +272,7 @@ const settle = (elapsed: number) => {
       hold.box = boxOf(hold.element);
     }
     const on = hold.held && hold.element.isConnected;
-    hold.on = toward(hold.on, on ? 1 : 0, elapsed, on ? 130 : 210);
+    hold.on = toward(hold.on, on ? 1 : 0, elapsed, on ? 130 : 90);
   }
   him.holds = him.holds.filter((hold) => hold.held || hold.on > 0.004);
 };
@@ -311,12 +313,14 @@ const rested = () => {
  * He is drawn on this canvas, under the page, from now on, as he is: a
  * screen drawn anew finds him where he was. Each thing he holds also gets
  * one of `rings`: a crisp line on its edge, drawn by the page so it follows
- * the element's own corner. Gives what stops it; nothing where WebGL can't
+ * the element's own corner, and its own picture drawn large in his dither
+ * on `marks`, a canvas over the page (marks.ts). Gives what stops it; nothing where WebGL can't
  * run.
  */
 export const attachField = (
   canvas: HTMLCanvasElement,
-  rings: readonly HTMLElement[]
+  rings: readonly HTMLElement[],
+  marks: HTMLCanvasElement
 ): (() => void) | null => {
   const layer = layerOf(canvas);
   if (layer === null) {
@@ -325,6 +329,8 @@ export const attachField = (
   stopDrawing?.();
   const still = matchMedia("(prefers-reduced-motion: reduce)");
   let colours = coloursOf(canvas);
+  // The light's own colour, as the page resolves it: the colour of the marks he draws.
+  let { mint } = readTones(canvas);
   let frame = 0;
   let last = performance.now();
 
@@ -340,6 +346,7 @@ export const attachField = (
     settle(elapsed);
     draw(layer, colours);
     placeRings(rings);
+    drawMarks(marks, him.holds, mint, him.clock);
     frame = requestAnimationFrame(loop);
   };
   const run = () => {
@@ -377,6 +384,7 @@ export const attachField = (
   };
   const onColours = () => {
     colours = coloursOf(canvas);
+    ({ mint } = readTones(canvas));
     if (still.matches) {
       draw(layer, colours);
     }
@@ -409,6 +417,7 @@ export const attachField = (
     for (const ring of rings) {
       ring.style.opacity = "0";
     }
+    drawMarks(marks, [], mint, 0);
   };
   stopDrawing = stop;
   run();

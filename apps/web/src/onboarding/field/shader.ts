@@ -108,9 +108,12 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
     for (int i = 0; i < 4; i++) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;
-      clear = min(clear, step(0.0, roundBox(p, u_holds[i], look.z)));
+      // As much clearing as there is of his ring: it comes and goes with it, never after it.
+      clear = min(clear, mix(1.0, step(0.0, roundBox(p, u_holds[i], look.z)), look.x));
     }
     level *= clear;
+    // The cleared cells come back by the dither as the ring fades, not all at once.
+    level = clear < 1.0 && b > clear ? 0.0 : level;
     for (int i = 0; i < 4; i++) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;

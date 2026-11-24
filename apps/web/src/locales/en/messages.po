@@ -3510,6 +3510,7 @@ msgstr "Awaiting approval"
 #: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 #: src/guest-sign-in.tsx
+#: src/onboarding/calm-frame.tsx
 msgid "Back"
 msgstr "Back"
 
@@ -8676,6 +8677,7 @@ msgid "Known"
 msgstr "Known"
 
 #: src/interview/concepts/frame.tsx
+#: src/onboarding/calm-frame.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Language"
@@ -8886,6 +8888,10 @@ msgstr "Lift the legal hold {hold} from version {label}?"
 #: src/frame/ui-words.tsx
 msgid "Light"
 msgstr "Light"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Light or dark"
+msgstr "Light or dark"
 
 #: src/projects/project-dialog.tsx
 msgid "Lightbulb"
@@ -9714,6 +9720,10 @@ msgstr "New team"
 #: src/brain/sources-page.tsx
 msgid "New version"
 msgstr "New version"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Next"
+msgstr "Next"
 
 #: src/frame/ui-words.tsx
 msgctxt "the next question"
@@ -14546,6 +14556,10 @@ msgstr "Stephen talks to nobody until you pick the day the interviews start."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
 msgstr "Stephen’s requests"
+
+#: src/onboarding/calm-frame.tsx
+msgid "Steps"
+msgstr "Steps"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "a workflow's steps, drawn as a flow"
