@@ -64,8 +64,8 @@ const ask = async (
   });
 };
 
-/** What a line of `characters` costs at Kugel 3.5's $0.07 a minute, each character said in 30 ms: 35 micros each. */
-const lineMicros = (characters: number): number => characters * 35;
+/** What a line of `characters` costs at Voxtral's $13 a million: 13 micros each. */
+const lineMicros = (characters: number): number => characters * 13;
 
 /** What GPT-4o Transcribe costs for `seconds`, at $0.60 an hour, in micros. */
 const heardMicros = (seconds: number): number =>
@@ -98,7 +98,7 @@ const said = async (month: string): Promise<number> => {
     purpose: "onboarding.speech",
     trigger: newPerson(),
     work: { onboarding: true },
-  }).speak({ text, voice: "1656", language: "en" });
+  }).speak({ text, voice: "voice_485", language: "en" });
   return lineMicros(text.length);
 };
 
@@ -289,7 +289,7 @@ describe("the organization's AI, for the admin", () => {
           },
           {
             feature: "speech",
-            model: "kugelaudio/kugel-3.5",
+            model: "mistral/voxtral-mini-tts-3-0",
             micros: spoken,
           },
           {
@@ -304,7 +304,7 @@ describe("the organization's AI, for the admin", () => {
         rows: [
           {
             feature: "speech",
-            model: "kugelaudio/kugel-3.5",
+            model: "mistral/voxtral-mini-tts-3-0",
             micros: spokenBefore,
           },
         ],

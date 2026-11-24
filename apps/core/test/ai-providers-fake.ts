@@ -1,22 +1,18 @@
 /**
  * The AI providers connect reaches in core's tests (test/connect-providers.ts):
- * Anthropic, OpenAI, Mistral, OpenRouter, KugelAudio and an organization's
+ * Anthropic, OpenAI, Mistral, OpenRouter and an organization's
  * own OpenAI-compatible endpoint, each at its own host. Each answers the
  * replies a test planned for the key it is sent (`aiProvidersControlUrl`),
  * one per request, and refuses a key it has no plan for, as a provider
  * refuses a key it doesn't know. Every request it got is kept, with all of
  * its headers, so a test can read where a key went and in which header.
  *
- * KugelAudio's speech and OpenAI's transcription, which Grasp's own
+ * Mistral's speech and OpenAI's transcription, which Grasp's own
  * features reach (@grasp-os/shared/platform-ai), answer as the provider
- * does when no reply is planned for the key: a line sent over the speech
- * socket with `speechBytesPerChar` bytes of audio for each character,
- * each character said in `secondsPerCharacter`, one after another, in
- * two parts (its first word, then the rest), each with when its words
- * are said from where the part starts, and a voice Grasp didn't choose
- * refused; a planned refusal (`status`) comes as the socket's error
- * frame, and each line it was sent is kept as a request, its body the
- * line's message; a recording with `writtenText`; and a realtime transcription socket with a delta of
+ * does when no reply is planned for the key: a line as a WAV file with
+ * `speechBytesPerChar` bytes of samples for each character it says, which
+ * take `secondsPerCharacter` each to play, and a voice Grasp didn't choose
+ * refused; a recording with `writtenText`; and a realtime transcription socket with a delta of
  * `partialText` for the first audio of each stretch, and `writtenText` for
  * each commit that has audio, or OpenAI's error for one that has none.
  * Every socket's opening, events and close are kept (`realtimeControlUrl`).
@@ -39,10 +35,10 @@ export const partialText = "Hello";
 /** What a stretch settled at a pause (`{ pause: true }`) is written down as. */
 export const pausedText = "Before the pause";
 
-/** Bytes of audio the fake says for each character of a line: 30 ms of 16-bit PCM at 24 kHz. */
+/** Bytes of samples the fake says for each character of a line, after its file's 44 of header. */
 export const speechBytesPerChar = 1440;
 
-/** How long the fake takes to say each character of a line. */
+/** How long the fake takes to say each character of a line: 16-bit mono at 24 kHz. */
 export const secondsPerCharacter = 0.03;
 
 /**
@@ -87,9 +83,8 @@ export const compatibleHost = "llm.acme-ai.test";
  * its reader goes away, or, with `resume`, until a test releases it by
  * name and it sends the `rest` (a model pausing mid-answer), no answer at
  * all until the request is dropped (`hang`), a redirect elsewhere
- * (`redirect`), OpenAI's own answer once a test releases it by name
- * (`release`, `releaseUrl`), or, for a line said, its first part and then
- * the socket closed (`cut`).
+ * (`redirect`), or OpenAI's own answer once a test releases it by name
+ * (`release`, `releaseUrl`).
  */
 export type PlannedReply =
   | { status: number; headers?: Record<string, string>; body?: unknown }
@@ -97,8 +92,7 @@ export type PlannedReply =
   | { hold: string; resume?: { release: string; rest: string } }
   | { hang: true }
   | { redirect: string }
-  | { release: string }
-  | { cut: true };
+  | { release: string };
 
 /** Where tests release a reply held by name: POST `{ release }`. */
 export const releaseUrl = "https://ai-providers-control.test/release";
@@ -154,7 +148,6 @@ export const aiProvidersFake = () => {
     "api.anthropic.com",
     "api.openai.com",
     "eu.api.openai.com",
-    "api.eu.kugelaudio.com",
     "api.mistral.ai",
     "openrouter.ai",
     "llm.acme-ai.test",
@@ -188,11 +181,11 @@ export const aiProvidersFake = () => {
       typeof value.hold === "string" ||
       value.hang === true ||
       typeof value.redirect === "string" ||
-      typeof value.release === "string" ||
-      value.cut === true);
+      typeof value.release === "string");
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: its source is embedded
   const keyOf = (request: Request): string | null => {
-    const apiKey = request.headers.get("x-api-key");
+    const apiKey =
+      request.headers.get("x-api-key") ?? request.headers.get("xi-api-key");
     if (apiKey !== null) {
       return apiKey;
     }
@@ -332,141 +325,83 @@ export const aiProvidersFake = () => {
     return new Response(null, { status: 101, webSocket: client });
   };
   /**
-   * KugelAudio's speech socket: each message is a line to say, answered
-   * with its audio in two parts, when the words of each part are said,
-   * and a last frame; a voice Grasp didn't choose is refused, as
-   * KugelAudio refuses a voice the key can't see, and so is a line a
-   * refusal is planned for.
+   * Mistral's line said: a WAV file in base64, 16-bit mono at 24 kHz, as
+   * long as the characters it says, a direction in brackets not among
+   * them; a voice Grasp didn't choose is refused, as Mistral refuses one
+   * it doesn't have.
    */
-  const openSpeech = (request: Request, url: URL, key: string): Response => {
-    const { 0: client, 1: server } = new WebSocketPair();
-    server.accept();
-    const voices = new Set<unknown>([1656, 1071, 2222, 1073, 2220]);
-    const msPerCharacter = 30;
-    const bytesPerCharacter = 1440;
-    const send = (frame: Record<string, unknown>): void => {
-      server.send(JSON.stringify(frame));
-    };
-    const say = async (body: string): Promise<void> => {
-      seen.push({
-        host: url.hostname,
-        method: request.method,
-        path: url.pathname + url.search,
-        headers: Object.fromEntries(request.headers),
-        body,
-        key,
-      });
-      const requestId = `req-speech-${seen.length}`;
-      const reply = plans.get(key)?.shift();
-      if (reply !== undefined && "status" in reply) {
-        send({
-          error: "Refused by the fake provider",
-          error_code: reply.status === 429 ? "RATE_LIMITED" : "INTERNAL_ERROR",
-          code: reply.status,
-          request_id: requestId,
-        });
-        return;
-      }
-      if (reply !== undefined && "release" in reply) {
-        // Waited for on a timer of this socket's own request.
-        while (!released.has(reply.release)) {
-          // oxlint-disable-next-line no-await-in-loop -- until released
-          await scheduler.wait(10);
-        }
-      }
-      const asked: unknown = JSON.parse(body);
-      if (
-        !isRecord(asked) ||
-        typeof asked.text !== "string" ||
-        !voices.has(asked.voice_id)
-      ) {
-        send({
-          error: "Voice not found",
-          error_code: "NOT_FOUND",
-          code: 404,
-          request_id: requestId,
-        });
-        return;
-      }
-      // The fake's lines are plain text, one code point to a character.
-      const { text } = asked;
-      const cut = text.indexOf(" ") + 1;
-      const parts = cut === 0 ? [text] : [text.slice(0, cut), text.slice(cut)];
-      let from = 0;
-      for (const [chunk, part] of parts.entries()) {
-        const words: Record<string, unknown>[] = [];
-        let at = 0;
-        for (const word of part.split(" ")) {
-          if (word !== "") {
-            words.push({
-              word,
-              start_ms: at * msPerCharacter,
-              end_ms: (at + word.length) * msPerCharacter,
-              char_start: at,
-              char_end: at + word.length,
-              original_char_start: from + at,
-              original_char_end: from + at + word.length,
-              score: 1,
-            });
-          }
-          at += word.length + 1;
-        }
-        send({
-          audio: btoa(
-            String.fromCodePoint(0).repeat(part.length * bytesPerCharacter)
-          ),
-          enc: "pcm_s16le",
-          idx: chunk,
-          sr: 24_000,
-          samples: (part.length * bytesPerCharacter) / 2,
-          chunk_id: chunk,
-        });
-        send({
-          word_timestamps: words,
-          chunk_id: chunk,
-          text: part,
-          original_text: text,
-        });
-        // Cut off after its first part, as a server that failed mid-line.
-        if (reply !== undefined && "cut" in reply) {
-          server.close(1011, "");
-          return;
-        }
-        from += part.length;
-      }
-      send({
-        final: true,
-        chunks: parts.length,
-        usage: {
-          audio_seconds: (text.length * msPerCharacter) / 1000,
-          characters: text.length,
-          model_id: asked.model_id,
+  const spokenLine = (body: string): Response => {
+    const voices = [
+      "voice_485",
+      "voice_478",
+      "voice_590",
+      "voice_1788",
+      "voice_591",
+    ];
+    const asked: unknown = JSON.parse(body);
+    const voice =
+      isRecord(asked) && typeof asked.voice_id === "string"
+        ? asked.voice_id
+        : "";
+    if (!voices.includes(voice)) {
+      return Response.json(
+        {
+          object: "error",
+          message: `Voice '${voice}' not found.`,
+          type: "invalid_voice",
         },
-      });
+        { status: 404 }
+      );
+    }
+    const input =
+      isRecord(asked) && typeof asked.input === "string" ? asked.input : "";
+    const said = input
+      .split("[")
+      .map((part, at) => (at === 0 ? part : part.slice(part.indexOf("]") + 1)))
+      .join("");
+    // The fake's lines are plain text, one code point to a character.
+    // oxlint-disable-next-line typescript/no-misused-spread -- see above
+    const samples = [...said].length * 1440;
+    const file = new Uint8Array(44 + samples);
+    const view = new DataView(file.buffer);
+    const name = (at: number, tag: string): void => {
+      for (let letter = 0; letter < 4; letter += 1) {
+        view.setUint8(at + letter, tag.codePointAt(letter) ?? 0);
+      }
     };
-    server.addEventListener("message", (event) => {
-      void say(String(event.data));
-    });
-    return new Response(null, { status: 101, webSocket: client });
+    name(0, "RIFF");
+    view.setUint32(4, 36 + samples, true);
+    name(8, "WAVE");
+    name(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, 24_000, true);
+    view.setUint32(28, 48_000, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    name(36, "data");
+    view.setUint32(40, samples, true);
+    let binary = "";
+    for (let at = 0; at < file.length; at += 8192) {
+      binary += String.fromCodePoint(...file.subarray(at, at + 8192));
+    }
+    return Response.json(
+      { audio_data: btoa(binary) },
+      { headers: { "x-request-id": `req-speech-${seen.length}` } }
+    );
   };
-  /** KugelAudio's speech socket, when `request` opens one with a key. */
-  const speechSocket = (
-    request: Request,
-    url: URL,
-    key: string | null
-  ): Response | undefined =>
-    url.hostname === "api.eu.kugelaudio.com" &&
-    url.pathname === "/ws/tts" &&
-    request.headers.get("upgrade") === "websocket" &&
-    key !== null
-      ? openSpeech(request, url, key)
-      : undefined;
-  /** How OpenAI's audio endpoints answer when nothing is planned. */
+  /** How Mistral's speech and OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
     request: Request,
     url: URL,
     body: string
   ): Response | undefined => {
+    if (url.hostname === "api.mistral.ai") {
+      return request.method === "POST" && url.pathname === "/v1/audio/speech"
+        ? spokenLine(body)
+        : undefined;
+    }
     // Grasp's own project answers at OpenAI's EU host, or its US one.
     if (
       url.hostname !== "api.openai.com" &&
@@ -625,10 +560,6 @@ export const aiProvidersFake = () => {
     if ("release" in reply) {
       // Never expected: a held reply is answered where it is planned for.
       return new Response("Held", { status: 500 });
-    }
-    if ("cut" in reply) {
-      // Never expected: only a line said over the speech socket is cut.
-      return new Response("Cut", { status: 500 });
     }
     return new Response(reply.sse, {
       headers: {
@@ -816,10 +747,6 @@ export const aiProvidersFake = () => {
         return await control(request, url);
       }
       const key = keyOf(request);
-      const speech = speechSocket(request, url, key);
-      if (speech !== undefined) {
-        return speech;
-      }
       const body = await request.text();
       const seenAs: ProviderRequest = {
         host: url.hostname,
