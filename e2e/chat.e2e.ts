@@ -439,7 +439,7 @@ test("a person answers the agent's questions in the box's place, types instead a
   await expect(chat.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
 });
 
-test("a person attaches files to a question, takes one off, and sees the question carry the other", async ({
+test("a person attaches files to a question, sees them, takes two off by pointer and by keyboard, and sees the question carry the other", async ({
   pageOf,
 }) => {
   const { user } = peopleIn("chat");
@@ -447,6 +447,7 @@ test("a person attaches files to a question, takes one off, and sees the questio
   const tag = crypto.randomUUID().slice(0, 8);
   const plan = `plan-${tag}.md`;
   const notes = `notes-${tag}.txt`;
+  const draft = `draft-${tag}.txt`;
   const question = `What does the plan say ${tag}?`;
   await page.goto("/");
 
@@ -459,9 +460,20 @@ test("a person attaches files to a question, takes one off, and sees the questio
       buffer: Buffer.from("# Plan\n\nShip it."),
     },
     { name: notes, mimeType: "text/plain", buffer: Buffer.from("Notes") },
+    { name: draft, mimeType: "text/plain", buffer: Buffer.from("Draft") },
   ]);
-  await page.getByRole("button", { name: `Remove ${notes}` }).click();
+  const main = page.getByRole("main");
+  for (const name of [plan, notes, draft]) {
+    // oxlint-disable-next-line no-await-in-loop -- each card in turn
+    await expect(main.getByText(name)).toBeVisible();
+  }
+  await main.getByRole("button", { name: `Remove ${notes}` }).click();
   await expect(page.getByText(notes)).toHaveCount(0);
+  // From the keyboard too: the focus on its Remove, Enter takes it off.
+  await main.getByRole("button", { name: `Remove ${draft}` }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(draft)).toHaveCount(0);
+  await expect(page.locator("body")).not.toBeFocused();
   await expect(page.getByText(plan)).toBeVisible();
   // A type core doesn't take stays out, and the box says why.
   await picker.setInputFiles({
