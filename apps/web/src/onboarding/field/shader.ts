@@ -7,7 +7,7 @@
 //
 // Layer 0, behind the page: where he rests on this screen (`u_rest`, each
 // screen its own place and tempo), a light that follows the pointer, and
-// the light he gathers round whatever he attends to (`u_attend`).
+// the light he gathers round each thing he holds (`u_holds`).
 // Layer 1, over the page, only while he carries the page to its next
 // screen: a first front spreads from what was pressed and shows the picture
 // he took from it (a flag), his own light chases it and covers the window,
@@ -39,12 +39,11 @@ uniform vec3 u_mood;
 // The pointer: x, y, and how much of its light is there.
 uniform vec3 u_pointer;
 // What he attends to: its box (x, y, width, height), and how much he has gathered.
-uniform vec4 u_attend;
-uniform float u_attendOn;
-// 0 round a thing to press, 1 behind words.
-uniform float u_attendKind;
-// The corner of what he attends to, in CSS pixels: his line follows it.
-uniform float u_attendRadius;
+// What he holds: up to four elements at once, each its own light that builds up while he is on it
+// and fades where it is when he leaves. Each one's box (x, y, width, height), and how it looks:
+// how much of it there is, 0 round a thing to press or 1 behind words, and its corner.
+uniform vec4 u_holds[4];
+uniform vec3 u_holdLooks[4];
 // The carry: 0 none, 1 spreading, 2 holding, 3 draining.
 uniform float u_phase;
 // The box it spreads from, the box it drains toward.
@@ -168,15 +167,29 @@ void main() {
     level *= mix(0.4, 1.0, smoothstep(300.0, 540.0, abs(p.x - window.x * 0.5)));
     // Where there is little of him there is none: the page stays clean, no stray cells.
     level = max(level - 0.07, 0.0) * 1.08;
-    // What he attends to. Round a thing to press, he is a fine line of light on its edge with a
-    // soft light round it that moves along it; its middle stays clear. Behind words, he is a
-    // faint light with no edge.
-    float d = roundBox(p, u_attend, u_attendRadius);
+    // What he holds. Round a thing to press, he is a fine line of light on its edge with a soft
+    // light round it that moves along it, growing outward as he builds up; its middle stays clear.
+    // Behind words, he is a faint light with no edge.
     float round_ = silk(p / 190.0 + vec2(t * 0.35, -t * 0.28) + seed, t * 2.4);
-    float line = exp(-abs(d) / 3.0) * 0.8;
-    float halo = exp(-max(d, 0.0) / 30.0) * step(0.0, d) * (0.1 + 0.6 * round_);
-    float behind = exp(-max(d, 0.0) / 90.0) * (0.1 + 0.3 * flow);
-    level += u_attendOn * mix(line + halo, behind, u_attendKind);
+    // Inside a thing to press there is none of him: its own surface stays as it is, the same all
+    // over, whatever lies behind the page. Only its edge carries his line.
+    float clear = 1.0;
+    for (int i = 0; i < 4; i++) {
+      vec3 look = u_holdLooks[i];
+      if (look.x < 0.004 || look.y > 0.5) continue;
+      clear = min(clear, step(0.0, roundBox(p, u_holds[i], look.z)));
+    }
+    level *= clear;
+    for (int i = 0; i < 4; i++) {
+      vec3 look = u_holdLooks[i];
+      if (look.x < 0.004) continue;
+      float d = roundBox(p, u_holds[i], look.z);
+      // The line sits on the edge and just outside it, never inward.
+      float line = exp(-abs(d - 1.5) / 2.2) * 0.8 * step(-1.0, d);
+      float halo = exp(-max(d, 0.0) / (6.0 + 26.0 * look.x)) * step(0.0, d) * (0.1 + 0.6 * round_);
+      float behind = exp(-max(d, 0.0) / 90.0) * (0.1 + 0.3 * flow);
+      level += look.x * mix(line + halo, behind, look.y);
+    }
 
     float q = floor(clamp(level, 0.0, 1.0) * 4.0 + b);
     if (q < 1.0) {

@@ -20,14 +20,15 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
-  // A link's words on the page's start edge: its padding hangs outside it.
-  flush: { marginInlineStart: `calc(-1 * ${space[4]})` },
+  // Under the welcome's centred words, on the same middle.
   forget: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: space[2],
+    textAlign: "center",
   },
+  said: { display: "block", textAlign: "center" },
 });
 
 // The admin deletes the kickoff, Grasp's first conversation with the
@@ -73,7 +74,7 @@ export const ForgetKickoff = ({
   };
   if (forgotten) {
     return (
-      <output aria-live="polite">
+      <output aria-live="polite" {...stylex.props(styles.said)}>
         <Text as="span" size="lg">
           {t`Forgotten. Nothing of our first conversation is kept.`}
         </Text>
@@ -82,7 +83,7 @@ export const ForgetKickoff = ({
   }
   if (kickoff === "erasing") {
     return (
-      <output aria-live="polite">
+      <output aria-live="polite" {...stylex.props(styles.said)}>
         <Text as="span" size="lg">
           {t`Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself.`}
         </Text>
@@ -100,7 +101,6 @@ export const ForgetKickoff = ({
           setOpen(true);
         }}
         size="lg"
-        style={styles.flush}
         variant="link"
       >
         {t`Forget our first conversation`}

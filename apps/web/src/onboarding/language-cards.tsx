@@ -86,15 +86,10 @@ export const LanguageCards = ({
     setLit(code);
     field.attend(card);
   };
-  const go = (code: Locale) => {
-    // Only the card he is on lets him go: he may already be on the next one.
-    setLit((current) => {
-      if (current === code) {
-        field.attend(null);
-        return null;
-      }
-      return current;
-    });
+  const go = (code: Locale, card: Element) => {
+    field.release(card);
+    // Only the card he is on goes dark: he may already be on the next one.
+    setLit((current) => (current === code ? null : current));
   };
   return (
     <ul aria-label={t`Your language`} {...stylex.props(styles.list)}>
@@ -102,8 +97,8 @@ export const LanguageCards = ({
         <li key={code}>
           <button
             {...(chosen === code && { "aria-current": true })}
-            onBlur={() => {
-              go(code);
+            onBlur={(event) => {
+              go(code, event.currentTarget);
             }}
             onClick={(event) => {
               onPick(code, event.currentTarget);
@@ -114,8 +109,8 @@ export const LanguageCards = ({
             onPointerEnter={(event) => {
               come(code, event.currentTarget);
             }}
-            onPointerLeave={() => {
-              go(code);
+            onPointerLeave={(event) => {
+              go(code, event.currentTarget);
             }}
             type="button"
             {...stylex.props(

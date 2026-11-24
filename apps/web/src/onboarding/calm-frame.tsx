@@ -9,15 +9,23 @@ import {
 } from "@grasp-os/ui/components/select";
 import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
+import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useEffect, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { GraspLogo } from "../connections/brand-logos.ts";
 import { signOut } from "../core-connection.ts";
+import {
+  applyTheme,
+  chooseTheme,
+  onThemeChange,
+  readTheme,
+} from "../frame/theme.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { useCore } from "../use-core.ts";
@@ -28,7 +36,7 @@ import { useNarrow } from "./use-narrow.ts";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
-// language and the way out at its end; under it, on a later step, the
+// language, light or dark, and the way out at its end; under it, on a later step, the
 // library's StepperNav bar with how far along; then the step in one
 // centred column, its words on the start edge, the page scrolling. Behind
 // it all, Stephen: the light of the page, alive, in another place on every
@@ -82,6 +90,8 @@ const styles = stylex.create({
   endCentred: { justifyContent: "center" },
   stepCentred: { justifyItems: "center", textAlign: "center", gap: space[8] },
   head: { display: "grid", gap: space[4] },
+  // A welcome: its title and line on the column's middle, what it asks below at full width.
+  headCentred: { justifyItems: "center", textAlign: "center" },
   end: {
     display: "flex",
     flexWrap: "wrap",
@@ -132,6 +142,33 @@ const Language = () => {
         ))}
       </SelectContent>
     </Select>
+  );
+};
+
+/**
+ * Light, dark or the system's, as one quiet icon that steps through them:
+ * the person's own choice, the one their menu in the platform makes too.
+ */
+const Appearance = ({ userId }: { userId: string }) => {
+  const { t } = useLingui();
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const mode = useSyncExternalStore(onThemeChange, () => readTheme(userId));
+  // What theme.js painted first was whoever was here last; this is theirs.
+  useEffect(() => {
+    applyTheme(readTheme(userId));
+  }, [userId]);
+  return (
+    <ThemeToggle
+      aria-label={t`Appearance`}
+      mode={mode}
+      onModeChange={(next) => {
+        if (isThemeMode(next)) {
+          chooseTheme(userId, next);
+        }
+      }}
+      size="sm"
+      variant="icon"
+    />
   );
 };
 
@@ -194,12 +231,15 @@ const AlongBar = ({ along }: { along: Along }) => {
 };
 
 export const CalmFrame = ({
+  userId,
   along,
   language = true,
   pose = fromTheTop,
   centred = false,
   children,
 }: {
+  /** Whose light or dark the bar's icon keeps. */
+  userId: string;
   /** Little on it: the column in the middle of the room, not at its top. */
   centred?: boolean;
   /** StepperNav's bar under the top bar, on a step after the welcome. */
@@ -218,6 +258,7 @@ export const CalmFrame = ({
         </span>
         <div {...stylex.props(styles.tools)}>
           {language ? <Language /> : null}
+          <Appearance userId={userId} />
           <Leave />
         </div>
       </header>
@@ -240,9 +281,12 @@ export const CalmStep = ({
   title,
   body,
   figure,
+  centred = false,
   children,
   end,
 }: {
+  /** The title and its line on the column's middle; what the step asks stays full width. */
+  centred?: boolean;
   /** Stephen over the title, on a page with little else; then it all stands centred. */
   figure?: ReactNode;
   title: string;
@@ -254,7 +298,7 @@ export const CalmStep = ({
     {...stylex.props(styles.step, figure !== undefined && styles.stepCentred)}
   >
     {figure}
-    <div {...stylex.props(styles.head)}>
+    <div {...stylex.props(styles.head, centred && styles.headCentred)}>
       <Heading level={1} size="xl">
         {title}
       </Heading>
