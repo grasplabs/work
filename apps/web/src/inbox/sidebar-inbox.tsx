@@ -9,7 +9,6 @@ import {
 import { BellIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useMatchRoute } from "@tanstack/react-router";
@@ -17,10 +16,12 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
+import { groupLabel } from "./groups.ts";
 
 // The sidebar's Inbox view, chosen with the Home | Inbox switch under its
-// head (frame/app-sidebar.tsx), as the reference's: the inbox with how many
-// things wait on the person, or a sentence when nothing does. The count is
+// head (frame/app-sidebar.tsx), as the reference's: All, the inbox, with
+// how many things wait on the person, named as the inbox's filter names
+// it; or a sentence when nothing does. The count is
 // the Inbox tab's dot too. It counts everything core's feed of what waits
 // lists (`session.waiting.list`), the failed workflows, questions, stopped
 // schedules, sources and package notices among it only while unread. Read
@@ -58,9 +59,6 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
 export const useWaitingCount = (): number | undefined =>
   useFrameRead(readCount).value;
 
-/** The inbox filter's name for everything, as the inbox's own filter has it. */
-const everything = msg({ message: "Everything", context: "inbox filter" });
-
 const styles = stylex.create({
   // Said where the rows would stand, quiet, as the reference's empty view.
   empty: {
@@ -96,7 +94,7 @@ export const InboxView = ({ waiting }: { waiting: number | undefined }) => {
               >
                 <Link to="/inbox">
                   <Icon icon={BellIcon} />
-                  {i18n._(everything)}
+                  {i18n._(groupLabel.all)}
                   {/* Inside the link, so its name says how many wait. */}
                   <span {...stylex.props(visuallyHidden)}>
                     <Plural

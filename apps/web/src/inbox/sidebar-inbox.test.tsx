@@ -112,7 +112,7 @@ describe("the sidebar's Inbox view", () => {
       2
     );
     // The link's own words, then the figure beside it, in the row.
-    await expect(shown(feed)).resolves.toBe("Everything5 things waiting5");
+    await expect(shown(feed)).resolves.toBe("All5 things waiting5");
   });
 
   it("says nothing waits, with no row, while nothing does", async () => {
