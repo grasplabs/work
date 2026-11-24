@@ -35,6 +35,7 @@ export const ProfileName = ({ name }: { name: string }) => {
       });
       if (done === true) {
         setSaved(next);
+        setDraft(null);
         setTried(undefined);
         setState("saved");
       } else {
@@ -45,11 +46,10 @@ export const ProfileName = ({ name }: { name: string }) => {
   };
   const save = (): void => {
     const next = draft?.trim();
-    // A failed save keeps what was typed in the field, as the row says.
-    if (state !== "failed") {
-      setDraft(null);
-    }
+    // What was typed stays in the field until core takes it, so a failed
+    // save keeps it, as the row says.
     if (next === undefined || next === "" || next === saved) {
+      setDraft(null);
       return;
     }
     send(next);

@@ -844,6 +844,19 @@ export const LogRecords = ({
             ? t`No events match.`
             : t`No events match in the latest stretch of the log.`}
         </Text>
+        {/* Each read searches one stretch: older ones may still match. */}
+        {next === null ? null : (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void goOlder();
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {busy ? t`Loading…` : t`Older`}
+          </Button>
+        )}
       </div>
     );
   }
