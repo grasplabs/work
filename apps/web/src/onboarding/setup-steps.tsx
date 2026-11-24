@@ -111,6 +111,9 @@ const Ai = ({ data, furthest, path, go, onward }: StepProps) => {
     body = t`Everything I read and say runs on it. Your own key works, and it’s ready.`;
   } else if (graspOffered) {
     body = t`Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key.`;
+  } else if (ai === null) {
+    // Core couldn't say: no providers are shown, so nothing is asked of them here.
+    body = t`Everything I read and say runs on it. You can set it up later in Settings.`;
   }
   return (
     <CalmStep
