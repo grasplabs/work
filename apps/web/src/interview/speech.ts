@@ -105,6 +105,9 @@ export const setSound = (on: boolean): void => {
   soundOn = on;
 };
 
+/** Whether lines are said out loud now. */
+export const soundIsOn = (): boolean => soundOn;
+
 let context: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
 let samples = new Uint8Array(0);
