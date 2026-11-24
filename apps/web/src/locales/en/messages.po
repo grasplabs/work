@@ -7105,6 +7105,10 @@ msgid "Going well."
 msgstr "Going well."
 
 #: src/interview/start.tsx
+msgid "Got it"
+msgstr "Got it"
+
+#: src/interview/start.tsx
 msgid "Got it."
 msgstr "Got it."
 
@@ -7667,10 +7671,6 @@ msgstr "How you do the work is shared in your company as how your team works, ne
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
-
-#: src/interview/start.tsx
-msgid "How your answers are handled"
-msgstr "How your answers are handled"
 
 #: src/brain/sources-page.tsx
 msgid "How your connections feed the Brain"
@@ -17548,6 +17548,10 @@ msgstr "What Grasp noticed could be better, by kind."
 msgid "What happened to this run"
 msgstr "What happened to this run"
 
+#: src/interview/start.tsx
+msgid "What happens to your answers"
+msgstr "What happens to your answers"
+
 #: src/settings/stephen-settings.tsx
 msgid "What he can do in each system, as one pack, with each person's own sign-in."
 msgstr "What he can do in each system, as one pack, with each person's own sign-in."
@@ -18785,8 +18789,8 @@ msgid "Your company account. Leaving the company stops new sign-ins; an admin ca
 msgstr "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 
 #: src/interview/start.tsx
-msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most."
-msgstr "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most."
+msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
+msgstr "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
 
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."

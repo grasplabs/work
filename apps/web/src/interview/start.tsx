@@ -1,9 +1,14 @@
 import { Button } from "@grasp-os/ui/components/button";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@grasp-os/ui/components/dialog";
 import { Heading } from "@grasp-os/ui/components/heading";
 import {
   Item,
@@ -12,12 +17,14 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
+import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
 import { media, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { Actions, Page, Quiet, Words } from "./calm.tsx";
@@ -26,8 +33,8 @@ import { DitherOver } from "./frame.tsx";
 
 // The start of the interview as someone meets it on their link: one
 // screen, one decision, agree and start. The title on two lines, one short
-// paragraph, what becomes of their answers behind one quiet trigger, the
-// one button, and "Not right now" and "I'd rather skip this" as two link
+// paragraph whose last words, underlined, open what becomes of their
+// answers in a dialog, the one button, and "Not right now" and "I'd rather skip this" as two link
 // buttons apart at the foot. Two text styles (the serif title, the body's
 // words at one size) and the buttons' label, centred on one axis. Then the
 // ways out of it, as few words as honestly do: "Not now" offers a time to
@@ -86,20 +93,13 @@ const styles = stylex.create({
   titleWhole: {
     whiteSpace: { default: null, [media.sm]: "nowrap" },
   },
-  // The trigger on the centre axis, where it stays as the panel opens under it.
-  centre: { justifySelf: "center" },
-  // The promises: a list in the paragraph's words, its dots lined up at the start, centred as a
-  // block under the trigger.
+  // The promises: a list in the dialog's words, its dots lined up at the start.
   list: {
-    width: "fit-content",
-    maxWidth: "100%",
-    boxSizing: "border-box",
     marginBlock: 0,
-    marginInline: "auto",
-    paddingBlockStart: space["2"],
     paddingInlineStart: space["5"],
     listStyleType: "disc",
-    textAlign: "start",
+    display: "grid",
+    gap: space["2"],
   },
   // The one button: the whole width on a phone, its own width on a wider window.
   agree: { width: { default: "100%", [media.sm]: "auto" } },
@@ -203,6 +203,46 @@ const useTitleSize = () => {
   };
 };
 
+/**
+ * What becomes of their answers: the paragraph's underlined words, which
+ * open the promises in a dialog over the page.
+ */
+const Answers = ({
+  promises,
+  children,
+}: {
+  promises: string[];
+  children: ReactNode;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Link asChild>
+          <button type="button">{children}</button>
+        </Link>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t`What happens to your answers`}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <Text as="div" size="lg">
+            <ul {...stylex.props(styles.list)}>
+              {promises.map((each) => (
+                <li key={each}>{each}</li>
+              ))}
+            </ul>
+          </Text>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose variant="default">{t`Got it`}</DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 /** The start: one decision, centred. */
 export const Consent = ({
   name,
@@ -256,24 +296,15 @@ to talk about your work?`.split("\n");
         </Heading>
         <div {...stylex.props(styles.block)}>
           <Text size="lg">
-            {t`Your company asked everyone to have a short chat with ${who}, our AI interviewer. It takes ${minutes} minutes at most.`}
+            <Trans>
+              Your company asked everyone to have a short chat with {who}, our
+              AI interviewer. It takes {minutes} minutes at most, and you decide{" "}
+              <Answers promises={promises}>
+                what happens to your answers
+              </Answers>
+              .
+            </Trans>
           </Text>
-          <Collapsible fitContent variant="plain">
-            <CollapsibleTrigger size="lg" style={styles.centre} weight="normal">
-              {t`How your answers are handled`}
-            </CollapsibleTrigger>
-            <CollapsibleContent asChild>
-              <div>
-                <Text as="div" size="lg">
-                  <ul {...stylex.props(styles.list)}>
-                    {promises.map((each) => (
-                      <li key={each}>{each}</li>
-                    ))}
-                  </ul>
-                </Text>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
         </div>
         <div {...stylex.props(styles.agreeRoom)}>
           <Button onClick={onAgree} size="lg" style={styles.agree}>

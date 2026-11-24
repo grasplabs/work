@@ -7105,6 +7105,10 @@ msgid "Going well."
 msgstr "Va bien."
 
 #: src/interview/start.tsx
+msgid "Got it"
+msgstr "Entendido"
+
+#: src/interview/start.tsx
 msgid "Got it."
 msgstr "Entendido."
 
@@ -7667,10 +7671,6 @@ msgstr "Cómo haces el trabajo se comparte en tu empresa como la forma en que tr
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Cómo entras en Grasp. Las contraseñas y la verificación en dos pasos las gestiona la cuenta de tu organización."
-
-#: src/interview/start.tsx
-msgid "How your answers are handled"
-msgstr "Qué pasa con tus respuestas"
 
 #: src/brain/sources-page.tsx
 msgid "How your connections feed the Brain"
@@ -17548,6 +17548,10 @@ msgstr "Lo que Grasp vio que podría mejorar, por tipo."
 msgid "What happened to this run"
 msgstr "Qué pasó con esta ejecución"
 
+#: src/interview/start.tsx
+msgid "What happens to your answers"
+msgstr "Qué pasa con tus respuestas"
+
 #: src/settings/stephen-settings.tsx
 msgid "What he can do in each system, as one pack, with each person's own sign-in."
 msgstr "Lo que puede hacer en cada sistema, como un paquete, con el inicio de sesión de cada persona."
@@ -18785,8 +18789,8 @@ msgid "Your company account. Leaving the company stops new sign-ins; an admin ca
 msgstr "Tu cuenta de la empresa. Al dejar la empresa ya no se puede iniciar sesión de nuevo; un administrador puede cerrar antes una sesión en Miembros y roles."
 
 #: src/interview/start.tsx
-msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most."
-msgstr "Tu empresa ha pedido a todos una breve charla con {who}, nuestro entrevistador de IA. Dura {minutes} minutos como mucho."
+msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
+msgstr "Tu empresa ha pedido a todos una breve charla con {who}, nuestro entrevistador de IA. Dura {minutes} minutos como mucho, y tú decides <0>qué pasa con tus respuestas</0>."
 
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."

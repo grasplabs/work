@@ -7105,6 +7105,10 @@ msgid "Going well."
 msgstr "Es läuft gut."
 
 #: src/interview/start.tsx
+msgid "Got it"
+msgstr "Verstanden"
+
+#: src/interview/start.tsx
 msgid "Got it."
 msgstr "Alles klar."
 
@@ -7667,10 +7671,6 @@ msgstr "Wie Sie die Arbeit machen, wird in Ihrem Unternehmen als Arbeitsweise Ih
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Wie Sie sich bei Grasp anmelden. Passwörter und die zweistufige Anmeldung liegen beim Konto Ihrer Organisation."
-
-#: src/interview/start.tsx
-msgid "How your answers are handled"
-msgstr "Was mit deinen Antworten passiert"
 
 #: src/brain/sources-page.tsx
 msgid "How your connections feed the Brain"
@@ -17548,6 +17548,10 @@ msgstr "Was Grasp als verbesserungswürdig bemerkt hat, nach Art."
 msgid "What happened to this run"
 msgstr "Was mit dieser Ausführung geschah"
 
+#: src/interview/start.tsx
+msgid "What happens to your answers"
+msgstr "Was mit deinen Antworten passiert"
+
 #: src/settings/stephen-settings.tsx
 msgid "What he can do in each system, as one pack, with each person's own sign-in."
 msgstr "Was er in jedem System tun kann, als ein Paket, mit der eigenen Anmeldung jeder Person."
@@ -18785,8 +18789,8 @@ msgid "Your company account. Leaving the company stops new sign-ins; an admin ca
 msgstr "Ihr Firmenkonto. Wer das Unternehmen verlässt, kann sich nicht mehr neu anmelden; ein Admin kann eine Sitzung unter Mitglieder und Rollen früher beenden."
 
 #: src/interview/start.tsx
-msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most."
-msgstr "Dein Unternehmen bittet alle um ein kurzes Gespräch mit {who}, unserem KI-Interviewer. Es dauert höchstens {minutes} Minuten."
+msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
+msgstr "Dein Unternehmen bittet alle um ein kurzes Gespräch mit {who}, unserem KI-Interviewer. Es dauert höchstens {minutes} Minuten, und du entscheidest, <0>was mit deinen Antworten passiert</0>."
 
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."
