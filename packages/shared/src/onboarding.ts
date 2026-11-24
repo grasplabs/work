@@ -442,11 +442,11 @@ export interface ReportWindow {
 /**
  * The programme with Grasp, as the inbox shows it to everyone signed
  * in: when it began, where the onboarding stands, and where today falls
- * in its weeks and its weekly reports, nothing more. It begins on the
- * Monday (UTC) of the week the interviews start, and runs in weeks from
- * there; a week's report is ready on the first day of the week after it.
- * Core counts the days (onboarding/cadence.ts), so every page says the
- * same week.
+ * in its weeks and its weekly reports, and the suites the company works
+ * in, nothing more. It begins on the Monday (UTC) of the week the
+ * interviews start, and runs in weeks from there; a week's report is
+ * ready on the first day of the week after it. Core counts the days
+ * (onboarding/cadence.ts), so every page says the same week.
  */
 export interface Programme {
   /** Its first day, a Monday: `YYYY-MM-DD`. */
@@ -468,6 +468,13 @@ export interface Programme {
   nextReport: NextReport;
   /** What the next weekly report is about: its week's days up to today. */
   reportWindow: ReportWindow;
+  /**
+   * The suites the kickoff says the company works in, so every member is
+   * told why a connection is recommended; empty when it named none. The
+   * one thing of the kickoff's context (`OnboardingContext`) a member
+   * reads: its places and words are the admin's.
+   */
+  suites: OnboardingContext["suites"];
 }
 
 /**
