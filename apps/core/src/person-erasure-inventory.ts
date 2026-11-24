@@ -247,6 +247,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.agent_places": { company: "settings an admin changed" },
   "core.agent_tool_classes": { company: "settings an admin changed" },
   "core.app_requests": { company: "Apps they asked Grasp for" },
+  // Who else asked for an app after the first to ask: the same record as
+  // the request's own `requested_by`, kept as it is.
+  "core.app_request_askers": { company: "Apps they asked Grasp for" },
   // Their asks to share a skill (a waiting one holds their text) are
   // deleted; on asks they decided as an admin, `decided_by` is cleared,
   // and the decision stays.
@@ -837,6 +840,7 @@ export const reviewedPersonColumns: Readonly<
   "core.app_integrations": ["added_by"],
   "core.app_members": ["added_by", "member_id", "member_type"],
   "core.app_pointers": ["changed_by"],
+  "core.app_request_askers": ["user_id"],
   "core.app_requests": ["requested_by"],
   "core.run_state_writers": ["writer_run_id"],
   "core.skill_shares": ["decided_by", "requested_by"],

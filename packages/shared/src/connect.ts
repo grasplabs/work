@@ -635,6 +635,11 @@ export interface AppRequest {
   /** Who asked first; `name` is null once they are gone. */
   requestedBy: { userId: string; name: string | null };
   requestedAt: string;
+  /**
+   * Everyone who asked for it, once each, the first to ask first: who,
+   * and when they asked.
+   */
+  askers: { userId: string; askedAt: string }[];
 }
 
 /** Most app requests listed at once: the latest. */
