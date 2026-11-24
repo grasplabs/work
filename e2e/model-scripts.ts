@@ -3,7 +3,10 @@
  * script, the agent's replies in a chat its person opened with `opener`,
  * one per turn of the agent's, in order. The fake keeps no state: each
  * request carries its chat so far, so the turn is the replies the agent
- * already gave in it, and parallel tests never share one. A reply that
+ * already gave in it, and parallel tests never share one. The script is
+ * the one the person's own first words open, never one the recall
+ * beside them quotes from another of their chats: tests that sign in as
+ * the same person each open a script of their own (`wordsOf`). A reply that
  * calls a tool on something the chat names (its App, a workflow) reads
  * it from the request, as the model would: from what the chat said so
  * far, its system prompt among it.
@@ -387,8 +390,26 @@ const textOf = (content: unknown): string => {
 };
 
 /**
+ * The person's own words in a question's `content`: its first part, as
+ * core puts them first (core's chat-agent.ts, `questionContent`). The
+ * parts after them are core's: notes on what the question is about, and
+ * what the recall before it found in the Brain, which can quote the same
+ * person's other chats, other tests' among them.
+ */
+const wordsOf = (content: unknown): string => {
+  if (typeof content === "string") {
+    return content;
+  }
+  const first = textPartSchema.safeParse(
+    Array.isArray(content) ? content[0] : undefined
+  );
+  return first.success ? first.data.text : "";
+};
+
+/**
  * The scripted answer to a provider request's `body`: the next of the
- * replies of the script its chat opened with. Only an agent's turn has
+ * replies of the script its chat opened with, by the words its person
+ * opened it with alone. Only an agent's turn has
  * one, as only it offers tools: anything else the stack asks a model for,
  * such as a chat's title, has none, nor has a turn past a script's end, so
  * the fake refuses it as it refuses every other request.
@@ -399,7 +420,7 @@ export const scriptedAnswer = (body: unknown): Answer | undefined => {
     return undefined;
   }
   const { system, messages } = request.data;
-  const opened = textOf(messages.find(({ role }) => role === "user")?.content);
+  const opened = wordsOf(messages.find(({ role }) => role === "user")?.content);
   // The longest opener the chat opened with: one script's opener may
   // begin another's.
   const [script] = Object.values<ModelScript>(modelScripts)
