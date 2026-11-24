@@ -7,7 +7,6 @@ import {
   MessageContent,
   MessageResponse,
 } from "@grasp-os/ui/components/message";
-import { ProgressCircle } from "@grasp-os/ui/components/progress";
 import {
   PromptInput,
   PromptInputBanner,
@@ -29,13 +28,9 @@ import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import { shownAs, useSaid, wordsOf } from "../spoken.tsx";
-import {
-  budgetSeconds,
-  nearEnd,
-  usedSeconds,
-  usedWords,
-  wrapUpSeconds,
-} from "./clock.ts";
+import { usedWords, wrapUpSeconds } from "./clock.ts";
+import { Countdown } from "./countdown.tsx";
+import type { CountdownLook } from "./countdown.tsx";
 import {
   copy,
   fixture,
@@ -69,7 +64,10 @@ const besideQuery = "@media (width >= 80rem)";
 // waiting in the subtle grey; once the line is said, every word rests in ink.
 const lit = stylex.create({
   word: {
-    transitionProperty: { default: "color", [media.reducedMotion]: "none" },
+    transitionProperty: {
+      default: "color, opacity",
+      [media.reducedMotion]: "none",
+    },
     transitionDuration: duration.ui,
     transitionTimingFunction: duration.ease,
   },
@@ -77,6 +75,9 @@ const lit = stylex.create({
   said: { color: colors.foreground },
   saying: { color: colors.accent },
   waiting: { color: colors.subtleForeground },
+  // Streamed: a word not yet said keeps its room, so the line never reflows; it fades in as it comes.
+  unseen: { opacity: { default: 0, [media.reducedMotion]: 1 } },
+  seen: { opacity: 1, color: colors.foreground },
 });
 
 const styles = stylex.create({
@@ -569,7 +570,16 @@ const Composer = ({
 };
 
 /** A line of Stephen's, its words lighting up while he says it. */
-const LitLine = ({ text, speaking }: { text: string; speaking: boolean }) => {
+const LitLine = ({
+  text,
+  speaking,
+  stream = false,
+}: {
+  text: string;
+  speaking: boolean;
+  /** Typed or silent: unsaid words keep their room unseen and fade in as they arrive. */
+  stream?: boolean;
+}) => {
   const said = useSaid({ line: text, saying: text.length, from: 0, speaking });
   return (
     <>
@@ -583,7 +593,14 @@ const LitLine = ({ text, speaking }: { text: string; speaking: boolean }) => {
           look = "saying";
         }
         return (
-          <span key={start} {...stylex.props(lit.word, lit[look])}>
+          <span
+            key={start}
+            {...stylex.props(
+              lit.word,
+              lit[look],
+              stream && (look === "waiting" ? lit.unseen : lit.seen)
+            )}
+          >
             {word}
           </span>
         );
@@ -603,19 +620,19 @@ const Stage = ({
   talk,
   left,
   clock,
+  countLook,
   onReadBack,
 }: {
   talk: Talk;
   left: number;
   clock: ClockPlace;
+  countLook: CountdownLook;
   onReadBack: () => void;
 }) => {
   const now = talk.turns.findLast((turn) => turn.from === "stephen");
-  const over = [
-    fixture.interviewer,
-    ...(clock === "title" ? [usedWords(left)] : []),
-  ].join(" · ");
   const speaking = talk.doing === "speaking";
+  // Spoken, his words light up with his voice; typed or silent, they stream in at a reading pace.
+  const stream = talk.mode === "type" || talk.micRefused;
   // A long line, as today's interview shows it: its first sentence large, the rest under it.
   // Time's up too: "That's our 20 minutes." as the title, the rest under it.
   const shown = shownAs(now?.text ?? "", now?.id === "time-up" ? 0 : 90);
@@ -623,34 +640,38 @@ const Stage = ({
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
         <div {...stylex.props(styles.over)}>
-          {clock === "title" ? (
-            <ProgressCircle
-              aria-label={`${fixture.minutes} minutes at most`}
-              getAriaValueText={() => usedWords(left)}
-              max={budgetSeconds}
-              size="sm"
-              value={usedSeconds(left)}
-              variant={nearEnd(left) ? "warning" : "default"}
-            />
-          ) : null}
           <Text as="span" color="muted" size="sm">
-            {over}
+            {fixture.interviewer}
           </Text>
+          {clock === "title" ? (
+            <Countdown left={left} look={countLook} />
+          ) : null}
         </div>
         {now?.lead === undefined ||
         (talk.doing === "listening" && talk.interim !== "") ? null : (
           <Text color="muted" size="lg">
-            {now.lead}
+            <LitLine
+              key={`${now.id}-lead`}
+              speaking={speaking}
+              stream={stream}
+              text={now.lead}
+            />
           </Text>
         )}
         <Heading level={1} size="xl">
-          <LitLine key={now?.id} speaking={speaking} text={shown.title} />
+          <LitLine
+            key={now?.id}
+            speaking={speaking}
+            stream={stream}
+            text={shown.title}
+          />
         </Heading>
         {shown.rest === "" ? null : (
           <Text size="lg">
             <LitLine
               key={`${now?.id}-rest`}
               speaking={speaking}
+              stream={stream}
               text={shown.rest}
             />
           </Text>
@@ -682,6 +703,7 @@ export const Conversation = ({
   left,
   clock,
   look,
+  countLook,
   transcript = false,
   onReadBack,
 }: {
@@ -690,6 +712,8 @@ export const Conversation = ({
   left: number;
   clock: ClockPlace;
   look: "stage" | "thread";
+  /** The countdown's look over the question (A): small, large or minutes only. */
+  countLook: CountdownLook;
   /** The transcript is open: beside the stage, or in its place on a phone. */
   transcript?: boolean;
   onReadBack: () => void;
@@ -731,6 +755,7 @@ export const Conversation = ({
         >
           <Stage
             clock={clock}
+            countLook={countLook}
             left={left}
             onReadBack={onReadBack}
             talk={talk}
