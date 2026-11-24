@@ -3,7 +3,6 @@
 // checkbox role beside a hidden native input, so a form sends it and an agent can check it by name.
 // The checkbox draws its box only; its words are Field's parts, on a row at least 44px tall that a
 // press on the box, its label or the space around them checks:
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Field orientation="horizontal">
 //     <Checkbox />
@@ -67,7 +66,7 @@ const styles = stylex.create({
     width: size.checkboxBox,
     height: size.checkboxBox,
     marginTop: `calc((${font.textSmLine} - ${size.checkboxBox}) / 2)`,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   mark: {

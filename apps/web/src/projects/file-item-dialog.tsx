@@ -151,8 +151,8 @@ const FileForm = ({
         </DialogClose>
         <Button
           disabled={picked === undefined}
-          errorLabel={t`Not added`}
-          loadingLabel={t`Adding`}
+          errorText={t`Not added`}
+          loadingText={t`Adding`}
           onClick={file}
           size="sm"
         >

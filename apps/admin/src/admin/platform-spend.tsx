@@ -42,7 +42,7 @@ const featureWords: Record<PlatformAiFeature, string> = {
 const featureLabel = (feature: PlatformAiFeature | null): string =>
   feature === null ? "Other" : featureWords[feature];
 
-/** `elevenlabs/eleven_v4` as "ElevenLabs eleven_v4". */
+/** `kugelaudio/kugel-3.5` as "KugelAudio kugel-3.5". */
 const modelLabel = (model: string): string => {
   const [provider = "", ...rest] = model.split("/");
   const id = aiProviderIdSchema.safeParse(provider);

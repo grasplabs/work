@@ -7,6 +7,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { messages as spanish } from "../locales/es/messages.po";
 import { messages as dutch } from "../locales/nl/messages.po";
 import { UiWords } from "./ui-words.tsx";
 
@@ -21,7 +22,7 @@ const Part = () => {
   const { copyButton, menu } = useI18n();
   return (
     <p lang={useLocale()}>
-      {copyButton.copyError}, {menu.loading}
+      {copyButton.copyError}, {menu.loading}, {menu.error}
     </p>
   );
 };
@@ -54,14 +55,20 @@ describe("Damsko's own words", () => {
 
   it("are English in English", async () => {
     const part = await drawn();
-    expect(part.textContent).toBe("Not copied, Working");
+    expect(part.textContent).toBe("Not copied, Working, Failed");
     expect(part.lang).toBe("en");
   });
 
   it("are the page's language's", async () => {
     i18n.loadAndActivate({ locale: "nl", messages: dutch });
     const part = await drawn();
-    expect(part.textContent).toBe("Niet gekopieerd, Bezig");
+    expect(part.textContent).toBe("Niet gekopieerd, Bezig, Mislukt");
     expect(part.lang).toBe("nl");
+  });
+
+  it("are a menu item's, not a run's status, where a language words them otherwise", async () => {
+    i18n.loadAndActivate({ locale: "es", messages: spanish });
+    const part = await drawn();
+    expect(part.textContent).toBe("No copiado, Trabajando, Error");
   });
 });

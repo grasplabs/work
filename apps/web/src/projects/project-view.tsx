@@ -232,8 +232,8 @@ const RemoveItem = ({
         <AlertDialogFooter>
           <AlertDialogCancel />
           <Button
-            errorLabel={t`Not taken out`}
-            loadingLabel={t`Taking out`}
+            errorText={t`Not taken out`}
+            loadingText={t`Taking out`}
             onClick={async () => {
               await asking.answer(takeOut);
             }}
@@ -422,8 +422,8 @@ const DeleteProject = ({
         <AlertDialogFooter>
           <AlertDialogCancel />
           <Button
-            errorLabel={t`Couldn't delete`}
-            loadingLabel={t`Deleting`}
+            errorText={t`Couldn't delete`}
+            loadingText={t`Deleting`}
             onClick={remove}
             size="sm"
             variant="destructive"

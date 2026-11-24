@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's Tabs. Two looks, on the list:
 // `default`, the tabs on a soft track with the chosen one raised; `line`, words in muted
 // on one hairline that turn ink, a line under the chosen one that glides to the next.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Tabs defaultValue="overview">
 //     <TabsList aria-label="Project" variant="line">
@@ -278,9 +277,12 @@ const styles = stylex.create({
   // The track's room above and below holds each tab's 44px target on a touch screen, so the row's scrolling never cuts it.
   listDefault: {
     gap: space["1"],
-    padding: {
+    // Written as the two long forms: the base list's own inline padding is a long form, which a
+    // short `padding` here would not replace, and the track would be wider at its sides.
+    paddingInline: space["1"],
+    paddingBlock: {
       default: space["1"],
-      [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2) ${space["1"]}`,
+      [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
     },
     backgroundImage: "none",
     boxShadow: "none",
@@ -358,7 +360,7 @@ const styles = stylex.create({
     paddingBlock: 0,
     paddingInline: space["3"],
     borderBottomWidth: 0,
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
     cornerShape: radius.shape,
     transitionProperty: "color, background-color",
   },
@@ -424,7 +426,7 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
     // Button's own shape at this size: the one corner capped at half, as a ghost icon Button hovers.
-    borderRadius: `min(${radius.base}, calc((${size.iconSm} + ${space["1"]}) / 2))`,
+    borderRadius: `min(${radius.xl}, calc((${size.iconSm} + ${space["1"]}) / 2))`,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",
@@ -459,7 +461,7 @@ const styles = stylex.create({
     marginInline: `calc(-1 * ${space["2"]})`,
     paddingInline: space["2"],
     paddingBottom: space["2"],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     paddingTop: `calc(${space["4"]} - ${space["2"]})`,
     color: colors.bodyForeground,

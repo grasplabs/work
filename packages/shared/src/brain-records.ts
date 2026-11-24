@@ -21,8 +21,9 @@ import { workflowResourceIdSchema } from "./ids.ts";
 // whatever type it is sent as.
 // A statement that changes is followed up by a new one (`followsUp`); a
 // team's size or stakeholder by a new dated value, the newest counting. A
-// gap is asked about, answered or closed once each (`brain.askAboutGap`,
-// `answerGap`, `closeGap`), never reopened.
+// gap is answered or closed once (`brain.answerGap`, `closeGap`), never
+// reopened; while it is open it may be asked about again
+// (`brain.askAboutGap`).
 // Nothing in a record names a person: a source's `who` is a role ("Head
 // of finance"), never a name, and there is no transcript or article, so
 // no interview's words reach the brain. Titles, names and a statement's

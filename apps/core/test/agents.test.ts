@@ -58,6 +58,8 @@ describe("the company's agents", () => {
       // One of the company's: nobody's own.
       ownerId: null,
       offeredAt: null,
+      // Whoever changed it first made its row, never the agent.
+      madeBy: null,
       changedBy: "admin-2",
       changedAt: "2026-11-02T00:00:00.000Z",
     });

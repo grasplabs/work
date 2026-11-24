@@ -421,7 +421,7 @@ export const layerStyles = stylex.create({
     // When it has more than it shows, it takes focus, so the keys can scroll it. Its ring is drawn
     // inside it, where the panel does not cut it. Square otherwise, so the hairlines run straight
     // to its sides instead of bending up at its corners.
-    borderRadius: { default: 0, ":focus-visible": radius.mark },
+    borderRadius: { default: 0, ":focus-visible": radius.sm },
     cornerShape: radius.shape,
     "::after": {
       content: '""',

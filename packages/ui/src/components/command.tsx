@@ -4,7 +4,6 @@
 // and the list Select and Combobox share (lib/styles listStyles). The list is always shown; typing
 // ranks it. CommandDialog puts it in a dialog's panel over the page, opened by its trigger or
 // mod+k.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Command items={commands} onAction={(value) => run(value)}>
 //     <CommandInput aria-label="Search actions" placeholder="Search actions" />
@@ -144,7 +143,7 @@ export interface CommandItemData {
   /** Out of use: skipped by the keys and the pointer. */
   disabled?: boolean;
   /** For an action that can fail: the words shown on the command, and given to an agent, when it does. */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * A second line under the words, quiet and smaller: where a search result comes from, or what it
    * is ("Project · edited Tuesday"), with the matched words marked by CommandHighlight. One line,
@@ -200,14 +199,14 @@ export interface CommandProps {
   /**
    * Runs the command with this value: Enter, a click, or its shortcut. Return a Promise and the
    * command shows it is working until it settles. If it throws or rejects, the command shows its
-   * `errorLabel`, and a screen reader hears it.
+   * `errorText`, and a screen reader hears it.
    */
   onAction?: (value: string, details: CommandActionDetails) => unknown;
   /**
-   * What a failed command says when it has no `errorLabel` of its own.
+   * What a failed command says when it has no `errorText` of its own.
    * @default "Failed"
    */
-  errorLabel?: string;
+  errorText?: string;
   /** The words in the field at first, so the list starts ranked by them. */
   defaultInputValue?: string;
   /**
@@ -281,7 +280,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.popover,
     boxShadow: shadow.popupShadow,
@@ -564,10 +563,7 @@ const isRtl = (element: Element) =>
 // ---- The row actions -------------------------------------------------------------------------------
 
 /** What the list keeps of each command, to find it by value: its name, its error words, its actions. */
-type Known = Pick<
-  CommandItemData,
-  "value" | "label" | "errorLabel" | "actions"
->;
+type Known = Pick<CommandItemData, "value" | "label" | "errorText" | "actions">;
 
 /** What a row needs for its More: the one menu, and how it is named and opened. */
 interface RowMenu {
@@ -768,7 +764,7 @@ interface Scope {
   placeholder: string | undefined;
   loading: boolean;
   handleFieldKeys: (event: KeyboardEvent<HTMLInputElement>) => void;
-  errorLabel: string;
+  errorText: string;
   rows: RowMenu;
   byValue: Map<string, CommandItemData>;
   register: (entry: Known) => () => void;
@@ -1018,7 +1014,7 @@ export interface CommandItemProps extends Omit<
   /**
    * Runs this command, before the Command's `onAction`: Enter, a click, or its shortcut. Return a
    * Promise and it shows it is working until it settles; if it throws or rejects, it shows its
-   * `errorLabel`.
+   * `errorText`.
    */
   onAction?: () => unknown;
   /** Layout only. */
@@ -1034,7 +1030,7 @@ export const CommandItem = ({
   media: mark,
   keywords,
   disabled,
-  errorLabel,
+  errorText,
   description,
   end,
   actions,
@@ -1042,17 +1038,17 @@ export const CommandItem = ({
   onAction,
   style,
 }: CommandItemProps) => {
-  const { rows, errorLabel: fallback, register, fail } = useScope();
+  const { rows, errorText: fallback, register, fail } = useScope();
   const { keys, words: content } = split(children);
   const plain = typeof content === "string";
   const label = plain ? content : labelGiven;
   const name = label ?? value;
-  const error = errorLabel ?? fallback;
+  const error = errorText ?? fallback;
   const withActions = actions !== undefined && actions.length > 0;
   // Known by value, so a failure finds its words and the right arrow its actions.
   useEffect(
-    () => register({ value, label: name, errorLabel, actions }),
-    [register, value, name, errorLabel, actions]
+    () => register({ value, label: name, errorText, actions }),
+    [register, value, name, errorText, actions]
   );
   const words = plain ? (
     <Words />
@@ -1133,7 +1129,7 @@ export const CommandItem = ({
           )}
           {withActions && (
             <MoreButton
-              entry={{ value, label: name, errorLabel, actions }}
+              entry={{ value, label: name, errorText, actions }}
               rows={rows}
               shown={state.highlighted}
             />
@@ -1246,7 +1242,7 @@ const CommandRoot = ({
   children,
   items,
   onAction,
-  errorLabel: errorGiven,
+  errorText: errorGiven,
   defaultInputValue,
   inputValue,
   onInputValueChange,
@@ -1259,7 +1255,7 @@ const CommandRoot = ({
   placeholder,
 }: RootProps) => {
   const catalog = useI18n();
-  const errorLabel = errorGiven ?? catalog.command.error;
+  const errorText = errorGiven ?? catalog.command.error;
   const byValue = commandsByValue(items ?? NO_ITEMS);
   // The commands written as parts, known by value once they are on the page.
   const known = useRef(new Map<string, Known>());
@@ -1274,7 +1270,7 @@ const CommandRoot = ({
     };
   };
   const { root, rows, handleFieldKeys, opened } = useRowActions(find);
-  // A failed action shows its errorLabel on the command, and a screen reader hears it, each time.
+  // A failed action shows its errorText on the command, and a screen reader hears it, each time.
   const fail = (words: string): never => {
     announce(words);
     throw new CommandError(words);
@@ -1282,14 +1278,14 @@ const CommandRoot = ({
   const run = (value: string, details: CommandActionDetails) =>
     runAction(
       () => onAction?.(value, details),
-      () => fail(find(value)?.errorLabel ?? errorLabel)
+      () => fail(find(value)?.errorText ?? errorText)
     );
   const scope: Scope = {
     dialogLabel,
     placeholder,
     loading,
     handleFieldKeys,
-    errorLabel,
+    errorText,
     rows,
     byValue,
     register,
@@ -1358,7 +1354,7 @@ export interface CommandDialogProps extends Omit<CommandProps, "style"> {
   "aria-label": string;
   /**
    * Runs the command with this value. The palette closes once it has run; when it returns a
-   * Promise, once that settles, and it stays open showing the `errorLabel` if it rejects. Return
+   * Promise, once that settles, and it stays open showing the `errorText` if it rejects. Return
    * `false` to keep it open (a command that changes what the list shows).
    */
   onAction?: (value: string, details: CommandActionDetails) => unknown;

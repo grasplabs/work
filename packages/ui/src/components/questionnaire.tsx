@@ -2,7 +2,6 @@
 // built on RadioGroup, Checkbox, Textarea, InputGroup's input and
 // Button. Each item is one choice, several, or the person's own words; a choice item may take
 // words of the person's own as well (QuestionnaireInput, "Other").
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Questionnaire onSubmit={(answers) => answer(answers)}>
 //     <QuestionnaireItem name="report">
@@ -342,7 +341,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.md,
@@ -432,7 +431,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: {
       default: colors.card,
@@ -489,7 +488,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: {
       default: colors.control,
@@ -555,7 +554,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: colors.control,
     boxShadow: size.borderStrong,

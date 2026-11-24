@@ -226,10 +226,7 @@ const styles = stylex.create({
     gap: space["2"],
   },
   // A control in a cell, a line tall: it may stand out above and below.
-  control: {
-    display: "inline-flex",
-    marginBlock: `calc(-1 * ${space["1"]})`,
-  },
+  control: { marginBlock: `calc(-1 * ${space["1"]})` },
   // Who did it: a face (or what kind of actor it is) before the name.
   // An ID for a name (an agent's, an App's) breaks rather than widen the table.
   who: {
@@ -856,18 +853,17 @@ export const LogRecords = ({
                 )}
                 <TableCell align="end">
                   {/* The button within the row's line, so the row keeps its height. */}
-                  <span {...stylex.props(styles.control)}>
-                    <Button
-                      aria-label={t`Details of event ${seq}`}
-                      onClick={() => {
-                        onDetails(record);
-                      }}
-                      size="icon-xs"
-                      variant="ghost"
-                    >
-                      <Icon icon={ChevronRightIcon} />
-                    </Button>
-                  </span>
+                  <Button
+                    aria-label={t`Details of event ${seq}`}
+                    onClick={() => {
+                      onDetails(record);
+                    }}
+                    size="icon-xs"
+                    style={styles.control}
+                    variant="ghost"
+                  >
+                    <Icon icon={ChevronRightIcon} />
+                  </Button>
                 </TableCell>
               </TableRow>
             );

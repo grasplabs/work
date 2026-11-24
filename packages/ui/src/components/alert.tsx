@@ -1,7 +1,6 @@
 // Alert: a note set into the page, for something to know, something that went well, something to
 // look at, or something that went wrong: a tinted ground with no border or shadow,
 // an icon in the note's colour, a short title over a sentence.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Alert>
 //     <AlertTitle>Exports are ready</AlertTitle>
@@ -136,7 +135,7 @@ const styles = stylex.create({
     minWidth: 0,
     paddingBlock: space["3"],
     paddingInline: space["4"],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     // No border and no shadow: the tint is the edge. In forced colours a real border draws it.
     borderWidth: { default: 0, [FORCED]: 1 },
@@ -165,7 +164,7 @@ const styles = stylex.create({
     [iconVars.size]: size.iconSm,
     columnGap: 0,
     padding: space["3"],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     boxShadow: size.borderStrong,
   },
   default: { backgroundColor: colors.alertBgDefault },

@@ -1,59 +1,52 @@
-import { defaultFlow, setupSteps } from "@grasp-os/shared/onboarding-flow";
+import {
+  defaultFlow,
+  onboardingBehind,
+  setupSteps,
+} from "@grasp-os/shared/onboarding-flow";
 import { describe, expect, it } from "vite-plus/test";
 
-import { landingAfterSignIn, onboardingBehind } from "./landing.ts";
+import { heldWhileOnboarding } from "./landing.ts";
 
-// Where someone lands right after signing in: a company's admin whose
-// organization is still onboarding goes into the onboarding; everyone
-// else where they were going.
+// Where someone signed in is held while their company's onboarding isn't
+// behind it: its admins in the onboarding, everyone else waiting.
 
 const admin = { role: "admin", staff: false } as const;
+const member = { role: "user", staff: false } as const;
 
-/** Where they land, and whether it was asked if the organization finished onboarding. */
-const land = async (
-  path: string,
-  identity: Parameters<typeof landingAfterSignIn>[0]["identity"],
-  open: boolean
-) => {
-  let asked = false;
-  const to = await landingAfterSignIn({
-    path,
-    identity,
-    open: async () => {
-      asked = true;
-      return await Promise.resolve(open);
-    },
-  });
-  return { to, asked };
-};
-
-describe("landing right after signing in", () => {
-  it("takes the company's admin into the onboarding while their organization hasn't finished it", async () => {
-    await expect(land("/", admin, false)).resolves.toStrictEqual({
-      to: "/setup",
-      asked: true,
-    });
-  });
-
-  it("takes them home once it has", async () => {
-    await expect(land("/", admin, true)).resolves.toMatchObject({ to: null });
-  });
-
-  it("keeps a link they followed to sign in", async () => {
-    await expect(land("/inbox", admin, false)).resolves.toMatchObject({
-      to: null,
-    });
-  });
-
+describe("someone signed in while the company onboards", () => {
   it.each([
-    { who: "a member", identity: { role: "user", staff: false } as const },
-    { who: "Grasp's staff", identity: { role: "admin", staff: true } as const },
-  ])("leaves $who where they were going", async ({ identity }) => {
-    await expect(land("/", identity, false)).resolves.toStrictEqual({
+    { who: "an admin", identity: admin, path: "/", to: "/setup" },
+    {
+      who: "an admin on a link",
+      identity: admin,
+      path: "/inbox",
+      to: "/setup",
+    },
+    {
+      who: "an admin on the onboarding's own settings",
+      identity: admin,
+      path: "/settings/onboarding",
       to: null,
-      asked: false,
-    });
+    },
+    { who: "a member", identity: member, path: "/", to: "/waiting" },
+    {
+      who: "a builder on a link",
+      identity: { role: "builder", staff: false } as const,
+      path: "/apps",
+      to: "/waiting",
+    },
+  ])("holds $who: $to", ({ identity, path, to }) => {
+    expect(heldWhileOnboarding({ path, identity, behind: false })).toBe(to);
   });
+
+  it.each([admin, member])(
+    "lets everyone go on once the onboarding is behind the company",
+    (identity) => {
+      expect(
+        heldWhileOnboarding({ path: "/inbox", identity, behind: true })
+      ).toBeNull();
+    }
+  );
 });
 
 /** The default flow's steps, with those in `off` switched off. */

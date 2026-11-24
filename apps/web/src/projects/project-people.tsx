@@ -273,8 +273,8 @@ const AddRow = ({
       <div {...stylex.props(styles.go)}>
         <Button
           disabled={picked === null}
-          errorLabel={t`Not added`}
-          loadingLabel={t`Adding`}
+          errorText={t`Not added`}
+          loadingText={t`Adding`}
           onClick={add}
         >
           <Trans context="put in a project">Add</Trans>
@@ -361,8 +361,8 @@ const RemoveDialog = ({
         <AlertDialogFooter>
           <AlertDialogCancel />
           <Button
-            errorLabel={t`Not taken out`}
-            loadingLabel={t`Taking out`}
+            errorText={t`Not taken out`}
+            loadingText={t`Taking out`}
             onClick={takeOut}
             size="sm"
             variant="destructive"

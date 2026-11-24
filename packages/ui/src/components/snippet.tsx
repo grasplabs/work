@@ -127,7 +127,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [media.forcedColors]: 1 },
     borderStyle: "solid",
     borderColor: "ButtonText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     boxShadow: {
       default: "inset 0 0 0 1px transparent",

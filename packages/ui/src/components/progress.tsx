@@ -2,11 +2,13 @@
 // under way when how far is unknown, in StyleX,
 // built on UI SDK's Progress: a round track in three
 // heights, the primary colour for what is done, and a ring in three sizes.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
-//   <Progress label="Exporting the report" value={60} />
-//   <Progress label="Connecting" value={null} />                  under way, how far unknown
-//   <ProgressCircle label="Uploading" value={40} size="lg" />
+//   <Progress value={60}>
+//     <ProgressLabel>Exporting the report</ProgressLabel>
+//     <ProgressValue />
+//   </Progress>
+//   <Progress aria-label="Connecting" value={null} />             no words above it; how far unknown
+//   <ProgressCircle aria-label="Uploading" value={40} size="lg" />
 //
 // A progress bar is for a task that will finish; a reading such as storage used is a meter.
 "use client";
@@ -15,10 +17,12 @@ import * as stylex from "@stylexjs/stylex";
 import {
   Progress as ProgressPrimitive,
   ProgressIndicator,
-  ProgressLabel,
+  ProgressLabel as ProgressLabelPrimitive,
   ProgressTrack,
-  ProgressValue,
+  ProgressValue as ProgressValuePrimitive,
 } from "@ui-sdk/react/progress";
+import { createContext, use } from "react";
+import type { ReactNode } from "react";
 
 import { visuallyHidden } from "../lib/styles";
 import {
@@ -47,14 +51,13 @@ export interface ProgressProps {
    * @default 100
    */
   max?: number;
-  /** What is under way, in a few words ("Exporting the report"). It names the bar. */
-  label?: string;
   /**
-   * Shows the label and the value above the bar. Hide it where the words beside it already say it;
-   * the label still names it.
-   * @default true
+   * What stands above the bar: a ProgressLabel, which names it, and a ProgressValue at the line's
+   * end. Left out where the words beside it already say it; `aria-label` names it then.
    */
-  showLabel?: boolean;
+  children?: ReactNode;
+  /** What is under way, in a few words ("Exporting the report"), when no ProgressLabel names the bar. */
+  "aria-label"?: string;
   /**
    * The colour of what is done, when it says something: `success` once it has worked, `warning`
    * when it is slow, `destructive` when it stopped.
@@ -72,6 +75,21 @@ export interface ProgressProps {
   style?: LayoutStyle;
 }
 
+/** Every prop a ProgressLabel takes. */
+export interface ProgressLabelProps {
+  /** What is under way, in a few words ("Exporting the report"). It names the bar. */
+  children: ReactNode;
+}
+
+/** Every prop a ProgressValue takes. */
+export interface ProgressValueProps {
+  /**
+   * What it shows, from the formatted value ("40%") and the value itself. Left out, the formatted
+   * value.
+   */
+  children?: (formatted: string, value: number | null) => ReactNode;
+}
+
 /** Every prop a ProgressCircle takes: a Progress's, drawn as a ring. */
 export interface ProgressCircleProps {
   /** How far the task has come, from 0 to `max`. `null` while how far is unknown: the ring turns. */
@@ -81,13 +99,13 @@ export interface ProgressCircleProps {
    * @default 100
    */
   max?: number;
-  /** What is under way, in a few words ("Uploading"). It names the ring, unseen. */
-  label?: string;
+  /** What is under way, in a few words ("Uploading"). It names the ring, which shows no words. */
+  "aria-label"?: string;
   /**
-   * Shows the value in the middle of a large ring. A ring never shows its label.
+   * Shows the value in the middle of a large ring.
    * @default true
    */
-  showLabel?: boolean;
+  showValue?: boolean;
   /**
    * The colour of what is done: `success`, `warning` or `destructive` when it says something.
    * @default "default"
@@ -326,11 +344,31 @@ const variants = {
 const bars = { sm: styles.sm, default: styles.md, lg: styles.lg };
 const rings = { sm: styles.ringSm, default: styles.ringMd, lg: styles.ringLg };
 
+/** Whether how far is known: a ProgressValue shows nothing while it is not. */
+const KnownContext = createContext(false);
+
+/** What is under way, above the bar: it names the bar. */
+export const ProgressLabel = ({ children }: ProgressLabelProps) => (
+  <ProgressLabelPrimitive {...stylex.props(styles.label)}>
+    {children}
+  </ProgressLabelPrimitive>
+);
+
+/** How far it has come, at the end of the label's line: the percentage, unseen by a screen reader, which hears the bar's own value. */
+export const ProgressValue = ({ children }: ProgressValueProps) =>
+  use(KnownContext) ? (
+    <ProgressValuePrimitive aria-hidden="true" {...stylex.props(styles.value)}>
+      {children === undefined
+        ? undefined
+        : (state): ReactNode => children(state.text, state.value)}
+    </ProgressValuePrimitive>
+  ) : null;
+
 export const Progress = ({
   value,
   max = 100,
-  label,
-  showLabel = true,
+  children,
+  "aria-label": ariaLabel,
   variant = "default",
   size: sized = "default",
   getAriaValueText,
@@ -339,19 +377,11 @@ export const Progress = ({
   <ProgressPrimitive
     value={value}
     max={max}
+    aria-label={ariaLabel}
     getValueLabel={getAriaValueText}
     {...stylex.props(styles.root, variants[variant], style)}
   >
-    {label !== undefined && (
-      <ProgressLabel
-        {...stylex.props(showLabel ? styles.label : visuallyHidden)}
-      >
-        {label}
-      </ProgressLabel>
-    )}
-    {showLabel && value !== null && (
-      <ProgressValue aria-hidden="true" {...stylex.props(styles.value)} />
-    )}
+    <KnownContext value={value !== null}>{children}</KnownContext>
     <ProgressTrack {...stylex.props(styles.track, bars[sized])}>
       {/* The class only: UI SDK sets the indicator's width as its own inline style. */}
       <ProgressIndicator className={className(styles.indicator)} />
@@ -372,8 +402,8 @@ export const Progress = ({
 export const ProgressCircle = ({
   value,
   max = 100,
-  label,
-  showLabel = true,
+  "aria-label": ariaLabel,
+  showValue = true,
   variant = "default",
   size: sized = "default",
   getAriaValueText,
@@ -384,18 +414,19 @@ export const ProgressCircle = ({
     render={<div data-slot="progress-circle" />}
     value={value}
     max={max}
+    aria-label={ariaLabel}
     getValueLabel={getAriaValueText}
     {...stylex.props(styles.root, styles.rootCircle, variants[variant], style)}
   >
-    {label !== undefined && (
-      <ProgressLabel {...stylex.props(visuallyHidden)}>{label}</ProgressLabel>
-    )}
     {/* The track is the ring; the indicator part is kept, unseen, so the value stays wired. */}
     <ProgressTrack {...stylex.props(styles.ring, rings[sized])}>
       <ProgressIndicator className={className(visuallyHidden)} />
     </ProgressTrack>
-    {showLabel && sized === "lg" && value !== null && (
-      <ProgressValue aria-hidden="true" {...stylex.props(styles.ringValue)} />
+    {showValue && sized === "lg" && value !== null && (
+      <ProgressValuePrimitive
+        aria-hidden="true"
+        {...stylex.props(styles.ringValue)}
+      />
     )}
   </ProgressPrimitive>
 );

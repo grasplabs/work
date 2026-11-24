@@ -1,7 +1,6 @@
 // Collapsible: one panel that opens and closes under its trigger, in StyleX,
 // built on UI SDK's Collapsible: a full-width trigger with a chevron at
 // its end, and quiet words under it that open over 200ms.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Collapsible>
 //     <CollapsibleTrigger>Advanced settings</CollapsibleTrigger>
