@@ -12,9 +12,13 @@ import { useEffect, useRef } from "react";
 // reduced motion at once.
 
 const styles = stylex.create({
+  // As wide as the room beside it allows, up to its own width: on a phone the cancellation is shorter.
   canvas: {
     display: "block",
-    width: "13rem",
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: "7rem",
+    maxWidth: "13rem",
     height: "6.5rem",
     color: colors.chart1,
     imageRendering: "pixelated",

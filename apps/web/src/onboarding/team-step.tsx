@@ -39,9 +39,11 @@ const styles = stylex.create({
   foot: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     gap: space[3],
   },
+  // Copy keeps its size; the postmark takes the room after it.
+  copy: { flexShrink: 0, marginInlineEnd: "auto" },
   end: {
     display: "flex",
     flexWrap: "wrap",
