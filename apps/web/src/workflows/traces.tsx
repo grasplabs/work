@@ -73,6 +73,24 @@ import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 /** Which part of Traces shows. */
 export type TracesPart = "runs" | "activity";
 
+/**
+ * Which part of Traces shows, given the run the address names: naming
+ * another run (Run's "Open the run") shows Runs, where it opens.
+ */
+export const useTracesPart = (
+  openRun: string | undefined
+): [TracesPart, (part: TracesPart) => void] => {
+  const [part, setPart] = useState<TracesPart>("runs");
+  const [named, setNamed] = useState(openRun);
+  if (openRun !== named) {
+    setNamed(openRun);
+    if (openRun !== undefined) {
+      setPart("runs");
+    }
+  }
+  return [part, setPart];
+};
+
 /** How often a run still going is read again. */
 const followMs = 1500;
 

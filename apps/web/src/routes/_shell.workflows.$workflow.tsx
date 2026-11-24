@@ -68,8 +68,7 @@ import { workflowVersions } from "../workflows/reads.ts";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
-import { Traces } from "../workflows/traces.tsx";
-import type { TracesPart } from "../workflows/traces.tsx";
+import { Traces, useTracesPart } from "../workflows/traces.tsx";
 import { useWorkflowDraft } from "../workflows/use-workflow-draft.ts";
 import { WorkflowFlow } from "../workflows/workflow-flow.tsx";
 import { WorkflowSettings } from "../workflows/workflow-settings.tsx";
@@ -310,7 +309,7 @@ const RunsView = ({
   /** The draft's revision while it passes: what a test runs. */
   testable: number | null;
 }) => {
-  const [part, setPart] = useState<TracesPart>("runs");
+  const [part, setPart] = useTracesPart(openRun);
   if (builder) {
     return (
       <div {...stylex.props(styles.column)}>
