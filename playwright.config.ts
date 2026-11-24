@@ -36,9 +36,11 @@ const browserPolicyTests = /(?:page-attacks|product-page-scripts)\.e2e\.ts$/u;
  * model core ships, whose first loads (the question embedder, then each
  * bulk embedder, copying the 99 MB token table) take the stack's one
  * workerd thread for long stretches. Beside other tests, and the setup's
- * platform warm-up, that failed them (November 2026), so it runs in a
- * project of its own, on a stack of its own in CI, the only one with the
- * model (.github/workflows/ci.yml).
+ * platform warm-up, that failed them (November 2026), so it runs only as
+ * a part of its own (`GRASP_E2E_PART=brain-meaning`), locally as in CI
+ * (.github/workflows/ci.yml): the one stack with the model. Every other
+ * stack starts without it, a local one too, so nothing else waits on its
+ * loads (`withModel`).
  */
 export const brainMeaningTests = /brain-meaning\.e2e\.ts$/u;
 /**
@@ -85,6 +87,16 @@ const ci = process.env.CI === "true";
  * between runs.
  */
 const prebuilt = process.env.GRASP_E2E_PREBUILT === "true";
+/**
+ * Whether this stack holds the model core ships: only the brain-meaning
+ * part's, and only when this machine holds its files
+ * (scripts/local-model-files.ts). On a local stack that also loaded it,
+ * the question embedder's first load, at the clock's first tick, left
+ * core answering nothing for 5 to 19 s, and the onboarding's admin
+ * journey failed 4 runs in 5 on its pages' 5 s deadline for core's
+ * answers (November 2026); without it, 5 in 5 passed.
+ */
+const withModel = process.env.GRASP_E2E_PART === "brain-meaning";
 
 /**
  * Core's `dev:start` (apps/core/package.json), which starts core and
@@ -159,17 +171,10 @@ const parallelProjects: Project[] = [
  */
 const serialProjects = (before: string[]): Project[] => [
   {
-    name: "brain-meaning",
-    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
-    testMatch: brainMeaningTests,
-    dependencies: before,
-    workers: 1,
-  },
-  {
     name: "onboarding-flow",
     use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
     testMatch: onboardingFlowTests,
-    dependencies: ["brain-meaning"],
+    dependencies: before,
     workers: 1,
   },
   {
@@ -216,7 +221,9 @@ const serialProjects = (before: string[]): Project[] => [
  * can't change what the next sees, and a stack of its own sees nothing
  * before it. One stack held all three, 18 tests one at a time, about 7
  * minutes (October 2026, GRA-1094). `serial` runs them in turn on one
- * stack. Locally all of it runs on one stack, the serial projects last.
+ * stack. Locally all of it runs on one stack, the serial projects last,
+ * except the Brain found by meaning: only its own part's stack holds the
+ * model (`withModel`), so it runs only as `brain-meaning`, locally too.
  */
 const e2eProjects = (): Project[] => {
   const part = process.env.GRASP_E2E_PART;
@@ -231,6 +238,16 @@ const e2eProjects = (): Project[] => {
   }
   if (part === "serial") {
     return serialProjects([]);
+  }
+  if (part === "brain-meaning") {
+    return [
+      {
+        name: "brain-meaning",
+        use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+        testMatch: brainMeaningTests,
+        workers: 1,
+      },
+    ];
   }
   const alone = serialProjects([]).find(({ name }) => name === part);
   if (alone !== undefined) {
@@ -276,24 +293,21 @@ export default defineConfig({
         // Connect's config, which sends the AI providers' requests to the
         // fake ones below (e2e/connect-config.ts).
         "node e2e/connect-config.ts &&",
-        // Prebuilt, the state is a copy of the migrated empty one
-        // e2e/build.ts made. The dirs come from `env` below, so no path is
-        // ever shell syntax.
-        ...(prebuilt
+        // Built as CI builds it (e2e/build.ts), here unless CI built it
+        // already; the state is a copy of the migrated empty one it made.
+        // The dirs come from `env` below, so no path is ever shell syntax.
+        ...(prebuilt ? [] : ["node e2e/build.ts &&"]),
+        'rm -rf "$DEV_PERSIST_TO" &&',
+        'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
+        // The model core ships, on the brain-meaning part's stack alone
+        // (`withModel`).
+        ...(withModel
           ? [
-              'rm -rf "$DEV_PERSIST_TO" &&',
-              'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
-              // The model core ships, when this machine holds its files: in
-              // CI only the brain-meaning part's does
-              // (.github/workflows/ci.yml), so no other stack loads it.
               'node scripts/local-model-files.ts --persist-to "$DEV_PERSIST_TO" -c apps/core/wrangler.jsonc &&',
-              "cd apps/core &&",
-              coreDevStart,
             ]
-          : [
-              'rm -rf "$DEV_PERSIST_TO" &&',
-              "vp run --filter @grasp-os/core dev",
-            ]),
+          : []),
+        "cd apps/core &&",
+        coreDevStart,
         `--local --port ${corePort} --inspector-port ${coreInspectorPort}`,
         devVar("BETTER_AUTH_SECRET", testAuthSecret),
         ...Object.entries(localSignIn(origin, idpOrigin)).map(([name, value]) =>

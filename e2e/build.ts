@@ -1,6 +1,7 @@
 /**
- * Builds the e2e stack once, for CI's parts to start
- * (`GRASP_E2E_PREBUILT=true`, playwright.config.ts): core's code as its dev
+ * Builds the e2e stack, once for CI's parts to start
+ * (`GRASP_E2E_PREBUILT=true`, playwright.config.ts), and as a local
+ * stack starts otherwise, so it is built as CI builds it: core's code as its dev
  * script builds it (`dev:build`), and the stack's empty state with every
  * migration applied (`dev:migrate`, e2e/stack.ts's `migratedStateDir`),
  * which each stack starts from a copy of. Applying them took about 12 s of
@@ -98,6 +99,18 @@ if (import.meta.main) {
     throw new Error("core's dev:build no longer runs `vp run build`");
   }
   const coreBuild = [...Object.values(buildSteps), lastBuildStep];
+  // dev:migrate's migrations, without its copy of the model core ships:
+  // only the brain-meaning part's stack holds it, put in as it starts
+  // (playwright.config.ts's `withModel`), so no other stack loads it.
+  const migrate = stepsOf("dev:migrate");
+  const migrations = migrate.filter(
+    (step) => !step.startsWith("node ../../scripts/local-model-files.ts")
+  );
+  if (migrations.length === migrate.length) {
+    throw new Error(
+      "core's dev:migrate no longer runs scripts/local-model-files.ts"
+    );
+  }
   rmSync(migratedStateDir, { recursive: true, force: true });
   rmSync(besideFrontend, { recursive: true, force: true });
   // From core's folder, as every step of core's scripts runs.
@@ -108,7 +121,7 @@ if (import.meta.main) {
       await run(step.replaceAll(frontendDist, besideFrontendFromCore));
     }),
     ...devBuild.map(runStep),
-    run(stepsOf("dev:migrate").join(" && "), {
+    run(migrations.join(" && "), {
       DEV_PERSIST_TO: migratedStateDir,
       CONNECT_WRANGLER_CONFIG: connectConfig,
     }),
