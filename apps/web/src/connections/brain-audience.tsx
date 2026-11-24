@@ -382,7 +382,6 @@ const EraseAnswers = ({
             }
             onDone();
           }}
-          size="sm"
           variant="destructive"
         >
           {t`Erase for good`}

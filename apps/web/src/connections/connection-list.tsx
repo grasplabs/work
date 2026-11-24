@@ -350,7 +350,6 @@ const DisconnectContent = ({
             }
             onDone();
           }}
-          size="sm"
           variant="destructive"
         >
           {t`Disconnect`}

@@ -314,7 +314,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
       </DialogBody>
       <DialogFooter>
         <DialogClose>{t`Cancel`}</DialogClose>
-        <Button disabled={busy} form={id} size="sm" type="submit">
+        <Button disabled={busy} form={id} type="submit">
           {t`Add the connection`}
         </Button>
       </DialogFooter>
@@ -428,7 +428,6 @@ const Revoke = ({
               }
               setOpen(false);
             }}
-            size="sm"
             variant="destructive"
           >
             {t`Revoke the connection`}

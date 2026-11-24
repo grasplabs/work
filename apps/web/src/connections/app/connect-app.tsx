@@ -272,8 +272,7 @@ export const ConnectApp = ({
         </DialogBody>
         <DialogFooter>
           <DialogClose>{words.cancel}</DialogClose>
-          {/* At Cancel's size, so the two stand at one size side by side. */}
-          <Button onClick={() => onConnect({ forWhom })} size="sm">
+          <Button onClick={() => onConnect({ forWhom })}>
             {words.signIn(app.name)}
           </Button>
         </DialogFooter>
@@ -485,7 +484,6 @@ export const ConnectAppConsent = ({
                 consent,
               })
             }
-            size="sm"
           >
             {words.connect}
           </Button>
