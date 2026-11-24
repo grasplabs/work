@@ -6,7 +6,7 @@ import type { DocumentSource } from "./setup.ts";
 // (notion-icon) from the gilbarbara/logos set (CC0), as Stephen's settings
 // take Teams and Slack; microsoft-sharepoint, which that set lacks, from
 // theSVG (MIT). The trademarks stay with their owners; they are shown only
-// to name the place.
+// to name the place. Dropbox and Box from the same set.
 
 const logos: Readonly<Record<string, string>> = {
   sharepoint: "/logos/microsoft-sharepoint.svg",
@@ -16,6 +16,16 @@ const logos: Readonly<Record<string, string>> = {
   confluence: "/logos/confluence.svg",
   notion: "/logos/notion.svg",
 };
+
+/**
+ * Places many companies keep documents in that Grasp doesn't connect to
+ * yet: offered as tiles with their logos, and noted by name when pressed,
+ * as a place typed in is. Their names are product names, not translated.
+ */
+export const namedPlaces = [
+  { name: "Dropbox", logo: "/logos/dropbox.svg" },
+  { name: "Box", logo: "/logos/box.svg" },
+] as const;
 
 /** The logo a place carries, by its address; none for a place Grasp has no logo for. */
 export const sourceLogo = (source: DocumentSource): string | null =>

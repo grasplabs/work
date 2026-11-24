@@ -29,7 +29,7 @@ import { CalmStep } from "./calm-frame.tsx";
 import { OtherRow } from "./other-row.tsx";
 import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
-import { sourceLogo } from "./source-logos.ts";
+import { namedPlaces, sourceLogo } from "./source-logos.ts";
 import type { SetupData, StepProps } from "./step-parts.ts";
 import { SupportLink } from "./support-link.tsx";
 
@@ -160,14 +160,34 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
       setConnecting(connectable(source) ?? null);
     }
   };
+  const isAsked = (name: string): boolean =>
+    wanted.some((each) => each.toLowerCase() === name.toLowerCase());
   const ask = async (name: string) => {
-    const known = wanted.some(
-      (each) => each.toLowerCase() === name.toLowerCase()
-    );
-    if (!known) {
+    if (!isAsked(name)) {
       await save({ ...choices, sourcesWanted: [...wanted, name] });
     }
   };
+  // A named place pressed again is no longer asked for.
+  const toggleAsked = async (name: string) => {
+    if (busy) {
+      return;
+    }
+    if (isAsked(name)) {
+      await save({
+        ...choices,
+        sourcesWanted: wanted.filter(
+          (each) => each.toLowerCase() !== name.toLowerCase()
+        ),
+      });
+      return;
+    }
+    await ask(name);
+  };
+  // Asked for by name beyond the places offered as tiles.
+  const typed = wanted.filter(
+    (each) =>
+      !namedPlaces.some(({ name }) => name.toLowerCase() === each.toLowerCase())
+  );
   // What became of a place, said to a screen reader after its name; its tile glows with it.
   const stateOfRow = (source: DocumentSource): string | null => {
     if (!noted.includes(source.id)) {
@@ -232,7 +252,34 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
               </Item>
             );
           })}
-          {wanted.map((name) => (
+          {namedPlaces.map(({ name, logo }) => {
+            const asked = isAsked(name);
+            return (
+              <Item
+                done={asked}
+                key={name}
+                onClick={() => {
+                  void toggleAsked(name);
+                }}
+                variant="outline"
+              >
+                <ItemMedia variant="image">
+                  <img alt="" src={logo} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    {name}
+                    {asked ? (
+                      <span {...stylex.props(visuallyHidden)}>
+                        , {t`asked for`}
+                      </span>
+                    ) : null}
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
+            );
+          })}
+          {typed.map((name) => (
             <Item done key={name} variant="outline">
               <ItemMedia variant="icon">
                 <Icon icon={FileIcon} />
