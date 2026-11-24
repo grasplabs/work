@@ -91,20 +91,25 @@ const Step = ({
 /** A language other than the page's was picked a moment ago: the page drawn anew in it knows. */
 let languagePicked = false;
 
-const Welcome = ({ admin, speaks, onNext }: StepBodyProps) => {
+const Welcome = ({ admin, speaks, onNext, footOnlyBack }: StepBodyProps) => {
   const { t, i18n } = useLingui();
   const [picked, setPicked] = useState(languagePicked);
+  // A card goes on by itself: on a first visit the foot is either there,
+  // held with its reason, or not there at all (`footOnlyBack`).
+  const foot = picked || !footOnlyBack;
   return (
     <Step
       nav={
-        <StepperNav
-          disabled={!picked}
-          disabledReason={t`Choose a language`}
-          finishText={t`Start`}
-          onNext={onNext}
-          step={0}
-          total={wholeSetup.length}
-        />
+        foot ? (
+          <StepperNav
+            disabled={!picked}
+            disabledReason={t`Choose a language`}
+            finishText={t`Start`}
+            onNext={onNext}
+            step={0}
+            total={wholeSetup.length}
+          />
+        ) : null
       }
       sentence={t`I’ll set up Grasp with you, one step at a time. Which language would you like to work in?`}
       speaks={speaks}
@@ -173,6 +178,7 @@ const Plan = ({ speaks, onNext, onBack, today }: StepBodyProps) => {
 
 interface StepBodyProps {
   admin: string;
+  footOnlyBack: boolean;
   data: ConceptProps["data"];
   speaks: boolean;
   today: Date;
@@ -190,6 +196,7 @@ export const StepsConcept = ({
   today,
   go,
   onward,
+  footOnlyBack,
 }: ConceptProps & { speaks: boolean }) => {
   const order: ConceptStep[] = ["welcome", "ai", "about"];
   const index = order.indexOf(step);
@@ -205,6 +212,7 @@ export const StepsConcept = ({
     >
       <Body
         admin={admin}
+        footOnlyBack={footOnlyBack}
         data={data}
         key={step}
         onBack={() => {
