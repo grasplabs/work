@@ -128,14 +128,13 @@ const useGroups = ({
   identity: Identity;
   view: SidebarView;
   waitingItems: readonly InboxItem[] | undefined;
-  chats: ReturnType<typeof useRecentChats>["rows"];
+  chats: Pick<ReturnType<typeof useRecentChats>, "rows" | "more">;
 }): SidebarGroupEntry[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const inbox = useInboxGroups(waitingItems);
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
-  const openChats = useChatsWindow();
   if (identity.onboardingOnly === true) {
     return [];
   }
@@ -200,21 +199,16 @@ const useGroups = ({
   // named, its label folding the list away; the way to every chat after
   // them, the chats window.
   const recent: SidebarGroupEntry[] =
-    chats.length === 0
+    chats.rows.length === 0
       ? []
       : [
           {
             id: "chats",
             label: t`Chats`,
             collapsible: true,
-            count: chats.length,
-            rows: chats,
-            more: {
-              label: t`All chats`,
-              onClick: () => {
-                openChats(true);
-              },
-            },
+            count: chats.rows.length,
+            rows: chats.rows,
+            more: chats.more,
           },
         ];
   const fromApps = fromAppsGroup(
@@ -292,7 +286,7 @@ export const AppSidebar = ({
     identity,
     view,
     waitingItems,
-    chats: chats.rows,
+    chats,
   });
   // Kept here, where it stays as the levels come and go.
   const outside = useWayOut();
