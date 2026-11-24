@@ -163,8 +163,14 @@ const FileForm = ({
   );
 };
 
-/** Add on a project's page, for its builders. */
-export const FileItemDialog = ({ project }: { project: Project }) => {
+/** Add on a project's page, for its builders, named for what it adds to. */
+export const FileItemDialog = ({
+  project,
+  "aria-label": label,
+}: {
+  project: Project;
+  "aria-label": string;
+}) => {
   const { failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
   const [candidates, setCandidates] = useState<ProjectItemCandidate[]>();
@@ -179,6 +185,7 @@ export const FileItemDialog = ({ project }: { project: Project }) => {
   return (
     <>
       <Button
+        aria-label={label}
         onClick={() => {
           setOpen(true);
           void read();

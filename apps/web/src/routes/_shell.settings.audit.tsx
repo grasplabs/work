@@ -5,23 +5,16 @@ import type {
 } from "@grasp-os/shared/audit-log";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 
-import { EventInspector } from "../activity/audit-event.tsx";
+import { EventDetails } from "../activity/audit-event.tsx";
 import { LogBar, LogRecords, readLog } from "../activity/audit-log.tsx";
 import { logSearchOf } from "../activity/log-search.ts";
 import type { LogSearch } from "../activity/log-search.ts";
-import type { Directory } from "../directory.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { RetentionRows } from "../settings/audit-archive.tsx";
@@ -38,16 +31,8 @@ import { SettingsError } from "../settings/settings-parts.tsx";
 // the archive and how long events are kept behind one quiet button in its
 // head. Over the table, a search, Filters and Export (activity/
 // audit-log.tsx); an event's details, in Damsko's Inspector, open in a
-// Sheet, and beside the table only where the page's own box is `WIDE` or
-// more, which the settings layout's column never is today. Core checks
-// the role on every call; every search of the log is itself recorded in it.
-
-/**
- * How wide the page's own box must be for the details beside the table:
- * the panel, the gap, and about 600px left for the table. The Inspector
- * pattern's 72rem is a whole window with its sidebar; this is the page's.
- */
-const WIDE = 64 * 16;
+// Sheet (activity/audit-event.tsx). Core checks the role on every call;
+// every search of the log is itself recorded in it.
 
 const styles = stylex.create({
   // The events' title over their card, on the page's ground, a small step
@@ -59,26 +44,6 @@ const styles = stylex.create({
     minWidth: 0,
   },
   head: { paddingInline: space.tableCellInline },
-  // The table, and the details beside it while an event is open.
-  split: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr)",
-    columnGap: space["6"],
-    alignItems: "start",
-  },
-  open: {
-    gridTemplateColumns: `minmax(0, 1fr) ${size.sidePanelWidth}`,
-  },
-  // The details stay in view beside the table, as tall as the window
-  // lets them be, and scroll inside.
-  aside: {
-    position: "sticky",
-    insetBlockStart: space["4"],
-    display: "grid",
-    gridTemplateRows: "minmax(0, 1fr)",
-    height: `calc(100dvh - 2 * ${space["8"]})`,
-    minHeight: 0,
-  },
 });
 
 /**
@@ -89,153 +54,79 @@ const styles = stylex.create({
 const logKey = (filters: LogSearch, { records, next }: AuditPage): string =>
   JSON.stringify([filters, records[0]?.seq ?? null, next]);
 
-/** Whether the element is wide enough for the details beside the table; true until measured. */
-const useWide = () => {
-  const box = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(true);
-  useEffect(() => {
-    const element = box.current;
-    if (element === null || typeof ResizeObserver === "undefined") {
-      return () => {
-        // Nothing was watched.
-      };
-    }
-    const watch = new ResizeObserver(([entry]) => {
-      setWide((entry?.contentRect.width ?? 0) >= WIDE);
-    });
-    watch.observe(element);
-    return () => {
-      watch.disconnect();
-    };
-  }, []);
-  return { box, wide };
-};
-
-/** The open event's details: beside the table, or in a Sheet where it is narrow. */
-const Details = ({
-  record,
-  directory,
-  archive,
-  wide,
-  onClose,
-}: {
-  record: AuditRecord;
-  directory: Directory;
-  /** The event was found in the archive. */
-  archive: boolean;
-  wide: boolean;
-  onClose: () => void;
-}) => {
-  if (wide) {
-    return (
-      <div {...stylex.props(styles.aside)}>
-        <EventInspector
-          archive={archive}
-          directory={directory}
-          framed
-          onClose={onClose}
-          record={record}
-        />
-      </div>
-    );
-  }
-  return (
-    <Sheet
-      onOpenChange={(open: boolean) => {
-        if (!open) {
-          onClose();
-        }
-      }}
-      open
-    >
-      <SheetContent>
-        <SheetHeader>
-          <SheetTitle>
-            <Trans>Event details</Trans>
-          </SheetTitle>
-        </SheetHeader>
-        <EventInspector
-          archive={archive}
-          directory={directory}
-          framed={false}
-          record={record}
-        />
-      </SheetContent>
-    </Sheet>
-  );
-};
-
 const AuditTrail = () => {
   const { log, last } = Route.useLoaderData();
   const filters = Route.useSearch();
   const [own, setOwn] = useState<FullVerification | null>(null);
   const [open, setOpen] = useState<AuditRecord>();
-  const { box, wide } = useWide();
+  // New filters close the details, so what they find is in view: their
+  // own searches (their events, similar ones, what it was about) too.
+  const searched = JSON.stringify(filters);
+  const [openFor, setOpenFor] = useState(searched);
+  if (openFor !== searched) {
+    setOpenFor(searched);
+    setOpen(undefined);
+  }
   const directory = log.state === "ready" ? log.data.directory : undefined;
-  const beside = open !== undefined && directory !== undefined && wide;
   const titleId = useId();
   return (
     <>
       <ChainBroken ended={endedOf(own, last)} />
-      <div ref={box} {...stylex.props(styles.split, beside && styles.open)}>
-        <section aria-labelledby={titleId} {...stylex.props(styles.group)}>
-          <div {...stylex.props(styles.head)}>
-            <SectionHeader
-              actions={
-                <IntegrityDialog last={last} onChecked={setOwn} own={own}>
-                  <RetentionRows />
-                </IntegrityDialog>
-              }
-              id={titleId}
-              title={
-                filters.archive === true ? (
-                  <Trans>Archived events</Trans>
-                ) : (
-                  <Trans>Events</Trans>
-                )
-              }
-              variant="group"
-            />
-          </div>
-          <Card size="sm">
-            <CardContent flush>
-              {log.state === "ready" ? (
-                <>
-                  {/* The bar starts again from new filters. */}
-                  <LogBar
-                    directory={log.data.directory}
-                    key={JSON.stringify(filters)}
-                    search={filters}
-                  />
-                  <LogRecords
-                    beside={beside}
-                    directory={log.data.directory}
-                    first={log.data.page}
-                    key={logKey(filters, log.data.page)}
-                    onDetails={setOpen}
-                    open={open?.seq}
-                    search={filters}
-                  />
-                </>
+      <section aria-labelledby={titleId} {...stylex.props(styles.group)}>
+        <div {...stylex.props(styles.head)}>
+          <SectionHeader
+            actions={
+              <IntegrityDialog last={last} onChecked={setOwn} own={own}>
+                <RetentionRows />
+              </IntegrityDialog>
+            }
+            id={titleId}
+            title={
+              filters.archive === true ? (
+                <Trans>Archived events</Trans>
               ) : (
-                <NotLoadedState heading="h3" page={log} />
-              )}
-            </CardContent>
-          </Card>
-        </section>
-        {open === undefined || directory === undefined ? null : (
-          <Details
-            archive={filters.archive === true}
-            directory={directory}
-            key={open.seq}
-            onClose={() => {
-              setOpen(undefined);
-            }}
-            record={open}
-            wide={wide}
+                <Trans>Events</Trans>
+              )
+            }
+            variant="group"
           />
-        )}
-      </div>
+        </div>
+        <Card size="sm">
+          <CardContent flush>
+            {log.state === "ready" ? (
+              <>
+                {/* The bar starts again from new filters. */}
+                <LogBar
+                  directory={log.data.directory}
+                  key={JSON.stringify(filters)}
+                  search={filters}
+                />
+                <LogRecords
+                  directory={log.data.directory}
+                  first={log.data.page}
+                  key={logKey(filters, log.data.page)}
+                  onDetails={setOpen}
+                  open={open?.seq}
+                  search={filters}
+                />
+              </>
+            ) : (
+              <NotLoadedState heading="h3" page={log} />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+      {open === undefined || directory === undefined ? null : (
+        <EventDetails
+          archive={filters.archive === true}
+          directory={directory}
+          key={open.seq}
+          onClose={() => {
+            setOpen(undefined);
+          }}
+          record={open}
+        />
+      )}
     </>
   );
 };

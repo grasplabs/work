@@ -282,6 +282,9 @@ const inDialog = (name: string) =>
     (each) => each.textContent?.trim() === name || words(each) === name
   );
 
+/** The dialog open on the page. */
+const dialog = () => document.querySelector('[role="dialog"]');
+
 const link = (name: string) =>
   [...document.querySelectorAll("a")].find(
     (each) => each.textContent?.trim() === name
@@ -398,7 +401,7 @@ describe("A project's page", () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
 
-    await press(button("Add"));
+    await press(button("Add a workflow to Sell & get paid"));
     // Found by name in the list, as a person picks it.
     await press(
       document.querySelector('[role="dialog"] [aria-label="Show the choices"]')
@@ -626,20 +629,6 @@ describe("A project's page", () => {
     }).toStrictEqual({ open: true, reasons: [true] });
   });
 
-  it("puts a long name in a box of its own beside the icon, so it can break", async () => {
-    const { session } = fakeProjects();
-    const name = "customer_onboarding_pipeline_review_2026";
-    await shown(session, { ...project("builder"), name });
-    const heading = document.querySelector("h1");
-    const named = heading?.firstElementChild;
-
-    expect({
-      heading: heading?.textContent,
-      // The icon tile, then the name alone in its own element.
-      parts: [...(named?.children ?? [])].map((each) => each.textContent),
-    }).toStrictEqual({ heading: name, parts: ["", name] });
-  });
-
   it("names who loses access before taking a shared workflow out", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
@@ -772,5 +761,28 @@ describe("A project's page", () => {
         ["setProject", "chat-accruals", null],
       ],
     });
+  });
+
+  it("says it is reading the person's chats, and only why where core couldn't", async () => {
+    const { session } = fakeProjects();
+    const { promise, reject } = Promise.withResolvers<ChatSummary[]>();
+    session.chats.list = async (): Promise<ChatSummary[]> => await promise;
+    await shown(session, project("user"));
+
+    await press(button("Add a chat"));
+    const reading = dialog()?.querySelector('[role="status"]')?.textContent;
+    await act(async () => {
+      reject(new Error("Your chats can't be read now."));
+      await Promise.resolve();
+    });
+    await settled();
+
+    const said = dialog()?.textContent ?? "";
+
+    expect({
+      reading,
+      reason: said.includes("Your chats can't be read now."),
+      none: said.includes("You have no chats to add."),
+    }).toStrictEqual({ reading: "Loading…", reason: true, none: false });
   });
 });

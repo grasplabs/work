@@ -18,13 +18,13 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { EventInspector } from "./audit-event.tsx";
+import { EventDetails } from "./audit-event.tsx";
 import { LogRecords } from "./audit-log.tsx";
 
 // The audit trail's events as an admin pages through them: 25 a page,
 // Newer and Older, Older reading core's next page only once this one needs
-// it; and an event's details, its position, check and hash, in the panel
-// the page opens beside the table.
+// it; and an event's details, its position, check and hash, in the Sheet
+// the page opens over the table.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -72,10 +72,12 @@ const Events = ({ first, archive }: { first: AuditPage; archive: boolean }) => {
         search={archive ? { archive } : {}}
       />
       {open === undefined ? null : (
-        <EventInspector
+        <EventDetails
           archive={archive}
           directory={directory}
-          framed
+          onClose={() => {
+            setOpen(undefined);
+          }}
           record={open}
         />
       )}
@@ -171,9 +173,12 @@ const page = () => ({
   rows: document.querySelectorAll("tbody tr").length,
 });
 
+/** The event's details, in their Sheet. */
+const sheet = (): Element | null => document.querySelector('[role="dialog"]');
+
 /** What the event's details panel says. */
 const panel = (): string =>
-  document.querySelector('[aria-label="Event details"]')?.textContent ?? "";
+  sheet()?.querySelector('[aria-label="Event details"]')?.textContent ?? "";
 
 describe(LogRecords, () => {
   afterEach(() => {
@@ -221,27 +226,64 @@ describe(LogRecords, () => {
     });
   });
 
-  it("opens an event's details beside the table: what happened, and its place in the chain under Integrity", async () => {
+  it("opens an event's details in a Sheet: what happened, its place in the chain under Integrity, until it is closed", async () => {
     await shown({ records: records(3, 1), next: null }, () => ({
       records: [],
       next: null,
     }));
     await press("Details of event 2");
     const open = panel();
+    const titled = sheet()?.textContent?.startsWith("Event details");
+    await press("Close");
 
     expect({
+      titled,
       what: open.includes("test.done"),
       action: open.includes("Actiontest.done"),
       position: open.includes("Position2"),
       verified: open.includes("Yes: it is unchanged"),
       hash: open.includes("hash-of-2"),
+      closed: sheet() === null,
     }).toStrictEqual({
+      titled: true,
       what: true,
       action: true,
       position: true,
       verified: true,
       hash: true,
+      closed: true,
     });
+  });
+
+  it("names an event's details in words, whichever way core wrote their keys", async () => {
+    const detailed: AuditRecord = {
+      ...record(4),
+      event: {
+        id: "event-4",
+        at: "2026-01-05T10:00:00.000Z",
+        source: "core",
+        actor: { type: "system" },
+        action: "test.done",
+        provenance: [],
+        detail: { records_read: 3, PreviousRole: "user", userId: "u-1" },
+      },
+    };
+    await shown({ records: [detailed], next: null }, () => ({
+      records: [],
+      next: null,
+    }));
+    await press("Details of event 4");
+    const names = [
+      ...(sheet()?.querySelectorAll('[aria-label="Details"] li') ?? []),
+    ]
+      .map((row) => row.textContent)
+      .filter((words) => words !== "");
+
+    expect(names).toStrictEqual([
+      "Records read 3",
+      "Previous role user",
+      "User id u-1",
+    ]);
   });
 
   it("keeps to the archive when an archived event's details search on: their events, similar ones, what it was about", async () => {

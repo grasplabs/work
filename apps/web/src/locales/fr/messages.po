@@ -1928,6 +1928,14 @@ msgstr "Ajouter un horaire"
 msgid "Add a trigger"
 msgstr "Ajouter un déclencheur"
 
+#: src/projects/project-view.tsx
+msgid "Add a workflow to {projectName}"
+msgstr "Ajouter un workflow à {projectName}"
+
+#: src/projects/project-view.tsx
+msgid "Add an App to {projectName}"
+msgstr "Ajouter une app à {projectName}"
+
 #: src/connections/http-connections.tsx
 msgid "Add an HTTP connection"
 msgstr "Ajouter une connexion HTTP"
@@ -5574,7 +5582,6 @@ msgid "Event"
 msgstr "Événement"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.audit.tsx
 msgid "Event details"
 msgstr "Détails de l’événement"
 
@@ -6066,7 +6073,7 @@ msgstr "Trouver une app ou un workflow"
 
 #: src/activity/audit-event.tsx
 msgid "Find similar"
-msgstr "Similaires"
+msgstr "Trouver des événements similaires"
 
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
@@ -8316,6 +8323,7 @@ msgstr "Chargement de la valeur"
 #: src/chat/thread.tsx
 #: src/drafts/share-with-team.tsx
 #: src/frame/page-states.tsx
+#: src/projects/project-chats.tsx
 msgid "Loading…"
 msgstr "Chargement…"
 

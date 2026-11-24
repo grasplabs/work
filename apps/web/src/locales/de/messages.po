@@ -1928,6 +1928,14 @@ msgstr "Zeit hinzufügen"
 msgid "Add a trigger"
 msgstr "Einen Auslöser hinzufügen"
 
+#: src/projects/project-view.tsx
+msgid "Add a workflow to {projectName}"
+msgstr "Einen Workflow zu {projectName} hinzufügen"
+
+#: src/projects/project-view.tsx
+msgid "Add an App to {projectName}"
+msgstr "Eine App zu {projectName} hinzufügen"
+
 #: src/connections/http-connections.tsx
 msgid "Add an HTTP connection"
 msgstr "HTTP-Verbindung hinzufügen"
@@ -3697,11 +3705,11 @@ msgstr "Standard- und Ausweichmodelle geändert"
 
 #: src/activity/audit-words.ts
 msgid "Changed the organization's logo"
-msgstr "Hat das Logo der Organisation geändert"
+msgstr "Das Logo der Organisation geändert"
 
 #: src/activity/audit-words.ts
 msgid "Changed the organization's time zone"
-msgstr "Hat die Zeitzone der Organisation geändert"
+msgstr "Die Zeitzone der Organisation geändert"
 
 #: src/activity/audit-words.ts
 msgid "Changed what a connection listens for"
@@ -5574,7 +5582,6 @@ msgid "Event"
 msgstr "Ereignis"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.audit.tsx
 msgid "Event details"
 msgstr "Ereignisdetails"
 
@@ -6692,7 +6699,7 @@ msgstr "Grasp hat dies gesendet, aber die Antwort ging verloren: Niemand kann sa
 
 #: src/activity/audit-event.tsx
 msgid "Grasp staff"
-msgstr "Grasp-Mitarbeiter"
+msgstr "Grasp-Mitarbeitende:r"
 
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
@@ -8316,6 +8323,7 @@ msgstr "Der Wert wird geladen"
 #: src/chat/thread.tsx
 #: src/drafts/share-with-team.tsx
 #: src/frame/page-states.tsx
+#: src/projects/project-chats.tsx
 msgid "Loading…"
 msgstr "Wird geladen…"
 
@@ -11656,7 +11664,7 @@ msgstr "Entfernte Personen"
 
 #: src/activity/audit-words.ts
 msgid "Removed the organization's logo"
-msgstr "Hat das Logo der Organisation entfernt"
+msgstr "Das Logo der Organisation entfernt"
 
 #: src/interview/transcript.tsx
 msgid "Removed."
@@ -11674,7 +11682,7 @@ msgstr "{name} umbenennen"
 
 #: src/activity/audit-words.ts
 msgid "Renamed the organization"
-msgstr "Hat die Organisation umbenannt"
+msgstr "Die Organisation umbenannt"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -13152,7 +13160,7 @@ msgstr "Angemeldet mit"
 
 #: src/activity/audit-words.ts
 msgid "Signed out a device"
-msgstr "Hat ein Gerät abgemeldet"
+msgstr "Ein Gerät abgemeldet"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"

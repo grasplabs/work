@@ -188,17 +188,38 @@ test("an admin approves a permission request, finds it in the audit log, and exp
       .poll(async () => await eventsFit(page, table))
       .toStrictEqual({ table: true, page: true, buttons: true });
   }
-  await page.setViewportSize(widths[0] ?? { width: 1440, height: 900 });
-  // Its details beside the table, or in a sheet on a narrow page: what it
-  // recorded, and its action to copy.
-  await granted.getByRole("button", { name: /^Details of event /u }).click();
-  await expect(
-    page.getByRole("listitem").filter({ hasText: "RequestedBy" })
-  ).toContainText(builder.userId);
-  await expect(page.getByRole("region", { name: "Integrity" })).toContainText(
-    "permission.granted"
+  // Its details in a Sheet: what it recorded, and its action to copy. A
+  // search from them (`search`, setting `to`) closes them, so what it finds
+  // is in view: on a phone the Sheet covers the table.
+  const searchFromDetails = async (
+    size: { width: number; height: number },
+    search: string,
+    to: string
+  ) => {
+    await page.setViewportSize(size);
+    await page.goto(`/settings/audit?target=${approved}`);
+    await granted.getByRole("button", { name: /^Details of event /u }).click();
+    const details = page.getByRole("dialog", { name: "Event details" });
+    await expect(
+      details.getByRole("listitem").filter({ hasText: "Requested by" })
+    ).toContainText(builder.userId);
+    await expect(
+      details.getByRole("region", { name: "Integrity" })
+    ).toContainText("permission.granted");
+    await details.getByRole("button", { name: search }).click();
+    await expect(page).toHaveURL(new RegExp(`[?&]${to}=`, "u"));
+    await expect
+      .poll(async () => ({ size, open: await details.count() }))
+      .toStrictEqual({ size, open: 0 });
+    await expect(granted.first()).toBeVisible();
+  };
+  await searchFromDetails(
+    { width: 1440, height: 900 },
+    "Find similar",
+    "action"
   );
-  await page.keyboard.press("Escape");
+  await searchFromDetails({ width: 390, height: 844 }, "Their events", "actor");
+  await page.setViewportSize(widths[0] ?? { width: 1440, height: 900 });
 
   // Narrowed to grants, the request drops out; the action is taken as
   // core takes it, whatever its case and a trailing dot.

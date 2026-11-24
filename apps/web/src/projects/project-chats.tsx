@@ -14,6 +14,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
 } from "@grasp-os/ui/components/empty";
 import {
   InputGroup,
@@ -32,6 +33,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Link } from "@grasp-os/ui/components/link";
 import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import {
   Icon,
   MessageCircleIcon,
@@ -58,11 +60,7 @@ const styles = stylex.create({
   // The search over the list, the list under it.
   picker: { display: "grid", gap: space["2"] },
   // The list scrolls inside, so the dialog keeps its size with many chats.
-  list: {
-    display: "grid",
-    gridTemplateRows: "minmax(0, 1fr)",
-    height: "18rem",
-  },
+  list: { height: "18rem" },
 });
 
 /** Whether `chat` is what `query` names. */
@@ -91,7 +89,7 @@ export const AddChat = ({
     const listed = await listing.run(
       async (session) => await session.chats.list()
     );
-    setMine(listed ?? []);
+    setMine(listed);
   };
   const add = async (chatId: string): Promise<void> => {
     const done = await adding.run(async (session) => {
@@ -128,7 +126,17 @@ export const AddChat = ({
             </DialogTitle>
           </DialogHeader>
           <DialogBody>
-            {offered !== undefined && offered.length === 0 ? (
+            {/* While they are read, a spinner; where they weren't, the reason alone. */}
+            {offered === undefined && listing.failure === undefined ? (
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyMedia>
+                    <Spinner aria-label={t`Loading…`} />
+                  </EmptyMedia>
+                </EmptyHeader>
+              </Empty>
+            ) : null}
+            {offered?.length === 0 ? (
               <Empty size="sm">
                 <EmptyHeader>
                   <EmptyDescription>
@@ -136,7 +144,8 @@ export const AddChat = ({
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
-            ) : (
+            ) : null}
+            {offered === undefined || offered.length === 0 ? null : (
               <div {...stylex.props(styles.picker)}>
                 <InputGroup>
                   <InputGroupAddon>
@@ -151,49 +160,46 @@ export const AddChat = ({
                   />
                   <InputGroupClear aria-label={t`Clear the search`} />
                 </InputGroup>
-                {/* Its height on a box of the page's own: the area fills it. */}
-                <div {...stylex.props(styles.list)}>
-                  <ScrollArea>
-                    {offered !== undefined && found.length === 0 ? (
-                      <Empty size="sm">
-                        <EmptyHeader>
-                          <EmptyDescription>
-                            <Trans>No chat by that name.</Trans>
-                          </EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    ) : (
-                      <ItemGroup aria-label={t`Your chats`}>
-                        {found.map((chat, index) => (
-                          <Fragment key={chat.id}>
-                            {index === 0 ? null : <ItemSeparator />}
-                            <Item size="sm">
-                              <ItemMedia>
-                                <Icon icon={MessageCircleIcon} />
-                              </ItemMedia>
-                              <ItemContent>
-                                <ItemTitle>{chat.title}</ItemTitle>
-                              </ItemContent>
-                              <ItemActions>
-                                <Button
-                                  disabled={adding.busy}
-                                  onClick={() => {
-                                    void add(chat.id);
-                                  }}
-                                  size="sm"
-                                  variant="outline"
-                                >
-                                  <Icon icon={PlusIcon} />
-                                  <Trans context="put in a project">Add</Trans>
-                                </Button>
-                              </ItemActions>
-                            </Item>
-                          </Fragment>
-                        ))}
-                      </ItemGroup>
-                    )}
-                  </ScrollArea>
-                </div>
+                <ScrollArea style={styles.list}>
+                  {found.length === 0 ? (
+                    <Empty size="sm">
+                      <EmptyHeader>
+                        <EmptyDescription>
+                          <Trans>No chat by that name.</Trans>
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : (
+                    <ItemGroup aria-label={t`Your chats`}>
+                      {found.map((chat, index) => (
+                        <Fragment key={chat.id}>
+                          {index === 0 ? null : <ItemSeparator />}
+                          <Item size="sm">
+                            <ItemMedia>
+                              <Icon icon={MessageCircleIcon} />
+                            </ItemMedia>
+                            <ItemContent>
+                              <ItemTitle>{chat.title}</ItemTitle>
+                            </ItemContent>
+                            <ItemActions>
+                              <Button
+                                disabled={adding.busy}
+                                onClick={() => {
+                                  void add(chat.id);
+                                }}
+                                size="sm"
+                                variant="outline"
+                              >
+                                <Icon icon={PlusIcon} />
+                                <Trans context="put in a project">Add</Trans>
+                              </Button>
+                            </ItemActions>
+                          </Item>
+                        </Fragment>
+                      ))}
+                    </ItemGroup>
+                  )}
+                </ScrollArea>
               </div>
             )}
             <ErrorText>{listing.failure ?? adding.failure}</ErrorText>

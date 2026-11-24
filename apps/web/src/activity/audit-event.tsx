@@ -9,6 +9,12 @@ import type {
 import { Button } from "@grasp-os/ui/components/button";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@grasp-os/ui/components/sheet";
+import {
   CircleUserIcon,
   CoinsIcon,
   Icon,
@@ -29,8 +35,8 @@ import { formatDateTime } from "../format.ts";
 import { actorIcon, actorOf, entryWords } from "./audit-log.tsx";
 import { typeLabels } from "./type-labels.ts";
 
-// One audit event's details, beside the events on Settings › Audit trail
-// (or in a Sheet on a phone), on Damsko's Inspector (blocks/inspector-01):
+// One audit event's details, in a Sheet over the events on Settings ›
+// Audit trail, on Damsko's Inspector (blocks/inspector-01):
 // what happened in plain words and when; who did it; what it concerned,
 // each opening what it names; the event's own details; and, last, its
 // place in the tamper-evident chain with its ids to copy.
@@ -39,9 +45,21 @@ import { typeLabels } from "./type-labels.ts";
 const count = (value: number): string =>
   new Intl.NumberFormat(i18n.locale).format(value);
 
-/** A detail's key as words: `records_read` reads "Records read". */
+/**
+ * A detail's key as words, whichever way core wrote it: `records_read`,
+ * `recordsRead` and `RecordsRead` all read "Records read". A word in
+ * capitals stays so (`requestID` reads "Request ID").
+ */
 const keyWords = (key: string): string => {
-  const words = key.replaceAll("_", " ");
+  const words = key
+    .replaceAll("_", " ")
+    .replaceAll(/(?<=[\p{Ll}\d])(?=\p{Lu})|(?<=\p{Lu})(?=\p{Lu}\p{Ll})/gu, " ")
+    .split(" ")
+    .filter((word) => word !== "")
+    .map((word) =>
+      /^\p{Lu}\p{Ll}*$/u.test(word) ? word.toLocaleLowerCase(i18n.locale) : word
+    )
+    .join(" ");
   return words.charAt(0).toLocaleUpperCase(i18n.locale) + words.slice(1);
 };
 
@@ -283,24 +301,19 @@ const SearchAction = ({
 );
 
 /**
- * One event's details, on Damsko's Inspector: beside the table
- * (`framed`), or in a Sheet on a phone. `onClose` closes whichever holds
- * it. Its searches (their events, similar ones, what it was about) look
- * where the event was found: in the archive when it came from there.
+ * One event's details, on Damsko's Inspector. Its searches (their events,
+ * similar ones, what it was about) look where the event was found: in the
+ * archive when it came from there.
  */
-export const EventInspector = ({
+const EventInspector = ({
   record,
   directory,
-  framed,
-  archive = false,
-  onClose,
+  archive,
 }: {
   record: AuditRecord;
   directory: Directory;
-  framed: boolean;
   /** The event was found in the archive, not the log. */
-  archive?: boolean;
-  onClose?: () => void;
+  archive: boolean;
 }) => {
   const { t, i18n: page } = useLingui();
   // A section's name inside the panel's own sentences, lower case as the
@@ -380,7 +393,7 @@ export const EventInspector = ({
     <Inspector
       aria-label={t`Event details`}
       description={formatDateTime(record.receivedAt)}
-      framed={framed}
+      framed={false}
       {...(event === null ? {} : { icon: actorIcon(event.actor) })}
       labels={{
         add: t({ message: "Add", context: "a panel section's action" }),
@@ -398,7 +411,38 @@ export const EventInspector = ({
       }}
       sections={sections}
       title={entryWords(event?.action)}
-      {...(onClose === undefined ? {} : { onClose })}
     />
   );
 };
+
+/** An event's details in a Sheet; `onClose` runs once it is closed. */
+export const EventDetails = ({
+  record,
+  directory,
+  archive,
+  onClose,
+}: {
+  record: AuditRecord;
+  directory: Directory;
+  /** The event was found in the archive, not the log. */
+  archive: boolean;
+  onClose: () => void;
+}) => (
+  <Sheet
+    onOpenChange={(open: boolean) => {
+      if (!open) {
+        onClose();
+      }
+    }}
+    open
+  >
+    <SheetContent>
+      <SheetHeader>
+        <SheetTitle>
+          <Trans>Event details</Trans>
+        </SheetTitle>
+      </SheetHeader>
+      <EventInspector archive={archive} directory={directory} record={record} />
+    </SheetContent>
+  </Sheet>
+);

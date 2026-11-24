@@ -1928,6 +1928,14 @@ msgstr "Añadir una hora"
 msgid "Add a trigger"
 msgstr "Añadir un disparador"
 
+#: src/projects/project-view.tsx
+msgid "Add a workflow to {projectName}"
+msgstr "Añadir un flujo de trabajo a {projectName}"
+
+#: src/projects/project-view.tsx
+msgid "Add an App to {projectName}"
+msgstr "Añadir una app a {projectName}"
+
 #: src/connections/http-connections.tsx
 msgid "Add an HTTP connection"
 msgstr "Añadir una conexión HTTP"
@@ -5574,7 +5582,6 @@ msgid "Event"
 msgstr "Evento"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.audit.tsx
 msgid "Event details"
 msgstr "Detalles del evento"
 
@@ -8316,6 +8323,7 @@ msgstr "Cargando el valor"
 #: src/chat/thread.tsx
 #: src/drafts/share-with-team.tsx
 #: src/frame/page-states.tsx
+#: src/projects/project-chats.tsx
 msgid "Loading…"
 msgstr "Cargando…"
 

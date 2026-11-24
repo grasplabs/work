@@ -539,7 +539,14 @@ export const ProjectView = ({
   const makes = builds && canBuild(identity.role);
   const { apps, workflows } = project.counts;
   const pages = useItemPages(project);
-  const fileItem = builds ? <FileItemDialog project={project} /> : undefined;
+  const projectName = project.name;
+  // Each kind's Add says what it adds to, as two of them stand on the page.
+  const fileItem = (label: string) =>
+    builds ? (
+      <FileItemDialog aria-label={label} project={project} />
+    ) : undefined;
+  const addApp = fileItem(t`Add an App to ${projectName}`);
+  const addWorkflow = fileItem(t`Add a workflow to ${projectName}`);
   return (
     <>
       <SiteHeader
@@ -593,20 +600,20 @@ export const ProjectView = ({
           }
         />
         {apps === 0 ? (
-          <QuietKind action={fileItem} icon={LayoutDashboardIcon}>
+          <QuietKind action={addApp} icon={LayoutDashboardIcon}>
             <Trans>No Apps in it yet.</Trans>
           </QuietKind>
         ) : (
-          <KindCard action={fileItem} title={<Trans>Apps</Trans>}>
+          <KindCard action={addApp} title={<Trans>Apps</Trans>}>
             <Items kind="app" pages={pages} project={project} />
           </KindCard>
         )}
         {workflows === 0 ? (
-          <QuietKind action={fileItem} icon={WorkflowIcon}>
+          <QuietKind action={addWorkflow} icon={WorkflowIcon}>
             <Trans>No workflows in it yet.</Trans>
           </QuietKind>
         ) : (
-          <KindCard action={fileItem} title={<Trans>Workflows</Trans>}>
+          <KindCard action={addWorkflow} title={<Trans>Workflows</Trans>}>
             <Items kind="workflow" pages={pages} project={project} />
           </KindCard>
         )}

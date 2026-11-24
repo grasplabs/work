@@ -95,7 +95,7 @@ import { typeLabels } from "./type-labels.ts";
 // the table, one bar: one search (a person by name, or any ID), one
 // Filters control that holds the rest (type, dates, action, what it was
 // about, and the archive in place of the log), and Export at the end.
-// Each event's details open beside the table (audit-event.tsx). Core
+// Each event's details open in a Sheet (audit-event.tsx). Core
 // records every search and export in the log itself.
 
 /** Midnight starting `day`, `days` later, in the viewer's time zone. */
@@ -713,8 +713,8 @@ const pageSize = 25;
  * the first of core's pages as the page read it, then each older one asked
  * for once Older reaches past what is here. Keyed by the filters and the
  * first page where it's used, so every new read starts from its own first
- * page. An event's details open beside the table (`onDetails`); the open
- * one is marked (`open`).
+ * page. An event's details open from its row (`onDetails`); the open one
+ * is marked (`open`).
  */
 export const LogRecords = ({
   first,
@@ -722,7 +722,6 @@ export const LogRecords = ({
   directory,
   onDetails,
   open,
-  beside = false,
 }: {
   first: AuditPage;
   search: LogSearch;
@@ -730,8 +729,6 @@ export const LogRecords = ({
   onDetails: (record: AuditRecord) => void;
   /** The event whose details are open, by its position. */
   open?: number;
-  /** The details stand beside the table, so it leaves out what they say. */
-  beside?: boolean;
 }) => {
   const [older, setOlder] = useState<AuditRecord[]>([]);
   const [next, setNext] = useState(first.next);
@@ -811,11 +808,9 @@ export const LogRecords = ({
             <TableHead hideBelow="sm">
               <Trans>By</Trans>
             </TableHead>
-            {beside ? null : (
-              <TableHead hideBelow="md">
-                <Trans>Type</Trans>
-              </TableHead>
-            )}
+            <TableHead hideBelow="md">
+              <Trans>Type</Trans>
+            </TableHead>
             <TableHead align="end" aria-label={t`Details`} />
           </TableRow>
         </TableHeader>
@@ -838,17 +833,15 @@ export const LogRecords = ({
                 <TableCell hideBelow="sm" wrap>
                   <EntryWho directory={directory} record={record} />
                 </TableCell>
-                {beside ? null : (
-                  <TableCell hideBelow="md">
-                    {record.type === null ? (
-                      "–"
-                    ) : (
-                      <Text as="span" color="muted" size="sm">
-                        {i18n._(typeLabels[record.type])}
-                      </Text>
-                    )}
-                  </TableCell>
-                )}
+                <TableCell hideBelow="md">
+                  {record.type === null ? (
+                    "–"
+                  ) : (
+                    <Text as="span" color="muted" size="sm">
+                      {i18n._(typeLabels[record.type])}
+                    </Text>
+                  )}
+                </TableCell>
                 <TableCell align="end">
                   {/* The button within the row's line, so the row keeps its height. */}
                   <Button

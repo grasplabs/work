@@ -231,7 +231,9 @@ test("a builder makes a project, files an App and a chat of theirs in it, and ad
   await expect(page.getByText("No Apps in it yet.")).toBeVisible();
 
   // Their App, put in without sharing it with anyone.
-  await page.getByRole("button", { name: "Add", exact: true }).first().click();
+  await page
+    .getByRole("button", { name: `Add an App to Quotes ${tag}` })
+    .click();
   const adding = page.getByRole("dialog", { name: `Add to Quotes ${tag}` });
   await adding.getByRole("combobox", { name: "App or workflow" }).fill(tag);
   await page.getByRole("option", { name: appName }).click();
@@ -365,10 +367,7 @@ test("long names break inside their word, over nothing and cut off nowhere, on a
     await people.getByRole("button", { name: "Close" }).last().click();
     await expect(people).toHaveCount(0);
 
-    await page
-      .getByRole("button", { name: "Add", exact: true })
-      .first()
-      .click();
+    await page.getByRole("button", { name: `Add an App to ${name}` }).click();
     const adding = page.getByRole("dialog", { name: `Add to ${name}` });
     await expect(adding).toBeVisible();
     expect({ size, faults: await layoutFaults(adding) }).toStrictEqual({
