@@ -1,10 +1,7 @@
-// PromptInput: where a person writes to an assistant, after shadcn's Prompt Input pattern
-// (apps/v4/content/docs/ai-elements/base/prompt-input.mdx and its demo), whose parts keep the AI
-// Elements names its migration keeps, in StyleX on UI SDK's Token Input and Trigger Menu. A card
-// with the files on top (Attachment), then the text, then a footer of tools (Button, DropdownMenu),
-// Submit at the end. Enter sends and Shift+Enter starts a line; an input method's Enter never
-// sends, and Enter in an open suggestion menu chooses the suggestion.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// PromptInput: where a person writes to an assistant, in StyleX on UI SDK's Token Input and Trigger
+// Menu. A card with the files on top (Attachment), then the text, then a footer of tools (Button,
+// DropdownMenu), Submit at the end. Enter sends and Shift+Enter starts a line; an input method's
+// Enter never sends, and Enter in an open suggestion menu chooses the suggestion.
 //
 //   <PromptInput onSubmit={({ text, files, tokens }) => send(text, files, tokens)} status={status}>
 //     <PromptInputHeader>
@@ -40,17 +37,17 @@
 // label and kind. The caller says which characters open a menu, where each one's items come from,
 // and how a picked item becomes a token; nothing here knows what the items are.
 //
-// The files are the prompt input's, as AI Elements' are: picked, pasted or dropped, it keeps them,
+// The files are the prompt input's own: picked, pasted or dropped, it keeps them,
 // PromptInputAttachments shows them (as an AttachmentGroup), and they go with the message to `onSubmit`;
 // `usePromptInputAttachments()` reads and changes them from a part of the caller's. The body is a
 // slot: in place of the text the caller may put a question or a dictation, and focus follows it
 // there and back. Every value is a token.
 //
-// shadcn draws the pattern as an InputGroup with addons above and below a textarea. Damsko's
-// InputGroup is a field's box (an input's hairline and corner, no room inside, its addons padded as
-// a field's), so the card here keeps the composer's own look, and its tools are Buttons, not
-// InputGroupButtons (which set themselves in from a field's edge). The text is Token Input's editor,
-// not a textarea, so a mention is a token; the length limit's sums are in prompt-input-limit.ts.
+// The card is not an InputGroup with addons above and below a textarea: Damsko's InputGroup is a
+// field's box (an input's hairline and corner, no room inside, its addons padded as a field's), so
+// the card here keeps the composer's own look, and its tools are Buttons, not InputGroupButtons
+// (which set themselves in from a field's edge). The text is Token Input's editor, not a textarea,
+// so a mention is a token; the length limit's sums are in prompt-input-limit.ts.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -198,8 +195,8 @@ import { Skeleton } from "./skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 /**
- * Where the answer to the last message is: AI Elements' four, from the AI SDK's chat status, and
- * `success`, the moment a product marks an answer as done.
+ * Where the answer to the last message is: the AI SDK's chat status (`ready`, `submitted`,
+ * `streaming`, `error`), and `success`, the moment a product marks an answer as done.
  */
 type Status = "ready" | "submitted" | "streaming" | "error" | "success";
 
@@ -450,7 +447,7 @@ export type PromptInputActionMenuItemProps = DropdownMenuItemProps;
 /** Every prop a PromptInputActionAddAttachments takes. */
 export interface PromptInputActionAddAttachmentsProps {
   /** Its words, in place of `promptInput.addAttachments` ("Add files"). */
-  label?: string;
+  children?: string;
   /** Layout only. */
   style?: LayoutStyle;
 }
@@ -540,10 +537,8 @@ export interface PromptInputBannerProps {
 
 /** Every prop a PromptInputQueue takes. */
 export interface PromptInputQueueProps {
-  /** Its PromptInputQueueItems: the messages written while an answer was still coming, the next one first. */
+  /** Its PromptInputQueueTrigger, then its PromptInputQueueContent. */
   children: ReactNode;
-  /** The words on its fold, with the count ("2 queued"). */
-  label: string;
   /**
    * Whether it starts open.
    * @default true
@@ -551,6 +546,18 @@ export interface PromptInputQueueProps {
   defaultOpen?: boolean;
   /** Layout only. */
   style?: LayoutStyle;
+}
+
+/** Every prop a PromptInputQueueTrigger takes. */
+export interface PromptInputQueueTriggerProps {
+  /** The words on its fold, with the count ("2 queued"). */
+  children: ReactNode;
+}
+
+/** Every prop a PromptInputQueueContent takes. */
+export interface PromptInputQueueContentProps {
+  /** Its PromptInputQueueItems: the messages written while an answer was still coming, the next one first. */
+  children: ReactNode;
 }
 
 /** Every prop a PromptInputQueueItem takes. */
@@ -675,21 +682,26 @@ export interface PromptInputMentionProps {
 export interface PromptInputMentionContentProps {
   /**
    * Rows of your own, as PromptInputMentionItems, drawn in place of the rows of the trigger's
-   * `items` (which every trigger has). Without them it draws the trigger's items.
+   * `items` (which every trigger has), and a PromptInputMentionEmpty for what it says while nothing
+   * matches. Without rows it draws the trigger's items.
    */
   children?: ReactNode;
-  /**
-   * The words while nothing matches.
-   * @default `promptInput.mentionEmpty`
-   */
-  emptyLabel?: string;
   /**
    * The words when the items could not be loaded.
    * @default `promptInput.mentionsError`
    */
-  errorLabel?: string;
+  errorText?: string;
   /** Layout only. */
   style?: LayoutStyle;
+}
+
+/** Every prop a PromptInputMentionEmpty takes. */
+export interface PromptInputMentionEmptyProps {
+  /**
+   * The words while nothing matches.
+   * @default `promptInput.mentionEmpty`
+   */
+  children?: ReactNode;
 }
 
 /** Every prop a PromptInputMentionItem takes. */
@@ -1204,7 +1216,7 @@ const styles = stylex.create({
     gap: space["1"],
     marginInline: "1px",
     paddingInline: space["1"],
-    borderRadius: `calc(${radius.base} / 2)`,
+    borderRadius: `calc(${radius.xl} / 2)`,
     cornerShape: radius.shape,
     backgroundColor: colors.muted,
     boxShadow: size.borderStrong,
@@ -1322,12 +1334,12 @@ const styles = stylex.create({
     position: "relative",
     zIndex: 1,
     marginInline: space["2"],
-    marginBlockEnd: `calc(-1 * ${radius.base})`,
+    marginBlockEnd: `calc(-1 * ${radius.xl})`,
     padding: space["3"],
     // Room for the card's corner to lie over its foot.
-    paddingBlockEnd: `calc(${space["3"]} + ${radius.base})`,
-    borderStartStartRadius: radius.base,
-    borderStartEndRadius: radius.base,
+    paddingBlockEnd: `calc(${space["3"]} + ${radius.xl})`,
+    borderStartStartRadius: radius.xl,
+    borderStartEndRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.muted,
     boxShadow: size.borderStrong,
@@ -1388,8 +1400,8 @@ const styles = stylex.create({
     paddingInlineStart: `calc(${space["4"]} - ${space["2"]})`,
     paddingBlockStart: space["1"],
     paddingBlockEnd: radius.promptInputRadius,
-    borderStartStartRadius: radius.base,
-    borderStartEndRadius: radius.base,
+    borderStartStartRadius: radius.xl,
+    borderStartEndRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.sm,
@@ -1676,7 +1688,7 @@ const useOutside = () => {
   return outside;
 };
 
-/** The files attached to the message, and what changes them: AI Elements' attachments. */
+/** The files attached to the message, and what changes them. */
 interface PromptInputAttachmentsValue {
   /** The files, in the order they came. */
   files: PromptInputFile[];
@@ -2651,7 +2663,6 @@ export const PromptInputBanner = ({
  */
 export const PromptInputQueue = ({
   children,
-  label,
   defaultOpen = true,
   style,
 }: PromptInputQueueProps) => {
@@ -2663,15 +2674,26 @@ export const PromptInputQueue = ({
       data-slot="prompt-input-queue"
       {...stylex.props(styles.above, styles.queue, style)}
     >
-      <Collapsible defaultOpen={defaultOpen}>
-        <CollapsibleTrigger>{label}</CollapsibleTrigger>
-        <CollapsibleContent>
-          <ul {...stylex.props(styles.queueList)}>{children}</ul>
-        </CollapsibleContent>
-      </Collapsible>
+      <Collapsible defaultOpen={defaultOpen}>{children}</Collapsible>
     </div>
   );
 };
+
+/** The queue's fold: its words, with the count, open and shut it. */
+export const PromptInputQueueTrigger = ({
+  children,
+}: PromptInputQueueTriggerProps) => (
+  <CollapsibleTrigger>{children}</CollapsibleTrigger>
+);
+
+/** What the fold opens: the waiting messages, the next one first. */
+export const PromptInputQueueContent = ({
+  children,
+}: PromptInputQueueContentProps) => (
+  <CollapsibleContent>
+    <ul {...stylex.props(styles.queueList)}>{children}</ul>
+  </CollapsibleContent>
+);
 
 /**
  * One waiting message: its words, and its actions at the row's end. When an action takes the
@@ -3663,11 +3685,12 @@ const PICKER_KEYS = "mod+/";
 
 /** Opens the file picker: Cmd or Ctrl and / does the same while focus is in the form. */
 export const PromptInputActionAddAttachments = ({
-  label,
+  children,
   style,
 }: PromptInputActionAddAttachmentsProps) => {
   const words = useI18n().promptInput;
   const openFiles = usePromptInput()?.openFiles;
+  const said = children ?? words.addAttachments;
   return (
     <DropdownMenuItem
       icon={PaperclipIcon}
@@ -3675,10 +3698,10 @@ export const PromptInputActionAddAttachments = ({
       onSelect={() => {
         openFiles?.();
       }}
-      label={label ?? words.addAttachments}
+      label={said}
       style={style}
     >
-      {label ?? words.addAttachments}
+      {said}
       <DropdownMenuShortcut>{PICKER_KEYS}</DropdownMenuShortcut>
     </DropdownMenuItem>
   );
@@ -4483,8 +4506,8 @@ const DataRows = ({ items }: { items: TriggerMenuData<unknown> }) =>
 const menuWords = (
   state: { status: TriggerMenuContentState["status"]; loading?: boolean },
   words: { error: string; loading: string },
-  rest: string
-) => {
+  rest: ReactNode
+): ReactNode => {
   if (state.status === "error") {
     return words.error;
   }
@@ -4493,18 +4516,48 @@ const menuWords = (
     : rest;
 };
 
+/** Where the menu is, for its PromptInputMentionEmpty: its state and its own words for it. */
+const MentionMenuContext = createContext<
+  | {
+      state: TriggerMenuContentState;
+      said: { error: string; loading: string };
+    }
+  | undefined
+>(undefined);
+
+/** What the menu says while nothing matches; and while its items load, or when they failed. */
+export const PromptInputMentionEmpty = ({
+  children,
+}: PromptInputMentionEmptyProps) => {
+  const menu = use(MentionMenuContext);
+  const words = useI18n().promptInput;
+  if (menu === undefined) {
+    throw new Error(
+      "PromptInputMentionEmpty must be used within a PromptInputMentionContent."
+    );
+  }
+  return (
+    // Its own words when the loader failed, where UI SDK would say nothing matched.
+    <TriggerMenuEmpty {...stylex.props(styles.mentionEmpty)}>
+      {menuWords(menu.state, menu.said, children ?? words.mentionEmpty)}
+    </TriggerMenuEmpty>
+  );
+};
+
 /** The menu: a menu's panel at the caret, its items, and what it says when it has none. */
 export const PromptInputMentionContent = ({
   children,
-  emptyLabel,
-  errorLabel,
+  errorText,
   style,
 }: PromptInputMentionContentProps) => {
   const words = useI18n().promptInput;
   const said = {
-    error: errorLabel ?? words.mentionsError,
+    error: errorText ?? words.mentionsError,
     loading: words.mentionsLoading,
   };
+  const parts = partsOf(children);
+  const empty = parts.find((part) => isPart(part, PromptInputMentionEmpty));
+  const rows = parts.filter((part) => !isPart(part, PromptInputMentionEmpty));
   return (
     <TriggerMenuContent
       side="bottom"
@@ -4527,18 +4580,16 @@ export const PromptInputMentionContent = ({
       )}
     >
       {(state: TriggerMenuContentState) => (
-        <>
-          {/* Its own words when the loader failed, where UI SDK would say nothing matched. */}
-          <TriggerMenuEmpty {...stylex.props(styles.mentionEmpty)}>
-            {menuWords(state, said, emptyLabel ?? words.mentionEmpty)}
-          </TriggerMenuEmpty>
+        // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
+        <MentionMenuContext value={{ state, said }}>
+          {empty ?? <PromptInputMentionEmpty />}
           <TriggerMenuList
             data-slot="prompt-input-mention"
             {...stylex.props(styles.mentionList)}
           >
-            {children ?? <DataRows items={state.items} />}
+            {rows.length > 0 ? rows : <DataRows items={state.items} />}
           </TriggerMenuList>
-        </>
+        </MentionMenuContext>
       )}
     </TriggerMenuContent>
   );
@@ -4594,7 +4645,7 @@ export const PromptInputMention = ({
       }}
     >
       <TriggerMenuStatus {...stylex.props(visuallyHidden)}>
-        {(state: TriggerMenuStatusState) =>
+        {(state: TriggerMenuStatusState): ReactNode =>
           menuWords(
             state,
             said,

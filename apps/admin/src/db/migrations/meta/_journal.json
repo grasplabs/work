@@ -393,6 +393,13 @@
       "when": 1794417104753,
       "tag": "0055_client_starting_flow",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1795292382001,
+      "tag": "0056_client_closed_from",
+      "breakpoints": true
     }
   ]
 }

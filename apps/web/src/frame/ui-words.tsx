@@ -509,7 +509,9 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       table: t({ message: "Table", context: "a table in a text" }),
     },
     menu: {
-      error: t`Failed`,
+      // On a menu item, and said, when the work it started failed; not a
+      // run's status, which other languages word otherwise.
+      error: t({ message: "Failed", context: "a menu item whose work failed" }),
       loading: t`Working`,
     },
     message: {

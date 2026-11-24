@@ -2,7 +2,6 @@
 // workspace, in StyleX, built on UI SDK's AlertDialog (role="alertdialog"). It wears Dialog's look
 // (dialog.tsx's `dialogStyles`), so the two are one family: the raised panel, the shade, the motion
 // and the sheet along the bottom under 640px.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <AlertDialog>
 //     <AlertDialogTrigger asChild><Button variant="destructive">Delete workspace</Button></AlertDialogTrigger>

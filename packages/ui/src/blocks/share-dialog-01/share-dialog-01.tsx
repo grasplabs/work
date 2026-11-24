@@ -252,9 +252,9 @@ const AddRow = ({
       await onInvite(user, at);
     },
     {
-      loadingLabel: words.adding,
-      successLabel: words.added,
-      errorLabel: words.failedInvite,
+      loadingText: words.adding,
+      successText: words.added,
+      errorText: words.failedInvite,
     }
   );
   const add = async () => {

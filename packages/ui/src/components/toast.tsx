@@ -6,7 +6,6 @@
 // Only a toast that stays (a loading one, or one given no time) has a close button, in its corner:
 // nothing else in sight would put it away. Newer toasts stack in front; the stack opens under a
 // pointer or focus. Place it once; call `toast()` from anywhere.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Toaster />
 //   toast.success("Report shared", { description: "Everyone on the team can read it." });
@@ -221,7 +220,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.md,
@@ -485,32 +484,32 @@ const useOneRegion = (queue: object, where: string) => {
 
 /**
  * A toast's action, as UI SDK's ToastAction hands it: a small outline Button that shows its work
- * while the action's Promise runs, and says `errorLabel` once it failed, once to a screen reader
+ * while the action's Promise runs, and says `errorText` once it failed, once to a screen reader
  * through the page's live region. The toast stays then.
  */
 const ActionButton = ({
   props,
   state,
   label,
-  errorLabel,
+  errorText,
 }: {
   props: Record<string, unknown>;
   state: ToastButtonState;
   label: ReactNode;
-  errorLabel: string;
+  errorText: string;
 }) => {
   const failed = state.error !== undefined && state.error !== null;
   const said = useRef(false);
   useEffect(() => {
     if (failed && !said.current) {
-      announce(errorLabel);
+      announce(errorText);
     }
     said.current = failed;
-  }, [failed, errorLabel]);
+  }, [failed, errorText]);
   return (
     <Button {...props} variant="outline" size="sm">
       {state.pending && <Spinner />}
-      {failed && !state.pending ? errorLabel : label}
+      {failed && !state.pending ? errorText : label}
     </Button>
   );
 };
@@ -626,7 +625,7 @@ export const Toaster = ({
                           props={props}
                           state={state}
                           label={data.action?.label}
-                          errorLabel={words.error}
+                          errorText={words.error}
                         />
                       )}
                     />

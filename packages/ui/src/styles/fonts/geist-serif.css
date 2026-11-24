@@ -1,0 +1,21 @@
+/* Geist Serif, the family the serif token names, at weight 400: two files beside this sheet,
+   split and declared as Geist's are, for the reasons geist.css gives. */
+@font-face {
+  font-family: "Geist Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./geist-serif.woff2") format("woff2");
+  unicode-range:
+    U+a1-a6, U+a8, U+aa-ac, U+ae-b6, U+b8-ff, U+131, U+152-153, U+2bb-2bc,
+    U+2c6, U+2da, U+2dc, U+304, U+308, U+329, U+2000-200a, U+2010-2012,
+    U+2015-2017, U+201a-201b, U+201e-2021, U+2023-2025, U+2027, U+202f-205f,
+    U+2122, U+2215, U+fffd;
+}
+@font-face {
+  font-family: "Geist Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./geist-serif-common.woff2") format("woff2");
+}

@@ -22,6 +22,7 @@ import {
   uploadVersionKept,
 } from "../brain-uploads.ts";
 import { localExtractor } from "../files/extract.ts";
+import { signatures } from "../files/upload-checks.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
@@ -45,8 +46,8 @@ import { onboardingStore } from "./store.ts";
 
 /** Old Office formats, refused with the way out. */
 const oldOffice = new Set(["doc", "xls", "ppt", "rtf"]);
-/** Slides: not read yet, with the way out. */
-const slides = new Set(["pptx", "key", "odp"]);
+/** Slides in a format that isn't read, with the way out. */
+const slides = new Set(["key", "odp"]);
 
 /** The extension a file's name ends in, lower case. */
 const extensionOf = (name: string): string =>
@@ -226,6 +227,11 @@ export const shareDocument = async (
   input: ShareDocumentInput
 ): Promise<OnboardingDocument> => {
   const extension = requireReadable(input.name);
+  // By its first bytes too, before anything reads it: a picture named as
+  // text is no document, and no model is asked about it.
+  if (!signatures[extension](input.bytes)) {
+    throw documentErrors.create("document.unsupported");
+  }
   const model = await readingModel(env);
   const store = onboardingStore(env);
   // The document's ID, its upload's: what the gateway records the call read.

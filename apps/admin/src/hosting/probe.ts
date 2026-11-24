@@ -169,7 +169,8 @@ export interface ProbeFault {
   code:
     | "probe_identity_mismatch"
     | "probe_binding_unanswered"
-    | "probe_clock_unarmed";
+    | "probe_clock_unarmed"
+    | "probe_starts_open";
   message: string;
 }
 
@@ -179,8 +180,10 @@ const isArmed = (clock: ClockRegistration | null): boolean =>
 
 /**
  * Checks core's `answer` against what the admin deployed: client
- * `clientId` at version `version`, each of `bindings` answering, and
- * both clocks armed with tasks to run. Null when it checks out.
+ * `clientId` at version `version`, each of `bindings` answering, both
+ * clocks armed with tasks to run and, where the company has to start
+ * closed (`startsClosed`), a core that says it does: one from a release
+ * before that starts open to all its people. Null when it checks out.
  */
 export const probeFault = (
   answer: ProvisionProbe,
@@ -188,7 +191,13 @@ export const probeFault = (
     clientId,
     version,
     bindings,
-  }: { clientId: string; version: string; bindings: readonly string[] }
+    startsClosed,
+  }: {
+    clientId: string;
+    version: string;
+    bindings: readonly string[];
+    startsClosed: boolean;
+  }
 ): ProbeFault | null => {
   if (answer.clientId !== clientId || answer.version !== version) {
     return {
@@ -210,6 +219,12 @@ export const probeFault = (
     return {
       code: "probe_clock_unarmed",
       message: `The ${unarmed.join(" and ")} clock isn't armed`,
+    };
+  }
+  if (startsClosed && answer.startsClosed !== true) {
+    return {
+      code: "probe_starts_open",
+      message: `Core doesn't start closed for ${clientId}'s onboarding`,
     };
   }
   return null;

@@ -6,11 +6,14 @@ import {
 } from "@grasp-os/app-kit/components/tabs";
 import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { Stage } from "@grasp-os/shared/admin/onboarding-admin";
+import { flowInterviews } from "@grasp-os/shared/onboarding-flow";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { OrgFlow } from "../../../admin/flow.tsx";
+import { GettingStarted } from "../../../admin/getting-started.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { OrgSteps } from "../../../admin/steps.tsx";
+import { fetchClientSetup } from "../../../clients/functions.ts";
 
 interface StepsSearch {
   /** The step that is open; the one the organization is at when none is. */
@@ -21,6 +24,8 @@ interface StepsSearch {
 
 const Steps = () => {
   const { admin, view } = useOrganization();
+  const { setup } = Route.useLoaderData();
+  const { snapshot } = admin;
   const { stage, tab = "steps" } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   return (
@@ -40,6 +45,30 @@ const Steps = () => {
       </TabsList>
       <TabsContent value="steps">
         <div className="mt-4 flex flex-col gap-6">
+          <GettingStarted
+            agreements={snapshot.agreements}
+            clientId={admin.client.id}
+            facts={{
+              window:
+                setup === null
+                  ? null
+                  : {
+                      open: setup.staffWindow.open,
+                      live: setup.staffWindow.live,
+                    },
+              gate: snapshot.gate,
+              admins: snapshot.company.admins,
+              // A Grasp that says no flow goes through all of it.
+              interviews:
+                snapshot.flow === undefined ||
+                flowInterviews(snapshot.flow.flow),
+              roster: snapshot.roster !== null,
+              plan: snapshot.plan !== null,
+              agreed: snapshot.agreed,
+              told: snapshot.told,
+              paused: snapshot.paused,
+            }}
+          />
           <OrgSteps
             clientId={admin.client.id}
             flow={admin.snapshot.flow?.flow}
@@ -71,5 +100,16 @@ export const Route = createFileRoute("/organizations/$clientId/steps")({
     stage: STAGES.find((each) => each === search.stage),
     ...(search.tab === "flow" ? { tab: "flow" as const } : {}),
   }),
+  // The staff window is the admin's own record, not the company's Grasp's:
+  // read beside the page, and left out of the list when it can't be.
+  loader: async ({ params }) => {
+    try {
+      return {
+        setup: await fetchClientSetup({ data: { clientId: params.clientId } }),
+      };
+    } catch {
+      return { setup: null };
+    }
+  },
   component: Steps,
 });

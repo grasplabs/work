@@ -407,7 +407,7 @@ const styles = stylex.create({
     },
     textDecoration: "none",
     textWrap: "pretty",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     transitionProperty: "color",
     transitionDuration: duration.hover,
@@ -456,7 +456,7 @@ const styles = stylex.create({
     margin: 0,
     padding: space[2],
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     // A ghost button's fill under the pointer, so the column reads as something to press.
     backgroundColor: {
@@ -519,7 +519,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.popover,
     boxShadow: shadow.popupShadow,

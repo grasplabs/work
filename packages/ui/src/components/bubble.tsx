@@ -1,7 +1,6 @@
 // Bubble: the framed surface of a message in a conversation. A Message lays out the row (avatar, header, footer, which side); a Bubble is the surface
 // inside it. The person's message is a `muted` Bubble at the end of the line: the soft bubble with
 // the one edge. Reactions overlap its edge.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Bubble variant="muted" align="end">
 //     <BubbleContent>Which invoices are unpaid?</BubbleContent>
@@ -136,7 +135,7 @@ const styles = stylex.create({
     paddingBlock: space["3"],
     paddingInline: space["4"],
     border: "none",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     color: colors.foreground,
     fontFamily: font.sans,

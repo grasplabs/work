@@ -88,7 +88,7 @@ const styles = stylex.create({
     paddingBlock: 0,
     paddingInline: space[1],
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",
@@ -162,8 +162,8 @@ export const InlineEdit = ({
     }
   }
   const save = useAction(async (work: Promise<unknown>) => await work, {
-    successLabel: words.saved(draft.trim()),
-    errorLabel: words.error,
+    successText: words.saved(draft.trim()),
+    errorText: words.error,
   });
   const saving = save.status === "loading";
 

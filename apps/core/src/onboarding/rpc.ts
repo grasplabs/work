@@ -51,7 +51,10 @@ import type {
   OnboardingDocument,
   ShareDocumentInput,
 } from "@grasp-os/shared/onboarding-documents";
-import { setupPlaceSchema } from "@grasp-os/shared/onboarding-flow";
+import {
+  onboardingBehind,
+  setupPlaceSchema,
+} from "@grasp-os/shared/onboarding-flow";
 import type {
   OnboardingFlow,
   SetupPlace,
@@ -87,7 +90,7 @@ import {
   sharePlaceFile,
 } from "./document-places.ts";
 import { removeDocument, shareDocument } from "./documents.ts";
-import { gateView, openAsFlowSays } from "./gate.ts";
+import { gateOpen, gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
 import {
   eraseOwedClaimsQuietly,
@@ -132,6 +135,18 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     super();
     this.#env = env;
     this.#check = check;
+  }
+
+  async behind(): Promise<boolean> {
+    return await withPerson(this.#check, async () => {
+      const store = onboardingStore(this.#env);
+      const [{ flow }, place, open] = await Promise.all([
+        store.flow(),
+        store.place(),
+        gateOpen(this.#env),
+      ]);
+      return onboardingBehind({ flow, done: place.done, open });
+    });
   }
 
   async programme(): Promise<Programme | null> {

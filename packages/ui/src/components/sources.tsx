@@ -1,11 +1,9 @@
-// Sources: what an answer drew on, folded under it, after shadcn's Sources pattern (apps/v4/content/
-// docs/ai-elements/base/sources.mdx), built as shadcn builds it: a Trace with a TraceCollapsible, its
-// trigger a TraceLine, and under it the sources, each a TraceLine in a link. In Damsko's look:
-// folded, the trigger is a pile as tall as a finger needs, the first sources' marks overlapping in a
-// row, then the count ("3 sources"). Pressed, the list opens under it: one row per source, at least
-// a large control tall, its mark on a tile, its title, and where it lives in a quiet line under
-// the title; the whole row takes the press. A source is not a step: no seat and no dots.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Sources: what an answer drew on, folded under it. It is built from Trace: a Trace with a
+// TraceCollapsible, its trigger a TraceLine, and under it the sources, each a TraceLine in a link:
+// folded, the trigger is a pile as tall as a finger needs, the first sources' marks overlapping in
+// a row, then the count ("3 sources"). Pressed, the list opens under it: one row per source, at
+// least a large control tall, its mark on a tile, its title, and where it lives in a quiet line
+// under the title; the whole row takes the press. A source is not a step: no seat and no dots.
 //
 //   <Sources>
 //     <SourcesTrigger count={2}>
@@ -183,7 +181,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.row,
+    borderRadius: radius.lg,
     cornerShape: radius.shape,
     fontFamily: "inherit",
     fontSize: font.textSm,
@@ -250,7 +248,7 @@ const styles = stylex.create({
     marginInline: `calc(-1 * ${space["2"]})`,
     padding: space["2"],
     borderWidth: 0,
-    borderRadius: `min(${radius.base}, ${space["3"]})`,
+    borderRadius: `min(${radius.xl}, ${space["3"]})`,
     cornerShape: radius.shape,
     backgroundColor: "transparent",
     color: "inherit",
@@ -324,7 +322,7 @@ const styles = stylex.create({
     [iconVars.stroke]: size.iconStroke,
     width: size.controlSm,
     height: size.controlSm,
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 3))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 3))`,
   },
   tilePile: {
     [iconVars.size]: size.sourcesMarkInline,
@@ -332,7 +330,7 @@ const styles = stylex.create({
     width: size.sourcesPileMark,
     height: size.sourcesPileMark,
     marginInlineStart: `calc(-1 * ${size.sourcesPileOverlap})`,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   // Locked or gone: the mark stays, quieter.

@@ -263,7 +263,7 @@ const styles = stylex.create({
     direction: "ltr",
     unicodeBidi: "isolate",
     paddingInline: space["1"],
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: colors.codeBg,
     fontFamily: font.mono,
@@ -311,7 +311,7 @@ const styles = stylex.create({
     // On the first line of the words, whatever their size.
     marginBlock: `calc((1lh - ${size.checkboxBox}) / 2)`,
     marginInlineStart: space["1"],
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: "round",
     color: colors.primaryForeground,
   },
@@ -389,7 +389,7 @@ const sectionStyles = stylex.create({
     padding: 0,
     margin: 0,
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",
