@@ -1,0 +1,49 @@
+{
+  "name": "@grasp-os/ui",
+  "private": true,
+  "description": "Damsko, Grasp's design system, installed as source from its registry: StyleX on UI SDK",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "exports": {
+    "./components/data-grid": "./src/components/data-grid/index.ts",
+    "./components/data-grid/*": null,
+    "./components/data-table": "./src/components/data-table/index.ts",
+    "./components/data-table/*": null,
+    "./components/markdown": "./src/components/markdown/index.ts",
+    "./components/markdown/*": null,
+    "./components/*.stylex": "./src/components/*.stylex.ts",
+    "./components/*": "./src/components/*.tsx",
+    "./blocks/*": "./src/blocks/*.tsx",
+    "./lib/i18n": "./src/lib/i18n.tsx",
+    "./lib/menu": "./src/lib/menu.tsx",
+    "./lib/*": "./src/lib/*.ts",
+    "./hooks/*": "./src/hooks/*.ts",
+    "./styles/*": "./src/styles/*"
+  },
+  "dependencies": {
+    "@hugeicons/core-free-icons": "catalog:",
+    "@hugeicons/react": "catalog:",
+    "@stylexjs/stylex": "catalog:",
+    "@tanstack/react-table": "catalog:",
+    "@ui-sdk/core": "catalog:",
+    "@ui-sdk/react": "catalog:",
+    "mdast-util-from-markdown": "catalog:",
+    "mdast-util-gfm": "catalog:",
+    "micromark-extension-gfm": "catalog:",
+    "prismjs": "catalog:",
+    "react-is": "catalog:",
+    "recharts": "catalog:"
+  },
+  "devDependencies": {
+    "@types/prismjs": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "shadcn": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

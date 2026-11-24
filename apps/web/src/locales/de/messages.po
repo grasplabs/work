@@ -4266,6 +4266,7 @@ msgstr "Kopenhagen"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4289,6 +4290,7 @@ msgstr "Aus einem anderen System übertragen"
 msgid "Copies"
 msgstr "Kopien"
 
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4356,6 +4358,10 @@ msgstr "Kosten"
 msgctxt "what the Brain remembers about something"
 msgid "Cost"
 msgstr "Kosten"
+
+#: src/frame/ui-words.tsx
+msgid "Could not finish"
+msgstr "Konnte nicht abgeschlossen werden"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
@@ -4899,6 +4905,10 @@ msgstr "Dokumente und Workflow-Läufe erscheinen hier, sobald sie im Gehirn anko
 msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
 msgstr "Dokumente, die sie oder andere mit einem Team oder dem Unternehmen geteilt haben, bleiben, und ihr Text kann sie weiterhin nennen."
 
+#: src/frame/ui-words.tsx
+msgid "Does something that needs your yes"
+msgstr "Tut etwas, das dein Ja braucht"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Erledigt hier Dinge für Personen"
@@ -4918,6 +4928,7 @@ msgstr "Nicht erlauben, solange dieser Datensatz darauf verweist"
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/shown-once.tsx
@@ -5660,6 +5671,11 @@ msgstr "Fehlgeschlagen"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Fehlgeschlagen"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
@@ -9134,6 +9150,10 @@ msgstr "Noch nicht von der Geschäftsleitung bestätigt"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
+#: src/frame/ui-words.tsx
+msgid "Not copied"
+msgstr "Nicht kopiert"
+
 #: src/brain/brain.ts
 msgid "Not drawn yet"
 msgstr "Noch nicht skizziert"
@@ -10503,6 +10523,10 @@ msgstr "Vorliebe"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Drücken Sie auf eine Zeile, um sie zu ändern, nehmen Sie heraus, was nicht stimmt, oder tippen Sie, was fehlt. Wählen Sie, wohin jede Zeile geht. Was Sie stehen lassen, zählt."
+
+#: src/frame/ui-words.tsx
+msgid "Presses \"{words}\""
+msgstr "Drückt „{words}“"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -16597,6 +16621,10 @@ msgstr "Workflows, die die App startet"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows in diesem Monat"
+
+#: src/frame/ui-words.tsx
+msgid "Working"
+msgstr "Arbeitet"
 
 #: src/chat/thread.tsx
 msgid "Working on it"

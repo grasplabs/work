@@ -1,0 +1,22 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "",
+    "baseColor": "",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@grasp-os/ui/components",
+    "ui": "@grasp-os/ui/components",
+    "lib": "@grasp-os/ui/lib",
+    "hooks": "@grasp-os/ui/hooks",
+    "utils": "@grasp-os/ui/lib/utils"
+  },
+  "registries": {
+    "@damsko": "https://damsko.joingrasp.com/r/{name}.json"
+  }
+}
