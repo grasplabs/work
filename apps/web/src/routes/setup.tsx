@@ -42,6 +42,12 @@ import { loadCoreStatus } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import {
+  isConcept,
+  isConceptStep,
+} from "../onboarding/concepts/concept-props.ts";
+import type { Concept } from "../onboarding/concepts/concept-props.ts";
+import { ConceptSetup } from "../onboarding/concepts/concepts.tsx";
 import { motion } from "../onboarding/motion.ts";
 import { useReveal } from "../onboarding/reveal-state.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
@@ -583,6 +589,44 @@ const Setup = () => {
 };
 
 /**
+ * The setup's first three steps as one of the concepts Ruben chooses
+ * between (`?concept=a|b|c`), on the same data and core calls; past the
+ * plan, the setup goes on as it is.
+ */
+const Concepts = ({ concept }: { concept: Concept }) => {
+  const { i18n } = useLingui();
+  const navigate = useNavigate();
+  const { identity } = Route.useRouteContext();
+  const loaded = Route.useLoaderData();
+  const { step: asked } = Route.useSearch();
+  if (loaded.state !== "ready") {
+    return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
+  }
+  const step = isConceptStep(asked) ? asked : "welcome";
+  return (
+    <ConceptSetup
+      admin={identity.name.split(" ")[0] ?? identity.name}
+      concept={concept}
+      data={{ ai: loaded.data.ai }}
+      go={(next) => {
+        void navigate({ to: "/setup", search: { concept, step: next } });
+      }}
+      onward={() => {
+        void navigate({ to: "/setup", search: { step: "company" } });
+      }}
+      step={step}
+      today={new Date(`${todayInUtc()}T12:00:00Z`)}
+    />
+  );
+};
+
+/** Today's setup, or one of the concepts of its first steps. */
+const SetupPage = () => {
+  const { concept } = Route.useSearch();
+  return concept === undefined ? <Setup /> : <Concepts concept={concept} />;
+};
+
+/**
  * The organization's name, for the message to the team; none when it has
  * none or core can't say, which leaves the rest of the onboarding as it is.
  */
@@ -642,8 +686,9 @@ export const Route = createFileRoute("/setup")({
   // `connection`: a connection's flow, started on a step, came back to it.
   validateSearch: (
     search: Record<string, unknown>
-  ): { step?: SetupStep; connection?: string } => ({
+  ): { step?: SetupStep; connection?: string; concept?: Concept } => ({
     ...(isStep(search.step) && { step: search.step }),
+    ...(isConcept(search.concept) && { concept: search.concept }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
     }),
@@ -731,5 +776,5 @@ export const Route = createFileRoute("/setup")({
         flow,
       };
     }),
-  component: Setup,
+  component: SetupPage,
 });
