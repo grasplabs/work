@@ -47,7 +47,7 @@ export interface Integration {
 }
 
 /** Where an integration stands, for the person looking at it. */
-export type IntegrationState =
+type IntegrationState =
   | "needs_reauth"
   | "shared"
   | "personal"
@@ -74,6 +74,19 @@ export const parseIntegrationKey = (
     return undefined;
   }
   return { source, id };
+};
+
+/**
+ * The products behind Grasp's own connectors that the catalog doesn't
+ * list, because an admin connects them while setting up (the directory,
+ * HR and documents): product names, so not translated.
+ */
+const unlistedNames: Readonly<Record<string, string>> = {
+  "microsoft-directory": "Microsoft Entra ID",
+  "google-directory": "Google Directory",
+  "hibob-hr": "HiBob",
+  "microsoft-documents": "SharePoint and OneDrive",
+  "google-documents": "Google Drive",
 };
 
 const byNewest = (one: ListedConnection, other: ListedConnection): number =>
@@ -124,8 +137,12 @@ export const integrationsOf = (
         key,
         source: connection.source,
         id: connection.provider,
-        // The catalog alone has its name: its ID stands in.
-        name: connection.provider,
+        // The catalog has its name, or the product we know it as; else its ID stands in.
+        name:
+          (connection.source === "native" &&
+          Object.hasOwn(unlistedNames, connection.provider)
+            ? unlistedNames[connection.provider]
+            : undefined) ?? connection.provider,
         categories: [],
         group: "Other",
         description: null,
@@ -156,7 +173,7 @@ export const stateOf = ({ connections }: Integration): IntegrationState => {
 };
 
 /** What the list shows, as in the prototype: everything, what is connected, or one kind of app. */
-export type IntegrationFilter =
+type IntegrationFilter =
   | { show: "all" }
   | { show: "connected" }
   | { show: "group"; group: CatalogGroup };
@@ -301,17 +318,6 @@ export const find = (
   ];
 };
 
-/** How many integrations each kind of app holds. */
-const countByGroup = (
-  integrations: readonly Integration[]
-): ReadonlyMap<CatalogGroup, number> => {
-  const counts = new Map<CatalogGroup, number>();
-  for (const { group } of integrations) {
-    counts.set(group, (counts.get(group) ?? 0) + 1);
-  }
-  return counts;
-};
-
 /** An HTTP connection, as listed: its summary beside the connection. */
 export interface HttpListed {
   connection: ListedConnection;
@@ -334,44 +340,8 @@ export const httpConnectionsOf = (
       : []
   );
 
-/**
- * How many each filter holds: every integration and every live HTTP
- * connection under All; what is connected, HTTP connections included,
- * under Connected (both list under those filters); and the integrations
- * of each kind of app, which an HTTP connection isn't.
- */
-export const filterCounts = (
-  integrations: readonly Integration[],
-  connections: readonly ListedConnection[]
-): {
-  all: number;
-  connected: number;
-  groups: ReadonlyMap<CatalogGroup, number>;
-} => {
-  const http = httpConnectionsOf(connections).length;
-  return {
-    all: integrations.length + http,
-    connected:
-      integrations.filter((integration) =>
-        keeps({ show: "connected" }, integration)
-      ).length + http,
-    groups: countByGroup(integrations),
-  };
-};
-
-/** A count rounded down to a round number, to say "more than" it: 1,487 is more than 1,400. */
-export const roundedDown = (count: number): number => {
-  let step = 10;
-  if (count >= 1000) {
-    step = 100;
-  } else if (count >= 100) {
-    step = 50;
-  }
-  return Math.floor(count / step) * step;
-};
-
 /** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
-const plain = (name: string): string =>
+export const plain = (name: string): string =>
   name.toLocaleLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
 
 /**
@@ -454,15 +424,15 @@ export const workflowsOf = (
 
 /**
  * The page's sections, by where each app stands, as the prototype's
- * (`routes/integrations/index.tsx`): what someone has to sign in to again,
- * what is connected and used, what is connected though no workflow the
+ * (`routes/integrations/index.tsx`): what needs someone, what is connected
+ * and used, what is connected though no workflow the
  * person can open uses it, and then the catalog's other apps. Each in
  * `find`'s order. The prototype's "Still to connect" (an app a workflow
  * names that nobody connected) has no counterpart: Grasp's workflows name
  * connections, never apps that aren't there.
  */
 export interface IntegrationSections {
-  /** The connection the company relies on lapsed: someone has to sign in again. */
+  /** One of its connections lapsed, a spare beside one that works too: it needs someone. */
   lapsed: Integration[];
   /** Connected and used by a workflow; every connected one while that isn't known. */
   connected: Integration[];
@@ -517,7 +487,9 @@ export const sectionsOf = (
     search
   );
   const own = found.filter((integration) => integration.connections.length > 0);
-  const lapsed = own.filter((integration) => reliedOnLapsed(integration, uses));
+  const lapsed = own.filter(
+    (integration) => stateOf(integration) === "needs_reauth"
+  );
   const connected = own.filter((integration) => !lapsed.includes(integration));
   const used = (integration: Integration): boolean =>
     uses === undefined || workflowsOf(integration, uses).length > 0;

@@ -147,7 +147,7 @@ describe("the sidebar's kinds of app", () => {
     document.body.replaceChildren();
   });
 
-  it("counts a kind's connected apps, as its page lists them", async () => {
+  it("counts the apps of a kind nobody connected yet, as its page lists them", async () => {
     await shown(
       [
         entry("gmail", "Email and calendar"),
@@ -156,20 +156,17 @@ describe("the sidebar's kinds of app", () => {
       [connected("gmail")]
     );
     await vi.waitFor(() => {
-      expect(kinds()).toStrictEqual({ "Email and calendar": "2" });
+      expect(kinds()).toStrictEqual({ "Email and calendar": "1" });
     });
   });
 
-  it("keeps a kind whose apps are all connected", async () => {
+  it("leaves out a kind whose apps are all connected: they stand under Connected", async () => {
     await shown(
       [entry("gmail", "Email and calendar"), entry("slack", "Chat")],
-      [connected("gmail"), connected("slack")]
+      [connected("gmail")]
     );
     await vi.waitFor(() => {
-      expect(kinds()).toStrictEqual({
-        "Email and calendar": "1",
-        Chat: "1",
-      });
+      expect(kinds()).toStrictEqual({ Chat: "1" });
     });
   });
 });

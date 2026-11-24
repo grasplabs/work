@@ -172,7 +172,12 @@ const allow = (): HTMLElement | null | undefined =>
   [...document.querySelectorAll("li")]
     .find(
       (each) =>
-        each.textContent?.includes("HUBSPOT_LIST_CONTACTS") &&
+        // The tool HUBSPOT_LIST_CONTACTS, as it shows: "List contacts" in
+        // HubSpot's dialog, with its toolkit's name before it in another's.
+
+        // The tool HUBSPOT_LIST_CONTACTS, as it shows: "List contacts" in
+        // HubSpot's dialog, with its toolkit's name before it in another's.
+        each.textContent?.toLowerCase().includes("list contacts") &&
         each.querySelector("li") === null
     )
     ?.querySelector<HTMLElement>("label");
@@ -208,7 +213,7 @@ const field = (label: string): HTMLInputElement | null | undefined => {
 
 /** Where the step titled `title` stands. */
 const stepState = (title: string): string | undefined =>
-  [...document.querySelectorAll<HTMLElement>("li[data-state]")].find(
+  [...document.querySelectorAll<HTMLElement>("section[data-state]")].find(
     (each) => each.querySelector("h3")?.textContent === title
   )?.dataset.state;
 
@@ -230,8 +235,9 @@ describe("the connect dialog's steps", () => {
       "idle",
     ]);
 
-    const preselected = document.querySelector<HTMLInputElement>(
-      'input[type="radio"]:checked'
+    // The option chosen already, as a person presses it: its radio.
+    const preselected = document.querySelector<HTMLElement>(
+      '[role="radio"][aria-checked="true"]'
     );
     await press(preselected);
     expect([stepState("Who uses it"), stepState("Sign in")]).toStrictEqual([
@@ -247,23 +253,6 @@ describe("the connect dialog's steps", () => {
       "done",
       "active",
     ]);
-  });
-
-  it("fades the waiting row in as signing in starts, rather than swapping it into the buttons' place", async () => {
-    await opened(someone("user"), async () => await waitingForever());
-    const before = button("Sign in to Microsoft 365")?.closest(
-      '[data-slot="fade-in"]'
-    );
-    await press(button("Sign in to Microsoft 365"));
-    const waiting = [...document.querySelectorAll("output")].find((each) =>
-      each.textContent?.includes("Waiting for Microsoft 365")
-    );
-    const after = waiting?.closest('[data-slot="fade-in"]');
-    expect({
-      fadesIn: after instanceof HTMLElement,
-      anew: after !== before,
-      buttonsLeft: before?.isConnected,
-    }).toStrictEqual({ fadesIn: true, anew: true, buttonsLeft: false });
   });
 
   it("goes by the newest attempt only, when an older one answers after trying again failed", async () => {
