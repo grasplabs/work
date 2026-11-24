@@ -476,6 +476,30 @@ describe(ChatThread, () => {
     });
   });
 
+  it("streams what the model thinks again after a reply of its answer, open under Thinking", async () => {
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Let me check.",
+          code: [],
+          tools: [],
+          end: "done",
+          at: "2026-10-27T09:00:05.000Z",
+        },
+      ],
+      { text: "", code: [], tools: [], reasoning: "Add two to two." }
+    );
+
+    expect(firstStep()).toStrictEqual({
+      line: "Thinking",
+      open: true,
+      shows: "Add two to two.",
+    });
+  });
+
   it("says it checks the App while its turn checks the drafts it wrote, past its answer", async () => {
     const answered: ChatMessage[] = [
       asked,

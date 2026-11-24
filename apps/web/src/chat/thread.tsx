@@ -1109,6 +1109,14 @@ const answerStateOf = (
   };
 };
 
+/** The reply being written still thinks: its thoughts come, nothing else yet. */
+const stillThinks = (partial: ChatPartial | null): boolean =>
+  partial !== null &&
+  partial.reasoning.trim() !== "" &&
+  partial.text.trim() === "" &&
+  partial.code.length === 0 &&
+  partial.tools.length === 0;
+
 /** One answer of Grasp's: what it thought, its steps, its words, and what came of them, as one Message. */
 const AnswerRow = ({
   turn,
@@ -1147,7 +1155,7 @@ const AnswerRow = ({
             {...(thought.seconds === undefined
               ? {}
               : { duration: thought.seconds })}
-            isStreaming={thinking}
+            isStreaming={thinking || stillThinks(partial)}
           >
             <ReasoningTrigger>
               {thinking ? context.workingLabel : undefined}

@@ -158,6 +158,22 @@ export const inputOf = (input: string): string => {
   }
 };
 
+/**
+ * The most lines one CodeBlockContent draws, even never folded: past
+ * them it only says how many more there are (Damsko's code block).
+ */
+const drawnLines = 2000;
+
+/** `text` in runs of at most `drawnLines` lines, so a code block draws every line. */
+const runsOf = (text: string): string[] => {
+  const lines = text.split("\n");
+  const runs: string[] = [];
+  for (let at = 0; at < lines.length; at += drawnLines) {
+    runs.push(lines.slice(at, at + drawnLines).join("\n"));
+  }
+  return runs;
+};
+
 /** Lines of a value shown before the rest waits behind "Show all". */
 const shownLines = 12;
 
@@ -321,11 +337,15 @@ export const ExactInput = ({
       </Button>
       {open ? (
         <div id={id} {...stylex.props(styles.wide)}>
-          {/* All of it: what is confirmed is never folded away. */}
+          {/* All of it: what is confirmed is never folded away, nor left
+              undrawn past a code block's most lines. */}
           <CodeBlock language="json" size="sm">
-            <CodeBlockContent maxLines={false} wrap>
-              {inputOf(input)}
-            </CodeBlockContent>
+            {runsOf(inputOf(input)).map((run, at) => (
+              // A run's place is its key: runs never reorder.
+              <CodeBlockContent key={at} maxLines={false} wrap>
+                {run}
+              </CodeBlockContent>
+            ))}
           </CodeBlock>
         </div>
       ) : null}

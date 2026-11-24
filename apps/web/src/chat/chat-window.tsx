@@ -68,8 +68,8 @@ import { FailureLine } from "./failure-line.tsx";
 // narrows the chats by their titles at once and asks core what was said
 // (`chats.search`), whose chats show where the words were, marked.
 // Renaming takes the window's place with a dialog of its own; as it goes,
-// by Escape, Cancel or once renamed, the window comes back with the chat's
-// row highlighted.
+// by Escape, Cancel or once renamed, the window comes back on the list it
+// was in with the chat's row highlighted.
 //
 // Delete still asks first: core deletes a chat for good, with nothing to
 // bring it back, so an Undo after it could not keep its word.
@@ -133,21 +133,35 @@ const useSaidSearch = () => {
   return { found, failure, search };
 };
 
-/** Reads the person's chats from core, the archived ones or the rest, again on each `read`. */
+/**
+ * Reads the person's chats from core, the archived ones or the rest, again
+ * on each `read`: the latest read only, so an answer that comes late for
+ * an earlier one is dropped, and kept with which list it is.
+ */
 const useListed = () => {
   const core = useCore();
-  const [listed, setListed] = useState<ChatSummary[]>();
+  const [listed, setListed] = useState<{
+    archived: boolean;
+    chats: ChatSummary[];
+  }>();
   const [failure, setFailure] = useState<string>();
+  const latest = useRef(0);
   const read = (archived: boolean): void => {
+    latest.current += 1;
+    const asked = latest.current;
     void (async () => {
       try {
         const chats = await core.withSession(
           async (session) => await session.chats.list({ archived })
         );
-        setListed(chats);
-        setFailure(undefined);
+        if (asked === latest.current) {
+          setListed({ archived, chats });
+          setFailure(undefined);
+        }
       } catch (error) {
-        setFailure(failureText(error));
+        if (asked === latest.current) {
+          setFailure(failureText(error));
+        }
       }
     })();
   };
@@ -392,6 +406,8 @@ const useChatItems = ({
   const [archived, setArchived] = useState(false);
   const [deleting, setDeleting] = useState<ChatSummary>();
   const [renaming, setRenaming] = useState<ChatSummary>();
+  // Back from Rename: the window shows again on the list it was in.
+  const [renamed, setRenamed] = useState(false);
   const said = useSaidSearch();
   const listing = useListed();
   const { failure, run } = useCoreAction();
@@ -401,7 +417,10 @@ const useChatItems = ({
     setReadWhenShown(shown);
     if (shown) {
       setSearch("");
-      setArchived(false);
+      if (!renamed) {
+        setArchived(false);
+      }
+      setRenamed(false);
     }
   }
   const read = useEffectEvent((which: boolean) => {
@@ -413,7 +432,10 @@ const useChatItems = ({
     }
   }, [shown, archived]);
 
-  const chats = listing.listed ?? [];
+  // Only the list asked for: the other's rows would take this one's actions.
+  const listed =
+    listing.listed?.archived === archived ? listing.listed.chats : undefined;
+  const chats = listed ?? [];
   const query = search.trim();
   const searching = query !== "";
   const answered = said.found?.query === query ? said.found : undefined;
@@ -492,7 +514,7 @@ const useChatItems = ({
     },
     // Core's answer is the list: Command filters only by what it shows.
     filter: false,
-    loading: listing.listed === undefined,
+    loading: listed === undefined,
   };
   const count = chats.length;
   let empty = searching ? t`No chat has that.` : t`No chats here yet.`;
@@ -519,6 +541,7 @@ const useChatItems = ({
           chat={renaming}
           onDone={() => {
             setRenaming(undefined);
+            setRenamed(true);
             onRenamed(renaming.id);
           }}
         />

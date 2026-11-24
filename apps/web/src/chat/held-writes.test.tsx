@@ -337,6 +337,20 @@ describe("a write to an App held for the person", () => {
     });
   });
 
+  it("draws every line of a request longer than a code block draws, to its last field", async () => {
+    // Far under connect's 64 KiB, laid out past 2,000 lines.
+    const sent = JSON.stringify({
+      reference: { name: "notes.create", kind: "mutation" },
+      args: {
+        ids: Array.from({ length: 2500 }, (_, at) => at),
+        cc: "eve@evil.test",
+      },
+    });
+    await shown({ calls: { "chat-1": [{ ...held, request: sent }] } });
+
+    expect(exactShown()).toBe(JSON.stringify(JSON.parse(sent), null, 2));
+  });
+
   it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
     // Under the card's 1,200 characters as held; far past them once its
     // zero-width spaces show as escapes: the end, cut off, is what matters.

@@ -44,15 +44,19 @@ const travel = chat("travel", "Trip to Lyon");
 
 /**
  * A page in the frame, with nothing of the chats on it, whose core lists
- * `listed` and finds `found` for any search.
+ * `listed` (or, archived, `archived`) and finds `found` for any search.
  */
 const shown = async (
   found: (query: string) => Promise<ChatSearchHit[]>,
-  listed: ChatSummary[] = [board, lease, travel]
+  listed: ChatSummary[] = [board, lease, travel],
+  archived: () => Promise<ChatSummary[]> = async () => await Promise.resolve([])
 ) => {
   const asked: string[] = [];
   const chats = {
-    list: async () => await Promise.resolve(listed),
+    list: async (which?: { archived?: boolean }) =>
+      which?.archived === true
+        ? await archived()
+        : await Promise.resolve(listed),
     search: async (query: string) => {
       asked.push(query);
       return await found(query);
@@ -109,6 +113,31 @@ const rows = (): string[] =>
       return (read.textContent ?? "").trim();
     }
   );
+
+/** Chooses the window's row `value` ("archived", "back", a chat's ID), as a click would. */
+const choose = async (value: string): Promise<void> => {
+  const row = dialog()?.querySelector<HTMLElement>(
+    `[data-command-value="${value}"]`
+  );
+  if (row === null || row === undefined) {
+    throw new Error(`The window has no row ${value}`);
+  }
+  await act(async () => {
+    row.click();
+    await Promise.resolve();
+  });
+};
+
+/** Lets what was started settle: core's answers, and what they set. */
+const settled = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 0);
+    await promise;
+  });
+};
 
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
@@ -213,6 +242,84 @@ describe("the chats window", () => {
     await type("office");
     await vi.waitFor(() => {
       expect(rows()).toStrictEqual(["Office lease 2027"]);
+    });
+  });
+
+  it("lists the archived chats alone, never the rest's rows meanwhile, and drops a list that comes late", async () => {
+    const late = Promise.withResolvers<ChatSummary[]>();
+    const old = { ...chat("old", "Old budget"), archived: true };
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, lease, travel],
+      async () => await late.promise
+    );
+    await openWindow({ key: "k", metaKey: true });
+
+    await choose("archived");
+    const whileArchivedRead = rows();
+    await choose("back");
+    await vi.waitFor(() => {
+      expect(rows()).toHaveLength(3);
+    });
+    await act(async () => {
+      late.resolve([old]);
+      await late.promise;
+    });
+    await settled();
+
+    expect({ whileArchivedRead, back: rows() }).toStrictEqual({
+      whileArchivedRead: [],
+      back: ["Board report", "Lease of the office", "Trip to Lyon"],
+    });
+  });
+
+  it("comes back from renaming an archived chat on the archived chats", async () => {
+    const old = { ...chat("old", "Old budget"), archived: true };
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, lease, travel],
+      async () => await Promise.resolve([old])
+    );
+    await openWindow({ key: "k", metaKey: true });
+    await choose("archived");
+    await vi.waitFor(() => {
+      expect(rows()).toStrictEqual(["Old budget"]);
+    });
+
+    await act(async () => {
+      dialog()
+        ?.querySelector<HTMLElement>('button[aria-label="More for Old budget"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[role="menuitem"]')?.textContent
+      ).toContain("Rename");
+    });
+    await act(async () => {
+      document.querySelector<HTMLElement>('[role="menuitem"]')?.click();
+      await Promise.resolve();
+    });
+    const renaming = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        '[role="dialog"][aria-labelledby]'
+      );
+      expect(found?.textContent).toContain("Rename chat");
+      return found;
+    });
+    await act(async () => {
+      [...(renaming?.querySelectorAll("button") ?? [])]
+        .find((button) => button.textContent === "Cancel")
+        ?.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect({
+        renaming: document.body.textContent.includes("Rename chat"),
+        rows: rows(),
+      }).toStrictEqual({ renaming: false, rows: ["Old budget"] });
     });
   });
 
