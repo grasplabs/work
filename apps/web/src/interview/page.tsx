@@ -1,7 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type {
   InterviewLine,
@@ -9,8 +5,20 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
+import { Button } from "@grasp-os/ui/components/button";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, MessageSquareIcon, XIcon } from "@grasp-os/ui/lib/icons";
+import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  duration,
+  media,
+  radius,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import { MessagesSquareIcon, XIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import {
   useEffect,
   useLayoutEffect,
@@ -20,6 +28,7 @@ import {
 } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import { ErrorText } from "../error-text.tsx";
 import { formatDay } from "../format.ts";
 import { isLocale } from "../i18n.ts";
 import { LanguageButton } from "../language-picker.tsx";
@@ -29,6 +38,7 @@ import { Before } from "./before.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
 import { Composer, SaveNote, SaveTrouble } from "./composer.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
+import { voice } from "./interview.stylex.ts";
 import {
   forgetInterview,
   keepNow,
@@ -38,6 +48,7 @@ import {
   useInterviewer,
   useProgress,
 } from "./kept.ts";
+import { fullWidth, looks } from "./looks.ts";
 import {
   sendTyped,
   setLoopWords,
@@ -45,6 +56,7 @@ import {
   stopLoop,
   useLoop,
 } from "./loop.ts";
+import { Mark } from "./mark.tsx";
 import {
   begun,
   isReading,
@@ -72,6 +84,117 @@ import { useInterviewWords, useLoopWords } from "./words.ts";
 // wrote down, a few lines at a time; what they leave in is what counts.
 // Nothing on the page scrolls.
 
+const styles = stylex.create({
+  frame: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100svh",
+    overflow: "hidden",
+    backgroundColor: colors.background,
+    color: colors.bodyForeground,
+  },
+  header: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["3"],
+    height: "4.5rem",
+    paddingInline: { default: space["4"], [media.sm]: space["10"] },
+  },
+  side: { display: "flex", flexGrow: 1, flexBasis: 0 },
+  start: { justifyContent: "flex-start" },
+  end: { justifyContent: "flex-end" },
+  main: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    // Centred while it fits; on a window too low for it, it scrolls in its own room and never runs under the foot.
+    justifyContent: "safe center",
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingInline: space["4"],
+  },
+  // Room under the stage for their words, which float up from the box.
+  overBox: { paddingBlockEnd: "7rem" },
+  footer: {
+    display: "flex",
+    flexShrink: 0,
+    flexDirection: { default: "column", [media.sm]: "row" },
+    alignItems: { default: "stretch", [media.sm]: "flex-end" },
+    gap: { default: space["3"], [media.sm]: space["4"] },
+    paddingInline: { default: space["4"], [media.sm]: space["10"] },
+    paddingBlockStart: space["2"],
+    paddingBlockEnd: space["5"],
+  },
+  box: {
+    width: "100%",
+    minWidth: 0,
+    order: { default: null, [media.sm]: 2 },
+    maxWidth: { default: null, [media.sm]: "36rem" },
+  },
+  // On a phone the mark and the language share a row under the box; wider, they stand at its sides.
+  corners: {
+    display: { default: "flex", [media.sm]: "contents" },
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  corner: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    height: "3.5rem",
+  },
+  cornerStart: {
+    order: { default: null, [media.sm]: 1 },
+    flexGrow: { default: null, [media.sm]: 1 },
+    flexBasis: { default: null, [media.sm]: 0 },
+  },
+  cornerEnd: {
+    justifyContent: "flex-end",
+    order: { default: null, [media.sm]: 3 },
+    flexGrow: { default: null, [media.sm]: 1 },
+    flexBasis: { default: null, [media.sm]: 0 },
+  },
+  // The stage, over the box and what floats up from it.
+  stage: {
+    position: "relative",
+    zIndex: 1,
+    display: "flex",
+    justifyContent: "center",
+    width: "100%",
+    opacity: 1,
+    transitionProperty: "opacity",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  away: { opacity: 0 },
+  shown: { display: "flex", justifyContent: "center", width: "100%" },
+  phases: { display: "flex", alignItems: "center", gap: space["1"] },
+  phase: {
+    display: "block",
+    width: "0.375rem",
+    height: "0.375rem",
+    borderRadius: radius.full,
+    backgroundColor: colors.border,
+    transitionProperty: "width, background-color",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  phaseDone: { backgroundColor: colors.foreground },
+  phaseNow: { width: "1.25rem", backgroundColor: colors.foreground },
+  // Something new is marked in the transcript.
+  fresh: {
+    display: "inline-block",
+    width: "0.375rem",
+    height: "0.375rem",
+    borderRadius: radius.circle,
+    backgroundColor: voice.heat,
+  },
+  failed: { paddingBlockStart: space["4"] },
+});
+
 /** Room kept free over the box, for their words that show there. */
 const overBox = 112;
 
@@ -79,10 +202,10 @@ const overBox = 112;
 const beside = "(min-width: 80rem)";
 
 const onBeside = (listener: () => void): (() => void) => {
-  const media = window.matchMedia(beside);
-  media.addEventListener("change", listener);
+  const query = window.matchMedia(beside);
+  query.addEventListener("change", listener);
   return () => {
-    media.removeEventListener("change", listener);
+    query.removeEventListener("change", listener);
   };
 };
 
@@ -132,17 +255,18 @@ const PhaseBar = ({ phase }: { phase: InterviewPhase }) => {
   const parts = interviewPhases.length;
   return (
     <div>
-      <span className="sr-only">{t`Part ${n} of ${parts}: ${label}`}</span>
-      <div aria-hidden="true" className="flex items-center gap-1">
+      <span {...stylex.props(visuallyHidden)}>
+        {t`Part ${n} of ${parts}: ${label}`}
+      </span>
+      <div aria-hidden="true" {...stylex.props(styles.phases)}>
         {interviewPhases.map((each, index) => (
           <span
-            className={cn(
-              "block h-1.5 rounded-full transition-all duration-300",
-              index === at && "bg-foreground w-5",
-              index < at && "bg-foreground w-1.5",
-              index > at && "bg-border w-1.5"
-            )}
             key={each}
+            {...stylex.props(
+              styles.phase,
+              index < at && styles.phaseDone,
+              index === at && styles.phaseNow
+            )}
           />
         ))}
       </div>
@@ -167,9 +291,9 @@ const Said = ({
   const { body, size } = useHead(room, headSizes.talking);
   const who = useInterviewer();
   return (
-    <div className="flex w-full max-w-md flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen, looks.narrow)}>
       <Head fill={fill} label={label} sign={sign} size={size} who={who} />
-      <div className="flex w-full flex-col items-center gap-6" ref={body}>
+      <div ref={body} {...stylex.props(looks.body)}>
         {children}
       </div>
     </div>
@@ -202,36 +326,25 @@ const InterviewFrame = ({
   box?: ReactNode;
   children: ReactNode;
 }) => (
-  <div className="bg-background flex h-svh flex-col overflow-hidden text-sm">
-    <header
-      className="flex h-18 flex-none items-center gap-3 px-4 sm:px-10"
-      ref={top}
-    >
-      <div className="flex flex-1 basis-0 justify-start">{left}</div>
+  <div {...stylex.props(styles.frame)}>
+    <header ref={top} {...stylex.props(styles.header)}>
+      <div {...stylex.props(styles.side, styles.start)}>{left}</div>
       {middle}
-      <div className="flex flex-1 basis-0 justify-end">{right}</div>
+      <div {...stylex.props(styles.side, styles.end)}>{right}</div>
     </header>
-    <main
-      className={cn(
-        "relative flex min-h-0 flex-1 flex-col items-center justify-center px-4",
-        box !== undefined && "pb-28"
-      )}
-    >
+    <main {...stylex.props(styles.main, box !== undefined && styles.overBox)}>
       {children}
     </main>
-    <footer
-      className="flex flex-none flex-col gap-3 px-4 pt-2 pb-5 sm:flex-row sm:items-end sm:gap-4 sm:px-10"
-      ref={bottom}
-    >
+    <footer ref={bottom} {...stylex.props(styles.footer)}>
       {box === undefined ? null : (
-        <div className="w-full min-w-0 sm:order-2 sm:max-w-xl">{box}</div>
+        <div {...stylex.props(styles.box)}>{box}</div>
       )}
-      <div className="flex items-center justify-between sm:contents">
-        <div className="flex h-14 items-center gap-2 sm:order-1 sm:flex-1 sm:basis-0">
-          <GraspMark className="size-5 flex-none" />
+      <div {...stylex.props(styles.corners)}>
+        <div {...stylex.props(styles.corner, styles.cornerStart)}>
+          <Mark />
           {open ? <SaveNote /> : null}
         </div>
-        <div className="flex h-14 items-center justify-end sm:order-3 sm:flex-1 sm:basis-0">
+        <div {...stylex.props(styles.corner, styles.cornerEnd)}>
           <LanguageButton />
         </div>
       </div>
@@ -251,20 +364,21 @@ const Stopped = ({
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle>{t`Your place is kept.`}</PageHeaderTitle>
-        <p className="text-muted-foreground text-balance">
+      <div {...stylex.props(looks.words)}>
+        <Heading level={1} size="default">
+          {t`Your place is kept.`}
+        </Heading>
+        <Text color="muted">
           {t`Open this link again whenever you like, and carry on where you stopped.`}
-        </p>
+        </Text>
       </div>
-      <Button
-        className="w-full max-w-sm"
-        onClick={onCarryOn}
-        size="xl"
-        variant="highlight"
-      >
-        {t`Carry on now`}
-      </Button>
+      <div {...stylex.props(looks.actions)}>
+        <div {...stylex.props(fullWidth.button)}>
+          <Button onClick={onCarryOn} size="lg">
+            {t`Carry on now`}
+          </Button>
+        </div>
+      </div>
     </Said>
   );
 };
@@ -275,11 +389,11 @@ const Over = ({ room }: { room: number }) => {
   const who = interviewerNames[useInterviewer()];
   return (
     <Said fill={1} label={t`${who}, drawn in dots.`} room={room} sign="heart">
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle>{t`The interviews are over.`}</PageHeaderTitle>
-        <p className="text-muted-foreground text-balance">
-          {t`Thank you for your time.`}
-        </p>
+      <div {...stylex.props(looks.words)}>
+        <Heading level={1} size="default">
+          {t`The interviews are over.`}
+        </Heading>
+        <Text color="muted">{t`Thank you for your time.`}</Text>
       </div>
     </Said>
   );
@@ -294,11 +408,13 @@ const Deleted = ({ room, removing }: { room: number; removing: boolean }) => {
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
-      <PageHeaderTitle aria-live="polite">
-        {removing
-          ? t`Deleted. What the Brain kept of it is being removed.`
-          : t`Deleted. Nothing you said is kept.`}
-      </PageHeaderTitle>
+      <div aria-live="polite">
+        <Heading level={1} size="default">
+          {removing
+            ? t`Deleted. What the Brain kept of it is being removed.`
+            : t`Deleted. Nothing you said is kept.`}
+        </Heading>
+      </div>
     </Said>
   );
 };
@@ -313,15 +429,15 @@ const Withdrawn = ({ room, removing }: { room: number; removing: boolean }) => {
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle aria-live="polite">
+      <div aria-live="polite" {...stylex.props(looks.words)}>
+        <Heading level={1} size="default">
           {removing
             ? t`You withdrew. What the Brain kept of it is being removed.`
             : t`You withdrew. Nothing you said is used from now on.`}
-        </PageHeaderTitle>
-        <p className="text-muted-foreground text-balance">
+        </Heading>
+        <Text color="muted">
           {t`It stays here for you to read. You can still delete it.`}
-        </p>
+        </Text>
       </div>
     </Said>
   );
@@ -375,18 +491,16 @@ const TranscriptButton = ({
       aria-expanded={open}
       onClick={onToggle}
       size="sm"
-      title={t`Transcript`}
       variant="ghost"
     >
-      <MessagesSquareIcon data-icon="inline-start" />
-      <span className="sr-only sm:not-sr-only">{t`Transcript`}</span>
+      <Icon icon={MessageSquareIcon} />
+      <span {...stylex.props(looks.wideOnly)}>{t`Transcript`}</span>
       {fresh ? (
         <>
-          <span
-            aria-hidden="true"
-            className="bg-brain-heat size-1.5 rounded-full"
-          />
-          <span className="sr-only">{t`Something new is marked`}</span>
+          <span aria-hidden="true" {...stylex.props(styles.fresh)} />
+          <span {...stylex.props(visuallyHidden)}>
+            {t`Something new is marked`}
+          </span>
         </>
       ) : null}
     </Button>
@@ -471,10 +585,7 @@ const Stage = ({
     key = "talk";
   }
   return (
-    <div
-      className="animate-in fade-in flex w-full justify-center duration-500"
-      key={key}
-    >
+    <div key={key} {...stylex.props(styles.shown, fadeIn)}>
       {stage}
     </div>
   );
@@ -508,9 +619,9 @@ const AnswerBox = ({ reading }: { reading: boolean }) => {
 const StopButton = ({ onStop }: { onStop: () => void }) => {
   const { t } = useLingui();
   return (
-    <Button onClick={onStop} size="sm" title={t`Stop for now`} variant="ghost">
-      <XIcon data-icon="inline-start" />
-      <span className="sr-only sm:not-sr-only">{t`Stop for now`}</span>
+    <Button onClick={onStop} size="sm" variant="ghost">
+      <Icon icon={XIcon} />
+      <span {...stylex.props(looks.wideOnly)}>{t`Stop for now`}</span>
     </Button>
   );
 };
@@ -560,9 +671,9 @@ const deletable = (progress: InterviewProgress, ended: boolean): boolean =>
 /** Why deleting or withdrawing didn't work, when it didn't. */
 const Failed = ({ message }: { message: string | null }) =>
   message === null ? null : (
-    <p className="text-destructive pt-4 text-sm" role="alert">
-      {message}
-    </p>
+    <div {...stylex.props(styles.failed)}>
+      <ErrorText>{message}</ErrorText>
+    </div>
   );
 
 /** Withdrawing is offered while they take part and haven't withdrawn. */
@@ -699,13 +810,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
       top={top}
     >
       {/* The stage stands over the box and what floats up from it. Where there's no room beside it, it makes way for the transcript. */}
-      <div
-        className={cn(
-          "relative z-10 flex w-full justify-center transition-opacity duration-300",
-          away && "opacity-0"
-        )}
-        inert={away}
-      >
+      <div inert={away} {...stylex.props(styles.stage, away && styles.away)}>
         <Stage
           deleted={deleted === "yes"}
           onCarryOn={() => {

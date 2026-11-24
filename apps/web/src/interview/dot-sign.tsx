@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import {
@@ -18,6 +19,16 @@ import { PITCH } from "../brain/dot-shapes.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { signColumns, signDots } from "./dot-signs.ts";
 import type { DotSign as Sign } from "./dot-signs.ts";
+
+const looks = stylex.create({
+  canvas: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+  },
+});
 
 // A small sign beside Stephen: what he is doing, or the little he feels,
 // ported from the prototype (grasplabs/prototype, packages/grasp:
@@ -304,10 +315,6 @@ export const DotSign = ({
     return element === null ? undefined : animate(element, latest);
   }, []);
   return (
-    <canvas
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 size-full"
-      ref={canvas}
-    />
+    <canvas aria-hidden="true" {...stylex.props(looks.canvas)} ref={canvas} />
   );
 };
