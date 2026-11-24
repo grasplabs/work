@@ -249,6 +249,9 @@ catalog:
   babel-plugin-react-compiler: 1.0.0
   class-variance-authority: 0.7.1
   clsx: 2.1.1
+  # Flags beside the languages and a provider's region in Settings
+  # (frame/flag.tsx), as the reference draws them.
+  country-flag-icons: 1.6.20
   # The kit's command palette (components/command), as shadcn builds it.
   cmdk: 1.1.1
   # The kit's carousel.

@@ -116,7 +116,6 @@ const RemoveDocument = ({
                 }
               });
             }}
-            size="sm"
             variant="destructive"
           >
             {t`Remove`}

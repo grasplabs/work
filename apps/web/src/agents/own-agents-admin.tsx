@@ -15,9 +15,8 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDollars } from "../format.ts";
 import { orNull } from "../load-from-core.tsx";
+import { FactRow, SettingRow, SettingsGroup } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SectionCard } from "./section-card.tsx";
-import { FactRow, SettingRow } from "./setting-row.tsx";
 
 // People's own agents, in Settings › Workspace for the company's admins
 // (Ruben, 21 November: a company setting, not part of the Agents page):
@@ -125,7 +124,7 @@ export const OwnAgentsCard = ({
     return found.name === "" ? found.email : found.name;
   };
   return (
-    <SectionCard
+    <SettingsGroup
       flush
       // Behind the info mark: what an admin sees of them, and never.
       info={t`Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told.`}
@@ -155,6 +154,6 @@ export const OwnAgentsCard = ({
       </FieldGroup>
       <UsageRows nameOf={nameOf} usage={admin.usage} />
       <ErrorText>{failure}</ErrorText>
-    </SectionCard>
+    </SettingsGroup>
   );
 };

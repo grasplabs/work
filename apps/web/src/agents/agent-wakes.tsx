@@ -342,7 +342,6 @@ const NewWake = ({
             <Button
               disabled={!can || !ready}
               form={formId}
-              size="sm"
               type="submit"
               variant="default"
             >

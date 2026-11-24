@@ -242,17 +242,21 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   const sourceName = `Invoices ${randomBytes(4).toString("hex")}`;
   await asAdmin.goto("/settings/webhooks");
   await asAdmin
-    .getByLabel("New source, named after its sender")
-    .fill(sourceName, pageRead);
-  await asAdmin.getByRole("button", { name: "Add the source" }).click();
-  const shown = asAdmin.getByRole("dialog");
-  const secret = await shown
-    .getByRole("textbox", { name: "Secret" })
-    .inputValue();
-  await shown.getByRole("button", { name: "Done" }).click();
-  const url = await asAdmin
-    .getByRole("textbox", { name: `URL of ${sourceName}` })
-    .inputValue(pageRead);
+    .getByRole("button", { name: "Add a source" })
+    .first()
+    .click(pageRead);
+  const adding = asAdmin.getByRole("dialog");
+  await adding.getByLabel("Name").fill(sourceName);
+  await adding.getByRole("button", { name: "Next" }).click();
+  // Each value stands in a snippet, beside the button that copies it.
+  const copied = (button: string) =>
+    adding
+      .locator('[data-slot="snippet"]')
+      .filter({ has: asAdmin.getByRole("button", { name: button }) })
+      .locator('[data-slot="snippet-value"]');
+  const secret = (await copied("Copy the secret").textContent()) ?? "";
+  const url = (await copied("Copy the URL").textContent()) ?? "";
+  await adding.getByRole("button", { name: "Done" }).click();
 
   // The builder starts the workflow on its invoices, from What starts it
   // in the Workshop on its page: its Settings' Triggers.

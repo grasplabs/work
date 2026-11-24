@@ -1,5 +1,5 @@
-import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
-import type { ThemeMode } from "@grasp-os/ui/components/theme-toggle";
+import { isThemeId, isThemeMode } from "@grasp-os/ui/components/theme-toggle";
+import type { ThemeId, ThemeMode } from "@grasp-os/ui/components/theme-toggle";
 
 // Light, dark or the system's (Damsko's modes): a UI preference, the
 // person's own, kept in this browser's storage, one entry per person, so
@@ -55,4 +55,44 @@ export const chooseTheme = (userId: string, theme: ThemeMode): void => {
     // Storage blocked: theme.js follows the system whatever is chosen.
   }
   applyTheme(theme);
+};
+
+// The theme's colours (Damsko's themes: Evergreen, Pine, Paper), chosen in
+// Settings › Appearance, kept beside the mode in the same way: one entry
+// per person, and `grasp-theme-id`, the one applied last, which theme.js
+// puts on the root as `data-theme` before first paint.
+
+/** The colours theme.js applies. */
+const appliedIdKey = "grasp-theme-id";
+
+const personIdKey = (userId: string): string => `grasp-theme-id:${userId}`;
+
+/** The colours `userId` chose in this browser; Evergreen until they choose. */
+export const readThemeId = (userId: string): ThemeId => {
+  try {
+    const kept = localStorage.getItem(personIdKey(userId));
+    return isThemeId(kept) ? kept : "evergreen";
+  } catch {
+    return "evergreen";
+  }
+};
+
+/** Has theme.js apply the colours `id` now, and on the next load before first paint. */
+export const applyThemeId = (id: ThemeId): void => {
+  try {
+    localStorage.setItem(appliedIdKey, id);
+  } catch {
+    // Storage blocked: theme.js shows Evergreen.
+  }
+  document.dispatchEvent(new Event("grasp-theme"));
+};
+
+/** Keeps `id` as `userId`'s colours in this browser, and applies them. */
+export const chooseThemeId = (userId: string, id: ThemeId): void => {
+  try {
+    localStorage.setItem(personIdKey(userId), id);
+  } catch {
+    // Storage blocked: theme.js shows Evergreen whatever is chosen.
+  }
+  applyThemeId(id);
 };

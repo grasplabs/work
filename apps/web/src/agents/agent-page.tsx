@@ -376,13 +376,7 @@ const EditAgent = ({
         </DialogBody>
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
-          <Button
-            disabled={!can}
-            form={formId}
-            size="sm"
-            type="submit"
-            variant="default"
-          >
+          <Button disabled={!can} form={formId} type="submit" variant="default">
             {t`Save`}
           </Button>
         </DialogFooter>
@@ -438,7 +432,6 @@ const DeleteAgent = ({
                 setWorking(false);
               });
             }}
-            size="sm"
             variant="destructive"
           >
             {t`Delete for good`}
