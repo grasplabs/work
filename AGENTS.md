@@ -129,7 +129,7 @@ The frontend (`apps/web`) speaks English, German, Dutch, Spanish and French thro
 - Whole sentences only, never glued fragments. Counts go through `plural`. Name placeholders after what they hold: a local `const date = …` gives translators `{date}`, not `{0}`.
 - Lists through `formatList` (`apps/web/src/format.ts`), not `join(", ")` inside a message.
 - Not translated: product and company names, people's names, what someone typed, core's own error messages, and text whose exact words are recorded (the Composio consent).
-- `@grasp-os/ui` (Damsko) has its own few words in English, translated in `apps/web/src/frame/ui-words.tsx`, typed as Damsko's whole catalog: a word a re-pin brings fails the type check until that pull request translates it.
+- `@grasp-os/ui` (Damsko) has its own few words in English: give a part's translations in `apps/web/src/frame/ui-words.tsx` in the pull request that first uses the part.
 - `@grasp-os/app-kit` stays free of Lingui (App pages and the admin share it): its few words are English props a page passes translated.
 - Every new message needs all four translations in the same pull request.
 

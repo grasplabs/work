@@ -96,7 +96,9 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
     (box?.y ?? 0) + (box?.height ?? 0) / 2
   );
   await page.mouse.down();
-  const asking = page.getByRole("dialog", { name: "Delete your interview?" });
+  const asking = page.getByRole("alertdialog", {
+    name: "Delete your interview?",
+  });
   await expect(asking).toBeVisible({ timeout: holdMs * 2 });
   await page.mouse.up();
   await asking.getByRole("button", { name: "Delete it" }).click();
