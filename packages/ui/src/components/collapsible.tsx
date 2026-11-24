@@ -54,10 +54,12 @@ export interface CollapsibleProps {
    */
   disabled?: boolean;
   /**
-   * `default` lies on the page; `outline` stands off it, as a quiet button.
+   * `default` lies on the page, filled under the pointer; `outline` stands off it, as a quiet
+   * button; `plain` is words that open, with no fill at any time and a line under them beneath the
+   * pointer: for one line among a page's own words.
    * @default "default"
    */
-  variant?: "default" | "outline";
+  variant?: "default" | "outline" | "plain";
   /**
    * The trigger is only as wide as its words and its chevron, which then stands beside them: for
    * one quiet line among words. Without it the trigger runs the whole width, chevron at the end.
@@ -131,6 +133,21 @@ const styles = stylex.create({
     },
     boxShadow: { default: shadow.sm, [OFF]: "none" },
   },
+  // Words that open: no fill under the pointer or the press, which would stand as a box among a
+  // page's words. Under the pointer a line under them, as a `link` Button's; a disabled one none.
+  plain: {
+    backgroundColor: "transparent",
+    textDecorationLine: {
+      default: "none",
+      ":hover": {
+        default: null,
+        [HOVER]: { default: "underline", [OFF]: "none" },
+      },
+    },
+    textDecorationThickness: size.linkUnderlineWidth,
+    textUnderlineOffset: size.linkUnderlineOffset,
+    textDecorationColor: colors.linkUnderline,
+  },
   // Only as wide as its words and chevron: at the start, the chevron a step after the words.
   // The trigger bleeds out of the root by its padding on each side, so its room is the root's
   // and that bleed: held to the root's width alone, a root as wide as its words (in a box that
@@ -149,8 +166,16 @@ const styles = stylex.create({
 });
 
 // The root's look, for its trigger: two plain values, so neither is a new object each render.
-const VariantContext = createContext<"default" | "outline">("default");
+const VariantContext = createContext<"default" | "outline" | "plain">(
+  "default"
+);
 const FitContentContext = createContext(false);
+
+const looks = {
+  default: disclosureStyles.ghost,
+  outline: styles.outline,
+  plain: styles.plain,
+} as const;
 
 /** One panel that opens and closes under its trigger. */
 export const Collapsible = ({
@@ -200,7 +225,7 @@ export const CollapsibleTrigger = ({
     <CollapsibleTriggerPrimitive
       {...stylex.props(
         disclosureStyles.trigger,
-        variant === "outline" ? styles.outline : disclosureStyles.ghost,
+        looks[variant],
         fitContent && styles.fit,
         textSize === "default" && styles.textDefault,
         textSize === "lg" && styles.textLg,
