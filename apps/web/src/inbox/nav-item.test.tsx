@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import type { WaitingFeed } from "@grasp-os/shared/waiting";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -108,7 +108,8 @@ describe("the sidebar's Inbox", () => {
       ],
       2
     );
-    await expect(shown(feed)).resolves.toBe("Inbox55 things waiting");
+    // The link's own words: the figure itself stands beside it, in the row.
+    await expect(shown(feed)).resolves.toBe("Inbox5 things waiting");
   });
 
   it("shows no count while nothing waits", async () => {

@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import type { Organization } from "@grasp-os/shared/organization";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -14,9 +13,12 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vite-plus/test";
 
-import { organizationRenamed, SidebarBrandOf } from "./sidebar-brand.tsx";
+import {
+  organizationRenamed,
+  OrganizationNameOf,
+} from "./organization-name.tsx";
 
-// The sidebar's header against core's answer to its read of the
+// The organization's name in the sidebar against core's answer to its read of the
 // organization, faked: the organization's name once core says it;
 // "Grasp" when it has none or core can't say.
 
@@ -44,7 +46,7 @@ const settled = async (): Promise<void> => {
 };
 
 /**
- * The header's lines of text once core answered `organization`'s read, and
+ * The name shown once core answered `organization`'s read, and
  * `then` (a rename on the page, say) ran.
  */
 const textWith = async (
@@ -58,9 +60,7 @@ const textWith = async (
     root.render(
       <I18nProvider i18n={i18n}>
         <RouterContextProvider router={router}>
-          <SidebarProvider>
-            <SidebarBrandOf organization={organization} />
-          </SidebarProvider>
+          <OrganizationNameOf organization={organization} />
         </RouterContextProvider>
       </I18nProvider>
     );
@@ -69,14 +69,8 @@ const textWith = async (
   if (then !== undefined) {
     act(then);
   }
-  // The header's name, without its fold button's.
-  const text = [
-    ...host.querySelectorAll('[data-slot="brand-header"] > div span'),
-  ]
-    .filter((span) => span.children.length === 0)
-    .map((span) => span.textContent.trim())
-    .filter((line) => line !== "")
-    .join(" ");
+  const text =
+    host.querySelector('[data-slot="organization-name"]')?.textContent ?? "";
   act(() => {
     root.unmount();
   });
@@ -84,7 +78,7 @@ const textWith = async (
   return text;
 };
 
-describe("the sidebar's header", () => {
+describe("the organization's name in the sidebar", () => {
   it("names the organization once core says it, and its new name once renamed, and says Grasp alone when it has none or core can't say", async () => {
     expect({
       named: await textWith(async () => {
@@ -114,8 +108,8 @@ describe("the sidebar's header", () => {
         await settled();
         return organizationNamed("Noordkade Finance");
       }),
-      // A header mounted anew, its read still out: nothing of the names
-      // the headers before it showed.
+      // A name mounted anew, its read still out: nothing of the names
+      // shown before it.
       mountedAgain: await textWith(
         async () => await Promise.withResolvers<Organization>().promise
       ),

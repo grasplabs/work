@@ -79,7 +79,6 @@ export const ItemBar = ({
     <SiteHeader
       actions={actions}
       crumbs={[back, { label: name }]}
-      phoneCrumbs="last-two"
       // Where it stands gives way to its actions where the bar is narrow.
       trailing={
         state === undefined ? undefined : (

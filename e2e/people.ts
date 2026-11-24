@@ -594,7 +594,6 @@ const cast = {
   dataModel: { builder: "builder" },
   workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
   languages: { member: "user" },
-  iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
   brainMeaning: { member: "user" },
@@ -605,6 +604,7 @@ const cast = {
   setupDocuments: { admin: "admin" },
   setupStory: { admin: "admin" },
   pagePanel: { member: "user" },
+  frame: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

@@ -178,6 +178,38 @@ const readGap = async (env: Env, gap: GapRecord): Promise<Gap> => {
   return read ?? gapWith(gap, undefined, new Map());
 };
 
+/**
+ * Of `gaps`, the brain's gaps as every member reads them (`brainGaps`),
+ * the open ones `person` may answer from their inbox (`brain.openGaps`):
+ * every one for the company's own admins, asked of someone or not; for
+ * anyone else only those asked of them (a `gap_asked` notification of
+ * theirs), so nobody reads from here what was asked of someone else.
+ * Taken from what `brain.read` serves, not read again from the records,
+ * so a gap says here exactly what it says there: nothing an admin took
+ * out of the brain, and a kickoff's team by the team that followed it.
+ */
+export const openGaps = async (
+  env: Env,
+  person: Identity,
+  gaps: readonly Gap[]
+): Promise<Gap[]> => {
+  const open = gaps.filter(({ closedAt }) => closedAt === undefined);
+  if (isMemberAdmin(person) || open.length === 0) {
+    return open;
+  }
+  const asked = await drizzle(env.DB)
+    .select({ gap: notifications.gapId })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.personId, person.userId),
+        eq(notifications.type, "gap_asked")
+      )
+    );
+  const ofThem = new Set(asked.map(({ gap }) => gap));
+  return open.filter(({ id }) => ofThem.has(id));
+};
+
 /** Refuses anyone but the company's own admins: never Grasp staff. */
 const requireMemberAdmin = (person: Identity): void => {
   if (!isMemberAdmin(person)) {

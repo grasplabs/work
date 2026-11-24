@@ -1,60 +1,74 @@
-import { Kbd } from "@grasp-os/app-kit/components/kbd";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarHeader,
+  SidebarLevel,
+  SidebarLevels,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
+  SidebarTrigger,
   useSidebar,
-} from "@grasp-os/app-kit/components/sidebar";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/sidebar";
 import {
-  BotIcon,
   BrainIcon,
   FolderIcon,
+  Icon,
   LayoutGridIcon,
-  MessagesSquareIcon,
+  LinkIcon,
+  MessageCircleIcon,
   SearchIcon,
-  SettingsIcon,
-  WorkflowIcon,
-} from "lucide-react";
+  UserSparklesIcon,
+  XIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import {
+  Link,
+  useLocation,
+  useMatchRoute,
+  useRouter,
+} from "@tanstack/react-router";
 import { useEffect } from "react";
-import type { ComponentType, SVGProps } from "react";
 
 import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { InboxNavItem } from "../inbox/nav-item.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
-import { useWorkflowsWaiting } from "../workflows/nav-item.tsx";
-import { IntegrationsIcon } from "./integrations-icon.tsx";
+import { WorkflowsItem } from "../workflows/nav-item.tsx";
+import { GraspMark } from "./grasp-mark.ts";
+import { levelAt } from "./levels.ts";
 import { PersonMenu } from "./person-menu.tsx";
-import { SidebarBrand } from "./sidebar-brand.tsx";
+import { SettingsLevel } from "./settings-level.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
+import { useWayOut } from "./way-out.tsx";
 
-// The app's sidebar, down the left beside every signed-in page, as
-// Shopify's admin has it: the organization and the sidebar's own fold on
-// top, with search under it; the product's sections; the Apps' own
-// entries; and at the foot Settings and the person signed in. Folded, it
-// is a rail of icons, each named on hover, the groups parted by hairlines.
-// What only admins use is in the person menu. Staff who reach the
-// onboarding alone get none of the sections: Grasp steers the onboarding
-// from its admin.
+// The app's sidebar, Damsko's Sidebar on its own light ground, the page a
+// card beside it: Grasp's mark at the top, with the search of the chats
+// and the sidebar's own fold; under it the product's sections and the
+// Apps' own entries, or, while a Settings page is open, Settings' own
+// level in their place; at the foot the person signed in, with their
+// menu. Folded, it goes off the side whole, and each page's bar holds the
+// way back (frame/site-header.tsx). On a phone it is a sheet from the
+// start. Staff who reach the onboarding alone get none of the sections:
+// Grasp steers the onboarding from its admin.
 
 interface Section {
   to: "/" | "/brain" | "/projects" | "/apps" | "/agents" | "/integrations";
   label: MessageDescriptor;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  icon: IconData;
 }
 
-const chat: Section = { to: "/", label: msg`Chat`, icon: MessagesSquareIcon };
+const chat: Section = { to: "/", label: msg`Chat`, icon: MessageCircleIcon };
 const brain: Section = { to: "/brain", label: msg`Brain`, icon: BrainIcon };
 const projects: Section = {
   to: "/projects",
@@ -63,113 +77,108 @@ const projects: Section = {
 };
 const apps: Section = { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon };
 // The company's agents: the ones a person may ask, and for admins all of them.
-const agents: Section = { to: "/agents", label: msg`Agents`, icon: BotIcon };
+const agents: Section = {
+  to: "/agents",
+  label: msg`Agents`,
+  icon: UserSparklesIcon,
+};
 const integrations: Section = {
   to: "/integrations",
   label: msg`Integrations`,
-  icon: IntegrationsIcon,
+  icon: LinkIcon,
 };
+
+const styles = stylex.create({
+  // Grasp's mark at the start, the search and the fold at the end, in one
+  // row a sidebar row tall.
+  head: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["1"],
+    minHeight: size.sidebarMenuButtonHeight,
+    paddingInlineStart: size.sidebarRowInline,
+  },
+  // The mark at the shell's mark size, in the sidebar's ink.
+  mark: {
+    [iconVars.size]: size.appShellMark,
+    display: "inline-flex",
+    marginInlineEnd: "auto",
+  },
+});
 
 /** A section's entry: Chat is itself; any other holds the pages under it. */
 const SectionItem = ({ section }: { section: Section }) => {
   const { i18n } = useLingui();
   const matchRoute = useMatchRoute();
-  const { to, label, icon: Icon } = section;
+  const { to, label, icon } = section;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        asChild
         isActive={matchRoute({ to, fuzzy: to !== "/" }) !== false}
-        render={<Link to={to} />}
-        tooltip={i18n._(label)}
       >
-        <Icon />
-        <span>{i18n._(label)}</span>
+        <Link to={to}>
+          <Icon icon={icon} />
+          {i18n._(label)}
+        </Link>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
 };
 
-/** Workflows, with how many workflows need the person (workflows/nav-item.tsx). */
-const WorkflowsItem = () => {
-  const { t } = useLingui();
-  const matchRoute = useMatchRoute();
-  const waiting = useWorkflowsWaiting();
-  const shown = waiting !== undefined && waiting > 0;
-  const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={inWorkflows}
-        render={<Link to="/workflows" />}
-        tooltip={t`Workflows`}
-      >
-        <WorkflowIcon />
-        <span>
-          <Trans>Workflows</Trans>
-        </span>
-        {/* Inside the link, so its name says how many need the person. */}
-        {shown ? (
-          <SidebarMenuBadge placement="inside">
-            <span aria-hidden="true">{waiting}</span>
-            <span className="sr-only">
-              <Plural
-                one="# workflow needs you"
-                other="# workflows need you"
-                value={waiting}
-              />
-            </span>
-          </SidebarMenuBadge>
-        ) : null}
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
-};
-
-/** Search, under the organization: the person's chats, ⌘K away anywhere. */
-const SearchItem = () => {
+/** The search of the person's chats, a round button in the head: the chats window, ⌘K. */
+const SearchButton = () => {
   const { t } = useLingui();
   const openChats = useChatsWindow();
+  const { setOpenMobile } = useSidebar();
+  const keys = shortcutLabel(chatsKey);
   return (
-    // As much room above it, from the brand, as below it, to the sections.
-    <SidebarMenu className="mt-2">
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          onClick={() => {
-            openChats(true);
-          }}
-          tooltip={t`Search chats`}
-          variant="field"
-        >
-          <SearchIcon />
-          <span>{t`Search chats`}</span>
-          <Kbd className="ml-auto">{shortcutLabel(chatsKey)}</Kbd>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <SidebarMenuButton
+      aria-label={t`Search chats`}
+      onClick={() => {
+        // The window opens over the page: the phone's sheet goes first.
+        setOpenMobile(false);
+        openChats(true);
+      }}
+      size="icon"
+      title={`${t`Search chats`} (${keys})`}
+    >
+      <Icon icon={SearchIcon} />
+    </SidebarMenuButton>
   );
 };
 
-/** Settings, at the foot: the person's own, and for admins the organization's. */
-const SettingsItem = () => {
+/**
+ * The sidebar's top: Grasp's mark, and the search and the fold at its end;
+ * in the phone's sheet, a close button in the fold's place.
+ */
+const Head = ({ searching }: { searching: boolean }) => {
   const { t } = useLingui();
-  const matchRoute = useMatchRoute();
+  const { isMobile, setOpenMobile } = useSidebar();
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
+    <div {...stylex.props(styles.head)}>
+      <span {...stylex.props(styles.mark)}>
+        <Icon icon={GraspMark} label="Grasp" />
+      </span>
+      {searching ? <SearchButton /> : null}
+      {isMobile ? (
         <SidebarMenuButton
-          isActive={matchRoute({ to: "/settings", fuzzy: true }) !== false}
-          render={<Link to="/settings/profile" />}
-          tooltip={t`Settings`}
+          aria-label={t`Close`}
+          onClick={() => {
+            setOpenMobile(false);
+          }}
+          size="icon"
         >
-          <SettingsIcon />
-          <span>{t`Settings`}</span>
+          <Icon icon={XIcon} />
         </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+      ) : (
+        <SidebarTrigger aria-label={t`Show or hide the sidebar`} />
+      )}
+    </div>
   );
 };
 
-/** The app's sidebar: the organization, search, the sections, Settings and the person signed in. */
+/** The app's sidebar: Grasp's mark, search and the fold, the sections or a level, and the person. */
 export const AppSidebar = ({
   core,
   identity,
@@ -180,27 +189,32 @@ export const AppSidebar = ({
   const { t } = useLingui();
   const router = useRouter();
   const { setOpenMobile } = useSidebar();
+  // Settings' own while a Settings page is open, else the main one.
+  const level = levelAt(useLocation().pathname);
+  // Kept here, not in the level: the phone's sheet draws its rows anew.
+  const outside = useWayOut();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
   useEffect(
     () =>
-      router.subscribe("onResolved", () => {
+      router.subscribe("onBeforeNavigate", () => {
         setOpenMobile(false);
       }),
     [router, setOpenMobile]
   );
   const sections = identity.onboardingOnly !== true;
   return (
-    <Sidebar collapsible="icon" label={t`Sidebar`} variant="inset">
+    <Sidebar aria-label={t`Sidebar`} variant="inset">
       <SidebarHeader>
-        <SidebarBrand core={core} />
-        {sections ? <SearchItem /> : null}
+        <Head searching={sections} />
       </SidebarHeader>
-      <SidebarContent>
-        {sections ? (
-          <>
-            <SidebarGroup>
-              <nav aria-label={t`Main`}>
+      <SidebarLevels value={level}>
+        <SidebarLevel value="main">
+          {/* No landmark with nothing in it: who reaches the onboarding
+              alone has no sections. */}
+          {sections ? (
+            <SidebarContent aria-label={t`Main`}>
+              <SidebarGroup>
                 <SidebarMenu>
                   <SectionItem section={chat} />
                   {/* With how many things wait on the person. */}
@@ -213,16 +227,17 @@ export const AppSidebar = ({
                   <SectionItem section={agents} />
                   <SectionItem section={integrations} />
                 </SidebarMenu>
-              </nav>
-            </SidebarGroup>
-            <SurfaceNav core={core} />
-          </>
-        ) : null}
-      </SidebarContent>
+              </SidebarGroup>
+              <SurfaceNav core={core} />
+            </SidebarContent>
+          ) : null}
+        </SidebarLevel>
+        <SettingsLevel identity={identity} outside={outside} />
+      </SidebarLevels>
       <SidebarFooter>
-        <SettingsItem />
         <PersonMenu core={core} identity={identity} />
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   );
 };
