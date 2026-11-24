@@ -43,11 +43,12 @@ const fileNameOf = (title: string): string =>
 
 /**
  * Renames chat `chatId` to a new name, trimmed, and reads the page again;
- * `onRenamed` shows the new name at once. Where core can't, it says so.
+ * `onRenamed` shows the new name at once, for the chat it was given to.
+ * Where core can't, it says so.
  */
 export const useRenameChat = (
   chatId: string,
-  onRenamed?: (title: string) => void
+  onRenamed?: (renamed: string, title: string) => void
 ): ((name: string) => void) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -61,7 +62,7 @@ export const useRenameChat = (
         return true;
       }));
     if (renamed === true && parsed.success) {
-      onRenamed?.(parsed.data);
+      onRenamed?.(chatId, parsed.data);
       await router.invalidate();
       return;
     }

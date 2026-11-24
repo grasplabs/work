@@ -4161,6 +4161,7 @@ msgid "Chart"
 msgstr "Chart"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/chat-page.tsx
 #: src/chat/chat-panel.tsx
 #: src/frame/app-sidebar.tsx
 msgid "Chat"
