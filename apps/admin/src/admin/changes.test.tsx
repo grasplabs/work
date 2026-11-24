@@ -500,39 +500,35 @@ describe("a change on an organization's page", () => {
         toFake: ["setTimeout", "clearTimeout"],
         shouldAdvanceTime: true,
       });
-      try {
+      await act(async () => {
+        router.history.push(acmeContract);
+        await Promise.resolve();
+      });
+      if (slower) {
+        // Past the page's wait, the frame still reading: its core asked alone.
         await act(async () => {
-          router.history.push(acmeContract);
-          await Promise.resolve();
+          await vi.advanceTimersByTimeAsync(frameWaitMs);
         });
-        if (slower) {
-          // Past the page's wait, the frame still reading: its core asked alone.
-          await act(async () => {
-            await vi.advanceTimersByTimeAsync(frameWaitMs);
-          });
-          vi.useRealTimers();
-          await until(() => asked() > askedBefore).catch(() => null);
-        }
-        // The page shows its read along with the frame's (React holds the
-        // navigation with the frame's update it was waiting on), so what
-        // it shows is told once that is in too.
-        frame.resolve(null);
-        await settle();
-        const shown = agreedOn(container);
-
-        expect({
-          on: router.state.location.pathname,
-          agreed: shown.includes("In place since 2 Sep 2026"),
-          // In time, the page takes the frame's read; past it, asks once alone.
-          askedAgain: asked() - askedBefore,
-        }).toStrictEqual({
-          on: "/organizations/acme/details",
-          agreed: true,
-          askedAgain: slower ? 1 : 0,
-        });
-      } finally {
         vi.useRealTimers();
+        await until(() => asked() > askedBefore).catch(() => null);
       }
+      // The page shows its read along with the frame's (React holds the
+      // navigation with the frame's update it was waiting on), so what
+      // it shows is told once that is in too.
+      frame.resolve(null);
+      await settle();
+      const shown = agreedOn(container);
+
+      expect({
+        on: router.state.location.pathname,
+        agreed: shown.includes("In place since 2 Sep 2026"),
+        // In time, the page takes the frame's read; past it, asks once alone.
+        askedAgain: asked() - askedBefore,
+      }).toStrictEqual({
+        on: "/organizations/acme/details",
+        agreed: true,
+        askedAgain: slower ? 1 : 0,
+      });
     }
   );
 
@@ -796,96 +792,88 @@ describe("a change on an organization's page", () => {
 
   it("coming to another organization while the frame reads every client again, nothing changed since its answer, shows that answer at once", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      const first = Promise.withResolvers<null>();
-      const again = Promise.withResolvers<null>();
-      const { container, router, calls } = await onAcme(
-        async () => {},
-        undefined,
-        {
-          framed: { 2: first.promise, 3: again.promise },
-        }
+    const first = Promise.withResolvers<null>();
+    const again = Promise.withResolvers<null>();
+    const { container, router, calls } = await onAcme(
+      async () => {},
+      undefined,
+      {
+        framed: { 2: first.promise, 3: again.promise },
+      }
+    );
+    // A change on Acme: the frame reads every client again, Globex in it.
+    const open = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Change what was agreed"
+    );
+    await go(() => {
+      open?.click();
+    });
+    await act(async () => {
+      agreementsForm()?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true })
       );
-      // A change on Acme: the frame reads every client again, Globex in it.
-      const open = [...container.querySelectorAll("button")].find(
-        (button) => button.textContent === "Change what was agreed"
-      );
-      await go(() => {
-        open?.click();
-      });
-      await act(async () => {
-        agreementsForm()?.dispatchEvent(
-          new Event("submit", { bubbles: true, cancelable: true })
-        );
-        await Promise.resolve();
-      });
-      await until(
-        () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
-      );
-      // Its minute later than the frame's last load, Globex's answer just in.
-      vi.setSystemTime(Date.now() + freshMs + 1000);
-      first.resolve(null);
-      await settle();
-      // The same address loaded again: the frame reads every client again, unchanged.
-      await act(async () => {
-        void router.load();
-        await Promise.resolve();
-      });
-      await until(
-        () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 3
-      );
-      const globexAsked = () =>
-        calls.filter(
-          ({ fn, data }) =>
-            fn === "fetchClientAdmin" &&
-            typeof data === "object" &&
-            data !== null &&
-            Reflect.get(data, "clientId") === "globex"
-        ).length;
-      await act(async () => {
-        router.history.push("/organizations/globex/details?tab=contract");
-        await Promise.resolve();
-      });
-      // Shown from the answer kept, before the frame's read is in.
-      await until(() => agreedOn(container) !== "").catch(() => null);
-      const shown = agreedOn(container);
-      const asked = globexAsked();
-      again.resolve(null);
-      await settle();
+      await Promise.resolve();
+    });
+    await until(
+      () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 2
+    );
+    // Its minute later than the frame's last load, Globex's answer just in.
+    vi.setSystemTime(Date.now() + freshMs + 1000);
+    first.resolve(null);
+    await settle();
+    // The same address loaded again: the frame reads every client again, unchanged.
+    await act(async () => {
+      void router.load();
+      await Promise.resolve();
+    });
+    await until(
+      () => calls.filter(({ fn }) => fn === "fetchClientAdmins").length === 3
+    );
+    const globexAsked = () =>
+      calls.filter(
+        ({ fn, data }) =>
+          fn === "fetchClientAdmin" &&
+          typeof data === "object" &&
+          data !== null &&
+          Reflect.get(data, "clientId") === "globex"
+      ).length;
+    await act(async () => {
+      router.history.push("/organizations/globex/details?tab=contract");
+      await Promise.resolve();
+    });
+    // Shown from the answer kept, before the frame's read is in.
+    await until(() => agreedOn(container) !== "").catch(() => null);
+    const shown = agreedOn(container);
+    const asked = globexAsked();
+    again.resolve(null);
+    await settle();
 
-      expect({
-        on: router.state.location.pathname,
-        shown: shown.includes("Not recorded yet"),
-        asked,
-      }).toStrictEqual({
-        on: "/organizations/globex/details",
-        shown: true,
-        asked: 0,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    expect({
+      on: router.state.location.pathname,
+      shown: shown.includes("Not recorded yet"),
+      asked,
+    }).toStrictEqual({
+      on: "/organizations/globex/details",
+      shown: true,
+      asked: 0,
+    });
   });
 
   it("after its minute, moving to another organization reads the frame no second time: only a change, or reopening the same address, does", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      const { router, calls } = await onAcme(async () => {});
-      const framed = () =>
-        calls.filter(({ fn }) => fn === "fetchClientAdmins").length;
-      const before = framed();
-      vi.setSystemTime(Date.now() + freshMs + 1000);
-      await go(() => {
-        router.history.push("/organizations/globex");
-      });
-      await go(() => {
-        router.history.push(acmeContract);
-      });
+    const { router, calls } = await onAcme(async () => {});
+    const framed = () =>
+      calls.filter(({ fn }) => fn === "fetchClientAdmins").length;
+    const before = framed();
+    vi.setSystemTime(Date.now() + freshMs + 1000);
+    await go(() => {
+      router.history.push("/organizations/globex");
+    });
+    await go(() => {
+      router.history.push(acmeContract);
+    });
 
-      expect(framed() - before).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(framed() - before).toBe(0);
   });
 
   it.each([
@@ -1045,24 +1033,20 @@ describe("a change on an organization's page", () => {
 
   it("moving between its sections once its answer is a minute old asks its core nothing: the router reloads a page it stays on only when asked, and the page says when it read it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      const { router, asked } = await onAcme(async () => {});
-      const askedBefore = asked();
-      vi.setSystemTime(Date.now() + freshMs + 1000);
-      await go(() => {
-        router.history.push("/organizations/acme/details?tab=members");
-      });
-      await go(() => {
-        router.history.push("/organizations/acme");
-      });
-      await go(() => {
-        router.history.push(acmeContract);
-      });
+    const { router, asked } = await onAcme(async () => {});
+    const askedBefore = asked();
+    vi.setSystemTime(Date.now() + freshMs + 1000);
+    await go(() => {
+      router.history.push("/organizations/acme/details?tab=members");
+    });
+    await go(() => {
+      router.history.push("/organizations/acme");
+    });
+    await go(() => {
+      router.history.push(acmeContract);
+    });
 
-      expect(asked() - askedBefore).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(asked() - askedBefore).toBe(0);
   });
 });
 

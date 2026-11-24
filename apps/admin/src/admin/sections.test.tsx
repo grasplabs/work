@@ -8,6 +8,7 @@ import { daysAgo, emptyAdminSnapshot } from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
 import { orgSections, sectionTo, sectionWords } from "./sections.ts";
+import type { OrgSection } from "./sections.ts";
 import { formatDate } from "./words.ts";
 
 // An organization's integrations, workflows and members, and its sections
@@ -98,19 +99,64 @@ const unread = (
   error,
 });
 
-/** What every section but the Setup says of a client not read, in `state`'s words. */
-const expected = (state: string[]) =>
-  orgSections
-    .filter((each) => each !== "setup")
-    .map((section) => ({
-      section,
-      title: true,
-      column: true,
-      failed: false,
-      fromCore: false,
-      toSetup: true,
-      state,
-    }));
+/** Every section but the Setup, the admin's own record, read whatever its core does. */
+const coreSections = orgSections.filter((each) => each !== "setup");
+
+const downRow = gridRow({ id: "down", name: "Down" });
+const downAdmin = unread(downRow, "timeout");
+const waitingRow = gridRow({
+  id: "waiting",
+  name: "Waiting",
+  status: "provisioning",
+  hostname: null,
+});
+const waitingAdmin = unread(waitingRow, "not_deployed");
+
+/** What `section` of `client` says, its core not read as `admin` has it. */
+const sectionOf = async (
+  client: GridRow,
+  admin: ClientAdmin,
+  section: OrgSection
+) => {
+  const path = sectionTo[section].replace(`/organizations/$clientId`, "");
+  const { container, main } = await openAt(client, admin, path);
+  const page = main();
+  const column = container.querySelector(
+    `nav[aria-label="${client.name}"]`
+  )?.textContent;
+  return {
+    title:
+      container.querySelector("main h1")?.textContent ===
+      (section === "overview" ? client.name : sectionWords[section].title),
+    column:
+      (column?.includes("Details") ?? false) &&
+      (column?.includes("Not read now") ?? false),
+    failed: page.includes("This couldn’t be shown"),
+    fromCore: ["Needs Grasp", "% known", "From the company"].some((words) =>
+      page.includes(words)
+    ),
+    toSetup:
+      container.querySelector(
+        `main a[href="/organizations/${client.id}/setup"]`
+      ) !== null,
+    state: [
+      "isn’t set up yet",
+      "See its Setup progress",
+      "’s Grasp didn’t answer",
+      "Try again",
+    ].filter((words) => page.includes(words)),
+  };
+};
+
+/** What a section says of a client not read, in `state`'s words. */
+const expected = (state: string[]) => ({
+  title: true,
+  column: true,
+  failed: false,
+  fromCore: false,
+  toSetup: true,
+  state,
+});
 
 describe("an organization's integrations, workflows and members", () => {
   it("shows what a company connected only once it signed in, says core doesn't report its connections yet, and that what is still to connect comes from Composio", async () => {
@@ -287,69 +333,38 @@ describe("an organization's integrations, workflows and members", () => {
 });
 
 describe("an organization's sections without its core", () => {
-  it("opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup", async () => {
-    const down = gridRow({ id: "down", name: "Down" });
-    const waiting = gridRow({
-      id: "waiting",
-      name: "Waiting",
-      status: "provisioning",
-      hostname: null,
-    });
-    /** What each section of `client` says, but its Setup. */
-    const sectionsOf = async (client: GridRow, admin: ClientAdmin) => {
-      const said = [];
-      for (const section of orgSections.filter((each) => each !== "setup")) {
-        const path = sectionTo[section].replace(`/organizations/$clientId`, "");
-        // oxlint-disable-next-line no-await-in-loop -- one page at a time, as one tab opens them
-        const { container, main } = await openAt(client, admin, path);
-        const page = main();
-        const column = container.querySelector(
-          `nav[aria-label="${client.name}"]`
-        )?.textContent;
-        said.push({
-          section,
-          title:
-            container.querySelector("main h1")?.textContent ===
-            (section === "overview"
-              ? client.name
-              : sectionWords[section].title),
-          column:
-            (column?.includes("Details") ?? false) &&
-            (column?.includes("Not read now") ?? false),
-          failed: page.includes("This couldn’t be shown"),
-          fromCore: ["Needs Grasp", "% known", "From the company"].some(
-            (words) => page.includes(words)
-          ),
-          toSetup:
-            container.querySelector(
-              `main a[href="/organizations/${client.id}/setup"]`
-            ) !== null,
-          state: [
-            "isn’t set up yet",
-            "See its Setup progress",
-            "’s Grasp didn’t answer",
-            "Try again",
-          ].filter((words) => page.includes(words)),
-        });
-      }
-      return said;
-    };
-    const downAdmin = unread(down, "timeout");
-    const waitingAdmin = unread(waiting, "not_deployed");
-    const downSections = await sectionsOf(down, downAdmin);
-    const waitingSections = await sectionsOf(waiting, waitingAdmin);
-    const downPage = await openAt(down, downAdmin);
+  // One test a section: a section opened the first time loads its route's
+  // code, most of the time it takes, and all of them in one test took
+  // longer than a test may on a busy machine. Here no test's time grows
+  // with the number of sections.
+  it.each(coreSections)(
+    "opens its %s for an organization whose core didn't answer, and one not deployed yet, saying why nothing of it is read and what to do",
+    async (section) => {
+      const downSays = await sectionOf(downRow, downAdmin, section);
+      const waitingSays = await sectionOf(waitingRow, waitingAdmin, section);
+
+      expect({ down: downSays, waiting: waitingSays }).toStrictEqual({
+        down: expected(["’s Grasp didn’t answer", "Try again"]),
+        waiting: expected(["isn’t set up yet", "See its Setup progress"]),
+      });
+    }
+  );
+
+  it("says why an organization whose core didn't answer can't be read, and one not deployed yet, and opens its Setup", async () => {
+    const downPage = await openAt(downRow, downAdmin);
     const downWhy = downPage.main();
-    const membersPage = await openAt(down, downAdmin, "/details?tab=members");
+    const membersPage = await openAt(
+      downRow,
+      downAdmin,
+      "/details?tab=members"
+    );
     const membersWhy = membersPage.main();
-    const setupPage = await openAt(down, downAdmin, "/setup");
+    const setupPage = await openAt(downRow, downAdmin, "/setup");
     const setup = setupPage.main();
-    const waitingPage = await openAt(waiting, waitingAdmin);
+    const waitingPage = await openAt(waitingRow, waitingAdmin);
     const waitingWhy = waitingPage.main();
 
     expect({
-      downSections,
-      waitingSections,
       downWhy: downWhy.includes("Its Grasp can’t be read now:"),
       membersWhy: membersWhy.includes("Its Grasp can’t be read now:"),
       // Its Setup is the admin's own record, read whatever its core does.
@@ -358,8 +373,6 @@ describe("an organization's sections without its core", () => {
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      downSections: expected(["’s Grasp didn’t answer", "Try again"]),
-      waitingSections: expected(["isn’t set up yet", "See its Setup progress"]),
       downWhy: true,
       membersWhy: true,
       setup: true,

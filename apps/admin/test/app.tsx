@@ -123,11 +123,14 @@ const dataOf = (url: URL, init: RequestInit | undefined): unknown => {
 
 let mounted: Root | undefined;
 
-/** Server function calls the page made that aren't answered yet. */
-let inFlight = 0;
+/** An admin opened: its router, and the server function calls it made that aren't answered yet. */
+interface Opened {
+  router: { state: { status: string } };
+  inFlight: number;
+}
 
-/** The router of the admin opened last. */
-let opened: { state: { status: string } } | undefined;
+/** The admin opened last, until its test ends. */
+let opened: Opened | undefined;
 
 /** Unmounts the page opened last, its effects, subscriptions and timers with it. */
 const unmountOpened = (): void => {
@@ -137,25 +140,48 @@ const unmountOpened = (): void => {
   mounted = undefined;
 };
 
-afterEach(() => {
-  unmountOpened();
+/** The turn a page was given last (`tick`): a React `act` scope, open until it ends. */
+let turn: Promise<void> = Promise.resolve();
+
+// Clears what a test left, a test that timed out too: the runner moves on
+// while its body still runs, inside a turn. That turn ends before anything
+// else here: an `act` still open while the next test renders takes those
+// renders into its own queue, and that test's pages show nothing. The
+// body's next turn then throws (`tick`), so it opens no page over the
+// next test's. And a clock it faked goes back to the real one, as its own
+// `finally` would run only once its body ends.
+afterEach(async () => {
   opened = undefined;
-  inFlight = 0;
+  await Promise.allSettled([turn]);
+  unmountOpened();
   document.body.replaceChildren();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 /** How long a page may take to come to rest before a test fails on it. */
 const restMs = 5000;
 
-/** One macrotask, past React's and the router's microtasks. */
-const tick = async (): Promise<void> => {
-  await act(async () => {
-    // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
-    await new Promise((resolve) => {
-      setTimeout(resolve, 5);
+/**
+ * One macrotask on `page`, past React's and the router's microtasks.
+ * Throws once `page` isn't the one open any more: its test ended while it
+ * waited (it timed out, its body still running) or opened another.
+ */
+const tick = async (page: Opened | undefined): Promise<void> => {
+  // A promise of its own: `act`'s thenable closes its scope on each `then`,
+  // so it is awaited once, here.
+  turn = (async () => {
+    await act(async () => {
+      // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
     });
-  });
+  })();
+  await turn;
+  if (opened !== page) {
+    throw new Error("The page closed while the test waited on it");
+  }
 };
 
 /**
@@ -164,6 +190,7 @@ const tick = async (): Promise<void> => {
  * turns in a row.
  */
 export const settle = async (): Promise<void> => {
+  const page = opened;
   const until = Date.now() + restMs;
   let still = 0;
   while (still < 3) {
@@ -171,20 +198,24 @@ export const settle = async (): Promise<void> => {
       throw new Error("The page didn't come to rest");
     }
     // oxlint-disable-next-line no-await-in-loop -- each turn waits on what the last one started
-    await tick();
-    still = inFlight === 0 && opened?.state.status === "idle" ? still + 1 : 0;
+    await tick(page);
+    still =
+      page?.inFlight === 0 && page.router.state.status === "idle"
+        ? still + 1
+        : 0;
   }
 };
 
 /** Waits until `shown` holds, as the page goes on: a page that never comes to rest. */
 export const until = async (shown: () => boolean): Promise<void> => {
+  const page = opened;
   const deadline = Date.now() + restMs;
   while (!shown()) {
     if (Date.now() > deadline) {
       throw new Error("The page never showed it");
     }
     // oxlint-disable-next-line no-await-in-loop -- each turn waits on what the last one started
-    await tick();
+    await tick(page);
   }
 };
 
@@ -206,6 +237,8 @@ export const openAdmin = async (
     reportPageErrorFn: { logged: true },
     ...answers,
   };
+  const router = getRouter();
+  const page: Opened = { router, inFlight: 0 };
   vi.stubGlobal(
     "fetch",
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -216,7 +249,7 @@ export const openAdmin = async (
       const fn = fnOf(url);
       const data = dataOf(url, init);
       calls.push({ fn, data });
-      inFlight += 1;
+      page.inFlight += 1;
       try {
         if (!Object.hasOwn(answered, fn)) {
           throw new Error(
@@ -238,18 +271,17 @@ export const openAdmin = async (
           { headers: { "x-tss-serialized": "true" } }
         );
       } finally {
-        inFlight -= 1;
+        page.inFlight -= 1;
       }
     }
   );
   // One page at a time: the one opened before stops before this one starts.
   unmountOpened();
-  const router = getRouter();
   router.update({
     context: router.options.context,
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  opened = router;
+  opened = page;
   // On the document, as Start's client entry mounts it: the root route
   // renders the document's own <html> and <body>. Mounted on an element
   // inside the body instead, the app's <body> would sit above the root it
@@ -261,7 +293,7 @@ export const openAdmin = async (
     mounted = createRoot(document);
     mounted.render(<RouterProvider router={router} />);
   });
-  await (rest ? settle() : tick());
+  await (rest ? settle() : tick(page));
   const container = document.body;
   const main = (): string => container.querySelector("main")?.textContent ?? "";
   return {
