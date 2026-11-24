@@ -5,11 +5,11 @@ import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 
-// A builder's Workflows: every workflow they have a role in, one row each,
-// gathered by the phase it stands in (a live one running, one with no
-// version yet building); its runs a page of their own, Workflows › Runs,
-// filtered by status in the address; and a run opened beside a workflow's
-// runs, which its address keeps open across a reload.
+// A builder's Workflows: every workflow they have a role in, one row each
+// in one table, saying how it stands now (a live one on, one with no
+// version yet not live); their runs a page of their own, Workflows › Runs,
+// filtered by status in the address; and a workflow's page with its runs,
+// each opening a page of its own, which its address keeps across a reload.
 
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
@@ -50,7 +50,7 @@ const made = async (
   }
 };
 
-test("a builder finds their workflows by phase, their runs on a page of their own filtered in the address, and a run kept open by its address", async ({
+test("a builder finds their workflows in one table, their runs on a page of their own filtered in the address, and a run on a page of its own", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("workflowOverview");
@@ -58,17 +58,17 @@ test("a builder finds their workflows by phase, their runs on a page of their ow
   await made(builder, "Contract review", waiting("1 second"), false);
   const page = await pageOf(builder);
 
-  // Each workflow under its phase, saying how it stands.
+  // Each workflow a row, saying how it stands now: one table where the
+  // window is wide enough for its columns.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/workflows");
-  const running = page.getByRole("region", { name: "Running" });
-  await expect(
-    running.getByRole("link", { name: "Invoice approval" })
-  ).toBeVisible(pageRead);
-  const building = page.getByRole("region", { name: "Building" });
-  await expect(
-    building.getByRole("link", { name: "Contract review" })
-  ).toBeVisible();
-  await expect(building).toContainText("Not live yet");
+  const table = page.getByRole("table", { name: "Workflows" });
+  const row = (name: string) =>
+    table.getByRole("row").filter({
+      has: page.getByRole("link", { name, exact: true }),
+    });
+  await expect(row("Invoice approval")).toContainText("On", pageRead);
+  await expect(row("Contract review")).toContainText("Not live yet");
 
   // Its runs, a page of their own, filtered by status in the address.
   await page.getByRole("link", { name: "Runs", exact: true }).click();
@@ -82,18 +82,18 @@ test("a builder finds their workflows by phase, their runs on a page of their ow
     pageRead
   );
 
-  // A run opened beside the workflow's runs: its address keeps it open.
-  await page.goto(`/workflows/${live}?view=runs`);
+  // The workflow's page lists its runs; one opens on a page of its own,
+  // which its address keeps.
+  await page.goto(`/workflows/${live}`);
   await page
-    .getByRole("table", { name: "Runs" })
-    .getByRole("link")
+    .getByRole("link", { name: /^Run of/u })
     .first()
     .click(pageRead);
-  await expect(page).toHaveURL(/[?&]run=/u);
-  const opened = page.getByRole("complementary", {
-    name: /^The run started/u,
-  });
-  await expect(opened).toBeVisible(pageRead);
+  await expect(page).toHaveURL(
+    new RegExp(`/workflows/${live}/runs/[^/?]+$`, "u")
+  );
+  const title = page.getByRole("heading", { level: 1, name: /^Run of/u });
+  await expect(title).toBeVisible(pageRead);
   await page.reload();
-  await expect(opened).toBeVisible(pageRead);
+  await expect(title).toBeVisible(pageRead);
 });

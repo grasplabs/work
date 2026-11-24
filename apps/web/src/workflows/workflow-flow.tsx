@@ -23,14 +23,10 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import {
-  ArrowRightIcon,
   CheckIcon,
   CodeIcon,
   Icon,
-  Maximize2Icon,
-  MinusIcon,
   PlayIcon,
-  PlusIcon,
   TableIcon,
 } from "@grasp-os/ui/lib/icons";
 import {
@@ -46,6 +42,12 @@ import { useEffect, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import {
+  FitToScreenIcon,
+  SplitIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from "./icons.ts";
 import { stepFieldsAt } from "./step-body.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 import type { Layout } from "./workflow-diagram.tsx";
@@ -459,15 +461,13 @@ const Controls = ({
   const { t } = useLingui();
   return (
     <div {...stylex.props(styles.controls)}>
-      {/* Fit, zoom in and out, and left to right, until Damsko's set has
-        their own drawings (logged as a registry gap): its nearest shapes. */}
       <Button
         aria-label={t`Fit to view`}
         onClick={onFit}
         size="icon-sm"
         variant="ghost"
       >
-        <Icon icon={Maximize2Icon} />
+        <Icon icon={FitToScreenIcon} />
       </Button>
       <Button
         aria-label={t`Zoom out`}
@@ -478,7 +478,7 @@ const Controls = ({
         size="icon-sm"
         variant="ghost"
       >
-        <Icon icon={MinusIcon} />
+        <Icon icon={ZoomOutIcon} />
       </Button>
       <Button
         aria-label={t`Zoom in`}
@@ -489,7 +489,7 @@ const Controls = ({
         size="icon-sm"
         variant="ghost"
       >
-        <Icon icon={PlusIcon} />
+        <Icon icon={ZoomInIcon} />
       </Button>
       {layout === "side" ? (
         <Button
@@ -511,7 +511,7 @@ const Controls = ({
           size="icon-sm"
           variant="ghost"
         >
-          <Icon icon={ArrowRightIcon} />
+          <Icon icon={SplitIcon} />
         </Button>
       )}
     </div>

@@ -35,6 +35,27 @@ const hourMs = 60 * minuteMs;
 const dayMs = 24 * hourMs;
 
 /**
+ * How long something took, `ms`, in its largest whole unit (seconds,
+ * minutes, hours or days), as the page's language says it ("12 seconds").
+ */
+export const formatDuration = (ms: number): string => {
+  const units = [
+    { unit: "day", size: dayMs },
+    { unit: "hour", size: hourMs },
+    { unit: "minute", size: minuteMs },
+  ] as const;
+  const { unit, size } = units.find(({ size: each }) => ms >= each) ?? {
+    unit: "second",
+    size: 1000,
+  };
+  return new Intl.NumberFormat(i18n.locale, {
+    style: "unit",
+    unit,
+    unitDisplay: "long",
+  }).format(Math.max(0, Math.floor(ms / size)));
+};
+
+/**
  * How long ago `value` was, in its largest whole unit (minutes, hours or
  * days), as the page's language writes it: `short` for a quiet mark at a
  * row's end ("5d"), `long` for a screen reader ("5 days").

@@ -1,81 +1,38 @@
 import { failureText } from "@grasp-os/shared/errors";
-import type {
-  WorkflowResourceRun,
-  WorkflowRunStatus,
-} from "@grasp-os/shared/workflow-resources";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
-import type { BadgeVariant } from "@grasp-os/ui/components/badge";
-import { IconTile } from "@grasp-os/ui/components/icon-tile";
 import {
-  Item,
-  ItemContent,
-  ItemDetail,
-  ItemGroup,
-  ItemSeparator,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
-import {
-  SidePanel,
-  SidePanelContent,
-  SidePanelHeader,
-  SidePanelSection,
-} from "@grasp-os/ui/components/side-panel";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 import { Text } from "@grasp-os/ui/components/text";
-import { PlayIcon } from "@grasp-os/ui/lib/icons";
-import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Fragment, useEffect, useEffectEvent, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import { isTransient } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
-import type { Names } from "./activity-bar.tsx";
+import { personOf } from "./activity-words.ts";
+import type { Names } from "./activity-words.ts";
 import { Code } from "./code.tsx";
-import { RunFilesReader, useRunFilesSection } from "./run-files.tsx";
-import type { RunFilesRead, RunPanelSection } from "./run-files.tsx";
-import { runStatusLabels } from "./run-status.ts";
-import { WaitingForAiProvider } from "./runs.tsx";
-import { StopRun } from "./stop-run.tsx";
+import { runStatusLabels, runToneOf } from "./run-status.ts";
+import type { AnyRunStatus } from "./run-status.ts";
 
-// One run of an independent workflow, opened beside its list on a side
-// panel (in a Sheet where the page is narrow): when it
-// ran, how it ended, who started it, and what it returned or why it
-// failed; then, for the workflow's builders, its steps (traces.tsx). The
-// run is read on its own (`workflowResources.run`) and again until it
-// ends: the list carries no result, as only the person it acted for and
-// the organization's admins see what it returned or why it failed (it can
-// hold what the run read for them). Everyone else is told so, rather than
-// shown nothing. Where its steps show under it, they follow the run
-// (`status`): the run is read again only when where it is moves (its
-// status, or a wait for its AI provider begun or ended, traces.tsx
-// `followedState`), never on a second timer of its own. The workflow's
-// builders may stop a run that hasn't ended (asked again first); the files
-// it finished writing are there to download for those who may see what it
-// returned (run-files.tsx).
+// What a run of an independent workflow shows wherever it is shown (its
+// page, run-page.tsx; a test's rows): its status as a Badge, the kept
+// values it started without, what it returned or why it failed as far as
+// the reader may see it (only the person it acted for and the
+// organization's admins see that: it can hold what the run read for
+// them), who started it, and the run read again until it ends, with the
+// stop its builders may give it.
 
 /** How often a run still going is read again. */
 const followMs = 1500;
 
-/** How wide the page must be for a run to open beside its list. */
-const besideFrom = 60 * 16;
-
 const styles = stylex.create({
-  // The note that a run wasn't found, over the list.
-  notFound: { marginBlockEnd: space["4"] },
-  // The list and the run opened beside it.
-  split: {
-    display: "grid",
-    gridTemplateColumns: `minmax(0, 1fr) ${size.sidePanelWidth}`,
-    columnGap: space["6"],
-    alignItems: "start",
-  },
   // What stands in a section's card, in its rows' inset.
   card: {
     display: "grid",
@@ -84,43 +41,16 @@ const styles = stylex.create({
     paddingInline: space.sidePanelPadding,
     minWidth: 0,
   },
-  // Its status, and what it waits for, under its name.
-  status: {
-    display: "inline-flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: space["1"],
-  },
 });
 
 /** Whether `run` has ended: nothing about it changes after. */
 const ended = (run: WorkflowResourceRun): boolean => run.endedAt !== null;
 
-/**
- * Whether a run's facts are read again on their own timer: only while it
- * goes on, and only where no steps follow it (`status`).
- */
-const readsAgain = (
-  run: WorkflowResourceRun,
-  status: string | null | undefined
-): boolean => status === undefined && !ended(run);
-
-/**
- * How a run's status stands as a Badge: done is success, failed is
- * danger, anything else a plain fact (nobody need act on it).
- */
-const runVariantOf = (status: WorkflowRunStatus): BadgeVariant => {
-  if (status === "completed") {
-    return "success";
-  }
-  return status === "failed" ? "destructive" : "default";
-};
-
 /** A run's status, in words, as a Badge. */
-export const RunStatusBadge = ({ status }: { status: WorkflowRunStatus }) => {
+export const RunStatusBadge = ({ status }: { status: AnyRunStatus }) => {
   const { t } = useLingui();
   return (
-    <Badge size="sm" variant={runVariantOf(status)}>
+    <Badge size="sm" variant={runToneOf(status)}>
       {t(runStatusLabels[status])}
     </Badge>
   );
@@ -151,37 +81,6 @@ export const StartedWithout = ({ run }: { run: WorkflowResourceRun }) => {
 };
 
 /**
- * An opened run's status, and, while a step of it waits for its AI
- * provider, what for: as the runs table says it (`WaitingForAiProvider`).
- */
-const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => (
-  <output {...stylex.props(styles.status)}>
-    <RunStatusBadge status={run.status} />
-    {run.aiProvider === undefined ? null : (
-      <Text as="span" color="muted" size="xs">
-        <WaitingForAiProvider wait={run.aiProvider} />
-      </Text>
-    )}
-  </output>
-);
-
-/**
- * What an ended run's result is titled in its panel: why it failed, or
- * what it returned; none when there is nothing of either to show.
- */
-const resultLabelOf = (
-  run: WorkflowResourceRun
-): "failed" | "returned" | null => {
-  if (!ended(run)) {
-    return null;
-  }
-  if (run.error !== undefined) {
-    return "failed";
-  }
-  return run.result === undefined ? null : "returned";
-};
-
-/**
  * What an ended run returned, or why it failed, as far as the reader may
  * see: its section's card in the panel, or, where core kept it from them,
  * who sees it.
@@ -189,9 +88,12 @@ const resultLabelOf = (
 export const RunResultView = ({
   run,
   seesResult,
+  builder = false,
 }: {
   run: WorkflowResourceRun;
   seesResult: boolean;
+  /** Whether the reader builds the workflow: they may see a failure's code, folded away. */
+  builder?: boolean;
 }) => {
   const { t } = useLingui();
   if (!ended(run)) {
@@ -201,11 +103,21 @@ export const RunResultView = ({
     return (
       <div {...stylex.props(styles.card)}>
         <Text size="sm">{run.error.message}</Text>
-        {run.error.code === null ? null : (
-          <Text color="muted" size="xs">
-            <code>{run.error.code}</code>
-          </Text>
-        )}
+        {builder && run.error.code !== null ? (
+          <Collapsible>
+            <CollapsibleTrigger>
+              {t({
+                message: "Details",
+                context: "a failed run's error code, folded away",
+              })}
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <Text color="muted" size="xs">
+                <code>{run.error.code}</code>
+              </Text>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
       </div>
     );
   }
@@ -222,15 +134,12 @@ export const RunResultView = ({
 };
 
 /**
- * Run `opened`, read again until it ends, or, given `status` (what its
- * followed steps last said of it; null before they said anything), once
- * each time that moves; whether the reader builds the workflow, and so
- * may stop it; and the stop.
+ * Run `opened`, read again until it ends; whether the reader builds the
+ * workflow, and so may stop it; and the stop.
  */
-const useFollowedRun = (
+export const useFollowedRun = (
   workflow: string,
-  opened: WorkflowResourceRun,
-  status: string | null | undefined
+  opened: WorkflowResourceRun
 ) => {
   const core = useCore();
   const [run, setRun] = useState(opened);
@@ -250,7 +159,7 @@ const useFollowedRun = (
         }
         setRun(read);
         setFailure(undefined);
-        if (readsAgain(read, status)) {
+        if (!ended(read)) {
           timer = setTimeout(() => {
             void follow();
           }, followMs);
@@ -271,7 +180,7 @@ const useFollowedRun = (
       stopped = true;
       clearTimeout(timer);
     };
-  }, [core, opened.id, workflow, status]);
+  }, [core, opened.id, workflow]);
 
   // Only its builders may stop a run: the reader's role, as core says it.
   const [builder, setBuilder] = useState(false);
@@ -310,308 +219,5 @@ const useFollowedRun = (
 export const useStartedBy = (names: Names) => {
   const { t } = useLingui();
   return (principal: string): string =>
-    principal === names.me
-      ? t`You`
-      : (names.people.get(principal) ?? t`Someone else`);
-};
-
-/** Where a panel or a list holding it says what went wrong reading it. */
-const Failure = ({ children }: { children: string | undefined }) =>
-  children === undefined ? null : (
-    <div {...stylex.props(styles.card)}>
-      <ErrorText>{children}</ErrorText>
-    </div>
-  );
-
-/**
- * Run `opened` on the Inspector panel: its status under its name; its
- * facts; what it returned or why it failed; the files it wrote; then
- * `steps`, for its builders. Beside the list (`framed`), or in a Sheet.
- */
-const RunPanel = ({
-  workflow,
-  opened,
-  names,
-  admin,
-  framed,
-  onClose,
-  steps,
-  status,
-}: {
-  workflow: string;
-  opened: WorkflowResourceRun;
-  names: Names;
-  admin: boolean;
-  framed: boolean;
-  onClose: () => void;
-  steps: ReactNode;
-  status: string | null | undefined;
-}) => {
-  const { t } = useLingui();
-  const { run, failure, builder, stop } = useFollowedRun(
-    workflow,
-    opened,
-    status
-  );
-  const startedBy = useStartedBy(names);
-  const [files, setFiles] = useState<RunFilesRead>();
-  const filesSection = useRunFilesSection(workflow, run.id, files);
-  const openedAt = formatDateTime(opened.createdAt);
-  const seesResult = run.principal === names.me || admin;
-  const facts = [
-    { id: "started-by", name: t`Started by`, detail: startedBy(run.principal) },
-    { id: "started", name: t`Started`, detail: formatDateTime(run.createdAt) },
-    {
-      id: "ended",
-      name: t`Ended`,
-      detail:
-        run.endedAt === null
-          ? t({ message: "Not yet", context: "a run that hasn't ended" })
-          : formatDateTime(run.endedAt),
-    },
-    { id: "version", name: t`Version`, detail: String(run.version) },
-  ];
-  const sections: RunPanelSection[] = [];
-  const result = resultLabelOf(run);
-  if (result !== null) {
-    sections.push({
-      id: "result",
-      label: result === "failed" ? t`Why it failed` : t`What it returned`,
-      content: <RunResultView run={run} seesResult={seesResult} />,
-    });
-  }
-  if (filesSection !== undefined) {
-    sections.push(filesSection);
-  }
-  if (steps !== null && steps !== undefined) {
-    sections.push({ id: "steps", label: t`What it did`, content: steps });
-  }
-  const label = t`The run started ${openedAt}`;
-  return (
-    <SidePanel aria-label={label} framed={framed}>
-      <SidePanelHeader
-        actions={builder && !ended(run) ? <StopRun stop={stop} /> : undefined}
-        description={<RunStatusFact run={run} />}
-        icon={<IconTile icon={PlayIcon} variant="tinted" />}
-        onClose={onClose}
-        title={label}
-      />
-      <SidePanelContent>
-        <SidePanelSection title={t`Details`}>
-          <ItemGroup aria-label={t`Details`}>
-            {facts.map((fact, at) => (
-              <Fragment key={fact.id}>
-                {at === 0 ? null : <ItemSeparator />}
-                <Item size="xs">
-                  <ItemContent>
-                    <ItemTitle>
-                      {fact.name}
-                      <ItemDetail>{fact.detail}</ItemDetail>
-                    </ItemTitle>
-                  </ItemContent>
-                </Item>
-              </Fragment>
-            ))}
-          </ItemGroup>
-          {/* The kept values it started without, if any, under its facts. */}
-          <StartedWithout run={run} />
-        </SidePanelSection>
-        {sections.map((section) => (
-          <SidePanelSection key={section.id} title={section.label}>
-            {section.content}
-          </SidePanelSection>
-        ))}
-        <Failure>{failure}</Failure>
-        <Failure>{files === undefined ? undefined : files.failure}</Failure>
-        <RunFilesReader
-          // Read again once the run ends, with what it finished last.
-          key={ended(run) ? "ended" : "going"}
-          onRead={setFiles}
-          run={run.id}
-          workflow={workflow}
-        />
-        {result === null ? (
-          <RunResultView run={run} seesResult={seesResult} />
-        ) : null}
-      </SidePanelContent>
-    </SidePanel>
-  );
-};
-
-/**
- * Whether a list `width` wide has room for a run beside it; undefined for
- * none: a list that isn't shown (another view or part shows) has no width,
- * and is neither wide nor narrow.
- */
-const fits = (width: number): boolean | undefined =>
-  width === 0 ? undefined : width >= besideFrom;
-
-/**
- * Whether the list's box (`measure`, its ref) is wide enough for a run
- * beside it; undefined until it is measured, and while it isn't shown.
- * Measured as the box is attached, before the first paint, so a run opened
- * by its address mounts once, where it belongs, and is read once: never
- * beside the list first on a phone, then again in a Sheet.
- */
-const useWide = () => {
-  const [wide, setWide] = useState<boolean>();
-  const measure = (element: HTMLDivElement | null) => {
-    if (element !== null) {
-      setWide(fits(element.getBoundingClientRect().width));
-    }
-    const watch =
-      element === null || typeof ResizeObserver === "undefined"
-        ? undefined
-        : new ResizeObserver(([entry]) => {
-            setWide(fits(entry?.contentRect.width ?? 0));
-          });
-    if (element !== null) {
-      watch?.observe(element);
-    }
-    return () => {
-      watch?.disconnect();
-    };
-  };
-  return { wide, measure };
-};
-
-/**
- * The run the address asks to open (`asked`), among `runs` as core lists
- * them for the reader (undefined while they aren't read). One they don't
- * list opens nothing: no such run, another workflow's, another person's,
- * or older than the runs listed, all alike, so nothing says whether it
- * exists. It leaves the address (`onClear`), and `notFound` says it could
- * not be opened until a run opens or the person closes the note.
- */
-export const useAddressedRun = (
-  runs: readonly WorkflowResourceRun[] | undefined,
-  asked: string | undefined,
-  onClear: () => void
-) => {
-  const opened = runs?.find((run) => run.id === asked) ?? null;
-  const missing = runs !== undefined && asked !== undefined && opened === null;
-  const [notFound, setNotFound] = useState(false);
-  if (missing && !notFound) {
-    setNotFound(true);
-  }
-  if (opened !== null && notFound) {
-    setNotFound(false);
-  }
-  const clear = useEffectEvent(onClear);
-  useEffect(() => {
-    if (missing) {
-      clear();
-    }
-  }, [missing]);
-  return {
-    opened,
-    notFound,
-    onDismiss: () => {
-      setNotFound(false);
-    },
-  };
-};
-
-/** Where an address named a run the reader can't open: one sentence, whatever the reason. */
-const RunNotFound = ({ onDismiss }: { onDismiss: () => void }) => {
-  const { t } = useLingui();
-  return (
-    <Alert onClose={onDismiss} style={styles.notFound} variant="info">
-      <AlertDescription>
-        {t`That run wasn't found, or isn't yours to see.`}
-      </AlertDescription>
-    </Alert>
-  );
-};
-
-/**
- * A list of runs (`children`) with run `opened` beside it, `steps` under
- * its facts and result: what its builders see of what it did. In a Sheet
- * over the list where the page is narrow.
- */
-export const RunBeside = ({
-  workflow,
-  opened,
-  names,
-  admin,
-  onClose,
-  steps,
-  status,
-  children,
-  notFound = false,
-  onDismissNotFound,
-}: {
-  workflow: string;
-  opened: WorkflowResourceRun | null;
-  names: Names;
-  /** Whether the reader is one of the organization's admins. */
-  admin: boolean;
-  onClose: () => void;
-  steps?: ReactNode;
-  /**
-   * Where `steps` follow the run: where it is as they last read it, its
-   * status and any wait for its AI provider (traces.tsx `followedState`;
-   * null before they did), so the run's facts are not read on a timer too.
-   */
-  status?: string | null;
-  /** The list the run was opened from. */
-  children?: ReactNode;
-  /** Whether the address named a run that isn't listed (`useAddressedRun`). */
-  notFound?: boolean;
-  /** Closes the note that it wasn't found. */
-  onDismissNotFound?: () => void;
-}) => {
-  const { t } = useLingui();
-  const { wide, measure } = useWide();
-  const panel = (framed: boolean) =>
-    opened === null ? null : (
-      <RunPanel
-        // Another run starts from what the list says of it.
-        key={opened.id}
-        admin={admin}
-        framed={framed}
-        names={names}
-        onClose={onClose}
-        opened={opened}
-        status={status}
-        steps={steps}
-        workflow={workflow}
-      />
-    );
-  const openedAt = opened === null ? "" : formatDateTime(opened.createdAt);
-  return (
-    <div ref={measure}>
-      {notFound ? (
-        <RunNotFound
-          onDismiss={() => {
-            onDismissNotFound?.();
-          }}
-        />
-      ) : null}
-      {wide === true && opened !== null ? (
-        <div {...stylex.props(styles.split)}>
-          <div>{children}</div>
-          {panel(true)}
-        </div>
-      ) : (
-        children
-      )}
-      <Sheet
-        onOpenChange={(open) => {
-          if (!open) {
-            onClose();
-          }
-        }}
-        open={wide === false && opened !== null}
-      >
-        {/* The panel draws the title and the close: the sheet names it only. */}
-        <SheetContent showCloseButton={false}>
-          <span {...stylex.props(visuallyHidden)}>
-            <SheetTitle>{t`The run started ${openedAt}`}</SheetTitle>
-          </span>
-          {wide === false ? panel(false) : null}
-        </SheetContent>
-      </Sheet>
-    </div>
-  );
+    principal === names.me ? t`You` : personOf(names, principal);
 };
